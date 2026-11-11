@@ -451,7 +451,8 @@ def test_a_descendant_moved_away_after_a_scan_is_still_killed(tmp_path):
         assert {middle, orphan} <= set(watch.watched)
         os.kill(middle, signal.SIGKILL)
         assert wait_for(lambda: psutil.Process(orphan).ppid() != middle)
-        assert orphan not in {p.pid for p in psutil.Process(child.pid).children(True)}
+        assert orphan not in {
+            p.pid for p in psutil.Process(child.pid).children(recursive=True)}
         watch.stop(grace=0.2)
         assert child.wait(timeout=30) == -signal.SIGTERM
         assert wait_for(lambda: gone(orphan))

@@ -160,7 +160,7 @@ def test_a_held_item_is_kept_in_place_and_linked_relatively(lo, tmp_path):
 def test_a_project_item_from_the_folder_copied_is_not_the_projects_own(lo, tmp_path):
     from moxi import config
 
-    config.set("moxi", "skills.form", "copy", by="test")
+    config.set_value("moxi", "skills.form", "copy", by="test")
     root = project(tmp_path)
     kit.manifest(lo, f'[project."{root}"]\nskills = ["review"]\nagents = ["helper"]\n')
     assert install.install().code == 0

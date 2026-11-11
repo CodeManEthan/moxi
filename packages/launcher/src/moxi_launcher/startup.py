@@ -322,7 +322,7 @@ def setup(*, ask: Callable[[str], bool] | None = None, out: TextIO | None = None
             continue
         answer = bool(ask(f"launcher: {question} [y/N] "))
         try:
-            config.set(MODULE, key, answer, by="moxi install")
+            config.set_value(MODULE, key, answer, by="moxi install")
         except config.ConfigError as error:
             print(f"moxi launcher: {key} was not set: {error}", file=out)
             return 1

@@ -73,9 +73,9 @@ def test_the_config_check_refuses_what_the_schema_cannot_say(text, part):
 
 def test_config_set_runs_the_modules_check():
     with pytest.raises(ConfigError) as caught:
-        config.set("loadout", "backups.keep", 0, by="test")
+        config.set_value("loadout", "backups.keep", 0, by="test")
     assert "keep at least 1" in str(caught.value)
-    config.set("loadout", "backups.keep", 3, by="test")
+    config.set_value("loadout", "backups.keep", 3, by="test")
     assert settings.read().backups_keep == 3
 
 

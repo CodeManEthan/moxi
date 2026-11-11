@@ -524,7 +524,7 @@ def test_config_set_refuses_what_comms_refuses(core_state, capsys, argv, value, 
         if value is None:
             moxi_config.add_item("comms", argv[0], argv[-1], by="ui")
         else:
-            moxi_config.set("comms", argv[0], value, by="ui")
+            moxi_config.set_value("comms", argv[0], value, by="ui")
     assert caught.value.file == str(path) and caught.value.key == key
     assert path.read_text() == "block = true\n"
 

@@ -215,7 +215,7 @@ def test_adopt_leaves_a_listed_skill_that_wants_every_harness(folder):
 def test_writes_go_to_the_configured_folder(folder):
     from moxi import config
 
-    config.set("loadout", "source", str(folder), by="test")
+    config.set_value("loadout", "source", str(folder), by="test")
     assert writes.add("skill", "review")
     assert manifest.load().user.names("skill") == ("review",)
     assert (folder / "loadout.toml").exists()

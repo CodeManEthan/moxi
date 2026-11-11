@@ -265,8 +265,8 @@ TMUX_FLOOR = (3, 2)
 _SLOTS_SETUP = """
 import sys
 from moxi import config, paths
-config.set("slots", "tmux", sys.argv[1], by="launcher browser test")
-config.set("slots", "tmux_conf", sys.argv[2], by="launcher browser test")
+config.set_value("slots", "tmux", sys.argv[1], by="launcher browser test")
+config.set_value("slots", "tmux_conf", sys.argv[2], by="launcher browser test")
 print(paths.socket_path("slots", "tmux"))
 """
 

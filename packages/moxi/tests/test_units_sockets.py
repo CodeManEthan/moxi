@@ -114,7 +114,7 @@ def test_a_new_set_is_one_add_then_keep(w):
 def test_a_changed_port_changes_the_set_and_not_the_service(w):
     w.module(shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))
-    config.set("demo", "port", 8471, by="test")
+    config.set_value("demo", "port", 8471, by="test")
     plan = w.plan()
     assert plan[("shell", "socket")].action == "change"
     assert plan[("shell", "socket")].dropped == ()
@@ -475,7 +475,7 @@ def test_a_switch_form_start_follows_its_key_and_config_set_applies_it_without_a
     assert units.switched_daemons("demo", "shell.enabled") == ["shell"]
 
     w.sup.calls.clear()
-    applied = config.set("demo", "shell.enabled", True, by="test")
+    applied = config.set_value("demo", "shell.enabled", value=True, by="test")
     assert "demo: applying units for shell.enabled" in capsys.readouterr().out
     assert [(a.change.kind, a.change.action, a.ok) for a in applied] == [
         ("daemon", "change", True), ("socket", "keep", True)]

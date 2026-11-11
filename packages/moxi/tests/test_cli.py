@@ -269,7 +269,7 @@ def test_modules_json_shows_what_starts_each_socket_daemon_now(site, capsys, mon
     assert item["daemons"]["shell"]["socket"]["start"] == {"login": "door.enabled"}
     assert item["starts"] == {"shell": "connection", "web": "login"}
     monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
-    config.set("demo", "door.enabled", True, by="test")
+    config.set_value("demo", "door.enabled", value=True, by="test")
     assert demo()["starts"] == {"shell": "login", "web": "login"}
 
 

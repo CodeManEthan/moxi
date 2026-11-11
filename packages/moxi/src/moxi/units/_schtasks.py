@@ -143,7 +143,7 @@ class SchtasksBackend:
         daemon = spec.kind == "daemon"
         log = self.log_path(spec.module, spec.name)
         gate = ["-m", "moxi", "run"]
-        home = dict(spec.environment).get(HOME_ENV)
+        home = dict(spec.env).get(HOME_ENV)
         if home:
             gate += ["--home", home]
         if not daemon and spec.switch:
@@ -342,14 +342,16 @@ class SchtasksBackend:
             "disable": [("/change", "/disable")] + ([("/end",)] if daemon else []),
         }.get(act)
         if steps is None:
-            return Acted(unit.module, unit.name, act, False, (f"no such act {act!r}",))
+            return Acted(unit.module, unit.name, act, ok=False,
+                         lines=(f"no such act {act!r}",))
         if daemon and not unit.marked:
             return self._act_foreign_daemon(act, unit, steps, fence)
         for verb, *rest in steps:
             ran = self._end(task, fence) if verb == "/end" else fence.run(verb, task, *rest)
             if not ran.ok:
-                return Acted(unit.module, unit.name, act, False, (ran.failure(),))
-        return Acted(unit.module, unit.name, act, True)
+                return Acted(unit.module, unit.name, act, ok=False,
+                             lines=(ran.failure(),))
+        return Acted(unit.module, unit.name, act, ok=True)
 
     def _act_foreign_daemon(self, act: str, unit: UnitRef, steps, fence: Fence) -> Acted:
         """`act`'s steps on a foreign task read as a daemon, around reads of the task.
@@ -382,8 +384,8 @@ class SchtasksBackend:
                 ran = (self._end(task, fence) if verb == "/end"
                        else fence.run(verb, task, *rest))
                 if not ran.ok:
-                    return Acted(unit.module, unit.name, act, False,
-                                 (ran.failure(), *_unchecked(task, why, unchecked)))
+                    return Acted(unit.module, unit.name, act, ok=False,
+                                 lines=(ran.failure(), *_unchecked(task, why, unchecked)))
                 continue
             if verb == "/change":
                 ran = fence.run(verb, task, *rest)
@@ -402,13 +404,14 @@ class SchtasksBackend:
                     settled, info, why = self._settle(
                         task, fence, lambda read: read.get("state") != "Running")
                     if not settled and info is not None and i < len(steps) - 1:
-                        return Acted(unit.module, unit.name, act, False, (
+                        return Acted(unit.module, unit.name, act, ok=False, lines=(
                             f"{task} still runs {SETTLE_SECONDS:g} s after /end; not "
                             "started again",))
             if not ran.ok:
-                return Acted(unit.module, unit.name, act, False, (ran.failure(),))
-        return Acted(unit.module, unit.name, act, True,
-                     _unchecked(task, why, unchecked))
+                return Acted(unit.module, unit.name, act, ok=False,
+                             lines=(ran.failure(),))
+        return Acted(unit.module, unit.name, act, ok=True,
+                     lines=_unchecked(task, why, unchecked))
 
     def _settle(self, task: str, fence: Fence, done: Callable[[dict], bool]
                 ) -> tuple[bool, dict | None, str | None]:
@@ -454,8 +457,9 @@ class SchtasksBackend:
             try:
                 live = self._live_file(file, strict=True)
             except (OSError, ValueError, KeyError, TypeError) as exc:
-                raise ReadError(Ran(False, None, "", "", ("read", str(file)),
-                                    f"{type(exc).__name__}: {exc}")) from None
+                raise ReadError(Ran(ok=False, returncode=None, stdout="", stderr="",
+                                    argv=("read", str(file)),
+                                    reason=f"{type(exc).__name__}: {exc}")) from None
             if live is not None:
                 out.add(task)
         return frozenset(out)
@@ -557,14 +561,16 @@ class SchtasksBackend:
     # -- a foreign timer's wrap: systemd only ------------------------------------------------
 
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
-        return Acted(None, ref, "wrap", False, (f"wrap is systemd only; {ref} runs as it is",))
+        return Acted(None, ref, "wrap", ok=False,
+                     lines=(f"wrap is systemd only; {ref} runs as it is",))
 
     def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
         """Empty: Task Scheduler has no wraps."""
         return ()
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
-        return Acted(None, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
+        return Acted(None, ref, "unwrap", ok=True,
+                     lines=(f"{ref} is not wrapped by {module}",))
 
     def unwrap_all(self, module: str, fence: Fence) -> list[Acted]:
         return []

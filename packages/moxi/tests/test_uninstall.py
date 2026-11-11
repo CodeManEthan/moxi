@@ -20,7 +20,7 @@ import moxi.cli as cli
 import moxi.install as install
 import moxi.modules as modules
 import moxi.uninstall as uninstall
-from conftest import WINDOWS, drop_modules, is_link, link_folder
+from conftest import WINDOWS, drop_modules, is_link, link_dir
 from moxi import _questions, _settle, files, paths, units
 from moxi.units import _backend, _state
 from fake_backend import FakeBackend, FakeSupervisor
@@ -394,7 +394,8 @@ def test_a_unit_that_fails_to_go_is_printed_and_the_package_still_goes(
     def remove(module, **k):
         change = units.UnitChange(module, "relay", "daemon", "remove", None, (), None,
                                   "uninstalled")
-        return [units.Applied(change, False, ("moxi-turns-relay.service: busy",))]
+        return [units.Applied(change, ok=False,
+                              lines=("moxi-turns-relay.service: busy",))]
     monkeypatch.setattr(units, "remove", remove)
     code, out, err = moxi_uninstall(capsys, "turns")
     assert code == 1
@@ -473,7 +474,7 @@ def skilled(fake, capsys, monkeypatch, tmp_path):
     from moxi import config, place
 
     if WINDOWS:
-        config.set("moxi", "skills.form", "link", by="test")
+        config.set_value("moxi", "skills.form", "link", by="test")
     user = tmp_path / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
@@ -676,7 +677,7 @@ def test_purge_removes_a_store_that_is_a_link_as_a_link(stored, capsys, tmp_path
     (elsewhere / "a").write_text("keep me")
     index = stored.cache / "index"
     shutil.rmtree(index)
-    link_folder(index, elsewhere)
+    link_dir(index, elsewhere)
     code, out, err = moxi_uninstall(capsys, "turns", "--purge")
     assert code == 0, err
     assert not os.path.lexists(index) and (elsewhere / "a").read_text() == "keep me"

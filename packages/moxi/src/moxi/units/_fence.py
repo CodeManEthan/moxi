@@ -169,9 +169,11 @@ class Fence:
         try:
             proc = runner(cmd, env=dict(env) if env else None, timeout=TIMEOUT)
         except subprocess.TimeoutExpired:
-            return Ran(False, None, "", "", tuple(cmd), f"timed out after {TIMEOUT:g} s")
+            return Ran(ok=False, returncode=None, stdout="", stderr="", argv=tuple(cmd),
+                       reason=f"timed out after {TIMEOUT:g} s")
         except OSError as exc:
-            return Ran(False, None, "", "", tuple(cmd), f"did not run: {exc}")
+            return Ran(ok=False, returncode=None, stdout="", stderr="", argv=tuple(cmd),
+                       reason=f"did not run: {exc}")
         out, err = _text(getattr(proc, "stdout", "")), _text(getattr(proc, "stderr", ""))
         code = proc.returncode
         return Ran(code == 0, code, out, err, tuple(cmd))

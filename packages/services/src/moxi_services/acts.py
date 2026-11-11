@@ -9,7 +9,7 @@ What each act calls, by the row's form (services builds no supervisor command; t
 writer, `moxi.units`, does the rest):
 
 - a module row M/N: `units.<act>(M, [N])` to start, stop or restart it;
-  `moxi.config.set(M, <its switch>, ...)` to enable or disable it (refused without a
+  `moxi.config.set_value(M, <its switch>, ...)` to enable or disable it (refused without a
   switch); add and remove are refused, since it comes and goes with its module.
 - a written row N: `units.<act>("services", [N])`; enable and disable set the store's
   flag, then `apply(plan("services", only=[N]))`; add writes the row, then its unit;
@@ -394,7 +394,7 @@ def _switch_module(row: ModuleRow, on: bool, by: str, lines: list[str]):
         raise Refused(f"{row.id} declares no switch, so it has no on and off of its own",
                       f"stop it with `moxi services stop {row.id}`, or remove its module "
                       f"with `moxi uninstall {row.module}`")
-    applied = moxi.config.set(row.module, row.switch, on, by=by)
+    applied = moxi.config.set_value(row.module, row.switch, on, by=by)
     lines.append(f"{row.module} {row.switch} set to {str(on).lower()}")
     # `moxi.config.set` prints the lines of a daemon switch's units as it applies them.
     if not _applied(applied, lines.said):
@@ -456,7 +456,7 @@ def _set_key(row: UserRow, on: bool, by: str, lines: list[str]) -> bool:
     """Set an adopted Linux timer's key; a config file that refuses it is a failure of
     the act (exit 1), since the row is already written."""
     try:
-        moxi.config.set(MODULE, state.key(row.name), on, by=by)
+        moxi.config.set_value(MODULE, state.key(row.name), on, by=by)
     except moxi.config.ConfigError as exc:
         lines.append(str(exc))
         return False

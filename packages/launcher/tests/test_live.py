@@ -129,8 +129,8 @@ def own_slots(live_env, monkeypatch):
         socket = paths.socket_path("slots", "tmux")
         assert socket.startswith(str(home)), socket
         tmux = shutil.which("tmux")
-        config.set("slots", "tmux", tmux, by="launcher live test")
-        config.set("slots", "tmux_conf", os.devnull, by="launcher live test")
+        config.set_value("slots", "tmux", tmux, by="launcher live test")
+        config.set_value("slots", "tmux_conf", os.devnull, by="launcher live test")
         log = open(home / "server.log", "wb")
         server = subprocess.Popen([str(paths.script("moxi-slots-server"))],
                                   env=dict(os.environ), stdin=subprocess.DEVNULL,
@@ -358,8 +358,8 @@ def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
     screen when it shows (the switch is on), and runs the brief as the opening prompt."""
     needs(harness)
     monkeypatch.setattr(first, "turns_api", lambda quiet=False: None)
-    config.set("launcher", "startup.trust_dialog", True, by="launcher live test")
-    config.set("launcher", "startup.wait_s", 15, by="launcher live test")
+    config.set_value("launcher", "startup.trust_dialog", True, by="launcher live test")
+    config.set_value("launcher", "startup.wait_s", 15, by="launcher live test")
     brief, answer = words()
     typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
     extra = kept_out(harness)
@@ -482,8 +482,8 @@ def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live
         needs_host()
     # The work dir is new, so Claude asks whether to trust it: the launcher answers that
     # screen through slots, as in the slot launch without turns.
-    config.set("launcher", "startup.trust_dialog", True, by="launcher live test")
-    config.set("launcher", "startup.wait_s", 15, by="launcher live test")
+    config.set_value("launcher", "startup.trust_dialog", True, by="launcher live test")
+    config.set_value("launcher", "startup.wait_s", 15, by="launcher live test")
     brief, answer = words()
     typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
     if harness == "codex":

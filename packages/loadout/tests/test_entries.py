@@ -380,7 +380,7 @@ def test_another_value_under_the_key_is_blocked_then_taken_over(lo):
 def test_backups_are_pruned_to_keep(lo):
     from moxi import config
 
-    config.set("loadout", "backups.keep", "2", by="test")
+    config.set_value("loadout", "backups.keep", "2", by="test")
     for n in range(4):
         cmd = f"echo {n}"
         write(lo, f'[user]\nhooks = ["h"]\n[hook.h]\nevent = "Stop"\ncommand = "{cmd}"\n'

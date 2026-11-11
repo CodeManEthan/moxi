@@ -848,7 +848,7 @@ class SystemdBackend:
         from .. import files, paths
 
         def no(line: str) -> Acted:
-            return Acted(None, ref, "wrap", False, (line,))
+            return Acted(None, ref, "wrap", ok=False, lines=(line,))
 
         if self.own(ref):
             return no(f"{ref} is in moxi's own unit names; only a foreign timer is wrapped")
@@ -935,7 +935,7 @@ class SystemdBackend:
         if not ran.ok:
             return no(ran.failure() + f"; {path} is written, and applies at the next "
                                       "daemon-reload")
-        return Acted(None, ref, "wrap", True, (
+        return Acted(None, ref, "wrap", ok=True, lines=(
             f"{ref}: its runs are behind {switch} and recorded as {record}",
             f"turn them on with: moxi config set {module} {key} true"))
 
@@ -957,7 +957,8 @@ class SystemdBackend:
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
         found = [path for path, mark in self._drop_ins(module) if mark[1] == ref]
         if not found:
-            return Acted(None, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
+            return Acted(None, ref, "unwrap", ok=True,
+                         lines=(f"{ref} is not wrapped by {module}",))
         for path in found:
             _delete(path)
         ran = fence.run("daemon-reload")
@@ -983,7 +984,7 @@ def dropin_name(module: str) -> str:
 
 def _env(spec: Spec) -> list[str]:
     """A service's `Environment=` lines: one per variable the unit runs with."""
-    return [environment_line(name, value) for name, value in spec.environment]
+    return [environment_line(name, value) for name, value in spec.env]
 
 
 def _read_wrap(path: Path) -> tuple[str, str, str, str] | None:
@@ -1196,7 +1197,7 @@ class SocketStarts:
                 # Its login link is made or kept even though nothing starts it now.
                 if login and not self._run(io, daemon, "enable", service):
                     return
-                io.say(daemon, _login_line(service, login) if login_only else
+                io.say(daemon, _login_line(service, login=login) if login_only else
                        f"{service} rewritten; the new code runs from its next start")
             return
         found = "down" if self._new(key) else (
@@ -1318,7 +1319,7 @@ def _outside_install(text: str) -> list[str]:
     return out
 
 
-def _login_line(unit: str, login: bool) -> str:
+def _login_line(unit: str, *, login: bool) -> str:
     """The line for a login-only change, which runs no stop or restart."""
     now = "starts it from now on" if login else "no longer starts it"
     return f"{unit} rewritten: a login {now}; a running daemon is left as it is"

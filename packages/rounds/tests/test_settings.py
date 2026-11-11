@@ -211,10 +211,10 @@ def test_two_readings_share_no_table(write_config):
 
 
 def test_a_table_set_through_moxi_config_reads_back(config_file):
-    config.set("rounds", "projects", {"proj-a": {"into": "main",
+    config.set_value("rounds", "projects", {"proj-a": {"into": "main",
                                                  "check": {"command": "make check",
                                                            "timeout_s": 600}}}, by="test")
-    config.set("rounds", "flows",
+    config.set_value("rounds", "flows",
                {"design": {"steps": [{"step": "design", "by": "lead"}]}}, by="test")
     read = settings.load()
     assert read["projects"]["proj-a"]["check"] == {"command": "make check",
@@ -275,12 +275,12 @@ def test_a_table_the_schema_takes_is_still_held_to_the_modules_check(
     before = path.read_text()
 
     with pytest.raises(config.ConfigError) as caught:
-        config.set("rounds", "projects", {"proj-a": {"refused": 1}}, by="test")
+        config.set_value("rounds", "projects", {"proj-a": {"refused": 1}}, by="test")
     assert caught.value.key == "projects.proj-a.refused"
     assert caught.value.file == str(path)
     assert path.read_text() == before and config.history("rounds") == []
 
-    config.set("rounds", "projects", {"proj-a": {"into": "next"}}, by="test")
+    config.set_value("rounds", "projects", {"proj-a": {"into": "next"}}, by="test")
     assert settings.load()["projects"] == {"proj-a": {"into": "next"}}
 
     path.write_text("[projects.proj-b]\nrefused = true\n")

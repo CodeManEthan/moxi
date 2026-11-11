@@ -368,7 +368,7 @@ LIVE = textwrap.dedent("""\
     """)
 
 
-def _typed(argv, found="None", tty=True) -> tuple[int, str]:
+def _typed(argv, found="None", *, tty=True) -> tuple[int, str]:
     """Run the console path in a child with a pseudo-terminal (or a pipe) on its input,
     the walk replaced by one that finds `found`."""
     code = LIVE.format(found=found)

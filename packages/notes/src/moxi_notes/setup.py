@@ -13,7 +13,7 @@
    would, and prints how many hold a secret, the first ten with their rules, how many
    commit authors the push gate would refuse, and the allowance lines that would keep the
    private names it found, with the path of the private allowlist they go in.
-5. **Writes.** The settings, through `moxi.config.set(..., by="moxi install")`; in the
+5. **Writes.** The settings, through `moxi.config.set_value(..., by="moxi install")`; in the
    notes repo, the two git hook pieces (re-enabled if disabled), the clean filter's driver
    and attribute for `redact` or their removal for `leave-out`, and the snapshot spec.
 
@@ -491,7 +491,7 @@ def _set(key: str, value, out) -> bool:
     from moxi import config
 
     try:
-        config.set(MODULE, key, value, by=BY)
+        config.set_value(MODULE, key, value, by=BY)
     except config.ConfigError as exc:
         print(f"notes: {key} was not set: {exc}", file=out)
         return False

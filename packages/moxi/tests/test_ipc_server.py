@@ -26,8 +26,8 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32",
                                 reason="Unix sockets; the Windows pipe server is built apart")
 
 
-def req(id, method, params=None, **extra) -> bytes:
-    obj = {"jsonrpc": "2.0", "id": id, "method": method, **extra}
+def req(request_id, method, params=None, **extra) -> bytes:
+    obj = {"jsonrpc": "2.0", "id": request_id, "method": method, **extra}
     if params is not None:
         obj["params"] = params
     return json.dumps(obj).encode() + b"\n"

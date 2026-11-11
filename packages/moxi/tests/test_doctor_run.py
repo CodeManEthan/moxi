@@ -324,9 +324,9 @@ def test_a_daemon_switched_off_is_off_and_still_installed_warns(d):
     row = d.rows("demo")[("demo", "daemon relay")]
     assert (row.state, row.detail, row.fix) == (
         "off", "switched off", "moxi config set demo relay.enabled true")
-    moxi.config.set("demo", "relay.enabled", True, by="test")
+    moxi.config.set_value("demo", "relay.enabled", value=True, by="test")
     d.installed(DAEMONS=switched)
-    moxi.config._change("demo", "relay.enabled", "set", False, by="test")
+    moxi.config._change("demo", "relay.enabled", "set", value=False, by="test")
     row = d.rows("demo")[("demo", "daemon relay")]
     assert row.state == "warn" and row.detail.startswith("switched off, unit still installed")
 
@@ -833,7 +833,7 @@ def test_a_wrap_shows_the_timer_s_state_its_key_and_its_last_run(d):
     files.append_record(d.state_dir() / "runs.jsonl",
                         {"unit": "demo/backup", "at": "2026-10-30T10:00:00Z",
                          "seconds": 3, "result": "ran", "exit": 0})
-    moxi.config.set("demo", "rows.backup", True, by="test")
+    moxi.config.set_value("demo", "rows.backup", value=True, by="test")
     got = d.rows("demo")
     assert got[("demo", "wrap backup.timer switch")].state == "ok"
     assert got[("demo", "wrap backup.timer last run")].detail == (
@@ -1161,7 +1161,7 @@ def test_a_ledger_that_is_not_json_is_one_fail_row_and_the_rest_run(pl):
 
 
 def test_a_harness_name_with_no_row_and_a_skipped_row_warn_on_moxi(pl, capsys):
-    moxi.config.set("moxi", "skills.harnesses", ["claude", "opencode"], by="test")
+    moxi.config.set_value("moxi", "skills.harnesses", ["claude", "opencode"], by="test")
     moxi.config.add_item("moxi", "harnesses", {"name": "Bad Name", "skills": "/x"},
                          by="test")
     got = pl.rows()

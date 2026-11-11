@@ -14,7 +14,7 @@ def configure(folder: Path) -> Path:
     from moxi import config
 
     folder.mkdir(parents=True, exist_ok=True)
-    config.set("loadout", "source", str(folder), by="test")
+    config.set_value("loadout", "source", str(folder), by="test")
     return folder
 
 

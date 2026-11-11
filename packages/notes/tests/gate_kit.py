@@ -32,7 +32,7 @@ def google_key(seed: int = 2) -> str:
 
 
 def private_names(*words: str) -> None:
-    moxi.config.set("secrets", "private_names.words", list(words), by="test")
+    moxi.config.set_value("secrets", "private_names.words", list(words), by="test")
 
 
 def break_private_names() -> None:

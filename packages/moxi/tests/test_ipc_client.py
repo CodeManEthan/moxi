@@ -91,8 +91,8 @@ class Fake:
     def send(self, data: bytes) -> None:
         self.server.sendall(data)
 
-    def answer(self, id, result) -> None:
-        self.send(json.dumps({"jsonrpc": "2.0", "id": id, "result": result}).encode()
+    def answer(self, request_id, result) -> None:
+        self.send(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}).encode()
                   + b"\n")
 
     def close(self) -> None:
@@ -150,7 +150,7 @@ def accept(server: int, open_client):
 
     ov = _winapi.ConnectNamedPipe(server, overlapped=True)
     client = open_client()
-    ov.GetOverlappedResult(True)
+    ov.GetOverlappedResult(True)  # noqa: FBT003 -- Win32 API argument is positional
     return client
 
 
@@ -237,7 +237,7 @@ def full_listener(address: str) -> tuple[socket.socket, list[socket.socket]]:
     waiting = []
     for _ in range(64):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.setblocking(False)
+        sock.setblocking(False)  # noqa: FBT003 -- socket API argument is positional
         try:
             sock.connect(address)
         except BlockingIOError:

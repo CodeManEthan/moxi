@@ -114,14 +114,14 @@ def move(module: str, record: list, *, replace: bool = False,
             return record
         names, impl = _daemons(module)
         if impl is not None and names:
-            _unmarked(module, names, impl, replace)
+            _unmarked(module, names, impl, replace=replace)
             if not replace:
                 # No unit file of these names is unmarked (`_unmarked`), so a name with
                 # no marked unit has no unit at all, and nothing of it can run.
                 marked = {ref.name for ref in impl.marked(module)}
                 names = [name for name in names if name in marked]
             if names:
-                _stop(module, names, replace, record)
+                _stop(module, names, replace=replace, record=record)
         for _, old, new in moves:
             _rename(module, old, new, say)
         return record
@@ -186,7 +186,7 @@ def _daemons(module: str):
     return names, impl
 
 
-def _unmarked(module: str, names: list[str], impl, replace: bool) -> None:
+def _unmarked(module: str, names: list[str], impl, *, replace: bool) -> None:
     """Step 3: refuse when a unit file of one of `names` is not this module's, unless
     `replace`."""
     if replace:
@@ -206,7 +206,7 @@ def _unmarked(module: str, names: list[str], impl, replace: bool) -> None:
                                 refused=True)
 
 
-def _stop(module: str, names: list[str], replace: bool, record: list) -> None:
+def _stop(module: str, names: list[str], *, replace: bool, record: list) -> None:
     """Step 4: stop what runs, recorded; raise before the rename when a stop failed."""
     from . import units
 

@@ -887,7 +887,7 @@ def _config_json(module: str, found, schema) -> int:
             named, unavailable = names[0]
             item["switch_table"] = True
             item["entries"] = _switch_entries(key.name, settings, named,
-                                              unavailable is None)
+                                              with_named=unavailable is None)
             if unavailable is not None:
                 item["declarations"] = "unavailable"
                 item["reason"] = unavailable
@@ -939,7 +939,7 @@ def _switch_names(module: str, found) -> tuple[dict[str, list[str]], str | None]
 
 
 def _switch_entries(table: str, settings, named: dict[str, list[str]],
-                    with_named: bool) -> list[dict]:
+                    *, with_named: bool) -> list[dict]:
     """A switch table's entries: each in the file, then each a switch names that the file
     lacks (false, from the default); by entry name."""
     in_file = {}

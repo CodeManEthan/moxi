@@ -291,9 +291,9 @@ def test_resume_never_starts_an_entry_twice_or_one_built_by_hand(w):
     w.sup.calls.clear()
     again = units.resume(record)
     forged = units.resume([Stopped("demo", "relay", "moxi-demo-relay.service", "fake",
-                                   True)])
+                                   marked=True)])
     copied = units.resume([Stopped("demo", "relay", "moxi-demo-relay.service", "fake",
-                                   True, token=object())])
+                                   marked=True, token=object())])
     for [acted] in (again, forged, copied):
         assert not acted.ok
         assert acted.lines == ("moxi-demo-relay.service: not stopped by this process; "
@@ -736,7 +736,7 @@ def test_a_second_wrap_with_the_same_key_and_name_replaces_the_first(w):
     w.foreign_timer()
     from moxi import config
 
-    config.set("demo", "rows.backup", True, by="test")
+    config.set_value("demo", "rows.backup", value=True, by="test")
     for _ in range(2):
         acted = units.wrap("backup.timer", module="demo", key="rows.backup",
                            name="backup")
@@ -906,7 +906,7 @@ def test_config_show_json_lists_every_key(w, capsys):
     from moxi import config
 
     w.module(DAEMONS="{}")
-    config.set("demo", "port", 9000, by="test")
+    config.set_value("demo", "port", 9000, by="test")
     keys = {k["name"]: k for k in show_json("demo", capsys)}
     assert list(keys) == ["relay.enabled", "snapshot.enabled", "loud", "port", "rows",
                           "plain"]
@@ -935,7 +935,7 @@ def test_config_show_json_lists_switch_table_entries_in_the_file_and_named(w, ca
                 """)
     w.foreign_timer()
     assert units.wrap("backup.timer", module="demo", key="rows.backup", name="backup").ok
-    config.set("demo", "rows", {"relay": True, "stray": False}, by="test")
+    config.set_value("demo", "rows", {"relay": True, "stray": False}, by="test")
     [rows] = [k for k in show_json("demo", capsys) if k["name"] == "rows"]
     assert rows["switch_table"] is True and "declarations" not in rows
     assert rows["entries"] == [
@@ -955,7 +955,7 @@ def test_config_show_json_with_units_from_failing_lists_the_file_entries(w, caps
 
     w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'rows.relay'}}",
              units_from="def units():\n    raise OSError('rows gone')\n")
-    config.set("demo", "rows.kept", True, by="test")
+    config.set_value("demo", "rows.kept", value=True, by="test")
     [rows] = [k for k in show_json("demo", capsys) if k["name"] == "rows"]
     assert rows["entries"] == [{"name": "kept", "value": True, "source": "file",
                                 "named_by": []}]

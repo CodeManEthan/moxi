@@ -724,7 +724,7 @@ class Installer:
         from . import config
 
         try:
-            config.set(names.HARNESS, "skills.form", self.skills_form, by="moxi install")
+            config.set_value(names.HARNESS, "skills.form", self.skills_form, by="moxi install")
         except config.ConfigError as exc:
             raise InstallError(f"skills.form was not set: {exc}") from None
         print(f"skills.form set to {self.skills_form}")

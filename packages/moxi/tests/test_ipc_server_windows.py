@@ -27,8 +27,8 @@ from moxi.ipc import _server, _sweep, _users
 WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows named pipes")
 
 
-def req(id, method, params=None) -> bytes:
-    obj = {"jsonrpc": "2.0", "id": id, "method": method}
+def req(request_id, method, params=None) -> bytes:
+    obj = {"jsonrpc": "2.0", "id": request_id, "method": method}
     if params is not None:
         obj["params"] = params
     return json.dumps(obj).encode() + b"\n"
@@ -786,10 +786,10 @@ def access_list(handle: int) -> tuple[bool, list[tuple[int, int, str]]]:
     from ctypes import wintypes as w
 
     api = _win._bind()
-    PP = ctypes.POINTER(ctypes.c_void_p)
+    void_pointer_pointer = ctypes.POINTER(ctypes.c_void_p)
     get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityInfo
     get.restype = w.DWORD
-    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, PP, PP, PP, PP, PP]
+    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer]
     dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
     code = get(handle, _win._SE_FILE_OBJECT, _win._DACL_SECURITY_INFORMATION, None, None,
                ctypes.byref(dacl), None, ctypes.byref(descriptor))
@@ -836,10 +836,10 @@ def owner_of(handle: int) -> str:
     from ctypes import wintypes as w
 
     api = _win._bind()
-    PP = ctypes.POINTER(ctypes.c_void_p)
+    void_pointer_pointer = ctypes.POINTER(ctypes.c_void_p)
     get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityInfo
     get.restype = w.DWORD
-    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, PP, PP, PP, PP, PP]
+    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer]
     owner, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
     code = get(handle, _win._SE_FILE_OBJECT, _win._OWNER_SECURITY_INFORMATION,
                ctypes.byref(owner), None, None, None, ctypes.byref(descriptor))
@@ -906,7 +906,7 @@ def admitting_the_network(name: str) -> int:
     descriptor = _win._descriptor(_pipe.access_list())
     try:
         attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
-                                             descriptor, False)
+                                             descriptor, False)  # noqa: FBT003 -- Win32 fields are positional
         handle = _pipe._bind_create()(
             name, _pipe._PIPE_ACCESS_DUPLEX | _pipe._FILE_FLAG_OVERLAPPED
             | _pipe._FILE_FLAG_FIRST_PIPE_INSTANCE, 0, 1, 8192, 8192, 0,

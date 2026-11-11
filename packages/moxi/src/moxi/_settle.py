@@ -604,7 +604,7 @@ def _switches(step: Settle, changes) -> bool:
                     f"again: {turn_on}")
         try:
             with held():
-                config.set(module, switch, on, by="moxi install")
+                config.set_value(module, switch, on, by="moxi install")
                 recorded.record(module, change.name, change.digest)
         except config.ConfigError as exc:
             say(f"{change.unit}: its switch {switch} was not written: {exc}", err=True)
@@ -732,8 +732,8 @@ def _restart(step: Settle) -> tuple[int, list[str]]:
     try:
         acted = units.resume(step.record)
     except Exception as exc:  # resume catches each entry's error; this is a last guard
-        acted = [units.Acted(module, entry.name, "start", False,
-                             (f"{entry.unit}: {_one_line(exc)}",))
+        acted = [units.Acted(module, entry.name, "start", ok=False,
+                             lines=(f"{entry.unit}: {_one_line(exc)}",))
                  for entry in step.record]
     started, problems = 0, []
     for entry, result in zip(step.record, acted):
@@ -930,7 +930,7 @@ def _skills(step: Settle) -> bool:
     with held():
         done = place.apply(steps, replace=step.replace,
                            say=lambda line: say(f"{module}: {line}"))
-    return _skills_report(module, steps, done, step.replace) and not misnamed
+    return _skills_report(module, steps, done, replace=step.replace) and not misnamed
 
 
 def _misnamed(module: str, skills: list[str]) -> set[str]:
@@ -978,7 +978,7 @@ def _skill_dirs(found) -> tuple[list[str] | None, object]:
     return skills, skill_dir
 
 
-def _skills_report(module: str, steps, done, replace: bool) -> bool:
+def _skills_report(module: str, steps, done, *, replace: bool) -> bool:
     """One line per placement the plan added, updated or removed; True when every step
     went through (a skip counts, and so does a refusal for a broken harness row, which
     `apply` said), False on another refusal `replace` didn't place over or a step
@@ -1081,7 +1081,7 @@ def _ask_questions(step: Settle) -> bool:
         on = _ask(f"{module}: {text}? [y/N] ")
         try:
             with held():
-                config.set(module, key, on, by="moxi install")
+                config.set_value(module, key, on, by="moxi install")
                 _questions.record(module, key)
         except config.ConfigError as exc:
             say(f"{module}: install question {key} not set: {exc}", err=True)

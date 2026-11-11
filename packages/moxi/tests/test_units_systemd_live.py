@@ -139,7 +139,7 @@ class Row:
     def output(self) -> list[str]:
         return self.out.read_text().splitlines() if self.out.exists() else []
 
-    def switch(self, on: bool) -> None:
+    def switch(self, *, on: bool) -> None:
         self.config.parent.mkdir(parents=True, exist_ok=True)
         table, _, key = KEY.partition(".")
         self.config.write_text(f"[{table}]\n{key} = {'true' if on else 'false'}\n")
@@ -203,7 +203,7 @@ def test_wrap_on_this_boxs_user_manager(tmp_path, monkeypatch, capsys):
             assert [r["result"] for r in row.lines()] == ["off"]
 
             # On: the script runs and one `ran` line carries its exit and seconds.
-            row.switch(True)
+            row.switch(on=True)
             assert row.start().ok
             assert row.output() == [f"first {a}" for a in odd]
             ran = row.lines()[-1]
@@ -673,7 +673,7 @@ def test_a_changed_socket_restarts_a_keep_daemon_on_this_boxs_user_manager(
             assert first["ActiveState"] == "active" and first["MainPID"] not in ("", "0")
             assert row.show(sock, "Listen")["Listen"] == f"127.0.0.1:{row.port} (Stream)"
 
-            config.set(row.module, "port", str(row.other), by="test")
+            config.set_value(row.module, "port", str(row.other), by="test")
             if service_too:
                 declare("a throwaway daemon for the socket proof, rewritten")
             assert {(c.kind, c.action) for c in row.plan()} == {
@@ -732,8 +732,9 @@ def test_a_failed_read_after_a_home_move_starts_the_sockets_then_the_service(
                                "socket": {"setting": "port", "addresses": ["127.0.0.1"]}}})
 
     def lost_bus(self, ids, fence):
-        raise ReadError(Ran(False, 1, "", "Failed to connect to bus",
-                            ("systemctl", "--user", "show"), None))
+        raise ReadError(Ran(ok=False, returncode=1, stdout="",
+                            stderr="Failed to connect to bus",
+                            argv=("systemctl", "--user", "show"), reason=None))
 
     try:
         with _backend.use(SystemdBackend()):

@@ -129,7 +129,7 @@ class Layout:
     def device(self, env: Mapping[str, str] | None = None, *,
                create: bool = True) -> str | None:
         """This device's label for the module (`device_label`, with its `create`)."""
-        return _label(self.prefix, _env(env), create)
+        return _label(self.prefix, _env(env), create=create)
 
     # -- the roots ---------------------------------------------------------------------
 
@@ -284,10 +284,10 @@ def device_label(module: str | None = None, env: Mapping[str, str] | None = None
     `OSError`.
     """
     prefix = names.env_prefix(module) if module is not None else ""
-    return _label(prefix, _env(env), create)
+    return _label(prefix, _env(env), create=create)
 
 
-def _label(prefix: str, env: Mapping[str, str], create: bool = True) -> str | None:
+def _label(prefix: str, env: Mapping[str, str], *, create: bool = True) -> str | None:
     own = env.get(f"{prefix}DEVICE") if prefix else None
     if label := own or env.get(DEVICE_ENV):
         return label

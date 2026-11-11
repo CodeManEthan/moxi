@@ -454,9 +454,9 @@ def test_setting_the_switch_applies_the_units_through_the_core(monkeypatch, conf
     monkeypatch.setattr(moxi.config, "apply_units",
                         lambda module, key, **kw: applied.append((module, key)) or [])
     config_file("")
-    moxi.config.set("connector", "enabled", True, by="test")
+    moxi.config.set_value("connector", "enabled", True, by="test")
     assert settings.enabled() is True
-    moxi.config.set("connector", "port", 8453, by="test")
+    moxi.config.set_value("connector", "port", 8453, by="test")
     moxi.config.unset("connector", "enabled", by="test")
     assert settings.enabled() is False
     # The port is the socket unit's setting, so the core writes the units after it too.

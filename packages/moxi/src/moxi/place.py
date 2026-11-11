@@ -997,7 +997,7 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
                 notes.append(step.note)
                 say(step.note)
             try:
-                placed = _apply_one(step, ledger, replace, stamp, say)
+                placed = _apply_one(step, ledger, replace=replace, stamp=stamp, say=say)
             except OSError as exc:
                 say(f"{step.item.name} for {step.item.harness}: could not "
                     f"{step.action} {step.target}: {exc}")
@@ -1012,7 +1012,7 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
     return done
 
 
-def _apply_one(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Placed | None:
+def _apply_one(step: Step, ledger: dict, *, replace: bool, stamp: str, say) -> Placed | None:
     """One step. A step that places a target this owner handed over first checks the
     hand-over: while any other owner places the target the step is skipped, and once
     the target is placed the lapsed `handed` entry is dropped."""
@@ -1026,13 +1026,13 @@ def _apply_one(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Plac
             to = handed[key].get("to", "another owner")
             say(f"{step.item.name} was handed to {to}; skipped")
             return None
-    placed = _apply_step(step, ledger, replace, stamp, say)
+    placed = _apply_step(step, ledger, replace=replace, stamp=stamp, say=say)
     if placed is not None:
         ledger.get(step.owner, {}).get("handed", {}).pop(key, None)
     return placed
 
 
-def _apply_step(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Placed | None:
+def _apply_step(step: Step, ledger: dict, *, replace: bool, stamp: str, say) -> Placed | None:
     item, key, owner = step.item, step.target, step.owner
     if step.action == "refuse":
         if not (replace and step.cause in _OCCUPANTS and step.occupant is not None):

@@ -161,7 +161,7 @@ def test_flag_per_form():
     assert state.flag(row("nightly")) is True
     # An adopted Linux timer's on/off is its key, not the store's flag.
     assert state.flag(row("backup")) is False
-    moxi.config.set("services", "adopted.backup", True, by="test")
+    moxi.config.set_value("services", "adopted.backup", True, by="test")
     assert state.flag(row("backup")) is True
     assert state.flag(row("backup"), {"adopted.backup": False}) is False
     assert state.is_wrapped(row("backup")) and not state.is_wrapped(row("nightly"))
@@ -185,7 +185,7 @@ def test_the_adopted_table_is_a_switch_table():
 
 @pytest.mark.parametrize("value, expect", [("true", True), ("false", False)])
 def test_the_key_is_set_and_read_through_the_cores_config(value, expect):
-    moxi.config.set("services", "adopted.backup", value, by="test")
+    moxi.config.set_value("services", "adopted.backup", value, by="test")
     assert state.key_on("backup") is expect
     moxi.config.unset("services", "adopted.backup", by="test")
     assert state.key_on("backup") is False

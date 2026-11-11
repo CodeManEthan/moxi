@@ -1,6 +1,6 @@
 """One config file per module, born declared, read through this module.
 
-A program changes the file through this module (`set`, `unset`, `add_item`,
+A program changes the file through this module (`set_value`, `unset`, `add_item`,
 `remove_item`), which checks each change against the schema before it writes. A person
 may also edit the file by hand; one that no longer reads raises `ConfigError`, naming the
 file, when it is next read.
@@ -77,7 +77,7 @@ turns bad and reporting the error once per change of the file.
 Changing
 --------
 
-`set`, `unset`, `add_item` and `remove_item` change one key of a module's config file
+`set_value`, `unset`, `add_item` and `remove_item` change one key of a module's config file
 (what `moxi config set` and `moxi config unset` run): the key must be declared and live,
 the value is coerced to the key's type, and the file is edited through
 `moxi.files.edit_toml` under its lock, keeping comments and order. Before anything is
@@ -112,7 +112,7 @@ DEFAULT = "default"
 FILE = "file"
 ENV = "env"
 
-#: The history of every change `set`, `unset`, `add_item` and `remove_item` make, in the
+#: The history of every change `set_value`, `unset`, `add_item` and `remove_item` make, in the
 #: core's state directory.
 HISTORY = "settings.jsonl"
 #: How long a change waits for the config file's lock, in seconds.
@@ -782,7 +782,7 @@ def _key(name, spec, source) -> Key:
 
 # -- changing a module's settings ------------------------------------------------------
 
-def set(module: str, key: str, value, *, by: str) -> list:
+def set_value(module: str, key: str, value, *, by: str) -> list:
     """Set `key` of module `module`'s config file to `value`, coerced to the key's type.
 
     A switch table's entry is set by its name, `<table key>.<entry>`, to a bool. When
@@ -796,7 +796,7 @@ def set(module: str, key: str, value, *, by: str) -> list:
 
 def unset(module: str, key: str, *, by: str) -> list:
     """Remove `key` from module `module`'s config file, so it reads its default (a switch
-    table's entry then reads false). Returns the units applied, as `set` does. A key the
+    table's entry then reads false). Returns the units applied, as `set_value` does. A key the
     file does not hold changes nothing: no file is made or written and no history line is
     added, though the file is still checked as it is (a missing one as the empty text)."""
     _change(module, key, "unset", None, by=by)
@@ -804,7 +804,7 @@ def unset(module: str, key: str, *, by: str) -> list:
 
 
 def apply_units(module: str, key: str, *, say=print) -> list:
-    """After a `set` or `unset` of `key`: when it is the switch of one or more of the
+    """After a `set_value` or `unset` of `key`: when it is the switch of one or more of the
     module's daemons (a `DAEMONS` entry, or one `UNITS_FROM` returns), or the key a socket
     daemon's `start` names (`{"login": key}`), plan and apply those daemons' units and
     nothing else of the module, under the core lock, and return
@@ -967,7 +967,7 @@ def _toml_value(text, path, key, kind):
 
 
 def _coerce(target, entry, name, value, path, text):
-    """Step 3 for `set`: `value` as key `target`'s type (or as a switch entry's bool).
+    """Step 3 for `set_value`: `value` as key `target`'s type (or as a switch entry's bool).
     `text` is True for a value given on the command line."""
     kind = target.type
     if entry is not None:
@@ -1165,7 +1165,7 @@ def _item(value, *, inline=False):
         for v in value:
             array.append(_item(v, inline=True))
         if any(isinstance(v, dict) for v in value):
-            array.multiline(True)
+            array.multiline(multiline=True)
         return array
     if isinstance(value, dict) and inline:
         table = tomlkit.inline_table()
@@ -1237,5 +1237,5 @@ def _check_config(module: str, schema: Schema, check) -> None:
 
 __all__ = ["TYPES", "READS", "FIELDS", "ITEMS", "DEFAULT", "FILE", "ENV", "HISTORY",
            "ConfigError", "SchemaError", "Key", "Schema", "Settings", "is_switch_table",
-           "is_entry_name", "schema_for", "check_text", "load", "Config", "set", "unset",
+           "is_entry_name", "schema_for", "check_text", "load", "Config", "set_value", "unset",
            "add_item", "remove_item", "history"]

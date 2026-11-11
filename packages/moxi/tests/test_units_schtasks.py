@@ -412,7 +412,7 @@ def test_a_new_daemon_is_written_utf16_created_and_run(w):
     assert w.plan()["relay"].action == "keep"
     [ref] = w.backend.marked("demo")
     assert ref == UnitRef("demo", "relay", "daemon", ("\\Moxi\\demo-relay",),
-                          change.paths, True)
+                          paths=change.paths, enabled=True)
 
 
 def test_a_new_timer_is_created_and_not_run(w):
@@ -533,23 +533,23 @@ def test_a_disabled_daemon_is_created_disabled_and_a_flip_takes_effect_now(w, si
     tool = w.tmp / "tool.exe"
     tool.write_text("")
 
-    def declare(enabled: bool):
+    def declare(*, enabled: bool):
         site.write("moxi_demo/runtime.py", RUNTIME_DAEMON.format(tool=str(tool),
                                                                  enabled=enabled))
         w.module(UNITS_FROM="'moxi_demo.runtime:units'")
 
     task = "\\Moxi\\demo-extra"
-    declare(False)
+    declare(enabled=False)
     [done] = w.apply(w.plan().values())
     assert done.ok and w.sup.calls == [("/create", task)]
     assert w.sup.tasks[task] == {"enabled": False, "running": False}
-    declare(True)
+    declare(enabled=True)
     [change] = w.plan().values()
     assert change.action == "change" and change.enabled_before is False
     [done] = w.apply([change])
     assert done.ok and w.sup.calls == [("/end", task), ("/create", task), ("/run", task)]
     assert w.sup.tasks[task] == {"enabled": True, "running": True}
-    declare(False)
+    declare(enabled=False)
     [done] = w.apply(w.plan().values())
     assert done.ok, done.lines
     assert w.sup.calls == [("/create", task), ("/end", task)]
@@ -1326,7 +1326,7 @@ def test_a_switch_form_start_changes_no_task_and_its_key_writes_and_restarts_not
         if value is None:
             config.unset("demo", "snap.enabled", by="test")
         else:
-            config.set("demo", "snap.enabled", value, by="test")
+            config.set_value("demo", "snap.enabled", value, by="test")
         on = w.plan()["relay"]
         assert (on.action, on.text) == ("keep", off.text)
         w.sup.calls.clear()

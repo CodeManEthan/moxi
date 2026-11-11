@@ -29,7 +29,7 @@ def key_on(name: str) -> bool:
 
 
 def put_key(name: str, on: bool) -> None:
-    moxi.config.set("services", state.key(name), on, by="test")
+    moxi.config.set_value("services", state.key(name), on, by="test")
 
 
 def other_system(monkeypatch, platform: str = "darwin") -> None:

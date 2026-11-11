@@ -334,7 +334,7 @@ def test_the_setting_off_skips_before_any_git(repo, folder, installs):
     from moxi import config
 
     kit.configure(folder)
-    config.set("loadout", "reinstall_on_commit", "false", by="test")
+    config.set_value("loadout", "reinstall_on_commit", "false", by="test")
     assert gitpiece.run(Ctx("post-commit", folder)).kind == "ok"
     assert installs.calls == [] and repo.calls() == []
 
@@ -561,7 +561,7 @@ def test_the_setting_off_removes_each_registered_piece(repo, folder):
 
     kit.configure(in_git(folder))
     install.install()
-    config.set("loadout", "reinstall_on_commit", "false", by="test")
+    config.set_value("loadout", "reinstall_on_commit", "false", by="test")
     install.install()
     assert repo.pieces(folder) == {}
     assert repo.verbs()[2:] == [f"remove {folder} loadout/reinstall-commit",
@@ -635,7 +635,7 @@ def test_the_row_is_off_while_the_setting_is_off(repo, folder):
     from moxi import config
 
     kit.configure(in_git(folder))
-    config.set("loadout", "reinstall_on_commit", "false", by="test")
+    config.set_value("loadout", "reinstall_on_commit", "false", by="test")
     found = row(doctor.rows())
     assert found.state == "off" and "reinstall_on_commit" in found.detail
 

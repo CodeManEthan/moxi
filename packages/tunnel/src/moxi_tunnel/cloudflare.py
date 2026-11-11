@@ -357,7 +357,7 @@ def _set_switch(value: bool) -> list:
     `file=True`: the switch was not touched."""
     try:
         with contextlib.redirect_stdout(io.StringIO()):
-            return config.set(MODULE, SWITCH, value, by=MODULE)
+            return config.set_value(MODULE, SWITCH, value, by=MODULE)
     except config.ConfigError as exc:
         raise StepFailed(f"tunnel can't set {SWITCH}: {exc.problem}",
                          f"{exc.fix}, then {_REPAIR}", file=True) from None

@@ -598,18 +598,18 @@ def run_time(mac, tool, flag):
 def test_enabled_false_is_written_and_disabled_and_a_flip_takes_effect_now(mac, tmp_path):
     tool = tmp_path / "tool"
     tool.write_text("")
-    run_time(mac, tool, False)
+    run_time(mac, tool, flag=False)
     mac.module(UNITS_FROM="'moxi_demo.runtime:units'")
     [done] = mac.apply(units.plan("demo"))
     assert done.ok and mac.ctl.calls == [("disable", f"{DOMAIN}/moxi.demo.row")]
-    run_time(mac, tool, True)
+    run_time(mac, tool, flag=True)
     [change] = units.plan("demo")
     assert change.action == "change" and change.enabled_before is False
     mac.ctl.calls.clear()
     assert mac.apply([change])[0].ok
     assert [c[0] for c in mac.ctl.verbs()] == ["bootout", "enable", "bootstrap"]
     assert "moxi.demo.row" in mac.ctl.loaded
-    run_time(mac, tool, False)
+    run_time(mac, tool, flag=False)
     mac.ctl.calls.clear()
     assert mac.apply(units.plan("demo"))[0].ok
     assert mac.ctl.calls == [("bootout", f"{DOMAIN}/moxi.demo.row"),
@@ -721,7 +721,7 @@ def test_a_loaded_keep_socket_daemon_whose_port_changed_is_reloaded(mac):
     _loaded_keep_shell(mac, "127.0.0.1")
     from moxi import config
 
-    config.set("demo", "port", "9000", by="test")
+    config.set_value("demo", "port", "9000", by="test")
     [done] = mac.apply(units.plan("demo"))
     assert done.ok and done.lines == ()
     assert [c[0] for c in mac.ctl.verbs()] == RELOAD
@@ -1702,7 +1702,7 @@ def test_proof_a_keep_socket_daemons_port_change_reloads_it(real_mac, serving):
         conn, pid = _hold(m.port)
         assert _until(m.daemon, lambda d: d.pid).pid == int(pid)
     try:
-        config.set(m.module, "port", str(m.other), by="test")
+        config.set_value(m.module, "port", str(m.other), by="test")
         m.ctl.calls.clear()
         [done] = m.apply()
         assert done.ok, m.lines
@@ -1841,7 +1841,7 @@ def test_a_login_only_change_is_rewritten_and_the_loaded_job_left_as_it_is(mac, 
         if value is None:
             applied = config.unset("demo", "snapshot.enabled", by="test")
         else:
-            applied = config.set("demo", "snapshot.enabled", value, by="test")
+            applied = config.set_value("demo", "snapshot.enabled", value, by="test")
         [done] = applied
         # One read is the plan's (its own job names the address), one the apply's.
         assert done.ok and mac.ctl.calls == [("print", DOMAIN)] * 2
@@ -1861,7 +1861,7 @@ def test_a_change_with_another_key_beside_the_login_ones_reloads_as_before(mac):
     mac.apply(units.plan("demo"))
     mac.module(ANNOUNCES="2", DAEMONS=switched_shell("127.0.0.1", more=", 'args': ['-v']"))
     mac.ctl.calls.clear()
-    [done] = config.set("demo", "snapshot.enabled", True, by="test")
+    [done] = config.set_value("demo", "snapshot.enabled", value=True, by="test")
     assert done.ok and [c[0] for c in mac.ctl.verbs()] == RELOAD
     assert mac.ctl.loaded[RELAY][0]                    # RunAtLoad started it
 
@@ -1875,7 +1875,7 @@ def test_restart_after_an_upgrade_kickstarts_a_running_daemon_with_a_login_only_
     mac.apply(units.plan("demo"))
     mac.ctl.loaded[RELAY][0] = 4242                    # a connection started it
     monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
-    config.set("demo", "snapshot.enabled", True, by="test")
+    config.set_value("demo", "snapshot.enabled", value=True, by="test")
     mac.ctl.calls.clear()
     assert all(a.ok for a in mac.apply(units.plan("demo"), restart=True))
     assert [c[0] for c in mac.ctl.verbs()] == ["kickstart"]

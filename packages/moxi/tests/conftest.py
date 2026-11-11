@@ -506,9 +506,10 @@ class PipeRaw:
 
         if err == _winapi.ERROR_IO_PENDING:
             ms = max(0, int(timeout * 1000))
-            if _winapi.WaitForMultipleObjects([ov.event], False, ms) != _winapi.WAIT_OBJECT_0:
+        if _winapi.WaitForMultipleObjects(
+                [ov.event], False, ms) != _winapi.WAIT_OBJECT_0:  # noqa: FBT003 -- Win32 API arguments are positional
                 ov.cancel()
-        n, err = ov.GetOverlappedResult(True)
+        n, err = ov.GetOverlappedResult(True)  # noqa: FBT003 -- Win32 API argument is positional
         return n, err == _winapi.ERROR_OPERATION_ABORTED
 
     def send(self, data: bytes) -> None:

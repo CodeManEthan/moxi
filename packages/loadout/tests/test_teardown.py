@@ -216,7 +216,7 @@ def test_a_global_line_the_user_had_naming_the_folder_is_named(lo):
 def test_the_opencode_row_stays_while_skills_harnesses_names_it(lo):
     from moxi import config, place
 
-    config.set("moxi", "skills.harnesses", ["claude", "opencode"], by="test")
+    config.set_value("moxi", "skills.harnesses", ["claude", "opencode"], by="test")
     lines, say = said()
     assert teardown.teardown(say=say) == 0
     assert "opencode" in place.harnesses()[0]
@@ -262,7 +262,7 @@ def test_a_harnesses_key_setup_made_is_unset_at_uninstall(folder, had_key):
     default = [{"name": "claude", "skills": "", "agents": ""},
                {"name": "codex", "skills": "", "agents": ""}]
     if had_key:
-        config.set("moxi", "harnesses", default, by="test")
+        config.set_value("moxi", "harnesses", default, by="test")
     harness_row.add(say=lambda line: None)
     assert [r["name"] for r in core_config()["harnesses"]] == ["claude", "codex", "opencode"]
     lines, say = said()

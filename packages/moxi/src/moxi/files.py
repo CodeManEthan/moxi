@@ -546,10 +546,10 @@ def append_record(path: str | os.PathLike, record: dict, *,
                              f"{', '.join(found)}")
     _check_length(line, max_bytes)
     if collapse is None:
-        _write_line(path, line, max_bytes, durable)
+        _write_line(path, line, max_bytes, durable=durable)
     else:
         window, name = collapse
-        window._take(path, name, line, max_bytes, durable)
+        window._take(path, name, line, max_bytes, durable=durable)
 
 
 def _refused(value: object, names: frozenset[str]) -> set[str]:
@@ -573,7 +573,7 @@ def _check_length(line: bytes, max_bytes: int | None) -> None:
                          f"of {max_bytes} bytes")
 
 
-def _write_line(path: Path, line: bytes, max_bytes: int | None, durable: bool) -> None:
+def _write_line(path: Path, line: bytes, max_bytes: int | None, *, durable: bool) -> None:
     if max_bytes is None or _size(path) + len(line) <= max_bytes:
         _append(path, line, durable=durable)
         return
@@ -647,7 +647,7 @@ class Collapse:
         return [key for key in self._windows if wanted is None or key[0] == wanted]
 
     def _take(self, path: Path, name: str, line: bytes, max_bytes: int | None,
-              durable: bool) -> None:
+              *, durable: bool) -> None:
         now = self._clock()
         key = (_key_path(path), name)
         with self._lock:
@@ -662,7 +662,7 @@ class Collapse:
                 window = self._windows[key] = [start, per, 0, 0, max_bytes, durable]
             window[4], window[5] = max_bytes, durable
             if per == "minute" and window[2] < self.after:
-                _write_line(path, line, max_bytes, durable)
+                _write_line(path, line, max_bytes, durable=durable)
                 window[2] += 1
             else:
                 window[3] += 1
@@ -676,7 +676,7 @@ class Collapse:
         row = {"at": _stamp(self._clock()), "kind": "summary", "class": key[1],
                "count": held, "per": per, "since": _stamp(start * _SPAN[per])}
         line = (json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
-        _write_line(key[0], line, max_bytes, durable)
+        _write_line(key[0], line, max_bytes, durable=durable)
 
 
 _SPAN = {"minute": 60, "hour": 3600}

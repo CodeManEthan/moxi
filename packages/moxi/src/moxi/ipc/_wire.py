@@ -242,20 +242,20 @@ def encode(message: dict) -> bytes:
     return json.dumps(message, separators=(",", ":"), allow_nan=False).encode() + b"\n"
 
 
-def request(id: int | str, method: str, params: object = None) -> dict:
-    return {"jsonrpc": "2.0", "id": id, "method": method, **_params(params)}
+def request(request_id: int | str, method: str, params: object = None) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "method": method, **_params(params)}
 
 
 def notification(method: str, params: object = None) -> dict:
     return {"jsonrpc": "2.0", "method": method, **_params(params)}
 
 
-def result(id: int | str | None, value: object) -> dict:
-    return {"jsonrpc": "2.0", "id": id, "result": value}
+def result(request_id: int | str | None, value: object) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "result": value}
 
 
-def error(id: int | str | None, exc: RpcError) -> dict:
-    return {"jsonrpc": "2.0", "id": id, "error": exc.error()}
+def error(request_id: int | str | None, exc: RpcError) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "error": exc.error()}
 
 
 def too_long(max_line: int) -> bytes:
@@ -405,41 +405,43 @@ class Inbound:
         try:
             obj = _loads(line)
         except ValueError:
-            return self._refuse(None, PARSE_ERROR, "parse error: not JSON", first, "json")
+            return self._refuse(None, PARSE_ERROR, "parse error: not JSON", first=first, kind="json")
         if isinstance(obj, list):
-            return self._refuse(None, INVALID_REQUEST, "batches are not supported", first,
-                                "batch")
+            return self._refuse(None, INVALID_REQUEST, "batches are not supported", first=first,
+                                kind="batch")
         if not isinstance(obj, dict):
-            return self._refuse(None, INVALID_REQUEST, "a message is a JSON object", first,
-                                "value")
-        id = obj.get("id")
-        if not _id_ok(id):
+            return self._refuse(None, INVALID_REQUEST, "a message is a JSON object", first=first,
+                                kind="value")
+        request_id = obj.get("id")
+        if not _id_ok(request_id):
             return self._refuse(None, INVALID_REQUEST, "an id is a string, an integer or "
-                                "null", first, "request")
+                                "null", first=first, kind="request")
         why = _invalid(obj)
         if why:
-            return self._refuse(id, INVALID_REQUEST, why, first, "request")
+            return self._refuse(request_id, INVALID_REQUEST, why, first=first, kind="request")
         note = "id" not in obj
         method = obj["method"]
         if self.hello is not None and self.agreed is None:
             if method != HELLO or note:
-                return self._refuse(id, HELLO_REQUIRED, f"send {HELLO} first", first,
-                                    "hello", close=True)
+                return self._refuse(request_id, HELLO_REQUIRED, f"send {HELLO} first", first=first,
+                                    kind="hello", close=True)
             try:
                 self.agreed = hello(obj.get("params"), self.hello)
             except RpcError as exc:
-                return Reply(encode(error(id, exc)), False, first, "hello")
-            return Reply(encode(result(id, hello_result(self.agreed, self.hello))), False,
+                return Reply(encode(error(request_id, exc)), False, first,  # noqa: FBT003 -- wire record fields are positional
+                             "hello")
+            return Reply(encode(result(request_id, hello_result(self.agreed, self.hello))), False,  # noqa: FBT003 -- wire record fields are positional
                          first, "hello")
         if method.startswith("rpc."):
             if note:
-                return Reply(None, False, first, "reserved")
+                return Reply(None, False, first,  # noqa: FBT003 -- wire record fields are positional
+                             "reserved")
             if method == HELLO and self.hello is not None:
-                return self._refuse(id, INVALID_REQUEST, "the hello is already agreed",
-                                    first, "reserved")
-            return self._refuse(id, METHOD_NOT_FOUND, f"method not found: {method}", first,
-                                "reserved")
-        return Message(None if note else id, method, obj.get("params"), note)
+                return self._refuse(request_id, INVALID_REQUEST, "the hello is already agreed",
+                                    first=first, kind="reserved")
+            return self._refuse(request_id, METHOD_NOT_FOUND, f"method not found: {method}", first=first,
+                                kind="reserved")
+        return Message(None if note else request_id, method, obj.get("params"), note)
 
     def answer(self, message: Message, value: object) -> bytes | None:
         """The line answering `message` with `value`; None for a notification. A value
@@ -467,9 +469,8 @@ class Inbound:
     def _internal(self, message: Message) -> bytes:
         return encode(error(message.id, RpcError(INTERNAL_ERROR, "internal error")))
 
-    def _refuse(self, id, code: int, text: str, first: bool, kind: str, *,
-                close: bool = False) -> Reply:
-        return Reply(encode(error(id, RpcError(code, text))), close, first, kind)
+    def _refuse(self, request_id, code: int, text: str, *, first: bool, kind: str, close: bool = False) -> Reply:
+        return Reply(encode(error(request_id, RpcError(code, text))), close, first, kind)
 
 
 def _invalid(obj: dict) -> str | None:

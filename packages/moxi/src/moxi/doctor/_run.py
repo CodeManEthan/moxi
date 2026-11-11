@@ -393,7 +393,7 @@ def _unit_row(change, state, install: str | None = None, *, socket=None,
     if state is None or action not in ("keep", "change", "remove"):
         return Row(module, label, *planned)
     if change.kind == "daemon" and socket is not None:
-        seen = _daemon_seen(change, state, socket, socket_row)
+        seen = _daemon_seen(change, state, socket, socket_row=socket_row)
     else:
         seen = _state_of(change, state)
     worse = seen if _RANK[seen[0]] > _RANK[planned[0]] else planned
@@ -412,7 +412,7 @@ def _left_out(change) -> str:
     return f"; {tail}" if sep and tail.endswith(LEFT_OUT) else ""
 
 
-def _daemon_seen(change, state, socket, socket_row: bool) -> tuple[str, str, str | None]:
+def _daemon_seen(change, state, socket, *, socket_row: bool) -> tuple[str, str, str | None]:
     """A daemon with a `socket`, read beside its socket's state. Like a timer between
     runs, a daemon whose socket listens is waiting, not down: its process `inactive`
     under a socket `active` is `ok`, "idle, socket listening". Every other pair reads the
@@ -912,7 +912,7 @@ def _placement_rows(ctx: _Context) -> list[Row]:
         bad = [placed for placed in place.status(owner) if placed.state != "ok"]
         for placed in bad:
             entry = entries.get(str(placed.path), {})
-            rows.append(_placement_row(placed, entry, found, ctx.is_present(owner)))
+            rows.append(_placement_row(placed, entry, found, present=ctx.is_present(owner)))
         if not bad:
             count = len(entries)
             rows.append(Row(owner, "placements", "ok",
@@ -920,7 +920,7 @@ def _placement_rows(ctx: _Context) -> list[Row]:
     return rows
 
 
-def _placement_row(placed, entry: Mapping, found, present: bool) -> Row:
+def _placement_row(placed, entry: Mapping, found, *, present: bool) -> Row:
     """One placement that isn't `ok`, as a `warn` row. Its fix is a `moxi install` line only
     when the owner is an installed module whose own package the source lies in, since only
     then is the placement one that `moxi install` makes; another owner's tool (a project
@@ -1142,22 +1142,22 @@ def _module_costs(found, active: list, samples: list[dict], now: float,
     budgets = found.budgets
     if rated and hows:
         how = " and ".join(sorted(hows))
-        rows.append(_budget_row(module, "idle_cpu", rate > budgets.get("idle_cpu", 1e9),
-                                f"{rate * 100:.2f}% of one core, {how}",
-                                f"{budgets['idle_cpu'] * 100:g}%"
+        rows.append(_budget_row(module, "idle_cpu", over=rate > budgets.get("idle_cpu", 1e9),
+                                measured=f"{rate * 100:.2f}% of one core, {how}",
+                                budget=f"{budgets['idle_cpu'] * 100:g}%"
                                 if "idle_cpu" in budgets else None))
     from .. import cli
 
     cap = _size_bytes(budgets["rss"]) if "rss" in budgets else None
-    rows.append(_budget_row(module, "rss", cap is not None and memory > cap,
-                            f"{cli._size_text(memory)} of memory and swap",
-                            budgets.get("rss")))
-    rows.append(_budget_row(module, "fds", "fds" in budgets and fds > budgets["fds"],
-                            f"{fds} open files", budgets.get("fds")))
+    rows.append(_budget_row(module, "rss", over=cap is not None and memory > cap,
+                            measured=f"{cli._size_text(memory)} of memory and swap",
+                            budget=budgets.get("rss")))
+    rows.append(_budget_row(module, "fds", over="fds" in budgets and fds > budgets["fds"],
+                            measured=f"{fds} open files", budget=budgets.get("fds")))
     return rows
 
 
-def _budget_row(module: str, key: str, over: bool, measured: str, budget) -> Row:
+def _budget_row(module: str, key: str, *, over: bool, measured: str, budget) -> Row:
     shown = f"budget {budget}" if budget is not None else "no budget"
     if over:
         return Row(module, f"cost {key}", "warn", f"{measured}, over its {shown}")
@@ -1342,7 +1342,7 @@ def terminal_row(*, keyboard: bool | None = None, view=None, run=None) -> Row:
     held = _record.read(record)
     if isinstance(held, _record.Unreadable):
         return Row("moxi", name, "fail",
-                   f"the record at {record} can't be read ({_record._reason(held.exc)})",
+                   f"the record at {record} can't be read ({_record._reason(held.error)})",
                    f"fix its permissions or remove it, then type {terminal.RECORD_COMMAND} "
                    "here")
     if isinstance(held, _record.Record) and held.env == _record.of():

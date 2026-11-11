@@ -72,7 +72,7 @@ def _set_switch(value: bool, by: str) -> list[str]:
 
     lines = io.StringIO()
     with contextlib.redirect_stdout(lines):
-        config.set(MODULE, "enabled", value, by=by)
+        config.set_value(MODULE, "enabled", value, by=by)
     return [line for line in lines.getvalue().splitlines() if line.strip()]
 
 

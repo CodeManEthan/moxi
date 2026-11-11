@@ -120,7 +120,7 @@ def w(site, tmp_path, monkeypatch):
 
     def installed(**names):
         module(**names)
-        config.set("demo", "relay.enabled", True, by="test")
+        config.set_value("demo", "relay.enabled", value=True, by="test")
         for change in units.plan("demo"):
             if change.digest is not None:
                 _state.record("demo", change.name, change.digest)
@@ -129,7 +129,7 @@ def w(site, tmp_path, monkeypatch):
         _settle.record_setup("demo", "0.1.0")
         supervisor.calls.clear()
 
-    def legacy(kind="state", data=True):
+    def legacy(kind="state", *, data=True):
         old = home_dir / kind / "oldbox" / "demo"
         old.mkdir(parents=True)
         if data:
@@ -516,7 +516,7 @@ def test_replace_whose_unit_step_refuses_the_unit_starts_the_old_one(w, capsys, 
 
 def test_replace_that_displaces_the_unit_runs_the_new_marked_one(w, capsys, monkeypatch):
     w.module(DAEMONS=ONE)
-    config.set("demo", "relay.enabled", True, by="test")
+    config.set_value("demo", "relay.enabled", value=True, by="test")
     (w.root / SERVICE).write_text("[Service]\nExecStart=/bin/true\n")
     w.sup.reload()
     w.sup.state(SERVICE)["active"] = True
@@ -531,7 +531,7 @@ def test_replace_that_displaces_the_unit_runs_the_new_marked_one(w, capsys, monk
 def test_a_daemon_switched_off_and_removed_is_taken_off_the_record(w, capsys, monkeypatch):
     w.installed(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
                         "'switch': 'relay.enabled'}}")
-    config._change("demo", "relay.enabled", "set", False, by="test")   # no apply yet
+    config._change("demo", "relay.enabled", "set", value=False, by="test")  # no apply yet
     w.sup.calls.clear()
     w.legacy()
     code, out = settle(w, capsys, monkeypatch)
@@ -635,26 +635,26 @@ def test_a_reinstall_with_the_ipv6_socket_unit_failed_is_not_refused_for_its_por
 
 def test_a_dropped_socket_unit_takes_its_own_entry_out():
     def entry(unit):
-        return units.Stopped("demo", "relay", unit, "fake", True)
+        return units.Stopped("demo", "relay", unit, "fake", marked=True)
 
     record = [entry("moxi-demo-relay.socket"), entry("moxi-demo-relay-1.socket"),
               entry(SERVICE)]
     change = units.UnitChange("demo", "relay", "socket", "change", None,
                               (Path("/u/moxi-demo-relay.socket"),), None, "",
                               dropped=(Path("/u/moxi-demo-relay-1.socket"),))
-    _settle._take_out(record, [units.Applied(change, False)])
+    _settle._take_out(record, [units.Applied(change, ok=False)])
     assert len(record) == 3
-    _settle._take_out(record, [units.Applied(change, True)])
+    _settle._take_out(record, [units.Applied(change, ok=True)])
     assert [e.unit for e in record] == ["moxi-demo-relay.socket", SERVICE]
 
 
 def test_only_a_daemons_or_its_sockets_change_takes_an_entry_out():
     def applied(kind, action, name="relay", paths=()):
         change = units.UnitChange("demo", name, kind, action, None, paths, None, "")
-        return units.Applied(change, True)
+        return units.Applied(change, ok=True)
 
     def entry(name, unit):
-        return units.Stopped("demo", name, unit, "fake", True)
+        return units.Stopped("demo", name, unit, "fake", marked=True)
 
     record = [entry("relay", SERVICE), entry("relay", "moxi-demo-relay.socket"),
               entry("other", "moxi-demo-other.service")]
@@ -807,7 +807,7 @@ TIMER_FILE = "moxi-demo-snapshot.timer"
 def shared_running(w, **names):
     """`relay` installed and running under switch snapshot.enabled, which reads on."""
     w.installed(DAEMONS=SHARED, **names)
-    config.set("demo", "snapshot.enabled", True, by="test")
+    config.set_value("demo", "snapshot.enabled", value=True, by="test")
     assert w.active(SERVICE)
     w.sup.calls.clear()
 
@@ -870,7 +870,7 @@ def test_two_timers_on_one_key_never_reset_each_other(w, capsys, monkeypatch):
     one = ("{'snapshot': {'command': 'moxi-demo-relay', 'every': '5m', "
            "'doc': 'take a snapshot', 'switch': 'snapshot.enabled'}}")
     w.installed(TIMERS=one)
-    config.set("demo", "snapshot.enabled", True, by="test")
+    config.set_value("demo", "snapshot.enabled", value=True, by="test")
     w.module(TIMERS=TIMER_TOO)
     code, out = settle(w, capsys, monkeypatch)
     assert code == 0, out
@@ -973,7 +973,7 @@ def test_a_changed_timer_is_switched_off_again_and_an_unchanged_one_left(w, caps
                                                                        monkeypatch):
     w.module(TIMERS=TIMER)
     settle(w, capsys, monkeypatch)
-    config.set("demo", "snapshot.enabled", True, by="test")
+    config.set_value("demo", "snapshot.enabled", value=True, by="test")
     code, out = settle(w, capsys, monkeypatch)
     assert code == 0 and "snapshot" not in out
     w.module(TIMERS=TIMER.replace("5m", "10m"))
@@ -1311,7 +1311,7 @@ def test_an_upgrade_asks_only_the_key_it_adds_and_never_resets_one(w, capsys, mo
     qmodule(w, {"guard.push": "Guard pushes to main"})
     at_terminal(monkeypatch, "n")
     settle(w, capsys, monkeypatch)
-    config.set("demo", "guard.push", True, by="test")        # the user turns it on later
+    config.set_value("demo", "guard.push", value=True, by="test")  # the user turns it on later
     qmodule(w, {"guard.push": "Guard pushes to main",
                 "guard.force": "Guard force pushes"}, version="0.2.0")
     asked = at_terminal(monkeypatch, "y")
@@ -1343,7 +1343,7 @@ def test_a_recorded_key_the_user_unsets_by_hand_is_not_asked_again(w, capsys, mo
 def test_a_key_the_config_file_already_sets_is_recorded_without_a_question_or_write(
         w, capsys, monkeypatch):
     qmodule(w, {"guard.push": "Guard pushes to main"})
-    config.set("demo", "guard.push", True, by="test")
+    config.set_value("demo", "guard.push", value=True, by="test")
     before = config_text()
     lines = len(config.history("demo"))
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
@@ -1409,7 +1409,7 @@ def test_a_switch_table_entry_is_asked_as_a_plain_key_is(w, capsys, monkeypatch)
 def test_a_switch_table_entry_already_in_the_file_is_recorded_without_a_question(
         w, capsys, monkeypatch):
     qmodule(w, {"guards.push": "Guard pushes to main"})
-    config.set("demo", "guards.push", False, by="test")
+    config.set_value("demo", "guards.push", value=False, by="test")
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     code, out = settle(w, capsys, monkeypatch)
     assert code == 0, out
@@ -1438,7 +1438,7 @@ def test_a_question_s_setting_and_record_are_one_held_span(w, capsys, monkeypatc
     qmodule(w, {"guard.push": "Guard pushes to main",
                 "guard.force": "Guard force pushes"})
     _settle.install_handlers()
-    real = config.set
+    real = config.set_value
 
     def set_then_signal(*a, **k):
         done = real(*a, **k)
@@ -1456,7 +1456,7 @@ def test_a_question_s_setting_and_record_are_one_held_span(w, capsys, monkeypatc
 def test_every_listener_hears_the_install_last_its_own_module_s_included(
         ear, capsys, monkeypatch):
     qmodule(ear, {"guard.push": "Guard pushes to main"}, DAEMONS=ONE)
-    config.set("demo", "relay.enabled", True, by="test")
+    config.set_value("demo", "relay.enabled", value=True, by="test")
     listen(ear, other=True)
     code, out = settle(ear, capsys, monkeypatch)
     assert code == 0, out
@@ -1567,8 +1567,8 @@ def _step(skills=None):
 def test_the_skills_question_is_answered_ahead_by_a_flag(capsys, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     monkeypatch.setattr(sys, "stdin", Tty())
-    assert _settle.skills_wanted(_step(True), ["moxi-comms-send"], ["claude"]) is True
-    assert _settle.skills_wanted(_step(False), ["moxi-comms-send"], ["claude"]) is False
+    assert _settle.skills_wanted(_step(skills=True), ["moxi-comms-send"], ["claude"]) is True
+    assert _settle.skills_wanted(_step(skills=False), ["moxi-comms-send"], ["claude"]) is False
     assert capsys.readouterr().out == ""
 
 
@@ -1601,7 +1601,7 @@ def sk(w, monkeypatch):
     from moxi import place
 
     if WINDOWS:
-        config.set("moxi", "skills.form", "link", by="test")
+        config.set_value("moxi", "skills.form", "link", by="test")
     user = w.tmp / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
@@ -1874,7 +1874,7 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
     before = owned(sk)["placed"]
     assert str(claude) in before
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
-    config.set("moxi", "harnesses", [{"name": "claude", "skills": "relative/skills"},
+    config.set_value("moxi", "harnesses", [{"name": "claude", "skills": "relative/skills"},
                                      {"name": "codex"}], by="test")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
@@ -1886,7 +1886,7 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
         ("harnesses", "warn"), ("skills.harnesses claude", "warn")]
 
     config.unset("moxi", "harnesses", by="test")
-    config.set("moxi", "skills.harnesses", ["claude", "codex", "cluade"], by="test")
+    config.set_value("moxi", "skills.harnesses", ["claude", "codex", "cluade"], by="test")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
     assert ("demo: moxi-demo-send for cluade not placed: harness cluade has no row in "
@@ -1898,7 +1898,7 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
 def test_the_skills_question_names_only_harnesses_with_a_working_row(sk, capsys,
                                                                        monkeypatch):
     sk.skills("moxi-demo-send")
-    config.set("moxi", "skills.harnesses", ["claude", "cluade", "codex"], by="test")
+    config.set_value("moxi", "skills.harnesses", ["claude", "cluade", "codex"], by="test")
     asked = at_terminal(monkeypatch, "y")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
@@ -1912,7 +1912,7 @@ def test_a_name_taken_out_of_skills_harnesses_removes_its_placements(sk, capsys,
     sk.skills("moxi-demo-send")
     place_settle(sk, capsys, skills=True)
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
-    config.set("moxi", "skills.harnesses", ["codex"], by="test")
+    config.set_value("moxi", "skills.harnesses", ["codex"], by="test")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
     assert (f"demo: removed skill moxi-demo-send for claude ({sk.claude('moxi-demo-send')})"
@@ -1920,7 +1920,7 @@ def test_a_name_taken_out_of_skills_harnesses_removes_its_placements(sk, capsys,
     assert not os.path.lexists(sk.claude("moxi-demo-send"))
     assert [p.harness for p in sk.place.status("demo")] == ["codex"]
     # Its only placements on a broken row still count as its own: no question.
-    config.set("moxi", "harnesses", [{"name": "codex", "skills": "relative"}], by="test")
+    config.set_value("moxi", "harnesses", [{"name": "codex", "skills": "relative"}], by="test")
     code, out = place_settle(sk, capsys)
     assert code == 0 and "skills not placed; place them with" not in out
     assert [p.harness for p in sk.place.status("demo")] == ["codex"]

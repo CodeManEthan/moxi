@@ -1313,7 +1313,7 @@ def test_the_psutil_reader_names_each_failure(monkeypatch, error, raised):
 
     monkeypatch.setattr(psutil, "Process", Refusing)
     with pytest.raises(raised) as caught:
-        proc._psutil_read(12, "environ")
+        proc._psutil_read(12, "env")
     if raised is OSError:
         assert type(caught.value) is OSError
 

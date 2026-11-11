@@ -796,7 +796,7 @@ def test_roles_reads_the_core_harness_tables_folder(tmp_path):
     folder = tmp_path / "my-agents"
     folder.mkdir()
     (folder / "lead.md").write_text("x", encoding="utf-8")
-    config.set("moxi", "harnesses",
+    config.set_value("moxi", "harnesses",
                [{"name": "claude", "skills": "", "agents": str(folder)},
                 {"name": "codex", "skills": "", "agents": ""}], by="test")
     assert presets.roles("claude") == {"lead"}

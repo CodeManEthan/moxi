@@ -21,7 +21,7 @@ import pytest
 import moxi.config
 import moxi.files
 import moxi.paths
-from conftest import FOLDER_LINK, WINDOWS, is_link, link_folder, link_text
+from conftest import DIR_LINK, WINDOWS, is_link, link_dir, link_text
 from moxi import place
 from moxi.place import Item
 from moxi_dev.testing import can_symlink, need_symlinks
@@ -93,7 +93,7 @@ def one(steps, action=None):
 
 
 def set_core(key, value):
-    moxi.config.set("moxi", key, value, by="test")
+    moxi.config.set_value("moxi", key, value, by="test")
 
 
 # -- targets and the harness table --------------------------------------------------------
@@ -103,7 +103,7 @@ def test_a_skill_links_into_each_default_harness_dir(home, skill):
     items = [Item(src, "claude", "comms-send"), Item(src, "codex", "comms-send")]
     steps = place.plan("comms", items)
     assert [s.action for s in steps] == ["add", "add"]
-    assert [s.form for s in steps] == [FOLDER_LINK, FOLDER_LINK]
+    assert [s.form for s in steps] == [DIR_LINK, DIR_LINK]
     said, say = lines()
     done = place.apply(steps, say=say)
     claude = home / ".claude" / "skills" / "comms-send"
@@ -279,7 +279,7 @@ def test_a_harness_dir_reached_through_a_symlink_gives_one_key(home, tmp_path, s
     real = tmp_path / "real-skills"
     real.mkdir()
     (home / ".claude").mkdir()
-    link_folder(home / ".claude" / "skills", real)
+    link_dir(home / ".claude" / "skills", real)
     src = skill()
     place.apply(place.plan("comms", [Item(src, "claude", "x")]))
     assert list(ledger()["comms"]["placed"]) == [str(real / "x")]
@@ -493,7 +493,7 @@ def test_an_unmarked_path_is_refused_and_replace_moves_it_aside(home, skill):
 def test_an_unmarked_link_is_refused(home, tmp_path, skill):
     target = home / ".claude" / "skills" / "comms-send"
     target.parent.mkdir(parents=True)
-    link_folder(target, tmp_path)
+    link_dir(target, tmp_path)
     step = one(place.plan("comms", [Item(skill(), "claude", "comms-send")]), "refuse")
     assert step.cause == "occupant" and "did not make" in step.reason
 
@@ -590,7 +590,7 @@ def test_git_s_must_be_a_number(skill):
 def _occupy(case, target, src, other):
     """Put occupant `case` at `target`, `src` being the item's source."""
     if case == "a link not the placer's":
-        link_folder(target, other)
+        link_dir(target, other)
     elif case == "an unmarked folder":
         target.mkdir()
         (target / "SKILL.md").write_text("the user's\n")
@@ -1156,7 +1156,7 @@ def test_apply_inside_a_nested_hold_yields(skill):
 
 # -- Windows decisions (the plan only; the disk side is a row on a Windows host) ----------
 
-@pytest.mark.parametrize("setting, symlinks, held, folder, want", [
+@pytest.mark.parametrize("setting, symlinks, held, is_dir, want", [
     ("auto", True, False, True, ("copy", None)),
     ("link", True, False, True, ("junction", None)),
     ("auto", True, False, False, ("link", None)),
@@ -1213,7 +1213,7 @@ def test_from_package_reads_the_installed_package_and_an_older_install_of_it(
     assert place.from_package(found, pkg / "skills" / "x")
     # Reached through a link to the package folder, and the package through a link.
     alias = tmp_path / "alias"
-    link_folder(alias, pkg)
+    link_dir(alias, pkg)
     assert place.from_package(found, alias / "skills" / "x")
     # Where an older install lay, before an upgrade moved the package.
     old = tmp_path / "old" / "lib" / "python3.11" / "site-packages" / "moxi_fpdemo"
