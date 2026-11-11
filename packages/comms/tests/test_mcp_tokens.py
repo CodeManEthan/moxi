@@ -151,7 +151,7 @@ def test_a_token_is_32_random_bytes_and_only_its_hex_hash_is_kept():
     ("41000-1730000000.12", True), ("srv-41000-55-console@acme", True),
     ("../x", False), ("a/b", False), ("", False), (".hidden", False), (7, False),
     ("x" * 257, False)])
-def test_a_claim_key_names_a_file_in_the_claim_directory_only(key, ok):
+def test_a_claim_key_names_a_file_in_the_claim_dir_only(key, ok):
     assert tokens.valid_claim_key(key) is ok
 
 

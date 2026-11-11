@@ -287,9 +287,9 @@ class Registry:
             rows = self.history.write(lambda conn: conn.execute(
                 "SELECT token_hash, claim_key, identity, adapter, binding_id, created_at "
                 "FROM mcp_tokens WHERE revoked_at IS NULL").fetchall())
-        except (sqlite3.Error, RuntimeError) as e:
+        except (sqlite3.Error, RuntimeError) as exc:
             log.warning("tool tokens weren't loaded (%s: %s); a session's tools answer "
-                        "401 until its adapter registers again", type(e).__name__, e)
+                        "401 until its adapter registers again", type(exc).__name__, exc)
             return 0
         with self._lock:
             self._active = {r[0]: Row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in rows}
@@ -426,10 +426,10 @@ class Registry:
         with self._lock:
             try:
                 self.history.write(step)
-            except (sqlite3.Error, RuntimeError) as e:
+            except (sqlite3.Error, RuntimeError) as exc:
                 log.error("tool tokens: the store didn't record %d revocation(s) %s "
                           "(%s: %s); this daemon refuses them anyway", len(hashes), why,
-                          type(e).__name__, e)
+                          type(exc).__name__, exc)
             for h in hashes:
                 self._active.pop(h, None)
         return len(hashes)

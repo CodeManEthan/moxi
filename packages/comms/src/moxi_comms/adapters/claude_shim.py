@@ -676,20 +676,20 @@ class ClaudeShim:
             if self.claims.may_register():
                 with self.claims.register_lock:
                     self.connect()
-        except (DaemonOffline, DaemonTimeout) as e:
+        except (DaemonOffline, DaemonTimeout) as exc:
             if not tolerate_offline:
                 raise
             log.info("the daemon is not there at launch (%s); serving this session "
-                     "unbound and binding when it returns", e)
+                     "unbound and binding when it returns", exc)
             self._report("offline", TOLERATED_OFFLINE_MESSAGE)
-        except DaemonError as e:
+        except DaemonError as exc:
             # A launch into a name another session holds waits for it and cannot send
             # while it waits, unless its wrapper refuses that launch instead. Any other
             # refusal ends the adapter, with one line.
             if (not self.autoreconnect or not self.WAIT_WHEN_HELD
-                    or self.refusal_kind(e) != NAME_REFUSAL):
+                    or self.refusal_kind(exc) != NAME_REFUSAL):
                 raise
-            self.claims.name_refused((e.data.get("holder") or {}).get("qualified"))
+            self.claims.name_refused((exc.data.get("holder") or {}).get("qualified"))
             self._report("refused", REFUSED_WAITING)
         if self.autoreconnect:
             self._supervisor = threading.Thread(target=self._supervise, daemon=True)
@@ -726,11 +726,11 @@ class ClaudeShim:
         """Bind once. The first bind and every reconnect come through here alike."""
         try:
             return self._connect_once()
-        except DaemonError as e:
-            kind = self.refusal_kind(e)
+        except DaemonError as exc:
+            kind = self.refusal_kind(exc)
             if kind is not None:
                 with self._lock:
-                    self.last_refusal = str(e)
+                    self.last_refusal = str(exc)
             raise
 
     def _connect_once(self) -> bool:
@@ -854,10 +854,10 @@ class ClaudeShim:
                     if self.offline and self.claims.may_register():
                         continue
                     self._stop.wait(0.05)
-                except Exception as e:                      # noqa: BLE001 -- see docstring
+                except Exception as exc:                      # noqa: BLE001 -- see docstring
                     log.exception("comms supervisor: unexpected error, retrying")
-                    self._report(f"error:{type(e).__name__}",
-                                 SUPERVISOR_ERROR.format(error=f"{type(e).__name__}: {e}"))
+                    self._report(f"error:{type(exc).__name__}",
+                                 SUPERVISOR_ERROR.format(error=f"{type(exc).__name__}: {exc}"))
                     try:
                         wait = next(delays)
                     except StopIteration:
@@ -899,23 +899,23 @@ class ClaudeShim:
             # A daemon that did not answer is a daemon that is not there.
             self._stop.wait(next(delays))
             return None
-        except DaemonError as e:
-            if e.try_again or e.code == wire.INTERNAL_ERROR:
+        except DaemonError as exc:
+            if exc.try_again or exc.code == wire.INTERNAL_ERROR:
                 # The daemon ANSWERED, but with an accident, not a refusal: a boundary
                 # read that 429'd under a restart burst, a broken record. Nobody holds
                 # the name; keep the backoff going. Falling into the ever-bound arm below
                 # would give the name up for good.
-                log.warning("register failed transiently (%s); retrying", e)
+                log.warning("register failed transiently (%s); retrying", exc)
                 self._stop.wait(next(delays))
                 return None
-            kind = self.refusal_kind(e)
+            kind = self.refusal_kind(exc)
             if kind == NAME_REFUSAL and self.ever_bound:
                 # Held it, and a successor now holds it. Stop competing: this process
                 # stays alive and serves the session offline.
                 log.warning("this session's name was claimed by another holder (%s); "
-                            "no longer retrying", e)
-                self.ended_because = f"name held by another session: {e}"
-                self.claims.name_refused((e.data.get("holder") or {}).get("qualified"))
+                            "no longer retrying", exc)
+                self.ended_because = f"name held by another session: {exc}"
+                self.claims.name_refused((exc.data.get("holder") or {}).get("qualified"))
                 self._report("refused", REFUSED_TERMINAL)
                 return None
             if kind == NAME_REFUSAL:
@@ -925,16 +925,16 @@ class ClaudeShim:
                 # retry at BACKOFF_START forever (~2 registers/second, each taking the
                 # daemon's one lock); the ceiling is the steady state.
                 log.info("this session's name is held by another session (%s); still "
-                         "waiting for it to free", e)
-                self.claims.name_refused((e.data.get("holder") or {}).get("qualified"))
+                         "waiting for it to free", exc)
+                self.claims.name_refused((exc.data.get("holder") or {}).get("qualified"))
                 self._report("refused", REFUSED_WAITING)
                 self._stop.wait(next(delays))
                 return None
             # Anything else: an invalid name, an unknown adapter kind, or
             # an error that is no refusal at all. Retried on the same backoff, said once
             # per distinct reason, in the daemon's words.
-            log.warning("register refused (%s); still retrying", e)
-            self._report(f"refused:{e}", REFUSED_RETRYING.format(reason=e))
+            log.warning("register refused (%s); still retrying", exc)
+            self._report(f"refused:{exc}", REFUSED_RETRYING.format(reason=exc))
             self._stop.wait(next(delays))
             return None
 
@@ -1091,7 +1091,7 @@ class ClaudeShim:
         client.notify(ACTIVITY_METHODS.get(kind, "activity"), {"identity": identity, **fields})
         return client.connected
 
-    def notify_endpoint(self, present: bool) -> bool:
+    def notify_endpoint(self, *, present: bool) -> bool:
         """The session's turns endpoint was found (True) or went away (False): kept, and
         told to the daemon at once by an `activity` with no `kind`, which releases
         nothing. A shim not bound now tells it on its next register."""
@@ -1199,8 +1199,8 @@ class ClaudeShim:
             fields["projects_root"] = projects_root
         try:
             answer = client.call("turn_ended", fields)
-        except (DaemonOffline, DaemonError) as e:
-            log.warning("turn end for %s not reported: %s", identity, e)
+        except (DaemonOffline, DaemonError) as exc:
+            log.warning("turn end for %s not reported: %s", identity, exc)
             return
         with self._lock:
             self.unreported_handled = [d for d in self.unreported_handled
@@ -1222,13 +1222,13 @@ class ClaudeShim:
             if client is None or not client.connected:
                 raise DaemonOffline("comms offline: not connected to the daemon")
             opened = client.call("open_digest", {"ids": ids})
-        except DaemonOffline as e:
-            log.info("digest not opened (%s); its rows wait again for the next binding", e)
+        except DaemonOffline as exc:
+            log.info("digest not opened (%s); its rows wait again for the next binding", exc)
             with self._lock:
                 self.held_ids.difference_update(ids)
             return [], None
-        except DaemonError as e:
-            log.warning("digest not opened: %s; the batch waits for the next boundary", e)
+        except DaemonError as exc:
+            log.warning("digest not opened: %s; the batch waits for the next boundary", exc)
             with self._lock:
                 self.queue = batch + self.queue
             return [], None
@@ -1373,8 +1373,8 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
         return 2
     try:
         declared = directors_mod.validated(args.director or directors_mod.from_env())
-    except directors_mod.BadDirector as e:
-        print(f"moxi-comms-shim: {e}", file=sys.stderr)
+    except directors_mod.BadDirector as exc:
+        print(f"moxi-comms-shim: {exc}", file=sys.stderr)
         return 2
     if declared:
         log.info("directors declared for this session: %s", ", ".join(declared))
@@ -1392,8 +1392,8 @@ def _serve_inject_file(args, common) -> int:  # pragma: no cover - the smoke run
     inject_path = Path(args.inject_file)
 
     def injector(text):
-        with inject_path.open("a") as f:
-            f.write(json.dumps({"digest": text}) + "\n")
+        with inject_path.open("a") as fh:
+            fh.write(json.dumps({"digest": text}) + "\n")
 
     # A refused claim says one line and leaves: a traceback is never the honest report
     # of "somebody else holds this name".
@@ -1408,14 +1408,14 @@ def _serve_inject_file(args, common) -> int:  # pragma: no cover - the smoke run
                      claim_roots=[parent] if parent else [])
     try:
         shim = ClaudeShim(injector=injector, **common, **claim).start()
-    except (DaemonOffline, DaemonTimeout) as e:
+    except (DaemonOffline, DaemonTimeout) as exc:
         # FIRST, because `DaemonTimeout` is a `DaemonError` and the arms are tried in
         # order. This is the hand-run seam's `EXIT_OFFLINE` -- a register nobody answered
         # now reaches it instead of printing a refusal that names no holder.
-        print(f"moxi-comms-shim: {e}", file=sys.stderr)
+        print(f"moxi-comms-shim: {exc}", file=sys.stderr)
         return EXIT_OFFLINE
-    except DaemonError as e:
-        print(f"{REFUSED_PREFIX}: {e}", file=sys.stderr)
+    except DaemonError as exc:
+        print(f"{REFUSED_PREFIX}: {exc}", file=sys.stderr)
         return EXIT_REFUSED
     boundary = Path(args.boundary_file) if args.boundary_file else None
     seen = None

@@ -111,8 +111,8 @@ def fetch(socket_path=None, *, timeout: float = 2.0) -> dict | None:
             return client.call("agents")
         finally:
             client.close()
-    except Exception as e:                                       # noqa: BLE001
-        print(f"comms roster: {e}", file=sys.stderr)
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"comms roster: {exc}", file=sys.stderr)
         return None
 
 
@@ -238,12 +238,12 @@ def write_state(path: Path, roster: dict[str, str]) -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
-        with os.fdopen(fd, "w") as f:
-            json.dump(roster, f, sort_keys=True, separators=(",", ":"))
+        with os.fdopen(fd, "w") as fh:
+            json.dump(roster, fh, sort_keys=True, separators=(",", ":"))
         os.replace(tmp, path)
         return True
-    except OSError as e:
-        print(f"comms roster: state write failed: {e}", file=sys.stderr)
+    except OSError as exc:
+        print(f"comms roster: state write failed: {exc}", file=sys.stderr)
         if tmp is not None:
             try:
                 os.unlink(tmp)

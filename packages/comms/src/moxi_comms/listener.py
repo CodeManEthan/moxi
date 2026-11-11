@@ -79,10 +79,10 @@ def memory_path(env) -> Path | None:
         key = found[0] if found is not None else None
     if not key or key in (".", "..") or "/" in key:
         return None
-    directory = sessions_dir(env) / key
-    if not directory.is_dir():
+    session_dir = sessions_dir(env) / key
+    if not session_dir.is_dir():
         return None
-    return directory / MEMORY
+    return session_dir / MEMORY
 
 
 def answer(event) -> str | None:

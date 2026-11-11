@@ -263,7 +263,7 @@ class Sender:
         daemon refuses the credential."""
         return cls("bound", identity=str(identity), token=str(token), reread=reread)
 
-    def environ(self, base) -> dict:
+    def sender_env(self, base) -> dict:
         """`base` as the verb would see this sender's process: the claim socket named,
         or the operator's stamp set with no claim socket. A bound sender has no
         environment: it is handed to `run` itself."""
@@ -440,11 +440,11 @@ def _reply(args, ctx: Context, *, bound=None) -> int:
     author (or, for your own message, its recipients) holds."""
     try:
         original = ctx.record.get_message(args.message_id)
-    except RecordError as e:
+    except RecordError as exc:
         # A read that raised is not "no such message": the original may carry an audience
         # the reply has to copy, and posting blind would drop it.
         _refuse(ctx, "record-unreadable",
-                f"{e}\nThe record could not be read, so there is nothing to reply to yet. "
+                f"{exc}\nThe record could not be read, so there is nothing to reply to yet. "
                 "Nothing was sent.")
         return _FAILED
     if original is None:
@@ -545,8 +545,8 @@ def _claim_sender(ctx: Context, path):
     try:
         answer = (claimhold.call(path, "claim") if ctx.deadline is None else
                   claimhold.call(path, "claim", timeout=ctx.deadline))
-    except AdapterMismatch as e:
-        _refuse(ctx, "adapter-mismatch", str(e))
+    except AdapterMismatch as exc:
+        _refuse(ctx, "adapter-mismatch", str(exc))
         return _FAILED
     except ClaimUnreachable:
         answer = claimhold.dead_adapter_answer(path)
@@ -608,8 +608,8 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
     try:
         # A claim socket outside comms' runtime directory is asked nothing.
         claim_path = claimhold.socket_from_env(ctx.env)
-    except OutsideRuntime as e:
-        _refuse(ctx, "outside-runtime", f"{e} Nothing was sent.")
+    except OutsideRuntime as exc:
+        _refuse(ctx, "outside-runtime", f"{exc} Nothing was sent.")
         return _REFUSED
     if claim_path:
         if (ctx.env.get(constants.OPERATOR_ENV) or "").strip():
@@ -721,8 +721,8 @@ def _send_reserved(args, ctx: Context, *, module: str, name: str, tags) -> int:
                 f"comms holds no token for {name} for {module} in this process's "
                 "credential chain — nothing was sent. Run `moxi doctor`.")
         return _REFUSED
-    except secrets.SecretError as e:
-        _refuse(ctx, "credential", f"{e} Nothing was sent. Run `moxi doctor`.")
+    except secrets.SecretError as exc:
+        _refuse(ctx, "credential", f"{exc} Nothing was sent. Run `moxi doctor`.")
         return _FAILED
     sender = SenderIdentity(qualified=name, scope=GLOBAL, name=name)
     return _send_resolved(args, ctx, sender=sender, operator_id=None, tags=tags,
@@ -788,8 +788,8 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                 # The operator's lane needs a credential like every other lane:
                 # the holder's own token out of the store, read the declared way.
                 token, _channel_id = operator_credential(db, room=channel_room, env=ctx.env)
-        except (SendFailed, RecordError) as e:
-            _refuse(ctx, "credential", str(e))
+        except (SendFailed, RecordError) as exc:
+            _refuse(ctx, "credential", str(exc))
             return _FAILED
     if getattr(args, "check", False):
         # `--check` stops here, at the post: every refusal above is send's own, said in
@@ -836,8 +836,8 @@ def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
         client = ctx.daemon()
         try:
             answer = client.send(sender.qualified, token, content)
-        except DaemonError as error:
-            if not error.data.get("credential"):
+        except DaemonError as exc:
+            if not exc.data.get("credential"):
                 raise
             refreshed = _claim_sender(ctx, path)
             if isinstance(refreshed, int):
@@ -853,8 +853,8 @@ def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
                 return _FAILED
             try:
                 answer = client.send(current_sender.qualified, current, content)
-            except DaemonError as retry_error:
-                if retry_error.data.get("credential"):
+            except DaemonError as retry_exc:
+                if retry_exc.data.get("credential"):
                     _refuse(ctx, "credential",
                             "comms refused this session's posting credential — nothing "
                             "was sent")
@@ -864,14 +864,14 @@ def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
     except DaemonNoAnswer:
         _refuse(ctx, "post-no-answer", _no_answer(ctx))
         return _UNKNOWN
-    except VersionMismatch as error:
-        _refuse(ctx, "protocol-mismatch", str(error))
+    except VersionMismatch as exc:
+        _refuse(ctx, "protocol-mismatch", str(exc))
         return _FAILED
-    except DaemonOffline as error:
-        _refuse(ctx, "offline", f"{error} Nothing was sent.")
+    except DaemonOffline as exc:
+        _refuse(ctx, "offline", f"{exc} Nothing was sent.")
         return _OFFLINE
-    except DaemonError as error:
-        return _send_refused(ctx, error)
+    except DaemonError as exc:
+        return _send_refused(ctx, exc)
     finally:
         if client is not None:
             client.close()
@@ -893,8 +893,8 @@ def _post_bound(ctx: Context, sender: SenderIdentity, bound: Sender, content: st
         client = ctx.daemon()
         try:
             answer = client.send(sender.qualified, bound.token, content)
-        except DaemonError as error:
-            if not error.data.get("credential"):
+        except DaemonError as exc:
+            if not exc.data.get("credential"):
                 raise
             current = bound.reread() if callable(bound.reread) else (bound.identity,
                                                                     bound.token)
@@ -909,8 +909,8 @@ def _post_bound(ctx: Context, sender: SenderIdentity, bound: Sender, content: st
                 return _FAILED
             try:
                 answer = client.send(identity, token, content)
-            except DaemonError as retry_error:
-                if retry_error.data.get("credential"):
+            except DaemonError as retry_exc:
+                if retry_exc.data.get("credential"):
                     _refuse(ctx, "credential",
                             "comms refused this session's posting credential — nothing "
                             "was sent")
@@ -920,14 +920,14 @@ def _post_bound(ctx: Context, sender: SenderIdentity, bound: Sender, content: st
     except DaemonNoAnswer:
         _refuse(ctx, "post-no-answer", _no_answer(ctx))
         return _UNKNOWN
-    except VersionMismatch as error:
-        _refuse(ctx, "protocol-mismatch", str(error))
+    except VersionMismatch as exc:
+        _refuse(ctx, "protocol-mismatch", str(exc))
         return _FAILED
-    except DaemonOffline as error:
-        _refuse(ctx, "offline", f"{error} Nothing was sent.")
+    except DaemonOffline as exc:
+        _refuse(ctx, "offline", f"{exc} Nothing was sent.")
         return _OFFLINE
-    except DaemonError as error:
-        return _send_refused(ctx, error)
+    except DaemonError as exc:
+        return _send_refused(ctx, exc)
     finally:
         if client is not None:
             client.close()
@@ -966,27 +966,27 @@ def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: st
         client = ctx.daemon()
         try:
             answer = client.send(sender.qualified, token, content)
-        except DaemonError as error:
-            if error.data.get("credential"):
+        except DaemonError as exc:
+            if exc.data.get("credential"):
                 _refuse(ctx, "credential", f"comms refused the token for "
                         f"{sender.qualified} — nothing was sent. Run `moxi doctor`.")
                 return _REFUSED
-            if error.code == wire.NAME_RESERVED:
-                _refuse(ctx, "name-reserved", f"{error} — nothing was sent.")
+            if exc.code == wire.NAME_RESERVED:
+                _refuse(ctx, "name-reserved", f"{exc} — nothing was sent.")
                 return _REFUSED
             raise
         return answer["message_id"]
     except DaemonNoAnswer:
         _refuse(ctx, "post-no-answer", _no_answer(ctx))
         return _UNKNOWN
-    except VersionMismatch as error:
-        _refuse(ctx, "protocol-mismatch", str(error))
+    except VersionMismatch as exc:
+        _refuse(ctx, "protocol-mismatch", str(exc))
         return _FAILED
-    except DaemonOffline as error:
-        _refuse(ctx, "offline", f"{error} Nothing was sent.")
+    except DaemonOffline as exc:
+        _refuse(ctx, "offline", f"{exc} Nothing was sent.")
         return _OFFLINE
-    except DaemonError as error:
-        return _send_refused(ctx, error)
+    except DaemonError as exc:
+        return _send_refused(ctx, exc)
     finally:
         if client is not None:
             client.close()
@@ -1001,23 +1001,23 @@ def _post_as_operator(ctx: Context, user_id: str, token: str, content: str):
         client = ctx.daemon()
         try:
             answer = client.send("operator", token, content, user=user_id)
-        except DaemonError as error:
-            if error.data.get("credential"):
-                _refuse(ctx, "credential", f"{error} — nothing was sent.")
+        except DaemonError as exc:
+            if exc.data.get("credential"):
+                _refuse(ctx, "credential", f"{exc} — nothing was sent.")
                 return _FAILED
             raise
         return answer["message_id"]
     except DaemonNoAnswer:
         _refuse(ctx, "post-no-answer", _no_answer(ctx))
         return _UNKNOWN
-    except VersionMismatch as error:
-        _refuse(ctx, "protocol-mismatch", str(error))
+    except VersionMismatch as exc:
+        _refuse(ctx, "protocol-mismatch", str(exc))
         return _FAILED
-    except DaemonOffline as error:
-        _refuse(ctx, "offline", f"{error} Nothing was sent.")
+    except DaemonOffline as exc:
+        _refuse(ctx, "offline", f"{exc} Nothing was sent.")
         return _OFFLINE
-    except DaemonError as error:
-        return _send_refused(ctx, error)
+    except DaemonError as exc:
+        return _send_refused(ctx, exc)
     finally:
         if client is not None:
             client.close()
@@ -1186,9 +1186,9 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     else:
         try:
             expires_in = expiry_seconds(expires)
-        except ValueError as e:
-            _refuse(ctx, "expires-shape", f"expires: {e}. Nothing was sent." if _tool(ctx)
-                    else f"--expires: {e}. Nothing was sent.")
+        except ValueError as exc:
+            _refuse(ctx, "expires-shape", f"expires: {exc}. Nothing was sent." if _tool(ctx)
+                    else f"--expires: {exc}. Nothing was sent.")
             return _USAGE, None
     if _blocked(ctx):
         # Advisory only: enforcement is at daemon routing. Refusing here is a
@@ -1201,12 +1201,12 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     # ---- 2. the daemon block --------------------------------------------------------
     try:
         client = ctx.daemon()
-    except VersionMismatch as e:
-        _refuse(ctx, "protocol-mismatch", str(e))
+    except VersionMismatch as exc:
+        _refuse(ctx, "protocol-mismatch", str(exc))
         return _FAILED, None
-    except DaemonOffline as e:
+    except DaemonOffline as exc:
         _refuse(ctx, "offline",
-                f"{e}\nThe daemon performs tier/route resolution; without it the verb "
+                f"{exc}\nThe daemon performs tier/route resolution; without it the verb "
                 "cannot tell an ephemeral typo from a chosen name.")
         return _OFFLINE, None
     # The cache read: every sender, every bound recipient of every adapter, `--held`
@@ -1227,8 +1227,8 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         for tag in tags:
             try:
                 r = client.call("resolve", {"name": tag})
-            except DaemonError as e:
-                _refuse(ctx, "resolve-refused", _refused_tag(tag, e))
+            except DaemonError as exc:
+                _refuse(ctx, "resolve-refused", _refused_tag(tag, exc))
                 return _REFUSED, None
             if r.get("send_only"):
                 # The whole post, before anything is posted: a send-only identity
@@ -1313,22 +1313,22 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
             return _USAGE, None
         if open_mark:
             marks.update(open_mark=True, cap=cap, no_cap=no_cap)
-            sent_lines.append(_open_line(cap, no_cap, ctx))
+            sent_lines.append(_open_line(cap, no_cap=no_cap, ctx=ctx))
     else:
         if referent is None:
             # `reply` hands the original in; `send --reply-to` reads it here, before
             # any posture check, through the record this verb already holds.
             try:
                 referent = ctx.record.get_message(str(reply_to))
-            except (DaemonOffline, RecordError) as e:
+            except (DaemonOffline, RecordError) as exc:
                 # Posting as typed on a failed read would silently drop an audience the
                 # referent may carry. A referent that is simply NOT in the record is a
                 # different fact, and it posts as typed below.
                 _refuse(ctx, "referent-unreadable",
-                        f"{e}\nThe message this answers ({reply_to}) could not be read, "
+                        f"{exc}\nThe message this answers ({reply_to}) could not be read, "
                         "so comms cannot copy its audience onto the reply. Nothing was "
                         "sent.")
-                return (_OFFLINE if isinstance(e, DaemonOffline) else _FAILED), None
+                return (_OFFLINE if isinstance(exc, DaemonOffline) else _FAILED), None
         names_text = ",".join(tags)
         got = _reply_checks(args, ctx, sender=sender, exempt=exempt, typed=typed,
                             cap=cap, no_cap=no_cap, referent=referent,
@@ -1464,7 +1464,7 @@ def _configured_cap(ctx: Context) -> int:
 
 
 
-def _open_line(cap, no_cap: bool, ctx: Context) -> str:
+def _open_line(cap, *, no_cap: bool, ctx: Context) -> str:
     """What an open thread's opener is told after its `sent` line: the cap and how to
     change it."""
     if no_cap:
@@ -1720,7 +1720,7 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
             return _REFUSED
         else:
             marks.update(cap=cap, no_cap=no_cap)
-            lines.append(_open_line(cap, no_cap, ctx))
+            lines.append(_open_line(cap, no_cap=no_cap, ctx=ctx))
     if thread.open and not thread.closed and not thread.note:
         in_force = None if no_cap else (cap if cap is not None else thread.cap)
         if in_force is not None:
@@ -1820,8 +1820,8 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
             if mml.posture == machine_line.POSTURE_NONE:
                 thread.closed, thread.closer = "none", (who.qualified, m.id)
                 return thread
-    except Exception as e:  # noqa: BLE001 -- every failure here only relaxes
-        return ThreadRead(note=THREAD_NOTE_ERROR.format(error=e))
+    except Exception as exc:  # noqa: BLE001 -- every failure here only relaxes
+        return ThreadRead(note=THREAD_NOTE_ERROR.format(error=exc))
     return thread
 
 
@@ -1842,8 +1842,8 @@ def _thread_idle(ctx: Context, items, sender, epoch) -> tuple[bool, str | None]:
                                                   "ids": [m.id for m in theirs]})
             finally:
                 client.close()
-        except Exception as e:  # noqa: BLE001 -- a failed read lets the reply through
-            return False, str(e)
+        except Exception as exc:  # noqa: BLE001 -- a failed read lets the reply through
+            return False, str(exc)
     since = float(answer.get("since") or 0.0)
     handed = answer.get("handed") or {}
     waiting = set(answer.get("waiting") or ())
@@ -1900,8 +1900,8 @@ def _nominated_asks(client, sender, resolved) -> tuple[list[str], str | None]:
                                      "recipients": list(resolved)})
     except (DaemonTimeout, DaemonOffline):
         return [], ASK_CHECK_NO_ANSWER
-    except DaemonError as e:
-        return [], f"NOTE: the single-reply check did not run (the daemon said: {e})."
+    except DaemonError as exc:
+        return [], f"NOTE: the single-reply check did not run (the daemon said: {exc})."
     return [str(i) for i in answer.get("asks") or ()], None
 
 
@@ -1928,19 +1928,19 @@ def _open_asks(ctx: Context, sender, nominated, resolved) -> tuple[list, list[st
                                      record=ctx.record,
                                      replies=lambda a=ask_id: ctx.record.history(
                                          names_channel, after=a))
-                except Exception as e:  # noqa: BLE001 -- every failure here only relaxes
+                except Exception as exc:  # noqa: BLE001 -- every failure here only relaxes
                     notes.append(f"NOTE: the single-reply check could not read msg {ask_id} "
-                                 f"from the record ({e}), so it did not hold this send.")
+                                 f"from the record ({exc}), so it did not hold this send.")
                     continue
                 # The daemon nominated it for this send's recipients; the verb keeps that
                 # fact its own too, so a stale nomination can only let the send through.
                 if asker is not None and asker.qualified in resolved:
                     found.append((ask, asker))
-    except Exception as e:  # noqa: BLE001 -- every failure here only relaxes
+    except Exception as exc:  # noqa: BLE001 -- every failure here only relaxes
         found = []
         for ask_id in nominated:
             notes.append(f"NOTE: the single-reply check could not read msg {ask_id} "
-                         f"from the record ({e}), so it did not hold this send.")
+                         f"from the record ({exc}), so it did not hold this send.")
     return found, notes
 
 
@@ -2231,8 +2231,8 @@ def run_reserved(ctx: Context, args, *, module: str, name: str, tags) -> SendRes
     try:
         try:
             code = _send_reserved(args, ctx, module=module, name=name, tags=list(tags))
-        except config.ConfigError as e:
-            ctx.refuse("config", str(e))
+        except config.ConfigError as exc:
+            ctx.refuse("config", str(exc))
             code = _REFUSED
     finally:
         ctx.capture = outer
@@ -2265,10 +2265,10 @@ def run(ctx: Context, args, *, tags=None, sender=None) -> SendResult:
                 code = _send(args, ctx, tags=list(tags or ()),
                              reply_to=getattr(args, "reply_to", None), channel_room=NAMES,
                              bound=bound)
-        except config.ConfigError as e:
+        except config.ConfigError as exc:
             # A config file that does not load refuses the send, naming the key and the
             # fix.
-            ctx.refuse("config", str(e))
+            ctx.refuse("config", str(exc))
             code = _REFUSED
     finally:
         ctx.capture = outer
@@ -2434,8 +2434,8 @@ def _delete(ctx: Context, mid: str, *, bound=None):
     names a refusal carries)."""
     try:
         claim_path = None if bound is not None else claimhold.socket_from_env(ctx.env)
-    except OutsideRuntime as e:
-        _refuse(ctx, "outside-runtime", f"{e} Nothing was withdrawn.")
+    except OutsideRuntime as exc:
+        _refuse(ctx, "outside-runtime", f"{exc} Nothing was withdrawn.")
         return _REFUSED, None
     user = None
     if bound is not None:
@@ -2463,8 +2463,8 @@ def _delete(ctx: Context, mid: str, *, bound=None):
         try:
             with ctx.db() as db:
                 token, _channel_id = operator_credential(db, room=NAMES, env=ctx.env)
-        except (SendFailed, RecordError) as e:
-            _refuse(ctx, "credential", str(e))
+        except (SendFailed, RecordError) as exc:
+            _refuse(ctx, "credential", str(exc))
             return _FAILED, None
         who, user = OPERATOR, operator_id
     client = None
@@ -2475,22 +2475,22 @@ def _delete(ctx: Context, mid: str, *, bound=None):
         _refuse(ctx, "delete-no-answer",
                 DELETE_NO_ANSWER_TOOL if _tool(ctx) else DELETE_NO_ANSWER)
         return _UNKNOWN, None
-    except VersionMismatch as error:
-        _refuse(ctx, "protocol-mismatch", str(error))
+    except VersionMismatch as exc:
+        _refuse(ctx, "protocol-mismatch", str(exc))
         return _FAILED, None
-    except DaemonOffline as error:
-        _refuse(ctx, "offline", f"{error} Nothing was withdrawn.")
+    except DaemonOffline as exc:
+        _refuse(ctx, "offline", f"{exc} Nothing was withdrawn.")
         return _OFFLINE, None
-    except DaemonError as error:
-        names = {k: error.data.get(k) for k in ("delivered", "expired")}
-        if error.refused:
-            _refuse(ctx, wire.CODE_NAMES.get(error.code, "refused"),
-                    f"{error} — nothing was withdrawn.")
+    except DaemonError as exc:
+        names = {k: exc.data.get(k) for k in ("delivered", "expired")}
+        if exc.refused:
+            _refuse(ctx, wire.CODE_NAMES.get(exc.code, "refused"),
+                    f"{exc} — nothing was withdrawn.")
             return _REFUSED, names
-        if error.try_again:
-            _refuse(ctx, "delete-again", f"{error} Nothing was withdrawn; try again.")
+        if exc.try_again:
+            _refuse(ctx, "delete-again", f"{exc} Nothing was withdrawn; try again.")
             return _AGAIN, None
-        _refuse(ctx, "delete-failed", f"{error} Nothing was withdrawn.")
+        _refuse(ctx, "delete-failed", f"{exc} Nothing was withdrawn.")
         return _FAILED, None
     finally:
         if client is not None:

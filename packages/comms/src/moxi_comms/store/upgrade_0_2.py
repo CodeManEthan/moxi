@@ -173,8 +173,8 @@ class Plan:
     denied: list = field(default_factory=list)
     renamed: list = field(default_factory=list)        # (from, to)
     # What the reading passes to the rows it makes.
-    directory_rows: dict = field(default_factory=dict, repr=False)  # (name, scope) -> row
-    directory_rooms: dict = field(default_factory=dict, repr=False)  # room id -> row
+    directory_rows: dict = field(default_factory=dict, repr=False)  # noqa: MX3 -- legacy address-directory rows
+    directory_rooms: dict = field(default_factory=dict, repr=False)  # noqa: MX3 -- legacy address-directory rooms
     queued: list = field(default_factory=list, repr=False)  # 0.2's (name, message id)
     cursor_of: dict = field(default_factory=dict, repr=False)  # name -> message id
 
@@ -284,14 +284,14 @@ def _open_0_2(role: str, p: Path) -> sqlite3.Connection:
         raise StoreRefused(p, "is empty, not a comms 0.2 database; nothing was moved")
     try:
         conn = _store.connect(p, create=False, private=False)
-    except (sqlite3.Error, _store.StoreError) as e:
-        raise StoreRefused(p, f"can't be opened ({e}); nothing was moved") from None
+    except (sqlite3.Error, _store.StoreError) as exc:
+        raise StoreRefused(p, f"can't be opened ({exc}); nothing was moved") from None
     try:
         try:
             check = [r[0] for r in conn.execute("PRAGMA quick_check").fetchall()]
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-        except sqlite3.Error as e:
-            raise StoreRefused(p, f"can't be read ({e}); nothing was moved") from None
+        except sqlite3.Error as exc:
+            raise StoreRefused(p, f"can't be read ({exc}); nothing was moved") from None
         if check != ["ok"]:
             raise StoreRefused(p, "fails SQLite's quick_check ("
                                + "; ".join(str(c) for c in check[:3])
@@ -359,8 +359,8 @@ def read(env=None, *, now: float | None = None, prepare: bool = False) -> Plan:
             for role, conn in conns.items():
                 try:
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
-                except sqlite3.Error as e:
-                    raise StoreRefused(found[role], f"can't be checkpointed ({e}); "
+                except sqlite3.Error as exc:
+                    raise StoreRefused(found[role], f"can't be checkpointed ({exc}); "
                                                     "nothing was moved") from None
             plan.fingerprint = {role: _fingerprint(role, p) for role, p in found.items()}
         for conn in conns.values():
@@ -378,7 +378,7 @@ def read(env=None, *, now: float | None = None, prepare: bool = False) -> Plan:
     return plan
 
 
-def _read_directory(plan: Plan, conn, path) -> None:
+def _read_directory(plan: Plan, conn, path) -> None:  # noqa: MX3 -- reads the legacy address-directory store
     if conn is None:
         return
     for row in _select(conn, "directory", "agents", "ORDER BY rowid"):
@@ -391,14 +391,14 @@ def _read_directory(plan: Plan, conn, path) -> None:
                                 _record_time(row["created_at"])))
     plan.operators = [(r["user_id"], r["name"], _record_time(r["created_at"]))
                       for r in _select(conn, "directory", "operators", "ORDER BY rowid")]
-    plan.directory_rooms = {r["channel_id"]: r for r in _select(conn, "directory", "rooms",
+    plan.directory_rooms = {r["channel_id"]: r for r in _select(conn, "directory", "rooms",  # noqa: MX3 -- legacy address-directory rooms
                                                        "ORDER BY rowid")}
     for r in _select(conn, "directory", "meta"):
         plan.meta[r["key"]] = r["value"]
 
 
 def _read_record(plan: Plan, conn, path) -> None:
-    directory_rooms = plan.directory_rooms
+    directory_rooms = plan.directory_rooms  # noqa: MX3 -- legacy address-directory rooms
     record_meta = {}
     channels = []
     if conn is not None:
@@ -473,14 +473,14 @@ def _read_bindings(plan: Plan, conn, now: float) -> None:
     plan.fenced = sorted(set(fenced))
 
 
-def _read_cursors(plan: Plan, folder) -> None:
-    if folder is None:
+def _read_cursors(plan: Plan, cursor_dir) -> None:
+    if cursor_dir is None:
         return
     seen = {}
-    for p in sorted(folder.rglob("*")):
+    for p in sorted(cursor_dir.rglob("*")):
         if not p.is_file():
             continue
-        rel = p.relative_to(folder)
+        rel = p.relative_to(cursor_dir)
         if rel.name.startswith("."):
             plan.skipped.append(f"skipped {p}: a cursor writer's temporary file")
             continue
@@ -499,8 +499,8 @@ def _read_cursors(plan: Plan, folder) -> None:
             cursor = record["cursor"]
             if isinstance(cursor, bool) or not str(cursor).isdigit():
                 raise ValueError(f"cursor {cursor!r} is not a message id")
-        except (OSError, UnicodeError, ValueError, KeyError, TypeError) as e:
-            raise StoreRefused(p, f"doesn't read as a cursor ({e}); nothing was moved") \
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
+            raise StoreRefused(p, f"doesn't read as a cursor ({exc}); nothing was moved") \
                 from None
         q = identity_of(tag)
         if is_auto_name(name):
@@ -538,9 +538,9 @@ def _replay_bound(env) -> tuple[int, int]:
 
     try:
         replay = load(env).replay
-    except ConfigError as e:
-        raise StoreRefused(e.file or config_path(env),
-                           f"can't be read for the move's catch-up bound ({e}); "
+    except ConfigError as exc:
+        raise StoreRefused(exc.file or config_path(env),
+                           f"can't be read for the move's catch-up bound ({exc}); "
                            "nothing was moved") from None
     return replay.messages, replay.hours * 3600
 
@@ -664,10 +664,10 @@ def move(target, env=None, *, now: float | None = None) -> Plan:
     _discard(new)                      # a run that died before its rename
     try:
         _build(plan, new, now)
-    except sqlite3.IntegrityError as e:
+    except sqlite3.IntegrityError as exc:
         _discard(new)
         raise StoreRefused(next(iter(plan.files.values())), (
-            f"holds a row comms.db can't take ({e}); nothing was moved")) from None
+            f"holds a row comms.db can't take ({exc}); nothing was moved")) from None
     except BaseException:
         _discard(new)
         raise
@@ -738,10 +738,10 @@ def _wal_has_frames(p: Path) -> bool:
         return False
 
 
-def _fsync_dir(directory: Path) -> None:
+def _fsync_dir(target_dir: Path) -> None:
     if os.name == "nt":
         return
-    fd = os.open(directory, os.O_RDONLY)
+    fd = os.open(target_dir, os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -761,8 +761,8 @@ def dry_run(target=None, env=None, *, now: float | None = None) -> list[str]:
         return [f"nothing to move: no comms 0.2 files here; the store is {target}"]
     try:
         state = state_of(target)
-    except sqlite3.Error as e:
-        raise StoreRefused(target, f"can't be read ({e}); nothing was written") from None
+    except sqlite3.Error as exc:
+        raise StoreRefused(target, f"can't be read ({exc}); nothing was written") from None
     if state == MARKED:
         _refuse_live_daemon(env)
         conn = _store.connect(target, create=False)
@@ -805,12 +805,12 @@ def doctor_rows(env=None) -> list:
     if _open.zero_two_files(env):
         try:
             dry_run(env=env)
-        except StoreRefused as e:
-            rows.append(Row(MODULE, "store", "fail", str(e),
+        except StoreRefused as exc:
+            rows.append(Row(MODULE, "store", "fail", str(exc),
                             "moxi comms migrate --dry-run"))
-        except (sqlite3.Error, OSError, ValueError) as e:
+        except (sqlite3.Error, OSError, ValueError) as exc:
             rows.append(Row(MODULE, "store", "fail",
-                            f"comms' 0.2 files can't be read: {e}",
+                            f"comms' 0.2 files can't be read: {exc}",
                             "moxi comms migrate --dry-run"))
         else:
             rows.append(Row(MODULE, "store", "warn",

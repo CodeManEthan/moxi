@@ -193,7 +193,7 @@ def describe_module(found=None) -> str:
     return f"broken ({found.reason}); no cache is read. Reinstall it: {INSTALL}"
 
 
-def required_refusal(required: bool, found=None) -> str | None:
+def required_refusal(*, required: bool, found=None) -> str | None:
     """Why the daemon refuses to start, or None: `[cache] required` is true and cache is
     not `present`."""
     if not required:
@@ -208,7 +208,7 @@ def required_refusal(required: bool, found=None) -> str | None:
             "running without the hold is what you mean.")
 
 
-def projects_root(environ) -> str | None:
+def projects_root(env) -> str | None:
     """The Claude projects root a session states as its evidence, by cache's rule over
     the session's environment (cache re-exports sessions' `projects_root`). None when
     cache is not present: nothing would read it."""
@@ -216,10 +216,10 @@ def projects_root(environ) -> str | None:
     if found.state != "present" or found.api is None:
         return None
     try:
-        return str(found.api.projects_root(environ))
-    except Exception as e:                                         # noqa: BLE001
+        return str(found.api.projects_root(env))
+    except Exception as exc:                                         # noqa: BLE001
         log.warning("the Claude projects root could not be worked out (%s: %s)",
-                    type(e).__name__, e)
+                    type(exc).__name__, exc)
         return None
 
 
@@ -231,9 +231,9 @@ def open_store(*, learn: bool):
         return None
     try:
         return found.api.open_store(learn=learn)
-    except Exception as e:                                         # noqa: BLE001
+    except Exception as exc:                                         # noqa: BLE001
         log.warning("cache's drift store did not open (%s: %s); a measured lifetime "
-                    "reads unknown", type(e).__name__, e)
+                    "reads unknown", type(exc).__name__, exc)
         return None
 
 
@@ -292,8 +292,8 @@ def clock_state(adapter, session_id, *, projects_root=None, turned=True, name=No
                             cache_source=cache_source, new_session=new_session,
                             agent_model=agent_model, bound_at=bound_at, store=store,
                             kinds=kinds)
-    except Exception as e:                                         # noqa: BLE001
-        return Clock(UNKNOWN, reason=f"the cache read failed ({type(e).__name__}: {e})",
+    except Exception as exc:                                         # noqa: BLE001
+        return Clock(UNKNOWN, reason=f"the cache read failed ({type(exc).__name__}: {exc})",
                      code=READ_FAILED)
 
 
@@ -317,9 +317,9 @@ def _clock_state(adapter, session_id, *, projects_root, turned, name, now, cache
     if kind.evidence:
         try:
             answer = _evidence_fn(kind.evidence)(name, session_id)
-        except Exception as e:                                     # noqa: BLE001
+        except Exception as exc:                                     # noqa: BLE001
             return Clock(UNKNOWN, reason=f"the {adapter} kind's evidence failed "
-                                         f"({type(e).__name__}: {e})",
+                                         f"({type(exc).__name__}: {exc})",
                          code=EVIDENCE_FAILED)
         if answer == kinds_mod.UNREADABLE:
             who = name or f"the {adapter} agent"
@@ -447,10 +447,10 @@ def session_target(client, qualified: str) -> Target:
 
     try:
         reply = client.call("session", {"identity": qualified})
-    except DaemonOffline as e:
-        return target_for_name(qualified, error=f"the comms daemon is offline ({e})")
-    except DaemonError as e:
-        return target_for_name(qualified, error=f"the session query failed ({e})")
+    except DaemonOffline as exc:
+        return target_for_name(qualified, error=f"the comms daemon is offline ({exc})")
+    except DaemonError as exc:
+        return target_for_name(qualified, error=f"the session query failed ({exc})")
     return target_for_name(qualified, reply)
 
 

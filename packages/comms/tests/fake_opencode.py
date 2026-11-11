@@ -66,7 +66,7 @@ def mint(prefix: str) -> str:
     return f"{prefix}_{(ms * 0x1000 + random.randint(1, 4000)) & 0xFFFFFFFFFFFF:012x}{tail}"
 
 
-def stream_line(provider, model, session, small=False, agent="build") -> str:
+def stream_line(provider, model, session, *, small=False, agent="build") -> str:
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
     return (f"timestamp={stamp} level=INFO run=fake0001 message=stream "
             f"providerID={provider} modelID={model} session.id={session} "
@@ -292,7 +292,7 @@ class FakeOpenCode:
             return (self.sessions[sid].get("model") or self.default_model
                     or (self.free[0] if self.free else "opencode/big-pickle"))
 
-    def request_log(self, sid, small=False, agent="build", model=None):
+    def request_log(self, sid, *, small=False, agent="build", model=None):
         model = model or self.model_of(sid)
         provider, model_id = model.split("/", 1)
         self.on_log(stream_line(provider, model_id, sid, small=small, agent=agent))
@@ -352,7 +352,7 @@ class FakeOpenCode:
         if self.auto:
             threading.Timer(0.05, self.finish, args=(sid,)).start()
 
-    def finish(self, sid, finish="stop", error=None, idle=True):
+    def finish(self, sid, finish="stop", error=None, *, idle=True):
         """End the running turn: its assistant message completes (sent twice, as the
         real server does), then idle."""
         with self.lock:
@@ -431,20 +431,20 @@ def record_dir() -> Path | None:
 
 
 def event(kind: str, **fields) -> None:
-    directory = record_dir()
-    if directory is None:
+    records_dir = record_dir()
+    if records_dir is None:
         return
-    directory.mkdir(parents=True, exist_ok=True)
-    with (directory / "events.jsonl").open("a") as f:
-        f.write(json.dumps({"event": kind, "pid": os.getpid(), "t": time.time(),
+    records_dir.mkdir(parents=True, exist_ok=True)
+    with (records_dir / "events.jsonl").open("a") as fh:
+        fh.write(json.dumps({"event": kind, "pid": os.getpid(), "t": time.time(),
                             **fields}) + "\n")
 
 
 def serve(argv) -> int:
     config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT") or "{}")
     value = os.environ.get("FAKE_OPENCODE_FREE")
-    directory = record_dir()
-    if directory is not None and (directory / "refreshed").exists():
+    records_dir = record_dir()
+    if records_dir is not None and (records_dir / "refreshed").exists():
         value = os.environ.get("FAKE_OPENCODE_FREE_REFRESHED", value)
     free = FREE_DEFAULT if value is None else [m for m in value.split(",") if m]
 
@@ -455,7 +455,7 @@ def serve(argv) -> int:
     fake = FakeOpenCode(password=os.environ.get("OPENCODE_SERVER_PASSWORD"), free=free,
                         default_model=config.get("model"), on_log=out,
                         auto=os.environ.get("FAKE_OPENCODE_AUTO", "1") != "0",
-                        store=(directory / "sessions.json") if directory else None)
+                        store=(records_dir / "sessions.json") if records_dir else None)
     fake.start()
     stamp_keys = ("MOXI_COMMS_NAME", "MOXI_COMMS_SLOT", "MOXI_COMMS_SCOPE")
     event("serve", argv=argv, url=fake.url, config=config,
@@ -483,10 +483,10 @@ def window(url: str, session_id: str) -> int:
                                  headers={"authorization": f"Basic {token}"})
     try:
         urllib.request.urlopen(req, timeout=5).read()
-    except urllib.error.HTTPError as e:
-        print(f"Error: opencode server GET {url}/session/{session_id} → {e.code}",
+    except urllib.error.HTTPError as exc:
+        print(f"Error: opencode server GET {url}/session/{session_id} → {e.excode}",
               file=sys.stderr, flush=True)
-        event("window-exit", code=1, why=str(e.code))
+        event("window-exit", code=1, why=str(exc.code))
         return 1
     try:
         foreground = os.tcgetpgrp(0) == os.getpgrp()
@@ -527,10 +527,10 @@ def refresh(argv) -> int:
         print('timestamp=0 level=ERROR run=fake0001 message="Failed to fetch models.dev" '
               'cause="Cause([Fail(HttpClientError: Transport error)])"', file=sys.stderr)
     else:
-        directory = record_dir()
-        if directory is not None:
-            directory.mkdir(parents=True, exist_ok=True)
-            (directory / "refreshed").touch()
+        records_dir = record_dir()
+        if records_dir is not None:
+            records_dir.mkdir(parents=True, exist_ok=True)
+            (records_dir / "refreshed").touch()
     print("Models cache refreshed", file=sys.stderr)
     return 0
 
@@ -567,9 +567,9 @@ def main(argv) -> int:
     return 2
 
 
-def install(directory: Path, name: str = "opencode") -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    script = directory / name
+def install(bin_dir: Path, name: str = "opencode") -> Path:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / name
     script.write_text(f"#!/bin/sh\nexec {sys.executable} {Path(__file__).resolve()} \"$@\"\n")
     script.chmod(0o755)
     return script
@@ -583,8 +583,8 @@ def control(url: str, op: str, **body) -> dict:
     return json.loads(urllib.request.urlopen(req, timeout=5).read() or b"{}")
 
 
-def events(directory: Path) -> list:
-    path = directory / "events.jsonl"
+def events(records_dir: Path) -> list:
+    path = records_dir / "events.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]

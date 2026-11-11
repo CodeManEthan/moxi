@@ -64,9 +64,9 @@ def peer(peer, *, view: membership.ProcView | None = None, records=None,
         live = claimfile.live_records(view) if records is None else list(records)
         inside = membership.sessions_of(pid, claimfile.membership_table(live), view,
                                         strict=True)
-    except membership.Unplaceable as e:
+    except membership.Unplaceable as exc:
         log.info("a sign-in code was refused: process %s's ancestry stops at %s, which "
-                 "can't be read", pid, e.pid)
+                 "can't be read", pid, exc.pid)
         return PEER_REFUSED
     except Exception:  # noqa: BLE001 - a walk that fails never reads as outside
         log.exception("a sign-in code was refused: process %s couldn't be placed", pid)

@@ -66,13 +66,13 @@ class Line:
              timeout: float = 10.0) -> dict:
         """The whole answer: `{"result": ...}` or `{"error": ...}`. Notifications read
         on the way are kept in `notes`."""
-        id = next(self._ids)
-        self.send({"id": id, "method": method, "params": params or {}})
+        request_id = next(self._ids)
+        self.send({"id": request_id, "method": method, "params": params or {}})
         deadline = time.monotonic() + timeout
         while True:
             message = self.read(max(deadline - time.monotonic(), 0.01))
             assert message is not None, f"no answer to {method}: the connection closed"
-            if message.get("id") == id:
+            if message.get("id") == request_id:
                 return message
 
     def read(self, timeout: float = 10.0) -> dict | None:

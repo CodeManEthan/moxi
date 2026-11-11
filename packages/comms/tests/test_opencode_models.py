@@ -184,8 +184,8 @@ def models_file() -> str:
 def write_models_list(age: float) -> None:
     path = models_file()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write("{}")
+    with open(path, "w") as fh:
+        fh.write("{}")
     then = time.time() - age
     os.utime(path, (then, then))
 

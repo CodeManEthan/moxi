@@ -197,8 +197,8 @@ def record_write_root(env=None, cwd=None) -> tuple:
     env = os.environ if env is None else env
     try:
         backend = backend_name(None, env=env)
-    except (RecordError, ConfigError) as e:
-        return None, f"comms' config could not be read ({e})"
+    except (RecordError, ConfigError) as exc:
+        return None, f"comms' config could not be read ({exc})"
 
     def absolute(value) -> Path:
         path = Path(os.path.expanduser(str(value)))
@@ -209,8 +209,8 @@ def record_write_root(env=None, cwd=None) -> tuple:
     if backend == LOCAL:
         try:
             record = config_mod.load(env=env).local.record
-        except ConfigError as e:
-            return None, f"comms' config could not be read ({e})"
+        except ConfigError as exc:
+            return None, f"comms' config could not be read ({exc})"
         source = absolute(record) if record else comms_db()
         return source.parent, f"the local backend's record ({source})"
     if backend == MOCK:

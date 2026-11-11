@@ -233,8 +233,8 @@ def backend_choice(explicit: str | None = None, env=None) -> BackendChoice:
     else:
         try:
             cfg = config.load(env=env)
-        except config.ConfigError as e:
-            raise RecordError(str(e)) from None
+        except config.ConfigError as exc:
+            raise RecordError(str(exc)) from None
         chosen = cfg.backend
         source = {"env": SOURCE_ENV, "file": SOURCE_CONFIG}.get(
             cfg.sources.get("backend"), SOURCE_DEFAULT)

@@ -67,7 +67,7 @@ def test_the_stores_door_is_the_declared_pair():
 
 # --------------------------------------------------------------------- permissions
 
-def test_the_store_is_written_0600_in_a_0700_directory(tmp_path):
+def test_the_store_is_written_0600_in_a_0700_dir(tmp_path):
     store = TokenStore(tmp_path / "tokens")
     path = store.write_secret(owner_for_role("operator"), POSTING_KEY, "OPERATOR-TOKEN")
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -75,7 +75,7 @@ def test_the_store_is_written_0600_in_a_0700_directory(tmp_path):
     assert stat.S_IMODE(store.root.stat().st_mode) == 0o700
 
 
-def test_a_loose_file_is_REFUSED_not_warned_about(tmp_path):
+def test_a_loose_file_is_refused_not_warned_about(tmp_path):
     """Decided here: 0600 is the whole mechanism. A store that reads a
     world-readable credential anyway has a comment where its rule was."""
     store = TokenStore(tmp_path)
@@ -88,7 +88,7 @@ def test_a_loose_file_is_REFUSED_not_warned_about(tmp_path):
     assert str(path) not in str(e.value)      # the path goes to the log, not to an agent
 
 
-def test_a_loose_store_directory_is_refused_too(tmp_path):
+def test_a_loose_store_dir_is_refused_too(tmp_path):
     store = TokenStore(tmp_path / "tokens")
     owner = owner_for_role("operator")
     store.write_secret(owner, POSTING_KEY, "OPERATOR-TOKEN")

@@ -172,8 +172,8 @@ def fetch_roster(socket_path=None, timeout: float = 2.0):
             return client.call("agents")
         finally:
             client.close()
-    except Exception as e:                                  # noqa: BLE001
-        log.warning("roster for layer one unavailable: %s", e)
+    except Exception as exc:                                  # noqa: BLE001
+        log.warning("roster for layer one unavailable: %s", exc)
         return None
 
 
@@ -472,7 +472,7 @@ class CodexAdapter(HarnessAdapter):
             reloader.join(RELOAD_JOIN)
 
     # ------------------------------------------------------------------ comms' tools
-    def tool_token_registered(self, served: bool) -> None:
+    def tool_token_registered(self, *, served: bool) -> None:
         """A registration the daemon answered: when it serves the tools, the host's
         server list is reloaded, now or once the session is found."""
         if not served:
@@ -516,8 +516,8 @@ class CodexAdapter(HarnessAdapter):
                               "not reloaded", self.agent.qualified)
                 return
             answer = session.mcp_reload(timeout_s=RELOAD_WAIT)
-        except Exception as e:                              # noqa: BLE001
-            self.log.warning("mcp.reload for %s failed: %s", self.agent.qualified, e)
+        except Exception as exc:                              # noqa: BLE001
+            self.log.warning("mcp.reload for %s failed: %s", self.agent.qualified, exc)
             return
         self.reloads.append(answer)
         self.log.info("mcp.reload for %s: reloaded %s, servers %s", self.agent.qualified,
@@ -805,10 +805,10 @@ class CodexAdapter(HarnessAdapter):
                 delivery = session.steer(text, ref=ref)
             else:
                 delivery = session.deliver(text, ref=ref)
-        except Exception as e:                              # noqa: BLE001
-            self.log.warning("the hand-in of digest %s failed: %s", ref, e)
-            delivery = _Unsent(HandInFailed(f"the hand-in failed: {type(e).__name__}: "
-                                            f"{e}"), ref)
+        except Exception as exc:                              # noqa: BLE001
+            self.log.warning("the hand-in of digest %s failed: %s", ref, exc)
+            delivery = _Unsent(HandInFailed(f"the hand-in failed: {type(exc).__name__}: "
+                                            f"{exc}"), ref)
         hand.delivery = delivery
         self.log.info("handed digest %s to turns by %s as delivery %s", ref,
                       "steer" if steer else "deliver", delivery.id)
@@ -832,9 +832,9 @@ class CodexAdapter(HarnessAdapter):
                     return
                 self._stop.wait(self.wait_retry)
                 continue
-            except Exception as e:                          # noqa: BLE001
+            except Exception as exc:                          # noqa: BLE001
                 self.log.exception("waiting on digest %s failed", hand.ref)
-                value = HandInFailed(f"the wait failed: {type(e).__name__}: {e}")
+                value = HandInFailed(f"the wait failed: {type(exc).__name__}: {exc}")
             if (type(value).__name__ == "Refused" and hand.steer and not hand.fell_back
                     and value.reason in STEER_FALLBACK):
                 if self._fall_back(hand, value.reason):
@@ -855,9 +855,9 @@ class CodexAdapter(HarnessAdapter):
                       hand.ref, reason)
         try:
             hand.delivery = session.deliver(hand.text, ref=hand.ref)
-        except Exception as e:                              # noqa: BLE001
+        except Exception as exc:                              # noqa: BLE001
             hand.delivery = _Unsent(HandInFailed(f"the hand-in failed: "
-                                                 f"{type(e).__name__}: {e}"), hand.ref)
+                                                 f"{type(exc).__name__}: {exc}"), hand.ref)
         return True
 
     def _on_result(self, hand: Hand, value) -> None:

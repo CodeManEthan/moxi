@@ -218,8 +218,8 @@ class Tools:
     async def agents(self, args: Mapping[str, Any], ctx) -> Any:
         try:
             info = await asyncio.to_thread(self.link.read, "agents")
-        except (DaemonError, DaemonOffline) as e:
-            return self._read_refused(e)
+        except (DaemonError, DaemonOffline) as exc:
+            return self._read_refused(exc)
         info = dict(info)
         standing = [s for s in info.get("standing") or ()
                     if isinstance(s, dict) and s.get("kind") != SEND_ONLY]
@@ -306,8 +306,8 @@ class Tools:
             # answer into an error, which the connector would still settle as written.
             waiting = await self._waiting()
             shown, _ = await self._take(ctx, lambda pending: pending[:limit])
-        except (DaemonError, DaemonOffline) as e:
-            return self._read_refused(e)
+        except (DaemonError, DaemonOffline) as exc:
+            return self._read_refused(exc)
         more = max(0, waiting - len(shown))
         ctx.log(returned=len(shown), more_waiting=more)
         count = len(shown)
@@ -379,20 +379,20 @@ class Tools:
 
     def _release(self, digest) -> None:
         try:
-            self.link.settle(digest, False)
-        except (DaemonError, DaemonOffline) as e:
+            self.link.settle(digest, handled=False)
+        except (DaemonError, DaemonOffline) as exc:
             # The binding's close puts the digest's rows back to waiting.
             log.warning("digest %s of a cancelled call couldn't be released (%s); its "
-                        "messages wait again when the binding closes", digest, e)
+                        "messages wait again when the binding closes", digest, exc)
 
     def _settler(self, digest, ids):
-        async def settle(written: bool) -> None:
+        async def settle(written: bool) -> None:  # noqa: FBT001 -- connector callback protocol passes the result positionally
             try:
-                await asyncio.to_thread(self.link.settle, digest, bool(written))
-            except (DaemonError, DaemonOffline) as e:
+                await asyncio.to_thread(self.link.settle, digest, handled=bool(written))
+            except (DaemonError, DaemonOffline) as exc:
                 # The binding's close puts the digest's rows back to waiting.
                 log.warning("digest %s couldn't be settled (%s); its messages wait again",
-                            digest, e)
+                            digest, exc)
                 return
             if written:
                 for mid in ids:
@@ -467,8 +467,8 @@ class Tools:
                 if pushed:
                     taken, gone = await self._take(ctx, lambda pending, mid=mid: [
                         p for p in pending if str(p["message_id"]) == mid])
-            except (DaemonError, DaemonOffline) as e:
-                return self._read_refused(e)
+            except (DaemonError, DaemonOffline) as exc:
+                return self._read_refused(exc)
             if not pushed:
                 message = self._message(reply, already=False)
                 self.shown[mid] = None

@@ -87,10 +87,10 @@ class BindingHistory:
                 return True
             try:
                 self._conn = init(self._resolved())
-            except (sqlite3.Error, OSError) as e:
+            except (sqlite3.Error, OSError) as exc:
                 log.warning("binding history unavailable (%s: %s); bindings will not be "
                             "recorded and replay attribution stays unverified",
-                            type(e).__name__, e)
+                            type(exc).__name__, exc)
                 self._conn = None
                 return False
             return True

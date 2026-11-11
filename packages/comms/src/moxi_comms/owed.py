@@ -374,8 +374,8 @@ class ReplyCheck:
         if identity is not None:                                  # step 3
             try:
                 answer = self.owed_query(identity, authors, referents)
-            except Exception as e:                                # noqa: BLE001
-                self.log.info("the owed query failed (%s); this %s passes", e,
+            except Exception as exc:                                # noqa: BLE001
+                self.log.info("the owed query failed (%s); this %s passes", exc,
                               self.moment)
         if not isinstance(answer, dict):
             with self.lock:

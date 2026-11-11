@@ -54,8 +54,8 @@ def lay_tokens(source: Path, dest: Path) -> None:
     os.chmod(dest, tokens.DIR_MODE)
     for f in source.iterdir():
         fd = os.open(dest / f.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, tokens.FILE_MODE)
-        with os.fdopen(fd, "wb") as out:
-            out.write(f.read_bytes())
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(f.read_bytes())
         os.chmod(dest / f.name, tokens.FILE_MODE)
 
 
@@ -233,7 +233,7 @@ def test_a_move_stopped_after_its_commit_finishes_its_renames(soon, monkeypatch)
     assert all(upgrade_0_2.moved_name(p).exists() for p in found.values())
 
 
-def test_a_stopped_move_whose_cursor_folder_alone_is_left_finishes_it(soon, monkeypatch):
+def test_a_stopped_move_whose_cursor_dir_alone_is_left_finishes_it(soon, monkeypatch):
     """The cursor folder counts as comms 0.2's when the move fingerprinted it: left
     under its 0.2 name alone, it still makes the next open finish the move."""
     found = zero_two_home()
@@ -362,7 +362,7 @@ def test_another_backends_cursor_files_are_named_and_skipped(soon):
     assert rows("SELECT name FROM cursors") == [("reviewer@proj-a",)]
 
 
-def test_older_directory_shapes_are_carried_as_0_2_read_them(soon):
+def test_older_dir_shapes_are_carried_as_0_2_read_them(soon):
     """Rooms from before one room carry with no kind; an agents table with no kind
     column reads as `agent`; a webhooks table isn't read."""
     found = zero_two_home()
@@ -400,8 +400,8 @@ def run_setup():
     name, _, attr = module.SETUP.partition(":")
     try:
         result = getattr(importlib.import_module(name), attr)()
-    except SystemExit as e:
-        result = e.code
+    except SystemExit as exc:
+        result = exc.code
     if isinstance(result, int) and not isinstance(result, bool):
         return result, None
     return (1, result) if isinstance(result, str) else (0, None)

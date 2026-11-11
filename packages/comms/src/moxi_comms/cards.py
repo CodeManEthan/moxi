@@ -153,17 +153,17 @@ def answer(arg: str, env) -> Answer:
             data, truncated = _read(path)
         except FileNotFoundError:
             continue
-        except NotACard as e:
-            return Answer(UNREADABLE, _unreadable(qualified, str(e)))
-        except OSError as e:
-            return Answer(UNREADABLE, _unreadable(qualified, _oserror(e)))
+        except NotACard as exc:
+            return Answer(UNREADABLE, _unreadable(qualified, str(exc)))
+        except OSError as exc:
+            return Answer(UNREADABLE, _unreadable(qualified, _oserror(exc)))
         try:
-            text = _decode(data, truncated)
+            text = _decode(data, truncated=truncated)
         except UnicodeDecodeError:
             # Never mojibake and never a guess: the same refusal-to-fabricate posture as
             # attribution's `unknown`.
             return Answer(UNREADABLE, _unreadable(qualified, "it is not valid UTF-8"))
-        return Answer(OK, render(qualified, path, text, truncated, note=note))
+        return Answer(OK, render(qualified, path, text, truncated=truncated, note=note))
     return _miss(candidates, env, note=note)
 
 
@@ -219,7 +219,7 @@ def _oserror(e: OSError) -> str:
     return e.strerror or str(e)
 
 
-def _decode(data: bytes, truncated: bool) -> str:
+def _decode(data: bytes, *, truncated: bool) -> str:
     """Strict UTF-8. When the read cap bound, a trailing partial character is dropped
     rather than reported as invalid -- the cut is comms' own, not the holder's defect."""
     return codecs.getincrementaldecoder("utf-8")().decode(data, not truncated)
@@ -253,11 +253,10 @@ def _miss(candidates: list[str], env, *, note: str = "") -> Answer:
 
 # --------------------------------------------------------------------------- rendering
 
-def render(qualified: str, path: Path, text: str, truncated: bool, *,
-           note: str = "") -> str:
+def render(qualified: str, path: Path, text: str, *, truncated: bool, note: str = "") -> str:
     """The closed envelope. Every comms-authored line renders INSIDE it -- an
     unenveloped notice is a line a card body could forge."""
-    shown, over = _budget(text, truncated)
+    shown, over = _budget(text, truncated=truncated)
     out = [_header(qualified, path)]
     claimed = False
     for line in shown:
@@ -278,7 +277,7 @@ def _header(qualified: str, path: Path) -> str:
     return f"[comms card] {qualified} {MARKS}" + (f" · {age}" if age else "")
 
 
-def _budget(text: str, truncated: bool) -> tuple[list[str], str]:
+def _budget(text: str, *, truncated: bool) -> tuple[list[str], str]:
     """The lines to show, and the over-budget notice (empty when the card fits).
 
     What counts as a line is fixed so the holder and the test agree: a single trailing

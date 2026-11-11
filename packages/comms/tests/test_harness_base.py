@@ -263,7 +263,7 @@ def test_a_dropped_batch_and_a_returned_delivery_hold_nothing():
 class FakeDaemon:
     """The binding's connection, as far as the turn end and `notify_activity` need it."""
 
-    def __init__(self, connected=True):
+    def __init__(self, *, connected=True):
         self.connected = connected
         self.frames: list = []
 
@@ -281,10 +281,10 @@ class FakeDaemon:
         return {"cursor": None}
 
 
-def bound_port(connected=True):
+def bound_port(*, connected=True):
     port = online_port()
     port.offline = False
-    port._daemon = FakeDaemon(connected)
+    port._daemon = FakeDaemon(connected=connected)
     return port
 
 

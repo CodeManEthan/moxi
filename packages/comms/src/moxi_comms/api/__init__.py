@@ -157,7 +157,7 @@ def _run(sender, to, text, *, posture, reply_to, new, audience, held, cap, no_ca
         if not tags:
             raise ValueError("send needs `to` to name at least one recipient")
         args.reply_to = None if reply_to is None else str(reply_to)
-    ctx = _sending.Context(env=sender.environ(os.environ), deadline=deadline)
+    ctx = _sending.Context(env=sender.sender_env(os.environ), deadline=deadline)
     return _sending.run(ctx, args, tags=tags)
 
 
@@ -189,7 +189,7 @@ def delete(sender: Sender, message_id, *, timeout_s: float = 30.0) -> DeleteResu
     from, who had it already and whose copy expired first."""
     if not isinstance(sender, Sender):
         raise TypeError(f"sender must be an api.Sender, not {type(sender).__name__}")
-    ctx = _sending.Context(env=sender.environ(os.environ), deadline=timeout_s)
+    ctx = _sending.Context(env=sender.sender_env(os.environ), deadline=timeout_s)
     return _sending.delete(ctx, message_id)
 
 
@@ -517,21 +517,21 @@ def identity_state(name: str, scope: str | None = None, *,
     qualified = qualify(name, scope)
     try:
         client = _daemon(timeout_s)
-    except DaemonOffline as e:
-        return IdentityState(qualified, "offline", reason=str(e))
+    except DaemonOffline as exc:
+        return IdentityState(qualified, "offline", reason=str(exc))
     try:
         try:
             answer = client.call("resolve", {"name": qualified})
-        except DaemonError as e:
-            if e.code == _wire.NAME_RETIRED:
-                return IdentityState(qualified, "retired", reason=str(e))
+        except DaemonError as exc:
+            if exc.code == _wire.NAME_RETIRED:
+                return IdentityState(qualified, "retired", reason=str(exc))
             raise
         if answer.get("bound"):
             held = client.call("session", {"identity": qualified})
             return IdentityState(qualified, "held", holder=Holder(
                 adapter=held.get("adapter"), session_id=held.get("session_id")))
-    except DaemonOffline as e:
-        return IdentityState(qualified, "offline", reason=str(e))
+    except DaemonOffline as exc:
+        return IdentityState(qualified, "offline", reason=str(exc))
     finally:
         client.close()
     reserved, module = _reserved(qualified)

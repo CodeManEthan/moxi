@@ -203,7 +203,7 @@ def reconcile(gone: str | None = None, *, declared=None, chain=None, env=None,
     else:
         declared = {m: n if n is UNKNOWN else tuple(n)
                     for m, n in declared.items() if m != gone}
-    with _held(target, env) as conn:
+    with _Held(target, env) as conn:
         return _reconcile(conn, declared, _chain(chain, env), clock)
 
 
@@ -221,7 +221,7 @@ def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result
 
     chain = _chain(chain, env)
     result = Result()
-    with _held(target, env) as conn:
+    with _Held(target, env) as conn:
         found = rows(conn)
         for name, row in found.items():
             if row["state"] == ACTIVE and row["freed_at"] is None:
@@ -232,9 +232,9 @@ def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result
         try:
             if chain.delete(secret_id(name), owner=owner(module)):
                 result.lines.append(f"{module}: {name}'s leftover token removed")
-        except SecretError as e:
-            result.lines.append(f"{module}: {name}'s token couldn't be removed: {e}")
-            log.warning("%s's token for %s couldn't be removed: %s", name, module, e)
+        except SecretError as exc:
+            result.lines.append(f"{module}: {name}'s token couldn't be removed: {exc}")
+            log.warning("%s's token for %s couldn't be removed: %s", name, module, exc)
     return result
 
 
@@ -259,8 +259,8 @@ def _minted(chain, found: dict) -> set:
     pairs = {(name, row["module"]) for name, row in found.items() if row["module"]}
     try:
         declared = declared_names()
-    except Exception as e:                                       # noqa: BLE001
-        log.warning("the installed modules couldn't be read: %s", e)
+    except Exception as exc:                                       # noqa: BLE001
+        log.warning("the installed modules couldn't be read: %s", exc)
         declared = {}
     pairs |= {(name, module) for module, names in declared.items() if names
               for name in names}
@@ -275,8 +275,8 @@ def _minted(chain, found: dict) -> set:
                 for key in store.secret_ids(TokenOwner(tuple(holder.split("/")))):
                     if key.startswith(SECRET_PREFIX) and "/" not in holder:
                         pairs.add((key[len(SECRET_PREFIX):], holder))
-        except Exception as e:                                   # noqa: BLE001
-            log.warning("the token store couldn't be listed: %s", e)
+        except Exception as exc:                                   # noqa: BLE001
+            log.warning("the token store couldn't be listed: %s", exc)
     return pairs
 
 
@@ -286,7 +286,7 @@ def renew(name: str, *, chain=None, env=None, target=None, clock=time.time) -> R
     can't read. Raises `KeyError` when `name` isn't reserved for a module."""
     chain = _chain(chain, env)
     result = Result()
-    with _held(target, env) as conn:
+    with _Held(target, env) as conn:
         row = lookup(conn, name)
         if row is None or row["state"] != ACTIVE:
             raise KeyError(name)
@@ -296,7 +296,7 @@ def renew(name: str, *, chain=None, env=None, target=None, clock=time.time) -> R
     return result
 
 
-class _held:
+class _Held:
     """comms.db open for writing under the reserved names' lock."""
 
     def __init__(self, target, env):
@@ -452,10 +452,10 @@ def _mint(conn, chain, name: str, module: str, clock, result: Result, *,
     token = _secrets.token_urlsafe(32)
     try:
         step = chain.put(secret_id(name), token, owner=owner(module))
-    except SecretError as e:
-        result.failed.append((name, module, str(e)))
+    except SecretError as exc:
+        result.failed.append((name, module, str(exc)))
         result.lines.append(f"{module}: {name} isn't reserved: its token couldn't be "
-                            f"written. {e}")
+                            f"written. {exc}")
         return
     at = stamp(clock())
     with transaction(conn) as c:
@@ -503,10 +503,10 @@ def _free(conn, chain, name: str, module: str, clock, result: Result) -> None:
     result.lines.append(f"{module}: {name} freed")
     try:
         chain.delete(secret_id(name), owner=owner(module))
-    except SecretError as e:
+    except SecretError as exc:
         # The row is freed and its hash gone, so the token no longer sends anything.
-        result.lines.append(f"{module}: {name}'s token couldn't be removed: {e}")
-        log.warning("freed %s, but its token couldn't be removed: %s", name, e)
+        result.lines.append(f"{module}: {name}'s token couldn't be removed: {exc}")
+        log.warning("freed %s, but its token couldn't be removed: %s", name, exc)
 
 
 # --------------------------------------------------------------------------- the trace
@@ -540,8 +540,8 @@ def trace_send(module: str, name: str, *, credential: bool, sent: bool) -> None:
                           key=record_key(name), fix=f"moxi comms reserved renew {name}")
         elif sent:
             doctor.clear(MODULE, record_key(name))
-    except Exception as e:                                       # noqa: BLE001
-        log.warning("the doctor's record for %s couldn't be written: %s", name, e)
+    except Exception as exc:                                       # noqa: BLE001
+        log.warning("the doctor's record for %s couldn't be written: %s", name, exc)
 
 
 # --------------------------------------------------------------------------- the listener
@@ -566,8 +566,8 @@ def _run(call) -> list[str]:
 
     try:
         return call().lines
-    except StoreRefused as e:
-        return [f"comms: reserved names weren't changed: {e.reason}"]
+    except StoreRefused as exc:
+        return [f"comms: reserved names weren't changed: {exc.reason}"]
 
 
 def _say(lines) -> None:
@@ -591,9 +591,9 @@ def doctor_rows(env=None, *, declared=None, chain=None) -> list:
         return []
     try:
         result = reconcile(declared=declared, chain=chain, env=env)
-    except StoreRefused as e:
+    except StoreRefused as exc:
         return [Row(MODULE, "reserved", "warn", f"reserved names weren't checked: "
-                    f"{e.reason}")]
+                    f"{exc.reason}")]
     out = [Row(MODULE, "reserved", "warn", f"{module or 'a module'}: {name} isn't "
                f"reserved: {why}", "moxi doctor runs again after the cause is gone")
            for name, module, why in result.conflicts]

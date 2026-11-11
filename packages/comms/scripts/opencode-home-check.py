@@ -193,9 +193,9 @@ def read_once(binary: str, env: dict, work: Path, capture: Capture) -> dict:
         start = skills.stdout.index("[")
         listed, _ = json.JSONDecoder().raw_decode(skills.stdout[start:])
         unreadable = None
-    except ValueError as e:
+    except ValueError as exc:
         listed = []
-        unreadable = f"exit {skills.returncode}, {len(skills.stdout)} bytes: {e}"
+        unreadable = f"exit {skills.returncode}, {len(skills.stdout)} bytes: {exc}"
     capture.bodies.clear()
     config = {"provider": {"check": {
         "npm": "@ai-sdk/openai-compatible", "name": "check",

@@ -143,15 +143,15 @@ def test_the_own_bind_is_loopback_non_blocking_and_reuses_addresses():
 
 def _time_wait_on(port: int) -> bool:
     want = f"0100007F:{port:04X}"
-    with open("/proc/net/tcp") as f:
+    with open("/proc/net/tcp") as fh:
         return any(line.split()[1] == want and line.split()[3] == "06"
-                   for line in f.read().splitlines()[1:])
+                   for line in fh.read().splitlines()[1:])
 
 
 @pytest.mark.skipif(not LINUX, reason="reads the kernel's TCP table for TIME_WAIT")
 def test_time_wait_sockets_left_by_an_earlier_listener_dont_refuse_the_bind():
     first = listen.bind(0)
-    first.setblocking(True)
+    first.setblocking(True)  # noqa: FBT003 -- socket API requires a positional boolean
     port = first.getsockname()[1]
     client = socket.create_connection(("127.0.0.1", port))
     conn, _ = first.accept()
@@ -174,7 +174,7 @@ def test_a_live_listener_on_the_port_is_port_taken_with_its_uid(unit_read):
     with listener() as holder:
         port = holder.getsockname()[1]
         clock = Clock()
-        got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
+        got = listen.take(port, env={}, sleep=clock.sleep, clock=clock)
     assert got.sock is None and got.why == "port-taken"
     assert clock.slept == [] and unit_read.asked == 1
     assert f"127.0.0.1:{port}" in got.detail
@@ -187,7 +187,7 @@ def test_a_port_bound_but_not_listening_retries_every_half_second_for_five_secon
     with blocker() as held:
         port = held.getsockname()[1]
         clock = Clock()
-        got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
+        got = listen.take(port, env={}, sleep=clock.sleep, clock=clock)
     assert got.sock is None and got.why == "bind-failed"
     assert clock.slept == [0.5] * 10 and clock.now == 105.0
     assert f"127.0.0.1:{port}" in got.detail and got.holder_uid is None
@@ -209,7 +209,7 @@ def test_a_listener_that_appears_while_the_binds_retry_is_port_taken(unit_read):
             late[0].listen(1)
 
     try:
-        got = listen.take(port, environ={}, sleep=sleep, clock=clock)
+        got = listen.take(port, env={}, sleep=sleep, clock=clock)
     finally:
         held.close()
         for s in late:
@@ -227,7 +227,7 @@ def test_a_port_freed_while_the_binds_retry_is_bound():
         clock.sleep(seconds)
         held.close()
 
-    got = listen.take(port, environ={}, sleep=sleep, clock=clock)
+    got = listen.take(port, env={}, sleep=sleep, clock=clock)
     try:
         assert got.why is None and got.sock.getsockname()[1] == port
         assert not got.inherited and clock.slept == [0.5]
@@ -236,7 +236,7 @@ def test_a_port_freed_while_the_binds_retry_is_bound():
 
 
 def test_a_bind_that_succeeds_reads_no_unit(unit_read):
-    got = listen.take(0, environ={})
+    got = listen.take(0, env={})
     try:
         assert got.why is None and unit_read.asked == 0
     finally:
@@ -248,10 +248,10 @@ def test_an_active_socket_unit_is_supervised_and_nothing_connects(unit_read, mon
     probed = []
     monkeypatch.setattr(listen, "answers", lambda *a, **k: probed.append(a) or True)
     with listener() as unit:
-        unit.setblocking(False)
+        unit.setblocking(False)  # noqa: FBT003 -- socket API requires a positional boolean
         port = unit.getsockname()[1]
         clock = Clock()
-        got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
+        got = listen.take(port, env={}, sleep=clock.sleep, clock=clock)
         # Nothing connected to the unit's socket: a connect would start its service.
         with pytest.raises(BlockingIOError):
             unit.accept()
@@ -268,7 +268,7 @@ def test_a_listener_with_the_unit_unread_and_this_users_uid_is_bind_failed(unit_
     with listener() as holder:
         port = holder.getsockname()[1]
         clock = Clock()
-        got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
+        got = listen.take(port, env={}, sleep=clock.sleep, clock=clock)
     assert got.sock is None and got.why == "bind-failed" and clock.slept == []
     assert "whether it is comms' own socket unit couldn't be read" in got.detail
     assert f"127.0.0.1:{port}" in got.detail
@@ -286,7 +286,7 @@ def test_a_listener_of_this_user_with_no_reach_to_the_user_manager_is_bind_faile
     with listener() as holder:
         port = holder.getsockname()[1]
         clock = Clock()
-        got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
+        got = listen.take(port, env={}, sleep=clock.sleep, clock=clock)
     assert got.sock is None and got.why == "bind-failed" and clock.slept == []
     assert "whether it is comms' own socket unit couldn't be read" in got.detail
     assert len(probed) == 1 and unit_read.asked == 1
@@ -302,7 +302,7 @@ def test_a_listener_of_another_user_is_port_taken_with_the_unit_unread(unit_read
     monkeypatch.setattr(listen, "holder_uid", lambda port, *a: other)
     monkeypatch.setattr(listen, "_another_user", lambda uid: uid == other)
     with listener() as holder:
-        got = listen.take(holder.getsockname()[1], environ={})
+        got = listen.take(holder.getsockname()[1], env={})
     assert got.why == "port-taken" and got.holder_uid == other
     assert f"uid {other}" in got.detail
 
@@ -312,7 +312,7 @@ def test_each_state_that_shows_the_unit_not_holding_lets_a_listener_be_port_take
         unit_read, state):
     unit_read.state = state
     with listener() as holder:
-        got = listen.take(holder.getsockname()[1], environ={})
+        got = listen.take(holder.getsockname()[1], env={})
     assert got.why == "port-taken"
 
 
@@ -373,28 +373,28 @@ def test_the_holders_uid_is_read_from_the_kernels_table(tmp_path):
 
 def test_systemds_socket_is_taken_and_its_variables_removed(passed):
     with listener() as unit:
-        environ = passed(unit)
-        sock = listen.inherited(environ=environ, platform="linux")
+        env = passed(unit)
+        sock = listen.inherited(env=env, platform="linux")
         try:
             assert sock.getsockname() == unit.getsockname()
             assert sock.getblocking() is False and not sock.get_inheritable()
         finally:
             sock.close()
-    assert environ == {"OTHER": "kept"}
+    assert env == {"OTHER": "kept"}
 
 
 def test_systemds_variables_for_another_process_pass_nothing_and_are_removed(passed):
     with listener() as unit:
-        environ = passed(unit)
-        environ["LISTEN_PID"] = str(os.getpid() + 1)
-        assert listen.inherited(environ=environ, platform="linux") is None
-    assert environ == {"OTHER": "kept"}
+        env = passed(unit)
+        env["LISTEN_PID"] = str(os.getpid() + 1)
+        assert listen.inherited(env=env, platform="linux") is None
+    assert env == {"OTHER": "kept"}
 
 
 def test_take_serves_an_inherited_socket_on_another_port_than_the_setting(passed):
     with listener() as unit:
         other = free_port()
-        got = listen.take(other, environ=passed(unit), platform="linux")
+        got = listen.take(other, env=passed(unit), platform="linux")
         try:
             assert got.why is None and got.inherited
             assert got.sock.getsockname()[1] == unit.getsockname()[1] != other
@@ -411,7 +411,7 @@ def test_a_passed_socket_that_isnt_one_loopback_listener_is_failed(passed, kind)
     if kind == "udp":
         socks[0].bind(("127.0.0.1", 0))
     try:
-        got = listen.take(1, environ=passed(*socks), platform="linux")
+        got = listen.take(1, env=passed(*socks), platform="linux")
     finally:
         for s in socks:
             s.close()
@@ -425,7 +425,7 @@ def test_launchds_listeners_key_is_taken_on_macos():
     with listener() as job:
         fd = os.dup(job.fileno())
         activate = fake_launchd({"Listeners": [fd]})
-        got = listen.take(1, environ={}, activate=activate, platform="darwin")
+        got = listen.take(1, env={}, activate=activate, platform="darwin")
         try:
             assert got.inherited and got.sock.getsockname() == job.getsockname()
             assert activate.asked == ["Listeners"]
@@ -436,7 +436,7 @@ def test_launchds_listeners_key_is_taken_on_macos():
 @pytest.mark.parametrize("code", [errno.ESRCH, errno.ENOENT])
 def test_a_process_launchd_didnt_start_binds_its_own(code):
     activate = fake_launchd({"Listeners": code})
-    got = listen.take(0, environ={}, activate=activate, platform="darwin")
+    got = listen.take(0, env={}, activate=activate, platform="darwin")
     try:
         assert got.why is None and not got.inherited
     finally:
@@ -445,13 +445,13 @@ def test_a_process_launchd_didnt_start_binds_its_own(code):
 
 def test_a_launchd_socket_that_cant_be_taken_is_failed():
     activate = fake_launchd({"Listeners": errno.EALREADY})
-    got = listen.take(0, environ={}, activate=activate, platform="darwin")
+    got = listen.take(0, env={}, activate=activate, platform="darwin")
     assert got.why == "failed" and "Listeners" in got.detail
 
 
 def test_launchd_is_never_asked_off_macos():
     activate = fake_launchd({})
-    got = listen.take(0, environ={}, activate=activate, platform="linux")
+    got = listen.take(0, env={}, activate=activate, platform="linux")
     got.sock.close()
     assert activate.asked == []
 
@@ -475,9 +475,9 @@ def test_the_daemon_serves_an_inherited_socket_on_another_port_and_revokes_nothi
     unit = listener()
     configured = free_port()
     write_config(None, f"[mcp]\nport = {configured}\n")
-    environ = passed(unit)
+    env = passed(unit)
     daemon = serving(port=None, mcp_listen=functools.partial(
-        listen.take, environ=environ, platform="linux"))
+        listen.take, environ=env, platform="linux"))
     port = unit.getsockname()[1]
     try:
         answer = ask_daemon("mcp_endpoint")
@@ -577,7 +577,7 @@ def test_a_daemon_beside_its_active_socket_unit_is_supervised_and_revokes_nothin
     s.bind()
     unit_read.state = "active"
     with listener() as unit:
-        unit.setblocking(False)
+        unit.setblocking(False)  # noqa: FBT003 -- socket API requires a positional boolean
         port = unit.getsockname()[1]
         daemon = serving(port=port)
         answer = ask_daemon("mcp_endpoint")
@@ -799,8 +799,8 @@ def test_the_port_taken_fix_names_moxi_install_comms_when_a_socket_unit_is_insta
 def test_take_carries_the_unit_read_and_none_when_no_read_was_asked(unit_read):
     unit_read.state = "inactive"
     with listener() as holder:
-        assert listen.take(holder.getsockname()[1], environ={}).unit == "inactive"
-    got = listen.take(0, environ={})
+        assert listen.take(holder.getsockname()[1], env={}).unit == "inactive"
+    got = listen.take(0, env={})
     try:
         assert got.unit is None and unit_read.asked == 1
     finally:
@@ -877,8 +877,8 @@ def _switches() -> int:
     total = 0
     for tid in os.listdir("/proc/self/task"):
         try:
-            with open(f"/proc/self/task/{tid}/status") as f:
-                for line in f:
+            with open(f"/proc/self/task/{tid}/status") as fh:
+                for line in fh:
                     if line.startswith("voluntary_ctxt_switches:"):
                         total += int(line.split()[1])
         except OSError:

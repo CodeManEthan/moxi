@@ -114,9 +114,9 @@ class Verifier:
         async with self._at_once:
             try:
                 row = await asyncio.wrap_future(self._pool.submit(self._verify, token))
-            except Exception as e:  # noqa: BLE001 - a check that fails lets nothing in
+            except Exception as exc:  # noqa: BLE001 - a check that fails lets nothing in
                 log.warning("a tool token couldn't be checked (%s); the call is refused",
-                            type(e).__name__)
+                            type(exc).__name__)
                 return None
         if row is None:
             return None
@@ -209,9 +209,9 @@ class Endpoint:
         except SystemExit:
             self.sock.close()
             raise StartFailed("the app's startup failed") from None
-        except Exception as e:
+        except Exception as exc:
             self.sock.close()
-            raise StartFailed(_first_line(e)) from None
+            raise StartFailed(_first_line(exc)) from None
         if not server.started:
             self.sock.close()
             raise StartFailed("the HTTP server didn't start")

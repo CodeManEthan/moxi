@@ -151,13 +151,13 @@ def _bounded(send, *, as_: str, attempts: int, sleep):
             log.info("posted message_id=%s channel=%s as=%s attempt=%d",
                      msg.id, msg.channel_id, as_, attempt)
             return msg
-        except RateLimited as e:
-            last = e
+        except RateLimited as exc:
+            last = exc
             log.warning("429 on attempt %d/%d; retry_after=%ss", attempt, attempts,
-                        e.retry_after)
+                        exc.retry_after)
             if attempt >= attempts:
                 break
-            sleep(min(e.retry_after, constants.RETRY_MAX_SLEEP))
+            sleep(min(exc.retry_after, constants.RETRY_MAX_SLEEP))
     raise SendFailed(
         f"SEND FAILED: rate limited on all {attempts} attempts "
         f"(last Retry-After {getattr(last, 'retry_after', '?')}s). The message was NOT "

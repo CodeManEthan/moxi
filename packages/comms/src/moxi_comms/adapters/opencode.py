@@ -180,8 +180,8 @@ def write_record(path: Path, record: dict) -> None:
     os.chmod(path.parent, 0o700)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(record, f)
+        with os.fdopen(fd, "w") as fh:
+            json.dump(record, fh)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
     except BaseException:
@@ -422,8 +422,8 @@ def additions_clash(additions) -> str | None:
     options = additions.options
     try:
         json.dumps(options)
-    except (TypeError, ValueError) as e:
-        return f"their options cannot be written as JSON ({e})"
+    except (TypeError, ValueError) as exc:
+        return f"their options cannot be written as JSON ({exc})"
     for key in OWN_KEYS:
         if key in options:
             return f"they set `{key}`, which comms' launch config sets"
@@ -490,8 +490,8 @@ def fetch_roster(socket_path=None, timeout: float = 2.0):
             return client.call("agents")
         finally:
             client.close()
-    except Exception as e:                                  # noqa: BLE001
-        log.warning("roster for layer one unavailable: %s", e)
+    except Exception as exc:                                  # noqa: BLE001
+        log.warning("roster for layer one unavailable: %s", exc)
         return None
 
 
@@ -501,8 +501,8 @@ def binary_version(binary: str, env=None, timeout: float = 15.0) -> str:
     try:
         out = subprocess.run([binary, "--version"], capture_output=True, text=True,
                              env=env, timeout=timeout, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as e:
-        return f"unknown ({e})"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"unknown ({exc})"
     text = (out.stdout or out.stderr).strip().splitlines()
     return text[0] if text else f"unknown (exit {out.returncode})"
 
@@ -659,9 +659,9 @@ class OpenCodeAdapter(HarnessAdapter):
             lines.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                           "text": text})
             update_record(self.agent.session_file, status=lines[-STATUS_KEEP:])
-        except OSError as e:
+        except OSError as exc:
             self.log.warning("could not write the status line to %s: %s",
-                             self.agent.session_file, e)
+                             self.agent.session_file, exc)
 
     # ------------------------------------------------------------------ the clock's evidence
     def _run_opencode(self, args) -> tuple:
@@ -671,9 +671,9 @@ class OpenCodeAdapter(HarnessAdapter):
             out = subprocess.run([self.binary, *args], capture_output=True, text=True,
                                  env=self.server_env(self._probe_model()),
                                  cwd=self.agent.cwd, timeout=30, stdin=subprocess.DEVNULL)
-        except (OSError, subprocess.SubprocessError) as e:
+        except (OSError, subprocess.SubprocessError) as exc:
             log.warning("opencode %s failed for %s: %s", " ".join(args),
-                        self.agent.qualified, e)
+                        self.agent.qualified, exc)
             return -1, ""
         return out.returncode, out.stdout
 
@@ -785,8 +785,8 @@ class OpenCodeAdapter(HarnessAdapter):
             # launch sets is left out with a note, and every other module's still goes in.
             additions = moxi_turns.launch_additions("opencode", cwd=self.agent.cwd, env=env,
                                                     refuse=additions_clash)
-        except Exception as e:                                  # noqa: BLE001
-            skipped = f"turns could not give this launch its additions: {e}"
+        except Exception as exc:                                  # noqa: BLE001
+            skipped = f"turns could not give this launch its additions: {exc}"
         else:
             notes += additions.notes
             why = additions_clash(additions)
@@ -886,8 +886,8 @@ class OpenCodeAdapter(HarnessAdapter):
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.PIPE, text=True,
                                     start_new_session=True)
-        except OSError as e:
-            reason = f"opencode did not run: {e}"
+        except OSError as exc:
+            reason = f"opencode did not run: {exc}"
         else:
             try:
                 _out, err = proc.communicate(timeout=MODELS_REFRESH_TIMEOUT)
@@ -911,8 +911,8 @@ class OpenCodeAdapter(HarnessAdapter):
     def offered_free(self) -> list:
         try:
             status, body = self.http.json("GET", "/config/providers")
-        except (Unreachable, NoAnswer) as e:
-            raise OpenCodeOffline(f"the provider listing did not answer: {e}") from e
+        except (Unreachable, NoAnswer) as exc:
+            raise OpenCodeOffline(f"the provider listing did not answer: {exc}") from exc
         if status != 200:
             raise OpenCodeOffline(f"the provider listing answered {status}")
         return free_models(body)
@@ -967,8 +967,8 @@ class OpenCodeAdapter(HarnessAdapter):
         try:
             status, body = self.http.json("POST", "/session",
                                           {"title": self.agent.qualified})
-        except (Unreachable, NoAnswer) as e:
-            raise OpenCodeOffline(f"creating the session: {e}") from e
+        except (Unreachable, NoAnswer) as exc:
+            raise OpenCodeOffline(f"creating the session: {exc}") from exc
         if status != 200 or not isinstance(body, dict) or not body.get("id"):
             raise OpenCodeOffline(f"creating the session answered {status}")
         with self._lock:
@@ -1008,8 +1008,8 @@ class OpenCodeAdapter(HarnessAdapter):
                              **kw)
         try:
             stream.start()
-        except (Unreachable, NoAnswer) as e:
-            raise OpenCodeOffline(f"the event stream did not open: {e}") from e
+        except (Unreachable, NoAnswer) as exc:
+            raise OpenCodeOffline(f"the event stream did not open: {exc}") from exc
         self.stream = stream
         self.reconcile()
 
@@ -1027,8 +1027,8 @@ class OpenCodeAdapter(HarnessAdapter):
         try:
             status, body = self.http.json("GET", "/session/status")
             mstatus, messages = self.http.json("GET", f"/session/{sid}/message")
-        except (Unreachable, NoAnswer) as e:
-            raise OpenCodeOffline(f"reconciling: {e}") from e
+        except (Unreachable, NoAnswer) as exc:
+            raise OpenCodeOffline(f"reconciling: {exc}") from exc
         if status != 200 or not isinstance(body, dict):
             raise OpenCodeOffline(f"the session status read answered {status}")
         idle = idle_from_status(status, body, sid)
@@ -1384,8 +1384,8 @@ class OpenCodeAdapter(HarnessAdapter):
         sid = self.session_id
         try:
             status, body = self.http.json("GET", "/session/status")
-        except (Unreachable, NoAnswer) as e:
-            self._failed(f"status read: {e}")
+        except (Unreachable, NoAnswer) as exc:
+            self._failed(f"status read: {exc}")
             return REQUEUE
         if not idle_from_status(status, body, sid):
             # Not idle, or not known to be: nothing is posted. The stream's own status
@@ -1401,18 +1401,18 @@ class OpenCodeAdapter(HarnessAdapter):
         post = {"messageID": mid, "parts": [{"type": "text", "text": text}]}
         try:
             code, answer = self.http.request("POST", f"/session/{sid}/prompt_async", post)
-        except Unreachable as e:
+        except Unreachable as exc:
             self._unpost(mid)
-            self._failed(f"no connection: {e}")
+            self._failed(f"no connection: {exc}")
             return REQUEUE
-        except NoAnswer as e:
+        except NoAnswer as exc:
             with self._lock:
                 p = self.pending.get(mid)
                 if p is not None:
                     p.uncertain = True
                 self._reconcile_wanted = True
             log.warning("post %s for %s had no answer (%s); the session's messages will "
-                        "say whether it was admitted", mid, identity, e)
+                        "say whether it was admitted", mid, identity, exc)
             return mid
         if 200 <= code < 300:
             self._succeeded()
@@ -1434,8 +1434,8 @@ class OpenCodeAdapter(HarnessAdapter):
         sid = self.session_id
         try:
             status, body = self.http.json("GET", "/session/status")
-        except (Unreachable, NoAnswer) as e:
-            log.warning("could not read the session's status to put a line in: %s", e)
+        except (Unreachable, NoAnswer) as exc:
+            log.warning("could not read the session's status to put a line in: %s", exc)
             return False
         if not idle_from_status(status, body, sid):
             return False
@@ -1443,8 +1443,8 @@ class OpenCodeAdapter(HarnessAdapter):
                 "parts": [{"type": "text", "text": line}]}
         try:
             code, _answer = self.http.request("POST", f"/session/{sid}/prompt_async", post)
-        except Unreachable as e:
-            log.warning("could not put a line into the session: %s", e)
+        except Unreachable as exc:
+            log.warning("could not put a line into the session: %s", exc)
             return False
         except NoAnswer:
             return True              # it may have been admitted: never post it twice
@@ -1526,10 +1526,10 @@ class OpenCodeAdapter(HarnessAdapter):
                 self.reconcile()
             self._server_delays = None
             return True
-        except (OpenCodeOffline, Unreachable, NoAnswer) as e:
-            self.trouble = str(e)
+        except (OpenCodeOffline, Unreachable, NoAnswer) as exc:
+            self.trouble = str(exc)
             log.warning("opencode server for %s not reachable: %s", self.agent.qualified,
-                        e)
+                        exc)
             if self._server_delays is None:
                 self._server_delays = self._backoff or backoff_delays()
             self._stop.wait(next(self._server_delays))
@@ -1648,8 +1648,8 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
     try:
         roster = opencode_roster.load(path=args.config)
         agent = roster.require(args.identity)
-    except ConfigError as e:
-        print(f"moxi-comms-opencode: {e}", file=sys.stderr)
+    except ConfigError as exc:
+        print(f"moxi-comms-opencode: {exc}", file=sys.stderr)
         return 2
     binary = opencode_roster.resolve_binary(args.opencode or agent.binary)
     comms_path = own_comms()
@@ -1710,9 +1710,9 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
     try:
         try:
             adapter.start()
-        except (DaemonOffline, DaemonError, OpenCodeOffline, ConfigError) as e:
-            print(f"moxi-comms-opencode: {e}", file=sys.stderr, flush=True)
-            return 4 if isinstance(e, DaemonOffline) else 2
+        except (DaemonOffline, DaemonError, OpenCodeOffline, ConfigError) as exc:
+            print(f"moxi-comms-opencode: {exc}", file=sys.stderr, flush=True)
+            return 4 if isinstance(exc, DaemonOffline) else 2
         log.info("moxi-comms-opencode running for %s", agent.qualified)
         show_notice(adapter, args.notice_hold_s, stopping)
         session = OpenCodeWindow(adapter, binary=binary, terminal=Terminal(tty),
@@ -1720,10 +1720,10 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
                                  ready_wait=args.ready_wait_s, env=adapter.window_env())
         try:
             return session.run()
-        except GaveUp as e:
-            log.error("gave up: %s", e)
+        except GaveUp as exc:
+            log.error("gave up: %s", exc)
             if not hangup.is_set():
-                reason = str(e).rstrip(". ")
+                reason = str(exc).rstrip(". ")
                 print(f"moxi-comms-opencode: gave up on {agent.qualified}: {reason}. The log "
                       f"is {log_path}.", file=sys.stderr, flush=True)
             return EXIT_GAVE_UP

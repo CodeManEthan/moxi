@@ -144,8 +144,8 @@ def both(daemon, method, params, planner=None):
         try:
             out.append(client.call(method, {k: own if v is OWN else v
                                             for k, v in params.items()}))
-        except DaemonError as e:
-            out.append((type(e), e.code, e.data, str(e)))
+        except DaemonError as exc:
+            out.append((type(exc), exc.code, exc.data, str(exc)))
         finally:
             client.close()
     return out

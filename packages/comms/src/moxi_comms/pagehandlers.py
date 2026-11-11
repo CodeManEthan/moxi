@@ -107,13 +107,13 @@ def gather() -> dict[str, Any]:
         rows = [_row(row) for row in api.roster_rows(timeout_s=DEADLINE)]
     except api.DaemonOffline:
         return {"state": "offline", "detail": None, "rows": []}
-    except api.DaemonError as err:
-        _log_once(err, "the comms daemon answered the roster read with an error")
-        return {"state": "error", "detail": DAEMON_ERROR.format(type(err).__name__),
+    except api.DaemonError as exc:
+        _log_once(exc, "the comms daemon answered the roster read with an error")
+        return {"state": "error", "detail": DAEMON_ERROR.format(type(exc).__name__),
                 "rows": []}
-    except Exception as err:
-        _log_once(err, "reading the roster failed")
-        return {"state": "error", "detail": UNEXPECTED.format(type(err).__name__),
+    except Exception as exc:
+        _log_once(exc, "reading the roster failed")
+        return {"state": "error", "detail": UNEXPECTED.format(type(exc).__name__),
                 "rows": []}
     return {"state": "up", "detail": None, "rows": rows}
 
@@ -144,8 +144,8 @@ class _Feed:
         while True:
             try:
                 await self.snapshot.changed()
-            except Exception as err:
-                _log_once(err, "the roster poller's gather failed")
+            except Exception as exc:
+                _log_once(exc, "the roster poller's gather failed")
             await asyncio.sleep(PERIOD)
 
 

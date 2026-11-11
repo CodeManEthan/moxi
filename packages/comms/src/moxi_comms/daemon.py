@@ -618,7 +618,7 @@ class Daemon:
     def start(self) -> "Daemon":
         # `[cache] required`: a box that says its cold-send hold must hold refuses to
         # start without the cache module, before anything is served or written.
-        refusal = cache.required_refusal(self.settings.use("cache").required)
+        refusal = cache.required_refusal(required=self.settings.use("cache").required)
         if refusal:
             raise RuntimeError(refusal)
         # The socket first, before anything is written or fenced: serving it takes the
@@ -628,15 +628,15 @@ class Daemon:
         self.host = wire.Host(str(self.socket_path), self._call, self._deregister)
         try:
             self.host.start()
-        except ipc.AlreadyServing as e:
+        except ipc.AlreadyServing as exc:
             self.host = None
-            who = f"pid {e.holder}" if e.holder else "another process"
+            who = f"pid {exc.holder}" if exc.holder else "another process"
             raise RuntimeError(
                 f"a live comms daemon ({who}) is serving at {self.socket_path}; refusing "
                 f"to start a second one. Stop the running daemon first.") from None
-        except OSError as e:
+        except OSError as exc:
             self.host = None
-            raise RuntimeError(f"the comms daemon can't serve {self.socket_path}: {e}") \
+            raise RuntimeError(f"the comms daemon can't serve {self.socket_path}: {exc}") \
                 from None
         try:
             self._boot()
@@ -743,9 +743,9 @@ class Daemon:
         try:
             from .mcp import server as mcp_server
             from .mcp import tools as mcp_tools
-        except Exception as e:                                   # noqa: BLE001
+        except Exception as exc:                                   # noqa: BLE001
             self.mcp_why = "failed"
-            self.mcp_detail = f"the MCP libraries didn't load: {type(e).__name__}: {e}"
+            self.mcp_detail = f"the MCP libraries didn't load: {type(exc).__name__}: {exc}"
             log.error("comms' tools aren't served: %s", self.mcp_detail)
             return
         from .mcp import listen
@@ -781,9 +781,9 @@ class Daemon:
         self.host.stop_hook = endpoint.stop
         try:
             self.host.run_on_loop(endpoint.start(), timeout=wire.START_WAIT)
-        except Exception as e:                                   # noqa: BLE001
+        except Exception as exc:                                   # noqa: BLE001
             self.mcp_why, self.mcp_held = "failed", False
-            self.mcp_detail = f"the endpoint didn't start: {e}"
+            self.mcp_detail = f"the endpoint didn't start: {exc}"
             log.error("comms' tools aren't served: %s", self.mcp_detail)
             return
         self.mcp_endpoint = endpoint
@@ -923,26 +923,26 @@ class Daemon:
         except DaemonStopping:
             raise wire.error(wire.STOPPING, "the comms daemon is stopping; try again in "
                              "a moment") from None
-        except sqlite3.OperationalError as e:
-            if "locked" not in str(e) and "busy" not in str(e):
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) and "busy" not in str(exc):
                 log.exception("%s failed", method)
-                raise wire.error(wire.FAILED, f"{type(e).__name__}: {e}") from None
+                raise wire.error(wire.FAILED, f"{type(exc).__name__}: {exc}") from None
             # comms.db's busy timeout passed: nothing of this method was committed.
             raise wire.error(wire.STORE_BUSY, "comms' store is busy; try again in a "
                              "moment") from None
-        except Refusal as e:
+        except Refusal as exc:
             if method == "bind":
                 # One journal line per refused attempt, naming what was asked. A waiting
                 # shim at the backoff ceiling adds about two a minute; that is the price
                 # of the journal showing the attempt at all.
-                log.warning("bind refused: %s: %s", _asked(params), e)
-            raise wire.error(e.code, str(e), **e.extra) from None
-        except Exception as e:  # never take the daemon down for one bad message
+                log.warning("bind refused: %s: %s", _asked(params), exc)
+            raise wire.error(exc.code, str(exc), **exc.extra) from None
+        except Exception as exc:  # never take the daemon down for one bad message
             # An ACCIDENT, not a refusal: a record read that failed, say. Answered
             # `failed`, in the try-again range, so a shim that has held its name keeps
             # retrying instead of reading it as a rival claim.
             log.exception("%s failed", method)
-            raise wire.error(wire.FAILED, f"{type(e).__name__}: {e}") from None
+            raise wire.error(wire.FAILED, f"{type(exc).__name__}: {exc}") from None
 
     def _own_binding(self, conn, params: dict) -> Binding | None:
         """The binding `conn` holds that `params` speaks for: the one its `identity`
@@ -1327,9 +1327,9 @@ class Daemon:
             inside = membership.sessions_of(
                 pid, claimfile.membership_table(claimfile.live_records(view)), view,
                 strict=True)
-        except membership.Unplaceable as e:
+        except membership.Unplaceable as exc:
             log.info("send under %s refused: process %s's ancestry stops at %s, which "
-                     "can't be read", name, pid, e.pid)
+                     "can't be read", name, pid, exc.pid)
             raise unplaced from None
         if inside:
             raise Refusal(f"a send under a reserved name from inside a session: {name} "
@@ -1451,8 +1451,8 @@ class Daemon:
             message = self.record.post_as_user(user, self._names_channel(), content,
                                                token=token if isinstance(token, str)
                                                else None)
-        except Forbidden as e:
-            raise Refusal(f"the operator's credential was refused: {e}",
+        except Forbidden as exc:
+            raise Refusal(f"the operator's credential was refused: {exc}",
                           code=wire.CREDENTIAL, credential=True) from None
         return {"message_id": str(message.id)}
 
@@ -1466,8 +1466,8 @@ class Daemon:
         """
         try:
             return self.record.max_message_id(self._names_channel()) or "0", None
-        except Exception as e:            # re-raised by the caller, in the old call's place
-            return "0", e
+        except Exception as exc:            # re-raised by the caller, in the old call's place
+            return "0", exc
 
     def _ping_ordered(self, conn, identity: str, method: str, raw) -> bool:
         """Is this ordered notification (`activity` and its kinds, `injected`) newer
@@ -1579,10 +1579,10 @@ class Daemon:
                 self.mcp_tokens.register(token_hash, claim=b.claim_key,
                                          identity=b.qualified, adapter=b.adapter,
                                          binding_id=b.history_id)
-            except mcp_tokens_mod.Refused as e:
-                raise Refusal(e.reason, code=e.code) from None
-            except RuntimeError as e:
-                raise wire.error(wire.FAILED, str(e)) from None
+            except mcp_tokens_mod.Refused as exc:
+                raise Refusal(exc.reason, code=exc.code) from None
+            except RuntimeError as exc:
+                raise wire.error(wire.FAILED, str(exc)) from None
         return {"served": bool(self.mcp_served)}
 
     # ------------------------------------------------------------------ query
@@ -1968,12 +1968,12 @@ class Daemon:
         elif message_id is not None:
             try:
                 case = self.classify(identity, message_id)
-            except (TypeError, ValueError) as e:
+            except (TypeError, ValueError) as exc:
                 # A cursor that is not a message id reaches `classify`'s `int()` and
                 # raises. `cursor["reason"]` already names that, so the command has
                 # something true to print; what it must not do is answer the whole
                 # query with a traceback.
-                case_error = f"{type(e).__name__}: {e}"
+                case_error = f"{type(exc).__name__}: {exc}"
         return {"identity": identity,
                 "bound": b is not None,
                 "binding": binding,
@@ -3009,11 +3009,11 @@ class Daemon:
                                       bound_at=bound_at, store=self.cache_store,
                                       kinds=self.kinds)
             self._drift_lines(binding, clock, quiet=quiet)
-        except Exception as e:                                     # noqa: BLE001
+        except Exception as exc:                                     # noqa: BLE001
             log.exception("the cache read failed for %s; it reads unknown",
                           getattr(binding, "qualified", "?"))
             clock = cache.Clock(cache.UNKNOWN,
-                                reason=f"the daemon's check failed ({type(e).__name__})",
+                                reason=f"the daemon's check failed ({type(exc).__name__})",
                                 code=cache.READ_FAILED)
         return clock
 
@@ -3804,12 +3804,12 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     settings = config.Config(report=_config_kept)
     try:
         settings.start()
-    except config.ConfigError as e:
-        raise SystemExit(str(e)) from None
+    except config.ConfigError as exc:
+        raise SystemExit(str(exc)) from None
     try:
         choice = backend_choice(None, env=os.environ)
-    except RecordError as e:
-        raise SystemExit(str(e)) from None
+    except RecordError as exc:
+        raise SystemExit(str(exc)) from None
     resolved = choice.name
     if args.backend and args.backend != resolved and not (
             args.backend == MOCK and args.backend_store):
@@ -3821,17 +3821,17 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
             f"file (or MOXI_COMMS_BACKEND) if the flip is what you meant, or drop the flag.")
     try:
         record = open_record(args.backend, role="reader")
-    except RecordError as e:
-        raise SystemExit(str(e)) from None
-    except (StoreError, LockTimeout) as e:
+    except RecordError as exc:
+        raise SystemExit(str(exc)) from None
+    except (StoreError, LockTimeout) as exc:
         # The store's gate refused (comms 0.2's files can't be moved, or a store sits
         # beside them that the move didn't make): the daemon doesn't start. The log has
         # it, and so does the next doctor run, until a start opens the store.
-        log.error("comms.db can't be opened, so the daemon doesn't start: %s", e)
+        log.error("comms.db can't be opened, so the daemon doesn't start: %s", exc)
         with contextlib.suppress(Exception):
-            moxi_doctor.record(MODULE, f"the daemon didn't start: {e}", key=STORE_RECORD,
+            moxi_doctor.record(MODULE, f"the daemon didn't start: {exc}", key=STORE_RECORD,
                                fix="moxi comms migrate --dry-run")
-        raise SystemExit(f"moxi-comms-daemon: {e}") from None
+        raise SystemExit(f"moxi-comms-daemon: {exc}") from None
     with contextlib.suppress(Exception):
         moxi_doctor.clear(MODULE, STORE_RECORD)
     # systemd stops the unit with SIGTERM. Without a handler the process died before the
@@ -3856,13 +3856,13 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
                     on_fatal=lambda why: stopping.set())
     try:
         daemon.start()
-    except RuntimeError as e:
+    except RuntimeError as exc:
         # A refusal is an answer, not a crash: the operator gets the recovery sentence
         # and systemd gets a clean nonzero exit, and the record connection this process
         # opened does not leak past the `finally` it never reaches.
         with contextlib.suppress(Exception):
             record.close()
-        raise SystemExit(str(e)) from None
+        raise SystemExit(str(exc)) from None
     log.info("comms daemon listening on %s", daemon.socket_path)
     try:
         stopping.wait()

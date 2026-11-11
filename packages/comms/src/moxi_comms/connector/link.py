@@ -151,18 +151,18 @@ class Link:
         try:
             client.connect()
             answer = client.bind(name=self.identity, global_=True, adapter=KIND)
-        except DaemonOffline as e:
+        except DaemonOffline as exc:
             client.close()
-            return self._set(OFFLINE, f"comms' daemon isn't answering ({e}); trying again")
-        except DaemonError as e:
+            return self._set(OFFLINE, f"comms' daemon isn't answering ({exc}); trying again")
+        except DaemonError as exc:
             client.close()
-            holder = (e.data.get("holder") or {})
+            holder = (exc.data.get("holder") or {})
             if holder.get("qualified") == self.identity:
                 self.holder = holder.get("adapter") or "another process"
                 return self._set(HELD, f"{self.identity} is held by another binding "
                                        f"(adapter {self.holder}); trying again every "
                                        f"{self.held_retry:g} s")
-            return self._set(REFUSED, f"comms refused {self.identity}: {e}; trying again "
+            return self._set(REFUSED, f"comms refused {self.identity}: {exc}; trying again "
                                       f"every {self.held_retry:g} s")
         with self._lock:
             if self._stop.is_set() or not client.connected:
@@ -207,9 +207,9 @@ class Link:
                 add_standing(None, conn, self.identity, GLOBAL)
             finally:
                 conn.close()
-        except Exception as e:  # noqa: BLE001 - ProvisionError, a store refusal, a lock
+        except Exception as exc:  # noqa: BLE001 - ProvisionError, a store refusal, a lock
             self.provisioned = False
-            log.warning("%s couldn't be provisioned as a standing name: %s", self.identity, e)
+            log.warning("%s couldn't be provisioned as a standing name: %s", self.identity, exc)
             return
         self.provisioned = True
         log.info("provisioned %s as a standing name", self.identity)
@@ -275,7 +275,7 @@ class Link:
                 self.buffer.pop(str(mid), None)
         return answer
 
-    def settle(self, digest, handled: bool) -> None:
+    def settle(self, digest, *, handled: bool) -> None:
         """`turn_ended` for one digest: `handled` deletes its rows and moves the name's
         cursor; unhandled puts them back to waiting, and a second, empty turn end is the
         release point that hands them to the binding again."""

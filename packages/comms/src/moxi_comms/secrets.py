@@ -200,8 +200,8 @@ class KeychainResolver(Resolver):
             return None
         try:
             value = backend.get_password(KEYCHAIN_SERVICE, self._user(secret_id, owner))
-        except Exception as e:                                   # noqa: BLE001
-            raise self._failed("resolve", secret_id, e) from None
+        except Exception as exc:                                   # noqa: BLE001
+            raise self._failed("resolve", secret_id, exc) from None
         if not value or not value.strip():
             return None
         log.info("secret %s: from the keychain", secret_id)     # never the value
@@ -213,8 +213,8 @@ class KeychainResolver(Resolver):
             return False
         try:
             backend.set_password(KEYCHAIN_SERVICE, self._user(secret_id, owner), value)
-        except Exception as e:                                   # noqa: BLE001
-            raise self._failed("write", secret_id, e) from None
+        except Exception as exc:                                   # noqa: BLE001
+            raise self._failed("write", secret_id, exc) from None
         return True
 
     def delete(self, secret_id: str, *, owner) -> bool:
@@ -226,8 +226,8 @@ class KeychainResolver(Resolver):
             if backend.get_password(KEYCHAIN_SERVICE, user) is None:
                 return False
             backend.delete_password(KEYCHAIN_SERVICE, user)
-        except Exception as e:                                   # noqa: BLE001
-            raise self._failed("remove", secret_id, e) from None
+        except Exception as exc:                                   # noqa: BLE001
+            raise self._failed("remove", secret_id, exc) from None
         return True
 
 
@@ -257,13 +257,13 @@ class StoreResolver(Resolver):
             return None                      # a store lookup is keyed by holder
         try:
             value = self.store.read_secret(owner, secret_id)
-        except TokenStoreError as e:
+        except TokenStoreError as exc:
             # A store that refuses (0600 wider than the rule) is not a holder without the
             # key: it is a store that could not be read, and falling through would answer
             # the wrong question. The store's refusals are already caller-shaped.
             raise SecretStepFailed(
                 f"cannot resolve the posting credential {secret_id}: the token store "
-                f"step failed. {e}") from None
+                f"step failed. {exc}") from None
         if not value:
             return None
         log.info("secret %s: resolved from the token store", secret_id)   # never which
@@ -274,12 +274,12 @@ class StoreResolver(Resolver):
 
         try:
             self.store.write_secret(owner, secret_id, value)
-        except TokenStoreError as e:
+        except TokenStoreError as exc:
             raise SecretStepFailed(f"cannot write {secret_id}: the token store step "
-                                   f"failed. {e}") from None
-        except OSError as e:
+                                   f"failed. {exc}") from None
+        except OSError as exc:
             raise SecretStepFailed(f"cannot write {secret_id}: the token store step "
-                                   f"failed ({e.strerror or e}).") from None
+                                   f"failed ({exc.strerror or exc}).") from None
         return True
 
     def delete(self, secret_id: str, *, owner) -> bool:
@@ -287,9 +287,9 @@ class StoreResolver(Resolver):
 
         try:
             return self.store.delete_secret(owner, secret_id)
-        except (TokenStoreError, OSError) as e:
+        except (TokenStoreError, OSError) as exc:
             raise SecretStepFailed(f"cannot remove {secret_id}: the token store step "
-                                   f"failed. {e}") from None
+                                   f"failed. {exc}") from None
 
 
 class Chain(Resolver):
@@ -336,8 +336,8 @@ class Chain(Resolver):
             try:
                 if step.delete(secret_id, owner=owner):
                     removed.append(step.name)
-            except SecretStepFailed as e:
-                failed = failed or e
+            except SecretStepFailed as exc:
+                failed = failed or exc
         if failed is not None:
             raise failed
         return removed

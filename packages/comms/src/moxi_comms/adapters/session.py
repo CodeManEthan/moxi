@@ -473,8 +473,8 @@ def tools_endpoint(socket_path=None, timeout: float = ENDPOINT_WAIT
         if "mcp" not in client.capabilities:
             return None, "comms' daemon is a comms without them"
         answer = client.call("mcp_endpoint")
-    except Exception as e:                                       # noqa: BLE001
-        return None, f"comms' daemon didn't say whether it serves them: {e}"
+    except Exception as exc:                                       # noqa: BLE001
+        return None, f"comms' daemon didn't say whether it serves them: {exc}"
     finally:
         client.close()
     url = answer.get("url") if isinstance(answer, dict) else None
@@ -580,8 +580,8 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     from ..config import ConfigError, load
     try:
         load()                  # a bad config file fails here, before claude starts
-    except ConfigError as e:
-        print(f"{prog}: {e}", file=sys.stderr)
+    except ConfigError as exc:
+        print(f"{prog}: {exc}", file=sys.stderr)
         return 2
 
     if args.retired_slot is not None:
@@ -613,8 +613,8 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     import uuid
     try:
         stated, named_argv = launch_session_id(passthrough, args.session_id)
-    except ValueError as e:
-        print(f"{prog}: {e}", file=sys.stderr)
+    except ValueError as exc:
+        print(f"{prog}: {exc}", file=sys.stderr)
         return 2
     # An unnamed resume states no id until the look; its runtime dir is still named, by
     # the wrapper's own --session-id when it has one, in lowercase as a stated id is.
@@ -625,8 +625,8 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
                           project=args.project,
                           directors=args.director, native=args.native,
                           comms=own_comms())
-    except directors_mod.BadDirector as e:
-        print(f"{prog}: {e}", file=sys.stderr)
+    except directors_mod.BadDirector as exc:
+        print(f"{prog}: {exc}", file=sys.stderr)
         return 2
     session.stated_id = stated
     if _claim_socket_is_live(session.claim_socket):
@@ -645,10 +645,10 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     import moxi_turns
     try:
         additions = additions_for(session, env)
-    except (moxi_turns.TurnsError, ValueError) as e:
+    except (moxi_turns.TurnsError, ValueError) as exc:
         # Before the session directory, the adapter and `claude`: nothing has started.
         print(f"{prog}: turns cannot give this launch its additions, so claude was not "
-              f"started: {e}", file=sys.stderr)
+              f"started: {exc}", file=sys.stderr)
         return moxi_exit.ERROR
     if tools_url is None:
         print(f"{prog}: {tools_off(tools_why)}", file=sys.stderr)

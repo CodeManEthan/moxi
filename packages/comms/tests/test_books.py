@@ -274,8 +274,8 @@ def test_the_books_serve_many_threads_on_one_connection(books):
                 books.hand(NAME, mid, n)
                 d = books.open_digest(NAME, n, [mid]).digest
                 books.turn_ended(NAME, [d], [])
-        except Exception as e:  # noqa: BLE001
-            errors.append(e)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
 
     threads = [threading.Thread(target=work, args=(n,)) for n in range(1, 7)]
     for t in threads:
@@ -349,8 +349,8 @@ def test_delete_racing_open_digest_ends_withdrawn_or_in_a_digest(books):
                 current[act] = (books.withdraw(current["mid"]) if act == "delete"
                                 else books.open_digest(NAME, 3, [current["mid"]]))
                 done.wait()
-        except Exception as e:  # noqa: BLE001
-            errors.append(e)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
             go.abort()
             done.abort()
 

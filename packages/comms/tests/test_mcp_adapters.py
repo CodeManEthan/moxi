@@ -82,7 +82,7 @@ def launch(rig, tmp_path):
 
 def test_the_token_is_read_from_a_launch_carrying_the_pair_and_only_its_hash_stays():
     env = {TOKEN_ENV: VALUE, URL_ENV: URL}
-    token = ToolToken.from_environ(env)
+    token = ToolToken.from_env(env)
     assert token.hash == tokens.digest(VALUE)
     assert TOKEN_ENV not in env, "the value leaves the environment"
     assert VALUE not in repr(token)
@@ -92,7 +92,7 @@ def test_the_token_is_read_from_a_launch_carrying_the_pair_and_only_its_hash_sta
                                  {TOKEN_ENV: "", URL_ENV: URL}])
 def test_a_launch_without_the_pair_has_no_token(env):
     before = dict(env)
-    assert ToolToken.from_environ(env) is None
+    assert ToolToken.from_env(env) is None
     assert env == before
 
 

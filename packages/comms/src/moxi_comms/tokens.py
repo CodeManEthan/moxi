@@ -352,8 +352,8 @@ class TokenStore:
             st = path.stat()
         except (FileNotFoundError, NotADirectoryError):
             return None
-        except OSError as e:
-            raise TokenStoreError(f"the token store is unreadable ({e.strerror}). "
+        except OSError as exc:
+            raise TokenStoreError(f"the token store is unreadable ({exc.strerror}). "
                                   "Nothing was attempted.") from None
         self._check_mode(path, st.st_mode, "file")
         self._check_mode(self.root, self.root.stat().st_mode, "directory")
@@ -435,13 +435,13 @@ class TokenStore:
         log.info("token store: removed [%s] from %s", key, path)
         return True
 
-    def _mkdirs(self, directory: Path) -> None:
+    def _mkdirs(self, holder_dir: Path) -> None:
         root = self.root
         root.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
         os.chmod(root, DIR_MODE)
-        if directory != root:
-            directory.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
-            os.chmod(directory, DIR_MODE)
+        if holder_dir != root:
+            holder_dir.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
+            os.chmod(holder_dir, DIR_MODE)
 
     def owners_present(self) -> list[str]:
         """Holder keys with a file, for the provision verb's summary. Never values."""

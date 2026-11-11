@@ -146,12 +146,12 @@ class Rollout:
 
     def write(self, root: Path, *, suffix="", name_tid=None, day="2026/10/05",
               zst=False) -> Path:
-        directory = root / day
-        directory.mkdir(parents=True, exist_ok=True)
+        day_dir = root / day
+        day_dir.mkdir(parents=True, exist_ok=True)
         name = f"rollout-2026-10-05T15-55-21-{name_tid or self.tid}{suffix}.jsonl"
         if zst:
             name += ".zst"
-        path = directory / name
+        path = day_dir / name
         path.write_text(self.text())
         return path
 
@@ -211,9 +211,9 @@ class OcDb:
             c.executescript(schema)
 
     def conn(self):
-        c = sqlite3.connect(self.path)
-        c.isolation_level = None
-        return c
+        conn = sqlite3.connect(self.path)
+        conn.isolation_level = None
+        return conn
 
     def mint(self, prefix):
         self.n += 1
@@ -768,7 +768,7 @@ def binding(rig):
     return wait_until(lambda: rig.daemon.bindings.get(CODER_Q))
 
 
-def test_cache_source_is_the_sessions_directory_under_codex_home(
+def test_cache_source_is_the_sessions_dir_under_codex_home(
         rig, codex_wrapper, tmp_path, monkeypatch):
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
