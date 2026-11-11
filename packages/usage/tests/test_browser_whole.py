@@ -154,9 +154,17 @@ def test_each_address_opens_its_piece_on_either_install(installs, on_both):
     on_both(installs, walk)
 
 
+def settled_page(page, route: str = ""):
+    """The page at `route` once its filter line holds all four filters: a filter is
+    absent until its list answers, and a menu opened meanwhile closes when it arrives."""
+    panel = open_page(page, route)
+    expect(panel.locator("[data-part=filters] [data-filter]")).to_have_count(4)
+    return panel
+
+
 def open_every_piece(page, shell):
     """Opens each piece of the page in turn, and after each yields what is open."""
-    panel = open_page(page)
+    panel = settled_page(page)
     yield "the page"
     filter_of(panel, "range").locator("button.pick").click()
     expect(filter_of(panel, "range").get_by_role("menuitemradio", name=re.compile("^All time"))).to_be_visible()
@@ -226,7 +234,7 @@ def test_no_piece_of_the_page_draws_a_heading_or_a_colour_but_text_tokens(instal
 
 def test_the_filters_are_kept_across_a_trip_to_sessions_and_back(installs, on_both):
     def walk(page, shell) -> list:
-        panel = open_page(page, "sessions")
+        panel = settled_page(page, "sessions")
         pick(panel, "range", "Last 7 days")
         expect(filter_of(panel, "range").locator("button.pick")).to_have_text("last 7 days▾")
         # The model list is read again under the new range; it is absent until it answers.
@@ -261,7 +269,7 @@ def test_the_filters_are_kept_across_a_trip_to_sessions_and_back(installs, on_bo
 
 def test_a_range_with_nothing_under_the_filters_says_so_in_the_charts_place(installs, ui_contexts):
     page = ui_contexts(installs["full"]).pages[0]
-    panel = open_page(page)
+    panel = settled_page(page)
     pick(panel, "harness", "Codex")
     expect(filter_of(panel, "harness").locator("button.pick")).to_have_text("Codex▾")
     pick(panel, "range", "Today")
