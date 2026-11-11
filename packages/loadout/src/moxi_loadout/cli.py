@@ -46,8 +46,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    def verb(name: str, help: str) -> argparse.ArgumentParser:
-        p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".")
+    def verb(name: str, help_text: str) -> argparse.ArgumentParser:
+        description = help_text[0].upper() + help_text[1:] + "."
+        p = verbs.add_parser(name, help=help_text, description=description)
         p.add_argument("--json", action="store_true", help="print JSON")
         return p
 
@@ -70,15 +71,15 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="plan and print, change nothing")
     p = verb("status", "say what has drifted")
     scopes(p, many=True)
-    for name, help in (("add", "list an item in a section, then install it"),
+    for name, verb_help in (("add", "list an item in a section, then install it"),
                        ("remove", "take an item out of a section, then install")):
-        p = verb(name, help)
+        p = verb(name, verb_help)
         p.add_argument("kind", metavar="KIND", choices=KINDS)
         p.add_argument("name", metavar="NAME")
         scopes(p, many=False)
-    for name, help in (("enable", "switch an item back on, then install it"),
+    for name, verb_help in (("enable", "switch an item back on, then install it"),
                        ("disable", "switch an item off for a harness, then install")):
-        p = verb(name, help)
+        p = verb(name, verb_help)
         p.add_argument("ident", metavar="ID", help="<kind>:<name>@<harness>, harness * "
                                                     "for every one")
         scopes(p, many=False)

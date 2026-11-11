@@ -61,7 +61,7 @@ FINE = ("ok", "off")
 #: The exit code each state gives an install when it is left after the write.
 STATE_CODES = {"bad-source": ERROR, "missing": ERROR, "stale": ERROR, "blocked": REFUSED,
                "modified": REFUSED, "would-commit": REFUSED}
-_FOLDERS = {"skill": "skills", "agent": "agents"}
+_KIND_DIRS = {"skill": "skills", "agent": "agents"}
 #: The kind and name a want of the global file carries, in `if-absent` mode.
 GLOBAL_KIND = "global"
 
@@ -158,7 +158,7 @@ class Plan:
     the section refusals (`lines`), and the conversion notes."""
 
     manifest: Manifest
-    folder: Path
+    loadout_dir: Path
     ledger: dict
     wants: list[Want] = field(default_factory=list)
     removals: list = field(default_factory=list)
@@ -296,12 +296,12 @@ def _want(plan: Plan, machine, section: Section, root, kind, name, harness,
         held = False
     dest = None
     if root is not None:
-        folder = machine.project_folders.get(harness, {}).get(_FOLDERS[kind])
-        if folder is None:
+        project_dir = machine.project_dirs.get(harness, {}).get(_KIND_DIRS[kind])
+        if project_dir is None:
             return _carry(plan, want, "blocked",
-                          f"harness {harness} has no project folder for {_FOLDERS[kind]} "
+                          f"harness {harness} has no project folder for {_KIND_DIRS[kind]} "
                           "(the setting project_folders)", REFUSED, filename=filename)
-        dest = Path(root) / folder / filename
+        dest = Path(root) / project_dir / filename
     from moxi.place import Item
 
     want.item = Item(Path(source), harness, filename, kind, dest=dest, held=held,
@@ -333,9 +333,9 @@ def _module_want(plan: Plan, want: Want, user_skills) -> Want:
     if not found.ok:
         return _carry(plan, want, "off", f"{module} is broken", 0, filename=skill)
     try:
-        folder = importlib.resources.files(found.package).joinpath(found.skills or "")
-        ok = found.skills is not None and isinstance(folder, Path) \
-            and (folder / skill).is_dir()
+        skills_dir = importlib.resources.files(found.package).joinpath(found.skills or "")
+        ok = found.skills is not None and isinstance(skills_dir, Path) \
+            and (skills_dir / skill).is_dir()
     except (ImportError, TypeError, ValueError, OSError):
         ok = False
     if not ok:
@@ -343,7 +343,7 @@ def _module_want(plan: Plan, want: Want, user_skills) -> Want:
                       filename=skill)
     from moxi.place import Item
 
-    want.item = Item(Path(folder) / skill, want.harness, skill)
+    want.item = Item(Path(skills_dir) / skill, want.harness, skill)
     return want
 
 
@@ -359,10 +359,10 @@ def _source(plan: Plan, machine, section: Section, root, kind, name):
     if own is not None:
         source = own
     else:
-        mine = plan.folder / _FOLDERS[kind] / filename
+        mine = plan.loadout_dir / _KIND_DIRS[kind] / filename
         theirs = None
         if root is not None:
-            claude = machine.project_folders.get("claude", {}).get(_FOLDERS[kind])
+            claude = machine.project_dirs.get("claude", {}).get(_KIND_DIRS[kind])
             if claude is not None:
                 theirs = Path(root) / claude / filename
         theirs_real = theirs is not None and theirs.exists() and not theirs.is_symlink() \
@@ -400,8 +400,8 @@ def _copied_by_loadout(plan: Plan, path: Path) -> bool:
 
     if path.is_dir():
         try:
-            with open(path / place.MARK, encoding="utf-8") as f:
-                mark = json.load(f)
+            with open(path / place.MARK, encoding="utf-8") as fh:
+                mark = json.load(fh)
         except (OSError, ValueError):
             return False
         return isinstance(mark, dict) and mark.get("owner") == OWNER
@@ -424,11 +424,11 @@ def _generate(plan: Plan, want: Want, section: Section, root, name, source, fiel
 
     harness = want.harness
     suffix = convert.SUFFIX[harness]
-    folder = stores.generated_dir() / harness
+    generated_dir = stores.generated_dir() / harness
     if root is not None:
         digest = hashlib.sha256(os.fspath(root).encode("utf-8", "surrogatepass"))
-        folder = folder / f"project-{digest.hexdigest()[:16]}"
-    path = folder / (name + suffix)
+        generated_dir = generated_dir / f"project-{digest.hexdigest()[:16]}"
+    path = generated_dir / (name + suffix)
     extra = plan.manifest.item("agent", name).get(harness)
     text, lost = convert.CONVERTERS[harness](name, fields, body, extra)
     data = convert.with_header(os.fspath(source), text)
@@ -462,8 +462,8 @@ def _carry(plan: Plan, want: Want, state: str, reason: str, code: int, *,
                 items.append(item)
     dest = None
     if root is not None and machine is not None:
-        folder = machine.project_folders.get(want.harness, {}).get(_FOLDERS[want.kind])
-        dest = None if folder is None else Path(root) / folder / (filename or "")
+        project_dir = machine.project_dirs.get(want.harness, {}).get(_KIND_DIRS[want.kind])
+        dest = None if project_dir is None else Path(root) / project_dir / (filename or "")
     if not items and filename is not None and (want.section.is_user or dest is not None):
         # No record (a lost ledger): name the target it would have, so nothing removes it.
         from moxi.place import Item
@@ -511,12 +511,12 @@ def _adoptable(plan: Plan) -> set[str]:
     over before it plans. One the module placed with `dest` stays the module's."""
     from moxi import place
 
-    from moxi_loadout.adoption import at_its_folder
+    from moxi_loadout.adoption import at_harness_dir
 
     table, _ = place.harnesses()
     out = set()
     for module in {w.module for w in plan.wants if w.module}:
-        out |= {str(p.path) for p in place.status(module) if at_its_folder(p, table)}
+        out |= {str(p.path) for p in place.status(module) if at_harness_dir(p, table)}
     return out
 
 

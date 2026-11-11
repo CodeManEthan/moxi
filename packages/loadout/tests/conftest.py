@@ -68,7 +68,7 @@ def fake_cli(bin_dir: Path, name: str) -> Path:
 
 
 @pytest.fixture
-def folder(tmp_path) -> Path:
+def loadout_dir(tmp_path) -> Path:
     """A loadout folder of the test's own, not yet made."""
     return tmp_path / "loadout-folder"
 

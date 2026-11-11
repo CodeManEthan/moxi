@@ -284,7 +284,7 @@ def _git_hook(machine) -> Row:
     from moxi_loadout import repo_link
 
     try:
-        return repo_link.state(machine.source, machine.reinstall_on_commit,
+        return repo_link.state(machine.source, on=machine.reinstall_on_commit,
                                seconds=STATUS_SECONDS)
     except Exception as exc:  # noqa: BLE001 - one row's failure is that row's
         return Row(MODULE, "git hook", "warn", f"the link to repo can't be read: {exc}",

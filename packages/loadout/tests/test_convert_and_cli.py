@@ -46,8 +46,8 @@ def test_the_header_reads_ok_until_the_file_is_edited(tmp_path, text):
     path.write_bytes(convert.with_header("/src/a.md", text))
     assert convert.state(path) == "ok"
     assert path.read_text().startswith("---\n# generated" if text.startswith("---") else "#")
-    with open(path, "a", encoding="utf-8") as f:
-        f.write("more\n")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("more\n")
     assert convert.state(path) == "modified"
     path.write_text(text)
     assert convert.state(path) is None
@@ -66,12 +66,12 @@ def test_frontmatter_that_does_not_read_is_refused(tmp_path, text, why):
 # -- the verbs -----------------------------------------------------------------------------
 
 @pytest.fixture
-def lo(folder):
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    kit.skill(folder / "skills", "other")
-    kit.manifest(folder, "# my loadout\n[user]\nskills = [\"other\"]\n")
-    return folder
+def lo(loadout_dir):
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    kit.skill(loadout_dir / "skills", "other")
+    kit.manifest(loadout_dir, "# my loadout\n[user]\nskills = [\"other\"]\n")
+    return loadout_dir
 
 
 def test_add_writes_the_manifest_then_installs_only_that_item(lo, capsys):

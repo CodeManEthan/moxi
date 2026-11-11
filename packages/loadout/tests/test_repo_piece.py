@@ -276,10 +276,10 @@ def test_repo_is_optional_with_its_extra():
     assert project["optional-dependencies"]["repo"] == ["moxi-repo>=0.1,<0.2"]
 
 
-def test_the_setting_defaults_on_and_needs_repo(folder):
+def test_the_setting_defaults_on_and_needs_repo(loadout_dir):
     from moxi_loadout import settings
 
-    kit.configure(folder)
+    kit.configure(loadout_dir)
     assert settings.read().reinstall_on_commit is True
     key = settings.schema().keys["reinstall_on_commit"]
     assert key.needs == "repo" and key.type == "bool"
@@ -324,23 +324,23 @@ def test_the_piece_imports_in_under_10_ms():
 
 # -- the piece's skips, without git ----------------------------------------------------------
 
-def test_no_root_is_skipped(repo, folder, installs):
-    kit.configure(folder)
+def test_no_root_is_skipped(repo, loadout_dir, installs):
+    kit.configure(loadout_dir)
     assert gitpiece.run(Ctx("post-commit", None)).kind == "ok"
     assert installs.calls == []
 
 
-def test_the_setting_off_skips_before_any_git(repo, folder, installs):
+def test_the_setting_off_skips_before_any_git(repo, loadout_dir, installs):
     from moxi import config
 
-    kit.configure(folder)
+    kit.configure(loadout_dir)
     config.set_value("loadout", "reinstall_on_commit", "false", by="test")
-    assert gitpiece.run(Ctx("post-commit", folder)).kind == "ok"
+    assert gitpiece.run(Ctx("post-commit", loadout_dir)).kind == "ok"
     assert installs.calls == [] and repo.calls() == []
 
 
-def test_a_commit_in_another_repository_is_skipped(repo, folder, tmp_path, installs):
-    kit.configure(folder)
+def test_a_commit_in_another_repository_is_skipped(repo, loadout_dir, tmp_path, installs):
+    kit.configure(loadout_dir)
     other = tmp_path / "other"
     other.mkdir()
     assert gitpiece.run(Ctx("post-commit", other)).kind == "ok"
@@ -363,7 +363,7 @@ def test_the_clean_env_drops_gits_local_and_pathspec_variables(monkeypatch):
 # -- the piece against real git ------------------------------------------------------------
 
 @pytest.fixture
-def tree(repo, folder, tmp_path):
+def tree(repo, loadout_dir, tmp_path):
     """A work tree whose `loadout/` folder is the configured loadout folder, with one
     commit outside it."""
     root = tmp_path / "dotfiles"
@@ -376,7 +376,7 @@ def tree(repo, folder, tmp_path):
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
-def test_a_commit_that_changes_the_folder_runs_the_install_with_a_clean_env(
+def test_a_commit_that_changes_the_loadout_dir_runs_the_install_with_a_clean_env(
         tree, installs, monkeypatch):
     commit(tree, "loadout/loadout.toml", "[user]\n")
     for k, v in {"GIT_DIR": str(tree / ".git"), "GIT_INDEX_FILE": str(tree / ".git/index"),
@@ -406,8 +406,8 @@ def test_a_commit_elsewhere_in_the_work_tree_is_skipped(tree, installs, repo):
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
-def test_a_capitalised_folder_keeps_its_case_where_the_os_folds_case(
-        repo, folder, tmp_path, installs, monkeypatch):
+def test_a_capitalised_loadout_dir_keeps_its_case_where_the_os_folds_case(
+        repo, loadout_dir, tmp_path, installs, monkeypatch):
     """Windows' normcase lowercases; git's pathspec still matches case exactly, so the
     path the piece gives git is the folder's own spelling."""
     root = tmp_path / "Dots"
@@ -424,7 +424,7 @@ def test_a_capitalised_folder_keeps_its_case_where_the_os_folds_case(
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
-def test_the_root_commit_is_read_against_the_empty_tree(repo, folder, tmp_path, installs):
+def test_the_root_commit_is_read_against_the_empty_tree(repo, loadout_dir, tmp_path, installs):
     root = tmp_path / "fresh"
     root.mkdir()
     git(root, "init", "-q")
@@ -439,7 +439,7 @@ def test_the_root_commit_is_read_against_the_empty_tree(repo, folder, tmp_path, 
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
-def test_a_merge_that_changes_the_folder_runs_the_install(tree, installs):
+def test_a_merge_that_changes_the_loadout_dir_runs_the_install(tree, installs):
     git(tree, "checkout", "-q", "-b", "side")
     commit(tree, "loadout/skills/review/SKILL.md", "---\nname: review\n---\n")
     git(tree, "checkout", "-q", "main")
@@ -471,8 +471,8 @@ def test_a_linked_worktree_has_its_own_root_and_is_skipped(tree, tmp_path, insta
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
-def test_a_nested_repository_inside_the_root_is_not_the_folders_work_tree(
-        repo, folder, tmp_path, installs):
+def test_a_nested_repository_inside_the_root_is_not_the_loadout_dirs_work_tree(
+        repo, loadout_dir, tmp_path, installs):
     outer = tmp_path / "outer"
     outer.mkdir()
     git(outer, "init", "-q")
@@ -530,59 +530,59 @@ def test_a_scoped_install_leaves_the_record(tree, installs):
 
 # -- registration --------------------------------------------------------------------------
 
-def in_git(folder):
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / ".git").mkdir()
-    return folder
+def in_git(loadout_dir):
+    loadout_dir.mkdir(parents=True, exist_ok=True)
+    (loadout_dir / ".git").mkdir()
+    return loadout_dir
 
 
-def test_install_registers_both_pieces_one_per_call(repo, folder):
-    kit.configure(in_git(folder))
+def test_install_registers_both_pieces_one_per_call(repo, loadout_dir):
+    kit.configure(in_git(loadout_dir))
     out = install.install()
     assert out.code == 0
-    assert repo.verbs() == [f"add {folder} loadout/reinstall-commit",
-                            f"add {folder} loadout/reinstall-merge"]
-    assert set(repo.pieces(folder)) == set(repo_link.PIECES)
-    assert f"added loadout/reinstall-commit in {folder}" in out.lines
+    assert repo.verbs() == [f"add {loadout_dir} loadout/reinstall-commit",
+                            f"add {loadout_dir} loadout/reinstall-merge"]
+    assert set(repo.pieces(loadout_dir)) == set(repo_link.PIECES)
+    assert f"added loadout/reinstall-commit in {loadout_dir}" in out.lines
     # A second install finds them there and writes nothing.
     install.install()
     assert len(repo.verbs()) == 2
 
 
-def test_setup_registers_them_too(repo, folder, capsys):
-    kit.configure(in_git(folder))
+def test_setup_registers_them_too(repo, loadout_dir, capsys):
+    kit.configure(in_git(loadout_dir))
     assert setup.setup() == 0
-    assert set(repo.pieces(folder)) == set(repo_link.PIECES)
-    assert f"loadout: added loadout/reinstall-merge in {folder}" in capsys.readouterr().out
+    assert set(repo.pieces(loadout_dir)) == set(repo_link.PIECES)
+    assert f"loadout: added loadout/reinstall-merge in {loadout_dir}" in capsys.readouterr().out
 
 
-def test_the_setting_off_removes_each_registered_piece(repo, folder):
+def test_the_setting_off_removes_each_registered_piece(repo, loadout_dir):
     from moxi import config
 
-    kit.configure(in_git(folder))
+    kit.configure(in_git(loadout_dir))
     install.install()
     config.set_value("loadout", "reinstall_on_commit", "false", by="test")
     install.install()
-    assert repo.pieces(folder) == {}
-    assert repo.verbs()[2:] == [f"remove {folder} loadout/reinstall-commit",
-                                f"remove {folder} loadout/reinstall-merge"]
+    assert repo.pieces(loadout_dir) == {}
+    assert repo.verbs()[2:] == [f"remove {loadout_dir} loadout/reinstall-commit",
+                                f"remove {loadout_dir} loadout/reinstall-merge"]
 
 
-def test_a_folder_in_no_work_tree_asks_nothing_of_repo(repo, folder):
-    kit.configure(folder)
+def test_a_loadout_dir_in_no_work_tree_asks_nothing_of_repo(repo, loadout_dir):
+    kit.configure(loadout_dir)
     assert install.install().code == 0
     assert repo.calls() == []
 
 
-def test_without_repo_nothing_is_registered_and_install_goes_on(no_repo, folder):
-    kit.configure(in_git(folder))
+def test_without_repo_nothing_is_registered_and_install_goes_on(no_repo, loadout_dir):
+    kit.configure(in_git(loadout_dir))
     out = install.install()
     assert out.code == 0
     assert not [line for line in out.lines if "git hook" in line]
 
 
-def test_a_repo_failure_is_a_line_not_an_exit_code(repo, folder, monkeypatch):
-    kit.configure(in_git(folder))
+def test_a_repo_failure_is_a_line_not_an_exit_code(repo, loadout_dir, monkeypatch):
+    kit.configure(in_git(loadout_dir))
     monkeypatch.setenv("FAKE_REPO_FAIL", "git is too old")
     out = install.install()
     assert out.code == 0
@@ -591,9 +591,9 @@ def test_a_repo_failure_is_a_line_not_an_exit_code(repo, folder, monkeypatch):
     assert setup.setup() == 0
 
 
-def test_a_git_call_of_repos_that_runs_out_of_time_is_a_line_too(repo, folder, monkeypatch,
+def test_a_git_call_of_repos_that_runs_out_of_time_is_a_line_too(repo, loadout_dir, monkeypatch,
                                                                   capsys):
-    kit.configure(in_git(folder))
+    kit.configure(in_git(loadout_dir))
     monkeypatch.setenv("FAKE_REPO_STATUS", "timeout")
     out = install.install()
     assert out.code == 0
@@ -610,20 +610,20 @@ def row(rows):
     return found
 
 
-def test_the_row_is_off_for_a_folder_in_no_work_tree(repo, folder):
-    kit.configure(folder)
+def test_the_row_is_off_for_a_loadout_dir_in_no_work_tree(repo, loadout_dir):
+    kit.configure(loadout_dir)
     assert row(doctor.rows()).state == "off"
 
 
-def test_the_row_is_off_with_repo_absent_saying_what_repo_would_do(no_repo, folder):
-    kit.configure(in_git(folder))
+def test_the_row_is_off_with_repo_absent_saying_what_repo_would_do(no_repo, loadout_dir):
+    kit.configure(in_git(loadout_dir))
     found = row(doctor.rows())
     assert found.state == "off" and "with repo, a commit reinstalls" in found.detail
     assert found.fix == "moxi install loadout --with repo"
 
 
-def test_the_row_warns_while_the_setting_is_on_and_a_piece_is_unregistered(repo, folder):
-    kit.configure(in_git(folder))
+def test_the_row_warns_while_the_setting_is_on_and_a_piece_is_unregistered(repo, loadout_dir):
+    kit.configure(in_git(loadout_dir))
     found = row(doctor.rows())
     assert found.state == "warn" and "loadout/reinstall-commit" in found.detail
     assert found.fix == "moxi loadout install"
@@ -631,29 +631,29 @@ def test_the_row_warns_while_the_setting_is_on_and_a_piece_is_unregistered(repo,
     assert row(doctor.rows()).state == "ok"
 
 
-def test_the_row_is_off_while_the_setting_is_off(repo, folder):
+def test_the_row_is_off_while_the_setting_is_off(repo, loadout_dir):
     from moxi import config
 
-    kit.configure(in_git(folder))
+    kit.configure(in_git(loadout_dir))
     config.set_value("loadout", "reinstall_on_commit", "false", by="test")
     found = row(doctor.rows())
     assert found.state == "off" and "reinstall_on_commit" in found.detail
 
 
-def test_the_row_warns_on_a_piece_disabled_in_repo(repo, folder):
-    kit.configure(in_git(folder))
+def test_the_row_warns_on_a_piece_disabled_in_repo(repo, loadout_dir):
+    kit.configure(in_git(loadout_dir))
     install.install()
     state = json.loads(repo.state_file.read_text())
-    state[os.path.realpath(folder)]["loadout/reinstall-merge"]["enabled"] = False
+    state[os.path.realpath(loadout_dir)]["loadout/reinstall-merge"]["enabled"] = False
     repo.state_file.write_text(json.dumps(state))
     found = row(doctor.rows())
     assert found.state == "warn" and "disabled" in found.detail
     assert "moxi repo git-hooks enable" in found.fix
 
 
-def test_the_row_warns_when_repos_git_does_not_answer_in_its_time(repo, folder,
+def test_the_row_warns_when_repos_git_does_not_answer_in_its_time(repo, loadout_dir,
                                                                   monkeypatch):
-    kit.configure(in_git(folder))
+    kit.configure(in_git(loadout_dir))
     monkeypatch.setattr(doctor, "STATUS_SECONDS", 0.1, raising=False)
     monkeypatch.setenv("FAKE_REPO_STATUS", "slow")
     found = row(doctor.rows())

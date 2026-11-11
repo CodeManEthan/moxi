@@ -180,7 +180,7 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
     except FileExistsError:
         found = _load(path)
         if found is not None and found.get("argv") == argv:
-            return Started(job, False)
+                return Started(job, new=False)
         raise Clash(f"job {job} was started already with other arguments") from None
     try:
         pid = _spawn(command(job, argv), cwd=os.fspath(stores.state_dir(create=True)),
@@ -196,7 +196,7 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
         atomic_write(path, json.dumps(record) + "\n", mode=0o600)
     except Exception:  # noqa: BLE001 - the job reads interrupted until its end lands
         log.exception("page job %s started (pid %s), but its pid wasn't recorded", job, pid)
-    return Started(job, True)
+    return Started(job, new=True)
 
 
 def _create(path: Path, text: str) -> None:
@@ -275,11 +275,11 @@ def _load(path: Path) -> dict | None:
 def prune(now: float | None = None) -> int:
     """Remove the job records (and their logs) older than a day; returns how many files
     went."""
-    folder = jobs_dir()
+    records_dir = jobs_dir()
     cutoff = (time.time() if now is None else now) - KEEP_SECONDS
     gone = 0
     try:
-        found = list(os.scandir(folder))
+        found = list(os.scandir(records_dir))
     except FileNotFoundError:
         return 0
     for entry in found:

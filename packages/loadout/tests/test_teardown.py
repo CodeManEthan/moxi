@@ -43,13 +43,13 @@ pytestmark = posix
 
 
 @pytest.fixture
-def lo(folder, tmp_path, monkeypatch):
+def lo(loadout_dir, tmp_path, monkeypatch):
     """The loadout folder with a skill, an agent and a global text; harness CLIs that
     write the files they own; the opencode row added as SETUP adds it."""
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    kit.agent(folder / "agents" / "helper.md", "helper")
-    (folder / "global.md").write_text("Be brief.\n")
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    kit.agent(loadout_dir / "agents" / "helper.md", "helper")
+    (loadout_dir / "global.md").write_text("Be brief.\n")
     bin_dir = tmp_path / "fake-mcp-bin"
     bin_dir.mkdir()
     for name, body in (("claude", FAKE_CLAUDE), ("codex", FAKE_CODEX)):
@@ -58,7 +58,7 @@ def lo(folder, tmp_path, monkeypatch):
         path.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     harness_row.add(say=lambda line: None)
-    return folder
+    return loadout_dir
 
 
 def read(path: Path):
@@ -74,8 +74,8 @@ def said():
     return out, out.append
 
 
-def installed(folder: Path, text: str = EVERYTHING) -> None:
-    kit.manifest(folder, text)
+def installed(loadout_dir: Path, text: str = EVERYTHING) -> None:
+    kit.manifest(loadout_dir, text)
     settings().parent.mkdir(parents=True, exist_ok=True)
     settings().write_text('{\n  "model": "opus"\n}\n')
     harness.global_file("claude").write_text(MINE)
@@ -91,7 +91,7 @@ def refusal(capture) -> str:
     return exc.value.reason
 
 
-def test_a_kept_entry_running_from_the_folder_is_found_in_any_path_form():
+def test_a_kept_entry_running_from_the_loadout_dir_is_found_in_any_path_form():
     windows = "C:\\Users\\sample\\loadout"
     hook = {"kind": "hook", "written": {"matcher": "Bash", "hooks": [
         {"type": "command", "command": f"python {windows}\\hooks\\guard.py"}]}}
@@ -166,8 +166,8 @@ def test_an_edited_generated_file_no_agent_uses_is_named_to_delete(lo):
     kit.manifest(lo, '[user]\nagents = ["helper"]\n')
     assert install.install().code == 0
     generated = stores.generated_dir() / "codex" / "helper.toml"
-    with open(generated, "a", encoding="utf-8") as f:
-        f.write("# mine\n")
+    with open(generated, "a", encoding="utf-8") as fh:
+        fh.write("# mine\n")
     kit.manifest(lo, '[user]\n')
     assert install.install().code == 0
     reason = refusal(lambda line: None)
@@ -177,7 +177,7 @@ def test_an_edited_generated_file_no_agent_uses_is_named_to_delete(lo):
     assert teardown.teardown(say=lambda line: None) == 0
 
 
-def test_an_entry_the_user_had_stays_and_one_running_from_the_folder_is_named(lo):
+def test_an_entry_the_user_had_stays_and_one_running_from_the_loadout_dir_is_named(lo):
     kit.manifest(lo, '[user]\nhooks = ["guard-rm"]\n' + HOOK)
     group = {"matcher": "Bash", "hooks": [{"type": "command", "timeout": 10,
                                            "command": f"python3 {lo}/hooks/guard_rm.py"}]}
@@ -194,7 +194,7 @@ def test_an_entry_the_user_had_stays_and_one_running_from_the_folder_is_named(lo
     assert ledger.read()["entries"] == []
 
 
-def test_a_global_line_the_user_had_naming_the_folder_is_named(lo):
+def test_a_global_line_the_user_had_naming_the_loadout_dir_is_named(lo):
     kit.manifest(lo, '[global]\nmode = "managed"\n')
     line = f"@{lo / 'global.md'}"
     harness.global_file("claude").parent.mkdir(parents=True, exist_ok=True)
@@ -236,10 +236,10 @@ def test_an_edited_opencode_row_stays_as_the_users(lo):
     assert any("was edited since loadout added it" in line for line in lines)
 
 
-def test_an_opencode_row_the_user_had_first_stays(folder):
+def test_an_opencode_row_the_user_had_first_stays(loadout_dir):
     from moxi import config, place
 
-    kit.configure(folder)
+    kit.configure(loadout_dir)
     config.add_item("moxi", "harnesses", harness_row.wanted(), by="test")
     harness_row.add(say=lambda line: None)
     assert harness_row.record_of(ledger.read())["prior"] is True
@@ -255,10 +255,10 @@ def core_config() -> dict:
 
 
 @pytest.mark.parametrize("had_key", [False, True])
-def test_a_harnesses_key_setup_made_is_unset_at_uninstall(folder, had_key):
+def test_a_harnesses_key_setup_made_is_unset_at_uninstall(loadout_dir, had_key):
     from moxi import config
 
-    kit.configure(folder)
+    kit.configure(loadout_dir)
     default = [{"name": "claude", "skills": "", "agents": ""},
                {"name": "codex", "skills": "", "agents": ""}]
     if had_key:
@@ -273,10 +273,10 @@ def test_a_harnesses_key_setup_made_is_unset_at_uninstall(folder, had_key):
         assert "harnesses" not in core_config()
 
 
-def test_a_harnesses_key_changed_since_setup_is_kept(folder):
+def test_a_harnesses_key_changed_since_setup_is_kept(loadout_dir):
     from moxi import config
 
-    kit.configure(folder)
+    kit.configure(loadout_dir)
     harness_row.add(say=lambda line: None)
     config.add_item("moxi", "harnesses", {"name": "other", "skills": "~/o", "agents": ""},
                     by="test")
@@ -350,16 +350,16 @@ def skill_md(name: str) -> str:
 
 
 @pytest.fixture
-def demo(site, folder):
+def demo(site, loadout_dir):
     """A module `demo` shipping skills moxi-demo and moxi-other, and the loadout folder."""
     package = site.module("demo", SKILLS="'skills'", files={
         "skills/moxi-demo/SKILL.md": skill_md("moxi-demo"),
         "skills/moxi-other/SKILL.md": skill_md("moxi-other")})
-    kit.configure(folder)
+    kit.configure(loadout_dir)
     return site.root / package / "skills"
 
 
-def both_kinds(skills, folder):
+def both_kinds(skills, loadout_dir):
     """moxi-demo placed by the module after a yes and taken over; moxi-other placed from
     the manifest as the module and taken over seeded."""
     from moxi import place
@@ -368,7 +368,7 @@ def both_kinds(skills, folder):
     place.apply(place.plan("demo", [Item(skills / "moxi-demo", "claude", "moxi-demo")]),
                 say=lambda line: None)
     assert install.install().code == 0
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo", "demo/moxi-other"]\n'
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo", "demo/moxi-other"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n'
                          '[skill."demo/moxi-other"]\nharnesses = ["claude"]\n')
     assert install.install().code == 0
@@ -382,8 +382,8 @@ def demo_plan(skills, name):
     return place.plan("demo", [Item(skills / name, "claude", name)])[0]
 
 
-def test_a_skill_from_the_modules_yes_goes_back_and_a_seeded_one_is_removed(demo, folder):
-    both_kinds(demo, folder)
+def test_a_skill_from_the_modules_yes_goes_back_and_a_seeded_one_is_removed(demo, loadout_dir):
+    both_kinds(demo, loadout_dir)
     lines, say = said()
     assert teardown.teardown(say=say) == 0, lines
     yes, seeded = kit.claude() / "moxi-demo", kit.claude() / "moxi-other"
@@ -399,8 +399,8 @@ def test_a_skill_from_the_modules_yes_goes_back_and_a_seeded_one_is_removed(demo
     assert kit.handed("demo")[str(seeded)]["seeded"] is True
 
 
-def test_a_lost_ledger_still_ends_right(demo, folder):
-    both_kinds(demo, folder)
+def test_a_lost_ledger_still_ends_right(demo, loadout_dir):
+    both_kinds(demo, loadout_dir)
     stores.ledger_path().unlink()
     lines, say = said()
     assert teardown.teardown(say=say) == 0, lines
@@ -419,13 +419,13 @@ GLOBS = ("packages/loadout/src/moxi_loadout/teardown.py",
 
 
 @pytest.fixture
-def app(folder, tmp_path):
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
+def app(loadout_dir, tmp_path):
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
     root = tmp_path / "app"
     root.mkdir()
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
-    kit.manifest(folder, f'[project."{root}"]\nskills = ["review"]\n')
+    kit.manifest(loadout_dir, f'[project."{root}"]\nskills = ["review"]\n')
     assert install.install().code == 0
     return root
 
@@ -440,11 +440,11 @@ def untracked(root) -> list[str]:
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
 def test_a_project_tree_is_left_as_it_was(app):
-    folder = app / ".claude" / "skills"
-    assert ignores.state(folder / ".gitignore") == "ours"
+    skills_dir = app / ".claude" / "skills"
+    assert ignores.state(skills_dir / ".gitignore") == "ours"
     assert teardown.teardown(say=lambda line: None) == 0
-    assert not os.path.lexists(folder / "review")
-    assert not os.path.lexists(folder / ".gitignore")
+    assert not os.path.lexists(skills_dir / "review")
+    assert not os.path.lexists(skills_dir / ".gitignore")
     assert not os.path.lexists(app / ".agents" / "skills" / ".gitignore")
     assert untracked(app) == []
     assert ignores.records(ledger.read()) == {}

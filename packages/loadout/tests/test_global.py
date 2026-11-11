@@ -16,19 +16,19 @@ TEXT = "Be brief.\n"
 
 
 @pytest.fixture
-def lo(folder):
-    kit.configure(folder)
-    (folder / "global.md").write_text(TEXT)
+def lo(loadout_dir):
+    kit.configure(loadout_dir)
+    (loadout_dir / "global.md").write_text(TEXT)
     from moxi import config
 
     config.add_item("moxi", "harnesses", {"name": "opencode",
                                           "skills": "~/.config/opencode/skills",
                                           "agents": "~/.config/opencode/agents"}, by="test")
-    return folder
+    return loadout_dir
 
 
-def mode(folder, name):
-    kit.manifest(folder, f'[global]\nmode = "{name}"\n')
+def mode(loadout_dir, name):
+    kit.manifest(loadout_dir, f'[global]\nmode = "{name}"\n')
 
 
 def test_managed_adds_each_part_and_off_takes_exactly_it_out(lo):

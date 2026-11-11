@@ -13,7 +13,7 @@ Three rules decide every case:
 `take(modules)` lists each module's own placements (made after a yes at its question) in
 the manifest's `[user] skills` with the harnesses they were placed for, then hands them to
 loadout, unseeded. It writes the manifest first and places nothing. Only a placement at
-its harness row's folder is taken (`at_its_folder`), which is where a module's skills
+its harness row's folder is taken (`at_harness_dir`), which is where a module's skills
 step puts one. A placement a module made at a path of its own choosing (with `dest`, as
 turns' setup places its Claude Code folder) stays with that module: its teardown and its
 uninstall remove it, and loadout never holds it.
@@ -47,10 +47,10 @@ class Taken:
     placed: object
 
 
-def take(modules: Iterable[str] | None = None, *, folder=None,
+def take(modules: Iterable[str] | None = None, *, loadout_dir=None,
          say: Callable[[str], object] = print) -> list[Taken]:
     """Hand every placement of each module in `modules` (every installed module but
-    loadout when None) at its harness row's folder (`at_its_folder`) to loadout,
+    loadout when None) at its harness row's folder (`at_harness_dir`) to loadout,
     unseeded, and list each in the manifest with the harnesses taken. A placement made
     with `dest` is left to the module. Returns what was taken.
 
@@ -64,21 +64,21 @@ def take(modules: Iterable[str] | None = None, *, folder=None,
 
     from moxi_loadout import manifest, writes
 
-    manifest.load(folder)
+    manifest.load(loadout_dir)
 
     if modules is None:
         from moxi.modules import installed
 
         modules = sorted({e.name for e in installed()} - {OWNER})
     table, _ = place.harnesses()
-    theirs = {module: [p for p in place.status(module) if at_its_folder(p, table)]
+    theirs = {module: [p for p in place.status(module) if at_harness_dir(p, table)]
               for module in modules if module != OWNER}
     skills: dict[str, list[str]] = {}
     for module, mine in theirs.items():
         for p in mine:
             skills.setdefault(f"{module}/{p.name}", []).append(p.harness)
     if skills:
-        writes.adopt(skills, folder=folder)
+        writes.adopt(skills, loadout_dir=loadout_dir)
     taken: list[Taken] = []
     for module, mine in theirs.items():
         if mine:
@@ -86,7 +86,7 @@ def take(modules: Iterable[str] | None = None, *, folder=None,
     return taken
 
 
-def at_its_folder(placed, table=None) -> bool:
+def at_harness_dir(placed, table=None) -> bool:
     """Whether `placed` (a `moxi.place.Placed`) sits at its harness row's folder for its
     kind, `<folder>/<name>`, which is where a module's skills step places an item.
 
@@ -99,10 +99,10 @@ def at_its_folder(placed, table=None) -> bool:
     if table is None:
         table, _ = place.harnesses()
     row = table.get(placed.harness)
-    folder = None if row is None else row.harness_dir(placed.kind)
-    if folder is None:
+    harness_dir = None if row is None else row.harness_dir(placed.kind)
+    if harness_dir is None:
         return False
-    return place.target_key(folder / placed.name) == place.target_key(placed.path)
+    return place.target_key(harness_dir / placed.name) == place.target_key(placed.path)
 
 
 @dataclass(frozen=True)
@@ -191,5 +191,5 @@ def deferred_signals():
             signal.raise_signal(got[0])
 
 
-__all__ = ["OWNER", "Taken", "Seeded", "take", "at_its_folder", "place_seeded",
+__all__ = ["OWNER", "Taken", "Seeded", "take", "at_harness_dir", "place_seeded",
            "deferred_signals"]

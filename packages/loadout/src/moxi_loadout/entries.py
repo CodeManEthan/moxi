@@ -136,7 +136,7 @@ class Run:
 
 # -- what the manifest wants ---------------------------------------------------------------
 
-def wanted(manifest, folder, rows: dict, run: Run) -> tuple[list[Entry], set]:
+def wanted(manifest, loadout_dir, rows: dict, run: Run) -> tuple[list[Entry], set]:
     """Every entry the manifest wants, and the (item, harness) pairs it wants but can't
     build this run, whose records are carried as they stand."""
     out: list[Entry] = []
@@ -161,7 +161,7 @@ def wanted(manifest, folder, rows: dict, run: Run) -> tuple[list[Entry], set]:
                     run.notes.append(f"{kind} {name}: loadout writes nothing for {h}")
                     continue
                 try:
-                    out += _build(kind, name, table, h, folder, run)
+                    out += _build(kind, name, table, h, loadout_dir, run)
                 except _Carry as exc:
                     carried.add((item, h))
                     run.rows.append(Row(USER, kind, name, h, "blocked", str(exc), None,
@@ -185,14 +185,14 @@ class _Carry(Exception):
     pass
 
 
-def _build(kind, name, table, h, folder, run) -> list[Entry]:
+def _build(kind, name, table, h, loadout_dir, run) -> list[Entry]:
     item = f"{kind}:{name}"
     if kind == "hook":
         if h == "opencode":
             run.notes.append(f"hook {name}: not for opencode, which extends by plugins")
             return []
         matcher = table.get("matcher")
-        handler = {"type": "command", "command": expand_command(table["command"], folder)}
+        handler = {"type": "command", "command": expand_command(table["command"], loadout_dir)}
         if table.get("timeout") is not None:
             handler["timeout"] = table["timeout"]
         group = ({"matcher": matcher} if matcher else {}) | {"hooks": [handler]}
@@ -203,7 +203,7 @@ def _build(kind, name, table, h, folder, run) -> list[Entry]:
                       [table["event"], matcher or "", handler["command"]], group)]
     if kind == "permissions":
         return _permissions(item, name, table, h)
-    return [_mcp(item, name, table, h, folder)]
+    return [_mcp(item, name, table, h, loadout_dir)]
 
 
 def _permissions(item, name, table, h) -> list[Entry]:
@@ -241,9 +241,9 @@ def _permissions(item, name, table, h) -> list[Entry]:
     return out
 
 
-def _mcp(item, name, table, h, folder) -> Entry:
-    args = [expand(a, folder) for a in table.get("args", ())]
-    env = {k: expand(v, folder) for k, v in (table.get("env") or {}).items()}
+def _mcp(item, name, table, h, loadout_dir) -> Entry:
+    args = [expand(a, loadout_dir) for a in table.get("args", ())]
+    env = {k: expand(v, loadout_dir) for k, v in (table.get("env") or {}).items()}
     url, headers = table.get("url"), dict(table.get("headers") or {})
     if h == "claude":
         sent = ({"type": "http", "url": url} | ({"headers": headers} if headers else {})
@@ -485,7 +485,7 @@ def _plain(value):
 
 # -- planning ------------------------------------------------------------------------------
 
-def plan(manifest, folder, data: dict, *, claims=None) -> Run:
+def plan(manifest, loadout_dir, data: dict, *, claims=None) -> Run:
     """Every entry the manifest wants planned against the harness files and the ledger's
     `entries`. Reads, writes nothing."""
     from moxi import place
@@ -495,7 +495,7 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
         run.notes.append("the global file is off: the manifest sets no [global] mode; "
                          "moxi loadout global mode MODE sets one")
     table, _ = place.harnesses()
-    want, carried = wanted(manifest, folder, table, run)
+    want, carried = wanted(manifest, loadout_dir, table, run)
     records = [r for r in data.get("entries", []) if isinstance(r, dict)
                and r.get("kind") not in KEPT_ELSEWHERE]
     claims = {} if claims is None else claims
@@ -533,7 +533,7 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
                                       f"not written; {path_fix(e.harness)}"))
             continue
         action = _one(e, None if rec is None else records[rec], doc, records,
-                      _claimed(claims, e.ident(), e.harness))
+                      claimed=_claimed(claims, e.ident(), e.harness))
         by_location[e.location()] = action
         run.actions.append(action)
     for i, r in enumerate(records):
@@ -550,8 +550,12 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
             run.actions.append(Action(None, r, "stand", f"no {r.get('harness')} on PATH"))
             continue
         kind, _, name = str(r.get("item")).partition(":")
-        run.actions.append(_gone(r, doc, records, used,
-                                 _claimed(claims, (kind, name), r.get("harness")), want))
+        run.actions.append(
+            _gone(
+                r, doc, records, used,
+                claimed=_claimed(claims, (kind, name), r.get("harness")), want=want,
+            )
+        )
     return run
 
 
@@ -623,7 +627,7 @@ def _shared_prior(records: list, e: Entry) -> bool:
     return True
 
 
-def _one(e: Entry, rec, doc, records, claimed: bool) -> Action:
+def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
     value = e.sent if e.kind == "mcp" else e.value
     if e.kind in MEMBERS:
         if e.key[-1] in _members(doc, e.kind, e.key):
@@ -673,7 +677,7 @@ def _one(e: Entry, rec, doc, records, claimed: bool) -> Action:
     return Action(e, rec, "blocked", "something else is there; --replace takes it over")
 
 
-def _gone(r: dict, doc, records: list, used: set, claimed: bool, want=()) -> Action:
+def _gone(r: dict, doc, records: list, used: set, *, claimed: bool, want=()) -> Action:
     """A record no wanted entry names: its item was dropped or disabled. While another
     item still wants the same entry, the entry stays and only this record goes; when
     that item holds no record of it yet, this one is kept until it does."""

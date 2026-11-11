@@ -180,29 +180,29 @@ def is_path_name(name: str) -> bool:
     return "/" in name or "\\" in name or name[:1] in ("~", ".")
 
 
-def section_root(name: str, folder: str | os.PathLike) -> str:
+def section_root(name: str, loadout_dir: str | os.PathLike) -> str:
     """Path section `name` as an absolute path: `~` expanded, a relative path read from
-    the loadout folder `folder`, normalized (links are not resolved)."""
+    the loadout loadout_dir `loadout_dir`, normalized (links are not resolved)."""
     path = os.path.expanduser(name)
     if not os.path.isabs(path):
-        path = os.path.join(os.fspath(folder), path)
+        path = os.path.join(os.fspath(loadout_dir), path)
     return os.path.normpath(path)
 
 
 # -- {source} ------------------------------------------------------------------------------
 
-def expand(text: str, folder: str | os.PathLike) -> str:
+def expand(text: str, loadout_dir: str | os.PathLike) -> str:
     """`text` with `{source}` replaced by the folder's absolute path, unquoted: for an MCP
     server's `args` and `env`, and for paths."""
-    return text.replace(SOURCE_TOKEN, os.path.abspath(os.fspath(folder)))
+    return text.replace(SOURCE_TOKEN, os.path.abspath(os.fspath(loadout_dir)))
 
 
-def expand_command(text: str, folder: str | os.PathLike, *,
+def expand_command(text: str, loadout_dir: str | os.PathLike, *,
                    windows: bool = sys.platform == "win32") -> str:
     """Hook command `text`, a shell string, with `{source}` replaced by the folder's
     absolute path quoted for the shell the harness runs hooks with: `shlex.quote` on Linux
     and macOS; on Windows, the quoting of `subprocess.list2cmdline`."""
-    path = os.path.abspath(os.fspath(folder))
+    path = os.path.abspath(os.fspath(loadout_dir))
     if windows:
         import subprocess
 
@@ -214,15 +214,15 @@ def expand_command(text: str, folder: str | os.PathLike, *,
     return text.replace(SOURCE_TOKEN, quoted)
 
 
-def item_source(table: Mapping, folder: str | os.PathLike) -> Path | None:
+def item_source(table: Mapping, loadout_dir: str | os.PathLike) -> Path | None:
     """An item table's own `source`, as an absolute path, or None when it has none: `~`
     and `{source}` expanded, a relative path read from the loadout folder."""
     given = table.get("source")
     if given is None:
         return None
-    path = os.path.expanduser(expand(given, folder))
+    path = os.path.expanduser(expand(given, loadout_dir))
     if not os.path.isabs(path):
-        path = os.path.join(os.fspath(folder), path)
+        path = os.path.join(os.fspath(loadout_dir), path)
     return Path(os.path.normpath(path))
 
 
@@ -282,7 +282,7 @@ class Refusal:
 class Manifest:
     """The manifest as read and checked.
 
-    `path` is the file and `folder` the loadout folder; `exists` is False when there is
+    `path` is the file and `loadout_dir` the loadout loadout_dir; `exists` is False when there is
     no file yet (then nothing is listed). `mode` is `[global] mode`, or None when the
     file sets none (the install question is asked only then); `global_file` is the
     global text's absolute path. `items` maps `(kind, name)` to the item's table, as
@@ -290,7 +290,7 @@ class Manifest:
     """
 
     path: Path
-    folder: Path
+    loadout_dir: Path
     exists: bool = True
     mode: str | None = None
     global_file: Path | None = None
@@ -337,19 +337,19 @@ class Manifest:
 
     def source_of(self, kind: str, name: str) -> Path | None:
         """The item's own `source` key as an absolute path, or None."""
-        return item_source(self.item(kind, name), self.folder)
+        return item_source(self.item(kind, name), self.loadout_dir)
 
 
 # -- reading -------------------------------------------------------------------------------
 
-def load(folder: str | os.PathLike | None = None) -> Manifest:
-    """The manifest in `folder` (the configured loadout folder when None), read and
+def load(loadout_dir: str | os.PathLike | None = None) -> Manifest:
+    """The manifest in `loadout_dir` (the configured loadout loadout_dir when None), read and
     checked. A missing file is an empty manifest with `exists` False. Raises
-    `ManifestError`, and `moxi.config.ConfigError` when `folder` is None and loadout's
+    `ManifestError`, and `moxi.config.ConfigError` when `loadout_dir` is None and loadout's
     config doesn't read."""
     from moxi_loadout import stores
 
-    path = stores.manifest_path(folder)
+    path = stores.manifest_path(loadout_dir)
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -362,9 +362,9 @@ def load(folder: str | os.PathLike | None = None) -> Manifest:
 def empty(path: str | os.PathLike) -> Manifest:
     """The manifest of a folder with no `loadout.toml`."""
     path = Path(path)
-    folder = path.parent
-    return Manifest(path=path, folder=folder, exists=False,
-                    global_file=folder / GLOBAL_FILE)
+    loadout_dir = path.parent
+    return Manifest(path=path, loadout_dir=loadout_dir, exists=False,
+                    global_file=loadout_dir / GLOBAL_FILE)
 
 
 def parse(text: str, *, path: str | os.PathLike) -> Manifest:
@@ -381,7 +381,7 @@ def parse(text: str, *, path: str | os.PathLike) -> Manifest:
 class _Reader:
     def __init__(self, path: Path, data: dict):
         self.path = path
-        self.folder = path.parent
+        self.loadout_dir = path.parent
         self.data = data
         self.lines: list[str] = []
 
@@ -430,7 +430,7 @@ class _Reader:
         self.duplicates(projects)
         if self.lines:
             raise ManifestError(self.path, self.lines)
-        return Manifest(path=self.path, folder=self.folder, exists=True, mode=mode,
+        return Manifest(path=self.path, loadout_dir=self.loadout_dir, exists=True, mode=mode,
                         global_file=global_file, user=user, projects=tuple(projects),
                         items=items, refused=tuple(refused))
 
@@ -444,7 +444,7 @@ class _Reader:
         if not isinstance(given, str) or not given.strip():
             self.problem(f"global.file: want a file name, found {_kind(given)}")
             given = GLOBAL_FILE
-        return mode, item_source({"source": given}, self.folder)
+        return mode, item_source({"source": given}, self.loadout_dir)
 
     def section(self, name: str, where: str, table: dict, refused: list) -> Section:
         label = USER if where == USER else f"{PROJECT}.{_quoted(name)}"
@@ -474,7 +474,7 @@ class _Reader:
                 continue
             if ident not in disabled:
                 disabled.append(ident)
-        root = section_root(name, self.folder) if where == "path" else None
+        root = section_root(name, self.loadout_dir) if where == "path" else None
         return Section(name=name, where=where, root=root, lists=lists,
                        disabled=tuple(disabled))
 

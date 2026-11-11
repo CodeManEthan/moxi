@@ -1,4 +1,5 @@
 # package<TAB>path<TAB>scope<TAB>kind<TAB>old<TAB>new
++cache	packages/cache/src/moxi_cache/cli.py	help="in the band's colour, dim when the watcher has stopped")	keep	help	help
 +cache	packages/cache/src/moxi_cache/codex.py	elif rec is need.record:	keep	record	record
 +comms	packages/comms/scripts/codex-smoke.py	-	name	clean_environ	clean_env
 +comms	packages/comms/scripts/codex-smoke.py	check	kwonly	ok	ok
@@ -7,12 +8,27 @@
 +comms	packages/comms/src/moxi_comms/adapters/claude_adapter.py	self.shim.notify_endpoint(present=False)	keep	present	present
 +comms	packages/comms/src/moxi_comms/config.py	load	name	environ	config_env
 +comms	packages/comms/src/moxi_comms/listener.py	memory_path	name	directory	session_dir
++loadout	packages/loadout/src/moxi_loadout/adoption.py	-	name	at_its_folder	at_harness_dir
++loadout	packages/loadout/src/moxi_loadout/cli.py	_parser.verb	name	help	help_text
++loadout	packages/loadout/src/moxi_loadout/cli.py	p = verbs.add_parser(name, help=help_text, description=description)	keep	help	help
 cache	packages/cache/src/moxi_cache/api.py	projects_root	name	environ	env
 cache	packages/cache/src/moxi_cache/cli.py	and clock.ttl_seconds is not None:	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/src/moxi_cache/cli.py	f"lifetime {_duration(clock.ttl_seconds)}{source}{key}")	use	clock.ttl_seconds	clock.ttl_s
+cache	packages/cache/src/moxi_cache/cli.py	help="the session or thread id")	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	help="where the record is: the Claude projects root, the Codex "	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	help="whose session it is (default: claude)")	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	how.add_argument("--json", action="store_true", help="print one JSON object, or null")	keep	help	help
 cache	packages/cache/src/moxi_cache/cli.py	if clock.age_seconds is not None:	use	clock.age_seconds	clock.age_s
 cache	packages/cache/src/moxi_cache/cli.py	if clock.kind in (WARM, COLD) and clock.age_seconds is not None \	use	clock.age_seconds	clock.age_s
+cache	packages/cache/src/moxi_cache/cli.py	read = verbs.add_parser("read", help="print each session's cache kind, age and lifetime",	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	read.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 cache	packages/cache/src/moxi_cache/cli.py	return (f"{session}: {clock.kind}, last request {_duration(clock.age_seconds)} ago, "	use	clock.age_seconds	clock.age_s
+cache	packages/cache/src/moxi_cache/cli.py	seg = verbs.add_parser("segment", help="print a session's status line segment",	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	seg.add_argument("session", metavar="SESSION", help="the Claude session id")	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	tim = verbs.add_parser("timers", help="list the timer's subscriptions and next asks",	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	tim.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	verbs.add_parser("doctor", help="check cache's config, table, drift record and watcher",	keep	help	help
+cache	packages/cache/src/moxi_cache/cli.py	verbs.add_parser("watch", help="run the watcher in the foreground",	keep	help	help
 cache	packages/cache/src/moxi_cache/cli.py	words += f" (last request {_duration(clock.age_seconds)} ago)"	use	clock.age_seconds	clock.age_s
 cache	packages/cache/src/moxi_cache/clock.py	Clock	name	age_seconds	age_s
 cache	packages/cache/src/moxi_cache/clock.py	Clock	name	ttl_seconds	ttl_s
@@ -182,8 +198,11 @@ cache	packages/cache/tests/test_watch.py	env = {"PATH": str(tmp_path / "empty"),
 cache	packages/cache/tests/test_watch.py	self.set()	keep	set	set
 cache	packages/cache/tests/test_watch.py	stop.set()	keep	set	set
 comms	packages/comms/scripts/codex-smoke.py	env["HOME"] = str(root / "home-dir")	keep	HOME	HOME
+comms	packages/comms/scripts/codex-smoke.py	help="real comms and turns processes with the fake codex binary")	keep	help	help
+comms	packages/comms/scripts/codex-smoke.py	help="run a real Codex turn; spends tokens")	keep	help	help
 comms	packages/comms/scripts/codex-smoke.py	mode = parser.add_mutually_exclusive_group(required=True)	keep	required	required
 comms	packages/comms/scripts/codex-smoke.py	out, err = proc.communicate(timeout=60)	keep	timeout	timeout
+comms	packages/comms/scripts/codex-smoke.py	parser.add_argument("--codex", default="codex", help="real Codex binary for --live")	keep	help	help
 comms	packages/comms/scripts/codex-smoke.py	proc.wait(timeout=5)	keep	timeout	timeout
 comms	packages/comms/scripts/codex-smoke.py	proc.wait(timeout=timeout)	keep	timeout	timeout
 comms	packages/comms/scripts/opencode-home-check.py	ap.add_argument("--home", default=os.environ.get("HOME"),	keep	HOME	HOME
@@ -230,8 +249,13 @@ comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	ClaudeShim.notify_en
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	ClaudeShim.start	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	_serve_inject_file	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	_serve_inject_file.injector	name	f	fh
+comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	ap.add_argument("--boundary-file", help="touch-file poll: each change = a Stop hook")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	ap.add_argument("--comm-slot", dest="retired_slot", help=argparse.SUPPRESS)	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	client = self._client	keep	_client	_client
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	connection=lambda: self._client, log=log, form=lambda: self.layer_form)	keep	_client	_client
+comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	help="an ALREADY-QUALIFIED director name (repeatable). moxi-comms-claude "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	help="serve this session's claim socket at this path, with the "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	help="the injection seam: write each digest to this file")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	identity, client = self.identity, self._client	keep	_client	_client
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	if self._client:	keep	_client	_client
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	main	name	e	exc
@@ -258,6 +282,20 @@ comms	packages/comms/src/moxi_comms/adapters/codex_roster.py	record = config_mod
 comms	packages/comms/src/moxi_comms/adapters/codex_roster.py	record_write_root	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	_named_agent	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	adapter.exit_hook = stopping.set	keep	set	set
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	ap.add_argument("--name", help="claim this chosen (or standing) name")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	ap.add_argument("--scope", help="a project scope, only to keep apart two agents of one "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	choice.add_argument("--sandbox", help="the sandbox mode")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="a JSON object of thread parameters")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="a comms config file whose [codex] table is the roster, in "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="a named permission profile, in place of a sandbox mode")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="a roster identity (e.g. planner@proj-a) whose row gives the "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="declare a director for THIS session (repeatable): messages "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="one Codex config override (KEY a TOML dotted key, VALUE TOML)")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="open the Codex window in this terminal")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="print the plan and the host's line; start nothing")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="resume this Codex thread instead of starting a new one "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="run no Codex window in this terminal")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	host.add_argument("--model", help="the model the thread runs")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	launch_args	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	main	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	plan	name	e	exc
@@ -289,13 +327,17 @@ comms	packages/comms/src/moxi_comms/adapters/opencode.py	_out, err = proc.commun
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	additions_clash	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--notice-hold", type=float, default=NOTICE_HOLD, metavar="SECONDS",	keep	type	type
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--notice-hold", type=float, default=NOTICE_HOLD, metavar="SECONDS",	use	"--notice-hold"	"--notice-hold-s"
+comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--opencode", help="the opencode binary (default: the roster's "	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--ready-wait", type=float, default=READY_WAIT, metavar="SECONDS",	keep	type	type
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("--ready-wait", type=float, default=READY_WAIT, metavar="SECONDS",	use	"--ready-wait"	"--ready-wait-s"
+comms	packages/comms/src/moxi_comms/adapters/opencode.py	ap.add_argument("identity", help="qualified roster identity, e.g. coder@proj-a")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	binary_version	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	env.get("HOME") or os.path.expanduser("~"), ".cache")	keep	HOME	HOME
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	fetch_roster	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	generation.ready.set()	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	hangup.set()	keep	set	set
+comms	packages/comms/src/moxi_comms/adapters/opencode.py	help="a comms config file, in config.toml's format, whose [opencode] "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/opencode.py	help="print the plan for this identity and exit; spawn nothing")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	last=last, wait=self.retry_delay()))	keep	wait	wait
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	main	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	self._wake.set()	keep	set	set
@@ -318,6 +360,15 @@ comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	own = sorted(set(def
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	parse_directors	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	unknown = sorted(set(defaults) - set(entry_keys))	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/roster_rows.py	unknown = sorted(set(section) - set(entry_keys))	keep	set	set
+comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--claude", default="claude", help="the claude binary")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--comm-slot", dest="retired_slot", help=argparse.SUPPRESS)	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--name", help="claim this chosen (or standing) name")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--project", help="override the computed project key")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--scope", help="a project scope, only to keep apart two agents of one "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/session.py	ap.add_argument("--session-id", help="the session id (a UUID) this launch names to "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/session.py	help="declare a director for THIS session (repeatable): messages "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/session.py	help="make the session directory and print the launch line; fork and exec nothing")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/session.py	help="the label Claude Code shows for this session (-n), verbatim: "	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/session.py	main	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/session.py	pairs = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/session.py	tools_endpoint	name	e	exc
@@ -384,6 +435,7 @@ comms	packages/comms/src/moxi_comms/cli.py	_binary_version	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	_device_label	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	_store_rows	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	_waiting_rows	name	e	exc
+comms	packages/comms/src/moxi_comms/cli.py	a = sub.add_parser("agents", help="who you can message")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	cmd_agents	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	cmd_cache	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	cmd_doctor	name	e	exc
@@ -391,14 +443,60 @@ comms	packages/comms/src/moxi_comms/cli.py	cmd_explain	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	cmd_migrate	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	cmd_owner	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	cmd_reserved	name	e	exc
+comms	packages/comms/src/moxi_comms/cli.py	dl = sub.add_parser("remove", help="withdraw a message you sent from every recipient "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	g = sub.add_parser("help", help="explain a comms word (tiers, marks, catch-up)")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	h = sub.add_parser("history", help="an identity's record, with honest attribution")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	h.add_argument("--limit", type=int, default=200)	keep	type	type
+comms	packages/comms/src/moxi_comms/cli.py	help="a comms identity — `name`, or `name@scope`")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="a comms identity — `name`, or `name@scope`. A bare name is "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="a comms name (a bare name is the global identity) or "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="a session id, as the session's harness names it")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="an agent's prompt-cache state (the policy's cache "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="correlate with this message id (rides the machine line as "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="declare that every recipient is a STANDING identity (the "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="declare that every recipient is a STANDING identity; refuse "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="hold the message until the recipient's next turn, or until its "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="leave it out: a reply takes its posture from the message it "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="move comms 0.2's files into comms.db now (the daemon's start "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="one JSON object on stdout: ok and rows, one per address, "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="one JSON object on stdout: ok, session_id, owner, adapter, "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="operator view: also show the mail waiting for each name")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="print the outcome and each recipient's state as one JSON object")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="required on a new message: what you want back. none: no reply "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="say what would move, and write nothing")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="start a Claude Code session with a comms identity "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="start a Codex session with a comms identity, through turns' "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="the recipient has not started yet: send to a name comms has never "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="the word, as you saw it — marks resolve with or without "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="this box's comms: directories, config, backend, "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="this message is not the reply to a single-reply ask you hold "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="which backend to talk to: mock (default: "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="which message to explain. The default is the newest delivery "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="why one message to an identity did or did not land")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	label = LAYOUT.device(create=False)	keep	create	create
 comms	packages/comms/src/moxi_comms/cli.py	main	name	e	exc
 comms	packages/comms/src/moxi_comms/cli.py	msgs = ctx.record.history(room["room_id"], limit=args.limit)	keep	record	record
+comms	packages/comms/src/moxi_comms/cli.py	r = sub.add_parser("reply", help="answer a message")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	r.add_argument("--audience", metavar="NAME",	keep	NAME	NAME
+comms	packages/comms/src/moxi_comms/cli.py	r.add_argument("--cap", metavar="N", help=CAP_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	r.add_argument("--check", action="store_true", help=CHECK_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	r.add_argument("--expires", metavar="DURATION", help=EXPIRES_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	r.add_argument("--interrupt", action="store_true", help=INTERRUPT_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	r.add_argument("--no-cap", dest="no_cap", action="store_true", help=NO_CAP_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	rn = rs_sub.add_parser("renew", help="mint a fresh token for a reserved name into "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	rs = sub.add_parser("reserved", help="the send-only names modules reserve")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	rs_sub = rs.add_subparsers(dest="action", required=True)	keep	required	required
+comms	packages/comms/src/moxi_comms/cli.py	s = sub.add_parser("send", help="message an identity by name")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("--audience", metavar="NAME",	keep	NAME	NAME
+comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("--cap", metavar="N", help=CAP_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("--check", action="store_true", help=CHECK_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("--expires", metavar="DURATION", help=EXPIRES_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("--interrupt", action="store_true", help=INTERRUPT_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("--no-cap", dest="no_cap", action="store_true", help=NO_CAP_HELP)	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("to", help="name, or a comma-separated list (one post, one thread)")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	sub = ap.add_subparsers(dest="verb", required=True)	keep	required	required
+comms	packages/comms/src/moxi_comms/cli.py	w = sub.add_parser("whois", help="read the card an identity wrote about itself")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	wh = sub.add_parser("whoami", help="what comms identity this session holds")	keep	help	help
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient._call	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.attributed_message	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.connect	name	e	exc
@@ -481,12 +579,14 @@ comms	packages/comms/src/moxi_comms/daemon.py	age, ttl = clock.age_seconds, geta
 comms	packages/comms/src/moxi_comms/daemon.py	age, ttl = clock.age_seconds, getattr(clock, "ttl_seconds", None)	use	clock.age_seconds	clock.age_s
 comms	packages/comms/src/moxi_comms/daemon.py	answer.update(cache_kind=clock.kind, age_seconds=clock.age_seconds,	use	age_seconds=	age_s=
 comms	packages/comms/src/moxi_comms/daemon.py	answer.update(cache_kind=clock.kind, age_seconds=clock.age_seconds,	use	clock.age_seconds	clock.age_s
+comms	packages/comms/src/moxi_comms/daemon.py	ap.add_argument("--backend-store", help="JSON store of the mock record")	keep	help	help
 comms	packages/comms/src/moxi_comms/daemon.py	b.qualified, ", ".join(sorted(asked - set(mine), key=_as_id)))	keep	set	set
 comms	packages/comms/src/moxi_comms/daemon.py	back -= set(ids)	keep	set	set
 comms	packages/comms/src/moxi_comms/daemon.py	back = set(released) | {mid for mid in b.delivered if mid not in b.handled}	keep	set	set
 comms	packages/comms/src/moxi_comms/daemon.py	cache_reason=clock.reason, cache_ttl=clock.ttl_seconds,	use	clock.ttl_seconds	clock.ttl_s
 comms	packages/comms/src/moxi_comms/daemon.py	event = self._sub.next_event(timeout=0.2)	keep	timeout	timeout
 comms	packages/comms/src/moxi_comms/daemon.py	f"{self.record.max_content_length}-character cap on one message",	keep	record	record
+comms	packages/comms/src/moxi_comms/daemon.py	help="which backend to hold: local or mock; default: "	keep	help	help
 comms	packages/comms/src/moxi_comms/daemon.py	if len(content) > self.record.max_content_length:	keep	record	record
 comms	packages/comms/src/moxi_comms/daemon.py	if not self.record.operator_token_ok(token if isinstance(token, str)	keep	record	record
 comms	packages/comms/src/moxi_comms/daemon.py	known = seen | set(waiting)	keep	set	set
@@ -568,7 +668,16 @@ comms	packages/comms/src/moxi_comms/owed.py	tail.append(TOOLS_FALLBACK.format(id
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_Feed._poll	name	err	exc
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/pagehandlers.py	gather	name	err	exc
+comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--backend-store", help="JSON store, mock backend only")	keep	help	help
+comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--db", help="comms.db path (default: STATE/comms/comms.db)")	keep	help	help
+comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--operator-id", help="the operator's user id")	keep	help	help
+comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--slots", dest="retired_slots", help=argparse.SUPPRESS)	keep	help	help
+comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--store", help=f"token store directory, local backend only (default: "	keep	help	help
+comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--writer", default="provisioner", help="the declared directory writer")	keep	help	help
 comms	packages/comms/src/moxi_comms/provision.py	first_start.run	name	e	exc
+comms	packages/comms/src/moxi_comms/provision.py	help="declare a standing identity (repeatable)")	keep	help	help
+comms	packages/comms/src/moxi_comms/provision.py	help="local or mock; default: MOXI_COMMS_BACKEND, then the "	keep	help	help
+comms	packages/comms/src/moxi_comms/provision.py	help="the operator's identity name (default: [provision] operator)")	keep	help	help
 comms	packages/comms/src/moxi_comms/provision.py	main	name	e	exc
 comms	packages/comms/src/moxi_comms/provision.py	record=getattr(record, "path", "the record")))	keep	record	record
 comms	packages/comms/src/moxi_comms/provision.py	setup	name	e	exc
@@ -637,6 +746,7 @@ comms	packages/comms/src/moxi_comms/sending.py	parent = ctx.record.get_message(c
 comms	packages/comms/src/moxi_comms/sending.py	record=ctx.record,	keep	record	record
 comms	packages/comms/src/moxi_comms/sending.py	referent = ctx.record.get_message(str(reply_to))	keep	record	record
 comms	packages/comms/src/moxi_comms/sending.py	replies=lambda a=ask_id: ctx.record.history(	keep	record	record
+comms	packages/comms/src/moxi_comms/sending.py	return _OK, client.delete(who, token, mid, user=user)	keep	user	user
 comms	packages/comms/src/moxi_comms/sending.py	return max(0, math.floor(t_ask - state.age_seconds + state.ttl_seconds))	use	state.age_seconds	state.age_s
 comms	packages/comms/src/moxi_comms/sending.py	return max(0, math.floor(t_ask - state.age_seconds + state.ttl_seconds))	use	state.ttl_seconds	state.ttl_s
 comms	packages/comms/src/moxi_comms/sending.py	return self._client.connect()	keep	_client	_client
@@ -1277,6 +1387,7 @@ comms	packages/comms/tests/test_operator_lane.py	code, out = rig.send(MAIN_Q, "m
 comms	packages/comms/tests/test_operator_lane.py	long_text = "x" * (rig.record.max_content_length + 500)	keep	record	record
 comms	packages/comms/tests/test_operator_lane.py	posted = rig.record.history(rig.names_channel)	keep	record	record
 comms	packages/comms/tests/test_operator_lane.py	return rig.record.history(rig.names_channel)[-1]	keep	record	record
+comms	packages/comms/tests/test_operator_lane.py	user=rig.prov.operator_user_id)	keep	user	user
 comms	packages/comms/tests/test_owner.py	-	name	test_an_unreadable_claim_directory_leaves_only_the_directors_empty	test_an_unreadable_claim_dir_leaves_only_the_directors_empty
 comms	packages/comms/tests/test_owner.py	{q: (b.session_id, b.turned, set(b.delivered))	keep	set	set
 comms	packages/comms/tests/test_page.py	assert asked == [{"deadline": 2.0}] and pagehandlers.DEADLINE == 2.0	use	"deadline"	"timeout_s"
@@ -1552,8 +1663,20 @@ connector	packages/connector/src/moxi_connector/calllog.py	`directory` defaults 
 connector	packages/connector/src/moxi_connector/calllog.py	log_.write({"at": now(), "kind": kind, **fields}, durable=True, collapse=None)	keep	durable	durable
 connector	packages/connector/src/moxi_connector/checks.py	return client.call(method, params, timeout=wait)	use	timeout=	timeout_s=
 connector	packages/connector/src/moxi_connector/cli.py	durable=True, collapse=None)	keep	durable	durable
+connector	packages/connector/src/moxi_connector/cli.py	p = verbs.add_parser("check", help="probe the public address through the edge",	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	p = verbs.add_parser("code", help="a one-time sign-in code, for a sign-in you started",	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	p = verbs.add_parser("grants", help="the sign-ins the connector keeps",	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	p = verbs.add_parser("log", help="the call log",	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	p = verbs.add_parser("revoke", help="revoke a grant, or every grant",	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	p = verbs.add_parser("status", help="the address, the process, the providers",	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	p.add_argument("--all", action="store_true", help="every grant, and every client")	keep	help	help
 connector	packages/connector/src/moxi_connector/cli.py	p.add_argument("--days", type=int, default=1, metavar="N",	keep	type	type
+connector	packages/connector/src/moxi_connector/cli.py	p.add_argument("--json", action="store_true", help="one JSON object per line")	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	p.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
 connector	packages/connector/src/moxi_connector/cli.py	p.add_argument("--label", metavar="NAME",	keep	NAME	NAME
+connector	packages/connector/src/moxi_connector/cli.py	p.add_argument("id", nargs="?", help="the grant's id, from moxi connector grants")	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	verbs.add_parser("disable", help="revoke every grant and turn the connector off",	keep	help	help
+connector	packages/connector/src/moxi_connector/cli.py	verbs.add_parser("enable", help="turn the connector on",	keep	help	help
 connector	packages/connector/src/moxi_connector/daemon.py	loop.add_signal_handler(sig, stopping.set)	keep	set	set
 connector	packages/connector/src/moxi_connector/daemon.py	signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stopping.set))	keep	set	set
 connector	packages/connector/src/moxi_connector/listen.py	three `LISTEN_*` variables are removed from `environ` either way, so no process the	keep	environ	environ
@@ -1632,23 +1755,73 @@ launcher	packages/launcher/src/moxi_launcher/catalog.py	or set(modes) - set(MODE
 launcher	packages/launcher/src/moxi_launcher/catalog.py	parser.add_argument(row_.option, action="append", type=convert,	keep	type	type
 launcher	packages/launcher/src/moxi_launcher/catalog.py	parser.add_argument(row_.option, nargs="+", action="extend", type=convert,	keep	type	type
 launcher	packages/launcher/src/moxi_launcher/catalog.py	parser.add_argument(row_.option, type=convert, choices=choices,	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/catalog.py	retired=row_.retired, help=argparse.SUPPRESS)	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/catalog.py	seen_modes: set = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	taken: set = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	unknown = sorted(set(meta) - {"harness", "checked", "help"})	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	unknown = sorted(set(spec) - set(FIELDS))	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	values[name] = found.check(value) if found is not None else value	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/cli.py	"exit-session", help="exit a launched session", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"keep-warm", help="open, release or list this session's holds", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"relaunch", help="relaunch a session in its slot", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"resume", help="launch a past session again, resumed", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	"show", help="show a launched session's state", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	catalog = verbs.add_parser("catalog", help="list the flag rows this install offers",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	catalog.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	deliver = verbs.add_parser("deliver", help="internal: send a launch's first turn",	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	deliver.add_argument("--pid", type=int, required=True, metavar="PID",	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	deliver.add_argument("request_id", metavar="REQUEST_ID", help="the launch's request id")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	exit_session.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	exit_session.add_argument("session_id", metavar="SESSION_ID", help="the session to exit")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	folder, launch = read.folder, read.launch	keep	folder	folder
+launcher	packages/launcher/src/moxi_launcher/cli.py	form.add_argument("--status", metavar="RUN", help="show the run RUN and its events")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	handoff = verbs.add_parser("handoff", help="print this session's handoff folder",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	handoff.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	handoff.add_argument("what", choices=("dir",), help="dir")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	handoffs = verbs.add_parser("handoffs", help="list a key's handoffs",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	handoffs.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="allow a permission row that differs from your default")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="arm a relaunch of the session this runs in")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="launch again the session the run RUN exited")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="leave the catalog row ROW out of this launch, whatever "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="list (the default), show NAME, or check")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="list launches made before TIME (UTC ISO 8601)")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="list only this harness's rows")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="list the project's agents and the seat matching each")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="list this key's handoffs, in the folder of its newest launch")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="list those before TIME (UTC ISO 8601)")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="print one JSON object per line")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="take the checks and the quiet read; exit nothing")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="take the checks and write nothing")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="the session to relaunch as its director: its session id or "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="the session; this one when left out")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="the table to list: launches (the default), runs, exits or holds")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	help="with --self: the handoff the new session gets first")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	key, folder, launch = here.key, here.folder, None	keep	folder	folder
+launcher	packages/launcher/src/moxi_launcher/cli.py	listed = actions.add_parser("holds", help="list the open holds", allow_abbrev=False,	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	listed.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	listing = verbs.add_parser(name, help=f"list {what}", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	listing.add_argument("--limit", type=int, metavar="N", help="list at most N")	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	log = verbs.add_parser("log", help="list launches, newest first",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	log.add_argument("--json", action="store_true", help="print one JSON object per line")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	log.add_argument("--limit", type=int, metavar="N", help="list at most N launches")	keep	type	type
+launcher	packages/launcher/src/moxi_launcher/cli.py	one = actions.add_parser(action, help=what, allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	one.add_argument("name", metavar="NAME", help="the hold's name: the work it stands for")	keep	NAME	NAME
 launcher	packages/launcher/src/moxi_launcher/cli.py	preset.add_argument("--project-preset", metavar="NAME",	keep	NAME	NAME
 launcher	packages/launcher/src/moxi_launcher/cli.py	preset.add_argument("--seat", metavar="NAME", help="launch the seat NAME")	keep	NAME	NAME
+launcher	packages/launcher/src/moxi_launcher/cli.py	presets = verbs.add_parser("presets", help="list, show or check the presets",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	presets.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	presets.add_argument("name", nargs="?", metavar="NAME",	keep	NAME	NAME
+launcher	packages/launcher/src/moxi_launcher/cli.py	preview = verbs.add_parser("preview", help="print what a launch would run",	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	preview.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	print(_dump({"key": here.key, "folder": str(here.folder),	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	print(here.folder)	keep	folder	folder
+launcher	packages/launcher/src/moxi_launcher/cli.py	relaunch.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	resume.add_argument("--slot", metavar="N", help="resume it in slot N instead")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	resume.add_argument("session_id", metavar="SESSION_ID", help="the session to resume")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run", help="launch a session", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
+launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	`environ` is the caller's environment; `child_environ` the one the child's is built	keep	environ	environ
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	from, which turns' launch additions are asked with (default `environ`; a replay's	keep	environ	environ
@@ -1677,6 +1850,8 @@ launcher	packages/launcher/src/moxi_launcher/handoffs.py	return handoffs_dir(str
 launcher	packages/launcher/src/moxi_launcher/job.py	answer = api.answer_screen(slot, screen, wait=0)	use	wait=	wait_s=
 launcher	packages/launcher/src/moxi_launcher/job.py	elif set(reading.words) <= {"person"}:	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/job.py	ended = api.wait_ended(slot, pane_id=pane, timeout=1)	use	timeout=	timeout_s=
+launcher	packages/launcher/src/moxi_launcher/job.py	help="the run's id; for expiry and keep-warm, the session's id; "	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/job.py	parser.add_argument("kind", choices=KINDS, help="the run's kind")	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	dropped |= set(newly)	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	dropped: set[str] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	named: set[str] = set()	keep	set	set
@@ -1861,8 +2036,27 @@ launcher	packages/launcher/tests/test_store.py	assert set(rows[0]) == set(store.
 launcher	packages/launcher/tests/test_store_v2.py	assert row.as_json()["base_env_json"] == {"HOME": "/users/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_store_v2.py	assert row.base_env == {"HOME": "/users/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_store_v2.py	for order in set(itertools.permutations(writes)):	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/adoption.py	at_its_folder	name	folder	harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	folder = None if row is None else row.folder(placed.kind)	use	row.folder	row.harness_dir
+loadout	packages/loadout/src/moxi_loadout/adoption.py	take	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/cli.py	_parser	name	help	verb_help
+loadout	packages/loadout/src/moxi_loadout/cli.py	changed = write(ident, user=args.user, project=args.project)	keep	user	user
+loadout	packages/loadout/src/moxi_loadout/cli.py	group.add_argument("--user", action="store_true", help="the user section")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	help="move what is in the way aside and place over it: a path, or "	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	help="project section P (a path or a key)")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	help="project section P (a path or a key); may repeat")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	mode = parts.add_parser("mode", help="set the global mode, then install it")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	p = verbs.add_parser("global", help="the global instruction file",	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("--dry-run", action="store_true", help="plan and print, change nothing")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("--user", action="store_true", help="the user section only")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("ident", metavar="ID", help="<kind>:<name>@<harness>, harness * "	keep	help	help
 loadout	packages/loadout/src/moxi_loadout/cli.py	p.add_argument("name", metavar="NAME")	keep	NAME	NAME
+loadout	packages/loadout/src/moxi_loadout/cli.py	parts.add_parser("remove", help="take loadout's part out of every global file")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	show = parts.add_parser("show", help="what the next install makes of each global file")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	show.add_argument("--diff", action="store_true", help="print it as a diff")	keep	help	help
+loadout	packages/loadout/src/moxi_loadout/cli.py	sub.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
 loadout	packages/loadout/src/moxi_loadout/convert.py	allowed = set(_tools(fields.pop("tools")))	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/convert.py	covered = set(_WRITES)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/convert.py	covered: set[str] = set()	keep	set	set
@@ -1872,6 +2066,10 @@ loadout	packages/loadout/src/moxi_loadout/doctor.py	skills.setdefault(name.parti
 loadout	packages/loadout/src/moxi_loadout/doctor.py	skills.setdefault(r["module"], set()).add(str(r.get("item")))	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/entries.py	"""Whether the MCP server `record` names is in its file now; None when the file	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/entries.py	(a.entry.kind if a.entry else a.record.get("kind")) in ("global-block", "rules",	keep	record	record
+loadout	packages/loadout/src/moxi_loadout/entries.py	_build	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/entries.py	_gone	kwonly	claimed	claimed
+loadout	packages/loadout/src/moxi_loadout/entries.py	_mcp	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/entries.py	_one	kwonly	claimed	claimed
 loadout	packages/loadout/src/moxi_loadout/entries.py	by_file.setdefault(a.entry.file if a.entry else a.record.get("file"), []).append(a)	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/entries.py	carried: set = set()	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/entries.py	e, r = a.entry, a.record	keep	record	record
@@ -1879,66 +2077,174 @@ loadout	packages/loadout/src/moxi_loadout/entries.py	file = a.entry.file if a.en
 loadout	packages/loadout/src/moxi_loadout/entries.py	harness = first.entry.harness if first.entry else first.record.get("harness")	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/entries.py	if (a.where.kind if a.entry else a.record.get("kind")) == "mcp" \	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/entries.py	kind = a.entry.kind if a.entry else a.record.get("kind")	keep	record	record
+loadout	packages/loadout/src/moxi_loadout/entries.py	plan	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/entries.py	unknown = sorted(set(native) - {"rules"})	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/entries.py	used: set[int] = set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/entries.py	wanted	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/entries.py	| ({"environment": env} if env else {}))	keep	environment	environment
-loadout	packages/loadout/src/moxi_loadout/gitpiece.py	"""Whether `root` is the top of the work tree that holds `folder`."""	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/gitpiece.py	"""Whether `root` is the top of the work tree that holds `folder`."""	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/gitpiece.py	_holds	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/gitpiece.py	_holds	name	real_folder	real_loadout_dir
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	done = link.git(folder, "rev-parse", "--show-toplevel", timeout=GIT_SECONDS)	use	timeout=	timeout_s=
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	done = link.git(root, "hash-object", "-t", "tree", "--stdin", input=b"",	use	input=	stdin_data=
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	done = link.git(root, "rev-parse", "--short", "HEAD", timeout=GIT_SECONDS)	use	timeout=	timeout_s=
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	if not link.changes(ctx.root, range=span, paths=paths, timeout=GIT_SECONDS):	use	range=	rev_range=
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	if not link.changes(ctx.root, range=span, paths=paths, timeout=GIT_SECONDS):	use	timeout=	timeout_s=
+loadout	packages/loadout/src/moxi_loadout/gitpiece.py	run	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	timeout=GIT_SECONDS)	use	timeout=	timeout_s=
+loadout	packages/loadout/src/moxi_loadout/harness.py	-	name	_environ	_env
+loadout	packages/loadout/src/moxi_loadout/harness.py	backup	name	folder	backup_dir
 loadout	packages/loadout/src/moxi_loadout/harness_row.py	__all__ = ["NAME", "KIND", "ITEM", "KEY", "wanted", "record_of", "present", "add",	keep	NAME	NAME
 loadout	packages/loadout/src/moxi_loadout/homes.py	(`moxi.place.folders`);	use	moxi.place.folders`	moxi.place.harness_dirs`
 loadout	packages/loadout/src/moxi_loadout/homes.py	-	name	MARKER	CALLER_ENV
 loadout	packages/loadout/src/moxi_loadout/homes.py	return api.check(places(reads=reads()), programs=PROGRAMS, page=page)	use	page=	for_page=
 loadout	packages/loadout/src/moxi_loadout/homes.py	return api.check(places(reads=reads(argv)), programs=PROGRAMS, page=True)	use	page=	for_page=
 loadout	packages/loadout/src/moxi_loadout/homes.py	token = _page.set(True)	keep	set	set
-loadout	packages/loadout/src/moxi_loadout/ignores.py	"""Bring each of loadout's ignore files in `folders` (every recorded one when None)	keep	folders	folders
-loadout	packages/loadout/src/moxi_loadout/ignores.py	"""The top of the work tree holding `folder` (or its nearest existing ancestor),	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/ignores.py	"""Write loadout's ignore file in `folder` for `names`, and record it in `data`.	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/ignores.py	`needs` (loadout's ignore file in `folder` covers it once written), `would-commit`	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/ignores.py	"""Bring each of loadout's ignore files in `folders` (every recorded one when None)	use	folders	target_dirs
+loadout	packages/loadout/src/moxi_loadout/ignores.py	"""The top of the work tree holding `folder` (or its nearest existing ancestor),	use	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	"""Write loadout's ignore file in `folder` for `names`, and record it in `data`.	use	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	Git.run	name	input	stdin_data
+loadout	packages/loadout/src/moxi_loadout/ignores.py	Git.toplevel	name	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	Verdict	name	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	_existing	name	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	_relative	name	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	_uncovered	name	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	`needs` (loadout's ignore file in `folder` covers it once written), `would-commit`	use	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	check	name	folder	target_dir
 loadout	packages/loadout/src/moxi_loadout/ignores.py	drop = set(LOCAL_VARS) | set(PATHSPEC_VARS)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/ignores.py	drop |= set(done.stdout.decode("utf-8", "replace").split())	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/ignores.py	names.setdefault(os.path.dirname(str(p.path)), set()).add(p.path.name)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/ignores.py	now = names.get(folder, set())	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/ignores.py	now = names.get(folder, set())	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/ignores.py	now = names.get(target_dir, set())	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/ignores.py	return set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/ignores.py	settle	name	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/ignores.py	settle	name	folders	target_dirs
+loadout	packages/loadout/src/moxi_loadout/ignores.py	write	name	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/install.py	_cover	name	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/install.py	_install	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/install.py	_install	name	folders	touched_dirs
+loadout	packages/loadout/src/moxi_loadout/install.py	_plan	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	f"{os.path.join(v.folder, ignores.IGNORE)}")	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/install.py	f"{os.path.join(v.folder, ignores.IGNORE)}")	use	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/install.py	global_preview	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	have.setdefault(os.path.dirname(str(p.path)), set()).add(p.path.name)	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/install.py	install	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	names = have.get(folder, set()) | {os.path.basename(t) for t in targets}	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/install.py	names = have.get(folder, set()) | {os.path.basename(t) for t in targets}	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/install.py	names = have.get(target_dir, set()) | {os.path.basename(t) for t in targets}	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/install.py	needs.setdefault(v.folder, []).append(target)	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/install.py	needs.setdefault(v.folder, []).append(target)	use	folder	target_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	record = plan.record(step)	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/install.py	replaced: set[int] = set()   # the seeded wants `--replace` places over an occupant	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/install.py	return {v.folder for v in verdicts.values()}	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/install.py	return {v.folder for v in verdicts.values()}	use	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/install.py	status	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	stopped: set[str] = set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/listing.py	-	name	_FOLDERS	_KIND_DIRS
+loadout	packages/loadout/src/moxi_loadout/listing.py	entries	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/listing.py	mine = found.folder / _FOLDERS[kind] / filename	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/manifest.py	"""The manifest in `folder` (the configured loadout folder when None), read and	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/manifest.py	`ManifestError`, and `moxi.config.ConfigError` when `folder` is None and loadout's	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/manifest.py	`path` is the file and `folder` the loadout folder; `exists` is False when there is	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/listing.py	mine = found.folder / _FOLDERS[kind] / filename	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/listing.py	mine = found.folder / _KIND_DIRS[kind] / filename	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	"""The manifest in `folder` (the configured loadout folder when None), read and	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	Manifest	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	_Reader.__init__	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	`ManifestError`, and `moxi.config.ConfigError` when `folder` is None and loadout's	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	`path` is the file and `folder` the loadout folder; `exists` is False when there is	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	empty	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	expand	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	expand_command	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	item_source	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	load	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/manifest.py	return Manifest(path=self.path, folder=self.folder, exists=True, mode=mode,	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/manifest.py	return mode, item_source({"source": given}, self.folder)	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/manifest.py	root = section_root(name, self.folder) if where == "path" else None	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/manifest.py	self.folder = path.parent	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/manifest.py	the loadout folder `folder`, normalized (links are not resolved)."""	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/manifest.py	return Manifest(path=self.path, folder=self.folder, exists=True, mode=mode,	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	return Manifest(path=self.path, loadout_dir=self.folder, exists=True, mode=mode,	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	return mode, item_source({"source": given}, self.folder)	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	root = section_root(name, self.folder) if where == "path" else None	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	section_root	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	self.folder = path.parent	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	the loadout folder `folder`, normalized (links are not resolved)."""	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/page.py	_SECTION = lb.Field("string", required=False, max=PATH_MAX)	keep	required	required
 loadout	packages/loadout/src/moxi_loadout/page.py	_SECTIONS = lb.Field("list", required=False, max=LIST_MAX,	keep	required	required
 loadout	packages/loadout/src/moxi_loadout/page.py	_USER = lb.Field("bool", required=False)	keep	required	required
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	"""The line a read gives for `err`: the verb's own words for a manifest, ledger or	use	err	exc
 loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	_logged: set[type] = set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	_section	name	err	exc
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	_start	name	err	exc
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	_toggle	name	err	exc
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	drift	name	err	exc
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	global_preview	name	err	exc
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	listing	name	err	exc
 loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	preview = install.global_preview(git_seconds=doctor.PLACE_GIT_SECONDS)	keep	git_seconds	git_seconds
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	projects	name	err	exc
 loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	return install.status(git=_git(), git_seconds=doctor.PLACE_GIT_SECONDS)	keep	git_seconds	git_seconds
+loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	status	name	err	exc
+loadout	packages/loadout/src/moxi_loadout/pagejob.py	prune	name	folder	records_dir
+loadout	packages/loadout/src/moxi_loadout/planner.py	-	name	_FOLDERS	_KIND_DIRS
+loadout	packages/loadout/src/moxi_loadout/planner.py	Plan	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/planner.py	_carry	name	folder	project_dir
+loadout	packages/loadout/src/moxi_loadout/planner.py	_copied_by_loadout	name	f	fh
+loadout	packages/loadout/src/moxi_loadout/planner.py	_generate	name	folder	generated_dir
+loadout	packages/loadout/src/moxi_loadout/planner.py	_module_want	name	folder	skills_dir
+loadout	packages/loadout/src/moxi_loadout/planner.py	_want	name	folder	project_dir
+loadout	packages/loadout/src/moxi_loadout/planner.py	claude = machine.project_folders.get("claude", {}).get(_FOLDERS[kind])	use	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/planner.py	claude = machine.project_folders.get("claude", {}).get(_KIND_DIRS[kind])	use	project_folders	project_dirs
 loadout	packages/loadout/src/moxi_loadout/planner.py	codes = set(codes)	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/planner.py	folder = machine.project_folders.get(harness, {}).get(_FOLDERS[kind])	use	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/planner.py	folder = machine.project_folders.get(want.harness, {}).get(_FOLDERS[want.kind])	use	project_folders	project_dirs
 loadout	packages/loadout/src/moxi_loadout/planner.py	mine = plan.folder / _FOLDERS[kind] / filename	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/planner.py	mine = plan.folder / _FOLDERS[kind] / filename	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/planner.py	mine = plan.folder / _KIND_DIRS[kind] / filename	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/planner.py	out = set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/planner.py	project_dir = machine.project_folders.get(harness, {}).get(_KIND_DIRS[kind])	use	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/planner.py	project_dir = machine.project_folders.get(want.harness, {}).get(_KIND_DIRS[want.kind])	use	project_folders	project_dirs
 loadout	packages/loadout/src/moxi_loadout/planner.py	record = plan.record(step) or {}	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/planner.py	return ({USER} if self.user else set()) | set(self.projects)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/planner.py	user_skills = set(manifest.user.names("skill"))	keep	set	set
-loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Register the pieces in the work tree holding `folder` while `on`, or remove them	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Whether `folder` is an existing folder inside a git work tree: it, or a folder	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""loadout's pieces registered in the repo holding `folder`, by id, each as repo's	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/settings.py	"""`folder` when it is a relative folder that stays inside a project, else	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/setup.py	"""Write the example manifest into `folder` when the folder is missing or empty.	keep	folder	folder
-loadout	packages/loadout/src/moxi_loadout/setup.py	`folder` has no `[global] mode`. Returns the mode written, or None when nothing was	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Register the pieces in the work tree holding `folder` while `on`, or remove them	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Whether `folder` is an existing folder inside a git work tree: it, or a folder	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""loadout's pieces registered in the repo holding `folder`, by id, each as repo's	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	_verb	kwonly	on	on
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	in_work_tree	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	registered	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	state	kwonly	on	on
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	state	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	sync	kwonly	on	on
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	sync	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/settings.py	"""The schema's default `read_project_dirs`, a fresh copy."""	use	read_project_dirs	project_folders
+loadout	packages/loadout/src/moxi_loadout/settings.py	"""`folder` when it is a relative folder that stays inside a project, else	use	folder	project_dir
+loadout	packages/loadout/src/moxi_loadout/settings.py	"""`value`, the file's `read_project_dirs`, merged over the default and checked, or	use	read_project_dirs	project_folders
+loadout	packages/loadout/src/moxi_loadout/settings.py	"project_folders")	use	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	(`read_project_dirs`). Every user choice of what goes where is in the manifest instead	use	read_project_dirs	project_folders
+loadout	packages/loadout/src/moxi_loadout/settings.py	-	name	FOLDER_KINDS	DIR_KINDS
+loadout	packages/loadout/src/moxi_loadout/settings.py	-	name	PROJECT_FOLDERS	PROJECT_DIRS
+loadout	packages/loadout/src/moxi_loadout/settings.py	-	name	default_folders	default_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	-	name	project_dirs	read_project_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	-	name	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	-	name	relative_folder	relative_dir
+loadout	packages/loadout/src/moxi_loadout/settings.py	Machine.__init__	name	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	PROJECT_DIRS = "project_folders"	keep	project_folders	project_folders
+loadout	packages/loadout/src/moxi_loadout/settings.py	PROJECT_FOLDERS = "project_folders"	keep	project_folders	project_folders
+loadout	packages/loadout/src/moxi_loadout/settings.py	`read_project_dirs` entry is a table of `skills` and `agents`, each a relative folder that	use	read_project_dirs	project_folders
+loadout	packages/loadout/src/moxi_loadout/settings.py	`read_project_dirs` maps each harness to `{"skills": rel, "agents": rel}`, the default	use	read_project_dirs	project_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	default folder in loadout's data directory when the key is empty), and `read_project_dirs`	use	read_project_dirs	project_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	project_folders	name	folder	project_dir
+loadout	packages/loadout/src/moxi_loadout/settings.py	relative_folder	name	folder	project_dir
+loadout	packages/loadout/src/moxi_loadout/settings.py	self.project_folders = project_dirs(settings[PROJECT_DIRS], settings.file)	use	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	self.project_folders = project_folders(settings[PROJECT_FOLDERS], settings.file)	use	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/settings.py	self.project_folders = read_project_dirs(settings[PROJECT_DIRS], settings.file)	use	project_folders	project_dirs
+loadout	packages/loadout/src/moxi_loadout/setup.py	"""Write the example manifest into `folder` when the folder is missing or empty.	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/setup.py	-	name	EXAMPLE_FOLDERS	EXAMPLE_DIRS
+loadout	packages/loadout/src/moxi_loadout/setup.py	_empty	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/setup.py	`folder` has no `[global] mode`. Returns the mode written, or None when nothing was	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/setup.py	ask_mode	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/setup.py	setup	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/setup.py	write_example	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/stores.py	harness_lock	name	folder	lock_dir
+loadout	packages/loadout/src/moxi_loadout/teardown.py	-	name	_folders	_loadout_dirs
+loadout	packages/loadout/src/moxi_loadout/teardown.py	_plan	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/teardown.py	_runs_from	name	folders	loadout_dirs
+loadout	packages/loadout/src/moxi_loadout/teardown.py	_teardown	name	folders	loadout_dirs
 loadout	packages/loadout/src/moxi_loadout/teardown.py	and a.reason.startswith("no ") and entries.mcp_there(a.record) is False:	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/teardown.py	elif a.op == "end" and a.record.get("prior") and _runs_from(a.record, folders):	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/teardown.py	f"there before loadout; it {how} {_runs_from(a.record, folders)}")	keep	record	record
@@ -1949,42 +2255,151 @@ loadout	packages/loadout/src/moxi_loadout/teardown.py	if a.op != "stand" or not 
 loadout	packages/loadout/src/moxi_loadout/teardown.py	if a.op == "stand" and a.record is not None and a.record.get("kind") == "mcp" \	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/teardown.py	r = a.record	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/teardown.py	say(f"loadout: {_label(a.record)} stays in {a.record.get('file')}, as it was "	keep	record	record
-loadout	packages/loadout/src/moxi_loadout/writes.py	"""Run `change(doc, manifest)` in one `edit_toml` block on the manifest in `folder`	keep	folder	folder
+loadout	packages/loadout/src/moxi_loadout/writes.py	"""Run `change(doc, manifest)` in one `edit_toml` block on the manifest in `folder`	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	-	name	_make_folder	_make_loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	_make_folder	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	_sections	kwonly	user	user
+loadout	packages/loadout/src/moxi_loadout/writes.py	add	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	adopt	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	disable	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	edit	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	enable	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	remove	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/writes.py	set_mode	name	folder	loadout_dir
+loadout	packages/loadout/tests/conftest.py	-	name	folder	loadout_dir
 loadout	packages/loadout/tests/conftest.py	HARNESS_HOMES = ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME")	keep	HOME	HOME
 loadout	packages/loadout/tests/conftest.py	The kit (`moxi_dev.testing`) already points `HOME`, `MOXI_HOME`, every `MOXI_<MODULE>_HOME`,	keep	HOME	HOME
 loadout	packages/loadout/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
-loadout	packages/loadout/tests/loadout_kit.py	"""Make `folder` the configured loadout folder; return it."""	keep	folder	folder
+loadout	packages/loadout/tests/loadout_kit.py	"""Make `folder` the configured loadout folder; return it."""	use	folder	loadout_dir
+loadout	packages/loadout/tests/loadout_kit.py	configure	name	folder	loadout_dir
+loadout	packages/loadout/tests/loadout_kit.py	manifest	name	folder	loadout_dir
 loadout	packages/loadout/tests/loadout_kit.py	return Path(os.environ["HOME"]) / ".agents" / "skills"	keep	HOME	HOME
+loadout	packages/loadout/tests/loadout_kit.py	skill	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	-	name	test_a_placement_whose_harness_row_is_gone_is_not_at_its_folder	test_a_placement_whose_harness_row_is_gone_is_not_at_its_harness_dir
+loadout	packages/loadout/tests/test_adoption.py	demo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_a_failed_hand_over_undoes_the_placement	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_a_failed_undo_names_the_target	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_a_module_skill_whose_module_is_absent_reads_off	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_a_module_skill_whose_module_is_broken_reads_broken	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_a_modules_own_placement_is_taken_over_unseeded	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_a_skill_the_manifest_lists_is_placed_as_the_module_and_seeded	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_disable_then_enable_an_adopted_skill	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_replace_on_a_module_skill_places_it_as_the_module_seeded	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_take_leaves_a_placement_the_module_made_with_dest	name	at_folder	at_harness_dir
+loadout	packages/loadout/tests/test_adoption.py	test_take_leaves_a_placement_the_module_made_with_dest	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_take_lists_every_module_placement_in_one_write	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_the_modules_add_refused_adopts_nothing	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_adoption.py	test_the_users_own_skill_wins_its_name_over_a_module_skill	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_drift.py	-	name	folder	loadout_dir_fixture
 loadout	packages/loadout/tests/test_browser_drift.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_drift.py	found = Path(ui_shell.env["HOME"]) / "my-loadout"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_drift.py	home = Path(ui_shell.env["HOME"]).resolve()	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_drift.py	moxi(ui_shell, "config", "set", "loadout", "source", str(found))	keep	set	set
+loadout	packages/loadout/tests/test_browser_drift.py	skill	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_drift.py	test_a_manifest_that_cant_be_read_shows_its_line_and_no_count	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_drift.py	test_the_block_and_the_page_fit_a_phone	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_drift.py	test_the_blocks_link_on_the_modules_view_opens_the_page_which_it_then_marks	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_drift.py	test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_drift.py	test_the_drift_block_keeps_the_contract	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_drift.py	test_the_page_keeps_the_contract_and_holds_the_drift_block	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_page.py	-	name	folder	loadout_dir_fixture
+loadout	packages/loadout/tests/test_browser_page.py	-	name	make_folder	make_loadout_dir
 loadout	packages/loadout/tests/test_browser_page.py	assert (Path(shell.env["HOME"]) / "my-loadout" / "loadout.toml").read_text() == BASE	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	assert not (Path(shell.env["HOME"]) / ".claude" / "skills").exists()	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	claude_md = Path(shell.env["HOME"]) / ".claude" / "CLAUDE.md"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_page.py	every_control	kwonly	enabled	enabled
 loadout	packages/loadout/tests/test_browser_page.py	expect(job).to_have_attribute("data-state", "done", timeout=30_000)	keep	timeout	timeout
+loadout	packages/loadout/tests/test_browser_page.py	folder = Path(shell.env["HOME"]) / "my-loadout"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	folder = Path(shell.env["HOME"]) / "my-loadout"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	home = Path(shell.env["HOME"])	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	home = Path(shell.env["HOME"]).resolve()	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	home = Path(ui_shell.env["HOME"])	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_page.py	installed	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_page.py	loadout_dir = Path(shell.env["HOME"]) / "my-loadout"	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_page.py	make_folder	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_browser_page.py	moxi(shell, "config", "set", "loadout", "source", str(folder))	keep	set	set
+loadout	packages/loadout/tests/test_browser_page.py	moxi(shell, "config", "set", "loadout", "source", str(folder))	keep	set	set
+loadout	packages/loadout/tests/test_browser_page.py	moxi(shell, "config", "set", "loadout", "source", str(loadout_dir))	keep	set	set
 loadout	packages/loadout/tests/test_browser_page.py	occupant = Path(ui_shell.env["HOME"]) / ".claude" / "skills" / "review-diff"	keep	HOME	HOME
+loadout	packages/loadout/tests/test_browser_page.py	skill	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_page.py	test_a_page_install_whose_path_has_no_git_is_refused_where_the_terminal_refuses	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_page.py	test_replace_over_a_copy_the_projects_git_tracks_says_git_will_show_it_deleted	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_page.py	test_turn_off_goes_through_the_sheet_with_a_new_key_each_time	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_convert_and_cli.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_convert_and_cli.py	test_the_header_reads_ok_until_the_file_is_edited	name	f	fh
+loadout	packages/loadout/tests/test_doctor.py	lo	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_doctor.py	script = os.path.join(os.environ["HOME"], "bin", "guard.sh")	keep	HOME	HOME
 loadout	packages/loadout/tests/test_doctor.py	seen.append(kwargs["timeout"])	use	["timeout"]	["timeout_s"]
+loadout	packages/loadout/tests/test_doctor.py	test_a_generated_file_no_agent_uses_warns	name	f	fh
+loadout	packages/loadout/tests/test_doctor.py	test_a_hook_command_the_shell_runs_does_not_warn	name	f	fh
+loadout	packages/loadout/tests/test_doctor.py	test_no_manifest_yet_is_ok	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_entries.py	assert set(install.status().rows and [r.state for r in install.status().rows]) == {"ok"}	keep	set	set
 loadout	packages/loadout/tests/test_entries.py	assert set(r.state for r in install.status().rows) == {"ok"}	keep	set	set
+loadout	packages/loadout/tests/test_entries.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_entries.py	write	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_global.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_global.py	mode	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_homes.py	"the home folder"} <= set(expected)	keep	set	set
 loadout	packages/loadout/tests/test_homes.py	("XDG_CONFIG_HOME", "OpenCode's home"), ("HOME", "the home folder")])	keep	HOME	HOME
+loadout	packages/loadout/tests/test_homes.py	-	name	test_a_job_reading_a_project_by_key_compares_projects_folders	test_a_job_reading_a_project_by_key_compares_project_dirs
+loadout	packages/loadout/tests/test_homes.py	-	name	test_a_job_refuses_when_a_harness_rows_folder_differs	test_a_job_refuses_when_a_harness_rows_dir_differs
+loadout	packages/loadout/tests/test_homes.py	-	name	test_a_job_refuses_when_only_moxis_own_state_folder_and_settings_file_differ	test_a_job_refuses_when_only_moxis_own_state_dir_and_settings_file_differ
 loadout	packages/loadout/tests/test_homes.py	assert not {"homes", "git"} & set(json.loads(stores.ledger_path().read_text()))	keep	set	set
 loadout	packages/loadout/tests/test_homes.py	assert not {"homes", "git"} & set(ledger.read())	keep	set	set
+loadout	packages/loadout/tests/test_homes.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_homes.py	make	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_homes.py	monkeypatch.setenv("HOME", str(tmp_path / "other-home"))	keep	HOME	HOME
+loadout	packages/loadout/tests/test_homes.py	refused	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_homes.py	test_a_job_refuses_while_only_the_terminal_sets_moxi_home_and_runs_once_the_shell_does	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_homes.py	test_setup_and_install_leave_the_ledger_without_homes_or_git	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_install.py	-	name	test_a_moved_folder_updates_its_links	test_a_moved_loadout_dir_updates_its_links
+loadout	packages/loadout/tests/test_install.py	-	name	test_a_project_item_from_the_folder_copied_is_not_the_projects_own	test_a_project_item_from_the_loadout_dir_is_not_the_projects_own
 loadout	packages/loadout/tests/test_install.py	assert after.code == 0 and set(states(after).values()) == {"ok"}	keep	set	set
 loadout	packages/loadout/tests/test_install.py	assert set(states(before).values()) == {"missing"}	keep	set	set
 loadout	packages/loadout/tests/test_install.py	assert set(states(install.status()).values()) == {"ok"}	keep	set	set
 loadout	packages/loadout/tests/test_install.py	assert set(states(out).values()) == {"ok"}	keep	set	set
+loadout	packages/loadout/tests/test_install.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_install.py	test_a_dropped_agents_generated_file_is_deleted_unless_edited	name	f	fh
+loadout	packages/loadout/tests/test_install.py	test_a_hand_edited_generated_agent_is_left_until_replaced	name	f	fh
+loadout	packages/loadout/tests/test_listener.py	demo	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_listener.py	out, err = child.communicate(timeout=60)	keep	timeout	timeout
+loadout	packages/loadout/tests/test_listener.py	test_a_disabled_skill_the_module_places_again_is_removed_in_that_run	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_a_failed_removal_at_module_uninstall_is_ended_by_the_next_install	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_a_listener_that_fails_leaves_the_placement_for_the_next_install	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_a_module_install_with_nothing_disabled_removes_nothing	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_a_module_uninstall_removes_its_skills_seeded_or_not	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_a_module_uninstall_with_a_lost_ledger_still_finds_its_skills	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_a_placement_the_module_made_with_dest_stays_the_modules	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_a_yes_at_the_modules_question_is_taken_over_in_the_same_run	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_an_interrupted_skills_step_is_ended_by_the_next_install	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_loadouts_own_install_and_uninstall_change_nothing	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_the_listener_adopts_while_a_cli_install_waits_and_neither_times_out	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_listener.py	test_the_uninstall_listener_leaves_the_users_own_skill_of_that_name	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	-	name	test_a_relative_path_section_is_read_from_the_loadout_folder	test_a_relative_path_section_is_read_from_the_loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	-	name	test_load_reads_the_configured_folder	test_load_reads_the_configured_loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	problems	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	read	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_a_manifest_that_cannot_be_read_is_an_error	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_a_missing_manifest_is_empty_and_sets_no_mode	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_a_name_listed_twice_is_listed_once	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_a_relative_path_section_is_read_from_the_loadout_folder	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_a_section_is_found_by_name_by_root_and_by_key_ignoring_case	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_a_section_name_is_a_path_or_a_key	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_a_value_of_the_wrong_shape_is_a_usage_error	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_an_items_own_source_is_absolute	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_an_unknown_key_names_the_closest_known_one	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_disabled_switches_only_its_own_section_and_star_means_every_harness	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_every_problem_is_reported_at_once_each_naming_the_file	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_hooks_permissions_and_mcp_in_a_project_are_refused_with_a_line	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_load_reads_the_configured_folder	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_no_global_mode_key_reads_none_so_the_question_is_asked	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_source_expands_quoted_in_a_command_and_plain_elsewhere	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_text_that_is_not_toml_is_a_usage_error	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_the_example_reads_with_every_section_and_kind	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_manifest.py	test_two_sections_for_one_project_are_refused	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_page.py	entered.set()	keep	set	set
+loadout	packages/loadout/tests/test_page.py	lo	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 loadout	packages/loadout/tests/test_page.py	release.set()	keep	set	set
 loadout	packages/loadout/tests/test_page.py	return real(*a, git=git, git_seconds=git_seconds, **kw)	keep	git_seconds	git_seconds
@@ -1992,16 +2407,117 @@ loadout	packages/loadout/tests/test_page.py	seen.update(git=git, git_seconds=git
 loadout	packages/loadout/tests/test_pagejob.py	assert not {"homes", "git"} & set(ledger.read())	keep	set	set
 loadout	packages/loadout/tests/test_pagejob.py	child.wait(timeout=30)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_pagejob.py	holder.wait(timeout=30)	keep	timeout	timeout
+loadout	packages/loadout/tests/test_pagejob.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_pagejob.py	manifest_bytes	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_pagejob.py	test_a_fresh_record_with_no_pid_reads_running_and_an_old_one_interrupted	name	folder	records_dir
+loadout	packages/loadout/tests/test_pagejob.py	test_a_record_whose_pid_was_reused_reads_interrupted	name	folder	records_dir
+loadout	packages/loadout/tests/test_pagejob.py	test_a_record_with_its_end_reads_done	name	folder	records_dir
+loadout	packages/loadout/tests/test_pagejob.py	test_the_runner_prunes_records_older_than_a_day	name	folder	records_dir
+loadout	packages/loadout/tests/test_projects_link.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	-	name	test_a_capitalised_folder_keeps_its_case_where_the_os_folds_case	test_a_capitalised_loadout_dir_keeps_its_case_where_the_os_folds_case
+loadout	packages/loadout/tests/test_repo_piece.py	-	name	test_a_commit_that_changes_the_folder_runs_the_install_with_a_clean_env	test_a_commit_that_changes_the_loadout_dir_runs_the_install_with_a_clean_env
+loadout	packages/loadout/tests/test_repo_piece.py	-	name	test_a_folder_in_no_work_tree_asks_nothing_of_repo	test_a_loadout_dir_in_no_work_tree_asks_nothing_of_repo
+loadout	packages/loadout/tests/test_repo_piece.py	-	name	test_a_merge_that_changes_the_folder_runs_the_install	test_a_merge_that_changes_the_loadout_dir_runs_the_install
+loadout	packages/loadout/tests/test_repo_piece.py	-	name	test_a_nested_repository_inside_the_root_is_not_the_folders_work_tree	test_a_nested_repository_inside_the_root_is_not_the_loadout_dirs_work_tree
+loadout	packages/loadout/tests/test_repo_piece.py	-	name	test_the_row_is_off_for_a_folder_in_no_work_tree	test_the_row_is_off_for_a_loadout_dir_in_no_work_tree
 loadout	packages/loadout/tests/test_repo_piece.py	added = set(done.stdout.split())	keep	set	set
 loadout	packages/loadout/tests/test_repo_piece.py	assert call["timeout"] == gitpiece.INSTALL_SECONDS == 180	use	["timeout"]	["timeout_s"]
 loadout	packages/loadout/tests/test_repo_piece.py	assert env["SAMPLE_KEPT"] == "yes" and env["HOME"] == os.environ["HOME"]	keep	HOME	HOME
 loadout	packages/loadout/tests/test_repo_piece.py	assert not set(leaked) & set(env)	keep	set	set
 loadout	packages/loadout/tests/test_repo_piece.py	assert not {"GIT_DIR", "GIT_INDEX_FILE", "GIT_LITERAL_PATHSPECS"} & set(call["env"])	keep	set	set
 loadout	packages/loadout/tests/test_repo_piece.py	assert set(repo.pieces(folder)) == set(repo_link.PIECES)	keep	set	set
+loadout	packages/loadout/tests/test_repo_piece.py	assert set(repo.pieces(folder)) == set(repo_link.PIECES)	keep	set	set
+loadout	packages/loadout/tests/test_repo_piece.py	assert set(repo.pieces(loadout_dir)) == set(repo_link.PIECES)	keep	set	set
+loadout	packages/loadout/tests/test_repo_piece.py	in_git	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_a_capitalised_folder_keeps_its_case_where_the_os_folds_case	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_a_commit_in_another_repository_is_skipped	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_a_folder_in_no_work_tree_asks_nothing_of_repo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_a_git_call_of_repos_that_runs_out_of_time_is_a_line_too	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_a_nested_repository_inside_the_root_is_not_the_folders_work_tree	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_a_repo_failure_is_a_line_not_an_exit_code	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_install_registers_both_pieces_one_per_call	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_no_root_is_skipped	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_setup_registers_them_too	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_root_commit_is_read_against_the_empty_tree	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_row_is_off_for_a_folder_in_no_work_tree	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_row_is_off_while_the_setting_is_off	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_row_is_off_with_repo_absent_saying_what_repo_would_do	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_row_warns_on_a_piece_disabled_in_repo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_row_warns_when_repos_git_does_not_answer_in_its_time	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_row_warns_while_the_setting_is_on_and_a_piece_is_unregistered	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_setting_defaults_on_and_needs_repo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_setting_off_removes_each_registered_piece	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_the_setting_off_skips_before_any_git	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	test_without_repo_nothing_is_registered_and_install_goes_on	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_repo_piece.py	tree	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_settings_and_stores.py	-	name	test_a_configured_folder_is_read_with_its_home_expanded	test_a_configured_loadout_dir_is_read_with_its_home_expanded
+loadout	packages/loadout/tests/test_settings_and_stores.py	-	name	test_each_lock_path_makes_its_private_folder_first	test_each_lock_path_makes_its_private_dir_first
+loadout	packages/loadout/tests/test_settings_and_stores.py	-	name	test_project_folders_change_only_what_the_file_names	test_project_dirs_change_only_what_the_file_names
+loadout	packages/loadout/tests/test_settings_and_stores.py	-	name	test_the_defaults_put_the_folder_in_loadouts_data_directory	test_the_defaults_put_the_loadout_dir_in_loadouts_data_dir
+loadout	packages/loadout/tests/test_settings_and_stores.py	assert machine.project_folders == {	use	project_folders	project_dirs
 loadout	packages/loadout/tests/test_settings_and_stores.py	assert set(found.stores) == {"source", "ledger", "generated", "backups"}	keep	set	set
+loadout	packages/loadout/tests/test_settings_and_stores.py	folders = settings.read().project_folders	use	project_folders	project_dirs
+loadout	packages/loadout/tests/test_settings_and_stores.py	project_dirs = settings.read().project_folders	use	project_folders	project_dirs
+loadout	packages/loadout/tests/test_settings_and_stores.py	test_project_folders_change_only_what_the_file_names	name	folders	project_dirs
+loadout	packages/loadout/tests/test_setup.py	-	name	test_a_folder_with_anything_in_it_gets_no_example	test_a_loadout_dir_with_anything_in_it_gets_no_example
+loadout	packages/loadout/tests/test_setup.py	test_a_folder_with_anything_in_it_gets_no_example	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_a_manifest_that_doesnt_read_fails_setup_and_adopts_nothing	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_a_manifest_write_that_fails_hands_nothing_over	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_a_recorded_row_the_user_removed_is_added_again	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_after_setup_install_places_for_opencode	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_an_empty_answer_is_off_and_written	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_an_opencode_row_already_there_is_the_users	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_no_answer_at_a_terminal_writes_nothing	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_setup_again_changes_nothing	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_setup_on_a_clean_machine	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_setup_takes_over_each_modules_own_placements	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_the_question_at_a_terminal_writes_the_answer	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_setup.py	test_the_question_is_skipped_when_the_manifest_has_a_mode	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	-	name	test_a_global_line_the_user_had_naming_the_folder_is_named	test_a_global_line_the_user_had_naming_the_loadout_dir_is_named
+loadout	packages/loadout/tests/test_teardown.py	-	name	test_a_kept_entry_running_from_the_folder_is_found_in_any_path_form	test_a_kept_entry_running_from_the_loadout_dir_is_found_in_any_path_form
+loadout	packages/loadout/tests/test_teardown.py	-	name	test_an_entry_the_user_had_stays_and_one_running_from_the_folder_is_named	test_an_entry_the_user_had_stays_and_one_running_from_the_loadout_dir_is_named
+loadout	packages/loadout/tests/test_teardown.py	app	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	both_kinds	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	demo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	installed	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	test_a_harnesses_key_changed_since_setup_is_kept	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	test_a_harnesses_key_setup_made_is_unset_at_uninstall	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	test_a_lost_ledger_still_ends_right	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	test_a_project_tree_is_left_as_it_was	name	folder	skills_dir
+loadout	packages/loadout/tests/test_teardown.py	test_a_skill_from_the_modules_yes_goes_back_and_a_seeded_one_is_removed	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_teardown.py	test_an_edited_generated_file_no_agent_uses_is_named_to_delete	name	f	fh
+loadout	packages/loadout/tests/test_teardown.py	test_an_opencode_row_the_user_had_first_stays	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_would_commit.py	-	name	test_a_user_folder_in_a_work_tree_takes_an_ignore_file	test_a_user_skills_dir_in_a_work_tree_takes_an_ignore_file
 loadout	packages/loadout/tests/test_would_commit.py	files = set(ignores.records(ledger.read()))	keep	set	set
+loadout	packages/loadout/tests/test_would_commit.py	lo	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_would_commit.py	test_a_gitignore_of_the_users_is_left_and_the_target_not_placed	name	folder	skills_dir
+loadout	packages/loadout/tests/test_would_commit.py	test_a_tracked_occupant_reads_would_commit_then_replace_places_over_it	name	folder	skill_dir
+loadout	packages/loadout/tests/test_would_commit.py	test_a_users_rule_that_covers_the_target_is_enough	name	folder	skills_dir
+loadout	packages/loadout/tests/test_would_commit.py	test_an_ignore_file_whose_header_is_gone_becomes_the_users	name	folder	skills_dir
+loadout	packages/loadout/tests/test_would_commit.py	test_the_ignore_file_is_written_before_the_placement	name	folder	skills_dir
+loadout	packages/loadout/tests/test_would_commit.py	test_the_last_placement_takes_its_ignore_file_with_it	name	folder	skills_dir
+loadout	packages/loadout/tests/test_writes.py	-	name	test_a_first_write_makes_the_folder_and_leaves_no_lock_file_in_it	test_a_first_write_makes_the_loadout_dir_and_leaves_no_lock_file_in_it
+loadout	packages/loadout/tests/test_writes.py	-	name	test_every_writer_keeps_comments_and_leaves_no_lock_in_the_folder	test_every_writer_keeps_comments_and_leaves_no_lock_in_the_loadout_dir
+loadout	packages/loadout/tests/test_writes.py	-	name	test_writes_go_to_the_configured_folder	test_writes_go_to_the_configured_loadout_dir
 loadout	packages/loadout/tests/test_writes.py	held.set()	keep	set	set
+loadout	packages/loadout/tests/test_writes.py	read	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_writes.py	release.set()	keep	set	set
+loadout	packages/loadout/tests/test_writes.py	start	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_a_change_that_changes_nothing_writes_nothing	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_a_first_write_makes_the_folder_and_leaves_no_lock_file_in_it	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_a_manifest_that_does_not_read_refuses_every_write	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_add_refuses_what_a_project_section_cannot_hold	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_add_to_a_project_finds_its_section_or_makes_one	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_adopt_leaves_a_listed_skill_that_wants_every_harness	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_adopt_lists_module_skills_with_the_harnesses_taken_in_one_write	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_disable_writes_every_section_listing_the_item_or_the_one_named	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_enable_takes_ids_out_and_refuses_one_harness_under_a_star	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_every_writer_keeps_comments_and_leaves_no_lock_in_the_folder	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_remove_takes_the_item_out_of_one_section_and_keeps_its_table	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_set_mode_writes_the_global_mode	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_writes_go_to_the_configured_folder	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_writes.py	test_writes_hold_the_one_manifest_lock	name	folder	loadout_dir
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_questions.py	return set(keys) if isinstance(keys, dict) else set()	keep	set	set
@@ -2035,9 +2551,21 @@ moxi	packages/moxi/src/moxi/cli.py	_DONE = {"set": "set", "unset": "unset", "add
 moxi	packages/moxi/src/moxi/cli.py	_paths_of	name	directories	store_dirs
 moxi	packages/moxi/src/moxi/cli.py	_switch_entries	kwonly	with_named	with_named
 moxi	packages/moxi/src/moxi/cli.py	for entry in sorted(set(in_file) | set(by_entry)):	keep	set	set
+moxi	packages/moxi/src/moxi/cli.py	group.add_argument("--add", metavar="VALUE", help="add one item to a list")	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	help="list the first-party modules moxi install knows by name")	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	help="remove one item from a list")	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	help="show (the default): every key with its value, source, doc, "	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	help="who makes the change, for the history (default: cli)")	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	help="with --available: fetch the published catalogue first (the "	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	help="with show: print the keys as one JSON list")	keep	help	help
 moxi	packages/moxi/src/moxi/cli.py	if argv and argv[0] in ("set", "unset"):	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	if op == "set":	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	if op in ("set", "unset"):	keep	set	set
+moxi	packages/moxi/src/moxi/cli.py	parser.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	parser.add_argument("--remove", action="store_true", help="take the shortcut off")	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	parser.add_argument("key", help="the setting's dotted name")	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	parser.add_argument("module", help="the module, or moxi for the core's own settings")	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	parser.add_argument("value", nargs="?", help="the new value")	keep	help	help
 moxi	packages/moxi/src/moxi/cli.py	seen = set() if _seen is None else _seen	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	shortcut_text	name	windows	is_windows
 moxi	packages/moxi/src/moxi/config.py	-	name	set	set_value
@@ -2060,7 +2588,10 @@ moxi	packages/moxi/src/moxi/doctor/_run.py	_daemon_seen	kwonly	socket_row	socket
 moxi	packages/moxi/src/moxi/doctor/_run.py	_placement_row	kwonly	present	present
 moxi	packages/moxi/src/moxi/doctor/_run.py	_unwritable	name	folder	check_dir
 moxi	packages/moxi/src/moxi/doctor/_run.py	f"the record at {record} can't be read ({_record._reason(held.exc)})",	use	held.exc	held.error
+moxi	packages/moxi/src/moxi/doctor/_run.py	help="also measure each module's daemons against its BUDGETS")	keep	help	help
+moxi	packages/moxi/src/moxi/doctor/_run.py	help="remove the record KEY a program left for MODULE, and exit")	keep	help	help
 moxi	packages/moxi/src/moxi/doctor/_run.py	hows = set()	keep	set	set
+moxi	packages/moxi/src/moxi/doctor/_run.py	parser.add_argument("--json", action="store_true", help="print the rows as one JSON list")	keep	help	help
 moxi	packages/moxi/src/moxi/doctor/_run.py	rows += check(ctx)	keep	ok	ok
 moxi	packages/moxi/src/moxi/doctor/_run.py	terminal_row	name	no	exc
 moxi	packages/moxi/src/moxi/files.py	"""Append `record` to the log `path` as one JSON line.	keep	record	record
@@ -2089,8 +2620,19 @@ moxi	packages/moxi/src/moxi/install.py	-	name	Environment	InstallEnv
 moxi	packages/moxi/src/moxi/install.py	-	name	environment	install_env
 moxi	packages/moxi/src/moxi/install.py	_ENTRY_KEYS = {"name", "extras", "specifier", "path", "directory", "url", "git",	keep	directory	directory
 moxi	packages/moxi/src/moxi/install.py	both = sorted(set(self.yes) & set(self.no))	keep	set	set
+moxi	packages/moxi/src/moxi/install.py	every.add_argument("--all", action="store_true", help="answer yes for every extra")	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	every.add_argument("--none", action="store_true", help="answer no for every extra")	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	had = set(_by_name(before))	keep	set	set
+moxi	packages/moxi/src/moxi/install.py	help="a Moxi distribution's requirement with a URL, as "	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="answer no for these extras")	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="install moxi-<module> from the index though Moxi's catalogue "	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="move a unit file or a placed skill moxi did not write out "	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="place each module's skills without asking")	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="place no module's skills, without asking")	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	help="set how skills are placed (the core's skills.form) "	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	if kind in ("path", "directory"):	keep	directory	directory
+moxi	packages/moxi/src/moxi/install.py	metavar="EXTRA,...", help="answer yes for these extras")	keep	help	help
+moxi	packages/moxi/src/moxi/install.py	parser.add_argument("module", help="the module, by its name (comms, cache, ...)")	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	run	name	environ	process_env
 moxi	packages/moxi/src/moxi/install.py	sources = [k for k in ("specifier", "path", "directory", "url", "git", "editable")	keep	directory	directory
 moxi	packages/moxi/src/moxi/install.py	unknown = sorted(set(entry) - _ENTRY_KEYS)	keep	set	set
@@ -2264,6 +2806,10 @@ moxi	packages/moxi/src/moxi/terminal/_walk.py	_Walk.up	name	error	exc
 moxi	packages/moxi/src/moxi/terminal/_walk.py	for index, flag in enumerate(part[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/terminal/_walk.py	self.seen: set[int] = set()	keep	set	set
 moxi	packages/moxi/src/moxi/terminal/_walk.py	stopped at (`program` may be empty when nothing of it could be read); `error` says	keep	error	error
+moxi	packages/moxi/src/moxi/uninstall.py	help="also remove the module's stores: rebuildable ones at once, "	keep	help	help
+moxi	packages/moxi/src/moxi/uninstall.py	help="uninstall without running the module's TEARDOWN, when it "	keep	help	help
+moxi	packages/moxi/src/moxi/uninstall.py	help="with --purge, remove every store without asking")	keep	help	help
+moxi	packages/moxi/src/moxi/uninstall.py	parser.add_argument("module", help="the module, by its name (comms, cache, ...)")	keep	help	help
 moxi	packages/moxi/src/moxi/units/__init__.py	environment(module)            the variables the module's units are written with	use	environment(module)   	unit_env(module)      
 moxi	packages/moxi/src/moxi/units/__init__.py	stop(module, names, record=[]) and resume(record)	use	record=[]	stopped=[]
 moxi	packages/moxi/src/moxi/units/_act.py	"""Start again exactly the units `stop(..., record=...)` stopped, in the order	use	record=...	stopped=...
@@ -2313,6 +2859,7 @@ moxi	packages/moxi/src/moxi/units/_systemd.py	-	name	_environment	_env
 moxi	packages/moxi/src/moxi/units/_systemd.py	_login_line	kwonly	login	login
 moxi	packages/moxi/src/moxi/units/_systemd.py	_read_wrap	name	handle	fh
 moxi	packages/moxi/src/moxi/units/_systemd.py	effective_env.get("HOME") or os.path.expanduser("~"), ".config")	keep	HOME	HOME
+moxi	packages/moxi/src/moxi/units/_systemd.py	io.say(change, line.format(user=user))	keep	user	user
 moxi	packages/moxi/src/moxi/units/_systemd.py	return [environment_line(name, value) for name, value in spec.environment]	keep	environment	environment
 moxi	packages/moxi/src/moxi/units/_systemd.py	return [environment_line(name, value) for name, value in spec.environment]	use	spec.environment	spec.env
 moxi	packages/moxi/src/moxi/units/_systemd.py	seen = set(_one(shown, "DropInPaths").split())	keep	set	set
@@ -2882,6 +3429,7 @@ moxi	packages/moxi/tests/test_units_schtasks.py	enabled=enabled))	keep	enabled	e
 moxi	packages/moxi/tests/test_units_schtasks.py	if bad == "folder":	keep	folder	folder
 moxi	packages/moxi/tests/test_units_schtasks.py	self.stuck: set[str] = set()	keep	set	set
 moxi	packages/moxi/tests/test_units_schtasks.py	test_a_disabled_daemon_is_created_disabled_and_a_flip_takes_effect_now.declare	kwonly	enabled	enabled
+moxi	packages/moxi/tests/test_units_schtasks.py	with _backend.use(Old(user="PC\\ana")):	keep	user	user
 moxi	packages/moxi/tests/test_units_systemd.py	-	name	test_the_unit_directory_follows_the_env	test_the_unit_dir_follows_the_env
 moxi	packages/moxi/tests/test_units_systemd.py	-	name	test_the_unit_directory_follows_the_environment	test_the_unit_directory_follows_the_env
 moxi	packages/moxi/tests/test_units_systemd.py	-	name	test_unwrap_leaves_another_file_in_the_drop_in_folder	test_unwrap_leaves_another_file_in_the_drop_in_dir
@@ -2933,10 +3481,20 @@ moxi	packages/moxi/tests/test_win.py	child.wait(timeout=30)	keep	timeout	timeout
 moxi	packages/moxi/tools/vendor.py	parser.add_argument("--wheels", type=Path, metavar="DIR",	keep	type	type
 moxi	packages/moxi/tools/vendor.py	wheel_from_dir	name	directory	wheel_dir
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	-	name	WORKERS_VAR	WORKERS_ENV
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="check every package, whatever changed, and run every "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="count the changes since HEAD left REV, and compare the "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only the tests marked with this finding; may be given "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="run only this whole-tree code check")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="with --only, print findings only under these paths")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	paths = set(_names(_git(root, *diff, fork, "HEAD")))	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	paths |= set(_names(_git(root, "ls-files", "--others", "--exclude-standard", "-z")))	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	paths |= set(_names(_git(root, *diff, "HEAD")))            # staged and unstaged	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	picked: set[str] = set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="check that each web page's build stamp matches its sources")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="contract [--staged] [PATH]: check a module's directory against "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="new <module>: start a new package under packages/")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="rename [--dry-run] [ROOT]: apply the identifier rename table")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="run the checks a change must pass before it merges")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	verbs = parser.add_subparsers(dest="verb", metavar="<verb>", required=True)	keep	required	required
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	-	name	DEV_ENV_PREFIX	TEST_PREFIX_ENV
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	and node.func.id in ("frozenset", "set", "dict", "tuple")	keep	set	set
@@ -2948,6 +3506,8 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	for norm in sorted(set(self.
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	for other in sorted(set(self.scripts) - {script}):	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	found = [(n + 1, line) for n, line in enumerate(lines[1:end], start=1)	keep	start	start
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	found = set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	help="read the files from git's index, as the next commit lands")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	help="the module's directory (default: the current directory)")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	hits.setdefault(key, (f"{top} ({extra[0]})", set()))[1].add(label)	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	if alias.name in ("environ", "environb"):	keep	environ	environ
 moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	if not (self.os or self.environ or self.getenv):	keep	environ	environ
@@ -2989,6 +3549,9 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	old_modules = set(sys.modules)
 moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	protected: set[int] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	return set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	seen = set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	help="the version range of moxi the module requires "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	parser.add_argument("--summary", help="the module's SUMMARY and description, one line")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	parser.add_argument("module", help="the module's name, lower-case letters and digits")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	flags: set[str] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	found = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	identifiers = set(keyword.kwlist) | {"True", "False", "None"}	keep	set	set
@@ -2997,6 +3560,8 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	used: set[tuple[str, str]] = set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	changed: set[str] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	cited = everywhere | own.get(source.path, set())	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found: set[Leftover] = set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="compare not-here rows with this merged main ref")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="show states and leftovers without editing files")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	own.setdefault(row.path, set()).add(row.old)	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("--table", type=Path, default=default, metavar="PATH")	keep	type	type
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("root", nargs="?", type=Path, default=Path.cwd(), metavar="ROOT")	keep	type	type
@@ -3004,6 +3569,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	remaining = sorted(set(remaini
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	touched.setdefault(id(row), set()).add(path)	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	written = set(edits) | apply_uses(texts, rows, states)	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/stamp.py	for rel in sorted(set(listed)):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/stamp.py	help="read the index and check only the packages the staged "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/stamp.py	if not ((attrs.get(rel, {}).get("text") == "set"	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/stamp.py	return set(_split(_git(self.root, "diff", "--cached", "--name-only", "-z",	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/stamp.py	return set(self.blobs)	keep	set	set
@@ -3080,11 +3646,30 @@ moxi-dev	packages/moxi-dev/tests/test_selection.py	assert set(json.loads(out.rea
 moxi-dev	packages/moxi-dev/tests/test_selection.py	assert set(sleeps) == {"setup", "call", "teardown", "outcome"}	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_selection.py	assert set(tests) == {"test_sleeps", "test_fails", "test_skipped"}	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_selection.py	names = set()	keep	set	set
+notes	packages/notes/src/moxi_notes/backfill.py	__all__ = ["INFERABLE", "Proposal", "Plan", "project_folders", "infer_project", "plan",	keep	project_folders	project_folders
 notes	packages/notes/src/moxi_notes/blobs.py	`git(*args, input=None, timeout=..., binary=True)` returning a finished process. Both	use	input=None, timeout=...	stdin_data=None, timeout_s=...
 notes	packages/notes/src/moxi_notes/blobs.py	done = git(*args, input=input, timeout=TIMEOUT, binary=True)	use	input=	stdin_data=
 notes	packages/notes/src/moxi_notes/blobs.py	done = git(*args, input=input, timeout=TIMEOUT, binary=True)	use	timeout=	timeout_s=
+notes	packages/notes/src/moxi_notes/cli.py	"backfill", help="add the required frontmatter keys notes can infer",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	"scan", help="what a snapshot would leave out now, with rules and lines",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	"validate", help="check the notes' frontmatter against the types file",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	handoffs = verbs.add_parser("handoffs", help="the notes directory's handoffs folder",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	help="list the files no type's home matches, not just count them")	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	help="the folder (default: the working directory)")	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	inbox = verbs.add_parser("inbox", help="inbox one-offs: list, add, rename",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p = actions.add_parser("add", help="make a one-off's folder",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p = actions.add_parser("dir", help="print the handoffs folder for a folder",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p = actions.add_parser("list", help="list the one-offs, by slug",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p = actions.add_parser("rename", help="rename a one-off",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p = verbs.add_parser("dir", help="print the notes directory for a folder",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--apply", action="store_true", help="write the proposed keys")	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--json", action="store_true", help="print JSON (shape below)")	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--json", action="store_true", help="print JSON, every file included")	keep	help	help
 notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit, default=60, metavar="N",	keep	type	type
 notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit, default=80, metavar="N",	keep	type	type
+notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("setup", help="ask setup's questions again and write the answers",	keep	help	help
+notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("snapshot", help="commit a snapshot of the notes repo now",	keep	help	help
 notes	packages/notes/src/moxi_notes/doctypes.py	NATURES = ("record", "living-state", "ephemeral")	keep	record	record
 notes	packages/notes/src/moxi_notes/doctypes.py	if len(set(required)) != len(required):	keep	set	set
 notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("cat-file", "-e", f"{oid}^{{commit}}", timeout=blobs.TIMEOUT)	use	timeout=	timeout_s=
@@ -3105,6 +3690,7 @@ notes	packages/notes/src/moxi_notes/setup.py	_add_name(found.author_names, f"{h.
 notes	packages/notes/src/moxi_notes/setup.py	_add_name(found.names, f"{h.set}/{h.rule}",	keep	set	set
 notes	packages/notes/src/moxi_notes/setup.py	if h.set == "private-names":	keep	set	set
 notes	packages/notes/src/moxi_notes/snapshot.py	backoff=float(spec.push_backoff) if spec else 300.0,	use	.push_backoff	.push_backoff_s
+notes	packages/notes/src/moxi_notes/snapshot.py	help="also see an ended session's edits committed and pushed "	keep	help	help
 notes	packages/notes/src/moxi_notes/snapshot.py	interval=float(spec.min_interval) if spec else 0.0,	use	.min_interval	.min_interval_s
 notes	packages/notes/src/moxi_notes/snapshot.py	self.dir = paths.Layout(_settings.MODULE).runtime_dir(create=True)	keep	create	create
 notes	packages/notes/src/moxi_notes/spec.py	__all__ = ["NAME", "PREPARE", "PATHS", "author", "build", "same", "ensure_saved"]	keep	NAME	NAME
@@ -3139,14 +3725,28 @@ projects	packages/projects/src/moxi_projects/acts.py	raised as without `record`.
 projects	packages/projects/src/moxi_projects/acts.py	record(conn, {"state": "removed", "key": gone.key})	keep	record	record
 projects	packages/projects/src/moxi_projects/acts.py	store.write(lambda conn: record(conn, outcome))	keep	record	record
 projects	packages/projects/src/moxi_projects/cli.py	_VERBS = {"add": _add, "set": _set, "remove": _remove, "promote": _promote, "list": _list,	keep	set	set
+projects	packages/projects/src/moxi_projects/cli.py	agents = verbs.add_parser("agents", help="add or remove a project's associated agents",	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	help="make the root first (for most kinds, a directory and git init)")	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	help="make the root first (not for a topic)")	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	help="the directory (default: the working directory)")	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	help=f"its kind (default: {DEFAULT_KIND}; `kinds` lists them)")	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	help=f"its kind (default: {acts.TOPIC}, whose folder is the one-off)")	keep	help	help
 projects	packages/projects/src/moxi_projects/cli.py	lead.add_argument("--lead", metavar="NAME", help="a new lead agent")	keep	NAME	NAME
+projects	packages/projects/src/moxi_projects/cli.py	lead.add_argument("--no-lead", action="store_true", help="clear the lead")	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	notes.add_argument("--no-notes-root", action="store_true", help="clear the notes root")	keep	help	help
 projects	packages/projects/src/moxi_projects/cli.py	notes.add_argument("--notes-root", metavar="DIR", type=_directory,	keep	type	type
+projects	packages/projects/src/moxi_projects/cli.py	p = pair.add_parser(action, help=help, description=help[0].upper() + help[1:] + ".")	keep	help	help
 projects	packages/projects/src/moxi_projects/cli.py	p = verb("set", "change a project's fields")	keep	set	set
+projects	packages/projects/src/moxi_projects/cli.py	p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".")	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("--kind", metavar="KIND", help="a new kind")	keep	help	help
+projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("--kind", metavar="KIND", help="only projects of this kind")	keep	help	help
 projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("--lead", metavar="NAME", help="its lead agent")	keep	NAME	NAME
 projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("--notes-root", metavar="DIR", type=_directory,	keep	type	type
 projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("--root", metavar="DIR", type=_directory,	keep	type	type
 projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("--root", metavar="DIR", type=_directory, help="a new directory")	keep	type	type
 projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("name", metavar="NAME")	keep	NAME	NAME
+projects	packages/projects/src/moxi_projects/cli.py	p.add_argument("slug", metavar="SLUG", help="the one-off (`moxi notes inbox list`)")	keep	help	help
 projects	packages/projects/src/moxi_projects/contributions.py	"""Check a `set` of `changes` on project `key` before it is written; return the kind	keep	set	set
 projects	packages/projects/src/moxi_projects/contributions.py	"""The kind `name` for `act` (`add` or `set`), or why it can't be used.	keep	set	set
 projects	packages/projects/src/moxi_projects/contributions.py	`lead` and `notes_root`). A `set` never takes defaults. A typed `notes_root` needs	keep	set	set
@@ -3211,10 +3811,28 @@ repo	packages/repo/src/moxi_repo/api.py	names = (set(committer.saved_names(repo.
 repo	packages/repo/src/moxi_repo/api.py	why = check(name, values or [])	keep	ok	ok
 repo	packages/repo/src/moxi_repo/api.py	| set(committer.read_state(repo.common_dir)["specs"]))	keep	set	set
 repo	packages/repo/src/moxi_repo/checks.py	left = set(item["left"])	keep	set	set
+repo	packages/repo/src/moxi_repo/cli.py	"add", help="register pieces in a repo",	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	"commit", allow_abbrev=False, help="run a repo's saved committer specs",	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	"git-hooks", help="the git hook pieces registered in your repos",	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	"rules", help="what a committer in a repo must know",	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	"specs", help="the committer's specs, and forgetting one",	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	add.add_argument("pieces", nargs="*", metavar="PIECE", help="a piece id, module/name")	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	av = sub.add_parser("available", help="the pieces installed modules declare",	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	av.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	cm.add_argument("--json", action="store_true", help="print one JSON array")	keep	help	help
 repo	packages/repo/src/moxi_repo/cli.py	cm.add_argument("--spec", metavar="NAME", help="the saved spec to run")	keep	NAME	NAME
 repo	packages/repo/src/moxi_repo/cli.py	cm.add_argument("--wait", type=float, default=0, metavar="SECONDS",	keep	type	type
 repo	packages/repo/src/moxi_repo/cli.py	cm.add_argument("--wait", type=float, default=0, metavar="SECONDS",	use	"--wait"	"--wait-s"
+repo	packages/repo/src/moxi_repo/cli.py	dest="sets", help="set a named piece's setting in this repo")	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	flip = sub.add_parser(name, help=what, description=what[0].upper() + what[1:] + ".")	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	help="add every project's repo, including those repo hasn't touched "	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	help="pin how git reaches the pieces in this repo (auto unpins)")	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	ls = sub.add_parser("list", help="each indexed repo's git hooks, or one repo's",	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	ls.add_argument("--json", action="store_true", help="print one JSON array")	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	rf = sub.add_parser("refresh", help="rewrite every git hook entry, shim and launcher",	keep	help	help
+repo	packages/repo/src/moxi_repo/cli.py	rm = sub.add_parser("remove", help="remove pieces, or everything repo wrote, from a repo",	keep	help	help
 repo	packages/repo/src/moxi_repo/cli.py	said = set()	keep	set	set
+repo	packages/repo/src/moxi_repo/cli.py	sp.add_argument("--json", action="store_true", help="print one JSON array")	keep	help	help
 repo	packages/repo/src/moxi_repo/commit_proof.py	shape = _Shape(separators or ":", set())	keep	set	set
 repo	packages/repo/src/moxi_repo/commit_rules.py	block_keys: set[str] = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/commit_rules.py	in_block: set[int] = set()  # the block's trailer lines, which no tag check reads	keep	set	set
@@ -3409,12 +4027,58 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	declare(verbs)	keep	enabled	enable
 rounds	packages/rounds/src/moxi_rounds/cli.py	dropped = dropping.drop(args.round, by=args.by, record=args.record,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	for flag, given in (("--from", args.origin), ("--record", args.record),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	form = parser.add_mutually_exclusive_group(required=True)	keep	required	required
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator gave the go")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the operator said it, one token: "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="a pointer to where the question came from, one token: "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="a project's key, to keep the listing to that project; "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="an option the question offers: a short key and its one "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="in place of --from, for a question that is the "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="list the questions of the round or the project")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="list the rounds that have ended, not the open ones")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="list what waits on the operator")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="make a parked question open again")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="on a project, in place of a sentence: put this question "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="on a round, in place of a sentence: bring this question "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="print the round as data, not as lines")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="print the same rows as data")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="record a round's ruling in the project's register")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the earlier ruling of the same thing that this one "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the new round's name, <project>/<slug>: a project's key "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the question, one sentence on one line; or the id of a "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the repos and paths a standing ruling applies to: KEY or "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the round the question is asked in, <project>/<slug>, or "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the round the ruling is on, <project>/<slug>, or a "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the round, <project>/<slug>; with --shown, the round "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the ruling, in a sentence or a few that read on their own")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the rulings were put in front of the operator as "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the stages a round's ruling applies to, as B2,B3 "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the stages the question holds up from now on, as B2,B3, "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="the stages the question holds up, as B2,B3, or none "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="what is marked: a question, Q<n>; with --shown, the "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="what is ruled, when it is a question: Q<n> (P<n> on a "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --by operator, a pointer to where he dropped it; "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --questions, for a round, which of its questions: "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --questions, write both forms into this folder, as "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with --shown, a pointer to where he was shown them, one "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with Q<n>, the key of the option he chose, one the "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with an ID, take the option under this key out; to "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="with park:Q<n>, what the question waits for: a stage "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="withdraw the round's open and parked questions, where "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	if args.record is not None:	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	marked = shown.mark(args.target, args.id, actor=_actor(args), record=args.record)	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("ask", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("drop", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("list", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("mark", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("open", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("rule", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("show", help=said, description=said)	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--as", dest="actor", metavar="NAME",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--by", choices=("lead", "operator"), required=True,	keep	required	required
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--description", metavar="TEXT", required=True,	keep	required	required
 rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--flow", metavar="NAME",	keep	NAME	NAME
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("--reason", metavar="TEXT", help="why, in short")	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	record=args.record)	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	record=args.record, blocks=args.blocks, options=args.options)	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	ruled = ruling.rule(args.target, actor=_actor(args), record=args.record,	keep	record	record
@@ -3676,6 +4340,7 @@ rounds	packages/rounds/tests/test_state.py	{"record": "comms:20"}, {"ids": "C1",
 rounds	packages/rounds/tests/test_write.py	SHOWN = {"ids": ["S1"], "record": "comms:12"}	keep	record	record
 rounds	packages/rounds/tests/test_write.py	writer.communicate(timeout=120)	keep	timeout	timeout
 secrets	packages/secrets/src/moxi_secrets/_generate.py	chars: set[int] = set()	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/_generate.py	help="write nothing; exit 1 when sets.json differs")	keep	help	help
 secrets	packages/secrets/src/moxi_secrets/_generate.py	if isinstance(a, dict) and set(a) - ALLOWLIST_FIELDS:	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/_generate.py	if set(data) != PIN_FIELDS:	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/_generate.py	missing = sorted(set(disabled) - upstream_ids)	keep	set	set
@@ -3740,24 +4405,44 @@ secrets	packages/secrets/tests/test_tools.py	assert set(c.failures["some-rule"])
 secrets	packages/secrets/tools/bump_gitleaks.py	"added": sorted(set(after) - set(before)),	keep	set	set
 secrets	packages/secrets/tools/bump_gitleaks.py	"changed": sorted(i for i in set(before) & set(after) if before[i] != after[i]),	keep	set	set
 secrets	packages/secrets/tools/bump_gitleaks.py	"removed": sorted(set(before) - set(after)),	keep	set	set
+secrets	packages/secrets/tools/bump_gitleaks.py	help="print the first failing text of each failing rule")	keep	help	help
 secrets	packages/secrets/tools/bump_gitleaks.py	parser.add_argument("--cost-factor", type=float, default=1.0,	keep	type	type
 secrets	packages/secrets/tools/bump_gitleaks.py	parser.add_argument("--cost-mb", type=float, default=1.0,	keep	type	type
 secrets	packages/secrets/tools/bump_gitleaks.py	parser.add_argument("--samples", type=int, default=60,	keep	type	type
 secrets	packages/secrets/tools/bump_gitleaks.py	parser.add_argument("--seed", type=int, default=7, help="the sampler's seed (default 7)")	keep	type	type
+secrets	packages/secrets/tools/bump_gitleaks.py	parser.add_argument("tag", help="the gitleaks release tag, such as v8.31.0")	keep	help	help
 secrets	packages/secrets/tools/bump_gitleaks.py	return sorted(set(out))	keep	set	set
 secrets	packages/secrets/tools/bump_gitleaks.py	rules = {h[1] for h in set(r2) ^ set(py)} or {owner}	keep	set	set
 secrets	packages/secrets/tools/bump_gitleaks.py	say(f"  {plat}: {' '.join(sorted(set(by_platform[plat])))}")	keep	set	set
 secrets	packages/secrets/tools/bump_gitleaks.py	self.no_path = set()	keep	set	set
 secrets	packages/secrets/tools/bump_gitleaks.py	unique = sorted(set(keywords))	keep	set	set
+secrets	packages/secrets/tools/name_folds.py	help="write nothing; exit 1 when _folds.py differs from a fresh one")	keep	help	help
 secrets	packages/secrets/tools/name_folds.py	if not {chr(x) for x in s} <= set(held.get(chr(c), chr(c))))	keep	set	set
 secrets	packages/secrets/tools/name_folds.py	out: set[int] = set()	keep	set	set
 services	packages/services/src/moxi_services/acts.py	`moxi.config.set(M, <its switch>, ...)` to enable or disable it (refused without a	use	set	set_value
 services	packages/services/src/moxi_services/acts.py	if not _acted(call(MODULE, [ref], foreign=True, kinds=kinds), lines):	keep	foreign	foreign
 services	packages/services/src/moxi_services/acts.py	ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)),	keep	foreign	foreign
 services	packages/services/src/moxi_services/acts.py	ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)), lines)	keep	foreign	foreign
+services	packages/services/src/moxi_services/cli.py	help="a command whose exit 0 means the daemon is healthy")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	help="adopt this existing unit: a systemd user unit, a launchd label "	keep	help	help
+services	packages/services/src/moxi_services/cli.py	help="also run each running daemon's health check")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	help="mark a timer that launches an agent session (it spends usage)")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	help="turn it on (a new command starts off without it)")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	on.add_argument("--disable", action="store_true", help="turn it off")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".",	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--cwd", metavar="DIR", help="the directory the command runs in")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--days", metavar="mon,...", help="only on these days (with --at)")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--doc", default="", metavar="TEXT", help="one line saying what it is")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	p.add_argument("--every", type=float, default=WATCH_EVERY, metavar="SECONDS",	keep	type	type
 services	packages/services/src/moxi_services/cli.py	p.add_argument("--every", type=float, default=WATCH_EVERY, metavar="SECONDS",	use	"--every"	"--every-s"
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--kind", choices=("daemon", "timer"), help="only daemons or timers")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--project", metavar="KEY", help="only rows of this project")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--project", metavar="KEY", help="the project it belongs to")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	p.add_argument("--timer", action="store_true", help="a timer, not a daemon")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	p.add_argument("name", metavar="NAME")	keep	NAME	NAME
+services	packages/services/src/moxi_services/cli.py	schedule.add_argument("--at", metavar="HH:MM[,HH:MM...]", help="run at these times")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	schedule.add_argument("--every", metavar="N", help="run every N minutes (5m) or hours (2h)")	keep	help	help
 services	packages/services/src/moxi_services/page.py	"at": lb.Field("list", required=False, max=48,	keep	required	required
 services	packages/services/src/moxi_services/page.py	"command": lb.Field("string", required=False, max=COMMAND_MAX),	keep	required	required
 services	packages/services/src/moxi_services/page.py	"cwd": lb.Field("string", required=False, max=PATH_MAX),	keep	required	required
@@ -3843,10 +4528,29 @@ sessions	packages/sessions/src/moxi_sessions/claude.py	seen: set[str] = set()	ke
 sessions	packages/sessions/src/moxi_sessions/claude.py	self._held = None	keep	_held	_held
 sessions	packages/sessions/src/moxi_sessions/claude.py	self._held = pending	keep	_held	_held
 sessions	packages/sessions/src/moxi_sessions/claude.py	self._held: tuple | None = None	keep	_held	_held
+sessions	packages/sessions/src/moxi_sessions/cli.py	"list", help="print the newest sessions",	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	"read", help="print part of one session",	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	finder = verbs.add_parser("find", help="print where a session's records are",	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	finder.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	finder.add_argument("session", metavar="SESSION", help="the session or thread id")	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	folder=args.folder)	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="a further root to probe after the usual one (for OpenCode, "	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="also print the newest thing said in each session")	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="only sessions changed at or after TIME: ISO 8601 "	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="only sessions whose record names this folder, an absolute "	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="only this harness's sessions")	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="the turns around TIME: ISO 8601 (2026-11-06T14:03:22Z; no "	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="whose record to look for (default: claude)")	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="whose session it is (default: claude)")	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	lister.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	lister.add_argument("--limit", type=int, default=LIST_DEFAULT, metavar="N",	keep	type	type
+sessions	packages/sessions/src/moxi_sessions/cli.py	reader.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	reader.add_argument("--turns", type=int, metavar="N",	keep	type	type
+sessions	packages/sessions/src/moxi_sessions/cli.py	reader.add_argument("session", metavar="SESSION", help="the session or thread id")	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	roots = verbs.add_parser("root", help="print each harness's root and its source",	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	roots.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	row["name"] or row["folder"] or "-", row["session"])))	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/cli.py	which.add_argument("--all", action="store_true", help="the whole session")	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/codex.py	named = {"type", "call_id", "name"} | ({key} if key else set())	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/find.py	"""`directory`'s entries by name, or none when it cannot be listed (noted)."""	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/lists.py	"""The entries that pass every filter but the harness (and, with `folder` false, the	keep	folder	folder
@@ -4101,9 +4805,29 @@ slots	packages/slots/src/moxi_slots/answer.py	opens), or `wait` runs out (`misma
 slots	packages/slots/src/moxi_slots/answer.py	pane.send("Enter")	keep	fail	fail
 slots	packages/slots/src/moxi_slots/answer.py	pane.send(key)	keep	fail	fail
 slots	packages/slots/src/moxi_slots/cli.py	HEADER = ["SLOT", "NAME", "STATE", "ATTACHED", "HOLD", "LABEL", "LAST LAUNCH"]	keep	NAME	NAME
+slots	packages/slots/src/moxi_slots/cli.py	help="print the command instead of running it")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	help="remove every free or ended slot that is idle and unheld, and say "	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	help="remove the named slots even when not idle (never an occupied or "	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("attach", help="attach this terminal to a slot (made when it has "	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("create", help="make slots: the numbers given (a missing one is "	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("hold", help="reserve a slot for a holder, for a while")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("jobs", help="the detached jobs that run")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("list", help="every slot: state, hold, label, attached, last "	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("release", help="end your hold on a slot")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("remove", help="kill idle slots and drop them from the registry")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("rename", help="name a slot, or clear its name")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("screen", help="which known screen a slot's run pane shows, and "	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p = verbs.add_parser("show", help="one slot")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--clear", action="store_true", help="clear the slot's name")	keep	help	help
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--count", type=int, default=1, metavar="K",	keep	type	type
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--for", dest="seconds", required=True, type=float, metavar="S",	keep	type	type
+slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--holder", metavar="H", help="the hold you have on the slot")	keep	help	help
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--holder", required=True, metavar="H")	keep	required	required
+slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--json", action="store_true", help="print the jobs as JSON")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--json", action="store_true", help="print the listing as JSON")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--json", action="store_true", help="print the read as JSON")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--json", action="store_true", help="print the slot as JSON")	keep	help	help
+slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("--name", help="name the one slot made")	keep	help	help
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("name", nargs="?", metavar="NAME")	keep	NAME	NAME
 slots	packages/slots/src/moxi_slots/cli.py	p.add_argument("numbers", metavar="N", nargs="*", type=int)	keep	type	type
 slots	packages/slots/src/moxi_slots/health.py	__all__ = ["NAME", "expected_pid", "check"]	keep	NAME	NAME
@@ -4156,7 +4880,18 @@ tunnel	packages/tunnel/src/moxi_tunnel/acts.py	self.last = exc.record	keep	recor
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	skip = {p for h, p in self.retired if h == normal_host(host)} | set(foreign)	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	| set(_bad_keys(decls)))	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/changes.py	for key in sorted(set(before.entries) | set(after.entries)):	keep	set	set
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="also compare each entry with the live config")	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="drop it from the record and leave the live config alone")	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="take over the port from config Moxi did not apply; a copy is kept")	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p = verbs.add_parser("add", help="turn a target on",	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p = verbs.add_parser("remove", help="turn a target off",	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p = verbs.add_parser("repair", help="put every entry right that tunnel can",	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p = verbs.add_parser("status", help="every target, its address and state",	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p.add_argument("--hostname", metavar="H", help="the hostname (Cloudflare only)")	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
 tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p.add_argument("--port", type=_port, help="the outside port")	keep	type	type
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p.add_argument("--provider", choices=_PROVIDERS, help="the provider (default tailscale)")	keep	help	help
+tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p.add_argument("--yes", action="store_true", help="answer yes; the lines still print")	keep	help	help
 tunnel	packages/tunnel/src/moxi_tunnel/cloudflare.py	exc.record = rec	keep	record	record
 tunnel	packages/tunnel/src/moxi_tunnel/cloudflare.py	self.record = rec	keep	record	record
 tunnel	packages/tunnel/src/moxi_tunnel/cloudflare.py	switch was touched; else a unit act of the core failed. `record` is the record as the	keep	record	record
@@ -4284,6 +5019,7 @@ turns	packages/turns/src/moxi_turns/codex_hooks.py	_Ping.__init__	name	wait_seco
 turns	packages/turns/src/moxi_turns/codex_hooks.py	command	name	wait_seconds	wait_s
 turns	packages/turns/src/moxi_turns/codex_hooks.py	conn.send(reply)	keep	fail	fail
 turns	packages/turns/src/moxi_turns/codex_hooks.py	conn.send({"ok": True, "block": reason})	keep	fail	fail
+turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--refuse-unanswered", help=argparse.SUPPRESS)	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--socket", required=True)	keep	required	required
 turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--wait-seconds", type=float, default=PING_TIMEOUT,	keep	type	type
 turns	packages/turns/src/moxi_turns/codex_hooks.py	parser.add_argument("--wait-seconds", type=float, default=PING_TIMEOUT,	use	"--wait-seconds"	"--wait-s"
@@ -4294,7 +5030,15 @@ turns	packages/turns/src/moxi_turns/codex_hooks.py	self.conn.send(ask)	keep	fail
 turns	packages/turns/src/moxi_turns/codex_hooks.py	self.conn.send({"op": PRINTED})	keep	fail	fail
 turns	packages/turns/src/moxi_turns/codex_hooks.py	self.wait_seconds = wait_s	use	self.wait_seconds	self.wait_s
 turns	packages/turns/src/moxi_turns/codex_hooks.py	session_flags	name	wait_seconds	event_wait_s
+turns	packages/turns/src/moxi_turns/codex_host.py	choice.add_argument("--sandbox", choices=SANDBOX_MODES, help="the sandbox mode")	keep	help	help
+turns	packages/turns/src/moxi_turns/codex_host.py	help="a JSON object of thread parameters")	keep	help	help
+turns	packages/turns/src/moxi_turns/codex_host.py	help="a named permission profile, in place of a sandbox mode")	keep	help	help
+turns	packages/turns/src/moxi_turns/codex_host.py	help="one Codex config override (KEY a TOML dotted key, VALUE TOML)")	keep	help	help
+turns	packages/turns/src/moxi_turns/codex_host.py	help="resume this thread instead of starting one")	keep	help	help
+turns	packages/turns/src/moxi_turns/codex_host.py	help="run no Codex window in this terminal")	keep	help	help
+turns	packages/turns/src/moxi_turns/codex_host.py	help="the thread's developer instructions")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--cwd", required=True, help="the thread's working directory")	keep	required	required
+turns	packages/turns/src/moxi_turns/codex_host.py	parser.add_argument("--model", help="the model the thread runs")	keep	help	help
 turns	packages/turns/src/moxi_turns/codex_mcp.py	`CodexError` for an error answer); `thread_id()` is the session's thread. `record` and	keep	record	record
 turns	packages/turns/src/moxi_turns/codex_mcp.py	run.done.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/codex_window.py	self._stop.set()	keep	set	set
@@ -4698,12 +5442,29 @@ ui	packages/ui/src/moxi_ui/api.py	* `check(places, *, programs=None, page=True)`
 ui	packages/ui/src/moxi_ui/api.py	found.api.check(places, *, programs=None, page=True) -> str | None	use	page=True	for_page=True
 ui	packages/ui/src/moxi_ui/cli.py	"""The environment the unit's shell starts with: `environ` less the locators, then on	keep	environ	environ
 ui	packages/ui/src/moxi_ui/cli.py	"""The locator variables whose values differ between `environ` and the environment a	keep	environ	environ
+ui	packages/ui/src/moxi_ui/cli.py	"gateway", help="the UI on your phone, through the tunnel",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	"open", help="make sure the shell runs, and sign this browser in",	keep	help	help
 ui	packages/ui/src/moxi_ui/cli.py	core writes the ui's units with (`moxi.units.environment`), which a tagged home's	use	moxi.units.environment`	moxi.units.unit_env`
 ui	packages/ui/src/moxi_ui/cli.py	cwd = layout().runtime_dir(create=True)	keep	create	create
 ui	packages/ui/src/moxi_ui/cli.py	held.enter_context(files.lock(layout().runtime_dir(create=True) / LOCK_FILE,	keep	create	create
+ui	packages/ui/src/moxi_ui/cli.py	help="only make sure the shell runs; with --print, print the URL")	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	help="print the sign-in URL instead of opening a browser, for an "	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	inner.add_parser("devices", help="list the paired devices",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	inner.add_parser("disable", help="turn the gateway off",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	inner.add_parser("enable", help="turn the gateway on",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	inner.add_parser("pair", help="print a one-use pairing URL for a phone",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	log = inner.add_parser("log", help="print the audit log",	keep	help	help
 ui	packages/ui/src/moxi_ui/cli.py	log.add_argument("--days", type=int, default=1, metavar="N",	keep	type	type
+ui	packages/ui/src/moxi_ui/cli.py	log.add_argument("--json", action="store_true", help="one JSON object per row")	keep	help	help
 ui	packages/ui/src/moxi_ui/cli.py	names = set(layout().locators())	keep	set	set
+ui	packages/ui/src/moxi_ui/cli.py	revoke = inner.add_parser("revoke", help="revoke a paired device",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	revoke.add_argument("id", help="the device's id, as `devices` lists it")	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	status = verbs.add_parser("status", help="say whether the shell runs, and its page servers",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	status.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 ui	packages/ui/src/moxi_ui/cli.py	tickets = session.Tickets(layout().runtime_dir(create=True) / TICKETS_DIR)	keep	create	create
+ui	packages/ui/src/moxi_ui/cli.py	verbs.add_parser("serve", help="run the shell in the foreground",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	verbs.add_parser("signout", help="sign every browser out",	keep	help	help
+ui	packages/ui/src/moxi_ui/cli.py	verbs.add_parser("stop", help="stop the shell",	keep	help	help
 ui	packages/ui/src/moxi_ui/cli.py	with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:	keep	Environment	Environment
 ui	packages/ui/src/moxi_ui/gateway/access.py	_object(await _body(receive, _BEGIN_CAP), set(), empty=True)	keep	set	set
 ui	packages/ui/src/moxi_ui/gateway/access.py	admitted.set(None)	keep	set	set
@@ -4753,8 +5514,11 @@ ui	packages/ui/src/moxi_ui/loopback/routes.py	if len(set(values)) != len(values)
 ui	packages/ui/src/moxi_ui/loopback/routes.py	paths: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/routes.py	seen: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/serve.py	await send(message)	keep	fail	fail
+ui	packages/ui/src/moxi_ui/loopback/serve.py	help="don't stop when stdin closes (for a run by hand)")	keep	help	help
+ui	packages/ui/src/moxi_ui/loopback/serve.py	help="listen on TCP 127.0.0.1 instead of a Unix socket")	keep	help	help
 ui	packages/ui/src/moxi_ui/loopback/serve.py	loop.call_soon_threadsafe(should_exit.set)	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/serve.py	parser.add_argument("--idle-s", type=_seconds, metavar="SECONDS",	keep	type	type
+ui	packages/ui/src/moxi_ui/loopback/serve.py	parser.add_argument("module", help="the module whose PAGE to serve")	keep	help	help
 ui	packages/ui/src/moxi_ui/loopback/serve.py	runtime = Layout(module).runtime_dir(create=True)	keep	create	create
 ui	packages/ui/src/moxi_ui/loopback/serve.py	self._should_exit.set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/serve.py	self.connections: set[Any] = set()	keep	set	set
@@ -4840,6 +5604,8 @@ ui	packages/ui/src/moxi_ui/terminal.py	check	name	page	for_page
 ui	packages/ui/src/moxi_ui/terminal.py	check(places, *, programs=None, page=True) -> str | None	use	page=True	for_page=True
 ui	packages/ui/src/moxi_ui/terminal.py	givers: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/terminal.py	the next check pass. `page` words the line for the browser page (the default) or for a	use	`page	`for_page
+ui	packages/ui/src/moxi_ui/testing/__init__.py	help="the browser moxi_ui.testing's browser fixtures run (default chromium)")	keep	help	help
+ui	packages/ui/src/moxi_ui/testing/__init__.py	help="where a failed browser test's Playwright trace goes (default "	keep	help	help
 ui	packages/ui/src/moxi_ui/testing/__init__.py	pending: set[Any] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/browser.py	"?.shadowRoot?.querySelector('*') != null", timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	held: set[str] = set()	keep	set	set
@@ -5173,9 +5939,50 @@ usage	packages/usage/src/moxi_usage/ceiling.py	_said: set[str] = set()	keep	set	
 usage	packages/usage/src/moxi_usage/ceiling.py	for n, value in enumerate(settings["ceiling.allow_commands"], start=1):	keep	start	start
 usage	packages/usage/src/moxi_usage/ceiling.py	for n, value in enumerate(settings[key], start=1):	keep	start	start
 usage	packages/usage/src/moxi_usage/ceiling.py	home = env.get("HOME") if isinstance(env, dict) else None	keep	HOME	HOME
+usage	packages/usage/src/moxi_usage/cli.py	"context", help="print how full a session's context is",	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	"index", help="read what changed in the harnesses' records into the token index",	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	"marks", help="print a session's warn-at marks, or every session's fired marks",	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	"requests", help="one line per request of a session's agent, with its context "	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	"restart-point", help="print the measured restart point and the warn-at marks",	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	"terms", help="every term of each cost: tokens x price per class, by model, day, "	keep	help	help
 usage	packages/usage/src/moxi_usage/cli.py	ages = [row.age_seconds for row in rows if row.age_seconds is not UNKNOWN]	use	row.age_seconds	row.age_s
+usage	packages/usage/src/moxi_usage/cli.py	context.add_argument("--agent", metavar="ID", help="one of the session's agents")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	context.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 usage	packages/usage/src/moxi_usage/cli.py	filled = set(provenance.get("filled", ()))	keep	set	set
+usage	packages/usage/src/moxi_usage/cli.py	help="after the pass, compare the stored claims with the claimed "	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="count one harness only")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="count one project: its key, or the directory a row "	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="cut days in UTC, not local time")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="exit 75 at once when another pass holds the index")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="group by model (the default), day, month, or the agents of "	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="let a schema change drop the rows of offline archive lanes")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="never ask Codex for a new reading, even when the newest is "	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="one of the session's agents (default: main)")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="only this harness's windows")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="print what would change and write nothing")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="read every source again from its start")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="read the index as it is, without running its pass")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="remove the snapshot layer, so the shipped table rules again")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="run the index's pass and the measure, and write it")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="the first day to count (YYYY-MM-DD)")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="the harness that holds the session; else each is asked")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="the last day to count (YYYY-MM-DD), included")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="the session id (a Codex thread id, an OpenCode session id)")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	help="the session id (a sessions row's id)")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	index.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	limits = verbs.add_parser("limits", help="print how much of each plan window is used",	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	limits.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	marks.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 usage	packages/usage/src/moxi_usage/cli.py	overridden = set(provenance.get("overridden", ()))	keep	set	set
+usage	packages/usage/src/moxi_usage/cli.py	parser = verbs.add_parser(verb, help=text, description=f"Print {text}, from the "	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	parser.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	parser.add_argument("--model", metavar="MODEL", help="count one model only")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	prices = verbs.add_parser("prices", help="print a model's facts, or the model table "	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	prices.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	prices.add_argument("--provider", help="the request's provider, for the lookup")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	prices.add_argument("model", nargs="?", metavar="MODEL", help="a model id")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	restart.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	terms.add_argument("--session", metavar="ID", help="count one session only")	keep	help	help
 usage	packages/usage/src/moxi_usage/context.py	seen: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/convert.py	extra = sorted(set(row) - _MULTIPLIER_KEYS - {"source", "as_of"})	keep	set	set
 usage	packages/usage/src/moxi_usage/convert.py	extra = sorted(set(row) - _ROW_KEYS)	keep	set	set
@@ -5233,6 +6040,7 @@ usage	packages/usage/src/moxi_usage/reports.py	self.models: set[str] = set()	kee
 usage	packages/usage/src/moxi_usage/reports.py	self.rules: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/reports.py	self.unpriced: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/reports.py	total = make({}) if total is None else total	keep	start	start
+usage	packages/usage/src/moxi_usage/reports.py	where, args = query.where(claimed=False)	keep	claimed	claimed
 usage	packages/usage/src/moxi_usage/settings.py	extra = sorted(set(row) - {"path", "id"})	keep	set	set
 usage	packages/usage/src/moxi_usage/settings.py	for n, row in enumerate(settings[ARCHIVE_KEY], start=1):	keep	start	start
 usage	packages/usage/src/moxi_usage/settings.py	if (prices or tiers is not None) and not {"input", "output"} <= set(prices):	keep	set	set
@@ -5367,4 +6175,5 @@ usage	packages/usage/tests/test_store.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_thresholds.py	assert set(found) == {"1x", "1.5x", "2x"}	keep	set	set
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--date", required=True,	keep	required	required
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--out", type=Path, default=DATA / "models.json")	keep	type	type
+usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--url", default=URL, help="where the copy was fetched from")	keep	help	help
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("litellm", type=Path, help="a copy of LiteLLM's price file")	keep	type	type

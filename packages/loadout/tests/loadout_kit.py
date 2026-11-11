@@ -9,23 +9,23 @@ import textwrap
 from pathlib import Path
 
 
-def configure(folder: Path) -> Path:
-    """Make `folder` the configured loadout folder; return it."""
+def configure(loadout_dir: Path) -> Path:
+    """Make `loadout_dir` the configured loadout loadout_dir; return it."""
     from moxi import config
 
-    folder.mkdir(parents=True, exist_ok=True)
-    config.set_value("loadout", "source", str(folder), by="test")
-    return folder
+    loadout_dir.mkdir(parents=True, exist_ok=True)
+    config.set_value("loadout", "source", str(loadout_dir), by="test")
+    return loadout_dir
 
 
-def manifest(folder: Path, text: str) -> Path:
-    path = folder / "loadout.toml"
+def manifest(loadout_dir: Path, text: str) -> Path:
+    path = loadout_dir / "loadout.toml"
     path.write_text(textwrap.dedent(text), encoding="utf-8")
     return path
 
 
-def skill(folder: Path, name: str, body: str = "Do the thing.\n") -> Path:
-    path = folder / name
+def skill(loadout_dir: Path, name: str, body: str = "Do the thing.\n") -> Path:
+    path = loadout_dir / name
     path.mkdir(parents=True, exist_ok=True)
     (path / "SKILL.md").write_text(f"---\nname: {name}\ndescription: A skill.\n---\n{body}",
                                    encoding="utf-8")
