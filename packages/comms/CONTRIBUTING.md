@@ -81,5 +81,5 @@ the internal entry points are `moxi-comms-<part>`.
 
 ## Reporting a security problem
 
-Email codemanethan@gmail.com rather than opening a public issue. See
-[docs/security.md](docs/security.md) for what comms does and doesn't protect against.
+Report it privately, as [SECURITY.md](https://github.com/CodeManEthan/moxi/blob/main/SECURITY.md) says, rather than opening a public issue.
+See [docs/security.md](docs/security.md) for what comms does and doesn't protect against.
