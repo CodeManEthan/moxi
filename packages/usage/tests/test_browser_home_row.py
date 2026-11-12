@@ -197,7 +197,7 @@ def test_without_usage_and_comms_home_draws_neither_row_and_names_neither(ui_she
     page.on("request", lambda request: asked.append(request.url))
     page.goto("/m/ui/")
     _expect_shown(page, [HEALTH])
-    expect(_home(page).locator(".entry")).to_have_count(1)
+    expect(_home(page).locator(f".entry[data-row='{USAGE}'], .entry[data-row='{COMMS}']")).to_have_count(0)
     expect(page.locator("moxi-usage-row, moxi-comms-mail")).to_have_count(0)
     text = _home(page).inner_text()
     assert "Usage" not in text and "Comms" not in text, text

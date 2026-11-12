@@ -522,7 +522,7 @@ def test_on_the_phone_home_is_the_rows_with_no_spot_and_no_act_under_the_reads_o
 def test_on_the_phone_tab_from_the_bands_last_name_closes_it_where_settings_is_hidden(
         gw, phones):
     shell, bridge = gw
-    page = _pair(phones(bridge), shell)
+    page = pair_page(phones(bridge), shell)
     home = page.locator("#moxi-panel > moxi-ui-page moxi-ui-home")
     health = home.get_by_role("button", name=re.compile("Health"))
     expect(health.locator(".fact")).to_have_text("1 check failing, 1 warning")
