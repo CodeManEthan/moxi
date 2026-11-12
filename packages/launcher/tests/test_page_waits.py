@@ -236,6 +236,55 @@ def test_comms_down_gives_no_waits_and_the_pass_asks_comms_nothing_more(wired,
     assert [name for name, _ in wired.comms.calls] == ["owner"]
 
 
+#: Seconds each turns and comms call of the next test takes.
+SLOW_CALL_S = 2.0
+
+
+def test_a_director_s_worker_makes_no_call_after_the_deadline(wired, monkeypatch):
+    # The deadline falls a second into the first directed agent's facts call, so the
+    # read reaches every kind of call on the agents' path before it stops.
+    monkeypatch.setattr(joiner, "JOIN_BUDGET_S", 7 * SLOW_CALL_S + 1.0)
+    agents_case(wired, *((f"{name}@proj-a", live("x", turn_open=True)) for name in (
+        "coder", "critic", "pilot", "helper", "scout", "curator")))
+    inside = threading.local()
+    seen: dict[str, float] = {}
+    calls: list[tuple[str, float, bool]] = []
+    real_call = joiner.Pass.call
+
+    def call(self, fn, /, *args, **kwargs):
+        seen["deadline"] = self.deadline
+        inside.depth = getattr(inside, "depth", 0) + 1
+        try:
+            return real_call(self, fn, *args, **kwargs)
+        finally:
+            inside.depth -= 1
+
+    def slow(name, fn):
+        def slept(*args, **kwargs):
+            calls.append((name, time.monotonic(), getattr(inside, "depth", 0) > 0))
+            time.sleep(SLOW_CALL_S)
+            return fn(*args, **kwargs)
+        return slept
+
+    monkeypatch.setattr(joiner.Pass, "call", call)
+    wired.turns.find = slow("find", wired.turns.find)
+    for session in wired.turns.sessions.values():
+        session.facts = slow("facts", session.facts)
+        session.agents = slow("agents", session.agents)
+    for name in ("owner", "roster", "session_of"):
+        setattr(wired.comms, name, slow(name, getattr(wired.comms, name)))
+    join = one_pass()
+    ended = time.monotonic()
+    deadline = seen["deadline"]
+    assert [name for name, _, _ in calls] == ["find", "facts", "agents", "owner", "roster",
+                                              "session_of", "find", "facts"]
+    # Every call was asked for through the pass, and none started past the deadline.
+    assert all(through for _, _, through in calls)
+    assert all(started < deadline for _, started, _ in calls)
+    assert ended <= deadline + SLOW_CALL_S + 0.5
+    assert join.kept == {}
+
+
 def test_without_comms_a_director_is_an_ordinary_session(wired):
     agents_case(wired, ("coder@proj-a", live("x", turn_open=True)))
     wired.comms = None
