@@ -271,15 +271,30 @@ def test_a_draft_is_draft(waiting):
     assert refused["hint"] == "clear the text typed in the session"
 
 
-def test_a_cap_of_none_is_capped(waiting, monkeypatch):
+def capped_at(monkeypatch, cap) -> None:
     shipped = settings.current()
 
     class Capped:
         def __getitem__(self, key):
-            return 0 if key == "keep_warm.subagent_cap" else shipped[key]
+            return cap if key == "keep_warm.subagent_cap" else shipped[key]
 
     monkeypatch.setattr(settings, "current", Capped)
-    assert code() == "capped"
+
+
+def test_a_cap_of_none_is_capped(waiting, monkeypatch):
+    capped_at(monkeypatch, 0)
+    refused = press()
+    assert refused["code"] == "capped"
+    assert refused["problem"] == ("keep-warm's cap of nudges in a row leaves a press none "
+                                  "to send to this session")
+
+
+def test_a_cap_setting_that_can_t_be_read_is_capped_and_named(waiting, monkeypatch):
+    capped_at(monkeypatch, "many")
+    refused = press()
+    assert refused["code"] == "capped" and covers() == []
+    assert refused["problem"] == ("keep-warm's cap setting keep_warm.subagent_cap could not "
+                                  "be read, so a press has no nudge to send to this session")
 
 
 # -- the refusals, in order ------------------------------------------------------------------

@@ -1974,7 +1974,7 @@ def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
     got = keepwarm.reading(*readings, **options, pressed=True)
     names = joined.names if joined is not None else ()
     refused = _press_refused(conn, row, sid, got, clock, facts, listed, joined, tick_s,
-                             at_work=bool(live_agents or names))
+                             current, at_work=bool(live_agents or names))
     if refused is not None:
         return refused
     fact = ({"kind": "subagents", "count": len(live_agents)} if live_agents
@@ -1989,10 +1989,11 @@ def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
 
 def _press_refused(conn: sqlite3.Connection, row: store.LaunchRow, sid: str,
                    got: keepwarm.Reading, clock: Any, facts: Any, listed: Any | None,
-                   joined: waits.Directed | None, tick_s: float | None, *,
-                   at_work: bool) -> dict[str, Any] | None:
+                   joined: waits.Directed | None, tick_s: float | None,
+                   current: Mapping[str, Any], *, at_work: bool) -> dict[str, Any] | None:
     """The refusal of the first step a press does not pass, in the order of the ask's
-    steps (`got`, the reading with `pressed`), or None when every one passes."""
+    steps (`got`, the reading with `pressed`), or None when every one passes. `current`
+    is the launcher's settings."""
     step = got.step
     if step == 2:
         return _no("run-open", f"a run is open on launch {row.request_id}",
@@ -2024,6 +2025,12 @@ def _press_refused(conn: sqlite3.Connection, row: store.LaunchRow, sid: str,
         return _no("unreadable", f"nobody was found at work, but {'; '.join(unread)}",
                    TRY_AGAIN)
     if step == 7:
+        key = keepwarm.CAPS[got.case]
+        try:
+            int(current[key])
+        except (KeyError, TypeError, ValueError):
+            return _no("capped", f"keep-warm's cap setting {key} could not be read, so a "
+                                 "press has no nudge to send to this session")
         return _no("capped", "keep-warm's cap of nudges in a row leaves a press none to send "
                              "to this session")
     if step == 8:
