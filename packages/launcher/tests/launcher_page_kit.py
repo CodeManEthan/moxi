@@ -413,3 +413,116 @@ def open_home(page: Any) -> Any:
     piece = home_prompt(page)
     piece.locator(".go:not([disabled])").wait_for()
     return piece
+
+
+# --- Home's Sessions row ------------------------------------------------------------------
+
+
+class FakeTurns:
+    """The fake turns for one test shell (`launcher_fake_turns`): a directory holding the
+    script it reads at each call. Start the shell with `options()`, so its launcher page
+    server finds each session the script lists, and no other, through the fake."""
+
+    def __init__(self, root: Path):
+        self.dir = Path(root)
+        self.dir.mkdir(parents=True, exist_ok=True)
+
+    def options(self) -> dict[str, Any]:
+        """The shell options that put the fake in turns' place."""
+        return {"site": [str(TESTS)],
+                "env": {"MOXI_LAUNCHER_TURNS": "launcher_fake_turns",
+                        "LAUNCHER_FAKE_TURNS": str(self.dir)}}
+
+    def script(self, **keys: Any) -> None:
+        """Write the fake's script anew, written whole and then moved into place."""
+        tmp = self.dir / "script.json.tmp"
+        tmp.write_text(json.dumps(keys))
+        os.replace(tmp, self.dir / "script.json")
+
+
+def waiting(*, subagents: int = 1, draft: bool = False) -> dict[str, Any]:
+    """A fake turns session whose own turn is closed while `subagents` subagents run, its
+    claim this test's own process, as `seed(.., claimed=True)` writes it."""
+    return {"endpoint_pid": os.getpid(), "turn_number": 3, "draft": draft,
+            "agents": [{"id": f"a{n}", "kind": "subagent", "state": "running", "final": False}
+                       for n in range(1, subagents + 1)]}
+
+
+def timed(shell: Any, session_id: str, *, ago_s: float = 60.0, ttl_s: int = 3600) -> Path:
+    """The cache watcher's clock record of `session_id` in the shell's runtime directory,
+    as the watcher writes it while it times the session: warm, its last request `ago_s`
+    seconds ago. Its `stale_after` outlasts any test, so it reads as fresh with no
+    rewrite. Returns its path."""
+    records = modules.load("cache", interface=1).api.records
+    now = time.time()
+    record = {"v": records.VERSION, "session": session_id, "harness": "claude",
+              "pid": os.getpid(), "kind": "warm", "last_request": now - ago_s, "ttl": ttl_s,
+              "read_at": now, "seen_at": now, "code": None, "warn_before": 900,
+              "stale_after": 86400}
+    assert records.valid(record), record
+    path = records.record_dir(shell.env) / f"{session_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record))
+    return path
+
+
+def end(shell: Any, *request_ids: str) -> None:
+    """Each launch's process reads ended from now on, so it no longer runs."""
+    with launch_log(shell) as conn:
+        for request_id in request_ids:
+            store.set_facts(conn, request_id, pid_started=1.0)
+
+
+#: What `left_out` writes: a finder, first on the import path, that finds none of the
+#: named packages.
+_LEFT_OUT = '''"""The launcher's page kit wrote this: in each process started with this directory on
+its path, the packages named here can't be imported, so their modules read as not
+installed."""
+
+import sys
+
+NAMES = frozenset({names!r})
+
+
+class _LeftOut:
+    def find_spec(self, name, path=None, target=None):
+        if name.partition(".")[0] in NAMES:
+            raise ModuleNotFoundError(f"{{name}} is left out", name=name)
+        return None
+
+
+sys.meta_path.insert(0, _LeftOut())
+'''
+
+
+def left_out(root: Path, *modules_: str) -> Path:
+    """A directory that, put on a test shell's `site`, makes each module of `modules_`
+    read as not installed in the shell and every page server it starts: its
+    `sitecustomize.py` keeps their packages from being imported, so
+    `moxi.modules.available` answers False for them. A shell's `leave_out` hides a module
+    only from its own list; this hides it from the launcher page server's reads as well.
+    Returns the directory."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    names = sorted(f"moxi_{name}" for name in modules_)
+    (root / "sitecustomize.py").write_text(_LEFT_OUT.format(names=set(names)))
+    return root
+
+
+#: A module of the tests' own whose one Home row says `quiet` and needs nothing, ordered
+#: above the Sessions row (tests/peer/moxi_peer).
+PEER = TESTS / "peer" / "moxi_peer"
+
+
+def install_peer(site: Path) -> Path:
+    """Copy the `peer` module into `site` with its `.dist-info`, so a shell with `site`
+    holds it as an installed module. Returns `site`."""
+    site = Path(site)
+    site.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(PEER, site / "moxi_peer", ignore=shutil.ignore_patterns("__pycache__"),
+                    dirs_exist_ok=True)
+    info = site / "moxi_peer-0.1.0.dist-info"
+    info.mkdir(exist_ok=True)
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: moxi-peer\nVersion: 0.1.0\n")
+    (info / "entry_points.txt").write_text("[moxi.modules]\npeer = moxi_peer.module\n")
+    return site
