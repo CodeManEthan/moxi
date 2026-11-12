@@ -247,7 +247,7 @@ def test_the_gate_matrix_passes():
 FILTERS = {"since", "until", "harness", "project", "folder", "model", "utc"}
 
 
-def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways():
+def test_each_route_declares_exactly_the_keys_it_reads_and_one_is_the_gateways():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
     assert {path: (r["kind"], set(r["query"]), r["stream"]) for path, r in routes.items()} == {
@@ -264,10 +264,12 @@ def test_each_route_declares_exactly_the_keys_it_reads_and_none_is_the_gateways(
         "/api/status": ("read", set(), False),
         "/api/restart-point": ("read", {"model"}, False),
         "/api/cost": ("read", set(), False),
+        "/api/summary": ("read", set(), False),
         "/api/pass": ("act", set(), False),
         "/api/events": ("read", set(), True),
     }
-    assert not any(route["gateway"] or route["confirmed"] for route in routes.values())
+    assert {path for path, route in routes.items() if route["gateway"]} == {"/api/summary"}
+    assert not any(route["confirmed"] for route in routes.values())
     assert routes["/api/session"]["query"]["session"]["required"]
     assert all(key["required"] for key in routes["/api/window"]["query"].values())
     assert routes["/api/requests"]["query"]["session"]["required"]
@@ -311,7 +313,7 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
         "lanes[].root", "lanes[].unreadable[].path", "lanes[].imports_path",
         "total.held_rows[].path", "total.duplicate_rows[].path",
         "total.duplicate_rows[].of_path"}
-    for path in ("/api/limits", "/api/daily", "/api/models", "/api/cost",
+    for path in ("/api/limits", "/api/daily", "/api/models", "/api/cost", "/api/summary",
                  "/api/terms", "/api/requests", "/api/prices", "/api/restart-point",
                  "/api/pass", "/api/events"):
         assert marked(path, "path") == set(), path
@@ -1222,6 +1224,163 @@ def test_a_failed_pull_says_why_on_the_topics_codex_rows():
     body = get("/api/limits")                    # the route asked for none, so says nothing
     assert body["pull"] is None
     assert all(row["note"] is None for row in body["rows"])
+
+
+# --- Home's summary -------------------------------------------------------------------------
+
+MINUTE = 60.0
+
+
+def window_reading(harness: str, used: float | None, *, ago: float, now: float,
+                   minutes: int = 300, resets: float | None = 3600.0,
+                   limit_id: str | None = None) -> Reading:
+    """A reading of one window taken `ago` seconds before `now`, resetting `resets`
+    seconds after `now` (None for a reading with no reset)."""
+    main = readings.PLAN_LIMIT if harness == "claude" else readings.CODEX_LIMIT
+    slot = "primary" if minutes == readings.FIVE_HOUR else "secondary"
+    return Reading(harness, limit_id or main, minutes, slot, used,
+                   None if resets is None else now + resets, now - ago, "rollout", "thread-1")
+
+
+def test_the_summary_is_the_one_route_the_gateway_reaches_and_carries_no_mark():
+    exported = loopback().export(page.PAGE)
+    routes = {route["path"]: route for route in exported["routes"]}
+    assert [path for path, route in routes.items() if route["gateway"]] == ["/api/summary"]
+    summary = routes["/api/summary"]
+    assert (summary["kind"], summary["query"], summary["stream"]) == ("read", {}, False)
+    assert not summary["confirmed"]
+    assert {key: _marks(shape, key) for key, shape in summary["returns"].items()} == {
+        "now": {}, "limits": {}, "cost": {}}
+
+
+def test_the_summary_takes_the_fresh_main_windows_of_the_harness_read_last():
+    now = time.time()
+    put_readings(
+        window_reading("codex", 41.0, ago=2 * MINUTE, now=now),
+        window_reading("codex", 60.0, ago=2 * MINUTE, now=now, minutes=readings.SEVEN_DAY,
+                       resets=3 * 86400),
+        window_reading("claude", 49.0, ago=MINUTE, now=now),
+        window_reading("claude", 12.0, ago=5 * MINUTE, now=now, minutes=readings.SEVEN_DAY,
+                       resets=4 * 86400))
+    body = get("/api/summary")
+    assert set(body) == {"now", "limits", "cost"} and body["cost"] is None
+    assert body["limits"] == {
+        "harness": "claude", "observed_at": limits.iso(now - MINUTE),
+        "windows": [
+            {"window": "5h", "used_percent": 49.0, "resets_at": limits.iso(now + 3600),
+             "full_at": None},
+            {"window": "7d", "used_percent": 12.0, "resets_at": limits.iso(now + 4 * 86400),
+             "full_at": None}]}
+
+
+def test_a_newer_codex_reading_wins_over_an_older_claude_one():
+    now = time.time()
+    put_readings(window_reading("claude", 49.0, ago=10 * MINUTE, now=now),
+                 window_reading("codex", 7.0, ago=MINUTE, now=now))
+    found = get("/api/summary")["limits"]
+    assert (found["harness"], found["observed_at"]) == ("codex", limits.iso(now - MINUTE))
+    assert [w["window"] for w in found["windows"]] == ["5h"]
+
+
+def test_a_reset_or_unavailable_main_window_is_not_taken():
+    now = time.time()
+    put_readings(window_reading("codex", 41.0, ago=MINUTE, now=now, resets=None),
+                 window_reading("codex", None, ago=MINUTE, now=now,
+                                minutes=readings.SEVEN_DAY, resets=86400))
+    rows = {row["label"]: row["state"] for row in get("/api/limits")["rows"]
+            if row["harness"] == "codex"}
+    assert rows == {"5h": "reset", "7d": "unavailable"}
+    assert get("/api/summary")["limits"] is None
+    put_readings(window_reading("claude", 20.0, ago=20 * MINUTE, now=now))
+    found = get("/api/summary")["limits"]
+    assert found["harness"] == "claude"            # the newer Codex rows are not taken
+    assert [w["window"] for w in found["windows"]] == ["5h"]
+
+
+def test_a_limit_that_is_not_the_main_one_is_not_taken():
+    now = time.time()
+    put_readings(window_reading("codex", 80.0, ago=MINUTE, now=now, limit_id="codex_other"),
+                 window_reading("codex", 30.0, ago=MINUTE, now=now, minutes=90))
+    assert {row["limit_id"] for row in get("/api/limits")["rows"]
+            if row["state"] == "fresh"} == {"codex_other", "codex"}
+    assert get("/api/summary")["limits"] is None
+
+
+def test_a_window_that_fills_before_its_reset_carries_its_full_at():
+    now = time.time()
+    put_readings(*(window_reading("codex", used, ago=ago * MINUTE, now=now)
+                   for used, ago in ((30.0, 50), (50.0, 30), (70.0, 10))))
+    (five,) = [row for row in get("/api/limits")["rows"]
+               if row["harness"] == "codex" and row["label"] == "5h"]
+    assert five["full_at"] is not None
+    (window,) = get("/api/summary")["limits"]["windows"]
+    assert window["full_at"] == five["full_at"] and window["used_percent"] == 70.0
+
+
+def test_no_reading_and_no_cost_give_two_nulls():
+    before = time.time()
+    body = get("/api/summary")
+    assert before <= body["now"] <= time.time()
+    assert (body["limits"], body["cost"]) == (None, None)
+
+
+@pytest.fixture
+def two_days(monkeypatch):
+    """An index of two days: on the first, one request of each of two priced models; on
+    the second, a model the price table lacks."""
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    first, second = (at(f"2026-10-0{d}T12:00") for d in (1, 2))
+    conn = store.open_index()
+    try:
+        source(conn, "/p/s1.jsonl", [request("r1", first), request("r2", first + 60, model="m-b"),
+                                     request("r3", second, model="mystery-9")],
+               session_id="s1", cwd="/w/app")
+    finally:
+        conn.close()
+
+
+def test_todays_cost_is_summed_over_its_models(two_days, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_today", lambda: dt.date(2026, 10, 1))
+    cost = get("/api/summary")["cost"]
+    rows = [row for row in get("/api/cost")["rows"] if row["period"] == "2026-10-01"]
+    assert {row["model"] for row in rows} == {"m-a", "m-b"}
+    assert cost == {"day": "2026-10-01", "dollars": pytest.approx(0.006), "complete": True}
+    assert cost["dollars"] == pytest.approx(sum(row["cost"] for row in rows))
+
+
+def test_an_unpriced_model_makes_todays_cost_incomplete(two_days, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_today", lambda: dt.date(2026, 10, 2))
+    assert get("/api/summary")["cost"] == {"day": "2026-10-02", "dollars": 0.0,
+                                           "complete": False}
+
+
+def test_a_day_with_no_request_has_no_cost(two_days, monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_today", lambda: dt.date(2026, 10, 3))
+    assert get("/api/summary")["cost"] is None
+
+
+def test_with_no_index_the_cost_is_null_and_no_index_is_made():
+    now = time.time()
+    put_readings(window_reading("codex", 41.0, ago=MINUTE, now=now))
+    body = get("/api/summary")
+    assert body["cost"] is None and body["limits"]["harness"] == "codex"
+    assert not store.index_path().exists()
+
+
+def test_an_index_from_a_newer_usage_leaves_the_cost_null(seeded):
+    _set_version(store.INDEX_VERSION + 1)
+    assert refused("/api/cost")
+    assert get("/api/summary")["cost"] is None
+
+
+def test_the_summary_never_pulls_codex_however_stale_its_reading(pulls):
+    now = time.time()
+    put_readings(window_reading("codex", 10.0, ago=120 * MINUTE, now=now))
+    found = get("/api/summary")["limits"]
+    assert pulls == []
+    assert (found["harness"], found["observed_at"]) == ("codex", limits.iso(now - 120 * MINUTE))
+    pagehandlers.gather_limits()                       # the poller's gather does pull
+    assert pulls == [limits.PULL_TIMEOUT]
 
 
 # --- one window opened ----------------------------------------------------------------------
