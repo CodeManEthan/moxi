@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The launcher offers interface 2: `running()` gives the launches running now, newest
+  first, each a frozen `Running` with its request id, harness, the session id it was
+  last known by, target, slot, project key, folder, name, comms name, start time and
+  whether its process runs. It reads only the launch log and the process table.
+  `running(live_only=False)` keeps the launches whose process has ended; `limit` caps
+  the count (200) and `timeout_s` the wait for a busy log (1 s).
 - The launcher offers a piece for Home's main spot in the browser UI shell: a box to say
   what the agent should do, the line above it that picks the project or folder the
   session starts in, a chip that picks the harness, the model and the effort, and a

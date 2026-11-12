@@ -194,6 +194,17 @@ many ids in one read. Neither writes to the log, except to bring an older one's
 schema up to date; a log held past the wait (1 second)
 raises `Busy`, and the caller asks again.
 
+Interface 2 adds what is running now: `running()` gives each launch that recorded a
+process and whose process runs, newest first, at most `limit` (200), as a `Running` of
+plain values: `request_id`, `harness`, `session_id` (the id the launch was last known by,
+None when it never learned one), `target`, `slot`, `project_key`, `cwd`, `name` (the
+launch's name, else its comms name, else its folder and start time), `identity`,
+`created_at` and `live`. With `live_only=False` it keeps the launches whose process has
+ended, with `live` false. It reads the launch log and the process table and nothing else:
+it asks no other module, starts no process, and writes nothing but an older log's schema
+update. With no launch log it gives none; a log held past `timeout_s` (1 second) raises
+`Busy`.
+
 ## Handoffs
 
 A handoff is a short file a session writes for the next session of its seat. Its key is
