@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- usage has a row on Home in the browser UI shell, the `row` component (`<moxi-usage-row>`,
+  order 300). It says on one line how full the main 5-hour and weekly windows of the
+  harness read last are, when the 5-hour one resets and today's cost:
+  `Claude 5-hour 49%, resets 21:34 · weekly 60% · today $19.54`, with `read 19:08` at the
+  right. A window that fills before it resets takes the row, set heavy, and the row then
+  needs the user (40 on Home's scale): `Claude weekly limit fills tomorrow 17:51, resets
+  Wed 23:58 · today $19.54`. A cost with an unpriced model reads `$19.54+`; with no window
+  read the row is the cost alone, and with neither there is no row. It reads its route
+  when it is shown and every 30 s while the window is visible. The row is a link to the
+  usage page.
+- A new read, `GET /api/summary`, the row's: `{now, limits, cost}`. `limits` is the
+  harness whose fresh main windows hold the newest reading, with each of those windows'
+  percent, reset and `full_at`; `cost` is today's dollars over every model and whether
+  they are whole. It never pulls a Codex reading through turns, so it never starts a
+  Codex app-server; it says what the readings store and the newest rollout hold. It is
+  the one route of usage the gateway serves, so the row shows on the phone too; it
+  carries numbers, times and a harness's name, nothing that can hold a path or text.
+
 ## 0.2.1 (2026-11-10)
 
 - usage's page is drawn anew, as one page with no tabs and no heading of its own.

@@ -57,8 +57,8 @@ test("the page bundle's tail holds the ISC notice of each package in it but Lit'
   assert.deepEqual(named, d3, "the notice names exactly the packages the page bundles");
 });
 
-test("the limits and cost bundles hold no d3, so they need no notice", async () => {
-  for (const entry of ["limits.ts", "cost.ts"]) {
+test("the limits, cost and row bundles hold no d3, so they need no notice", async () => {
+  for (const entry of ["limits.ts", "cost.ts", "row.ts"]) {
     const packages = await bundled(entry);
     assert.deepEqual([...packages.keys()].filter((name) => !LIT.has(name)), [], entry);
     const text = read(entry.replace(".ts", ".js"));

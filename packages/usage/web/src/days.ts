@@ -79,6 +79,12 @@ export function monthWord(month: string): string {
   return found === null || name === undefined ? month : `${name} ${found[1]}`;
 }
 
+/** A day's weekday: `Wed`; the day as given when it is not a day. */
+export function weekday(day: string): string {
+  const at = stamp(day);
+  return Number.isNaN(at) ? day : WEEKDAYS[new Date(at).getUTCDay()];
+}
+
 /** A day against `today`: `today`, `yesterday`, `tomorrow`, the weekday within six days
  * either side (`Wed`), else the date (`Nov 3`). */
 export function dayWord(day: string, today: string): string {
@@ -87,7 +93,7 @@ export function dayWord(day: string, today: string): string {
   if (off === 0) return "today";
   if (off === -1) return "yesterday";
   if (off === 1) return "tomorrow";
-  if (Math.abs(off) <= 6) return WEEKDAYS[new Date(stamp(day)).getUTCDay()];
+  if (Math.abs(off) <= 6) return weekday(day);
   return dateWord(day);
 }
 

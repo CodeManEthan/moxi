@@ -325,24 +325,26 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
                                                "used.rows[].name"}
 
 
-def test_the_page_serves_its_three_components_and_the_build_stamp():
+def test_the_page_serves_its_four_components_and_the_build_stamp():
     assert loopback().export(page.PAGE)["assets"] == ["build-stamp.txt", "cost.js",
-                                                      "limits.js", "page.js"]
+                                                      "limits.js", "page.js", "row.js"]
 
 
-def test_the_announcement_offers_the_page_its_blocks_and_the_ui_extra():
+def test_the_announcement_offers_the_page_its_blocks_its_row_and_the_ui_extra():
     from moxi_usage import module
 
     assert module.PAGE == "moxi_usage.page:PAGE"
-    assert module.OPTIONAL["ui"] == ("the usage page, with its limits and cost blocks, in "
-                                     "the browser UI shell")
+    assert module.OPTIONAL["ui"] == ("the usage page, with its limits and cost blocks and its "
+                                     "row on Home, in the browser UI shell")
     assert {name: (c["place"], c.get("home", False), c["script"])
             for name, c in module.COMPONENTS.items()} == {
         "page": ("page", False, "page.js"), "limits": ("block", True, "limits.js"),
-        "cost": ("block", True, "cost.js")}
+        "cost": ("block", True, "cost.js"), "row": ("block", True, "row.js")}
+    row = module.COMPONENTS["row"]
+    assert (row["title"], row["home_as"], row["order"]) == ("Usage", "row", 300)
     found = modules.load("usage", interface=1)
     assert found.ok and found.page == module.PAGE
-    assert set(found.components) == {"page", "limits", "cost"}
+    assert set(found.components) == {"page", "limits", "cost", "row"}
 
 
 def test_usage_offers_interfaces_1_and_2_and_no_other():
