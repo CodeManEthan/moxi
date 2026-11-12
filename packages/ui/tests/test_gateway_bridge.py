@@ -14,8 +14,8 @@ import time
 
 import pytest
 
-import phone_kit
-from moxi_ui.testing.phone import HOST, PhoneBridge
+from moxi_ui.testing import phone as phone_module
+from moxi_ui.testing.phone import HOST, PhoneBridge, gateway_shell, hold_port
 from moxi_ui.testing.shell import shell_env
 
 pytestmark = pytest.mark.timeout(120)
@@ -53,7 +53,7 @@ def test_the_mode_sets_no_locator_and_keeps_every_root_under_the_home(tmp_path):
 
 def test_in_gateway_mode_the_shell_takes_its_hold_where_pair_and_upstream_look(
         tmp_path_factory, fixture_site):
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
     try:
         port = shell.gateway_port
         hold = json.loads((shell.runtime_dir("ui") / "gateway.hold").read_text())
@@ -74,7 +74,7 @@ def test_in_gateway_mode_the_shell_takes_its_hold_where_pair_and_upstream_look(
 
 
 def test_on_in_gateway_mode_passes_and_writes_no_unit(tmp_path_factory, fixture_site):
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site, enabled=False)
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site], enabled=False)
     try:
         found = _supervisor(shell)
         if found != "None":
@@ -104,9 +104,9 @@ def test_a_port_another_program_takes_before_the_shell_binds_it_gets_another(
         taken.bind(("127.0.0.1", 0))
         taken.listen()
         first = [taken.getsockname()[1]]
-        pick = phone_kit.free_port
-        monkeypatch.setattr(phone_kit, "free_port", lambda: first.pop() if first else pick())
-        shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+        pick = phone_module.free_port
+        monkeypatch.setattr(phone_module, "free_port", lambda: first.pop() if first else pick())
+        shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
         try:
             assert shell.gateway_port != taken.getsockname()[1]
             status, data = shell.session().post("/m/ui/api/gateway/pair")
@@ -117,12 +117,12 @@ def test_a_port_another_program_takes_before_the_shell_binds_it_gets_another(
 
 def test_the_usual_test_environment_takes_no_hold(tmp_path_factory, fixture_site):
     home = tmp_path_factory.mktemp("usual")
-    shell = phone_kit.gateway_shell(home, fixture_site, start=False)
+    shell = gateway_shell(home, [fixture_site], start=False)
     shell.env = shell_env(home, [fixture_site])  # TestShell's usual environment
     shell.start()
     try:
         time.sleep(3)  # past the gateway's first tick
-        assert phone_kit.hold_port(shell) is None
+        assert hold_port(shell) is None
         with __import__("socket").socket() as free:
             free.bind(("127.0.0.1", shell.gateway_port))  # the port stays free
         # Its config lives under its own MOXI_HOME, where the gateway's switch is off.
@@ -133,7 +133,7 @@ def test_the_usual_test_environment_takes_no_hold(tmp_path_factory, fixture_site
 
 @pytest.fixture(scope="module")
 def phone(tmp_path_factory, fixture_site):
-    shell = phone_kit.gateway_shell(tmp_path_factory.mktemp("gw"), fixture_site)
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
     bridge = PhoneBridge(shell.home, shell.gateway_port).start()
     try:
         yield shell, bridge.pair(shell)

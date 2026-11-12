@@ -459,9 +459,32 @@ was never on the machine; cost by class as a stacked chart; and the tabs and the
 `terms` and `session/<id>` addresses of the page before it. It has no screen of its own
 for a phone, and fits a window 360 px wide.
 
-Two blocks go on the shell's home view: the limits, one meter per window, and the cost of
-today and the last 7 days, with how old the index behind it is, flagged once its last pass
-is over 10 minutes old. Without the extra, nothing of usage changes.
+Two blocks go on the shell's modules view: the limits, one meter per window, and the cost
+of today and the last 7 days, with how old the index behind it is, flagged once its last
+pass is over 10 minutes old. Without the extra, nothing of usage changes.
+
+### The row on Home
+
+usage has one row on the shell's Home, `Usage`, which is a link to the page. It reads
+`summary` when Home is shown and every 30 s while the window is visible, and says:
+
+| what usage holds | the row |
+|---|---|
+| a window read, none filling early | `Claude 5-hour 49%, resets 21:34 · weekly 60% · today $19.54`, and `read 19:08` at the right |
+| a window filling before it resets | `Claude weekly limit fills tomorrow 17:51, resets Wed 23:58 · today $19.54`, the first part heavy; the row needs you (40) |
+| today's cost, no window read | `today $19.54` |
+| neither | no row |
+
+The windows are the main 5-hour and weekly ones of the harness read last, each only while
+its reading is fresh; a window with no fresh reading is left out with its ` · `. With both
+windows filling early, the one that fills first leads and the other follows it
+(`, 5-hour fills 20:40`). `today $19.54+` means a model of today's has no price, so the sum
+is short. A time today is the time alone, on the next day `tomorrow 17:51`, and later
+the weekday (`Wed 23:58`), in the browser's zone and its way of writing a time. Without
+turns there are no Claude readings, so the row shows Codex's, or the cost alone.
+
+The row shows on the phone as at the desk: `summary` is the one route of usage the
+gateway serves.
 
 The page server's reads, each a `GET` under `/api`:
 
@@ -480,6 +503,7 @@ The page server's reads, each a `GET` under `/api`:
 | `restart-point` | `model` | `{model, tokens, reason}`: the context size past which carrying on with a main session of that model costs more than restarting it, or null with the reason |
 | `status` | none | the index: its lanes, held rows and last pass |
 | `cost` | none | today and the six days before it, by day and model |
+| `summary` | none | Home's row: `{now, limits, cost}`, the main windows of the harness read last (`harness`, `observed_at`, `windows` of `window`, `used_percent`, `resets_at`, `full_at`) and today's cost (`day`, `dollars`, `complete`), each null when there is none |
 
 The filters are `since`, `until` (dates, both included), `harness`, `project`, `folder`,
 `model` and `utc`. `folder` is a folder's whole path and keeps the sessions run in it,
@@ -488,8 +512,8 @@ Every answer but `prices` and `restart-point` carries `today`, the page server's
 date. `POST /api/pass` starts a pass, and `GET /api/events` is the stream, with the
 topics `limits` and `index`.
 
-`limits` makes no Codex pull, so it never waits on turns: the stream's poller pulls and
-publishes the `limits` topic. `window` and `restart-point` write nothing: `window` opens
+`limits` and `summary` make no Codex pull, so neither waits on turns or starts a Codex
+app-server: the stream's poller pulls and publishes the `limits` topic. `window` and `restart-point` write nothing: `window` opens
 the readings store only when it exists, and `restart-point` reads the measure's file and
 the model table. A session's `context` is the whole prompt of the newest request of its
 main file and the window it ran against, null when that is not known. `window`'s sessions

@@ -734,6 +734,67 @@ def limits(call: Any) -> dict[str, Any]:
     return {"now": now, **value}
 
 
+#: Home's row names a main window by its duration, never by its label.
+_SUMMARY_WINDOWS = {plan.FIVE_HOUR: "5h", plan.SEVEN_DAY: "7d"}
+
+
+def _taken(row: Mapping[str, Any]) -> bool:
+    """Whether a limits row is one Home's row says: a `fresh` 5-hour or 7-day window of
+    its harness's main limit, with its percent, reset and reading time."""
+    return (row["state"] == plan.FRESH
+            and row["limit_id"] == plan.MAIN_LIMIT.get(row["harness"])
+            and row["window_minutes"] in _SUMMARY_WINDOWS
+            and row["used_percent"] is not None and row["resets_at"] is not None
+            and row["observed_at"] is not None)
+
+
+def _moment(text: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(text)
+
+
+def _summary_limits(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """The main windows of the harness whose taken rows hold the newest reading; None
+    when no harness has a taken row."""
+    by: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if _taken(row):
+            by.setdefault(row["harness"], []).append(row)
+    if not by:
+        return None
+    newest = {harness: max(found, key=lambda row: _moment(row["observed_at"]))
+              for harness, found in by.items()}
+    harness = max(newest, key=lambda name: _moment(newest[name]["observed_at"]))
+    found = sorted(by[harness], key=lambda row: row["window_minutes"])
+    return {"harness": harness, "observed_at": newest[harness]["observed_at"],
+            "windows": [{"window": _SUMMARY_WINDOWS[row["window_minutes"]],
+                         "used_percent": row["used_percent"],
+                         "resets_at": row["resets_at"], "full_at": row["full_at"]}
+                        for row in found]}
+
+
+def _summary_cost() -> dict[str, Any] | None:
+    """Today's cost over every model, as the cost block sums it; None when the index
+    holds no request today, when there is no index, and when the report is refused."""
+    today = _today().isoformat()
+    try:
+        answer = _read("daily", {}, since=today, until=today)
+    except lb.Refused:
+        return None
+    rows = [row for row in answer["rows"] if row.get("day") == today]
+    if not rows:
+        return None
+    return {"day": today, "dollars": sum(_num(row.get("cost")) or 0.0 for row in rows),
+            "complete": all(bool(row.get("complete", True)) for row in rows)}
+
+
+def summary(call: Any) -> dict[str, Any]:
+    """`GET /api/summary`: Home's Usage row, the one read the gateway reaches. It never
+    pulls: a route the phone polls must not start Codex, so it says what the readings
+    store and the newest rollout hold, with when they were read."""
+    now, value = _limits(pull=False)
+    return {"now": now, "limits": _summary_limits(value["rows"]), "cost": _summary_cost()}
+
+
 def _reading(found: Any) -> dict[str, Any]:
     return {"at": plan.iso(found.observed_at), "used_percent": _num(found.used_percent)}
 

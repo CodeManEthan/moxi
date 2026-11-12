@@ -21,6 +21,8 @@
     GET  /api/restart-point  the context size past which carrying on with a session of
                         one model costs more than restarting it (`model=`), from the measure
     GET  /api/cost      today and the six days before it, by day and model
+    GET  /api/summary   Home's Usage row: the main plan windows of the harness read last,
+                        and today's cost; the one route the gateway reaches
     POST /api/pass      start a pass over the index, unless one is running
     GET  /api/events    the stream: topics `limits` and `index`
 
@@ -44,15 +46,16 @@ day against the server's day and not the browser's.
 Where the API's answer holds a map with open keys, the route carries it as a list of
 `{name, value}` rows or leaves it out, so every shape here is fixed. Every value that can
 hold a path carries the mark `path` (a `cwd`, a session's `folder`, the `home` folder),
-and a session's name or title the mark `redact`; only the gateway acts on a mark, and no
-route is the gateway's.
+and a session's name or title the mark `redact`; only the gateway acts on a mark.
+`/api/summary` is the one route the gateway reaches: it holds numbers, times and a
+harness's name, and no value that can hold a path or text, so it carries no mark.
 
 Wherever an answer names a session it carries `SESSION_REF`: the name typed for the
 session, its folder and its start, asked of the sessions module once per answer for the
 sessions that answer sends, and `known`, whether the session's record was found.
 
-The page's assets are the built files in `web/` beside this module: the `page`, `limits`
-and `cost` components' scripts and the build's stamp.
+The page's assets are the built files in `web/` beside this module: the `page`, `limits`,
+`cost` and `row` components' scripts and the build's stamp.
 
 The browser UI shell starts the page server on the first request for usage's page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
@@ -505,6 +508,24 @@ OPENED_WINDOW = {
             **SESSION_REF, "requests": _INT, "cost": _WHEN}))}),
 }
 
+#: Home's Usage row. `limits` is the harness whose main 5-hour and 7-day windows were
+#: read last, with the newest of those readings' times, and each such window that is
+#: `fresh`: `window` is `5h` or `7d`, from its duration; null when no harness has one.
+#: `cost` is today's dollars summed over its models, `complete` false when one of them
+#: is unpriced; null when there is no request today or no index. Times are ISO 8601 UTC,
+#: as a limits row's are, but `now`.
+SUMMARY = {
+    "now": _FLOAT,
+    "limits": lb.Out("table", nullable=True, items={
+        "harness": _TEXT,
+        "observed_at": _TEXT,
+        "windows": lb.Out("list", items=lb.Out("table", items={
+            "window": _TEXT, "used_percent": _FLOAT, "resets_at": _TEXT,
+            "full_at": _MAYBE}))}),
+    "cost": lb.Out("table", nullable=True, items={
+        "day": _TEXT, "dollars": _FLOAT, "complete": _BOOL}),
+}
+
 #: The restart point of one model's main sessions: `model` is the id the measure keys
 #: its row by (the one asked for with a bracket or date suffix taken off; the one asked
 #: for when it names no model), `tokens` the context size past which carrying on costs
@@ -559,6 +580,8 @@ PAGE = lb.Page(
         lb.Route("/api/restart-point", "read", "moxi_usage.pagehandlers:restart_point",
                  query={"model": lb.Field("string", max=512)}, returns=RESTART_POINT),
         lb.Route("/api/cost", "read", "moxi_usage.pagehandlers:cost", returns=COST),
+        lb.Route("/api/summary", "read", "moxi_usage.pagehandlers:summary",
+                 returns=SUMMARY, gateway=True),
         lb.Route("/api/pass", "act", "moxi_usage.pagehandlers:start_pass",
                  returns={"started": _BOOL, "running": _BOOL}),
         lb.Route("/api/events", "read", "moxi_usage.pagehandlers:events", stream=True,
@@ -574,5 +597,5 @@ __all__ = ["AGENT_ROW", "CONTEXT", "COST", "DAILY", "FILTERS", "GROUP", "HARNESS
            "PERIOD_ROW", "PRICES", "PROJECTS", "PROJECT_ROW", "PROVENANCE", "RATE",
            "REQUESTS", "REQUEST_ROW", "RESTART_POINT", "ROW_SUMS", "SAVING", "SESSION", "SESSIONS",
            "SESSION_REF", "SESSION_ROW",
-           "SPLIT", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
+           "SPLIT", "SUMMARY", "STATUS", "SUMS", "TERM", "TERMS", "TERMS_ROW", "TOP_DEFAULT", "TOP_MAX",
            "USED_MAX", "WINDOW"]
