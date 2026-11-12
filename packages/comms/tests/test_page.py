@@ -602,8 +602,8 @@ def test_the_announcement_names_the_page_and_its_components():
     from moxi_comms import module
 
     assert module.PAGE == "moxi_comms.page:PAGE"
-    assert module.OPTIONAL["ui"] == ("The comms panel and its roster of agents in the "
-                                     "browser UI shell.")
+    assert module.OPTIONAL["ui"] == ("The comms panel, its roster of agents and its row "
+                                     "on Home, in the browser UI shell.")
     assert set(module.COMPONENTS) == {"page", "roster", "mail"}
     assert module.COMPONENTS["roster"] == {
         "script": "roster.js", "title": "Agents", "contract": 1, "place": "block",
