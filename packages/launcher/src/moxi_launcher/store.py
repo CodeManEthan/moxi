@@ -997,6 +997,17 @@ def events(conn: sqlite3.Connection, request_id: str) -> list[Event]:
                 "WHERE request_id = ? ORDER BY at, id", (request_id,))]
 
 
+def last_event(conn: sqlite3.Connection, request_id: str, kind: str) -> Event | None:
+    """The newest event of `kind` on one launch, None when it has none."""
+    found = conn.execute(
+        "SELECT id, request_id, session_id, at, kind, detail_json FROM events "
+        "WHERE request_id = ? AND kind = ? ORDER BY at DESC, id DESC LIMIT 1",
+        (request_id, kind)).fetchone()
+    if found is None:
+        return None
+    return Event(*found[:5], json.loads(found[5]))
+
+
 def picked(conn: sqlite3.Connection, key: str) -> list[str]:
     """The paths of the handoffs filed under `key` that count as picked, newest first.
 

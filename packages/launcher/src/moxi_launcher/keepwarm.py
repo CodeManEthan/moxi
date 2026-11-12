@@ -8,15 +8,18 @@ work it handed out, and the named holds that say a director has work out.
     release_hold(request_id, name)
     signal_of(listed, named, dropped, holds)    # the signal's count, from values alone
     would_nudge(conn, row, sid, clock, ...)     # whether the next ask would nudge
+    cover_on(conn, row, sid, ...) / cover_off(conn, row, sid, why)   # the press's record
+    cover(conn, row, sid) / on(conn, row, sid)  # the record read; keep-warm on for a sid
 
-**Keep-warm acts only on a session the launcher launched with `keep_warm` on.** The row
-stamps `MOXI_LAUNCHER_KEEP_WARM=on`, and cache's timer asks about a session carrying it,
-from 900 s before its cache expires until 360 s before, every 120 s (`cachetimers`). The
-timer decides only when to ask; each ask reads for itself, in this order, and stops at
-the first that answers:
+**Keep-warm acts only on a session the launcher launched, with `keep_warm` on or under
+cover.** The row stamps `MOXI_LAUNCHER_KEEP_WARM=on`, and cache's timer asks about a
+session carrying it, from 900 s before its cache expires until 360 s before, every 120 s
+(`cachetimers`). The timer decides only when to ask; each ask reads for itself, in this
+order, and stops at the first that answers:
 
-1. The launch: launched, `keep_warm` on, no open run (a stale one, whose job is gone, is
-   ended at the insert), and the session claimed and live.
+1. The launch: launched, on (`keep_warm` on, or cover for the session id, below), no
+   open run (a stale one, whose job is gone, is ended at the insert), and the session
+   claimed and live.
 2. Cache's read of the session: its age must lie in `[lifetime - 900, lifetime - 360)`.
    A lifetime of 360 s or less leaves no window, and keep-warm never nudges.
 3. turns' facts: a turn is open, nothing (`busy`).
@@ -48,6 +51,12 @@ open, or turns refused for a reason that clears by itself: `stale-turn`, `rate`,
 at the delivery); `failed` (turns' `not-allowed`, `unsupported`, `gone`, or another
 refusal); or `unconfirmed`, when turns could not say whether the nudge went in. **A
 repeated `blocked` updates one run** (`store.end_blocked`).
+
+**Cover.** A press records that keep-warm is on for one running session: cover is the
+newest `keep-warm-cover` event of the launch, when it says `on` and names the session id
+asked about. A `/clear`'s new id, a relaunch and a resume (each a new launch) start
+without it, and an id the session comes back to reads its cover again. Holds keep to the
+launch value: the hold verbs refuse a launch that has cover alone.
 
 **Holds.** `keep-warm hold NAME`, run from the director's own session, opens a hold on
 its launch; `release NAME` releases it; `holds` lists them. Each is refused while the
@@ -82,6 +91,8 @@ log = logging.getLogger("moxi.launcher.keepwarm")
 
 #: The run's kind and mode.
 KIND, MODE = "keep-warm", "ask"
+#: The `events` kind of the cover record.
+COVER = "keep-warm-cover"
 #: The window before the cache's expiry in which an ask may nudge, in seconds: from
 #: `OPEN_S` before it to `SHUT_S` before it.
 OPEN_S, SHUT_S = 900.0, 360.0
@@ -140,7 +151,7 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
     row = store.resolve(conn, session_id)
     if row is None:
         return Verdict(None, "not-launched", f"no launch holds session {session_id}")
-    if row.values.get("keep_warm") != "on":
+    if not on(conn, row, session_id):
         return Verdict(None, "off", f"launch {row.request_id} does not keep warm")
     api = slots.api() if slots_api is LOOK else slots_api
     gone = lambda j: job.gone(j, slots_api=api)  # noqa: E731
@@ -414,6 +425,60 @@ def delivered(session: Any, text: str, number: int | None, *, ref: str,
         return Verdict("failed", reason if reason in FAILED_REFUSALS else "failed", said)
     return Verdict("unconfirmed", "lost", f"turns could not say whether the nudge went in: "
                                           f"{reason or kind}")
+
+
+# -- cover -------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Cover:
+    """Keep-warm cover on one launch's session: the `on` event's launch, session id and
+    time, as the store writes times."""
+
+    request_id: str
+    session_id: str
+    at: str
+
+
+def cover(conn: sqlite3.Connection, row: store.LaunchRow, sid: str) -> Cover | None:
+    """The cover of the launch `row` for the session id `sid`: the launch's newest cover
+    event when it says `on` and names `sid`, else None. Reads that launch alone, not the
+    launches it replaced."""
+    event = store.last_event(conn, row.request_id, COVER)
+    if event is None or event.detail.get("state") != "on":
+        return None
+    if event.detail.get("session_id") != sid:
+        return None
+    return Cover(row.request_id, sid, event.at)
+
+
+def cover_on(conn: sqlite3.Connection, row: store.LaunchRow, sid: str, *,
+             turn_number: int | None, waits: Mapping[str, Any], by: str = "page") -> Cover:
+    """Write cover on for the session id `sid` of the launch `row`, with the turn number
+    and what the session waits on (`kind`, `count`) at the press, and return it."""
+    at = store.now()
+    store.add_event(conn, COVER, {"state": "on", "by": by, "session_id": sid,
+                                  "turn_number": turn_number,
+                                  "waits": {"kind": waits.get("kind"),
+                                            "count": waits.get("count")}},
+                    request_id=row.request_id, session_id=sid, at=at)
+    return Cover(row.request_id, sid, at)
+
+
+def cover_off(conn: sqlite3.Connection, row: store.LaunchRow, sid: str, why: str) -> bool:
+    """End the cover of the session id `sid`, saying `why`. False, writing nothing, when
+    that session has no cover."""
+    if cover(conn, row, sid) is None:
+        return False
+    store.add_event(conn, COVER, {"state": "off", "why": why, "session_id": sid},
+                    request_id=row.request_id, session_id=sid)
+    return True
+
+
+def on(conn: sqlite3.Connection, row: store.LaunchRow, sid: str) -> bool:
+    """Whether keep-warm is on for the session id `sid` of the launch `row`: launched
+    with `keep_warm` on, or under cover."""
+    return row.values.get("keep_warm") == "on" or cover(conn, row, sid) is not None
 
 
 # -- whether the next ask would nudge -----------------------------------------------------
