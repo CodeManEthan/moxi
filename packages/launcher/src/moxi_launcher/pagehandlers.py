@@ -113,6 +113,16 @@ with the status path holding that id. What the resume meets later (a run opened 
 slot slots won't give, another resume of the session starting first) the job records as it
 records a launch's refusal.
 
+`/api/keep-warm` is the press of `Keep warm` on Home's Sessions row (`keep_warm`). It finds
+the launch's session as the joiner does, slots never asked, and reads now, through one
+`waits.Reads` whose deadline is `joiner.JOIN_BUDGET_S` from the press, what a join pass
+reads of that launch. A session keep-warm's next ask would already nudge is answered not
+refused, with nothing written. Else it reads the ask's steps as if cover had just been set
+(`keepwarm.reading` with `pressed`) and answers the first that does not pass as a refusal;
+when every one passes it writes the cover (`keepwarm.cover_on`), the one event a press
+writes, and wakes the joiner for a pass. It sends nothing to the session and starts no
+job: cache's timer's next ask sends the first nudge.
+
 A handler cuts each answer to its route's declared keys, and turns any failure it did not
 expect into `state` `error` with a fixed `detail` naming only the exception's class, so no
 message text, which may hold a path, reaches the browser. The class and its traceback are
@@ -148,8 +158,8 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import (api, catalog, first, job, joiner, names, presets, relaunch, settings, slots,
-               state, store, target, targets)
+from . import (api, catalog, first, job, joiner, keepwarm, names, presets, recycle, relaunch,
+               settings, slots, state, store, target, targets, waits)
 from . import resume as resuming
 from .compose import common
 from .live import alive, live
@@ -937,8 +947,9 @@ class _Feed:
     The joiner (`joiner.Joiner`) keeps, by request id, the facts of a running launch read
     beyond the launch log (the keys of `UNJOINED`), which `gather_running` lays over that
     launch's entry. Its task runs one pass at a time, off the poller, which never awaits
-    it: a pass when the set of running launches and their session ids changed, else
-    `joiner.JOIN_EVERY` seconds after the last pass ended. Each pass asks the `running`
+    it: a pass when the set of running launches and their session ids changed, or when a
+    press of `Keep warm` wakes it (`wake`), else `joiner.JOIN_EVERY` seconds after the last
+    pass ended. Each pass asks the `running`
     topic for a rebuild once its facts are kept; `joined_once` is set at the first."""
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
@@ -1004,9 +1015,14 @@ class _Feed:
                          for entry in value["sessions"])
         if keys != self._keys:
             self._keys = keys
-            with suppress(RuntimeError):    # the loop has closed
-                self.loop.call_soon_threadsafe(self._wake.set)
+            self.wake()
         return value
+
+    def wake(self) -> None:
+        """Ask the joiner for a pass now, from any thread. A pass running goes on to its end,
+        and the next starts after it, so one pass runs at a time."""
+        with suppress(RuntimeError):    # the loop has closed
+            self.loop.call_soon_threadsafe(self._wake.set)
 
     async def changed(self) -> None:
         """Ask each topic for one rebuild; a gather that raises is logged and the others
@@ -1869,6 +1885,198 @@ def resume(call: Any) -> Any:
             return {"refused": _unexpected(err, "a resume from the page failed"),
                     "command": None}
 
+
+# -- /api/keep-warm -------------------------------------------------------------------------
+
+#: The hint of an `unreadable` refusal.
+TRY_AGAIN = "try again"
+
+_pressing = threading.Lock()
+
+
+def _no(code: str, problem: str, hint: str = "") -> dict[str, Any]:
+    return {"refused": {"code": code, "row": None, "problem": problem, "hint": hint}}
+
+
+def press(request_id: str) -> dict[str, Any]:
+    """What `/api/keep-warm` answers for the launch `request_id`: `{"refused": None}` when
+    the session is covered after the press (by this press, or already), else the refusal
+    of the first step that does not pass. One press at a time, so a second press sees the
+    first's cover."""
+    deadline = time.monotonic() + joiner.JOIN_BUDGET_S
+    with _pressing, _store() as conn:
+        row = None if conn is None else store.get(conn, request_id)
+        if row is None:
+            return _no("not-launched", f"no launch has the request id {request_id}")
+        known = store.session_ids(conn, request_id)
+        sid = known[-1][0] if known else row.session_id
+        if sid is None:
+            return _no("no-session", f"launch {request_id} has no session id yet")
+        turns = first.turns_api(quiet=True)
+        try:
+            found = target.find(sid, conn=conn, turns=turns, slot=False)
+        except catalog.Refused as err:
+            return {"refused": _refused(err)}
+        try:
+            if not found.live or found.session is None:
+                return _no("not-live", f"the session of launch {request_id} is not live")
+            reads = waits.Reads(deadline=deadline, comms=joiner.comms_api(), turns=turns)
+            answer = _cover(conn, found, found.session_id or sid, reads)
+        finally:
+            found.close()
+    return answer or {"refused": None}
+
+
+def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
+           reads: waits.Reads) -> dict[str, Any] | None:
+    """Read the launch as a join pass does, through `reads`, then cover it and wake the
+    joiner: None when it is covered (written now, or already), else the refusal."""
+    row, session = found.row, found.session
+    cache = joiner.cache_api()
+    try:
+        now = time.time()
+        clock = None if cache is None else reads.call(
+            recycle.cache_read, cache, row, sid, dict(os.environ), now=now)
+        facts = reads.call(session.facts)
+        closed = getattr(facts, "turn_open", None) is False
+        listed, joined, live_agents = None, None, ()
+        if closed:
+            try:
+                listed = reads.call(session.agents)
+            except waits.Late:
+                raise
+            except Exception:  # noqa: BLE001  (an unread list counts no subagent)
+                listed = None
+        current = reads.call(settings.current)
+        records = () if cache is None else reads.call(cache.clock_records)
+        tick_s = None if cache is None else reads.call(joiner.cache_tick_s)
+        if closed:
+            nudges = reads.call(keepwarm.run_of_nudges, conn, row.request_id,
+                                getattr(facts, "session_id", None) or sid,
+                                getattr(facts, "turn_number", None))
+            live_agents = reads.call(keepwarm.signal_now, conn, row, listed, nudges).agents
+            # The join is the last read, so one the deadline cuts short keeps what it found.
+            if not live_agents and reads.comms is not None:
+                joined = waits.directed(reads, sid)
+    except waits.Late:
+        return _no("unreadable", "the session was not read within "
+                                 f"{joiner.JOIN_BUDGET_S:g} s", TRY_AGAIN)
+    except Exception as err:
+        _log_once(err, "reading a session for keep-warm failed")
+        return _no("unreadable", f"the session could not be read ({type(err).__name__})",
+                   TRY_AGAIN)
+    if cache is not None and tick_s is None:
+        return _no("unreadable", "cache's watcher tick could not be read", TRY_AGAIN)
+    readings = (conn, row, sid, clock, facts, listed, current, records)
+    options = {"gone": joiner.proc_gone, "now": now, "tick_s": tick_s, "directed": joined}
+    if keepwarm.would_nudge(*readings, **options):
+        return None
+    got = keepwarm.reading(*readings, **options, pressed=True)
+    names = joined.names if joined is not None else ()
+    refused = _press_refused(conn, row, sid, got, clock, facts, listed, joined, tick_s,
+                             at_work=bool(live_agents or names))
+    if refused is not None:
+        return refused
+    fact = ({"kind": "subagents", "count": len(live_agents)} if live_agents
+            else {"kind": "agents", "count": len(names)})
+    keepwarm.cover_on(conn, row, getattr(facts, "session_id", None) or sid,
+                      turn_number=getattr(facts, "turn_number", None), waits=fact)
+    feed = _current
+    if feed is not None:
+        feed.wake()
+    return None
+
+
+def _press_refused(conn: sqlite3.Connection, row: store.LaunchRow, sid: str,
+                   got: keepwarm.Reading, clock: Any, facts: Any, listed: Any | None,
+                   joined: waits.Directed | None, tick_s: float | None, *,
+                   at_work: bool) -> dict[str, Any] | None:
+    """The refusal of the first step a press does not pass, in the order of the ask's
+    steps (`got`, the reading with `pressed`), or None when every one passes."""
+    step = got.step
+    if step == 2:
+        return _no("run-open", f"a run is open on launch {row.request_id}",
+                   "another act is running on this session")
+    if step == 3:
+        return _no("no-timer", "cache's watcher does not ask keep-warm about this session",
+                   "moxi doctor's row keep-warm.timer says why and what cures it; cache "
+                   "does not time a Codex or a headless session")
+    kind = getattr(clock, "kind", None)
+    if kind != "warm":
+        return _no("cold", f"the session's cache is {kind or 'unknown'}",
+                   "nothing is sent to a session whose cache is cold")
+    ttl, age = getattr(clock, "ttl_s", None), getattr(clock, "age_s", None)
+    if step == 4:
+        margin = keepwarm.ASK_EVERY_S + (tick_s or 0.0)
+        if not isinstance(ttl, (int, float)) or ttl <= keepwarm.SHUT_S + margin:
+            return _no("no-window", "the session's cache lifetime leaves no ask certain "
+                                    "before it goes cold")
+        aged = (f"the session's cache is {age:g} s old, of a lifetime of {ttl:g} s"
+                if isinstance(age, (int, float)) else "the session's cache has no age")
+        return _no("too-late", aged, "the cold time is too near for a nudge to be sent")
+    if step == 5:
+        return _no("busy", "the session's own turn is open", "it is working, not waiting")
+    if not at_work:
+        unread = _unread(listed, joined)
+        if not unread:
+            return _no("not-waiting", "no subagent of the session and no agent it directs "
+                                      "is at work")
+        return _no("unreadable", f"nobody was found at work, but {'; '.join(unread)}",
+                   TRY_AGAIN)
+    if step == 7:
+        return _no("capped", "keep-warm's cap of nudges in a row leaves a press none to send "
+                             "to this session")
+    if step == 8:
+        boxed = ("there is text typed in the session's prompt box"
+                 if getattr(facts, "draft", None) is True
+                 else "the session's prompt box could not be read")
+        return _no("draft", boxed, "clear the text typed in the session")
+    if step == 9:
+        run = _last_ask(conn, row.request_id)
+        ended = "" if run is None else f" {run.outcome}, {run.word}"
+        return _no("ask-failed", f"keep-warm's last ask since the session's last request "
+                                 f"ended{ended}",
+                   f"a press does not change it; moxi launcher show {sid} has the run")
+    return None
+
+
+def _unread(listed: Any | None, joined: waits.Directed | None) -> list[str]:
+    """Each list a finding of nobody at work rests on that was not read whole, in words."""
+    parts = []
+    if listed is None:
+        parts.append("turns could not list its subagents")
+    elif getattr(listed, "complete", True) is False:
+        parts.append("turns' list of its subagents is incomplete")
+    if joined is not None and joined.raised:
+        parts.append("comms or turns could not be read for the agents it directs")
+    if joined is not None and joined.late:
+        parts.append("the agents it directs were not read within "
+                     f"{joiner.JOIN_BUDGET_S:g} s")
+    if joined is not None and joined.unlisted:
+        parts.append("turns could not list a directed agent's subagents")
+    return parts
+
+
+def _last_ask(conn: sqlite3.Connection, request_id: str) -> store.Run | None:
+    """The launch's newest keep-warm run but one ended `blocked` at the cap, which a press
+    passes over."""
+    for run in store.runs(conn, request_id=request_id):
+        if run.kind == keepwarm.KIND and not (run.outcome == "blocked"
+                                              and run.word == "capped"):
+            return run
+    return None
+
+
+def keep_warm(call: Any) -> dict[str, Any]:
+    """`POST /api/keep-warm`: keep-warm cover for a running launch's session, set when a
+    press would make keep-warm's next ask nudge it. Not the gateway's."""
+    with call.busy("keep-warm"):
+        try:
+            return press(call.body["request_id"])
+        except Exception as err:
+            return {"refused": _unexpected(err, "a keep-warm press failed")}
+
+
 __all__ = ["EVENT_CUT", "FIRST_JOIN_WAIT_S", "GIVEN", "KEY_BYTES", "KEY_FILE", "HEAD_MAX", "NOT_ON_PATH", "NO_RECENT", "NO_RECENT_HINT",
            "NO_SLOTS", "PROJECTS", "RECENTS_MAX", "REFUSALS", "REGATHER",
            "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNJOINED", "UNREADABLE", "USED", "WHOSE",
@@ -1878,5 +2086,6 @@ __all__ = ["EVENT_CUT", "FIRST_JOIN_WAIT_S", "GIVEN", "KEY_BYTES", "KEY_FILE", "
            "places", "preview", "previewed", "read_catalog", "read_form", "read_last", "read_launches",
            "read_name", "read_places", "read_presets", "read_recent", "read_recents", "read_running", "read_runs", "read_sessions", "read_state",
            "read_targets", "recent", "recents", "refusal", "request_of", "resumable", "resume", "resumed", "run_entry", "running_entry",
+           "TRY_AGAIN", "keep_warm", "press",
            "session_state", "spelled", "spelled_table", "targets_now", "ticket", "tokens", "unreadable",
            "verify", "whose"]

@@ -31,6 +31,8 @@
     POST /api/launch    the launch a ticket was issued for, run as a detached job (202)
     POST /api/resume    a past session resumed: a slot one as a detached job (202), a
                         terminal one answered with the command to copy
+    POST /api/keep-warm keep-warm cover for a running launch's session, set when a press
+                        would make keep-warm's next ask nudge it; nothing is sent to it
     GET  /api/running   the launches running now, as Home's Sessions row reads them; the
                         one route the gateway reaches
     GET  /api/events    the stream; topics `sessions`, `launches` and `running`
@@ -389,8 +391,9 @@ PREVIEW = {
     "expires_at": _text(nullable=True),
 }
 
-#: A refusal a page launch or resume meets before anything runs; null when it went ahead
-#: (202) or, for a terminal resume, with the command to copy.
+#: A refusal a page launch, resume or keep-warm press meets before anything runs; null when
+#: it went ahead (202 for a launch or resume), for a terminal resume with the command to
+#: copy, or for a press when the session is covered.
 ACTED = {"refused": Out("table", items=REFUSAL.items, nullable=True)}
 #: A page launch's refusal; for a launch in a terminal, which the page never runs, the
 #: `moxi launcher run` command to copy too.
@@ -460,6 +463,8 @@ PAGE = lb.Page(
                  body={"session": Field("string", max=QUERY_MAX),
                        "slot": Field("string", required=False, max=QUERY_MAX)},
                  returns={**ACTED, "command": _text(nullable=True)}),
+        lb.Route("/api/keep-warm", "act", _target("keep_warm"),
+                 body={"request_id": Field("string", max=QUERY_MAX)}, returns=ACTED),
         lb.Route("/api/running", "read", _target("read_running"), returns=RUNNING,
                  gateway=True),
         lb.Route("/api/events", "read", _target("events"), stream=True,

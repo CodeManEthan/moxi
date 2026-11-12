@@ -36,7 +36,7 @@ SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
           "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/last", "/api/recents",
           "/api/recent", "/api/name", "/api/preview", "/api/launch", "/api/resume",
-          "/api/running", "/api/events"]
+          "/api/keep-warm", "/api/running", "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
 NEVER_SENT = {"env", "env_json", "base_env", "base_env_json", "environ", "brief",
@@ -145,7 +145,7 @@ def test_the_page_declares_every_route_and_only_the_running_launches_for_the_gat
     routes = {route["path"]: route for route in exported["routes"]}
     assert list(routes) == ROUTES
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
-        "/api/preview", "/api/launch", "/api/resume"}
+        "/api/preview", "/api/launch", "/api/resume", "/api/keep-warm"}
     assert [p for p, r in routes.items() if r["gateway"]] == ["/api/running"]
     assert [p for p, r in routes.items() if r["stream"]] == ["/api/events"]
     assert list(routes["/api/events"]["topics"]) == ["sessions", "launches", "running"]
