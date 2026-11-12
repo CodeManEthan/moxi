@@ -213,9 +213,10 @@ def test_a_lifetime_too_short_for_an_ask_is_no_window(waiting):
 
 
 def test_a_cache_too_near_its_cold_time_is_too_late(waiting):
-    waiting.wired.cache = Clock([waiting.sid], asks=ASKS, age_s=3200.0)
+    waiting.wired.cache = Clock([waiting.sid], asks=ASKS, age_s=3433.41, ttl_s=3600.0)
     refused = press()
     assert refused["code"] == "too-late"
+    assert refused["problem"] == "the session's cache is 3433 s old, of a lifetime of 3600 s"
     assert refused["hint"] == "the cold time is too near for a nudge to be sent"
 
 

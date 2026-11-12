@@ -2012,7 +2012,7 @@ def _press_refused(conn: sqlite3.Connection, row: store.LaunchRow, sid: str,
         if not isinstance(ttl, (int, float)) or ttl <= keepwarm.SHUT_S + margin:
             return _no("no-window", "the session's cache lifetime leaves no ask certain "
                                     "before it goes cold")
-        aged = (f"the session's cache is {age:g} s old, of a lifetime of {ttl:g} s"
+        aged = (f"the session's cache is {age:.0f} s old, of a lifetime of {ttl:.0f} s"
                 if isinstance(age, (int, float)) else "the session's cache has no age")
         return _no("too-late", aged, "the cold time is too near for a nudge to be sent")
     if step == 5:
