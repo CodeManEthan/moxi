@@ -6,7 +6,7 @@ replaced whole at every tick that finds the session live:
     {"v": 1, "session": ..., "harness": "claude", "pid": ..., "kind": ...,
      "last_request": <epoch seconds or null>, "ttl": <seconds or null>,
      "read_at": <epoch seconds>, "seen_at": <epoch seconds>, "code": <code or null>,
-     "warn_before": <seconds>, "stale_after": <seconds>}
+     "warn_before": <seconds>, "stale_after": <seconds>, "asks": [<name>, ...] or null}
 
 `kind`, `ttl` and `code` are the clock's read (`api.read`) at `read_at`, and
 `last_request` is when the session's last request ended by that read. `seen_at` is the
@@ -23,6 +23,15 @@ every tick from its config as it read it at that tick, so a config change reache
 record within one tick. A record without them, one an older watcher wrote, renders
 nothing until the next tick rewrites it (`thresholds` gives None); it is still a record,
 so the timer and `moxi cache timers` read it.
+
+`asks` names the subscriptions the watcher that wrote this record will ask about this
+session when their window comes: the sorted names `Timer.asking` gave for the session's
+process. It is null while that watcher's timer has loaded nothing, which a reader takes as
+a list that names no subscription. A watcher that writes `asks` writes it into every
+record, the first tick's included, so a record without the key was written by an older
+watcher. It is optional, as the two thresholds are: `valid` does not ask for it. It is
+unrelated to the per-session `asks` of `moxi cache timers --json`, which is that
+command's list of when each subscription next asks.
 
 The format is a contract: a shell status line reads it with one `jq` and no config. A
 record is for display and for the timer; it can lag the transcript by a tick, so nothing
@@ -62,14 +71,16 @@ from moxi.paths import Layout
 
 #: The record format's version.
 VERSION = 1
+#: The fields every record holds; a record an older watcher wrote lacks the ones after
+#: them, and is still a record.
+REQUIRED = ("v", "session", "harness", "pid", "kind", "last_request", "ttl", "read_at",
+            "seen_at", "code")
 #: The two fields a reader renders and judges a record by.
 THRESHOLDS = ("warn_before", "stale_after")
+#: The field naming the subscriptions the watcher's timer will ask about the session.
+ASKS = "asks"
 #: Every field a record holds, in the order the watcher writes them.
-FIELDS = ("v", "session", "harness", "pid", "kind", "last_request", "ttl", "read_at",
-          "seen_at", "code") + THRESHOLDS
-#: The fields every record holds; a record an older watcher wrote, before records
-#: carried them, lacks `THRESHOLDS`, and is still a record.
-REQUIRED = FIELDS[:-len(THRESHOLDS)]
+FIELDS = REQUIRED + THRESHOLDS + (ASKS,)
 #: `stale_after` is this many of the watcher's ticks.
 STALE_TICKS = 3
 #: The directory under cache's runtime directory that holds the records.
@@ -230,7 +241,7 @@ def watching(found: dict | None, records: Iterable[dict], now: float) -> Watchin
     return Watching(outcome, at, last)
 
 
-__all__ = ["VERSION", "FIELDS", "REQUIRED", "THRESHOLDS", "STALE_TICKS", "DIR_NAME",
+__all__ = ["VERSION", "FIELDS", "REQUIRED", "THRESHOLDS", "ASKS", "STALE_TICKS", "DIR_NAME",
            "SAFE_ID_RE", "READING_NAME", "READING_VERSION", "READING_FIELDS", "FRESH",
            "NOT_READING", "STOPPED", "NO_READING", "Watching", "record_dir", "record_path",
            "reading_path", "valid", "thresholds", "load", "reading", "watching"]

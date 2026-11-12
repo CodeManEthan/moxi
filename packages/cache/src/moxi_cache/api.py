@@ -14,6 +14,9 @@ that has cache as an optional module reaches this module only through
 * `Clock`: what `read` gives back.
 * `clock_records()`: every clock record the watcher keeps, as written, for display
   (`moxi cache timers` and cache's page both list them through it).
+* `asking(environ)`: the names of the timer subscriptions a watcher started now would ask
+  about a process with this environment, the list it would write as a clock record's
+  `asks`; None where a process's environment can't be read. Starts nothing, writes nothing.
 * `segment(session_id, now=None)` and `Segment`: a Claude session's status line segment,
   from the watcher's clock record (`moxi_cache.segment`). Imported on first use, so loading
   this module does not load the segment module, which a renderer loads inside its audit
@@ -123,6 +126,23 @@ def clock_records() -> list[dict]:
     return sorted(found, key=lambda record: record["session"])
 
 
+def asking(environ) -> tuple[str, ...] | None:
+    """What a watcher started now would write as `asks` for a process whose environment is
+    `environ`: the sorted names of the subscriptions the timer's own check (`timer.load`)
+    accepts at the inputs as they are now, the installed modules' and cache's config's as
+    `moxi cache timers` reads them, whose `requires_env` `environ` meets (`timer.env_met`).
+    None where `timer.env_checkable()` is false. It starts no process and writes no file.
+    """
+    from . import timer as _timer
+    from .cli import _config_entries
+
+    if not _timer.env_checkable():
+        return None
+    entries, _ = _config_entries()
+    loaded = _timer.load(entries)
+    return tuple(sorted(s.name for s in loaded.subscriptions if _timer.env_met(s, environ)))
+
+
 def __getattr__(name):
     if name in ("segment", "Segment"):
         from . import segment as _segment
@@ -139,4 +159,4 @@ def projects_root(env=None) -> str:
 
 
 __all__ = ["read", "KINDS", "CODES", "MISSING", "open_store", "projects_root", "Clock",
-           "HARNESSES", "clock_records", "segment", "Segment"]
+           "HARNESSES", "clock_records", "asking", "segment", "Segment"]

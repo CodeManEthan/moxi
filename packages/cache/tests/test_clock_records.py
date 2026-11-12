@@ -89,6 +89,31 @@ def test_clock_records_is_in_interface_1():
     assert "clock_records" in api.__all__
 
 
+# --- asks -----------------------------------------------------------------------------------
+
+def test_required_is_the_ten_names_and_asks_is_not_one():
+    assert records.REQUIRED == ("v", "session", "harness", "pid", "kind", "last_request",
+                                "ttl", "read_at", "seen_at", "code")
+    assert records.FIELDS[-1] == records.ASKS == "asks"
+
+
+@pytest.mark.parametrize("asks", [["launcher.keep-warm"], [], None, "absent"])
+def test_a_record_is_valid_with_asks_as_a_list_as_null_and_without_it(asks):
+    rec = record(A) if asks == "absent" else record(A, asks=asks)
+    assert records.valid(rec)
+    put(f"{A}.json", rec)
+    assert api.clock_records() == [rec]
+
+
+def test_the_segments_render_of_a_record_with_asks_is_unchanged():
+    from moxi_cache import segment
+
+    plain = segment.from_record(record(A), NOW)
+    for asks in (["launcher.keep-warm"], [], None):
+        assert segment.from_record(record(A, asks=asks), NOW) == plain
+    assert plain is not None
+
+
 # --- moxi cache timers, unchanged ---------------------------------------------------------
 #
 # The text and JSON below are what `moxi cache timers` printed over these records before
