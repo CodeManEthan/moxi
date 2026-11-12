@@ -496,7 +496,7 @@ class _Feed:
         health = self._health_at is None or now - self._health_at >= HEALTH_PERIOD
         if health:
             self._health_at = now
-        self.thread = threading.Thread(target=self._gather, args=(health,), daemon=True,
+        self.thread = threading.Thread(target=self._gather, kwargs={"health": health}, daemon=True,
                                        name="services rows gather")
         self.thread.start()
         return True

@@ -1733,7 +1733,7 @@ connector	packages/connector/src/moxi_connector/page.py	req = under.check(params
 connector	packages/connector/src/moxi_connector/page.py	said=WRONG.format(left="1 try" if left == 1 else f"{left} tries"))	keep	said	said
 connector	packages/connector/src/moxi_connector/probe.py	fetch	name	e	exc
 connector	packages/connector/src/moxi_connector/probe.py	run	name	e	exc
-connector	packages/connector/src/moxi_connector/probe.py	with opener.open(req, timeout=STEP_WAIT) as answer:	keep	timeout	timeout
+connector	packages/connector/src/moxi_connector/probe.py	with opener.open(req, timeout=STEP_WAIT) as answer:  # noqa: MX3 -- HTTP response, not an open file	keep	timeout	timeout
 connector	packages/connector/src/moxi_connector/providers.py	Registry.start	name	e	exc
 connector	packages/connector/src/moxi_connector/providers.py	Registry.status_rows	name	e	exc
 connector	packages/connector/src/moxi_connector/providers.py	load	name	e	exc
@@ -4521,6 +4521,8 @@ services	packages/services/src/moxi_services/acts.py	name, ref, enable=enable, t
 services	packages/services/src/moxi_services/acts.py	ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)),	keep	foreign	foreign
 services	packages/services/src/moxi_services/acts.py	ok = _acted(call(MODULE, [row.unit], foreign=True, kinds=_kinds(row)), lines)	keep	foreign	foreign
 services	packages/services/src/moxi_services/acts.py	project=project, launches_session=launches_session, doc=doc, enable=enable,	keep	enable	enable
+services	packages/services/src/moxi_services/acts.py	return _outcome("disable")(_switch_body)(ident, False, by=by)	use	)(ident, False,	)(ident, on=False,
+services	packages/services/src/moxi_services/acts.py	return _outcome("enable")(_switch_body)(ident, True, by=by)	use	)(ident, True,	)(ident, on=True,
 services	packages/services/src/moxi_services/cli.py	_parser	name	help	verb_help
 services	packages/services/src/moxi_services/cli.py	_parser.verb	name	help	help_text
 services	packages/services/src/moxi_services/cli.py	_watch_line	kwonly	as_json	as_json
@@ -4562,6 +4564,7 @@ services	packages/services/src/moxi_services/pagehandlers.py	_logged: set[type] 
 services	packages/services/src/moxi_services/pagehandlers.py	common = dict(health=health, project=body.get("project"),	keep	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	gather	name	err	unexpected_exc
 services	packages/services/src/moxi_services/pagehandlers.py	projects	name	err	exc
+services	packages/services/src/moxi_services/pagehandlers.py	self.thread = threading.Thread(target=self._gather, args=(health,), daemon=True,	use	args=(health,)	kwargs={"health": health}
 services	packages/services/src/moxi_services/rows.py	-	name	_OWN_FOLDER	_OWN_SCHEDULER_DIR
 services	packages/services/src/moxi_services/rows.py	else set(modules))	keep	set	set
 services	packages/services/src/moxi_services/rows.py	if days is not None and (not _str_list(days) or not days or not set(days) <= set(DAYS)):	keep	set	set
@@ -4596,7 +4599,7 @@ services	packages/services/tests/test_cli.py	assert code == 0 and set(found[0]) 
 services	packages/services/tests/test_cli.py	assert set(found) == ROW_KEYS | {"row", "detail", "log", "wrapped", "process", "runs"}	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(found[0]["verdict"]) == VERDICT_KEYS	keep	set	set
 services	packages/services/tests/test_cli.py	assert set(process) == {"pid", "uptime_s", "rss_bytes", "cpu_s"}	keep	set	set
-services	packages/services/tests/test_cli.py	monkeypatch.setattr(moxi.config, "set", config_set)	keep	set	set
+services	packages/services/tests/test_cli.py	monkeypatch.setattr(moxi.config, "set", config_set)	use	"set"	"set_value"
 services	packages/services/tests/test_declared.py	assert set(found.daemons) == {"web"}	keep	set	set
 services	packages/services/tests/test_declared.py	assert set(found.timers) == {"nightly", "often"}	keep	set	set
 services	packages/services/tests/test_declared.py	assert set(units.declared()["daemons"]) == {"web"}	keep	set	set

@@ -324,8 +324,8 @@ def test_views_judge_every_row_from_one_read(fake):
 
     user(enabled=True)
     timer_row(enabled=True)
-    fake.written["web"] = Unit("daemon", True, active=True)
-    fake.written["job"] = Unit("timer", True, last=gate(code=1))
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
+    fake.written["job"] = Unit("timer", enabled=True, last=gate(code=1))
     found = verdict.views(store.read_rows())
     assert {v.row.id: v.verdict.state for v in found} == {
         "services/job": "warn", "services/web": "ok"}

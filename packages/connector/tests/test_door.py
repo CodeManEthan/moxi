@@ -328,7 +328,7 @@ def test_a_swap_whose_new_app_fails_to_start_leaves_the_sign_in_and_is_tried_aga
         assert (await door.mcp(tokens["access_token"])).status == 200
         assert (await door.token(client, query["code"], verifier)).status == 200
 
-        broken_manager(False)
+        broken_manager(broken=False)
         await d.tick()                                   # the next read swaps
         await settled(oauth)
         assert d.front.origin == OTHER and d.watch.current == OTHER

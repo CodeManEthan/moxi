@@ -120,15 +120,15 @@ def _gate_line(line: Mapping) -> LastRun:
     at = line.get("at")
     result, code = line.get("result"), line.get("exit")
     if result == "off":
-        return LastRun(False, "held off by its switch", at)
+        return LastRun(failed=False, text="held off by its switch", at=at)
     if result == "ran" and code == 0:
-        return LastRun(False, "ok", at)
+        return LastRun(failed=False, text="ok", at=at)
     if result == "ran":
-        return LastRun(True, f"exit {code}", at)
+        return LastRun(failed=True, text=f"exit {code}", at=at)
     if result == "unreadable":
-        return LastRun(True, "its switch's config file could not be read", at)
+        return LastRun(failed=True, text="its switch's config file could not be read", at=at)
     if result == "not-started":
-        return LastRun(True, "the command did not start", at)
+        return LastRun(failed=True, text="the command did not start", at=at)
     return LastRun(code not in (0, None), f"{result}, exit {code}", at)
 
 
@@ -139,17 +139,18 @@ def _supervisor_last(found: Mapping) -> LastRun | None:
         if code is None:
             return None
         if code == 0 or code in _SCHED_STATUS:
-            return LastRun(False, "ok" if code == 0 else f"result 0x{code:08X}", at)
-        return LastRun(True, f"result 0x{code & 0xFFFFFFFF:08X}", at)
+            return LastRun(failed=False,
+                           text="ok" if code == 0 else f"result 0x{code:08X}", at=at)
+        return LastRun(failed=True, text=f"result 0x{code & 0xFFFFFFFF:08X}", at=at)
     if "result" in found:  # systemd: the timer's service
         result = str(found.get("result") or "")
         status = str(found.get("status") or "")
         if not result and not status:
             return None
         if result in ("", "success") and status in ("", "0"):
-            return LastRun(False, "ok", None)
+            return LastRun(failed=False, text="ok", at=None)
         said = f"exit {status}" if status not in ("", "0") else result
-        return LastRun(True, said, None)
+        return LastRun(failed=True, text=said, at=None)
     if "status" in found:  # launchd: the last exit status
         code = _int(found.get("status"))
         if code is None:
@@ -215,7 +216,7 @@ def _cmd(verb: str, row: Row) -> str:
 
 
 def _unknown(reason: str) -> Verdict:
-    return Verdict("warn", f"unknown: {reason}", None, True)
+    return Verdict("warn", f"unknown: {reason}", None, unknown=True)
 
 
 def judge(row: Row, st: units.UnitState | None, *, flag: bool | None, health: tuple[str, str] | None = None, socket: units.UnitState | None = None,

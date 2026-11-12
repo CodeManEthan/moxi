@@ -263,8 +263,9 @@ def test_the_doctor_reads_the_grants_with_the_origin_it_reads(config_file, monke
 
 
 def _snap(view):
-    return doctor.Snapshot(True, 8452, "", None, ORIGIN, {"providers": [], "tools": []},
-                           None, None, None, view)
+    return doctor.Snapshot(switch=True, port=8452, public_url="", address=None,
+                           origin=ORIGIN, answer={"providers": [], "tools": []},
+                           error=None, last_check=None, last_call=None, grants=view)
 
 
 # -- the switch-off rule ------------------------------------------------------------------

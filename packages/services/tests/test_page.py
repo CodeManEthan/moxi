@@ -571,7 +571,7 @@ def test_add_refuses_fields_out_of_shape_before_any_job(body, says):
 def test_add_adopts_a_unit_with_its_on_or_off(fake):
     from fake_units import Unit
 
-    fake.foreign["backup.service"] = Unit("daemon", True, True)
+    fake.foreign["backup.service"] = Unit("daemon", enabled=True, active=True)
     found = ended(accepted(post("/api/add", {"name": "backup", "kind": "daemon",
                                              "unit": "backup.service", "enable": True})))
     assert (found["state"], found["id"]) == ("done", "services/backup"), found
@@ -581,7 +581,7 @@ def test_add_adopts_a_unit_with_its_on_or_off(fake):
 def test_an_adoption_without_its_on_or_off_ends_refused_saying_what_is_read_now(fake):
     from fake_units import Unit
 
-    fake.foreign["backup.service"] = Unit("daemon", True, True)
+    fake.foreign["backup.service"] = Unit("daemon", enabled=True, active=True)
     found = ended(accepted(post("/api/add", {"name": "backup", "kind": "daemon",
                                              "unit": "backup.service"})))
     assert (found["state"], found["code"]) == ("refused", 2)

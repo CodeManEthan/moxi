@@ -217,7 +217,7 @@ def bind(port: int) -> socket.socket:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((ADDRESS, port))
         sock.listen(BACKLOG)
-        sock.setblocking(False)
+        sock.setblocking(False)  # noqa: FBT003 -- socket API has no keyword parameter
     except BaseException:
         sock.close()
         raise
@@ -282,7 +282,7 @@ def inherited(*, env: MutableMapping[str, str] | None = None,
     if problem is not None:
         sock.close()
         raise Unusable(f"the supervisor's socket {problem}")
-    sock.setblocking(False)
+    sock.setblocking(False)  # noqa: FBT003 -- socket API has no keyword parameter
     return sock
 
 

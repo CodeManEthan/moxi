@@ -366,13 +366,13 @@ def _note_gate_off(row: Row, lines: list[str]) -> None:
 def enable(ident: str, *, by: str = BY) -> Outcome:
     """Turn a row on: a daemon enabled and running, a timer's schedule armed, when it
     returns. A module row through its declared switch."""
-    return _outcome("enable")(_switch_body)(ident, True, by=by)
+    return _outcome("enable")(_switch_body)(ident, on=True, by=by)
 
 
 def disable(ident: str, *, by: str = BY) -> Outcome:
     """Turn a row off: a daemon disabled and stopped, a timer's schedule off (a run in
     progress finishes) or its runs held by the gate. A module row through its switch."""
-    return _outcome("disable")(_switch_body)(ident, False, by=by)
+    return _outcome("disable")(_switch_body)(ident, on=False, by=by)
 
 
 def _switch_body(ident: str, *, on: bool, by: str, lines: list[str]):
