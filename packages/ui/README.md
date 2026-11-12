@@ -226,6 +226,12 @@ components. The browser fixtures need the `testing` extra and a browser:
 `pip install 'moxi-ui[testing]'`, then `playwright install chromium`. The plugin's
 docstring lists every fixture.
 
+A test of a module's phone face uses `moxi_ui.testing.phone`: `gateway_shell(home, site)`
+starts a shell in gateway mode with its tunnel address written, a `PhoneBridge` reaches its
+gateway at `https://gw.moxi.test/`, and `pair_page(context, shell)` pairs a browser context
+through the bridge and gives its page. Without a browser, `bridge.pair(shell)` gives a
+`PhoneSession` for the gateway's routes. The module's docstring has an example.
+
 A page module whose UI is optional:
 
 - declares an extra `ui = ["moxi-ui>=V,<W"]` and an `OPTIONAL` sentence for it;

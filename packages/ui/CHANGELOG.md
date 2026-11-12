@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `moxi_ui.testing.phone` gains the two helpers a module's phone test needs:
+  `gateway_shell(home, site=(), *, port=None, enabled=True, address=True, start=True,
+  **options)`, a gateway-mode test shell with its port set, its tunnel address written and
+  its hold waited for, and `pair_page(context, shell, *, passkey=False)`, which pairs a
+  browser context through a `PhoneBridge` and gives its page on the signed-in shell
+  document. `free_port`, `hold_port` and `wait_hold` come with them.
 - Home moves its column aside for a main piece's side panel. The piece dispatches a
   bubbling, composed `moxi-home-side` event with `detail: {width}`, the width in px of a
   panel it draws fixed to the window's right edge, and from 1100 px of window Home puts
