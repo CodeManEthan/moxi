@@ -5,8 +5,9 @@
 // `<moxi-ui-row>` with `Open`, and `All sessions (N)` under them.
 //
 // It reads `/api/running` each time it is connected and each time the document is shown
-// again, and at the desk follows the topic `running`. On the phone it holds itself open
-// and its rows carry no time, no message and no act.
+// again. At the desk it follows the topic `running`; on the phone, which has no stream, it
+// reads the route again every `POLL_MS` while the document is shown. On the phone it holds
+// itself open and its rows carry no time, no message and no act.
 //
 // `Open` goes to the session's transcript on sessions' page, and `All sessions` to that
 // page's list; without sessions installed both go to the launcher's page. The row's words
@@ -21,6 +22,8 @@ import { allLabel, allPlace, hrefOf, openPlace, parseRunning, rowAttrs, rowRepor
 import type { Place, Running, RunningEntry } from "./running-model.ts";
 
 const TAG = "moxi-launcher-running";
+/** On the phone, how often the row reads `/api/running` again while the document is shown. */
+const POLL_MS = 30_000;
 
 export class LauncherRunning extends LitElement {
   static styles = css`
@@ -40,6 +43,7 @@ export class LauncherRunning extends LitElement {
   open = false;
   value: Running | null = null;
   #stop: (() => void) | null = null;
+  #timer: ReturnType<typeof setInterval> | undefined;
   #shown = (): void => {
     if (document.visibilityState === "visible") void this.#read();
   };
@@ -47,6 +51,7 @@ export class LauncherRunning extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     if (!gateway()) this.#stop = subscribe("launcher", "running", (data) => this.#take(data));
+    else this.#timer = setInterval(this.#shown, POLL_MS);
     document.addEventListener("visibilitychange", this.#shown);
     void this.#read();
   }
@@ -55,6 +60,8 @@ export class LauncherRunning extends LitElement {
     super.disconnectedCallback();
     this.#stop?.();
     this.#stop = null;
+    clearInterval(this.#timer);
+    this.#timer = undefined;
     document.removeEventListener("visibilitychange", this.#shown);
   }
 
