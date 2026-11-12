@@ -596,8 +596,8 @@ class _Feed:
         while True:
             try:
                 await self.snapshot.changed()
-            except Exception as err:
-                _log_once(err, "the limits poller's gather failed")
+            except Exception as exc:
+                _log_once(exc, "the limits poller's gather failed")
             await asyncio.sleep(PERIOD)
 
     # The pass.
@@ -621,9 +621,9 @@ class _Feed:
                 answer = await aio.offload(_fresh_status)
             except _OWN_WORDS as exc:
                 note = str(exc)
-            except Exception as err:
-                _log_once(err, "the page's pass failed")
-                note = (f"the pass failed ({type(err).__name__}); the page server's log "
+            except Exception as pass_exc:
+                _log_once(pass_exc, "the page's pass failed")
+                note = (f"the pass failed ({type(pass_exc).__name__}); the page server's log "
                         "has the details")
             else:
                 found = _index(answer.get("index") or {})

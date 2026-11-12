@@ -1241,6 +1241,7 @@ comms	packages/comms/tests/test_delivery.py	rig.daemon = Daemon(rig.record, cloc
 comms	packages/comms/tests/test_delivery.py	rig.record.post_as_identity(	keep	record	record
 comms	packages/comms/tests/test_delivery.py	rig.record.post_as_identity("herald", rig.names_channel, body)	keep	record	record
 comms	packages/comms/tests/test_delivery.py	rig.record.post_as_user(rig.prov.operator_user_id, rig.names_channel,	keep	record	record
+comms	packages/comms/tests/test_delivery.py	daemon._release(binding, flagged=True)	keep	flagged	flagged
 comms	packages/comms/tests/test_digests.py	assert not (set(ids[:2]) & b.window), "the digest's ids left the window"	keep	set	set
 comms	packages/comms/tests/test_digests.py	return set(ids) <= got	keep	set	set
 comms	packages/comms/tests/test_directory_provision.py	-	name	test_a_new_directory_refuses_a_freed_room_row	test_a_new_dir_refuses_a_freed_room_row
@@ -1505,6 +1506,7 @@ comms	packages/comms/tests/test_posture_intent.py	return rig.send(to, text, *fla
 comms	packages/comms/tests/test_posture_intent.py	return rig.send(to, text, *flags, sender=who, posture=None, clock=clock)	keep	interrupt	interrupt
 comms	packages/comms/tests/test_posture_intent.py	rig.daemon = Daemon(rig.record, clock=whole_clock, start_trim_thread=False).start()	keep	record	record
 comms	packages/comms/tests/test_posture_intent.py	rig.record.history_bound = 2	keep	record	record
+comms	packages/comms/tests/test_posture_intent.py	rig.daemon._release(rig.daemon.bindings[R], flagged=True)	keep	flagged	flagged
 comms	packages/comms/tests/test_protocol_version.py	agreed = shim._client._client.agreed	keep	_client	_client
 comms	packages/comms/tests/test_protocol_version.py	assert set(agreed.capabilities) == set(wire.CAPABILITIES)	keep	set	set
 comms	packages/comms/tests/test_queue.py	Peer.turn	kwonly	answered	answered
@@ -2976,6 +2978,7 @@ moxi	packages/moxi/src/moxi/proc.py	return dict(_psutil_read(pid, "environ"))	ke
 moxi	packages/moxi/src/moxi/proc.py	return proc.communicate(timeout=KILL_GRACE)	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/proc.py	run	name	input	stdin_data
 moxi	packages/moxi/src/moxi/proc.py	run	name	timeout	timeout_s
+moxi	packages/moxi/src/moxi/proc.py	common = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=out,	keep	stdin	stdin
 moxi	packages/moxi/src/moxi/run.py	paths.core().runtime_dir(create=True)	keep	create	create
 moxi	packages/moxi/src/moxi/run.py	reader.join(timeout=2.0)  # a grandchild may still hold the pipe; leave it	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/run.py	result	name	environ	effective_env
@@ -4314,6 +4317,8 @@ repo	packages/repo/src/moxi_repo/api.py	moved = set(state.moved) if state is not
 repo	packages/repo/src/moxi_repo/api.py	names = (set(committer.saved_names(repo.common_dir))	keep	set	set
 repo	packages/repo/src/moxi_repo/api.py	why = check(name, values or [])	keep	ok	ok
 repo	packages/repo/src/moxi_repo/api.py	| set(committer.read_state(repo.common_dir)["specs"]))	keep	set	set
+repo	packages/repo/src/moxi_repo/api.py	_flip	kwonly	value	value
+repo	packages/repo/src/moxi_repo/api.py	_status_of	kwonly	in_index	in_index
 repo	packages/repo/src/moxi_repo/checks.py	left = set(item["left"])	keep	set	set
 repo	packages/repo/src/moxi_repo/cli.py	"add", help="register pieces in a repo",	keep	help	help
 repo	packages/repo/src/moxi_repo/cli.py	"commit", allow_abbrev=False, help="run a repo's saved committer specs",	keep	help	help
@@ -4379,6 +4384,8 @@ repo	packages/repo/src/moxi_repo/committer.py	returned, so a failed push is retr
 repo	packages/repo/src/moxi_repo/committer.py	save_spec	name	wait	wait_s
 repo	packages/repo/src/moxi_repo/committer.py	stray = sorted(set(stage) - set(every))	keep	set	set
 repo	packages/repo/src/moxi_repo/committer.py	timeout=PUSH_TIMEOUT)	use	timeout=	timeout_s=
+repo	packages/repo/src/moxi_repo/committer.py	_commit_text	kwonly	stale	stale
+repo	packages/repo/src/moxi_repo/committer.py	_commit_fix	kwonly	stale	stale
 repo	packages/repo/src/moxi_repo/gitconf.py	_write_moved(repo, state, set() if final else _still_moved(repo, moved, set()))	keep	set	set
 repo	packages/repo/src/moxi_repo/gitconf.py	for event in sorted((set(ours) | moved) - keep):	keep	set	set
 repo	packages/repo/src/moxi_repo/gitconf.py	for event in sorted(set(state.entries) - set(events)):	keep	set	set
@@ -4393,6 +4400,7 @@ repo	packages/repo/src/moxi_repo/gitconf.py	self.moved: set[str] = set()	keep	se
 repo	packages/repo/src/moxi_repo/gitconf.py	self.sections: set[str] = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/gitconf.py	state.moved = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/gitconf.py	state.moved = set(moved)	keep	set	set
+repo	packages/repo/src/moxi_repo/gitconf.py	set_enabled	kwonly	value	value
 repo	packages/repo/src/moxi_repo/gitrun.py	"""One changed path. `status` is git's letter (`A`, `M`, `D`, `R`, `T`, ...);	keep	R	R
 repo	packages/repo/src/moxi_repo/gitrun.py	__all__ = ["git", "changes", "Change", "literal_pathspec", "environment", "local_env_vars",	keep	environment	environment
 repo	packages/repo/src/moxi_repo/gitrun.py	`changes(root, staged=True | range=(a, b), paths=())` lists what changed, from git's `-z`	use	range=(a, b)	rev_range=(a, b)
@@ -4405,20 +4413,35 @@ repo	packages/repo/src/moxi_repo/gitrun.py	git	name	timeout	timeout_s
 repo	packages/repo/src/moxi_repo/gitrun.py	if command == "remote" and not (_REMOTE_VERBS & set(rest[:1])):	keep	set	set
 repo	packages/repo/src/moxi_repo/gitrun.py	if status in ("R", "C"):	keep	R	R
 repo	packages/repo/src/moxi_repo/gitrun.py	raise ValueError("changes() reads what is staged, or a range=(a, b)")	use	range=(a, b)	rev_range=(a, b)
+repo	packages/repo/src/moxi_repo/gitrun.py	_users_ssh	kwonly	clean_env	clean_env
+repo	packages/repo/src/moxi_repo/gitrun.py	-	name	environment	git_env
 repo	packages/repo/src/moxi_repo/pagehandlers.py	_logged: set[type] = set()	keep	set	set
+repo	packages/repo/src/moxi_repo/pagehandlers.py	_repo	name	err	unexpected_exc
+repo	packages/repo/src/moxi_repo/pagehandlers.py	gather	name	err	unexpected_exc
 repo	packages/repo/src/moxi_repo/pieces.py	"""What a piece returns. Make one with `ok()`, `refuse()`, `notice()` or `record()`."""	keep	record	record
 repo	packages/repo/src/moxi_repo/pieces.py	HookContext.git	name	input	stdin_data
 repo	packages/repo/src/moxi_repo/pieces.py	HookContext.git	name	timeout	timeout_s
 repo	packages/repo/src/moxi_repo/pieces.py	`git(*args, input=None)` runs git with the git hook's own environment, so a partly	use	input=None	stdin_data=None
 repo	packages/repo/src/moxi_repo/pieces.py	return cls("record", (str(line),))	keep	record	record
 repo	packages/repo/src/moxi_repo/pieces.py	unknown = sorted(set(map(str, value)) - DECLARATION_KEYS)	keep	set	set
+repo	packages/repo/src/moxi_repo/pieces.py	Piece.__init__	name	id	piece_id
 repo	packages/repo/src/moxi_repo/run.py	elif outcome.kind == "record":	keep	record	record
 repo	packages/repo/src/moxi_repo/run.py	return outcome.kind == "refuse" if refusing else outcome.kind in ("notice", "record")	keep	record	record
+repo	packages/repo/src/moxi_repo/run.py	_run	kwonly	refusing	refusing
+repo	packages/repo/src/moxi_repo/run.py	_fits	kwonly	refusing	refusing
+repo	packages/repo/src/moxi_repo/run.py	_record	kwonly	flagged	flagged
+repo	packages/repo/src/moxi_repo/run.py	_flag	kwonly	value	value
 repo	packages/repo/src/moxi_repo/shim.py	hooks_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/src/moxi_repo/shim.py	shim_text	kwonly	stdin	stdin
+repo	packages/repo/src/moxi_repo/shim.py	chain_line	kwonly	stdin	stdin
+repo	packages/repo/src/moxi_repo/shim.py	check_place	kwonly	moved	moved
+repo	packages/repo/src/moxi_repo/shim.py	place	kwonly	moved	moved
+repo	packages/repo/src/moxi_repo/shim.py	take_away	kwonly	moved	moved
 repo	packages/repo/tests/conftest.py	`refuse`, `raise`, `notice`, `record`, `print`, `stage`, `none`, `input`, `slow`, `glob`),	keep	record	record
 repo	packages/repo/tests/conftest.py	done = ctx.git("hash-object", "--stdin", input="hello\\n")	use	input=	stdin_data=
 repo	packages/repo/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
+repo	packages/repo/tests/conftest.py	git	name	input	stdin_data
 repo	packages/repo/tests/test_api_reexports.py	assert set(api.REEXPORTS) == set(NAMES)	keep	set	set
 repo	packages/repo/tests/test_api_reexports.py	assert set(moxi_repo.EXPORTS) <= set(api.REEXPORTS)	keep	set	set
 repo	packages/repo/tests/test_api_reexports.py	return set(json.loads(done.stdout.splitlines()[-1]))	keep	set	set
@@ -4472,6 +4495,7 @@ repo	packages/repo/tests/test_committer.py	s0 = spec(repo, push="origin", push_b
 repo	packages/repo/tests/test_committer.py	taken.set()	keep	set	set
 repo	packages/repo/tests/test_committer.py	threading.Timer(0.3, release.set).start()	keep	set	set
 repo	packages/repo/tests/test_committer.py	wrapper.write_text(WRAPPER.format(python=sys.executable, real=real), encoding="utf-8")	keep	real	real
+repo	packages/repo/tests/test_committer.py	deny	kwonly	on	on
 repo	packages/repo/tests/test_cost.py	names = set()	keep	set	set
 repo	packages/repo/tests/test_doctor.py	Path(hook).parent.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_doctor.py	api.index_path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -4497,6 +4521,7 @@ repo	packages/repo/tests/test_git_hooks.py	demo.act(lint="ok", watch="record", g
 repo	packages/repo/tests/test_git_hooks.py	hook.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_git_hooks.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_git_hooks.py	return set(gitconf.read(gitconf.resolve(repo)).pieces)	keep	set	set
+repo	packages/repo/tests/test_git_hooks.py	blob = git(repo, "hash-object", "--stdin", input="hello\n").stdout.strip()	use	input=	stdin_data=
 repo	packages/repo/tests/test_installs.py	assert left(alpha, "ears/old") == set()	keep	set	set
 repo	packages/repo/tests/test_installs.py	assert left(alpha, "ears/watch") == set()	keep	set	set
 repo	packages/repo/tests/test_installs.py	assert set(_records.ledger()) == ears_keys | kept	keep	set	set
@@ -4527,6 +4552,7 @@ repo	packages/repo/tests/test_projects.py	importers = set()	keep	set	set
 repo	packages/repo/tests/test_projects.py	return set(gitconf.read(gitconf.resolve(repo)).pieces)	keep	set	set
 repo	packages/repo/tests/test_projects.py	self.store.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_projects.py	site.module("projects", package="fake_projects", **announce)	keep	package	package
+repo	packages/repo/tests/test_projects.py	Projects.held	name	holder	holder_conn
 repo	packages/repo/tests/test_records.py	OPEN = {"record", "ledger", "flag"}	keep	record	record
 repo	packages/repo/tests/test_records.py	assert left(repo, "demo/gate") == set()	keep	set	set
 repo	packages/repo/tests/test_records.py	assert left(repo, "demo/lint") == set()	keep	set	set
@@ -5555,6 +5581,7 @@ tunnel	packages/tunnel/src/moxi_tunnel/acts.py	keys = set(decls.targets) | set(b
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	self.last = exc.record	keep	record	record
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	skip = {p for h, p in self.retired if h == normal_host(host)} | set(foreign)	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	| set(_bad_keys(decls)))	keep	set	set
+tunnel	packages/tunnel/src/moxi_tunnel/acts.py	_Live.__call__	name	caught	provider_exc
 tunnel	packages/tunnel/src/moxi_tunnel/changes.py	for key in sorted(set(before.entries) | set(after.entries)):	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="also compare each entry with the live config")	keep	help	help
 tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="drop it from the record and leave the live config alone")	keep	help	help
@@ -5571,17 +5598,25 @@ tunnel	packages/tunnel/src/moxi_tunnel/cli.py	p.add_argument("--yes", action="st
 tunnel	packages/tunnel/src/moxi_tunnel/cloudflare.py	exc.record = rec	keep	record	record
 tunnel	packages/tunnel/src/moxi_tunnel/cloudflare.py	self.record = rec	keep	record	record
 tunnel	packages/tunnel/src/moxi_tunnel/cloudflare.py	switch was touched; else a unit act of the core failed. `record` is the record as the	keep	record	record
+tunnel	packages/tunnel/src/moxi_tunnel/cloudflare.py	_set_switch	kwonly	value	value
+tunnel	packages/tunnel/src/moxi_tunnel/cloudflare.py	return fn(value)	use	fn(value)	fn(value=value)
 tunnel	packages/tunnel/src/moxi_tunnel/declare.py	keys = sorted(set(keys))	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/doctor.py	return None, [Row(MODULE, "record", "fail", exc.reason, exc.fix)]	keep	record	record
 tunnel	packages/tunnel/src/moxi_tunnel/doctor.py	return rec, [Row(MODULE, "record", "fail",	keep	record	record
 tunnel	packages/tunnel/src/moxi_tunnel/doctor.py	return rec, [Row(MODULE, "record", "ok", detail)]	keep	record	record
+tunnel	packages/tunnel/src/moxi_tunnel/doctor.py	_off	kwonly	public	public
+tunnel	packages/tunnel/src/moxi_tunnel/doctor.py	_off_row	kwonly	public	public
 tunnel	packages/tunnel/src/moxi_tunnel/locks.py	if not _gate.acquire(timeout=-1 if timeout is None else max(timeout, 0)):	keep	timeout	timeout
 tunnel	packages/tunnel/src/moxi_tunnel/ports.py	granted = set(FUNNEL_PORTS if funnel_ports is None else funnel_ports)	keep	set	set
+tunnel	packages/tunnel/src/moxi_tunnel/ports.py	_take	kwonly	replace	replace
+tunnel	packages/tunnel/src/moxi_tunnel/ports.py	_public	kwonly	replace	replace
 tunnel	packages/tunnel/src/moxi_tunnel/record.py	and held in its `record`."""	keep	record	record
+tunnel	packages/tunnel/src/moxi_tunnel/record.py	_sync_dir	name	directory	target_dir
 tunnel	packages/tunnel/src/moxi_tunnel/tailscale.py	if not isinstance(value, dict) or set(value) - {"HTTPS"} or value.get("HTTPS") is not True:	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/tailscale.py	return tuple(sorted(set(found))) if seen else None	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/tailscale.py	targets = set(targets)	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/tailscale.py	targets = {target} if isinstance(target, (int, str)) else set(target)	keep	set	set
+tunnel	packages/tunnel/src/moxi_tunnel/uninstall.py	_put_back	name	again	rollback_exc
 tunnel	packages/tunnel/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 tunnel	packages/tunnel/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
 tunnel	packages/tunnel/tests/fake_tailscale.py	bin_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -5590,6 +5625,7 @@ tunnel	packages/tunnel/tests/test_asks.py	assert got.targets == {} and {b.group 
 tunnel	packages/tunnel/tests/test_cli.py	assert len(tokens) == len(set(tokens))	keep	set	set
 tunnel	packages/tunnel/tests/test_cli.py	assert set(gateway) >= {"module", "name", "reach", "exposure", "provider", "state", "url",	keep	set	set
 tunnel	packages/tunnel/tests/test_cloudflare_step.py	assert set(cloudflare.read_file().rules()) == {A, B}	keep	set	set
+tunnel	packages/tunnel/tests/test_cloudflare_step.py	test_listeners_hear_a_switch_once	name	out	fh
 tunnel	packages/tunnel/tests/test_doctor.py	"record": "ok", "tailscale CLI": "ok", "certificate renewal": "ok",	keep	record	record
 tunnel	packages/tunnel/tests/test_doctor.py	assert got["cloudflare in step"].state == "ok" and got["record"].state == "ok"	keep	record	record
 tunnel	packages/tunnel/tests/test_doctor.py	assert got["record"].fix == "upgrade moxi-tunnel"	keep	record	record
@@ -5620,6 +5656,9 @@ tunnel	packages/tunnel/tests/test_uninstall_build.py	assert box.record() is not 
 tunnel	packages/tunnel/tests/test_uninstall_build.py	assert box.record()["entries"] == {}	keep	record	record
 tunnel	packages/tunnel/tests/test_uninstall_build.py	assert list(box.record()["entries"]) == ["alpha/gateway"]	keep	record	record
 tunnel	packages/tunnel/tests/test_uninstall_build.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+tunnel	packages/tunnel/tests/test_uninstall_build.py	_version	name	directory	package_dir
+tunnel	packages/tunnel/tests/test_uninstall_build.py	_version	name	f	fh
+tunnel	packages/tunnel/tests/test_uninstall_build.py	Box.build	name	directory	package_dir
 turns	packages/turns/src/moxi_turns/__init__.py	d.wait_ended(timeout)    # Ended | Refused | Lost	use	d.wait_ended(timeout)	d.wait_ended(timeout_s)
 turns	packages/turns/src/moxi_turns/__init__.py	d.wait_started(timeout)  # Started | Refused | Lost	use	d.wait_started(timeout)	d.wait_started(timeout_s)
 turns	packages/turns/src/moxi_turns/__init__.py	e = s.environ(names)   # {name: value | None}: the session's own environment, read	use	environ	env
@@ -6033,6 +6072,8 @@ turns	packages/turns/tests/test_codex_host_entry.py	-	name	test_missing_files_an
 turns	packages/turns/tests/test_codex_host_entry.py	-	name	test_the_check_counts_the_working_directory_as_writable	test_the_check_counts_the_working_dir_as_writable
 turns	packages/turns/tests/test_codex_host_entry.py	proc.wait(timeout=WAIT)	keep	timeout	timeout
 turns	packages/turns/tests/test_codex_host_entry.py	return proc.wait(timeout=timeout)	keep	timeout	timeout
+turns	packages/turns/tests/test_codex_host_entry.py	again = rig.spawn("--no-window", "--resume", thread, stdin=subprocess.DEVNULL)	keep	stdin	stdin
+turns	packages/turns/tests/test_codex_host_entry.py	host = rig.spawn("--no-window", stdin=subprocess.PIPE)	keep	stdin	stdin
 turns	packages/turns/tests/test_codex_limits.py	assert set(fresh) == {"payload", "received_at"}	keep	set	set
 turns	packages/turns/tests/test_codex_limits.py	client.call("usage.codex_limits", {}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_codex_mcp.py	assert set(records) == {"mcp:t:other"}	keep	set	set
@@ -6813,7 +6854,10 @@ ui	packages/ui/tests/test_web.py	assert set(re.findall(r'from"([^"]+)"', text)) 
 ui	packages/ui/tests/test_web.py	for name in set(names) - set(colours):	keep	set	set
 ui	packages/ui/tests/test_web.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/src/moxi_usage/allowlist.py	section: str | None = None          # before the first header, then "add" or "update"	keep	start	start
+usage	packages/usage/src/moxi_usage/allowlist.py	_resolve_dir	kwonly	logical	logical
+usage	packages/usage/src/moxi_usage/allowlist.py	for n, line in enumerate(lines[1:-1], start=2):	keep	start	start
 usage	packages/usage/src/moxi_usage/api.py	return sorted(set(globals()) | set(__all__))	keep	set	set
+usage	packages/usage/src/moxi_usage/api.py	__getattr__	name	value	unknown_value
 usage	packages/usage/src/moxi_usage/ceiling.py	__all__ = ["GUARD_ID", "NAME", "SWITCH", "STATE_DIR", "WARN", "HARD", "Rules", "rules",	keep	NAME	NAME
 usage	packages/usage/src/moxi_usage/ceiling.py	_said: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/ceiling.py	for n, value in enumerate(settings["ceiling.allow_commands"], start=1):	keep	start	start
@@ -6879,6 +6923,8 @@ usage	packages/usage/src/moxi_usage/index.py	gone, lanes_gone = [], set()	keep	s
 usage	packages/usage/src/moxi_usage/index.py	settle = set(ids[part] for part in by_session)	keep	set	set
 usage	packages/usage/src/moxi_usage/index.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/index.py	wanted = None if lanes is None else set(lanes)	keep	set	set
+usage	packages/usage/src/moxi_usage/index.py	_under	name	directories	unreadable_dirs
+usage	packages/usage/src/moxi_usage/index.py	_under	name	directory	unreadable_dir
 usage	packages/usage/src/moxi_usage/limits.py	Row	name	age_seconds	age_s
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/mark.py	-	name	CROSSING_AT	CROSSING_AT_ENV
@@ -6891,7 +6937,11 @@ usage	packages/usage/src/moxi_usage/marks.py	FROM_RECORD = "record"	keep	record	
 usage	packages/usage/src/moxi_usage/marks.py	return session.environ([listener.WARN_AT, listener.CROSSING_AT])	keep	environ	environ
 usage	packages/usage/src/moxi_usage/marks.py	return session.environ([listener.WARN_AT_ENV, listener.CROSSING_AT_ENV])	keep	environ	environ
 usage	packages/usage/src/moxi_usage/marks.py	return session.environ([listener.WARN_AT_ENV, listener.CROSSING_AT_ENV])	use	environ	env
+usage	packages/usage/src/moxi_usage/marks.py	fired	name	directory	marks_dir
+usage	packages/usage/src/moxi_usage/marks.py	sweep	name	directory	marks_dir
 usage	packages/usage/src/moxi_usage/measure.py	return harness == "codex" and originator is not None and originator in set(originators)	keep	set	set
+usage	packages/usage/src/moxi_usage/measure.py	_row	name	S	s
+usage	packages/usage/src/moxi_usage/measure.py	_row	name	P	p
 usage	packages/usage/src/moxi_usage/models.py	return sorted(set(self.rows) | exact)	keep	set	set
 usage	packages/usage/src/moxi_usage/page.py	"agent": lb.Field("string", required=False, max=512), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"harness": lb.Field("enum", required=False, values=HARNESSES),	keep	required	required
@@ -6907,6 +6957,8 @@ usage	packages/usage/src/moxi_usage/page.py	query={"models": lb.Field("string", 
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/pagehandlers.py	for model, provider in zip(ids, providers, strict=True):	keep	strict	strict
+usage	packages/usage/src/moxi_usage/pagehandlers.py	_Feed._poll	name	err	exc
+usage	packages/usage/src/moxi_usage/pagehandlers.py	_Feed._pass	name	err	pass_exc
 usage	packages/usage/src/moxi_usage/prices.py	added = sorted(set(after) - set(before))	keep	set	set
 usage	packages/usage/src/moxi_usage/prices.py	names: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/prices.py	priced: set[str] = set()	keep	set	set
@@ -6937,6 +6989,16 @@ usage	packages/usage/src/moxi_usage/store.py	keys = set(keys)	keep	set	set
 usage	packages/usage/src/moxi_usage/store.py	unknown = sorted(set(fields) - set(FILE_COLUMNS))	keep	set	set
 usage	packages/usage/src/moxi_usage/store.py	wanted = sorted(set(lanes))	keep	set	set
 usage	packages/usage/src/moxi_usage/thresholds.py	filled = set(facts.provenance.filled)	keep	set	set
+usage	packages/usage/src/moxi_usage/thresholds.py	restart_cost	name	S	s
+usage	packages/usage/src/moxi_usage/thresholds.py	restart_cost	name	P	p
+usage	packages/usage/src/moxi_usage/thresholds.py	optimum_calls	name	W	restart
+usage	packages/usage/src/moxi_usage/thresholds.py	mark_exact	name	S	s
+usage	packages/usage/src/moxi_usage/thresholds.py	mark_exact	name	P	p
+usage	packages/usage/src/moxi_usage/thresholds.py	mark_exact	name	W	restart
+usage	packages/usage/src/moxi_usage/thresholds.py	threshold	name	S	s
+usage	packages/usage/src/moxi_usage/thresholds.py	threshold	name	P	p
+usage	packages/usage/src/moxi_usage/thresholds.py	context), `P` (the prefix a fresh session reads from cache), `g` (the growth per	use	P	p
+usage	packages/usage/src/moxi_usage/thresholds.py	dollar figure enters anywhere. For one population's measured parameters `S` (the settled	use	S	s
 usage	packages/usage/tests/conftest.py	changed = sorted(path for path in set(now) | set(_AT_START)	keep	set	set
 usage	packages/usage/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_allowlist.py	"HOME": home,	keep	HOME	HOME
@@ -6966,6 +7028,175 @@ usage	packages/usage/tests/test_allowlist.py	check("work_roots None still allows
 usage	packages/usage/tests/test_allowlist.py	commands=commands, home=P["HOME"])	keep	HOME	HOME
 usage	packages/usage/tests/test_allowlist.py	monkeypatch.setenv("HOME", p["HOME"])	keep	HOME	HOME
 usage	packages/usage/tests/test_allowlist.py	os.symlink(p["HOME"], os.path.join(p["REPO"], "up"))	keep	HOME	HOME
+usage	packages/usage/tests/test_allowlist.py	table	name	P	p
+usage	packages/usage/tests/test_allowlist.py	table	name	CWD	current_dir
+usage	packages/usage/tests/test_allowlist.py	table	name	REPO	repo
+usage	packages/usage/tests/test_allowlist.py	table	name	WORK	work
+usage	packages/usage/tests/test_allowlist.py	table	name	NOTES	notes
+usage	packages/usage/tests/test_allowlist.py	table	name	WORK_ROOTS	work_dirs
+usage	packages/usage/tests/test_allowlist.py	table	name	REPO_TILDE	repo_tilde
+usage	packages/usage/tests/test_allowlist.py	table	name	REPO_REL	repo_rel
+usage	packages/usage/tests/test_allowlist.py	table	name	RESULTS	results
+usage	packages/usage/tests/test_allowlist.py	table	name	ALLOWED_FORMS	allowed_forms
+usage	packages/usage/tests/test_allowlist.py	table	name	MSG	msg
+usage	packages/usage/tests/test_allowlist.py	table	name	REFUSED_FORMS	refused_forms
+usage	packages/usage/tests/test_allowlist.py	table	name	R	r
+usage	packages/usage/tests/test_allowlist.py	table	name	REPORT	report
+usage	packages/usage/tests/test_allowlist.py	table	name	E	e
+usage	packages/usage/tests/test_allowlist.py	table	name	S	s
+usage	packages/usage/tests/test_allowlist.py	table	name	NEW	new
+usage	packages/usage/tests/test_allowlist.py	table	name	CHANGE	change
+usage	packages/usage/tests/test_allowlist.py	check("the allow is (True, \"\")", bash("git -C %s status --short" % repo), (True, ""))	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	commands=commands, home=p["HOME"])	keep	HOME	HOME
+usage	packages/usage/tests/test_allowlist.py	check("command not a string", bash(["git", "status", "--short"])[0], want_ok=False)	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	check("cwd None", bash("git -C %s status --short" % repo, None)[0], want_ok=False)	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	check("cwd relative", bash("git status --short", "code/app")[0], want_ok=False)	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	check("relative work root ignored", ask("Bash", {"command": "git -C %s status --short" % repo}, current_dir, ["home/tmp"], notes)[0], want_ok=False)	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	check("tool_input None", ask("Write", None, current_dir, work_dirs, notes)[0], want_ok=False)	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	check("tool_input not an object", ask("Bash", "git status --short", current_dir, work_dirs, notes)[0], want_ok=False)	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	check("work_roots None refuses the worktree", ask("Bash", {"command": "git -C %s status --short" % repo}, current_dir, None, notes)[0], want_ok=False)	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	check("work_roots None still allows cwd", ask("Bash", {"command": "git status --short"}, current_dir, None, notes)[0], want_ok=True)	keep	ok	ok
+usage	packages/usage/tests/test_allowlist.py	codex_bash("a user's command prefix", {"command": "make handoff"}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("cd && add -A", {"command": "cd %s && git add -A" % repo}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("cd && commit", {"command": "cd %s && git commit -m 'hand off'" % repo}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("command as an argv list", {"command": ["git", "status", "--short"]}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("git -C status", {"command": "git -C %s status --short" % repo}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("push", {"command": "git -C %s push" % repo}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("workdir empty", {"command": "git status --short", "workdir": ""}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("workdir in the work root", {"command": "git status --short", "workdir": repo}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("workdir not a string", {"command": "git status --short", "workdir": 7}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("workdir outside every root", {"command": "git status --short", "workdir": p["ELSE"]}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	codex_bash("workdir under cwd", {"command": "git add -A", "workdir": "sub"}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	end=" *** End Patch"), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("$ and backtick inside single quotes", "git -C %s commit -m 'costs $5, see `x`'" % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("%s [%s]" % (form, shape), cmd, want=False, cwd=cwd)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("%s [%s]" % (form, shape), cmd, want=True, cwd=cwd)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("%s: a link from outside every root into the work root" % shape, fmt % (e + "/inlink"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("%s: a link in the repository leading above it" % shape, fmt % (repo + "/up"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("%s: a link inside the work root" % shape, fmt % (work + "/inlink"), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("&& with no spaces", "cd %s&&git status --short" % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C a directory inside cwd", "git -C sub status --short", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C a quoted ~ is literal, relative to cwd", "git -C '~/tmp' status --short", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C a sibling with the root as name prefix", "git -C %s2 status --short" % work, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C bare ~", "git -C ~ status --short", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C outside every root: %s" % d, "git -C %s status --short" % d, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C the work root itself", "git -C %s status --short" % work, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C through a link out of the work root", "git -C %s/link-out status --short" % work, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C with .. out of the work root", "git -C %s/../code/other status --short" % work, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("-C ~user", "git -C ~root/tmp status --short", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a listed prefix in the cd shape", "cd %s && make handoff" % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a listed prefix in the cd shape, ~/", "cd %s && make handoff" % repo_tilde, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a listed prefix with more words", "make handoff report --quiet", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a listed prefix, bare", "make handoff", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a prefix then ;", "make handoff; ls", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a prefix word with $", "make $TARGET", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a prefix, cd outside every root", "cd %s && make handoff" % p["ELSE"], want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a prefix, cd to a sibling of cwd", "cd %s && make handoff" % p["OTHER"], want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("a quoted word that equals the prefix", "'make' handoff", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- a link in the repository leading above it", "git -C %s add -- up/x" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- a link leading above the repository, cd shape", "cd %s && git add -- up/x" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- a link leading above the repository, then ..", "git -C %s add -- up/.." % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- absolute path inside the repository", "git -C %s add -- %s/hooks/x.py" % (repo, repo), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- an in-dir link [%s]" % shape, fmt % "L/x", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- bare, path outside cwd", "git add -- ../other/x.py", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- outside the repository: %s [-C]" % path, "git -C %s add -- %s" % (repo, path), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- outside the repository: %s [cd]" % path, "cd %s && git add -- %s" % (repo, path), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- through an in-dir link, .. lexically inside <dir> [%s]" % shape, fmt % "L/../x", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- with a .. that stays inside", "git -C %s add -- hooks/../tests/y.py" % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("add -- ~/ path inside the repository", "git -C %s add -- %s/x.py" % (repo, repo_tilde), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("another word after the first", "make clean", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("bare add -- path inside cwd", "git add -- sub/x.py", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("bare git with cwd outside every root? cwd always passes", "git status --short", want=True, cwd=p["ELSE"])	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("cd -", "cd - && git status --short", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("cd alone", "cd %s" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("cd outside every root: %s" % d, "cd %s && git status --short" % d, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("cd then another cd", "cd %s && cd x" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("cd through a link out of the work root", "cd %s/link-out && git status --short" % work, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("cd with an option", "cd -P %s && git status --short" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("cd with no directory", "cd && git status --short", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("cd with nothing after &&", "cd %s &&" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("command git", "command git -C %s status --short" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("double-quoted -m with embedded newlines", "git -C %s commit -m \"a\nb\"" % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("env prefix", "GIT_DIR=x git -C %s status --short" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("escaped quote inside double quotes", "git -C %s commit -m \"say \\\"hi\\\"\"" % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("extra spaces and tabs", "  cd %s\t&&  git  status --short  " % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("git -C with no directory", "git -C", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("git -C with no subcommand", "git -C %s" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("git alone", "git", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("git by full path", "/usr/bin/git -C %s status --short" % repo, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("message that looks like an option", "git -C %s commit -m '--amend'" % repo, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("single-quoted -m with embedded newlines", "git -C %s commit -m '%s'" % (repo, msg), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("single-quoted -m with newlines, cd shape", "cd %s && git commit -m '%s'" % (repo, msg), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("the prefix's first word alone", "make", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_bash("two -C options", "git -C %s -C %s status --short" % (repo, repo), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch(".. out of the root", patch(add(notes + "/../code/app/x.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch(".. that stays inside the root", patch(add(notes + "/designs/../x.md", "x")), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("CRLF line ends", patch(add(new, "x")).replace("\n", "\r\n"), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("Markdown in the repository", patch(add(repo + "/README.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("Markdown outside the root", patch(add(p["ELSE"] + "/r.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("a .md link under the root leading outside", patch(update(notes + "/link.md", *change)), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("a .md name leading to source", patch(update(notes + "/src.md", *change)), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("a link from outside into the root", patch(add(e + "/notelink/r.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("a link inside the root, then ..", patch(add(notes + "/dlink/../x.md", "x")), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("a sibling with the root as name prefix", patch(add(notes + "2/r.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("add a report under the root", patch(add(new, "# Hand-off", "", "done")), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("add an empty report", patch(add(new)), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("add and update, both under the root", patch(add(new, "x"), update(report, *change)), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("add in a new directory", patch(add(notes + "/new/dir/r.md", "x")), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("add relative to cwd", patch(add("../../notes/r.md", "x")), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("blank lines around the patch", "\n\n" + patch(add(new, "x")) + "\n  \n", want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("command not a string", ["*** Begin Patch"], want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("cwd relative", patch(add("../../notes/r.md", "x")), want=False, cwd="code/app")	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("not Markdown", patch(add(notes + "/r.py", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("one Markdown, one not", patch(add(new, "x"), add(notes + "/r.py", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("relative .. out of the root", patch(add("../../notes/../x.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("relative Markdown in cwd", patch(add("README.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("the text under another key", patch(add(new, "x")), want=False, key="input")	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("the text under patch", patch(add(new, "x")), want=False, key="patch")	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("update of a source file", patch(update(repo + "/hooks/x.py", *change)), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("update the report", patch(update(report, *change)), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("update whose context line is a Markdown rule", patch(update(report, " ***", "+x")), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_patch("update with no @@ first", patch(update(report, " context", "+added")), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	patch(add("~/" + "notes/r.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("%s is not a wrap-up operation" % name, name, inp, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool(".. out of the root", name, dict(extra, file_path=notes + "/../code/app/x.md"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("Markdown in cwd", name, dict(extra, file_path=current_dir + "/README.md"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("Markdown in the repository", name, dict(extra, file_path=repo + "/README.md"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("Markdown outside the root", name, dict(extra, file_path=p["ELSE"] + "/r.md"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("Markdown suffix in the middle", name, dict(extra, file_path=notes + "/r.md.py"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("a .md link under the root leading outside", name, dict(extra, file_path=notes + "/link.md"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("a .md name leading to source under the root", name, dict(extra, file_path=notes + "/src.md"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("a link from outside the hand-off root into it", name, {"file_path": e + "/notelink/r.md"}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("a plain name leading to a report", name, dict(extra, file_path=notes + "/alias"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("a sibling with the root as name prefix", name, dict(extra, file_path=notes + "2/r.md"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("bounded read of non-Markdown under the root", "Read", {"file_path": notes + "/x.txt", "limit": 50}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("bounded read of source in the repository", "Read", {"file_path": repo + "/hooks/x.py", "limit": 50}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("bounded read outside the root", "Read", {"file_path": p["ELSE"] + "/outside.md", "limit": 50}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("file_path not a string", name, dict(extra, file_path=7), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("hand-off roots as a list", name, dict(extra, file_path=report), want=True, roots=[p["ELSE"], notes])	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("new report under the hand-off root", name, dict(extra, file_path=notes + "/new/dir/r.md"), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("no file_path", name, dict(extra), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("no hand-off root", name, dict(extra, file_path=report), want=False, roots=[])	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("not Markdown under the root", name, dict(extra, file_path=notes + "/r.py"), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("relative hand-off root ignored", name, dict(extra, file_path=report), want=False, roots="notes")	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("report path relative to cwd", name, dict(extra, file_path="../../notes/r.md"), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	expect_tool("report under the hand-off root", name, dict(extra, file_path=report), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	fmt % "L/../../top.txt", want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	fmt % (e + "/inlink/.."), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	fmt % (work + "/inlink/.."), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	patch(add(notes + "/uplink/../outside.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	patch(add(notes + "/uplink/new.md", "x")), want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	patch(update(report, "@@ ## Done", "-a", "+b", "@@", "+c", "*** End of File")), want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"command": "cd %s && git status --short" % p["OTHER"], "workdir": repo}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"command": "cd %s && git status --short" % p["SUB"], "workdir": repo}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"command": "cd .. && git status --short", "workdir": repo}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"command": "git -C S add -- L/x", "workdir": repo}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"command": "git add -- up/x", "workdir": repo}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"command": "git commit -m x", "workdir": repo_rel}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"command": "git status --short", "workdir": work + "/link-out"}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"file_path": e + "/notelink/build-report.md", "limit": 50}, want=False)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"file_path": notes + "/dlink/../x.md"}, want=True)	keep	want	want
+usage	packages/usage/tests/test_allowlist.py	{"file_path": notes + "/uplink/../outside.md"}, want=False)	keep	want	want
 usage	packages/usage/tests/test_bench.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_bench.py	picked = set(rnd.sample(range(ROLLOUTS), IMPORTED))	keep	set	set
 usage	packages/usage/tests/test_bench.py	return {"PATH": os.environ.get("PATH", ""), "HOME": str(home),	keep	HOME	HOME
@@ -6979,6 +7210,9 @@ usage	packages/usage/tests/test_ceiling.py	path.parent.mkdir(parents=True, exist
 usage	packages/usage/tests/test_ceiling.py	r.request(token_usage(input=30_000 + HARD, cached=0), response_id="resp_2")	use	input=	input_tokens=
 usage	packages/usage/tests/test_ceiling.py	r.request(token_usage(input=30_000, cached=0), response_id="resp_1")	use	input=	input_tokens=
 usage	packages/usage/tests/test_ceiling.py	tool_use_id="toolu_1", input=tool_input or {}, cwd=cwd,	keep	input	input
+usage	packages/usage/tests/test_ceiling.py	-	name	test_markers_live_in_a_private_directory_per_agent	test_markers_live_in_a_private_dir_per_agent
+usage	packages/usage/tests/test_ceiling.py	-	name	test_making_an_agents_directory_sweeps_old_ones	test_making_an_agents_dir_sweeps_old_ones
+usage	packages/usage/tests/test_ceiling.py	-	name	test_an_id_that_cannot_name_a_directory_still_warns_once_and_latches_in_memory	test_an_id_that_cannot_name_a_dir_still_warns_once_and_latches_in_memory
 usage	packages/usage/tests/test_claims.py	assert touched == set()	keep	set	set
 usage	packages/usage/tests/test_claims.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_context.py	assert set(found.as_dict()["unknown"]) == {"window", "percent"}	keep	set	set
@@ -6990,6 +7224,7 @@ usage	packages/usage/tests/test_doctor.py	assert set(found.stores) == {"index", 
 usage	packages/usage/tests/test_doctor.py	assert set(found.timers) == {"measure"}	keep	set	set
 usage	packages/usage/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_doctor.py	touched: set[int] = set()	keep	set	set
+usage	packages/usage/tests/test_doctor.py	test_the_marks_row_sweeps_old_files_and_counts	name	directory	marks_dir
 usage	packages/usage/tests/test_end_to_end.py	assert {row[0] for row in stored} == set(THREADS)      # the pass sent both rollouts'	keep	set	set
 usage	packages/usage/tests/test_index.py	answer.step(input=100, output=7)	keep	input	input
 usage	packages/usage/tests/test_index.py	assert len(ticks) == 4 and set(ticks) == {index.POLL}     # the fifth look is at 5	keep	set	set
@@ -7006,6 +7241,7 @@ usage	packages/usage/tests/test_index.py	codes = sorted(proc.wait(timeout=120) f
 usage	packages/usage/tests/test_index.py	parent = db.session(title="fix it", directory="/work/project")	keep	directory	directory
 usage	packages/usage/tests/test_index.py	proc.wait(timeout=30)	keep	timeout	timeout
 usage	packages/usage/tests/test_index.py	reply.step(input=900, output=40, cache_read=100)	keep	input	input
+usage	packages/usage/tests/test_index.py	-	name	test_a_source_under_an_unreadable_directory_keeps_its_row	test_a_source_under_an_unreadable_dir_keeps_its_row
 usage	packages/usage/tests/test_limits.py	assert (five.used_percent, five.source, five.age_seconds) == (25.0, "rollout", 2 * MIN)	use	five.age_seconds	five.age_s
 usage	packages/usage/tests/test_limits.py	assert five.age_seconds == 40 * MIN	use	five.age_seconds	five.age_s
 usage	packages/usage/tests/test_limits.py	assert set(data["unknown"]) == {"resets_at", "session_id", "plan_type"}	keep	set	set
@@ -7020,6 +7256,8 @@ usage	packages/usage/tests/test_mark.py	path.parent.mkdir(parents=True, exist_ok
 usage	packages/usage/tests/test_mark.py	release.set()	keep	set	set
 usage	packages/usage/tests/test_mark.py	reply.step(input=tokens - 1000, cache_read=1000, output=10)	keep	input	input
 usage	packages/usage/tests/test_mark.py	reply.step_finish(input=125_000)	keep	input	input
+usage	packages/usage/tests/test_mark.py	test_the_floor_and_the_listener_take_turns_own_event	name	SessionEvent	session_event_type
+usage	packages/usage/tests/test_mark.py	`SessionEvent`; transcripts are sessions' builders; the measure and the model rows are	keep	SessionEvent	SessionEvent
 usage	packages/usage/tests/test_measure.py	reply.step(input=context_of(k) - read, cache_read=read, output=10)	keep	input	input
 usage	packages/usage/tests/test_page.py	"/api/cost": ("read", set(), False),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/events": ("read", set(), True),	keep	set	set
@@ -7059,6 +7297,7 @@ usage	packages/usage/tests/test_prices_index.py	touched: set[int] = set()	keep	s
 usage	packages/usage/tests/test_reports.py	assert set(lines) == {(None, None), ("fast", None), (None, "2026-10-02T06:00:00Z")}	keep	set	set
 usage	packages/usage/tests/test_reports.py	first_ts=min(times, default=None), last_ts=max(times, default=None), **fields)	keep	default	default
 usage	packages/usage/tests/test_reports.py	touched: set[int] = set()	keep	set	set
+usage	packages/usage/tests/test_reports.py	request	name	input	input_tokens
 usage	packages/usage/tests/test_settings.py	assert keys == set(DEFAULTS) | {"ceiling.warning_text", "ceiling.deny_text"}	keep	set	set
 usage	packages/usage/tests/test_settings.py	keys = set(current)	keep	set	set
 usage	packages/usage/tests/test_store.py	input=10, cache_read=0, cache_write=0, cache_write_1h=0, output=5,	keep	input	input
@@ -7068,6 +7307,10 @@ usage	packages/usage/tests/test_store.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_thresholds.py	assert set(found) == {"1x", "1.5x", "2x"}	keep	set	set
 usage	packages/usage/tests/test_thresholds.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_thresholds.py	snapshot.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+usage	packages/usage/tests/test_thresholds.py	test_the_exact_equations_on_the_measured_rows	name	S	s
+usage	packages/usage/tests/test_thresholds.py	test_the_exact_equations_on_the_measured_rows	name	P	p
+usage	packages/usage/tests/test_thresholds.py	test_the_rounded_coefficients_sit_a_few_tokens_under_the_exact_ones	name	S	s
+usage	packages/usage/tests/test_thresholds.py	test_the_rounded_coefficients_sit_a_few_tokens_under_the_exact_ones	name	P	p
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--date", required=True,	keep	required	required
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--out", type=Path, default=DATA / "models.json")	keep	type	type
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--url", default=URL, help="where the copy was fetched from")	keep	help	help

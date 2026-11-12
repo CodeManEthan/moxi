@@ -371,7 +371,7 @@ def test_a_latched_codex_agent_can_still_write_its_hand_off_and_commit(tmp_path)
 
 # --- markers ----------------------------------------------------------------------------
 
-def test_markers_live_in_a_private_directory_per_agent():
+def test_markers_live_in_a_private_dir_per_agent():
     write_config(THRESHOLDS)
     a = started()
     a.context(20_000 + WARN)
@@ -383,7 +383,7 @@ def test_markers_live_in_a_private_directory_per_agent():
     assert os.stat(where.parent).st_mode & 0o777 == 0o700
 
 
-def test_making_an_agents_directory_sweeps_old_ones():
+def test_making_an_agents_dir_sweeps_old_ones():
     write_config(THRESHOLDS)
     old = ceiling.state_dir() / "old-session" / "old-agent"
     old.mkdir(parents=True)
@@ -400,7 +400,7 @@ def test_making_an_agents_directory_sweeps_old_ones():
     assert kept.exists()
 
 
-def test_an_id_that_cannot_name_a_directory_still_warns_once_and_latches_in_memory():
+def test_an_id_that_cannot_name_a_dir_still_warns_once_and_latches_in_memory():
     write_config(THRESHOLDS)
     a = started()
     a.context(20_000 + WARN)

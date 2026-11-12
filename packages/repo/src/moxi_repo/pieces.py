@@ -210,9 +210,9 @@ class Piece:
     __slots__ = ("id", "module", "name", "event", "target", "fail", "order", "doc",
                  "settings", "entry")
 
-    def __init__(self, *, id: str, module: str, name: str, event: str, target: str,
+    def __init__(self, *, piece_id: str, module: str, name: str, event: str, target: str,
                  fail: str, order: int, doc: str, settings: dict[str, str], entry: str):
-        self.id, self.module, self.name = id, module, name
+        self.id, self.module, self.name = piece_id, module, name
         self.event, self.target, self.fail, self.order = event, target, fail, order
         self.doc, self.settings, self.entry = doc, dict(settings), entry
 
@@ -281,7 +281,7 @@ def check(entry_name: str, value: object) -> Piece:
         if kind not in SETTING_KINDS:
             raise DeclarationError(pid, f"setting {key!r}: {kind!r} is not \"one\" or "
                                         "\"multi\"")
-    return Piece(id=pid, module=module, name=name, event=event, target=target, fail=fail,
+    return Piece(piece_id=pid, module=module, name=name, event=event, target=target, fail=fail,
                  order=order, doc=doc, settings=settings, entry=entry_name)
 
 

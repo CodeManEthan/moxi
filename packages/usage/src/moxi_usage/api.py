@@ -103,14 +103,16 @@ __all__ = [*_HOMES, "UNKNOWN"]
 
 def __getattr__(name: str) -> Any:
     if name == "UNKNOWN":
-        from moxi_sessions.api import UNKNOWN as value
+        from moxi_sessions.api import UNKNOWN
+
+        unknown_value = UNKNOWN
     else:
         home = _HOMES.get(name)
         if home is None:
             raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-        value = getattr(importlib.import_module(f"{__package__}.{home}"), name)
-    globals()[name] = value              # later lookups find it without coming here
-    return value
+        unknown_value = getattr(importlib.import_module(f"{__package__}.{home}"), name)
+    globals()[name] = unknown_value              # later lookups find it without coming here
+    return unknown_value
 
 
 def __dir__() -> list[str]:

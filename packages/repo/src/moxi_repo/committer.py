@@ -1251,11 +1251,11 @@ def _record_part(p: _Pass, spec: Spec | None, old: dict) -> None:
              and int(entry.get("index_busy_passes") or 0) >= STALE_INDEX_PASSES)
     # A pass that saw nothing conclusive still writes the lines its pushes printed.
     if conclusive or stale or p.push_lines:
-        text = _commit_text(p, entry, stale)
+        text = _commit_text(p, entry, stale=stale)
         if text:
             _records.open_record(key, cgd=p.where.cgd, kind="commit",
                                  subject={"spec": p.name}, text=text,
-                                 fix=_commit_fix(p, stale))
+                                 fix=_commit_fix(p, stale=stale))
         elif key in ledger:
             _records.close_record(key)
     for branch, value in sorted(p.push_records.items()):
@@ -1271,7 +1271,7 @@ def _record_part(p: _Pass, spec: Spec | None, old: dict) -> None:
     _records.sweep(p.where.cgd)
 
 
-def _commit_text(p: _Pass, entry: dict, stale: bool) -> str | None:
+def _commit_text(p: _Pass, entry: dict, *, stale: bool) -> str | None:
     """The commit record's text, or None when the pass has none of its conditions."""
     if stale:
         return (f"repo: {p.name}: git's index lock {p.where.git_dir / 'index.lock'} has "
@@ -1290,7 +1290,7 @@ def _commit_text(p: _Pass, entry: dict, stale: bool) -> str | None:
     return text
 
 
-def _commit_fix(p: _Pass, stale: bool) -> str:
+def _commit_fix(p: _Pass, *, stale: bool) -> str:
     if stale:
         return (f"if no git is running in {p.where.top}, remove "
                 f"{p.where.git_dir / 'index.lock'}")

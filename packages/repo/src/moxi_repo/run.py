@@ -210,10 +210,10 @@ def main(argv: list[str] | None = None) -> int:
     stdin = sys.stdin.buffer.read() if event in STDIN_EVENTS and sys.stdin else b""
     if not chosen:
         return OK
-    return _run(event, args, stdin, chosen, refusing)
+    return _run(event, args, stdin, chosen, refusing=refusing)
 
 
-def _run(event: str, args: tuple, stdin: bytes, chosen: list, refusing: bool) -> int:
+def _run(event: str, args: tuple, stdin: bytes, chosen: list, *, refusing: bool) -> int:
     from moxi_repo import pieces
 
     where = Where()
@@ -222,7 +222,7 @@ def _run(event: str, args: tuple, stdin: bytes, chosen: list, refusing: bool) ->
     for piece_id, section in chosen:
         ctx = pieces.HookContext(event, args, stdin, settings_of(section), committer, where)
         outcome, error = _call(last(section, "target") or "", ctx, pieces.Outcome)
-        if error is None and not _fits(outcome, refusing):
+        if error is None and not _fits(outcome, refusing=refusing):
             error = (f"returned {outcome.kind}, which "
                      + ("only post-* git hooks take" if refusing
                         else "only pre-* and commit-msg git hooks take"))
@@ -241,7 +241,7 @@ def _run(event: str, args: tuple, stdin: bytes, chosen: list, refusing: bool) ->
             else:
                 say(f"{event}: {piece_id} broke ({error}); the doctor keeps a record")
             _record(where, piece_id, f"{event} git hook: {piece_id} broke ({error})", fix,
-                    flagged)
+                    flagged=flagged)
             continue
         if outcome.kind == "refuse":
             refused = True
@@ -254,7 +254,7 @@ def _run(event: str, args: tuple, stdin: bytes, chosen: list, refusing: bool) ->
             root = quote_arg(where.load().root or ".")
             _record(where, piece_id, f"{event} git hook: {piece_id}: {outcome.lines[0]}",
                     f"moxi repo git-hooks disable {root} {piece_id} "
-                    f"(or: moxi repo git-hooks remove {root} {piece_id})", flagged)
+                    f"(or: moxi repo git-hooks remove {root} {piece_id})", flagged=flagged)
             continue
         if flagged:
             _clear(where, piece_id)
@@ -266,7 +266,7 @@ def _run(event: str, args: tuple, stdin: bytes, chosen: list, refusing: bool) ->
     return REFUSED if refused else OK
 
 
-def _fits(outcome, refusing: bool) -> bool:
+def _fits(outcome, *, refusing: bool) -> bool:
     if outcome.kind == "ok":
         return True
     return outcome.kind == "refuse" if refusing else outcome.kind in ("notice", "record")
@@ -295,7 +295,7 @@ def _call(target: str, ctx, outcome_type):
     return result, None
 
 
-def _record(where: Where, piece_id: str, text: str, fix: str, flagged: bool) -> None:
+def _record(where: Where, piece_id: str, text: str, fix: str, *, flagged: bool) -> None:
     """Ledger key, then the `recorded` flag, then the doctor record."""
     common = where.load().common_dir
     if not common:
@@ -307,7 +307,7 @@ def _record(where: Where, piece_id: str, text: str, fix: str, flagged: bool) -> 
         _records.open_record(
             _records.piece_key(common, piece_id), cgd=common, kind="piece",
             subject={"piece": piece_id, "root": where.root}, text=text, fix=fix,
-            before=None if flagged else (lambda: _flag(piece_id, True)))
+            before=None if flagged else (lambda: _flag(piece_id, value=True)))
     except Exception as exc:  # noqa: BLE001 - a record that can't be written is said
         say(f"the doctor record for {piece_id} could not be written ({describe(exc)})")
 
@@ -321,7 +321,7 @@ def _clear(where: Where, piece_id: str) -> None:
         from moxi_repo import _records
 
         _records.close_record(_records.piece_key(common, piece_id),
-                              after=lambda: _flag(piece_id, False))
+                              after=lambda: _flag(piece_id, value=False))
     except Exception as exc:  # noqa: BLE001
         say(f"the doctor record for {piece_id} could not be cleared ({describe(exc)})")
 
@@ -330,7 +330,7 @@ def _clear(where: Where, piece_id: str) -> None:
 FLAG_RETRY = (0.02, 0.05)
 
 
-def _flag(piece_id: str, value: bool) -> bool:
+def _flag(piece_id: str, *, value: bool) -> bool:
     """Set or unset `recorded` in the piece's section; True when git took it.
 
     Another git holding the config lock makes the write fail; it is tried twice more. A

@@ -477,13 +477,13 @@ def test_the_floor_and_the_listener_take_turns_own_event():
 
     from moxi import modules
 
-    SessionEvent = modules.load("turns").api.SessionEvent
+    session_event_type = modules.load("turns").api.SessionEvent
     s = Session()
-    ready = SessionEvent(event="ready", harness="claude", session_id=SESSION,
+    ready = session_event_type(event="ready", harness="claude", session_id=SESSION,
                          env={"MOXI_USAGE_WARN_AT": "1x"})
     assert mark.floor(dataclasses.replace(ready, env=dict(ready.env))) == ONE_X
     s.context(120_000)
-    tool = SessionEvent(event="after-tool", harness="claude", session_id=SESSION,
+    tool = session_event_type(event="after-tool", harness="claude", session_id=SESSION,
                         env={"MOXI_USAGE_WARN_AT": "1x"}, tool="Bash", point="after",
                         record_path=str(s.t.path))
     assert mark.on_tool(tool) == notice(120_000)

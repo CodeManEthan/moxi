@@ -286,7 +286,7 @@ def test_an_archive_lane_that_lists_empty_or_goes_offline_keeps_its_rows(reading
 
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
                     reason="POSIX directory modes; root reads every directory")
-def test_a_source_under_an_unreadable_directory_keeps_its_row(readings, roots):
+def test_a_source_under_an_unreadable_dir_keeps_its_row(readings, roots):
     t = transcript(roots["claude"], SESSION_A)
     t.write()
     transcript(roots["claude"], SESSION_B, project="-work-other").write()

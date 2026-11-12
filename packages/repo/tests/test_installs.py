@@ -193,7 +193,7 @@ def guard(repo: Path, mode: str, event: str, code: int) -> str:
     python, runner, root = gitconf.interpreter(), gitconf.runner_file(), shim.sh_path(repo)
     if mode == "config":
         return shim.entry_command(event, python, runner, root, code)
-    return shim.shim_text(event, python, runner, root, code, False)
+    return shim.shim_text(event, python, runner, root, code, stdin=False)
 
 
 @pytest.mark.parametrize("mode", [pytest.param("config", marks=NEEDS_CONFIG_GIT), "shim"])
@@ -302,7 +302,7 @@ def test_on_uninstall_removes_the_modules_pieces_and_specs_with_their_records(
     clock = [1000.0]
     demo.mp.setattr(committer, "_now", lambda: clock[0])
     bare = make_remote(demo, alpha)
-    deny(bare, True)
+    deny(bare, on=True)
     api.add(alpha, ["ears/gate", "ears/watch", "demo/lint"])
     api.add(beta, ["ears/gate"])
     moxi_repo.save_spec(spec(alpha, name="ears/snap", push="origin"))

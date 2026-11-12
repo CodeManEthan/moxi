@@ -70,7 +70,7 @@ def rows() -> list[Row]:
                            f"moxi repo git-hooks remove {quote_arg(root)}"))
             continue
         try:
-            status = api._status_of(repo, True, version, good)
+            status = api._status_of(repo, in_index=True, version=version, good=good)
         except (api.Failure, OSError) as exc:
             out.append(Row(MODULE, name, "fail", f"its git config can't be read: "
                            f"{getattr(exc, 'text', exc)}"))

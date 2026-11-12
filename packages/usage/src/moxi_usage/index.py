@@ -584,10 +584,10 @@ def _count_rows(conn: sqlite3.Connection, lane: str) -> int:
                             (lane,)).fetchone()[0])
 
 
-def _under(path: str, directories: list[tuple[str, str]]) -> str | None:
-    for directory, why in directories:
-        if path == directory or path.startswith(directory.rstrip(os.sep) + os.sep):
-            return f"under an unreadable directory: {directory}: {why}"
+def _under(path: str, unreadable_dirs: list[tuple[str, str]]) -> str | None:
+    for unreadable_dir, why in unreadable_dirs:
+        if path == unreadable_dir or path.startswith(unreadable_dir.rstrip(os.sep) + os.sep):
+            return f"under an unreadable directory: {unreadable_dir}: {why}"
     return None
 
 

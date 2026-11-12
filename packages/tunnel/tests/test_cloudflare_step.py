@@ -75,7 +75,7 @@ def test_the_first_add_writes_the_file_before_the_switch_turns_the_unit_on(setup
 def test_the_first_add_while_the_switch_is_on_and_the_unit_idle_restarts_it(setup, yes):
     from moxi import config
 
-    config.set_value("tunnel", "cloudflare.enabled", True, by="test")
+    config.set_value("tunnel", "cloudflare.enabled", value=True, by="test")
     assert setup.unit == "active" and setup.started_on is None  # the file wasn't there
     setup.unit = "inactive"  # it exited idle
     add("alpha/gateway", A, yes)
@@ -422,7 +422,7 @@ def test_a_moved_target_is_repaired_on_the_same_hostname(setup, yes, config_file
 def test_repair_turns_a_switch_left_on_with_no_target_off(setup, yes):
     from moxi import config
 
-    config.set_value("tunnel", "cloudflare.enabled", True, by="test")
+    config.set_value("tunnel", "cloudflare.enabled", value=True, by="test")
     assert cloudflare.in_step_row().state == "warn"
     assert acts.repair(ask=yes).code == 0
     assert_agree(setup)
@@ -535,8 +535,8 @@ def test_listeners_hear_a_switch_once(setup, tailscale, yes, alpha):
             HEARD.append((target, old and old.provider, new and new.provider))
         """)
     info = [p for p in alpha.root.iterdir() if p.name.endswith(".dist-info")][0]
-    with open(info / "entry_points.txt", "a") as out:
-        out.write("\n[moxi.tunnel.changes]\nalpha = moxi_alpha.listen:on_change\n")
+    with open(info / "entry_points.txt", "a") as fh:
+        fh.write("\n[moxi.tunnel.changes]\nalpha = moxi_alpha.listen:on_change\n")
     import moxi.modules
 
     moxi.modules.reset()

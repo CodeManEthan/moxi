@@ -239,7 +239,7 @@ def _read_bounds(tool_input: Mapping) -> None:
 
 #: What Codex's patch parser trims from a line (Rust's `trim`): Unicode White_Space.
 _WS = ("\t\n\x0b\x0c\r \x85\xa0 " + "".join(chr(c) for c in range(0x2000, 0x200B))
-       + "    　")
+       + "\\u2028\\u2029\\u202f\\u205f\\u3000")
 BEGIN_PATCH, END_PATCH = "*** Begin Patch", "*** End Patch"
 ADD_FILE, UPDATE_FILE = "*** Add File: ", "*** Update File: "
 DELETE_FILE, MOVE_TO = "*** Delete File:", "*** Move to:"
@@ -380,7 +380,7 @@ def lex(text: str, home: str) -> list:
     return tokens
 
 
-def _resolve_dir(d: str, cwd: str, work_roots: object, logical: bool,
+def _resolve_dir(d: str, cwd: str, work_roots: object, *, logical: bool,
                  base: str | None = None) -> str:
     """The directory `<dir>` names: absolute, `~/` (the lexer expanded it) or relative to
     `base` (`cwd` when None); by the path rule it must be `cwd` or lie under it or a work
@@ -410,7 +410,7 @@ def _workdir(tool_input: Mapping, cwd: object, work_roots: object) -> str | None
         return None
     if not isinstance(workdir, str):
         raise Refused("workdir is not a path")
-    return _resolve_dir(workdir, _cwd(cwd), work_roots, False)
+    return _resolve_dir(workdir, _cwd(cwd), work_roots, logical=False)
 
 
 def _git_form(args: list[str], repo: str) -> None:
@@ -467,7 +467,7 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
             raise Refused("a second '&&'")
         if ands[0] != 2 or tokens[0] != "cd":
             raise Refused("'&&' is allowed only directly after cd <dir>")
-        repo: str | None = _resolve_dir(tokens[1], cwd, work_roots, True, base)
+        repo: str | None = _resolve_dir(tokens[1], cwd, work_roots, logical=True, base=base)
         rest = tokens[3:]
         in_cd = True
     else:
@@ -487,7 +487,7 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
             raise Refused("git -C after cd")
         if len(args) < 2:
             raise Refused("git -C with no directory")
-        repo = _resolve_dir(args[1], cwd, work_roots, False, base)
+        repo = _resolve_dir(args[1], cwd, work_roots, logical=False, base=base)
         args = args[2:]
     elif repo is None:
         repo = _real(base)

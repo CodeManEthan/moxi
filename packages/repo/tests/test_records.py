@@ -179,7 +179,7 @@ def test_a_flag_write_is_tried_three_times_20_then_50_ms_apart(monkeypatch):
 
     monkeypatch.setattr(run.subprocess, "run", refused)
     monkeypatch.setattr(time, "sleep", waits.append)
-    assert run._flag("demo/watch", True) is False
+    assert run._flag("demo/watch", value=True) is False
     assert len(tries) == 3 and waits == [0.02, 0.05]
 
 

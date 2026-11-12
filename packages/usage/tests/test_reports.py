@@ -56,11 +56,11 @@ def conn():
     connection.close()
 
 
-def request(rid, ts, *, model="m-a", harness="claude", input=1000, cache_read=0,
+def request(rid, ts, *, model="m-a", harness="claude", input_tokens=1000, cache_read=0,
             cache_write=0, cache_write_1h=0, output=100, **fields):
     """A sessions request as a harness reader would give it."""
     return sessions.Request(harness=harness, request_id=rid, time=ts, model=model,
-                            input_tokens=input, cache_read_input_tokens=cache_read,
+                            input_tokens=input_tokens, cache_read_input_tokens=cache_read,
                             cache_creation_input_tokens=cache_write,
                             cache_creation_1h_input_tokens=cache_write_1h,
                             output_tokens=output, **fields)
@@ -92,7 +92,7 @@ def one(report, **match):
 # --- cost --------------------------------------------------------------------------------
 
 def test_the_five_terms_price_fresh_input_reads_both_writes_and_output(conn):
-    source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"), input=1000,
+    source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"), input_tokens=1000,
                                         cache_read=200, cache_write=300, cache_write_1h=100,
                                         output=100)])
     row = one(reports.daily(conn, tz="UTC", table=table()), day="2026-10-01")
@@ -157,7 +157,7 @@ def test_unknown_rows_flags_a_group_mixing_known_and_unknown_counts(conn):
 
 def test_an_unknown_cache_write_under_a_writes_as_input_rule_is_priced_and_named(conn):
     rows = [request("t1", at("2026-10-01T12:00"), harness="codex", model="gpt-x",
-                    input=1000, cache_read=400, cache_write=UNKNOWN, cache_write_1h=UNKNOWN,
+                    input_tokens=1000, cache_read=400, cache_write=UNKNOWN, cache_write_1h=UNKNOWN,
                     output=50)]
     source(conn, "/c/r.jsonl", rows, lane="codex", harness="codex", rank=1)
     report = reports.daily(conn, tz="UTC", table=table())
@@ -176,7 +176,7 @@ def test_an_unknown_cache_write_without_such_a_rule_counts_as_unknown(conn):
 
 def test_fast_mode_prices_its_cache_on_the_fast_input_price(conn):
     source(conn, "/p/a.jsonl", [
-        request("r1", at("2026-10-01T12:00"), speed="fast", input=1000, cache_read=500,
+        request("r1", at("2026-10-01T12:00"), speed="fast", input_tokens=1000, cache_read=500,
                 cache_write=300, cache_write_1h=100, output=100),
         request("r2", at("2026-10-01T12:05"), speed="standard", output=100)])
     report = reports.daily(conn, tz="UTC", table=table())
@@ -191,9 +191,9 @@ def test_fast_mode_prices_its_cache_on_the_fast_input_price(conn):
 
 def test_prompt_size_tiers_take_bounds_from_each_model_in_range(conn):
     source(conn, "/p/a.jsonl", [
-        request("r1", at("2026-10-01T12:00"), model="m-a", input=150_000, output=0),
-        request("r2", at("2026-10-01T12:01"), model="m-a", input=250_000, output=0),
-        request("r3", at("2026-10-01T12:02"), model="m-b", input=150_000, output=0)])
+        request("r1", at("2026-10-01T12:00"), model="m-a", input_tokens=150_000, output=0),
+        request("r2", at("2026-10-01T12:01"), model="m-a", input_tokens=250_000, output=0),
+        request("r3", at("2026-10-01T12:02"), model="m-b", input_tokens=150_000, output=0)])
     report = reports.models_report(conn, table=table())
     # m-a: 150k is under its 200k bound; 250k is above it
     assert one(report, model="m-a")["cost"] == pytest.approx(
@@ -205,10 +205,10 @@ def test_prompt_size_tiers_take_bounds_from_each_model_in_range(conn):
 def test_a_service_tier_picks_its_tier_and_a_write_bills_at_the_tier_input(conn):
     source(conn, "/c/r.jsonl", [
         request("t1", at("2026-10-01T12:00"), harness="codex", model="gpt-x",
-                service_tier="priority", input=1000, cache_read=400, cache_write=100,
+                service_tier="priority", input_tokens=1000, cache_read=400, cache_write=100,
                 output=10),
         request("t2", at("2026-10-01T12:01"), harness="codex", model="gpt-x",
-                service_tier="default", input=1000, output=10)],
+                service_tier="default", input_tokens=1000, output=10)],
         lane="codex", harness="codex")
     row = one(reports.daily(conn, tz="UTC", table=table()), model="gpt-x")
     priority = 500 * 2.0 + 400 * 0.2 + 100 * 2.0 + 10 * 16.0
@@ -396,7 +396,7 @@ def test_projects_group_by_the_stored_key_then_by_cwd(conn):
     source(conn, "/p/b.jsonl", [request("r2", t)], session_id="s2", cwd="/w/app-wt",
            project="key-app")
     source(conn, "/p/c.jsonl", [request("r3", t)], session_id="s3", cwd="/w/gone")
-    source(conn, "/p/d.jsonl", [request("r4", t, input=5000)], session_id="s4",
+    source(conn, "/p/d.jsonl", [request("r4", t, input_tokens=5000)], session_id="s4",
            cwd="/w/gone")
     report = reports.projects(conn, table=table())
     assert [(r["project"], r["cwd"], r["requests"]) for r in report.rows] == [
@@ -1000,9 +1000,9 @@ def test_terms_verb_prints_each_groups_terms_adding_up_to_its_cost(conn, monkeyp
                  'tiers.fast = {speed = "fast", input = 6.0, output = 30.0}\n')
     t = at("2026-10-01T12:00")
     source(conn, "/p/a.jsonl", [
-        request("r1", t, model="test-model-1", input=1_234_567, cache_read=200_000,
+        request("r1", t, model="test-model-1", input_tokens=1_234_567, cache_read=200_000,
                 output=4_567),
-        request("r2", t + 60, model="test-model-1", speed="fast", input=2_000_000,
+        request("r2", t + 60, model="test-model-1", speed="fast", input_tokens=2_000_000,
                 cache_read=1_500_000, cache_write=300_000, output=10_000),
         request("r3", at("2026-10-02T12:00"), model="mystery-9")])
     monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
@@ -1087,7 +1087,7 @@ def requests_index(conn):
         request("r1", t, turn_id="u1", cache_read=300, **line(2)),
         request("r2", t + 60, turn_id="u1", speed="fast", **line(3)),
         request("r3", t + 120, turn_id="u2", output=UNKNOWN, **line(6)),
-        request("r4", t + 180, turn_id="u2", model="m-b", input=150_000, **line(7))],
+        request("r4", t + 180, turn_id="u2", model="m-b", input_tokens=150_000, **line(7))],
         session_id="s1", title="Main", size=900, marks_read=1)
     compactions(conn, main, (4, t + 90, "auto", 167_412))
     agent = source(conn, "/p/s1/subagents/agent-a.jsonl", [

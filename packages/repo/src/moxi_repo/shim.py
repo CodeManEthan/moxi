@@ -68,7 +68,7 @@ def entry_command(event: str, python: str, runner: str, root: str, code: int) ->
 
 
 def shim_text(event: str, python: str, runner: str, root: str, code: int,
-              stdin: bool) -> str:
+              *, stdin: bool) -> str:
     """The shim for `event`: the guard, the pieces, then `<event>.local` if it is there.
 
     The existing git hook runs whatever the pieces did, with the same arguments and
@@ -127,7 +127,7 @@ _FIND = ('h="$(git rev-parse --path-format=absolute --git-common-dir)/moxi-repo/
          'if [ -f "$h" ]; then ')
 
 
-def chain_line(event: str, stdin: bool) -> str:
+def chain_line(event: str, *, stdin: bool) -> str:
     """The line a user adds to a manager's git hook for `event`. It names no path.
 
     For an event with stdin it saves stdin to a temp file, feeds the launcher from it and
@@ -181,7 +181,7 @@ def our_shims(hooks_dir: Path) -> dict[str, list[Path]]:
     return out
 
 
-def check_place(hooks_dir: Path, event: str, moved: bool) -> None:
+def check_place(hooks_dir: Path, event: str, *, moved: bool) -> None:
     """Raise `ShimRefused` when a shim for `event` can't be placed.
 
     `moved` says repo moved the existing git hook to `<event>.local` before. A
@@ -201,7 +201,7 @@ def check_place(hooks_dir: Path, event: str, moved: bool) -> None:
                           f"shim would run it; move or remove {local} first")
 
 
-def place(hooks_dir: Path, event: str, text: str, moved: bool) -> list[str]:
+def place(hooks_dir: Path, event: str, text: str, *, moved: bool) -> list[str]:
     """Write (or rewrite) our shim for `event`; return what was done, one line each.
 
     Every file that is already our shim for the event is rewritten in place under its
@@ -211,7 +211,7 @@ def place(hooks_dir: Path, event: str, text: str, moved: bool) -> list[str]:
     """
     from moxi import files
 
-    check_place(hooks_dir, event, moved)
+    check_place(hooks_dir, event, moved=moved)
     ours = our_shims(hooks_dir).get(event, [])
     if ours:
         for path in ours:
@@ -239,7 +239,7 @@ def left_line(local: Path, hook: Path, *, final: bool = False) -> str:
     return text
 
 
-def take_away(hooks_dir: Path, event: str, moved: bool, *, final: bool = False) -> list[str]:
+def take_away(hooks_dir: Path, event: str, *, moved: bool, final: bool = False) -> list[str]:
     """Remove every shim of ours for `event` and move `<event>.local` back when repo moved
     it; return what was done, one line each."""
     done = []

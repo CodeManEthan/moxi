@@ -532,7 +532,7 @@ def remote_head(bare: Path, branch: str = "main") -> str | None:
     return done.stdout.strip() or None
 
 
-def deny(bare: Path, on: bool) -> None:
+def deny(bare: Path, *, on: bool) -> None:
     flag = bare / "deny"
     if on:
         flag.write_text("", encoding="utf-8")
@@ -543,14 +543,14 @@ def deny(bare: Path, on: bool) -> None:
 def test_a_failed_push_keeps_the_commit_and_throttled_and_clean_passes_retry(demo, clock):
     repo = demo.repo()
     bare = make_remote(demo, repo)
-    deny(bare, True)
+    deny(bare, on=True)
     write(repo, "notes/a.md")
     s = spec(repo, push="origin", push_backoff_s=300, min_interval_s=3600)
     first = moxi_repo.commit(s)
     assert first.status == "committed" and first.push_error
     assert "remote says no" in first.push_error and first.exit_code == 1
     assert head(repo) == first.sha and remote_head(bare) is None
-    deny(bare, False)
+    deny(bare, on=False)
     clock[0] += 10
     write(repo, "notes/b.md")
     early = moxi_repo.commit(s)
@@ -561,11 +561,11 @@ def test_a_failed_push_keeps_the_commit_and_throttled_and_clean_passes_retry(dem
     assert late.status == "throttled" and late.pushed == ("main",)
     assert remote_head(bare) == first.sha
     # The same with a clean pass.
-    deny(bare, True)
+    deny(bare, on=True)
     s0 = spec(repo, push="origin", push_backoff_s=300)
     second = moxi_repo.commit(s0)
     assert second.status == "committed" and second.push_error
-    deny(bare, False)
+    deny(bare, on=False)
     clock[0] += 10
     assert moxi_repo.commit(s0).status == "clean" and remote_head(bare) == first.sha
     clock[0] += 400
@@ -577,11 +577,11 @@ def test_a_failed_push_keeps_the_commit_and_throttled_and_clean_passes_retry(dem
 def test_a_busy_pass_never_pushes_and_an_index_busy_pass_does(demo, clock):
     repo = demo.repo()
     bare = make_remote(demo, repo)
-    deny(bare, True)
+    deny(bare, on=True)
     write(repo, "notes/a.md")
     s = spec(repo, push="origin", push_backoff_s=300)
     assert moxi_repo.commit(s).push_error
-    deny(bare, False)
+    deny(bare, on=False)
     clock[0] += 400
     with files.lock(repo / ".git" / "moxi-repo" / "lock"):
         busy = moxi_repo.commit(s)
@@ -601,11 +601,11 @@ def test_a_failed_push_of_one_branch_is_retried_from_another_and_from_detached(d
     bare = make_remote(demo, repo)
     s = spec(repo, push="origin", push_backoff_s=300)
     git(repo, "switch", "-q", "-c", "a")
-    deny(bare, True)
+    deny(bare, on=True)
     write(repo, "notes/a.md")
     assert moxi_repo.commit(s).push_error
     a_sha = head(repo)
-    deny(bare, False)
+    deny(bare, on=False)
     git(repo, "switch", "-q", "-c", "b")
     write(repo, "notes/b.md")
     clock[0] += 400
@@ -614,12 +614,12 @@ def test_a_failed_push_of_one_branch_is_retried_from_another_and_from_detached(d
     assert remote_head(bare, "a") == a_sha
     # Again, from a detached HEAD.
     git(repo, "switch", "-q", "a")
-    deny(bare, True)
+    deny(bare, on=True)
     write(repo, "notes/c.md")
     assert moxi_repo.commit(s).push_error
     a_sha = head(repo)
     git(repo, "switch", "-q", "--detach")
-    deny(bare, False)
+    deny(bare, on=False)
     clock[0] += 400
     detached = moxi_repo.commit(s)
     assert detached.detached and detached.pushed == ("a",)

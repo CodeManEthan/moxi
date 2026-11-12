@@ -415,7 +415,7 @@ def test_after_purge_the_live_entries_read_as_foreign_and_repair_turns_the_switc
 def test_teardown_with_nothing_recorded_turns_a_switch_left_on_off(alpha, cf, units):
     import moxi.config
 
-    moxi.config.set_value("tunnel", "cloudflare.enabled", True, by="test")
+    moxi.config.set_value("tunnel", "cloudflare.enabled", value=True, by="test")
     cloudflare.write_file("# left behind\n")
     assert cloudflare.switch_on()
     teardown()

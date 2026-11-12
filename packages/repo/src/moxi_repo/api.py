@@ -449,7 +449,7 @@ def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
         problems = []
         for event in sorted(events):
             try:
-                shim.check_place(repo.hooks_dir, event, event in state.moved)
+                shim.check_place(repo.hooks_dir, event, moved=event in state.moved)
             except shim.ShimRefused as exc:
                 problems.append(f"{event}: {exc}")
         if problems:
@@ -573,21 +573,21 @@ def _drop_stale(path, keys: list[str], report: Report, *, why: str) -> None:
 
 
 def enable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, True)
+    return _flip(path, piece_id, value=True)
 
 
 def disable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, False)
+    return _flip(path, piece_id, value=False)
 
 
-def _flip(path: str | os.PathLike, piece_id: str, value: bool) -> Report:
+def _flip(path: str | os.PathLike, piece_id: str, *, value: bool) -> Report:
     repo = _resolve(path)
     state = _state(repo)
     if piece_id not in state.pieces:
         raise Usage(f"{piece_id} is not registered in {repo.root}")
     report = Report()
     try:
-        gitconf.set_enabled(repo, piece_id, value, state)
+        gitconf.set_enabled(repo, piece_id, value=value, state=state)
         if not value:
             # The record, its ledger key, then the flag.
             _records.close_piece(repo.common_dir, piece_id)
@@ -1042,11 +1042,11 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
                                              f"moxi repo git-hooks remove {_arg(root)}",
                                              state="warn")]})
             continue
-        out.append(_status_of(repo, repo.key in index, version, good))
+        out.append(_status_of(repo, in_index=repo.key in index, version=version, good=good))
     return out
 
 
-def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
+def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
     state = _state(repo)
     problems: list[Problem] = []
     listed = []
