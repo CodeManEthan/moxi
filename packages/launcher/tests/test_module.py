@@ -42,10 +42,11 @@ def test_it_ships_its_skills_folder(found):
     assert found.skills == "skills"
 
 
-def test_its_doctor_target_answers_with_rows(found):
-    from moxi_launcher import doctor
+def test_its_doctor_target_answers_with_rows(found, monkeypatch):
+    from moxi_launcher import doctor, joiner
 
     assert found.doctor == "moxi_launcher.doctor:rows"
+    monkeypatch.setattr(joiner, "cache_api", lambda: None)
     rows = list(doctor.rows(read=lambda argv: None))
     assert [(row.name, row.state) for row in rows] == [("catalog.claude", "off"),
                                                        ("catalog.codex", "off")]
