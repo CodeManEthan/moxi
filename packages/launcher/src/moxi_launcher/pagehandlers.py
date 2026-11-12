@@ -18,15 +18,28 @@ about each entry, is read only when the page asks for it. A live launch whose st
 be read (a keep-warm launch's cache read failing, say) is marked `unreadable` in its own
 entry, naming only the exception's class, and the other entries still stand.
 
-**The stream** carries two topics, `sessions` (every live launch's state) and `launches`
-(the newest page of the launch log), each built by a `Snapshot` of its own, which
-publishes only when its value changed. One poller feeds both: an asyncio task the stream
-route starts on its first call, living for the rest of the process. Every `TICK` seconds
-it reads the launch log's data version, and asks both topics for a rebuild when it moved,
-or when `REGATHER` seconds have passed without one: a session's process ending writes
-nothing to the log, nor does a spawning row turning stale. The poller is not a request, a
-stream or a busy hold, so it never delays the server's idle exit. It survives every
-exception: a failure is logged once per class and the next tick reads again.
+**The stream** carries three topics, `sessions` (every live launch's state), `launches`
+(the newest page of the launch log) and `running` (the launches running now, as Home's
+Sessions row reads them), each built by a `Snapshot` of its own, which publishes only
+when its value changed. One poller feeds all three: an asyncio task started by the first
+call of the stream route or of `/api/running`, living for the rest of the process. Every
+`TICK` seconds it reads the launch log's data version, and asks each topic for a rebuild
+when it moved, or when `REGATHER` seconds have passed without one: a session's process
+ending writes nothing to the log, nor does a spawning row turning stale. The poller is not
+a request, a stream or a busy hold, so it never delays the server's idle exit. It survives
+every exception: a failure is logged once per class and the next tick reads again.
+
+**The launches running now** (`/api/running` and the topic `running`) are `api.running`'s,
+each with where it runs, its folder sent as the last segment of its directory and never
+as a path. Over each the feed lays the facts its joiner kept for that request id and
+session (`joiner`): its cache, what it waits on, whether keep-warm covers it, and its
+session's latest message. A launch with none kept has `cache`, `waits` and `activity`
+null and `covered` false. The read costs one look at the launch log and one at a process
+per launch, as the `sessions` topic does, and asks no other module: the joiner reads the
+other modules on a task of its own, started with the poller, which the poller never
+awaits, and its pass asks the topic for a rebuild when it ends. The first call of
+`/api/running` waits for the first pass, for at most `FIRST_JOIN_WAIT_S` seconds, so a
+page server that has just started answers with the joined facts when that pass is quick.
 
 **The launch form** is filled from `/api/form`: the value each row offered for a harness
 takes from the shipped defaults, `[defaults]` and at most one preset, as `presets.layered`
@@ -135,8 +148,8 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import (api, catalog, first, job, names, presets, relaunch, settings, slots, state,
-               store, target, targets)
+from . import (api, catalog, first, job, joiner, names, presets, relaunch, settings, slots,
+               state, store, target, targets)
 from . import resume as resuming
 from .compose import common
 from .live import alive, live
@@ -161,13 +174,18 @@ WITHHELD = ("brief", "instructions")
 #: saved screen, which the detail's text can't mark as a path.
 EVENT_CUT = ("text", "pane_id", "capture")
 #: The stream's topics.
-TOPICS = ("sessions", "launches")
+TOPICS = ("sessions", "launches", "running")
+#: The facts of a running launch that are read beyond the launch log, each as it is when
+#: none was read.
+UNJOINED = {"cache": None, "waits": None, "covered": False, "activity": None}
 #: Seconds between the poller's reads of the launch log's data version, which moves at
 #: every write to the log.
 TICK = 1.0
 #: Seconds after which the poller gathers both topics again though the log has not moved:
 #: a session's process ending, or a run's job going, writes nothing to it.
 REGATHER = 5.0
+#: Seconds the first call of `/api/running` waits for the feed's first join pass to end.
+FIRST_JOIN_WAIT_S = 3.0
 
 log = logging.getLogger("moxi.launcher.page")
 
@@ -849,6 +867,36 @@ def gather_launches() -> dict[str, Any]:
     return {key: found[key] for key in ("state", "detail", "launches")}
 
 
+def running_entry(found: api.Running) -> dict[str, Any]:
+    """A launch running now as `/api/running` sends it, with nothing joined: its folder
+    is the last segment of its directory, and the directory itself is not sent."""
+    return {"request_id": found.request_id, "harness": found.harness,
+            "session_id": found.session_id, "name": found.name, "identity": found.identity,
+            "where": {"target": found.target, "slot": found.slot,
+                      "project_key": found.project_key,
+                      "folder": os.path.basename(os.path.normpath(found.cwd))},
+            "started_at": found.created_at, **UNJOINED}
+
+
+def gather_running(joined: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """The `running` topic's value, which `/api/running` answers too: every launch running
+    now, newest first, with the facts `joined` holds for its request id laid over it,
+    unless they hold a `session_id` other than the launch's. Never raises."""
+    try:
+        found = api.running()
+    except Exception as err:
+        return _failed(err, "gathering the running launches failed", count=0, sessions=[])
+    kept = joined or {}
+    entries = []
+    for launch in found:
+        facts = kept.get(launch.request_id) or {}
+        if facts.get("session_id", launch.session_id) != launch.session_id:
+            facts = {}
+        entries.append({**running_entry(launch),
+                        **{key: facts[key] for key in UNJOINED if key in facts}})
+    return _up(count=len(entries), sessions=entries)
+
+
 class _Version:
     """The store's data version, read on one connection kept open: SQLite moves it each
     time another connection commits. Read from the poller's worker thread, one read at a
@@ -883,15 +931,29 @@ class _Version:
 
 
 class _Feed:
-    """The two topics, a Snapshot for each, and the poller, on one event loop."""
+    """The three topics, a Snapshot for each, the poller and the joiner, on one event loop.
+
+    The joiner (`joiner.Joiner`) keeps, by request id, the facts of a running launch read
+    beyond the launch log (the keys of `UNJOINED`), which `gather_running` lays over that
+    launch's entry. Its task runs one pass at a time, off the poller, which never awaits
+    it: a pass when the set of running launches and their session ids changed, else
+    `joiner.JOIN_EVERY` seconds after the last pass ended. Each pass asks the `running`
+    topic for a rebuild once its facts are kept; `joined_once` is set at the first."""
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
         self.topics = lb.Topics(*TOPICS)
+        self.joiner = joiner.Joiner()
         self.snapshots = (lb.Snapshot(gather_sessions, self.topics, "sessions"),
-                          lb.Snapshot(gather_launches, self.topics, "launches"))
+                          lb.Snapshot(gather_launches, self.topics, "launches"),
+                          lb.Snapshot(self.running, self.topics, "running"))
         self.version = _Version()
+        self.joined_once = asyncio.Event()
+        self._wake = asyncio.Event()
+        self._keys: frozenset[tuple[str, str | None]] | None = None
+        self._first_wait: asyncio.Task[Any] | None = None
         self.task = loop.create_task(self._poll(), name="launcher state poller")
+        self.join_task = loop.create_task(self._join(), name="launcher joiner")
 
     async def _poll(self) -> None:
         seen: object = _NEVER
@@ -907,9 +969,47 @@ class _Feed:
                 _log_once(err, "the state poller failed")
             await asyncio.sleep(TICK)
 
+    async def _join(self) -> None:
+        while True:
+            try:
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self._wake.wait(), joiner.JOIN_EVERY)
+                self._wake.clear()
+                await self.joiner.run(self._published)
+            except Exception as err:
+                _log_once(err, "a join pass failed")
+
+    async def _published(self) -> None:
+        await self.snapshots[2].changed()
+        self.joined_once.set()
+
+    async def first_join(self) -> None:
+        """At the first call, wait for the first join pass to be published, for at most
+        `FIRST_JOIN_WAIT_S` seconds; calls made while that wait runs share it, and later
+        calls return at once."""
+        if self._first_wait is None:
+            self._first_wait = self.loop.create_task(self._wait_first())
+        await asyncio.shield(self._first_wait)
+
+    async def _wait_first(self) -> None:
+        with suppress(TimeoutError):
+            await asyncio.wait_for(self.joined_once.wait(), FIRST_JOIN_WAIT_S)
+
+    def running(self) -> dict[str, Any]:
+        """The `running` topic's value, with the facts the joiner keeps laid over it. A
+        change in the set of running launches and their session ids wakes the joiner."""
+        value = gather_running(self.joiner.joined())
+        keys = frozenset((entry["request_id"], entry["session_id"])
+                         for entry in value["sessions"])
+        if keys != self._keys:
+            self._keys = keys
+            with suppress(RuntimeError):    # the loop has closed
+                self.loop.call_soon_threadsafe(self._wake.set)
+        return value
+
     async def changed(self) -> None:
-        """Ask each topic for one rebuild; a gather that raises is logged and the other
-        still runs."""
+        """Ask each topic for one rebuild; a gather that raises is logged and the others
+        still run."""
         done = await asyncio.gather(*(s.changed() for s in self.snapshots),
                                     return_exceptions=True)
         for result in done:
@@ -932,9 +1032,20 @@ def _feed() -> _Feed:
 
 
 async def events(call: Any) -> Any:
-    """`GET /api/events`: the stream over the `sessions` and `launches` topics. The first
-    call starts the poller."""
+    """`GET /api/events`: the stream over the `sessions`, `launches` and `running` topics.
+    Its first call, or the first of `/api/running`, starts the poller."""
     return call.stream(_feed().topics)
+
+
+async def read_running(call: Any) -> dict[str, Any]:
+    """`GET /api/running`: the launches running now, with the facts the feed keeps. It
+    starts the feed as the stream route does, so a reader that never opens the stream,
+    the phone, keeps it running. The feed's first call waits for its first join pass, for
+    at most `FIRST_JOIN_WAIT_S` seconds; no later call waits."""
+    feed = _feed()
+    with call.busy("read"):
+        await feed.first_join()
+        return await aio.offload(feed.running)
 
 
 # -- the ticket -----------------------------------------------------------------------------
@@ -1757,14 +1868,14 @@ def resume(call: Any) -> Any:
             return {"refused": _unexpected(err, "a resume from the page failed"),
                     "command": None}
 
-__all__ = ["EVENT_CUT", "GIVEN", "KEY_BYTES", "KEY_FILE", "HEAD_MAX", "NOT_ON_PATH", "NO_RECENT", "NO_RECENT_HINT",
+__all__ = ["EVENT_CUT", "FIRST_JOIN_WAIT_S", "GIVEN", "KEY_BYTES", "KEY_FILE", "HEAD_MAX", "NOT_ON_PATH", "NO_RECENT", "NO_RECENT_HINT",
            "NO_SLOTS", "PROJECTS", "RECENTS_MAX", "REFUSALS", "REGATHER",
-           "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED", "WHOSE",
+           "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNJOINED", "UNREADABLE", "USED", "WHOSE",
            "WITHHELD", "alive", "body_of", "canonical", "danger", "events", "field", "fields", "form", "form_rows",
-           "gather_launches", "gather_sessions", "handed_rows", "head", "last", "launch", "launch_request", "launch_row",
+           "gather_launches", "gather_running", "gather_sessions", "handed_rows", "head", "last", "launch", "launch_request", "launch_row",
            "launched", "launches", "launches_of", "live", "live_states", "made_again", "modes", "name_now", "on_path", "page_key",
            "places", "preview", "previewed", "read_catalog", "read_form", "read_last", "read_launches",
-           "read_name", "read_places", "read_presets", "read_recent", "read_recents", "read_runs", "read_sessions", "read_state",
-           "read_targets", "recent", "recents", "refusal", "request_of", "resumable", "resume", "resumed", "run_entry",
+           "read_name", "read_places", "read_presets", "read_recent", "read_recents", "read_running", "read_runs", "read_sessions", "read_state",
+           "read_targets", "recent", "recents", "refusal", "request_of", "resumable", "resume", "resumed", "run_entry", "running_entry",
            "session_state", "spelled", "spelled_table", "targets_now", "ticket", "tokens", "unreadable",
            "verify", "whose"]

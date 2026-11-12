@@ -63,6 +63,15 @@ export function shownRows<T extends RowEntry>(entries: readonly T[]): T[] {
     .map((item) => item.entry);
 }
 
+/**
+ * Every entry in the order Home puts it in the document: the shown rows as `shownRows`
+ * orders them, then the rows with nothing to report in their fixed places. The document
+ * order is the order seen, so Tab reaches a risen row before the rows under it.
+ */
+export function inOrder<T extends RowEntry>(entries: readonly T[]): T[] {
+  return [...shownRows(entries), ...entries.filter((entry) => entry.report === null)];
+}
+
 /** Whether any row needs the user. */
 export function anyNeeds(entries: readonly RowEntry[]): boolean {
   return entries.some((entry) => (entry.report?.needs ?? 0) > 0);

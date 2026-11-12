@@ -519,6 +519,32 @@ def test_on_the_phone_home_is_the_rows_with_no_spot_and_no_act_under_the_reads_o
     assert reads.bounding_box() == line
 
 
+def test_on_the_phone_tab_from_the_bands_last_name_closes_it_where_settings_is_hidden(
+        gw, phones):
+    shell, bridge = gw
+    page = pair_page(phones(bridge), shell)
+    home = page.locator("#moxi-panel > moxi-ui-page moxi-ui-home")
+    health = home.get_by_role("button", name=re.compile("Health"))
+    expect(health.locator(".fact")).to_have_text("1 check failing, 1 warning")
+    button, band = page.locator("#moxi-pages-button"), page.locator("#moxi-pages")
+    names = band.locator("a")
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    button.focus()
+    page.keyboard.press("Enter")
+    expect(band).to_be_visible()
+    page.keyboard.press("Tab")
+    expect(names.first).to_be_focused()
+    page.keyboard.press("Shift+Tab")
+    expect(button).to_be_focused()
+    expect(band).to_be_visible()
+    # From the last name the band closes and Tab goes on into the page: Home's first row.
+    names.last.focus()
+    page.keyboard.press("Tab")
+    expect(band).to_be_hidden()
+    expect(button).to_have_attribute("aria-expanded", "false")
+    expect(health).to_be_focused()
+
+
 def test_code_holding_a_real_session_gets_a_404_on_every_act_path(gw, phones):
     shell, bridge = gw
     page = pair_page(phones(bridge), shell)

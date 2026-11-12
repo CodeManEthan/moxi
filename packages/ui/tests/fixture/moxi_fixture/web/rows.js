@@ -3,7 +3,9 @@
 // `{row, report}`: `row` is the component's name and `report` the detail it passes on in
 // its `moxi-home-row` event. A report set in `window.moxiFixtureRows[<name>]` before the
 // row is placed is its first. What it draws in its own shadow root shows whether Home set
-// the attribute `open`.
+// the attribute `open`, and holds a button, `Act on <name>`, to take the focus. Taken out
+// of the document and put back, as Home does when its row moves, it keeps its shadow root
+// and reports nothing again.
 
 const sheet = new CSSStyleSheet();
 sheet.replaceSync(`
@@ -23,15 +25,18 @@ export function defineRow(name) {
         root.adoptedStyleSheets = [sheet];
         this.text = document.createElement("p");
         this.text.dataset.testid = "inside";
-        root.append(this.text);
+        const act = document.createElement("button");
+        act.type = "button";
+        act.textContent = `Act on ${name}`;
+        root.append(this.text, act);
         this.draw();
+        this.told = (event) => {
+          if (event.detail?.row === name) this.report(event.detail.report);
+        };
+        const first = window.moxiFixtureRows?.[name];
+        if (first !== undefined) this.report(first);
       }
-      this.told = (event) => {
-        if (event.detail?.row === name) this.report(event.detail.report);
-      };
       window.addEventListener("moxi-fixture-row", this.told);
-      const first = window.moxiFixtureRows?.[name];
-      if (first !== undefined) this.report(first);
     }
 
     disconnectedCallback() {

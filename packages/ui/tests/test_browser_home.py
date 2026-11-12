@@ -312,6 +312,51 @@ def test_the_sentence_waits_for_a_main_piece_and_shows_when_it_does_not_load(
     expect(home.locator(".spot")).to_have_text(SENTENCE)
 
 
+# --- keyboard order ----------------------------------------------------------------------
+
+def test_tab_from_the_spot_reaches_a_risen_row_before_the_rows_under_it(ui_page):
+    quiet = {"parts": [{"text": "nothing much"}]}
+    _say(ui_page, "row-one", quiet)
+    _say(ui_page, "row-two", quiet)
+    _expect_shown(ui_page, [ONE, TWO, HEALTH])
+    _say(ui_page, "row-two", {"parts": [{"text": "waits for you"}], "needs": 20})
+    _expect_shown(ui_page, [TWO, ONE, HEALTH])
+    # The spot holds nothing to stop on, so Tab from the top line's last stop enters the rows.
+    ui_page.locator("#moxi-settings").focus()
+    ui_page.keyboard.press("Tab")
+    expect(_line(ui_page, TWO)).to_be_focused()
+    ui_page.keyboard.press("Tab")
+    expect(_line(ui_page, ONE)).to_be_focused()
+    ui_page.keyboard.press("Shift+Tab")
+    expect(_line(ui_page, TWO)).to_be_focused()
+
+
+def test_a_row_that_rises_keeps_the_focus_inside_its_component_and_the_same_component(
+        kept_shell, ui_contexts):
+    page = ui_contexts(kept_shell).pages[0]
+    home = _home(page)
+    quiet = {"parts": [{"text": "nothing much"}], "opens": True}
+    _say(page, "row-one", quiet)
+    _say(page, "row-two", quiet)
+    # The failing check holds Health on top.
+    _expect_shown(page, [HEALTH, ONE, TWO])
+    home.get_by_role("button", name=re.compile("Fixture two")).click()
+    component = home.locator("moxi-fixture-row-two")
+    before = component.element_handle()
+    act = component.get_by_role("button", name="Act on row-two")
+    act.focus()
+    _say(page, "row-two", {**quiet, "needs": 20})
+    _expect_shown(page, [TWO, HEALTH, ONE])
+    expect(act).to_be_focused()
+    # Moved, not placed again: the same element, still told it is open.
+    assert component.evaluate("(node, old) => node === old", before)
+    expect(component.get_by_test_id("inside")).to_have_text("Inside row-two, opened")
+    # It falls back with the focus too.
+    _say(page, "row-two", quiet)
+    _expect_shown(page, [HEALTH, ONE, TWO])
+    expect(act).to_be_focused()
+
+
 # --- a main piece's side panel -------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -486,6 +531,44 @@ def test_a_failing_check_of_a_real_run_shows_on_health_and_check_again_runs_the_
     expect(health.get_by_role("button", name="Check again")).to_have_count(0)
     expect(mine).to_have_count(0, timeout=DOCTOR_MS)
     expect(health.get_by_role("status")).to_have_count(0, timeout=DOCTOR_MS)
+
+
+def test_check_again_keeps_the_focus_through_the_run_and_when_the_health_row_falls(
+        kept_shell, ui_contexts):
+    page = ui_contexts(kept_shell).pages[0]
+    home = _home(page)
+    quiet = {"parts": [{"text": "nothing much"}]}
+    blocked = {"parts": [{"text": "someone is blocked on you"}], "needs": 10}
+    _say(page, "row-one", quiet)
+    _expect_shown(page, [HEALTH, ONE])
+    home.get_by_role("button", name=re.compile("Health")).click()
+    health = home.locator("moxi-ui-health")
+    # The run is held until the test answers it.
+    held: list = []
+    page.route("**/m/ui/api/checks/run", lambda route: held.append(route))
+    again = health.get_by_role("button", name="Check again")
+    again.focus()
+    page.keyboard.press("Enter")
+    checking = health.get_by_role("status")
+    expect(checking).to_be_focused()
+    assert len(held) == 1
+    # The row falls while the run goes, and the focus stays with it.
+    _say(page, "row-one", blocked)
+    expect(_line(page, ONE).locator(".fact")).to_have_text("someone is blocked on you")
+    _expect_shown(page, [ONE, HEALTH])
+    expect(checking).to_be_focused()
+    held[0].fulfill(json={"at": _now(), "running": False, "rows": [PASS, WARN, FAIL],
+                          "error": None})
+    expect(again).to_be_focused()
+    # And rises and falls again with the focus on Check again.
+    _say(page, "row-one", quiet)
+    expect(_line(page, ONE).locator(".fact")).to_have_text("nothing much")
+    _expect_shown(page, [HEALTH, ONE])
+    expect(again).to_be_focused()
+    _say(page, "row-one", blocked)
+    expect(_line(page, ONE).locator(".fact")).to_have_text("someone is blocked on you")
+    _expect_shown(page, [ONE, HEALTH])
+    expect(again).to_be_focused()
 
 
 _SHOW = """(hidden) => {

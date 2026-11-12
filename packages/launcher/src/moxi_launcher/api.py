@@ -7,6 +7,7 @@
     release_hold(request_id, name)
     launch_kind(session_id) -> str | None   # interface 1: how a session was launched
     launch_kinds(session_ids) -> dict       # the same for many ids, in one read
+    running() -> tuple[Running, ...]        # interface 2: the launches running now
 
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
 (a stored launch made again: a relaunch or a resume, its values the stored row's).
@@ -82,6 +83,12 @@ A launch learns some ids after its session starts (a Codex launch's id, the new 
 nothing but an older log's schema update, as any opening does; a launch log held too long
 raises `Busy`, and the caller asks again.
 
+**The launches running now** (interface 2): `running()` gives each launch not `failed`
+that records a process or an endpoint, newest first, with whether its process runs now
+(`live.alive`); by default only those whose process runs. It reads the launch log and the
+process table and nothing else: it asks no other module, starts no process and writes
+nothing but an older log's schema update. So a caller with a short bound can call it.
+
 A launch in this terminal does not return on Linux and macOS: the process becomes the
 harness. On Windows it returns when the harness exits, with the harness's exit code; if
 the first turn's deliverer could not start, the row ended `failed` while the harness ran,
@@ -105,7 +112,7 @@ from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
 
-from . import (catalog, compose, first, handoffs, identity, names, presets, slots, store,
+from . import (catalog, compose, first, handoffs, identity, live, names, presets, slots, store,
                targets)
 from .compose import Composition, common
 
@@ -729,6 +736,58 @@ def launch_kinds(session_ids: Iterable[str], *,
     return store.kinds(session_ids, timeout=timeout_s)
 
 
+@dataclass(frozen=True)
+class Running:
+    """A launch that may be running, as `running` gives it: plain values only.
+
+    `session_id` is the id the launch was last known by (it learns a new one after a
+    `/clear` or a compact), else the one it was started with, and None when it never
+    learned one. `name` is what the launch is called wherever it is listed
+    (`names.shown`), `identity` its comms name or None, `created_at` when its row was
+    written, and `live` whether its process runs now."""
+
+    request_id: str
+    harness: str
+    session_id: str | None
+    target: str
+    slot: str | None
+    project_key: str | None
+    cwd: str
+    name: str
+    identity: str | None
+    created_at: str
+    live: bool
+
+
+def running(*, live_only: bool = True, limit: int = 200,
+            timeout_s: float = 1.0) -> tuple[Running, ...]:
+    """The launches not `failed` that record a process or an endpoint, newest first, at
+    most `limit` of them, each process looked at once. With `live_only` (the default) only
+    those whose process runs now; without it the others too, with `live` false.
+
+    Reads the launch log and the process table and nothing else. `()` when there is no
+    launch log. Raises `Busy` when the log is held past `timeout_s` seconds, and
+    `moxi.store.StoreTooNew` when a newer launcher wrote it."""
+    found: list[Running] = []
+    with store.reading(timeout=timeout_s) as conn:
+        if conn is None:
+            return ()
+        for row in store.running(conn):
+            if len(found) >= limit:
+                break
+            is_live = live.alive(row)
+            if live_only and not is_live:
+                continue
+            known = store.session_ids(conn, row.request_id)
+            found.append(Running(
+                request_id=row.request_id, harness=row.harness,
+                session_id=known[-1][0] if known else row.session_id, target=row.target,
+                slot=row.slot, project_key=row.project_key, cwd=row.cwd,
+                name=names.shown(row), identity=row.identity, created_at=row.created_at,
+                live=is_live))
+    return tuple(found)
+
+
 def _result(composition: Composition, request_id: str, session_id: str | None,
             started: targets.Started, warnings: tuple[str, ...],
             base: str | None = None) -> LaunchResult:
@@ -754,5 +813,6 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
 
 __all__ = ["KINDS", "LAST", "TAKEN", "Busy", "CommsOffline", "CommsUnanswered", "IdentityRefused",
            "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal",
-           "ReplayRequest", "Replayed", "ScratchRoot", "check", "exit_code", "launch",
-           "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold"]
+           "ReplayRequest", "Replayed", "Running", "ScratchRoot", "check", "exit_code",
+           "launch", "launch_kind", "launch_kinds", "open_hold", "preview", "release_hold",
+           "running"]

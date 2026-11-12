@@ -977,6 +977,9 @@ notes = [
 projects = [
     { name = "moxi-projects" },
 ]
+sessions = [
+    { name = "moxi-sessions" },
+]
 slots = [
     { name = "moxi-slots" },
 ]
@@ -1005,12 +1008,13 @@ requires-dist = [
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-sessions", marker = "extra == 'sessions'", editable = "packages/sessions" },
     { name = "moxi-slots", marker = "extra == 'slots'", editable = "packages/slots" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "moxi-usage", marker = "extra == 'usage'", editable = "packages/usage" },
 ]
-provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage"]
+provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage", "sessions"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -6,6 +6,8 @@ work it handed out, and the named holds that say a director has work out.
     holds()                          # keep-warm holds: the open holds of the caller's launch
     open_hold(request_id, name)      # the same, for a caller that knows the launch
     release_hold(request_id, name)
+    signal_of(listed, named, dropped, holds)    # the signal's count, from values alone
+    would_nudge(conn, row, sid, clock, ...)     # whether the next ask would nudge
 
 **Keep-warm acts only on a session the launcher launched with `keep_warm` on.** The row
 stamps `MOXI_LAUNCHER_KEEP_WARM=on`, and cache's timer asks about a session carrying it,
@@ -54,6 +56,11 @@ the launch and each launch it replaced (`relaunch_of`, `resume_of`), so work han
 before a relaunch or a resume still keeps the new launch warm and is released from it.
 Opening a name open anywhere in the chain changes nothing; releasing one that is not open
 says so. A hold has no expiry: it leaves only by release.
+
+**What Home's Sessions row reads of keep-warm writes nothing.** `signal_of` is the count of
+step 4 on values the caller read, which the ask's own reading wraps with its one write, the
+`dropped` event. `would_nudge` reads the ask's steps in its order without writing, and is
+true only when each ends in a nudge and an ask is still to come before the window shuts.
 """
 
 from __future__ import annotations
@@ -61,13 +68,14 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from typing import Any
 
 from moxi import exit as codes
 
-from . import catalog, relaunch, slots, store, target
+from . import cachetimers, catalog, relaunch, slots, store, target
 from .recycle import LOOK, Verdict, cache_read
 
 log = logging.getLogger("moxi.launcher.keepwarm")
@@ -99,6 +107,9 @@ FAILED_REFUSALS = ("not-allowed", "unsupported", "gone")
 NUDGE_WAIT_S = 60.0
 #: The longest hold name, in characters.
 NAME_CAP = 128
+#: Seconds between cache's timer's asks, as the subscription states them.
+ASK_EVERY_S = float(next(t["every"] for t in cachetimers.TIMERS
+                         if t["name"] == "launcher.keep-warm"))
 
 
 # -- the ask -----------------------------------------------------------------------------
@@ -226,27 +237,51 @@ def _signal(conn: sqlite3.Connection, row: store.LaunchRow, session: Any,
         listed, failed = None, _words(error)
     else:
         failed = None
+    signal, newly = signal_of(listed, named, dropped, store.open_holds(conn, row.request_id))
+    if newly:
+        store.add_run_event(conn, nudges[0].run_id, "dropped", {"agents": list(newly)})
+    if signal.case is None and failed is not None:
+        return replace(signal, detail=f"{signal.detail} (turns' agents could not be read: "
+                                      f"{failed})")
+    return signal
+
+
+def signal_of(listed: Any | None, named: Iterable[str], dropped: Iterable[str],
+              holds: Iterable[str]) -> tuple[Signal, tuple[str, ...]]:
+    """The signal an ask reads, from values alone, writing nothing: `listed` is turns'
+    agents value (None when it could not be read), `named` and `dropped` the agents the
+    current run of nudges named and dropped, `holds` the open holds of the launch's chain.
+    Returns the signal and the agents newly dropped: named, not yet dropped, and now
+    `unknown`, or missing from a list turns says is complete. A newly dropped agent is not
+    counted."""
+    named, dropped = set(named), set(dropped)
     entries = list(getattr(listed, "entries", ()) or ()) if listed is not None else []
+    newly: tuple[str, ...] = ()
     if listed is not None and named:
         # An agent missing from a list turns says is incomplete may only be unread.
         missing = UNKNOWN if getattr(listed, "complete", True) is not False else None
         states = {a.id: a.state for a in entries}
-        newly = sorted(i for i in named - dropped if states.get(i, missing) == UNKNOWN)
-        if newly:
-            store.add_run_event(conn, nudges[0].run_id, "dropped", {"agents": newly})
-            dropped |= set(newly)
+        newly = tuple(sorted(i for i in named - dropped if states.get(i, missing) == UNKNOWN))
+        dropped |= set(newly)
     live = tuple(a for a in entries if a.kind in SIGNAL_KINDS and a.final is not True
                  and a.state in SIGNAL_STATES and a.id not in dropped)
-    holds = tuple(store.open_holds(conn, row.request_id))
+    holds = tuple(holds)
     kept = tuple(sorted(dropped))
     if live:
-        return Signal(SUBAGENTS, live, holds, kept, f"{len(live)} subagents at work")
+        return Signal(SUBAGENTS, live, holds, kept, f"{len(live)} subagents at work"), newly
     if holds:
-        return Signal(DIRECTOR, (), holds, kept, f"open holds: {', '.join(holds)}")
-    said = "no subagent at work and no open hold"
-    if failed is not None:
-        said += f" (turns' agents could not be read: {failed})"
-    return Signal(None, (), (), kept, said)
+        return Signal(DIRECTOR, (), holds, kept, f"open holds: {', '.join(holds)}"), newly
+    return Signal(None, (), (), kept, "no subagent at work and no open hold"), newly
+
+
+def signal_now(conn: sqlite3.Connection, row: store.LaunchRow, listed: Any | None,
+               nudges: Sequence[store.Run]) -> Signal:
+    """The signal an ask would read now, with `listed` its agents value and `nudges` its
+    run of nudges, from the launch log; writes nothing, so an agent the next ask will drop
+    is already not counted."""
+    named, dropped = _run_record(conn, nudges)
+    signal, _ = signal_of(listed, named, dropped, store.open_holds(conn, row.request_id))
+    return signal
 
 
 def _run_record(conn: sqlite3.Connection,
@@ -381,6 +416,105 @@ def delivered(session: Any, text: str, number: int | None, *, ref: str,
                                           f"{reason or kind}")
 
 
+# -- whether the next ask would nudge -----------------------------------------------------
+
+
+def would_nudge(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str, clock: Any,
+                facts: Any, listed: Any | None, settings: Mapping[str, Any],
+                records: Sequence[Mapping[str, Any]], *, gone: Callable[[str], bool],
+                now: float, tick_s: float | None) -> bool:
+    """Whether every step of the ask that can be read without writing ends in a nudge, read
+    now in the ask's order, with an ask still to come before the cache goes cold. Reads
+    the launch log through `conn` and writes nothing. A step that could not be read is
+    not passed.
+
+    For a launch found live with its claim checked: `session_id` is the id it was found
+    by, `clock` cache's read of it at `now` (epoch seconds), `facts` and `listed` turns'
+    facts and agents values (`listed` None when they could not be read), `settings` the
+    launcher's, `records` cache's clock records (`clock_records()`), `gone` whether a run's
+    job is gone, and `tick_s` the cache watcher's tick (None when it could not be read).
+    False at the first step not passed:
+
+    1. the launch keeps warm;
+    2. no run of any kind is open on it, or the open one is stale by `gone` at `now`;
+    3. cache times sessions of the launch's harness, and its watcher is timing this one:
+       a record for it rewritten within its own `stale_after`;
+    4. an ask is certain to come before the window shuts: a lifetime over `SHUT_S`, and an
+       age under it by more than `SHUT_S` and the most two asks can lie apart (the
+       timer's interval and a watcher tick);
+    5. no turn is open;
+    6. a live subagent or an open hold of the chain (`signal_of`);
+    7. the run of nudges is under its case's cap;
+    8. no draft in the prompt box (`draft` False; a box that could not be read is one);
+    9. no keep-warm run ended other than `nudged` since the session's last request.
+    """
+    if row.values.get("keep_warm") != "on":
+        return False
+    current = store.open_run(conn, row.request_id)
+    if current is not None and not store.run_stale(
+            current, gone, datetime.fromtimestamp(now, timezone.utc)):
+        return False
+    if not timed(row.harness, session_id, records, now):
+        return False
+    ttl, age = getattr(clock, "ttl_s", None), getattr(clock, "age_s", None)
+    if not asked_before_shut(ttl, age, tick_s):
+        return False
+    if getattr(facts, "turn_open", None) is not False:
+        return False
+    sid = getattr(facts, "session_id", None) or session_id
+    nudges = run_of_nudges(conn, row.request_id, sid, getattr(facts, "turn_number", None))
+    signal = signal_now(conn, row, listed, nudges)
+    if signal.case is None:
+        return False
+    try:
+        cap = int(settings[CAPS[signal.case]])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if len(nudges) >= cap:
+        return False
+    if getattr(facts, "draft", None) is not False:
+        return False
+    return not _ended_since(conn, row.request_id, now - age)
+
+
+def timed(harness: str, session_id: str, records: Sequence[Mapping[str, Any]],
+          now: float) -> bool:
+    """Whether cache's timer asks about the session: cache times sessions of `harness`,
+    and `records` holds one for `session_id` rewritten within its own `stale_after` at
+    `now`."""
+    if catalog._cache_timer(harness) is not None:
+        return False
+    for record in records:
+        if record.get("session") != session_id:
+            continue
+        seen, stale = record.get("seen_at"), record.get("stale_after")
+        if (isinstance(seen, (int, float)) and isinstance(stale, (int, float))
+                and now - seen <= stale):
+            return True
+    return False
+
+
+def asked_before_shut(ttl: Any, age: Any, tick_s: float | None) -> bool:
+    """Whether an ask is certain to come while the window is open: the timer asks every
+    `ASK_EVERY_S` until `SHUT_S` before expiry, and a watcher tick (`tick_s`) later at
+    most, so a cache of age `age` and lifetime `ttl` must be younger than `ttl - SHUT_S`
+    by that much."""
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+               for v in (ttl, age, tick_s)):
+        return False
+    return ttl > SHUT_S and age < ttl - SHUT_S - (ASK_EVERY_S + tick_s)
+
+
+def _ended_since(conn: sqlite3.Connection, request_id: str, since: float) -> bool:
+    """Whether the launch's newest keep-warm run ended other than `nudged` after `since`
+    (epoch seconds)."""
+    newest = next((r for r in store.runs(conn, request_id=request_id) if r.kind == KIND),
+                  None)
+    if newest is None or newest.open or newest.outcome == "nudged":
+        return False
+    return store.parse_time(newest.updated_at).timestamp() > since
+
+
 # -- holds -------------------------------------------------------------------------------
 
 
@@ -513,8 +647,9 @@ def _words(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
-__all__ = ["BLOCKED_REFUSALS", "CAPS", "DIRECTOR", "FAILED_REFUSALS", "FIRST_LINE", "KIND",
-           "MODE", "NAME_CAP", "NUDGE_WAIT_S", "OPEN_S", "QUIET_REFUSALS", "SHUT_S",
-           "SIGNAL_KINDS", "SIGNAL_STATES", "SUBAGENTS", "TEXTS", "Held", "Signal", "ask",
-           "check_name", "delivered", "hold", "holds", "no_window", "nudge_text",
-           "open_hold", "release", "release_hold", "run_of_nudges", "window"]
+__all__ = ["ASK_EVERY_S", "BLOCKED_REFUSALS", "CAPS", "DIRECTOR", "FAILED_REFUSALS",
+           "FIRST_LINE", "KIND", "MODE", "NAME_CAP", "NUDGE_WAIT_S", "OPEN_S",
+           "QUIET_REFUSALS", "SHUT_S", "SIGNAL_KINDS", "SIGNAL_STATES", "SUBAGENTS", "TEXTS",
+           "Held", "Signal", "ask", "asked_before_shut", "check_name", "delivered", "hold",
+           "holds", "no_window", "nudge_text", "open_hold", "release", "release_hold",
+           "run_of_nudges", "signal_now", "signal_of", "timed", "window", "would_nudge"]

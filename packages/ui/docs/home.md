@@ -104,7 +104,14 @@ What Home does with it:
   first line and the fact wraps under them.
 - **Order.** Rows that need the user sit above every row that does not, the lower `needs`
   first, then by `order`. The rest keep their fixed places by `order`. No row changes
-  colour; say what is wrong in words and use `heavy` for the part that matters.
+  colour; say what is wrong in words and use `heavy` for the part that matters. Home puts
+  the rows in the document in the order shown, so Tab reaches a risen row first. A row
+  that moves takes your component along: it is taken out of the document and put back,
+  with one `disconnectedCallback` and one `connectedCallback`, and is not placed again.
+  Hold up under that: keep your state and your shadow root, take up again on connect
+  what you let go on disconnect, and do not report `null` on the way. A report on
+  connect is fine when it is your line now, not a first line from before the move. An element inside your row that
+  held the focus gets it back after the move.
 - **Opening in place.** With `opens`, a click sets the attribute `open` on the component
   and shows it under the row, at the fact's column, pushing the rows below down. `Hide`
   takes the time's place and a second click closes it, removing the attribute. Draw the

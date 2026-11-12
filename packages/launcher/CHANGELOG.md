@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- Home's Sessions row: a new component `running` (`<moxi-launcher-running>`), a row under
+  Home's box that says how many launched sessions are running, and none when nothing is.
+  Opened, it lists the first four with where each runs, its cache when known and the
+  time of its latest message, or of its launch, then `All sessions (N)`. A session waiting
+  on agents or subagents with a warm cache and no keep-warm cover comes first, says when
+  it goes cold, and puts the row above the rows that need nothing. On the phone the list
+  is always open. New route `GET /api/running`, reached by the gateway, with no path in
+  its answer, and a third topic `running` on `/api/events`; a call of either starts the
+  page server's poller. New optional link `sessions` (an extra of the same name).
+  The page server reads each running session's cache (when cache is installed) and its
+  latest message (when sessions is) apart from the launch log, for the 24 newest, every
+  15 seconds and when the running sessions change, on four threads with an 8 second
+  bound; what it read last stands for 45 seconds when a read does not finish. The first
+  call of `/api/running` waits up to 3 seconds for the first of these reads.
+- Home's Sessions row reads what each running session waits on while its own turn is
+  closed: its subagents at work (with turns), else the agents its comms name directs
+  that work (with comms too), each comms read bounded at 2 seconds and none after the
+  daemon is found down. It reads a waiting session as kept warm only when keep-warm's next
+  ask would nudge it at every step it can read, with an ask still certain to come before
+  the window shuts. The reads write nothing, send nothing and never ask slots.
+- Keep-warm: `keepwarm.signal_of` is the count of the ask's signal on values alone, which
+  the ask and Home's row share, and `keepwarm.would_nudge` reads the ask's steps without
+  writing. The ask does what it did.
+- `target.find(.., slot=False)` finds a launched session without asking slots; the
+  default, which every act uses, still asks.
+- The launcher offers interface 2: `running()` gives the launches running now, newest
+  first, each a frozen `Running` with its request id, harness, the session id it was
+  last known by, target, slot, project key, folder, name, comms name, start time and
+  whether its process runs. It reads only the launch log and the process table.
+  `running(live_only=False)` keeps the launches whose process has ended; `limit` caps
+  the count (200) and `timeout_s` the wait for a busy log (1 s).
 - The launcher offers a piece for Home's main spot in the browser UI shell: a box to say
   what the agent should do, the line above it that picks the project or folder the
   session starts in, a chip that picks the harness, the model and the effort, and a

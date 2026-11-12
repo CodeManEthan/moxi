@@ -194,6 +194,17 @@ many ids in one read. Neither writes to the log, except to bring an older one's
 schema up to date; a log held past the wait (1 second)
 raises `Busy`, and the caller asks again.
 
+Interface 2 adds what is running now: `running()` gives each launch that recorded a
+process and whose process runs, newest first, at most `limit` (200), as a `Running` of
+plain values: `request_id`, `harness`, `session_id` (the id the launch was last known by,
+None when it never learned one), `target`, `slot`, `project_key`, `cwd`, `name` (the
+launch's name, else its comms name, else its folder and start time), `identity`,
+`created_at` and `live`. With `live_only=False` it keeps the launches whose process has
+ended, with `live` false. It reads the launch log and the process table and nothing else:
+it asks no other module, starts no process, and writes nothing but an older log's schema
+update. With no launch log it gives none; a log held past `timeout_s` (1 second) raises
+`Busy`.
+
 ## Handoffs
 
 A handoff is a short file a session writes for the next session of its seat. Its key is
@@ -324,9 +335,10 @@ and nothing has gone well since; a session merely waiting is never red.
 ## The page
 
 With the UI shell installed (`moxi install launcher --with ui`), the launcher has a page
-in the shell and three pieces other pages can show: the box on the shell's home that
-starts a session, a launched session's state, red when it needs a look, and a block on
-the shell's home listing each running launched session with its state.
+in the shell and four pieces other pages can show: the box on the shell's home that
+starts a session, the Sessions row under it, a launched session's state, red when it
+needs a look, and a block on the modules view listing each running launched session with
+its state.
 
 The page has four parts.
 
@@ -395,6 +407,45 @@ names them, each with `Clear`. Under the box, `Run again` lists up to three earl
 launches there; pointing at one shows what a click runs today, and one click runs it
 again where the button places a launch.
 
+**The Sessions row on Home.** Under the box, the row `Sessions` says how many launched
+sessions are running (`3 running`), and shows nothing when none is. Click it to open the
+list in place: at most four sessions, each with its name, where it runs (the slot,
+`terminal` or `headless`, then the project or the folder's name), its cache when that is
+known, and on the second line the time and first line of the latest thing said in it,
+or when it was launched. A session that waits on agents or subagents while its cache is
+warm, with nothing set to keep it warm, comes first and says in heavy type when its cache
+goes cold and what it waits on; the row then names it while closed and rises above the
+rows that need nothing. `Open` goes to the session's transcript on the sessions page, and
+`All sessions (N)` to that page's list; without sessions installed both go to the
+launcher's page. On the phone the list is always open and shows each session's name,
+where it runs and its cache, with no time, no message and no `Open`. The row reads
+`GET /api/running` and follows the stream's topic `running`; that route is the one the
+phone's gateway reaches, and it sends no path: a launch's folder goes by its name alone.
+
+The count and the names come from the launch log and are never more than a few seconds
+behind it. The cache, the latest message and what a session waits on are read by the page
+server apart from them, in a pass over the 24 newest running sessions every 15 seconds and
+whenever a session starts, ends or changes its id: the cache from cache's own reading of the
+transcript, the message from the transcript's newest turn, read again only when the
+transcript changed. A read that takes longer than 8 seconds is left for the next pass,
+and the session keeps what was read before for up to 45 seconds. A slow or missing module
+never holds up the count. The first look after the page server starts waits up to 3
+seconds for these reads.
+
+A session waits only while its own turn is closed. With turns, it waits on its subagents
+and teammates at work, counted as keep-warm counts them; with none, and comms installed,
+on the agents its comms name directs whose turn is open, or whose turn is closed while
+they wait on subagents of their own (a Claude session's; a Codex session counts only by
+its open turn). Each comms read may take 2 seconds, and once comms' daemon is found down
+the pass asks it nothing more. A waiting session is kept warm when every step of
+keep-warm's next ask that can be read without writing ends in a nudge, with an ask still
+certain to come before its window shuts: keep-warm on, no run open on the launch, cache's
+watcher timing the session, no turn open, a live subagent or an open hold, the run of
+nudges under its cap, nothing typed into the prompt box, and no ask since the session's
+last request that ended without a nudge. Any step it can't read counts against it, so the
+row says `goes cold` whenever a nudge is not certain. These reads write nothing, send
+nothing to a session and never ask slots.
+
 A launch from the page or from the box runs with the shell's environment, so its harness
 must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
 The page server starts when the page or the shell's home is first opened and stops once
@@ -442,14 +493,15 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 
 | Module | With it | Without it |
 |---|---|---|
-| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start; every act on a launched session | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm |
-| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only |
+| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
+| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
-| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm | neither row is offered |
+| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache on Home's Sessions row | neither row is offered; no session reads as kept warm |
 | projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
+| sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
 
 An agent role a preset names is looked for in the harness's own agent folders, the user's
 and the project's.

@@ -36,7 +36,7 @@ SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
           "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/last", "/api/recents",
           "/api/recent", "/api/name", "/api/preview", "/api/launch", "/api/resume",
-          "/api/events"]
+          "/api/running", "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
 NEVER_SENT = {"env", "env_json", "base_env", "base_env_json", "environ", "brief",
@@ -140,23 +140,23 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_every_route_none_for_the_gateway():
+def test_the_page_declares_every_route_and_only_the_running_launches_for_the_gateway():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
     assert list(routes) == ROUTES
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/preview", "/api/launch", "/api/resume"}
-    assert not any(r["gateway"] for r in routes.values())
+    assert [p for p, r in routes.items() if r["gateway"]] == ["/api/running"]
     assert [p for p, r in routes.items() if r["stream"]] == ["/api/events"]
-    assert list(routes["/api/events"]["topics"]) == ["sessions", "launches"]
+    assert list(routes["/api/events"]["topics"]) == ["sessions", "launches", "running"]
     assert routes["/api/launches"]["query"]["request"]["type"] == "string"
     assert page.PAGE.idle_s == 300 and page.PAGE.health is None
 
 
 def test_the_export_lists_the_built_assets():
     exported = loopback().export(page.PAGE)
-    assert exported["assets"] == ["build-stamp.txt", "page.js", "prompt.js", "sessions.js",
-                                  "state.js"]
+    assert exported["assets"] == ["build-stamp.txt", "page.js", "prompt.js", "running.js",
+                                  "sessions.js", "state.js"]
 
 
 def test_no_answer_declares_an_environment_a_brief_or_a_process():
@@ -948,21 +948,29 @@ def test_the_announcement_names_the_page_and_the_ui_link():
     assert found.ok and found.page == module.PAGE
 
 
-def test_the_announcement_declares_the_panel_the_home_block_and_the_state():
+def test_the_announcement_declares_the_panel_the_home_pieces_the_block_and_the_state():
     from moxi_launcher import module
 
-    assert set(module.COMPONENTS) == {"page", "prompt", "sessions", "state"}
+    assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state"}
     assert {name: decl["place"] for name, decl in module.COMPONENTS.items()} == {
-        "page": "page", "prompt": "block", "sessions": "block", "state": "inline"}
+        "page": "page", "prompt": "block", "running": "block", "sessions": "block",
+        "state": "inline"}
     assert module.COMPONENTS["sessions"]["home"] is True
+    assert "home_as" not in module.COMPONENTS["sessions"]
     assert "attributes" not in module.COMPONENTS["sessions"]
+    running = module.COMPONENTS["running"]
+    assert (running["title"], running["home"], running["home_as"], running["order"]) == (
+        "Sessions", True, "row", 100)
+    assert running["attributes"]["open"]["type"] == "bool"
+    assert module.OPTIONAL["sessions"].startswith("The latest thing said in each running")
     assert module.COMPONENTS["state"]["attributes"] == {
         "session": {"type": "string", "required": True, "doc": "a session id"}}
     for decl in module.COMPONENTS.values():
         assert decl["contract"] == 1
         assert decl["title"].strip() and "\n" not in decl["doc"]
     found = modules.load("launcher")
-    assert found.ok and set(found.components) == {"page", "prompt", "sessions", "state"}
+    assert found.ok and set(found.components) == {"page", "prompt", "running", "sessions",
+                                                  "state"}
 
 
 def test_each_components_script_is_a_built_asset_that_defines_its_element():
@@ -991,6 +999,11 @@ def test_the_components_reach_data_only_through_their_routes_and_topics():
     assert '"api/state"' in sessions and '"api/launches"' in sessions
     assert '"launcher","launches"' in sessions
     assert "api/state?session=" in state
+    # Home's Sessions row reads its one route and follows its topic.
+    running = (WEB / "running.js").read_text(encoding="utf-8")
+    assert '"api/running"' in running and '"launcher","running"' in running
+    assert "fetch(" not in running and "WebSocket" not in running
+    assert "EventSource" not in running
     # The panel reads and acts only through its own routes, follows both topics, draws the
     # launch form with the shell's one form renderer and places a state per live row.
     panel = (WEB / "page.js").read_text(encoding="utf-8")
