@@ -361,6 +361,27 @@ def test_a_waiting_session_keep_warm_will_not_nudge_is_not_covered(wired, change
     assert got["waits"] == {"kind": "subagents", "count": 1} and got["covered"] is False
 
 
+@pytest.mark.parametrize("unread", ["settings", "clock records", "tick"])
+def test_a_waiting_session_is_not_covered_when_a_step_can_t_be_read(wired, monkeypatch,
+                                                                     unread):
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
+    cache = Cache([sid])
+    wired.cache = cache
+
+    def failing():
+        raise RuntimeError("the file can't be read")
+
+    if unread == "settings":
+        monkeypatch.setattr(settings, "current", failing)
+    elif unread == "clock records":
+        cache.clock_records = failing
+    else:
+        monkeypatch.setattr(joiner, "cache_tick_s", lambda: None)
+    got = joined()
+    assert got["waits"] == {"kind": "subagents", "count": 1} and got["covered"] is False
+
+
 #: The reads a waiting session's worker makes, in order, that the next test watches.
 LOCAL_STEPS = ("cache read", "launch log", "signal", "settings", "clock records", "tick")
 
