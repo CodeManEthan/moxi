@@ -177,7 +177,8 @@ EVENT_CUT = ("text", "pane_id", "capture")
 TOPICS = ("sessions", "launches", "running")
 #: The facts of a running launch that are read beyond the launch log, each as it is when
 #: none was read.
-UNJOINED = {"cache": None, "waits": None, "covered": False, "activity": None}
+UNJOINED = {"cache": None, "waits": None, "covered": False, "coverable": None,
+            "activity": None}
 #: Seconds between the poller's reads of the launch log's data version, which moves at
 #: every write to the log.
 TICK = 1.0

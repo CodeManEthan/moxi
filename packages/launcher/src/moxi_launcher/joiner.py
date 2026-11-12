@@ -25,8 +25,8 @@ What a pass reads, each only when its module is installed:
   window read again only when the transcript's size or modification time changed since
   the last pass. `at` is when it was written, `by` is `you` for a message the person at
   the prompt sent and `agent` for the model's own, and `text` its first line.
-* `waits` and `covered` (`read_waits`), with turns, only while the launch's own turn is
-  closed. The session is found as an act finds it (`target.find`), but slots is never
+* `waits`, `covered` and `coverable` (`read_waits`), with turns, only while the launch's
+  own turn is closed. The session is found as an act finds it (`target.find`), but slots is never
   asked. `waits` counts its live subagents as keep-warm counts them (`keepwarm.signal_of`);
   with none, and comms installed, the agents its comms name directs that work, as
   `waits.directed` reads them through the pass: comms' `owner`, one `roster` for the
@@ -34,8 +34,10 @@ What a pass reads, each only when its module is installed:
   Each comms read may take `COMMS_TIMEOUT_S`, and once one finds the daemon down the pass
   asks comms nothing more. A join that raised gives no `waits`, and one that met the
   deadline leaves the launch unpublished in this pass. `covered` is
-  `keepwarm.would_nudge` over what the pass read, and is false without cache. Neither
-  writes anything.
+  `keepwarm.would_nudge` over what the pass read, the directed join included, and is false
+  without cache. `coverable`, set only on a launch that waits and is not covered, is the
+  cap of the case a press would nudge for, when `keepwarm.reading` with `pressed` passes
+  every step; else null. None of them writes anything.
 
 No fact holds the time it was read, so a pass over sessions that did nothing gives the
 same facts as the last one, and the topic publishes nothing.
@@ -52,6 +54,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from types import MappingProxyType
 from typing import Any
 
 from moxi import aio, config, modules
@@ -292,11 +295,13 @@ def read_activity(each: Pass, launch: Launch) -> dict[str, Any]:
 
 
 def read_waits(each: Pass, launch: Launch) -> dict[str, Any]:
-    """`waits` and `covered`, while the launch's own turn is closed: the session found as an
-    act finds it but without asking slots, its facts, then its live subagents counted as
-    keep-warm counts them, else the agents it directs that work (`waits.directed`), and
-    whether keep-warm's next ask would nudge it (`keepwarm.would_nudge`). Nothing without
-    turns; no `waits` and `covered` false for a session not found live, or whose turn is
+    """`waits`, `covered` and `coverable`, while the launch's own turn is closed: the
+    session found as an act finds it but without asking slots, its facts, then its live
+    subagents counted as keep-warm counts them, else the agents it directs that work
+    (`waits.directed`); whether keep-warm's next ask would nudge it, on the launch value or
+    its cover (`keepwarm.would_nudge`); and, for a launch that waits and is not covered,
+    whether a press would cover it (`coverable`). Nothing without turns; no `waits`,
+    `covered` false and `coverable` null for a session not found live, or whose turn is
     open."""
     if each.turns is None:
         return {}
@@ -307,10 +312,10 @@ def read_waits(each: Pass, launch: Launch) -> dict[str, Any]:
             found = each.call(target.find, launch.session_id, conn=conn, turns=each.turns,
                               slot=False)
         except catalog.Refused:
-            return {"waits": None, "covered": False}
+            return {"waits": None, **UNCOVERED}
         try:
             if not found.live or found.session is None:
-                return {"waits": None, "covered": False}
+                return {"waits": None, **UNCOVERED}
             return _waits_and_cover(each, launch, conn, found)
         finally:
             found.close()
@@ -321,7 +326,7 @@ def _waits_and_cover(each: Pass, launch: Launch, conn: Any, found: Any) -> dict[
     sid = found.session_id or launch.session_id
     facts = each.call(session.facts)
     if getattr(facts, "turn_open", None) is not False:
-        return {"waits": None, "covered": False}
+        return {"waits": None, **UNCOVERED}
     try:
         listed = each.call(session.agents)
     except Late:
@@ -342,8 +347,13 @@ def _waits_and_cover(each: Pass, launch: Launch, conn: Any, found: Any) -> dict[
             raise Late()
         if not joined.raised and joined.names:
             fact = {"kind": "agents", "count": len(joined.names)}
-    return {"waits": fact, "covered": _covered(each, launch, conn, found, sid, facts,
-                                               listed, joined)}
+    return {"waits": fact, **_covered(each, launch, conn, found, sid, facts, listed, fact,
+                                      joined)}
+
+
+#: `covered` and `coverable` where keep-warm's next ask would not nudge and a press would
+#: not change that.
+UNCOVERED: Mapping[str, Any] = MappingProxyType({"covered": False, "coverable": None})
 
 
 def proc_gone(job: str) -> bool:
@@ -355,12 +365,15 @@ def proc_gone(job: str) -> bool:
 
 
 def _covered(each: Pass, launch: Launch, conn: Any, found: Any, sid: str, facts: Any,
-             listed: Any | None, joined: waits.Directed | None) -> bool:
-    """`covered`: `keepwarm.would_nudge` over what the pass read. `joined` is the directed
-    join the pass read for `waits`, None when it was not made; the reading does not use it."""
+             listed: Any | None, fact: Mapping[str, Any] | None,
+             joined: waits.Directed | None) -> dict[str, Any]:
+    """`covered`, `keepwarm.would_nudge` over what the pass read, and `coverable`: for a
+    launch that waits (`fact`) and is not covered, `{"cap": n}` when the same reading
+    with `pressed` passes every step, `n` the cap of the case it found; else None.
+    `joined` is the directed join the pass read for `waits`, None when it was not made."""
     read = each.clocks.get(launch.request_id)
     if each.cache is None or read is None:
-        return False
+        return dict(UNCOVERED)
     clock, now = read
     try:
         current = each.shared("settings", lambda: each.call(settings.current))
@@ -369,9 +382,18 @@ def _covered(each: Pass, launch: Launch, conn: Any, found: Any, sid: str, facts:
     except Late:
         raise
     except Exception:  # noqa: BLE001  (a step that could not be read is not passed)
-        return False
-    return bool(each.call(keepwarm.would_nudge, conn, found.row, sid, clock, facts, listed,
-                          current, records, gone=proc_gone, now=now, tick_s=tick_s))
+        return dict(UNCOVERED)
+    reads = (conn, found.row, sid, clock, facts, listed, current, records)
+    options = {"gone": proc_gone, "now": now, "tick_s": tick_s, "directed": joined}
+    if each.call(keepwarm.would_nudge, *reads, **options):
+        return {"covered": True, "coverable": None}
+    if fact is None:
+        return dict(UNCOVERED)
+    pressed = each.call(keepwarm.reading, *reads, **options, pressed=True)
+    if pressed.step is not None:
+        return dict(UNCOVERED)
+    return {"covered": False,
+            "coverable": {"cap": int(current[keepwarm.CAPS[pressed.case]])}}
 
 
 #: A launch's reads, in the order a worker makes them. Each takes the pass and the launch
@@ -491,7 +513,6 @@ def _prepared() -> tuple[list[Launch], Any | None, Any | None, Any | None, Any |
 
 __all__ = ["ACTIVITY_LIMIT", "ACTIVITY_TEXT_CHARS", "CACHE_KINDS", "COMMS_TIMEOUT_S",
            "JOIN_BUDGET_S", "JOIN_EVERY", "JOIN_KEEP_S", "JOIN_MAX", "JOIN_THREADS", "READS",
-           "UNTIL_SAME_S", "Joiner", "Kept", "Late", "Launch", "Pass", "activity_of",
-           "cache_api", "cache_fact", "cache_tick_s", "comms_api", "proc_gone",
-           "read_activity", "read_cache", "read_waits", "sessions_api", "take",
-           "transcripts_root", "work"]
+           "UNCOVERED", "UNTIL_SAME_S", "Joiner", "Kept", "Late", "Launch", "Pass", "activity_of",
+           "cache_api", "cache_fact", "cache_tick_s", "comms_api", "proc_gone", "read_activity",
+           "read_cache", "read_waits", "sessions_api", "take", "transcripts_root", "work"]

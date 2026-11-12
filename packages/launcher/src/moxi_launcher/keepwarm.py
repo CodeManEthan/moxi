@@ -8,6 +8,7 @@ work it handed out, and the named holds that say a director has work out.
     release_hold(request_id, name)
     signal_of(listed, named, dropped, holds, *, directed)   # the signal, from values alone
     would_nudge(conn, row, sid, clock, ...)     # whether the next ask would nudge
+    reading(conn, row, sid, clock, ...)         # the same, its first step not passed
     cover_on(conn, row, sid, ...) / cover_off(conn, row, sid, why)   # the press's record
     cover(conn, row, sid) / on(conn, row, sid)  # the record read; keep-warm on for a sid
 
@@ -82,7 +83,8 @@ has no expiry: it leaves only by release.
 of step 4 on values the caller read, which the ask's own reading wraps with its writes:
 the `dropped` event, and a cover's `off`. `would_nudge` reads the ask's steps in its order
 without writing, and is true only when each ends in a nudge and an ask is still to come
-before the window shuts.
+before the window shuts; with `pressed` it reads them as if cover had just been set, which
+is whether a press would cover the session. `reading` names the first step not passed.
 """
 
 from __future__ import annotations
@@ -592,10 +594,21 @@ def on(conn: sqlite3.Connection, row: store.LaunchRow, sid: str) -> bool:
 # -- whether the next ask would nudge -----------------------------------------------------
 
 
+@dataclass(frozen=True)
+class Reading:
+    """What `reading` found: `step`, the first of `would_nudge`'s nine steps not passed
+    (None when all pass), and `case`, the case step 6 found (None when it was not
+    reached or found none)."""
+
+    step: int | None
+    case: str | None = None
+
+
 def would_nudge(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str, clock: Any,
                 facts: Any, listed: Any | None, settings: Mapping[str, Any],
                 records: Sequence[Mapping[str, Any]], *, gone: Callable[[str], bool],
-                now: float, tick_s: float | None) -> bool:
+                now: float, tick_s: float | None, directed: waits.Directed | None = None,
+                pressed: bool = False) -> bool:
     """Whether every step of the ask that can be read without writing ends in a nudge, read
     now in the ask's order, with an ask still to come before the cache goes cold. Reads
     the launch log through `conn` and writes nothing. A step that could not be read is
@@ -605,66 +618,116 @@ def would_nudge(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str,
     by, `clock` cache's read of it at `now` (epoch seconds), `facts` and `listed` turns'
     facts and agents values (`listed` None when they could not be read), `settings` the
     launcher's, `records` cache's clock records (`clock_records()`), `gone` whether a run's
-    job is gone, and `tick_s` the cache watcher's tick (None when it could not be read).
-    False at the first step not passed:
+    job is gone, `tick_s` the cache watcher's tick (None when it could not be read),
+    `directed` the directed join read for the session (None when it was not made), and
+    `pressed` whether to read it as if cover had just been set. False at the first step
+    not passed:
 
-    1. the launch keeps warm;
+    1. the launch keeps warm (`on`), or `pressed`;
     2. no run of any kind is open on it, or the open one is stale by `gone` at `now`;
     3. cache times sessions of the launch's harness, and its watcher is timing this one:
-       a record for it rewritten within its own `stale_after`;
+       a record for it rewritten within its own `stale_after`, whose `asks` names the
+       keep-warm subscription; a record without `asks`, from an older watcher, passes
+       only for a launch made with `keep_warm` on;
     4. an ask is certain to come before the window shuts: a lifetime over `SHUT_S`, and an
        age under it by more than `SHUT_S` and the most two asks can lie apart (the
        timer's interval and a watcher tick);
     5. no turn is open;
-    6. a live subagent or an open hold of the chain (`signal_of`);
-    7. the run of nudges is under its case's cap;
+    6. a signal (`signal_of`): a live subagent; an open hold of the chain, for a launch
+       made with `keep_warm` on; or, under cover or `pressed`, a directed agent at work
+       in `directed`;
+    7. the run of nudges is under its case's cap. While the cover holds (a live subagent,
+       a directed agent at work, or a join not read whole) only the nudges since the
+       cover's press count, and none when `pressed`; otherwise the whole run, as the ask
+       counts it once it ends a cover;
     8. no draft in the prompt box (`draft` False; a box that could not be read is one);
-    9. no keep-warm run ended other than `nudged` since the session's last request.
+    9. no keep-warm run ended other than `nudged` since the session's last request. A
+       run ended `blocked` at the cap is left out when a press came after it: under
+       cover, one that ended before the press; with `pressed`, every one.
     """
-    if row.values.get("keep_warm") != "on":
-        return False
+    return reading(conn, row, session_id, clock, facts, listed, settings, records,
+                   gone=gone, now=now, tick_s=tick_s, directed=directed,
+                   pressed=pressed).step is None
+
+
+def reading(conn: sqlite3.Connection, row: store.LaunchRow, session_id: str, clock: Any,
+            facts: Any, listed: Any | None, settings: Mapping[str, Any],
+            records: Sequence[Mapping[str, Any]], *, gone: Callable[[str], bool],
+            now: float, tick_s: float | None, directed: waits.Directed | None = None,
+            pressed: bool = False) -> Reading:
+    """`would_nudge`'s steps, with its arguments: the first step not passed and the case
+    step 6 found. Writes nothing."""
+    value_on = row.values.get("keep_warm") == "on"
+    sid = getattr(facts, "session_id", None) or session_id
+    held = cover(conn, row, sid)
+    if not pressed and not (on(conn, row, session_id) and (value_on or held is not None)):
+        return Reading(1)
     current = store.open_run(conn, row.request_id)
     if current is not None and not store.run_stale(
             current, gone, datetime.fromtimestamp(now, timezone.utc)):
-        return False
-    if not timed(row.harness, session_id, records, now):
-        return False
+        return Reading(2)
+    record = timed(row.harness, session_id, records, now)
+    if record is None or not _asks(record, value_on=value_on):
+        return Reading(3)
     ttl, age = getattr(clock, "ttl_s", None), getattr(clock, "age_s", None)
     if not asked_before_shut(ttl, age, tick_s):
-        return False
+        return Reading(4)
     if getattr(facts, "turn_open", None) is not False:
-        return False
-    sid = getattr(facts, "session_id", None) or session_id
+        return Reading(5)
+    covering = held is not None or pressed
+    joined = directed if covering else None
     nudges = run_of_nudges(conn, row.request_id, sid, getattr(facts, "turn_number", None))
-    signal = signal_now(conn, row, listed, nudges)
+    signal = signal_now(conn, row, listed, nudges, directed=joined)
     if signal.case is None:
-        return False
+        return Reading(6)
     try:
         cap = int(settings[CAPS[signal.case]])
     except (KeyError, TypeError, ValueError):
-        return False
+        return Reading(7, signal.case)
+    if covering and _kept(signal, joined):
+        nudges = [] if pressed else [r for r in nudges if r.created_at > held.at]
     if len(nudges) >= cap:
-        return False
+        return Reading(7, signal.case)
     if getattr(facts, "draft", None) is not False:
-        return False
-    return not _ended_since(conn, row.request_id, now - age)
+        return Reading(8, signal.case)
+    if _ended_since(conn, row.request_id, now - age, press=held, pressed=pressed):
+        return Reading(9, signal.case)
+    return Reading(None, signal.case)
+
+
+def _kept(signal: Signal, joined: waits.Directed | None) -> bool:
+    """Whether the next ask keeps a cover on this signal: a live subagent, a directed
+    agent at work, or a join not read whole. With none (a hold alone, or no join made)
+    the ask ends the cover, and counts the whole run of nudges."""
+    if signal.case == SUBAGENTS:
+        return True
+    return joined is not None and (bool(joined.names) or not signal.sure)
+
+
+def _asks(record: Mapping[str, Any], *, value_on: bool) -> bool:
+    """Whether the watcher that wrote the clock `record` asks keep-warm about its session:
+    its `asks` names the subscription; a record without `asks`, written by a watcher
+    that asks by the launch value, only when `value_on`."""
+    if "asks" not in record:
+        return value_on
+    return cachetimers.KEEP_WARM in (record.get("asks") or ())
 
 
 def timed(harness: str, session_id: str, records: Sequence[Mapping[str, Any]],
-          now: float) -> bool:
-    """Whether cache's timer asks about the session: cache times sessions of `harness`,
-    and `records` holds one for `session_id` rewritten within its own `stale_after` at
-    `now`."""
+          now: float) -> Mapping[str, Any] | None:
+    """The clock record by which cache's timer asks about the session: None unless cache
+    times sessions of `harness` and `records` holds one for `session_id` rewritten within
+    its own `stale_after` at `now`."""
     if catalog._cache_timer(harness) is not None:
-        return False
+        return None
     for record in records:
         if record.get("session") != session_id:
             continue
         seen, stale = record.get("seen_at"), record.get("stale_after")
         if (isinstance(seen, (int, float)) and isinstance(stale, (int, float))
                 and now - seen <= stale):
-            return True
-    return False
+            return record
+    return None
 
 
 def asked_before_shut(ttl: Any, age: Any, tick_s: float | None) -> bool:
@@ -678,14 +741,22 @@ def asked_before_shut(ttl: Any, age: Any, tick_s: float | None) -> bool:
     return ttl > SHUT_S and age < ttl - SHUT_S - (ASK_EVERY_S + tick_s)
 
 
-def _ended_since(conn: sqlite3.Connection, request_id: str, since: float) -> bool:
+def _ended_since(conn: sqlite3.Connection, request_id: str, since: float, *,
+                 press: Cover | None = None, pressed: bool = False) -> bool:
     """Whether the launch's newest keep-warm run ended other than `nudged` after `since`
-    (epoch seconds)."""
-    newest = next((r for r in store.runs(conn, request_id=request_id) if r.kind == KIND),
-                  None)
-    if newest is None or newest.open or newest.outcome == "nudged":
-        return False
-    return store.parse_time(newest.updated_at).timestamp() > since
+    (epoch seconds). A run ended `blocked` at the cap is passed over when a press came
+    after it: one that ended before `press`, or any with `pressed`, since a press starts
+    a new count."""
+    for run in store.runs(conn, request_id=request_id):
+        if run.kind != KIND:
+            continue
+        if (run.outcome == "blocked" and run.word == "capped"
+                and (pressed or (press is not None and run.updated_at < press.at))):
+            continue
+        if run.open or run.outcome == "nudged":
+            return False
+        return store.parse_time(run.updated_at).timestamp() > since
+    return False
 
 
 # -- holds -------------------------------------------------------------------------------
@@ -833,7 +904,8 @@ def _words(error: BaseException) -> str:
 __all__ = ["ASK_EVERY_S", "ASK_JOIN_BUDGET_S", "BLOCKED_REFUSALS", "CAPS", "COVER",
            "DIRECTING_TEXTS", "DIRECTOR", "FAILED_REFUSALS", "FIRST_LINE", "KIND", "MODE",
            "NAME_CAP", "NUDGE_WAIT_S", "OPEN_S", "QUIET_REFUSALS", "SHUT_S", "SIGNAL_KINDS",
-           "SIGNAL_STATES", "SUBAGENTS", "TEXTS", "Cover", "Held", "Signal", "ask",
-           "cover", "cover_off", "cover_on", "on", "asked_before_shut", "check_name", "delivered", "hold",
-           "holds", "no_window", "nudge_text", "open_hold", "release", "release_hold",
-           "run_of_nudges", "signal_now", "signal_of", "timed", "window", "would_nudge"]
+           "SIGNAL_STATES", "SUBAGENTS", "TEXTS", "Cover", "Held", "Reading", "Signal", "ask",
+           "cover", "cover_off", "cover_on", "on", "asked_before_shut", "check_name", "delivered",
+           "hold", "holds", "no_window", "nudge_text", "open_hold", "reading", "release",
+           "release_hold", "run_of_nudges", "signal_now", "signal_of", "timed", "window",
+           "would_nudge"]

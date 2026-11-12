@@ -17,7 +17,7 @@ SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 CWD = "/srv/work/proj-a"
 #: The keys of every entry, in the order they are declared.
 ENTRY = ["request_id", "harness", "session_id", "name", "identity", "where", "started_at",
-         "cache", "waits", "covered", "activity"]
+         "cache", "waits", "covered", "coverable", "activity"]
 
 
 @pytest.fixture(autouse=True)
@@ -142,6 +142,22 @@ def test_the_route_is_the_gateways_and_marks_the_activity_text():
     assert "cwd" not in entry and set(entry["where"].items) == {
         "target", "slot", "project_key", "folder"}
     assert all(out.mark is None for out in entry["where"].items.values())
+
+
+def test_coverable_is_a_nullable_cap_the_gateway_sends_the_phone_as_it_is():
+    entry = page.RUNNING["sessions"].items.items
+    coverable = entry["coverable"]
+    assert coverable.type == "table" and coverable.nullable
+    assert set(coverable.items) == {"cap"} and coverable.items["cap"].type == "int"
+    # The gateway cuts only what the exported shape marks: neither the table nor its cap
+    # is marked, so the phone gets `coverable` as the desk does.
+    [route] = [r for r in loopback().export(page.PAGE)["routes"]
+               if r["path"] == "/api/running"]
+    exported = route["returns"]["sessions"]["items"]["items"]
+    assert route["gateway"] is True
+    assert exported["coverable"]["mark"] is None and exported["coverable"]["nullable"]
+    assert exported["coverable"]["items"] == {
+        "cap": {"type": "int", "mark": None, "nullable": False, "items": None}}
 
 
 def test_a_call_of_the_route_starts_the_feed(conn, monkeypatch):

@@ -1,8 +1,9 @@
 """What a running launch waits on, and whether keep-warm covers it, as the joiner reads
 them (`joiner.read_waits`): its live subagents, else the agents it directs that work,
 through a stub comms and fake turns, only while its own turn is closed; comms down
-stopping the pass's comms reads; a slot launch read with slots never asked; and
-`covered` from `keepwarm.would_nudge`."""
+stopping the pass's comms reads; a slot launch read with slots never asked; `covered`
+from `keepwarm.would_nudge`; and `coverable`, whether a press would cover a launch that
+waits and is not covered, with each fact of the directed join."""
 
 from __future__ import annotations
 
@@ -16,7 +17,8 @@ import pytest
 from test_keepwarm import FakeSession, agent
 from test_page_joiner import HERE, Skewed, fresh, one_pass
 
-from moxi_launcher import catalog, first, joiner, keepwarm, settings, slots, store
+from moxi_launcher import (cachetimers, catalog, first, joiner, keepwarm, settings, slots,
+                           store, waits)
 
 __all__ = ["fresh"]
 
@@ -330,8 +332,9 @@ class Cache:
     """cache's read of every session: warm, the age and lifetime given; and the watcher
     timing the sessions given."""
 
-    def __init__(self, timing, *, age_s=3000.0, ttl_s=3600.0):
+    def __init__(self, timing, *, age_s=3000.0, ttl_s=3600.0, asks=None):
         self.timing, self.age_s, self.ttl_s = timing, age_s, ttl_s
+        self.asks = asks
 
     def read(self, harness, session_id, **options):
         return SimpleNamespace(kind="warm", age_s=self.age_s, ttl_s=self.ttl_s,
@@ -339,7 +342,8 @@ class Cache:
 
     def clock_records(self):
         return [{"session": sid, "harness": "claude", "seen_at": time.time(),
-                 "stale_after": 30} for sid in self.timing]
+                 "stale_after": 30, **({} if self.asks is None else {"asks": self.asks})}
+                for sid in self.timing]
 
 
 def test_a_waiting_session_keep_warm_will_nudge_is_covered(wired):
@@ -476,6 +480,121 @@ def test_every_session_the_read_opens_is_closed(wired):
                 ("critic@proj-a", live("x")))
     joined()
     assert [s.closed for s in wired.turns.sessions.values()] == [1, 1, 1]
+
+
+# -- coverable -------------------------------------------------------------------------------
+
+#: The clock record of a watcher that asks keep-warm about the session.
+ASKS = [cachetimers.KEEP_WARM]
+
+
+def pressed(sid, rid="r1"):
+    """The cover a press writes for the launch's session."""
+    conn = store.connect()
+    try:
+        keepwarm.cover_on(conn, store.resolve(conn, sid), sid, turn_number=4,
+                          waits={"kind": "subagents", "count": 1})
+    finally:
+        conn.close()
+
+
+def test_a_waiting_session_made_with_keep_warm_off_is_coverable_at_the_subagent_cap(wired):
+    sid = seeded()
+    wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
+    wired.cache = Cache([sid], asks=ASKS)
+    got = joined()
+    assert got["waits"] == {"kind": "subagents", "count": 1}
+    assert got["covered"] is False and got["coverable"] == {"cap": 3}
+
+
+def test_once_pressed_it_is_covered_and_not_coverable(wired):
+    sid = seeded()
+    wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
+    wired.cache = Cache([sid], asks=ASKS)
+    pressed(sid)
+    got = joined()
+    assert got["covered"] is True and got["coverable"] is None
+
+
+def test_a_director_is_coverable_at_the_director_cap_and_covered_once_pressed(wired):
+    sid, _ = agents_case(wired, ("coder@proj-a", live("x", turn_open=True)))
+    wired.cache = Cache([sid], asks=ASKS)
+    got = joined()
+    assert got["waits"] == {"kind": "agents", "count": 1}
+    assert got["covered"] is False and got["coverable"] == {"cap": 10}
+    pressed(sid)
+    got = joined()
+    assert got["covered"] is True and got["coverable"] is None
+
+
+def test_a_record_whose_asks_lacks_the_subscription_gives_neither_with_keep_warm_on(wired):
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
+    wired.cache = Cache([sid], asks=[])
+    got = joined()
+    assert got["waits"] == {"kind": "subagents", "count": 1}
+    assert got["covered"] is False and got["coverable"] is None
+
+
+@pytest.mark.parametrize("change", ["no waits", "own turn open", "draft", "no cache",
+                                    "keep warm on"])
+def test_coverable_is_null_outside_an_uncovered_wait_a_press_would_cover(wired, change):
+    values = {"keep_warm": "on"} if change == "keep warm on" else None
+    sid = seeded(values=values)
+    entries = [] if change == "no waits" else [agent("a1")]
+    wired.turns = Turns({sid: live(sid, entries=entries, turn_open=change == "own turn open",
+                                   draft=change == "draft")})
+    wired.cache = None if change == "no cache" else Cache([sid], asks=ASKS)
+    got = joined()
+    assert got["coverable"] is None
+    assert got["covered"] is (change == "keep warm on")
+
+
+def joined_with(wired, monkeypatch, found: waits.Directed, *, cover: bool = False) -> dict:
+    """A director with no subagent whose directed join reports `found`; under cover when
+    `cover`."""
+    sid, _ = agents_case(wired, ("coder@proj-a", live("x", turn_open=True)))
+    wired.cache = Cache([sid], asks=ASKS)
+    monkeypatch.setattr(waits, "directed", lambda reads, session_id: found)
+    if cover:
+        pressed(sid)
+    return joined()
+
+
+def test_a_join_that_raised_gives_no_waits_and_no_coverable_though_agents_were_found(
+        wired, monkeypatch):
+    got = joined_with(wired, monkeypatch, waits.Directed(("coder@proj-a",), raised=True))
+    assert got["waits"] is None and got["coverable"] is None and got["covered"] is False
+
+
+def test_a_join_with_an_agent_turns_could_not_list_counts_the_others(wired, monkeypatch):
+    got = joined_with(wired, monkeypatch, waits.Directed(("coder@proj-a",), unlisted=True))
+    assert got["waits"] == {"kind": "agents", "count": 1}
+    assert got["covered"] is False and got["coverable"] == {"cap": 10}
+
+
+def test_a_join_that_found_nobody_on_a_list_not_read_whole_is_not_coverable(wired,
+                                                                            monkeypatch):
+    got = joined_with(wired, monkeypatch, waits.Directed(unlisted=True))
+    assert got["waits"] is None and got["coverable"] is None and got["covered"] is False
+
+
+def test_a_join_that_met_the_deadline_publishes_nothing(wired, monkeypatch):
+    agents_case(wired, ("coder@proj-a", live("x", turn_open=True)))
+    monkeypatch.setattr(waits, "directed",
+                        lambda reads, session_id: waits.Directed(late=True))
+    assert one_pass().kept == {}
+
+
+@pytest.mark.parametrize("found, covered", [
+    (waits.Directed(("coder@proj-a",)), True),
+    (waits.Directed(("coder@proj-a",), unlisted=True), True),
+    (waits.Directed(), False),
+    (waits.Directed(unlisted=True), False),
+])
+def test_under_cover_the_directed_join_decides_covered(wired, monkeypatch, found, covered):
+    got = joined_with(wired, monkeypatch, found, cover=True)
+    assert got["covered"] is covered and got["coverable"] is None
 
 
 # -- the fake turns' script ------------------------------------------------------------------

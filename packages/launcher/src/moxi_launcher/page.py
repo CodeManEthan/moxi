@@ -289,12 +289,16 @@ WAITS = _table(nullable=True, kind=_text(), count=Out("int"))
 #: or null) and its first line, which the gateway cuts.
 ACTIVITY = _table(nullable=True, at=_text(), by=_text(nullable=True),
                   text=_text(nullable=True, mark="redact"))
-#: One launch running now. `started_at` is when its row was written. `cache`, `waits`
-#: and `activity` are null and `covered` false while nothing was read of them.
+#: Whether a press of `Keep warm` would cover a running launch that waits and is not
+#: covered: `cap`, the most nudges in a row it would send for the case it would nudge for.
+#: Null where it would not.
+COVERABLE = _table(nullable=True, cap=Out("int"))
+#: One launch running now. `started_at` is when its row was written. `cache`, `waits`,
+#: `coverable` and `activity` are null and `covered` false while nothing was read of them.
 RUNNING_LAUNCH = _table(
     request_id=_text(), harness=_text(), session_id=_text(nullable=True), name=_text(),
     identity=_text(nullable=True), where=WHERE, started_at=_text(), cache=CACHE,
-    waits=WAITS, covered=Out("bool"), activity=ACTIVITY,
+    waits=WAITS, covered=Out("bool"), coverable=COVERABLE, activity=ACTIVITY,
 )
 #: The launches running now, newest first: `count` of them, every one in `sessions`.
 RUNNING = {**STANDING, "count": Out("int"), "sessions": Out("list", items=RUNNING_LAUNCH)}
@@ -468,9 +472,9 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["ACTED", "ACTIVITY", "CACHE", "CATALOG", "FIELD", "FORM", "FORM_MODE", "FORM_ROW",
-           "HANDED", "LAST", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX", "NAME",
-           "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW",
+__all__ = ["ACTED", "ACTIVITY", "CACHE", "CATALOG", "COVERABLE", "FIELD", "FORM", "FORM_MODE",
+           "FORM_ROW", "HANDED", "LAST", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
+           "NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW",
            "PROBLEM", "RECENT", "RECENTS", "RECENT_LAUNCH", "RECENT_REQUEST", "RECENT_SHOWS",
            "REFUSAL", "REQUEST", "RUN", "RUNNING", "RUNNING_LAUNCH", "RUNS", "RUN_EVENT",
            "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE", "TARGETS",
