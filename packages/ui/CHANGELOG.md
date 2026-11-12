@@ -8,6 +8,18 @@
   its hold waited for, and `pair_page(context, shell, *, passkey=False)`, which pairs a
   browser context through a `PhoneBridge` and gives its page on the signed-in shell
   document. `free_port`, `hold_port` and `wait_hold` come with them.
+- Keyboard order follows what is seen. Home puts its rows in the document in the order
+  shown, so Tab reaches a risen row before the rows under it; a row that moves takes its
+  component along, which gets one `disconnectedCallback` and one `connectedCallback` and
+  is not placed again, and an element inside a row that held the focus keeps it. A row
+  component must hold up under that move and not report `null` on the way
+  (`docs/home.md`, "Order").
+- With the band of pages open, Tab goes from the page-name button to the band's first
+  name and from its last name to `Settings`; from `Settings`, or from the last name where
+  `Settings` is hidden, the band closes and Tab goes on into the page. Shift+Tab walks
+  back the same way. With the band closed Tab is the browser's own.
+- Health's `Check again` hands the focus to `Checking…` while the run lasts and takes it
+  back when the run ends.
 - Home moves its column aside for a main piece's side panel. The piece dispatches a
   bubbling, composed `moxi-home-side` event with `detail: {width}`, the width in px of a
   panel it draws fixed to the window's right edge, and from 1100 px of window Home puts

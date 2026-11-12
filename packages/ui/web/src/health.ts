@@ -4,6 +4,9 @@
 // place: then it lists only the checks that fail or warn, each with its fix, and a foot
 // with the way to the full list and `Check again`.
 //
+// A `Check again` that held the focus hands it to `Checking…` while the run lasts and
+// takes it back when the run ends, so the focus stays in the row when the row moves.
+//
 // It asks the shell for the kept run each time it is connected and each time the document
 // is shown again; that read is what starts a new run when the kept one is old. On the
 // phone it shows no detail, no fix and no act: the gateway cuts those texts, and a run is
@@ -58,6 +61,8 @@ export class HealthRow extends LitElement {
   asking = false;
   copied: string | null = null;
   #stop: (() => void) | null = null;
+  /** True from a `Check again` that held the focus until it holds it again. */
+  #keepFocus = false;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #shown = (): void => {
     if (document.visibilityState === "visible") void this.#read();
@@ -99,10 +104,23 @@ export class HealthRow extends LitElement {
   }
 
   async #again(): Promise<void> {
+    this.#keepFocus = (this.renderRoot as ShadowRoot).activeElement?.matches(".act") === true;
     this.asking = true;
     const answer = await api("ui", "api/checks/run", {});
     this.asking = false;
     if (answer.status === 200) this.#take(answer.data);
+  }
+
+  /** Moves a focus kept from `Check again` to what stands in its place, while nothing
+   * else took it meanwhile. */
+  protected updated(): void {
+    if (!this.#keepFocus) return;
+    const root = this.renderRoot as ShadowRoot;
+    const next = root.querySelector<HTMLElement>(".foot .act, .foot [role=status]");
+    const lost = root.activeElement === null
+      && (document.activeElement === null || document.activeElement === document.body);
+    if (next !== null && lost) next.focus();
+    if (next === null || root.activeElement !== next || next.matches(".act")) this.#keepFocus = false;
   }
 
   async #copy(text: string): Promise<void> {
@@ -131,7 +149,7 @@ export class HealthRow extends LitElement {
         <span><a href="/m/ui/modules" @click=${this.#modules}>All checks on Modules</a></span>
         <span>${foot.map((text, at) => html`${at ? html`<span class="sep">·</span>` : nothing}${text}`)}${desk
           ? html`${foot.length ? html`<span class="sep">·</span>` : nothing}${busy
-            ? html`<span role="status">Checking…</span>`
+            ? html`<span role="status" tabindex="-1">Checking…</span>`
             : html`<button type="button" class="act" @click=${() => this.#again()}>Check again</button>`}`
           : nothing}</span>
       </div>`;
