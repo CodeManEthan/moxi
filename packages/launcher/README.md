@@ -327,6 +327,34 @@ A hold stays open until it is released, across a relaunch or a resume of the ses
 Keep-warm and recycle on expiry are offered where cache can read a session's
 environment: Linux and WSL2 (macOS untested), for Claude Code sessions.
 
+**Cover.** A session launched without `--keep-warm on` can still be kept warm once it
+runs: `Keep warm` on Home's Sessions row (see "The page") puts it under cover. Cover
+belongs to one launch and the session id it has now: a `/clear` gives the session a new
+id, and a relaunch or a resume is a new launch, so each starts without it. A covered
+session is nudged while its subagents run, as a session launched with `--keep-warm on`
+is, and also while agents it directs through comms are at work: an agent whose turn is
+open, or whose closed turn waits on subagents of its own. Those nudges use
+`keep_warm.directing_texts`, name the agents and stop at `keep_warm.director_cap`.
+Under cover the count in a row starts at the press. Holds belong to the launch value
+alone: a launch with cover alone takes no holds, and a hold left open in its chain does
+not keep it warm. `moxi launcher show` reads a covered session as keep-warm on.
+
+Cover lasts until a keep-warm ask reads the session's own subagents and its directed
+agents in full and finds nobody at work. Asks come only near the end of a cache
+lifetime, so a session that goes back to work and then waits again is still covered. A
+director that takes a turn at each report starts its count in a row again each time, so
+pressing on a director is close to having launched it with `--keep-warm on`. If comms or
+turns can't be read, the cover is kept. There is no off short of a `/clear`, a relaunch
+or ending the session.
+
+**What keep-warm costs.** Each nudge is a turn: the session reads its whole cached
+context and writes a short reply. It comes about once per cache lifetime while the
+session waits (every 45 to 54 minutes on an hour lifetime), up to the cap in a row.
+cache's timer asks about every Claude session the launcher started, shortly before its
+cache would go cold: at most 5 short `moxi-launcher-job keep-warm` runs per idle
+stretch, each ending at its read of the launch log when the launch is neither on nor
+covered.
+
 **State.** `moxi launcher show [SESSION_ID]` shows a launched session's relaunch,
 recycle and keep-warm state (this session's when none is named). It reads red, with
 `failed` or `blocked` and why, when the latest run on the launch failed or was blocked
@@ -422,6 +450,23 @@ where it runs and its cache, with no time, no message and no `Open`. The row rea
 `GET /api/running` and follows the stream's topic `running`; that route is the one the
 phone's gateway reaches, and it sends no path: a launch's folder goes by its name alone.
 
+**Keep warm on the row.** Opened at the desk, a session that waits with nothing keeping
+it warm (one of those that come first) has `Keep warm` before `Open` when a press would
+keep it warm. Hover it for the cost: it sends a short turn before each cold time while the
+session waits, at most the cap in a row (see "Acting on launched sessions" for what a
+turn costs and how long cover lasts). A press sends nothing at once. It records cover,
+and cache's timer's next ask sends the first nudge. The row then reads `kept warm while
+1 subagent runs` (or `n agents work`) with `Open` alone, moves down to its place, and
+the focus goes to its `Open`. The button isn't offered on a Codex or headless session,
+on a cache too close to cold for an ask to come, with text typed in the prompt box,
+after an ask that failed since the session's last request, or while cache's watcher
+doesn't yet ask about the session (see "Upgrading"). If the launcher refuses a press,
+the reason shows under the row until the row next changes, and the button comes back
+after 20 seconds. The phone shows the same rows without the button. The press is `POST
+/api/keep-warm`, which answers `{"refused": null}` once the session is covered, or a
+refusal naming the step that failed. It is desk only: the phone's gateway doesn't reach
+it.
+
 The count and the names come from the launch log and are never more than a few seconds
 behind it. The cache, the latest message and what a session waits on are read by the page
 server apart from them, in a pass over the 24 newest running sessions every 15 seconds and
@@ -437,14 +482,15 @@ and teammates at work, counted as keep-warm counts them; with none, and comms in
 on the agents its comms name directs whose turn is open, or whose turn is closed while
 they wait on subagents of their own (a Claude session's; a Codex session counts only by
 its open turn). Each comms read may take 2 seconds, and once comms' daemon is found down
-the pass asks it nothing more. A waiting session is kept warm when every step of
+the pass asks it nothing more. A waiting session reads `kept warm` when every step of
 keep-warm's next ask that can be read without writing ends in a nudge, with an ask still
-certain to come before its window shuts: keep-warm on, no run open on the launch, cache's
-watcher timing the session, no turn open, a live subagent or an open hold, the run of
-nudges under its cap, nothing typed into the prompt box, and no ask since the session's
-last request that ended without a nudge. Any step it can't read counts against it, so the
-row says `goes cold` whenever a nudge is not certain. These reads write nothing, send
-nothing to a session and never ask slots.
+certain to come before its window shuts: its launch keeps warm (made with `keep_warm` on,
+or under cover), cache's watcher says it asks keep-warm about the session, no run open on
+the launch, no turn open, a live subagent, a directed agent at work under cover or an
+open hold with the launch value, the run of nudges under its cap, nothing typed into the
+prompt box, and no ask since the session's last request that ended without a nudge. Any
+step it can't read counts against it, so the row says `goes cold` whenever a nudge is
+not certain. These reads write nothing, send nothing to a session and never ask slots.
 
 A launch from the page or from the box runs with the shell's environment, so its harness
 must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
@@ -494,9 +540,9 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | Module | With it | Without it |
 |---|---|---|
 | turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
-| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only |
+| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
-| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache on Home's Sessions row | neither row is offered; no session reads as kept warm |
+| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
@@ -560,7 +606,10 @@ Set with `moxi config set launcher <key> <value>`:
   be idle.
 - `keep_warm.subagent_cap` (3) and `keep_warm.director_cap` (10): how many nudges in a row
   each case gets; `keep_warm.subagent_texts` and `keep_warm.director_texts` are their
-  words.
+  words. `keep_warm.director_cap` also caps the nudges for the agents a covered director
+  directs.
+- `keep_warm.directing_texts`: the nudges for a covered director with no open hold, in
+  order, the last repeating; the agents at work are named after each.
 - `records.keep_days` (90): how long ended runs, their events, exits and released holds
   are kept.
 - `name.template` (`<project>-<model>-<date:mmm-dd hh:mm>`) and `name.templates` (empty):
@@ -587,6 +636,17 @@ second adds the launcher beside it, runs its setup and offers each module under
 Optional links as an extra (`--with turns,comms`, say, answers ahead). The repository's
 README, at [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi`
 command and lists the other modules.
+
+## Upgrading
+
+After upgrading to this version, restart cache's watcher so it asks about running
+sessions: `moxi services restart cache/watch` with services installed, or stop `moxi
+cache watch` and start it again. It is harmless where the upgrade already restarted it,
+and the asks it started keep running. Until it restarts, `Keep warm` is not offered for
+a running session; a session launched with `--keep-warm on` is kept warm as before.
+`moxi doctor`'s row `keep-warm.timer` warns while the restart is still needed and a
+launched session is there to read it by. If it says moxi-cache is older than 0.1.6,
+upgrade moxi-cache first: a restart alone doesn't help.
 
 ## License
 
