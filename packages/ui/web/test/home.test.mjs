@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { anyNeeds, readReport, readSide, rowMode, rowOpen, shownRows, SIDE_FROM_PX, sideMargin } from "../src/home-model.ts";
+import { anyNeeds, inOrder, readReport, readSide, rowMode, rowOpen, shownRows, SIDE_FROM_PX, sideMargin } from "../src/home-model.ts";
 
 const entry = (key, order, detail) => ({ key, order, report: readReport(detail) });
 const keys = (entries) => shownRows(entries).map((item) => item.key);
@@ -45,6 +45,22 @@ test("a row that needs the user sits above every row that does not, lower needs 
   assert.deepEqual(keys(rows), ["blocked", "broken-early", "broken-late", "runs-out", "quiet"]);
   assert.equal(anyNeeds(rows), true);
   assert.equal(anyNeeds([entry("quiet", 100, said(0)), entry("silent", 50, null)]), false);
+});
+
+test("the document order is the order seen: the shown rows as they show, then the silent ones in place", () => {
+  const said = (needs) => ({ parts: [{ text: "x" }], needs });
+  const rows = [entry("silent-early", 50, null), entry("quiet", 100, said(0)), entry("silent-late", 500, null),
+                entry("waits", 200, said(20)), entry("broken", 900, said(30))];
+  const order = (entries) => inOrder(entries).map((item) => item.key);
+  assert.deepEqual(order(rows), ["waits", "broken", "quiet", "silent-early", "silent-late"]);
+  // The same objects, each once, so a renderer keyed on them moves elements and makes none.
+  assert.equal(new Set(inOrder(rows)).size, rows.length);
+  for (const item of inOrder(rows)) assert.ok(rows.includes(item));
+  // A row that stops needing the user goes back to its fixed place; one that goes silent drops below.
+  rows[3].report = readReport(said(0));
+  rows[4].report = null;
+  assert.deepEqual(order(rows), ["quiet", "waits", "silent-early", "silent-late", "broken"]);
+  assert.deepEqual(order([]), []);
 });
 
 test("a row without opens is a link, one with opens a toggle, one held open neither", () => {

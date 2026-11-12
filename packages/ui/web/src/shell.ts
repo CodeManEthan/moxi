@@ -99,6 +99,33 @@ export function pageName(at: { module: string; route: string } | null, modules: 
   return modules.find((item) => item.name === at.module)?.page?.title ?? null;
 }
 
+/** Where the focus is when Tab is pressed with the band open: the page-name button,
+ * `Settings`, the band's name at that index, or elsewhere (null). */
+export type TabFrom = "button" | "settings" | number | null;
+
+/** What the shell does with that Tab: focus the band's first or last name, the button or
+ * `Settings`; close the band and leave the Tab to the browser; or nothing (null). */
+export type TabMove = "first" | "last" | "button" | "settings" | "close" | null;
+
+/**
+ * Keeps Tab with the open band in the order it is seen, the band's `names` names between
+ * the page-name button and `Settings` (`back` for Shift+Tab). From the band's last name
+ * Tab goes to `Settings`, or with `Settings` hidden closes the band; from `Settings` it
+ * closes the band. Either close lets the browser's Tab go on into the page past the
+ * hidden names.
+ */
+export function bandTab(from: TabFrom, names: number, back: boolean, settingsShown: boolean): TabMove {
+  if (names === 0) return null;
+  if (back) {
+    if (from === "settings") return "last";
+    return from === 0 ? "button" : null;
+  }
+  if (from === "button") return "first";
+  if (from === "settings") return "close";
+  if (from === names - 1) return settingsShown ? "settings" : "close";
+  return null;
+}
+
 /** What a panel load came to: the element placed, or the error panel to show; null when
  * another load began meanwhile. */
 export type PanelLoad = { placed: Element } | { error: Named } | null;
@@ -261,7 +288,8 @@ export function boot(deps: ShellDeps): void {
   });
   button.addEventListener("click", () => setOpen(!isOpen()));
   // The open band closes on Escape, which hands the focus back to its button, and on a
-  // click or a focus that lands outside the top line and the band.
+  // click or a focus that lands outside the top line and the band. Tab walks it in the
+  // order it is seen (`bandTab`).
   const outside = (event: Event): void => {
     const target = event.target as Node | null;
     if (isOpen() && target !== null && !top.contains(target) && !band.contains(target)) setOpen(false);
@@ -269,9 +297,25 @@ export function boot(deps: ShellDeps): void {
   document.addEventListener("click", outside);
   document.addEventListener("focusin", outside);
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !isOpen()) return;
-    setOpen(false);
-    button.focus();
+    if (!isOpen()) return;
+    if (event.key === "Escape") {
+      setOpen(false);
+      button.focus();
+      return;
+    }
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    const names = [...band.querySelectorAll<HTMLAnchorElement>("a")];
+    const on = document.activeElement;
+    const at = names.indexOf(on as HTMLAnchorElement);
+    const from: TabFrom = on === button ? "button" : on === settings ? "settings" : at >= 0 ? at : null;
+    const move = bandTab(from, names.length, event.shiftKey, !settings.hidden);
+    if (move === null) return;
+    if (move === "close") {
+      setOpen(false);
+      return;
+    }
+    event.preventDefault();
+    ({ first: names[0], last: names[names.length - 1], button, settings })[move].focus();
   });
   addEventListener("popstate", go);
   deps.setNavigator(go);

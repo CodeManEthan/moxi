@@ -176,14 +176,60 @@ def test_the_band_opens_the_fixture_panel_in_the_same_document_and_back_returns(
     assert ui_page.evaluate("window.__sameDocument") is True
 
 
+_IN_PANEL = """() => {
+  let at = document.activeElement;
+  const inside = document.querySelector("#moxi-panel").contains(at);
+  while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
+  return inside && at !== document.body;
+}"""
+
+
+def test_tab_walks_the_open_band_in_the_order_it_is_seen(ui_page):
+    button, band = _button(ui_page), _band(ui_page)
+    settings = ui_page.locator("#moxi-settings")
+    names = band.locator("a")
+    button.focus()
+    ui_page.keyboard.press("Enter")
+    expect(band).to_be_visible()
+    # From the button to the band's first name, and from its last to Settings.
+    ui_page.keyboard.press("Tab")
+    expect(names.first).to_be_focused()
+    names.last.focus()
+    ui_page.keyboard.press("Tab")
+    expect(settings).to_be_focused()
+    expect(band).to_be_visible()
+    # Shift+Tab walks back the same way.
+    ui_page.keyboard.press("Shift+Tab")
+    expect(names.last).to_be_focused()
+    names.first.focus()
+    ui_page.keyboard.press("Shift+Tab")
+    expect(button).to_be_focused()
+    expect(band).to_be_visible()
+    ui_page.keyboard.press("Tab")
+    expect(names.first).to_be_focused()
+    settings.focus()
+    ui_page.keyboard.press("Shift+Tab")
+    expect(names.last).to_be_focused()
+    # From Settings the band closes and Tab goes on into the page, past the hidden names.
+    settings.focus()
+    ui_page.keyboard.press("Tab")
+    expect(band).to_be_hidden()
+    expect(button).to_have_attribute("aria-expanded", "false")
+    assert ui_page.evaluate(_IN_PANEL)
+    # With the band closed, Tab and Shift+Tab are the browser's own.
+    button.focus()
+    ui_page.keyboard.press("Tab")
+    expect(settings).to_be_focused()
+    ui_page.keyboard.press("Shift+Tab")
+    expect(button).to_be_focused()
+    expect(band).to_be_hidden()
+
+
 def test_the_band_closes_on_escape_on_a_click_outside_and_when_the_focus_leaves(ui_page):
     button, band = _button(ui_page), _band(ui_page)
     button.focus()
     ui_page.keyboard.press("Enter")
     expect(band).to_be_visible()
-    # Tab reaches Settings, then the band's names in order.
-    ui_page.keyboard.press("Tab")
-    expect(ui_page.locator("#moxi-settings")).to_be_focused()
     ui_page.keyboard.press("Tab")
     expect(band.locator("a").first).to_be_focused()
     ui_page.keyboard.press("Escape")
@@ -200,10 +246,12 @@ def test_the_band_closes_on_escape_on_a_click_outside_and_when_the_focus_leaves(
     expect(band).to_be_visible()
     ui_page.locator("#moxi-panel").click(position={"x": 5, "y": 300})
     expect(band).to_be_hidden()
-    # The focus moving on into the page.
+    # The focus moving on into the page: the panel is made focusable to take it, since
+    # what the page holds depends on the modules installed here.
     button.click()
     band.locator("a").last.focus()
-    ui_page.keyboard.press("Tab")
+    ui_page.locator("#moxi-panel").evaluate("(node) => node.tabIndex = -1")
+    ui_page.locator("#moxi-panel").focus()
     expect(band).to_be_hidden()
     # A name picked from the keyboard.
     button.focus()

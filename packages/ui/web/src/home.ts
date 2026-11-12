@@ -26,7 +26,7 @@ import type { PropertyValues } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { components, gateway, installed, navigate, place, subscribe } from "/m/ui/client.js";
 
-import { anyNeeds, readReport, readSide, rowMode, rowOpen, shownRows, SIDE_FROM_PX, sideMargin } from "./home-model.ts";
+import { anyNeeds, inOrder, readReport, readSide, rowMode, rowOpen, shownRows, SIDE_FROM_PX, sideMargin } from "./home-model.ts";
 import type { RowReport } from "./home-model.ts";
 import { placeOnceMore, scriptFailure } from "./place-model.ts";
 import { homeRows, mainPiece } from "./views.ts";
@@ -64,6 +64,13 @@ async function seat(host: Element, piece: { module: string; name: string }, curr
                                    async () => (url === "" ? "no script" : await scriptFailure(piece.module, url)),
                                    current);
   return load !== null && "placed" in load;
+}
+
+/** The element that holds the focus under `root`, followed through each shadow root. */
+function deepFocus(root: DocumentOrShadowRoot): Element | null {
+  let at = root.activeElement;
+  while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
+  return at;
 }
 
 export class UiHome extends LitElement {
@@ -120,6 +127,8 @@ export class UiHome extends LitElement {
   #stop: (() => void) | null = null;
   /** The piece in the spot whose side panel the column stands beside. */
   #sider: Node | null = null;
+  /** The element inside the rows that held the focus when this update began. */
+  #focused: HTMLElement | null = null;
 
   constructor() {
     super();
@@ -147,19 +156,28 @@ export class UiHome extends LitElement {
   }
 
   protected willUpdate(changed: PropertyValues): void {
+    this.#focused = this.#focusInRows();
     if (!changed.has("modules") || this.modules === null) return;
     this.#seatRows(homeRows(this.modules).filter((row) => installed(row.module)));
     if (!gateway()) void this.#seatMain(mainPiece(this.modules.filter((mod) => installed(mod.name))));
   }
 
-  /** Puts the shown rows in their order on the page. The entries stay where they are in
-   * the document, so no component is taken out and placed again when a row rises; the
-   * page's policy allows no style attribute, so the order is set on the style object. */
+  /** A row that moves takes its element out of the document and back, which drops the
+   * focus from anything inside it; the element that held it gets it back. */
   protected updated(): void {
-    const place = new Map(shownRows(this.rows).map((row, at) => [row.key, at]));
-    for (const entry of this.renderRoot.querySelectorAll<HTMLElement>(".entry")) {
-      entry.style.order = String(place.get(entry.dataset.row ?? "") ?? 0);
-    }
+    const kept = this.#focused;
+    this.#focused = null;
+    if (kept !== null && kept.isConnected && deepFocus(document) !== kept) kept.focus();
+  }
+
+  /** The element that holds the focus, followed through each shadow root, when it is
+   * inside the rows. */
+  #focusInRows(): HTMLElement | null {
+    const root = this.renderRoot as ShadowRoot;
+    const mine = root.activeElement;
+    if (mine === null || !root.querySelector(".rows")?.contains(mine)) return null;
+    const deepest = deepFocus(root);
+    return deepest instanceof HTMLElement ? deepest : null;
   }
 
   /** Keeps a row for every row component the modules list names, each placed once. */
@@ -235,7 +253,7 @@ export class UiHome extends LitElement {
       ${phone ? nothing : html`<section class="spot">${this.#spot}${this.main === null && !this.loading && !anyNeeds(this.rows)
         ? html`<p class="quiet">Nothing needs you.</p>` : nothing}</section>`}
       <nav class=${phone ? "rows phone" : "rows"} aria-label="Now" ?hidden=${shown.length === 0}>
-        ${repeat(this.rows, (row) => row.key, (row) => html`<div
+        ${repeat(inOrder(this.rows), (row) => row.key, (row) => html`<div
           class=${rowOpen(row.report, row.clicked) ? "entry open" : "entry"} data-row=${row.key}
           ?hidden=${row.report === null}>
           ${row.report === null ? nothing : this.#line(row, row.report)}${row.host}</div>`)}
