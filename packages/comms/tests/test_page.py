@@ -172,7 +172,7 @@ def test_the_page_declares_three_reads_and_only_the_mail_is_the_gateways():
     assert [path for path, r in routes.items() if r["gateway"]] == ["/api/mail"]
     assert not routes["/api/mail"]["query"] and not routes["/api/mail"]["stream"]
     assert routes["/api/events"]["stream"] and list(routes["/api/events"]["topics"]) == ["roster"]
-    assert exported["assets"] == ["build-stamp.txt", "page.js", "roster.js"]
+    assert exported["assets"] == ["build-stamp.txt", "mail.js", "page.js", "roster.js"]
     assert exported["budget"] == {"rss": "120M", "fds": 64}
     assert page.PAGE.idle_s == 300 and page.PAGE.health is None
 
@@ -604,7 +604,7 @@ def test_the_announcement_names_the_page_and_its_components():
     assert module.PAGE == "moxi_comms.page:PAGE"
     assert module.OPTIONAL["ui"] == ("The comms panel and its roster of agents in the "
                                      "browser UI shell.")
-    assert set(module.COMPONENTS) == {"page", "roster"}
+    assert set(module.COMPONENTS) == {"page", "roster", "mail"}
     assert module.COMPONENTS["roster"] == {
         "script": "roster.js", "title": "Agents", "contract": 1, "place": "block",
         "home": True, "doc": "Names held by live sessions, and standing names"}
@@ -612,7 +612,19 @@ def test_the_announcement_names_the_page_and_its_components():
     modules.reset()
     found = modules.load("comms", interface=2)
     assert found.ok and found.page == module.PAGE
-    assert set(found.components) == {"page", "roster"}
+    assert set(found.components) == {"page", "roster", "mail"}
+
+
+def test_the_mail_row_is_a_link_row_on_home_at_order_200():
+    from moxi_comms import module
+
+    assert module.COMPONENTS["mail"] == {
+        "script": "mail.js", "title": "Comms", "contract": 1, "place": "block",
+        "home": True, "home_as": "row", "order": 200,
+        "doc": "Mail waiting for names no session runs, on one line"}
+    assert "opens" not in module.COMPONENTS["mail"], "the row is a link to the page"
+    built = ROOT / "src" / "moxi_comms" / "web" / "mail.js"
+    assert '"moxi-comms-mail"' in built.read_text()
 
 
 def test_the_page_states_its_group_and_order_among_the_pages():

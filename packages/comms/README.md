@@ -254,6 +254,27 @@ the detail.
 cwd  = "/home/me/src/my-project"
 ```
 
+## In the browser
+
+With Moxi's browser UI shell installed, comms adds a page that lists who can be messaged
+and who waits on whom, and one row on the shell's Home, `Comms`, which is a link to that
+page. The row reads `GET /api/mail` when Home is shown and every 30 s while the window is
+visible. It counts the mail waiting for names no live session holds, since mail for a
+running agent waits on that session, not on you:
+
+| what waits | the row |
+|---|---|
+| one message, for one name | `1 message waiting · curator isn't running`, and `since 14:02` at the right |
+| mail for two or three names | `3 messages waiting · curator and scout aren't running` |
+| mail for more than three | `10 messages waiting · curator, scout and 3 more aren't running` |
+| nothing, or the daemon is down | no row |
+
+The count is set heavy and the row needs you (20 on Home's scale), so it sits above the
+rows that don't. A name is shown without its `@project` unless two names on the row share
+it. The time is the oldest message's: its weekday when it came on an earlier day this
+week, its date before that. The row never shows a message's text. `/api/mail` is the one
+route of comms the phone's gateway serves, so the row shows on the phone too.
+
 ## Security
 
 A name is a claim made by a process running as your user. comms keeps agents from

@@ -96,12 +96,16 @@ HEALTH = {"daemon": "moxi_comms.checks:health"}
 BUDGETS = {"idle_cpu": 0.01, "rss": "150M", "fds": 64}
 #: comms' page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_comms.page:PAGE"
-#: What comms offers the browser UI shell: its panel, and the roster any home view or
-#: page may place.
+#: What comms offers the browser UI shell: its panel, the roster any home view or page
+#: may place, and its row on Home, which says how much mail waits for names no session
+#: holds.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Comms", "contract": 1, "place": "page",
              "group": "daily", "order": 40,
              "doc": "Who can be messaged, and who waits on whom"},
     "roster": {"script": "roster.js", "title": "Agents", "contract": 1, "place": "block",
                "home": True, "doc": "Names held by live sessions, and standing names"},
+    "mail": {"script": "mail.js", "title": "Comms", "contract": 1, "place": "block",
+             "home": True, "home_as": "row", "order": 200,
+             "doc": "Mail waiting for names no session runs, on one line"},
 }

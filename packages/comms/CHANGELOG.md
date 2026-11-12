@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- comms has a row on Home in the browser UI shell, the `mail` component
+  (`<moxi-comms-mail>`, order 200). When mail waits for names no live session holds it
+  says so on one line, `3 messages waiting · curator and scout aren't running`, the count
+  heavy, with `since 14:02` (the oldest message's time, with its weekday or date when it
+  came on an earlier day) at the right, and the row needs the user (20 on Home's scale).
+  Past three names it reads `curator, scout and 3 more aren't running`. With nothing
+  waiting, or the daemon down, there is no row. It reads `/api/mail` when it is shown
+  and every 30 s while the window is visible, and is a link to comms' page. It shows
+  no message text.
 - `moxi_comms.api.roster()` now carries the mail waiting per name: `Roster.waiting`, one
   `Waiting(qualified, count, oldest)` for each name with mail queued, as the daemon's
   `agents` answer holds it (`oldest` in epoch seconds).
