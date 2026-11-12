@@ -246,6 +246,32 @@ def test_a_narrow_line_one_cuts_the_where_then_the_name_and_the_fact_last(ui_pag
     assert row.locator(".l1").evaluate("(node) => node.scrollWidth <= node.clientWidth")
 
 
+def test_a_heavy_fact_stays_whole_while_the_name_and_where_are_cut(ui_page):
+    attrs = {"name": "a-long-session-name-that-will-not-fit", "where": "slot 3 · proj-a",
+             "fact": "goes cold at 19:22", "fact-heavy": "", "lead": "waiting on 2 agents",
+             "lead-heavy": "", "time": "19:09", "rest": "Run the suite."}
+
+    def at(width):
+        _place(ui_page, [("row", attrs, ["Open"], None)], width=width)
+        row = ui_page.locator("#row")
+        return row, row.locator(".name"), row.locator(".where"), row.locator(".fact")
+
+    def wide(locator):
+        return locator.evaluate("(node) => node.getBoundingClientRect().width")
+
+    row, name, where, fact = at(900)
+    assert not _cut(name) and not _cut(where) and not _cut(fact)
+    assert _style(fact, "font-weight") == "600"
+    whole = wide(fact)
+    # Room for the fact and half the name: the where is gone, the name cut, the fact whole
+    # at the right end.
+    row, name, where, fact = at(round(wide(name) / 2 + whole))
+    assert _cut(name) and _cut(where) and not _cut(fact)
+    assert wide(fact) == whole
+    assert abs(fact.evaluate("(node) => node.getBoundingClientRect().right")
+               - row.evaluate("(node) => node.getBoundingClientRect().right")) < 1
+
+
 def _stop(row) -> dict:
     """Where a row's tab stop is: the focus attributes of its lines and of line one."""
     return row.evaluate("""(node) => Object.fromEntries([".head", ".l1"].map((sel) => {

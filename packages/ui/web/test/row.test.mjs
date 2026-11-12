@@ -94,6 +94,13 @@ test("a dot stands between the lead and the rest when there is no time", () => {
                    ["2 subagents", DOT, "08:55", "Found it."]);
 });
 
+test("a heavy lead and a rest that are both set are parted by one dot, as a phone's line two", () => {
+  const row = plan({ name: "planner", lead: "waiting on 2 agents", "lead-heavy": "", rest: "slot 4 · proj-a" });
+  assert.deepEqual(row.two, [
+    { kind: "lead", text: "waiting on 2 agents", strong: true }, dot, { kind: "rest", text: "slot 4 · proj-a" },
+  ]);
+});
+
 test("the time and the rest are one phrase: no dot parts them", () => {
   assert.deepEqual(kinds(plan({ time: "19:07", rest: "The build is smaller now." }).two), ["time", "rest"]);
 });
@@ -162,6 +169,18 @@ test("a row without toggles has no tab stop, open or not", () => {
   assert.equal(plan({ name: "proj-a", rest: "Done." }).stop, null);
   assert.equal(plan({ name: "proj-a", open: "" }).stop, null);
   assert.equal(plan({ rest: "Done.", open: "" }).stop, null);
+});
+
+test("a list row that never sets toggles does not toggle and takes no focus, opened or not", () => {
+  const listed = {
+    name: "planner", where: "slot 3 · proj-a", fact: "goes cold at 19:22", "fact-heavy": "",
+    lead: "waiting on 2 agents", "lead-heavy": "", time: "19:09", "said-by": "you", rest: "Run the suite.",
+  };
+  for (const attrs of [listed, { ...listed, open: "" }]) {
+    const row = plan(attrs);
+    assert.equal(row.toggles, false);
+    assert.equal(row.stop, null);
+  }
 });
 
 test("Enter or Space alone toggles a row; no other key does", () => {
