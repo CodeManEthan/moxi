@@ -16,6 +16,17 @@
   15 seconds and when the running sessions change, on four threads with an 8 second
   bound; what it read last stands for 45 seconds when a read does not finish. The first
   call of `/api/running` waits up to 3 seconds for the first of these reads.
+- Home's Sessions row reads what each running session waits on while its own turn is
+  closed: its subagents at work (with turns), else the agents its comms name directs
+  that work (with comms too), each comms read bounded at 2 seconds and none after the
+  daemon is found down. It reads a waiting session as kept warm only when keep-warm's next
+  ask would nudge it at every step it can read, with an ask still certain to come before
+  the window shuts. The reads write nothing, send nothing and never ask slots.
+- Keep-warm: `keepwarm.signal_of` is the count of the ask's signal on values alone, which
+  the ask and Home's row share, and `keepwarm.would_nudge` reads the ask's steps without
+  writing. The ask does what it did.
+- `target.find(.., slot=False)` finds a launched session without asking slots; the
+  default, which every act uses, still asks.
 - The launcher offers interface 2: `running()` gives the launches running now, newest
   first, each a frozen `Running` with its request id, harness, the session id it was
   last known by, target, slot, project key, folder, name, comms name, start time and

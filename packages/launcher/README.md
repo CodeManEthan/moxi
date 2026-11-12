@@ -423,13 +423,28 @@ where it runs and its cache, with no time, no message and no `Open`. The row rea
 phone's gateway reaches, and it sends no path: a launch's folder goes by its name alone.
 
 The count and the names come from the launch log and are never more than a few seconds
-behind it. The cache and the latest message are read by the page server apart from them,
-for the 24 newest running sessions, every 15 seconds and whenever a session starts, ends
-or changes its id: the cache from cache's own reading of the transcript, the message from
-the transcript's newest turn, read again only when the transcript changed. A read that
-takes longer than 8 seconds is left for the next round, and the session keeps what was
-read before for up to 45 seconds. A slow or missing module never holds up the count. The
-first look after the page server starts waits up to 3 seconds for these reads.
+behind it. The cache, the latest message and what a session waits on are read by the page
+server apart from them, for the 24 newest running sessions, every 15 seconds and whenever
+a session starts, ends or changes its id: the cache from cache's own reading of the
+transcript, the message from the transcript's newest turn, read again only when the
+transcript changed. A read that takes longer than 8 seconds is left for the next round,
+and the session keeps what was read before for up to 45 seconds. A slow or missing module
+never holds up the count. The first look after the page server starts waits up to 3
+seconds for these reads.
+
+A session waits only while its own turn is closed. With turns, it waits on its subagents
+and teammates at work, counted as keep-warm counts them; with none, and comms installed,
+on the agents its comms name directs whose turn is open, or whose turn is closed while
+they wait on subagents of their own (a Claude session's; a Codex session counts only by
+its open turn). Each comms read may take 2 seconds, and once comms' daemon is found down
+the round asks it nothing more. A waiting session is kept warm when every step of
+keep-warm's next ask that can be read without writing ends in a nudge, with an ask still
+certain to come before its window shuts: keep-warm on, no run open on the launch, cache's
+watcher timing the session, no turn open, a live subagent or an open hold, the run of
+nudges under its cap, nothing typed into the prompt box, and no ask since the session's
+last request that ended without a nudge. Any step it can't read counts against it, so the
+row says `goes cold` whenever a nudge is not certain. These reads write nothing, send
+nothing to a session and never ask slots.
 
 A launch from the page or from the box runs with the shell's environment, so its harness
 must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
@@ -478,10 +493,10 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 
 | Module | With it | Without it |
 |---|---|---|
-| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start; every act on a launched session | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm |
-| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only |
+| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
+| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
-| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm | neither row is offered |
+| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache on Home's Sessions row | neither row is offered; no session reads as kept warm |
 | projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |

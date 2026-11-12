@@ -25,6 +25,15 @@ What a pass reads, each only when its module is installed:
   window read again only when the transcript's size or modification time changed since
   the last pass. `at` is when it was written, `by` is `you` for a message the person at
   the prompt sent and `agent` for the model's own, and `text` its first line.
+* `waits` and `covered` (`read_waits`), with turns, only while the launch's own turn is
+  closed. The session is found as an act finds it (`target.find`), but slots is never
+  asked. `waits` counts its live subagents as keep-warm counts them (`keepwarm.signal_of`);
+  with none, and comms installed, the agents its comms name directs that work: comms'
+  `owner`, one `roster` for the pass, `session_of` for each directed agent, then turns'
+  facts of that agent's session. Each comms read may take `COMMS_TIMEOUT_S`, and once one
+  finds the daemon down the pass asks comms nothing more. `covered` is
+  `keepwarm.would_nudge` over what the pass read, and is false without cache. Neither
+  writes anything.
 
 No fact holds the time it was read, so a pass over sessions that did nothing gives the
 same facts as the last one, and the topic publishes nothing.
@@ -43,9 +52,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from moxi import aio, modules
+from moxi import aio, config, modules
 
-from . import api, recycle, store
+from . import api, catalog, first, keepwarm, recycle, settings, store, target
 
 #: Seconds after a pass ended before the next, when the set of running launches and
 #: their session ids did not change before then.
@@ -66,6 +75,8 @@ ACTIVITY_TEXT_CHARS = 200
 UNTIL_SAME_S = 1.0
 #: The cache kinds a launch's `cache` fact is given for.
 CACHE_KINDS = ("warm", "cold")
+#: Seconds each of comms' reads may take.
+COMMS_TIMEOUT_S = 2.0
 
 log = logging.getLogger("moxi.launcher.page")
 
@@ -122,6 +133,23 @@ def sessions_api() -> Any | None:
     return _optional("sessions", 2)
 
 
+def comms_api() -> Any | None:
+    """comms' interface 2, or None when comms is not installed or does not load."""
+    return _optional("comms", 2)
+
+
+def cache_tick_s() -> float | None:
+    """The cache watcher's tick, `watch.tick_s` in cache's settings; None when cache is not
+    installed or its settings can't be read."""
+    if not modules.available("cache"):
+        return None
+    found = modules.load("cache", interface=1)
+    if not found.ok:
+        return None
+    tick = config.load("cache", config.schema_for(found))["watch.tick_s"]
+    return float(tick) if isinstance(tick, (int, float)) else None
+
+
 def _optional(name: str, interface: int) -> Any | None:
     if not modules.available(name):
         return None
@@ -145,21 +173,60 @@ def take(limit: int) -> list[Launch]:
 class Pass:
     """What one pass's workers share: its deadline, the APIs of the modules it reads
     (None for one not installed), the environment the reads resolve roots in, and the
-    joiner whose memory the reads consult."""
+    joiner whose memory the reads consult.
+
+    It also holds what one pass reads once for every launch (`shared`), the clock each
+    launch's cache read gave (`clocks`, by request id, with the time it was read at), and
+    whether comms' daemon was found down, after which the pass asks comms nothing more."""
 
     def __init__(self, joiner: Joiner, *, deadline: float, cache: Any | None,
-                 sessions: Any | None, env: Mapping[str, str]):
+                 sessions: Any | None, env: Mapping[str, str], turns: Any | None = None,
+                 comms: Any | None = None):
         self.joiner = joiner
         self.deadline = deadline
         self.cache = cache
         self.sessions = sessions
+        self.turns = turns
+        self.comms = comms
         self.env = env
+        self.clocks: dict[str, tuple[Any, float]] = {}
+        self.offline = False
+        self._lock = threading.Lock()
+        self._shared: dict[str, tuple[bool, Any]] = {}
 
     def call(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         """`fn(*args, **kwargs)`, or `Late` when the deadline has passed."""
         if self.joiner.clock() >= self.deadline:
             raise Late()
         return fn(*args, **kwargs)
+
+    def comms_call(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """`call` of one of comms' reads, unless an earlier one of the pass found the
+        daemon down: then, and when this one does, comms' `DaemonOffline`."""
+        offline = self.comms.DaemonOffline
+        if self.offline:
+            raise offline("comms' daemon was found down earlier in this pass")
+        try:
+            return self.call(fn, *args, **kwargs)
+        except offline:
+            self.offline = True
+            raise
+
+    def shared(self, name: str, fn: Callable[[], Any]) -> Any:
+        """What `fn()` gives, called once in the pass whichever worker asks first; an
+        exception it raised is raised again to every worker that asks. `Late` is not kept."""
+        with self._lock:
+            if name not in self._shared:
+                try:
+                    self._shared[name] = (True, fn())
+                except Late:
+                    raise
+                except Exception as err:
+                    self._shared[name] = (False, err)
+            ok, value = self._shared[name]
+        if not ok:
+            raise value
+        return value
 
 
 # -- the reads --------------------------------------------------------------------------------
@@ -204,6 +271,7 @@ def read_cache(each: Pass, launch: Launch) -> dict[str, Any]:
     now = time.time()
     clock = each.call(recycle.cache_read, each.cache, launch.row, launch.session_id,
                       each.env, now=now)
+    each.clocks[launch.request_id] = (clock, now)
     kept = each.joiner.until_of(launch.request_id, launch.session_id)
     return {"cache": cache_fact(launch.row.harness, clock, now, kept)}
 
@@ -265,11 +333,137 @@ def read_activity(each: Pass, launch: Launch) -> dict[str, Any]:
     return {"activity": fact}
 
 
+def read_waits(each: Pass, launch: Launch) -> dict[str, Any]:
+    """`waits` and `covered`, while the launch's own turn is closed: the session found as an
+    act finds it but without asking slots, its facts, then its live subagents counted as
+    keep-warm counts them, else the agents it directs that work (`directed_at_work`), and
+    whether keep-warm's next ask would nudge it (`keepwarm.would_nudge`). Nothing without
+    turns; no `waits` and `covered` false for a session not found live, or whose turn is
+    open."""
+    if each.turns is None:
+        return {}
+    with store.reading() as conn:
+        if conn is None:
+            return {}
+        try:
+            found = each.call(target.find, launch.session_id, conn=conn, turns=each.turns,
+                              slot=False)
+        except catalog.Refused:
+            return {"waits": None, "covered": False}
+        try:
+            if not found.live or found.session is None:
+                return {"waits": None, "covered": False}
+            return _waits_and_cover(each, launch, conn, found)
+        finally:
+            found.close()
+
+
+def _waits_and_cover(each: Pass, launch: Launch, conn: Any, found: Any) -> dict[str, Any]:
+    session = found.session
+    sid = found.session_id or launch.session_id
+    facts = each.call(session.facts)
+    if getattr(facts, "turn_open", None) is not False:
+        return {"waits": None, "covered": False}
+    try:
+        listed = each.call(session.agents)
+    except Late:
+        raise
+    except Exception:  # noqa: BLE001  (an unread list counts no subagent)
+        listed = None
+    number = getattr(facts, "turn_number", None)
+    nudges = each.call(keepwarm.run_of_nudges, conn, found.row.request_id,
+                       getattr(facts, "session_id", None) or sid, number)
+    signal = each.call(keepwarm.signal_now, conn, found.row, listed, nudges)
+    waits = None
+    if signal.agents:
+        waits = {"kind": "subagents", "count": len(signal.agents)}
+    elif each.comms is not None:
+        try:
+            count = directed_at_work(each, sid)
+        except Late:
+            raise
+        except Exception as err:  # noqa: BLE001  (comms down or a read failed: no waits)
+            if not isinstance(err, (each.comms.DaemonOffline, each.comms.DaemonError)):
+                _log_once(err, "reading the agents a running launch directs failed")
+            count = 0
+        waits = {"kind": "agents", "count": count} if count else None
+    return {"waits": waits, "covered": _covered(each, launch, conn, found, sid, facts,
+                                                listed)}
+
+
+def directed_at_work(each: Pass, session_id: str) -> int:
+    """How many agents the session's comms name directs are working: its turn open, or,
+    for a Claude session, closed while it waits on subagents of its own. Raises comms'
+    `DaemonOffline` or `DaemonError`, or what a turns read raises."""
+    comms = each.comms
+    owner = each.comms_call(comms.owner, session_id, timeout_s=COMMS_TIMEOUT_S).identity
+    if not owner:
+        return 0
+    roster = each.shared("roster", lambda: each.comms_call(comms.roster,
+                                                           timeout_s=COMMS_TIMEOUT_S))
+    count = 0
+    for agent in roster.bound:
+        if owner not in tuple(agent.directors or ()):
+            continue
+        sid = each.comms_call(comms.session_of, agent.qualified, timeout_s=COMMS_TIMEOUT_S)
+        if sid is None:
+            continue
+        session = each.call(each.turns.find, session_id=sid)
+        if session is None:
+            continue
+        try:
+            facts = each.call(session.facts)
+        finally:
+            session.close()
+        if works(facts, getattr(session, "harness", None)):
+            count += 1
+    return count
+
+
+def works(facts: Any, harness: str | None) -> bool:
+    """Whether a directed agent's session works: its turn is open, or it is a Claude
+    session whose closed turn waits on subagents of its own (`facts.agents` above zero;
+    for Codex that count holds background terminals too, so it is not read)."""
+    if getattr(facts, "turn_open", None) is True:
+        return True
+    if harness == "codex":
+        return False
+    busy = getattr(facts, "agents", None)
+    return isinstance(busy, int) and not isinstance(busy, bool) and busy > 0
+
+
+def proc_gone(job: str) -> bool:
+    """Whether a run's job is gone, asking slots nothing: `job.gone` for a process job,
+    False for any other, so an open run slots runs reads as open."""
+    from . import job as jobs
+
+    return job.startswith("proc:") and jobs.gone(job)
+
+
+def _covered(each: Pass, launch: Launch, conn: Any, found: Any, sid: str, facts: Any,
+             listed: Any | None) -> bool:
+    read = each.clocks.get(launch.request_id)
+    if each.cache is None or read is None:
+        return False
+    clock, now = read
+    try:
+        current = each.shared("settings", settings.current)
+        records = each.shared("records", each.cache.clock_records)
+        tick_s = each.shared("tick", cache_tick_s)
+    except Late:
+        raise
+    except Exception:  # noqa: BLE001  (a step that could not be read is not passed)
+        return False
+    return bool(each.call(keepwarm.would_nudge, conn, found.row, sid, clock, facts, listed,
+                          current, records, gone=proc_gone, now=now, tick_s=tick_s))
+
+
 #: A launch's reads, in the order a worker makes them. Each takes the pass and the launch
 #: and returns the facts it read, a key of `pagehandlers.UNJOINED` each; every call it
 #: makes goes through `Pass.call`. A read that raises (but `Late`) gives nothing for this
 #: pass and the worker goes on to the next.
-READS: tuple[Callable[[Pass, Launch], Mapping[str, Any]], ...] = (read_cache, read_activity)
+READS: tuple[Callable[[Pass, Launch], Mapping[str, Any]], ...] = (
+    read_cache, read_activity, read_waits)
 
 
 def work(each: Pass, launch: Launch) -> dict[str, Any]:
@@ -320,9 +514,9 @@ class Joiner:
         at the latest, and returns when every worker thread has ended."""
         self.passes += 1
         deadline = self.clock() + JOIN_BUDGET_S
-        launches, cache, sessions = await aio.offload(_prepared)
+        launches, cache, sessions, turns, comms = await aio.offload(_prepared)
         each = Pass(self, deadline=deadline, cache=cache, sessions=sessions,
-                    env=dict(os.environ))
+                    env=dict(os.environ), turns=turns, comms=comms)
         pool = ThreadPoolExecutor(max_workers=JOIN_THREADS,
                                   thread_name_prefix="launcher join")
         try:
@@ -374,12 +568,14 @@ class Joiner:
         self.windows = {key: value for key, value in self.windows.items() if key in keys}
 
 
-def _prepared() -> tuple[list[Launch], Any | None, Any | None]:
-    return take(JOIN_MAX), cache_api(), sessions_api()
+def _prepared() -> tuple[list[Launch], Any | None, Any | None, Any | None, Any | None]:
+    return (take(JOIN_MAX), cache_api(), sessions_api(), first.turns_api(quiet=True),
+            comms_api())
 
 
-__all__ = ["ACTIVITY_LIMIT", "ACTIVITY_TEXT_CHARS", "CACHE_KINDS", "JOIN_BUDGET_S",
-           "JOIN_EVERY", "JOIN_KEEP_S", "JOIN_MAX", "JOIN_THREADS", "READS", "UNTIL_SAME_S",
-           "Joiner", "Kept", "Late", "Launch", "Pass", "activity_of", "cache_api",
-           "cache_fact", "read_activity", "read_cache", "sessions_api", "take",
-           "transcripts_root", "work"]
+__all__ = ["ACTIVITY_LIMIT", "ACTIVITY_TEXT_CHARS", "CACHE_KINDS", "COMMS_TIMEOUT_S",
+           "JOIN_BUDGET_S", "JOIN_EVERY", "JOIN_KEEP_S", "JOIN_MAX", "JOIN_THREADS", "READS",
+           "UNTIL_SAME_S", "Joiner", "Kept", "Late", "Launch", "Pass", "activity_of",
+           "cache_api", "cache_fact", "cache_tick_s", "comms_api", "directed_at_work",
+           "proc_gone", "read_activity", "read_cache", "read_waits", "sessions_api", "take",
+           "transcripts_root", "work", "works"]
