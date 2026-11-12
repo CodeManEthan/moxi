@@ -31,7 +31,9 @@
     POST /api/launch    the launch a ticket was issued for, run as a detached job (202)
     POST /api/resume    a past session resumed: a slot one as a detached job (202), a
                         terminal one answered with the command to copy
-    GET  /api/events    the stream; topics `sessions` and `launches`
+    GET  /api/running   the launches running now, as Home's Sessions row reads them; the
+                        one route the gateway reaches
+    GET  /api/events    the stream; topics `sessions`, `launches` and `running`
 
 **The page server only translates requests.** Every key a body may carry and every key an
 answer sends is declared here at every depth, so loopback refuses an undeclared key coming
@@ -46,11 +48,14 @@ preview's argv and first turn may hold the brief, and are marked `redact`, and p
 marked `path`. `/api/last` and `/api/recent` hand back values an earlier launch was asked
 with, and `/api/recents` and `/api/recent` the start of its brief and the brief, each
 marked `redact`; none of the three is open to the gateway. The launch log's own routes
-carry no recorded value and no brief.
+carry no recorded value and no brief. `/api/running` is the gateway's, so the phone's Home
+can read it: it sends no path (a launch's folder goes as its last segment, a name) and
+marks the text of a session's latest message `redact`.
 
 The page's assets are what the repository's web build writes from `packages/launcher/web/`
-into this package's `web/` folder: the panel and the three components the announcement
-declares (`page.js`, `prompt.js`, `sessions.js`, `state.js`), committed with their sources.
+into this package's `web/` folder: the panel and the four components the announcement
+declares (`page.js`, `prompt.js`, `running.js`, `sessions.js`, `state.js`), committed
+with their sources.
 
 The browser UI shell starts the page server on the first request for the launcher's page,
 and loopback stops it when it has been idle. Only that server and loopback's export command
@@ -269,6 +274,31 @@ RUN = _table(
 )
 RUNS = {**STANDING, "runs": Out("list", items=RUN)}
 
+#: Where a running launch runs: its target, its slot, its project's key, and `folder`, the
+#: last segment of its directory, a name and never a path.
+WHERE = _table(target=_text(), slot=_text(nullable=True), project_key=_text(nullable=True),
+               folder=_text())
+#: A running launch's cache: `state` is `warm` or `cold`, `until` when a warm cache goes
+#: cold, and `estimated` whether that time rests on a lifetime no request named.
+CACHE = _table(nullable=True, state=_text(), until=_text(nullable=True),
+               estimated=Out("bool"))
+#: What a running launch waits on while its own turn is closed: `kind` is `agents` or
+#: `subagents`, `count` how many of them work.
+WAITS = _table(nullable=True, kind=_text(), count=Out("int"))
+#: The latest message in a running launch's session: when, who said it (`you`, `agent`
+#: or null) and its first line, which the gateway cuts.
+ACTIVITY = _table(nullable=True, at=_text(), by=_text(nullable=True),
+                  text=_text(nullable=True, mark="redact"))
+#: One launch running now. `started_at` is when its row was written. `cache`, `waits`
+#: and `activity` are null and `covered` false while nothing was read of them.
+RUNNING_LAUNCH = _table(
+    request_id=_text(), harness=_text(), session_id=_text(nullable=True), name=_text(),
+    identity=_text(nullable=True), where=WHERE, started_at=_text(), cache=CACHE,
+    waits=WAITS, covered=Out("bool"), activity=ACTIVITY,
+)
+#: The launches running now, newest first: `count` of them, every one in `sessions`.
+RUNNING = {**STANDING, "count": Out("int"), "sessions": Out("list", items=RUNNING_LAUNCH)}
+
 #: One place the user launched in: a project's key, or null for a folder, with the folder
 #: and the time of the newest launch there.
 PLACE = _table(project_key=_text(nullable=True), cwd=_text(mark="path"), at=_text())
@@ -426,17 +456,22 @@ PAGE = lb.Page(
                  body={"session": Field("string", max=QUERY_MAX),
                        "slot": Field("string", required=False, max=QUERY_MAX)},
                  returns={**ACTED, "command": _text(nullable=True)}),
+        lb.Route("/api/running", "read", _target("read_running"), returns=RUNNING,
+                 gateway=True),
         lb.Route("/api/events", "read", _target("events"), stream=True,
                  topics={"sessions": _table(**STANDING,
                                             sessions=Out("list", items=SESSION_STATE)),
                          "launches": _table(**STANDING,
-                                            launches=Out("list", items=LAUNCH))}),
+                                            launches=Out("list", items=LAUNCH)),
+                         "running": _table(**RUNNING)}),
     ),
     assets="web",
 )
 
-__all__ = ["ACTED", "CATALOG", "FIELD", "FORM", "FORM_MODE", "FORM_ROW", "HANDED", "LAST", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
-           "NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "RECENT", "RECENTS", "RECENT_LAUNCH",
-           "RECENT_REQUEST", "RECENT_SHOWS", "REFUSAL", "REQUEST", "RUN",
-           "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE",
-           "TARGETS", "TEMPLATE_MAX", "VALUES"]
+__all__ = ["ACTED", "ACTIVITY", "CACHE", "CATALOG", "FIELD", "FORM", "FORM_MODE", "FORM_ROW",
+           "HANDED", "LAST", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX", "NAME",
+           "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW",
+           "PROBLEM", "RECENT", "RECENTS", "RECENT_LAUNCH", "RECENT_REQUEST", "RECENT_SHOWS",
+           "REFUSAL", "REQUEST", "RUN", "RUNNING", "RUNNING_LAUNCH", "RUNS", "RUN_EVENT",
+           "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE", "TARGETS",
+           "TEMPLATE_MAX", "VALUES", "WAITS", "WHERE"]

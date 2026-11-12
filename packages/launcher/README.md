@@ -335,9 +335,10 @@ and nothing has gone well since; a session merely waiting is never red.
 ## The page
 
 With the UI shell installed (`moxi install launcher --with ui`), the launcher has a page
-in the shell and three pieces other pages can show: the box on the shell's home that
-starts a session, a launched session's state, red when it needs a look, and a block on
-the shell's home listing each running launched session with its state.
+in the shell and four pieces other pages can show: the box on the shell's home that
+starts a session, the Sessions row under it, a launched session's state, red when it
+needs a look, and a block on the modules view listing each running launched session with
+its state.
 
 The page has four parts.
 
@@ -406,6 +407,21 @@ names them, each with `Clear`. Under the box, `Run again` lists up to three earl
 launches there; pointing at one shows what a click runs today, and one click runs it
 again where the button places a launch.
 
+**The Sessions row on Home.** Under the box, the row `Sessions` says how many launched
+sessions are running (`3 running`), and shows nothing when none is. Click it to open the
+list in place: at most four sessions, each with its name, where it runs (the slot,
+`terminal` or `headless`, then the project or the folder's name), its cache when that is
+known, and on the second line the time and first line of the latest thing said in it,
+or when it was launched. A session that waits on agents or subagents while its cache is
+warm, with nothing set to keep it warm, comes first and says in heavy type when its cache
+goes cold and what it waits on; the row then names it while closed and rises above the
+rows that need nothing. `Open` goes to the session's transcript on the sessions page, and
+`All sessions (N)` to that page's list; without sessions installed both go to the
+launcher's page. On the phone the list is always open and shows each session's name,
+where it runs and its cache, with no time, no message and no `Open`. The row reads
+`GET /api/running` and follows the stream's topic `running`; that route is the one the
+phone's gateway reaches, and it sends no path: a launch's folder goes by its name alone.
+
 A launch from the page or from the box runs with the shell's environment, so its harness
 must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
 The page server starts when the page or the shell's home is first opened and stops once
@@ -461,6 +477,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
+| sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
 
 An agent role a preset names is looked for in the harness's own agent folders, the user's
 and the project's.

@@ -44,6 +44,8 @@ OPTIONAL = {
     "usage": "Context warnings: warn_at sets the mark where usage warns the session, and "
              "recycle_at_limit with limit_at relaunches or compacts a session past its "
              "mark. Without it those rows aren't offered.",
+    "sessions": "The latest thing said in each running session, on Home's Sessions row. "
+                "Without it a row shows when it was launched.",
 }
 GATED = {}
 #: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the
@@ -74,8 +76,9 @@ SEGMENT = None
 #: Only that server and loopback's export import it.
 PAGE = "moxi_launcher.page:PAGE"
 #: What the launcher offers the browser UI shell: its panel, the piece for Home's main spot
-#: that starts a session, a block for the shell's home with each launched session's state,
-#: and one session's state that any host may place.
+#: that starts a session, Home's Sessions row with the launches running now, a block for
+#: the modules view with each launched session's state, and one session's state that any
+#: host may place.
 #: Each script is a file the page's web build writes beside the page's assets.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Launcher", "contract": 1, "place": "page",
@@ -84,6 +87,11 @@ COMPONENTS = {
     "prompt": {"script": "prompt.js", "title": "Launch", "contract": 1, "place": "block",
                "home": True, "home_as": "main", "order": 10,
                "doc": "Start a session: what it should do, where and with which model"},
+    "running": {"script": "running.js", "title": "Sessions", "contract": 1, "place": "block",
+                "home": True, "home_as": "row", "order": 100,
+                "doc": "The sessions running now: how many, and opened, the first four",
+                "attributes": {"open": {"type": "bool",
+                                        "doc": "set by Home while the row is shown opened"}}},
     "sessions": {"script": "sessions.js", "title": "Sessions", "contract": 1,
                  "place": "block", "home": True,
                  "doc": "Each launched session's recycle and keep-warm state"},

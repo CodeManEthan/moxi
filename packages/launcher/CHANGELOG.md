@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Home's Sessions row: a new component `running` (`<moxi-launcher-running>`), a row under
+  Home's box that says how many launched sessions are running, and none when nothing is.
+  Opened, it lists the first four with where each runs, its cache when known and the
+  time of its latest message, or of its launch, then `All sessions (N)`. A session waiting
+  on agents or subagents with a warm cache and no keep-warm cover comes first, says when
+  it goes cold, and puts the row above the rows that need nothing. On the phone the list
+  is always open. New route `GET /api/running`, reached by the gateway, with no path in
+  its answer, and a third topic `running` on `/api/events`; a call of either starts the
+  page server's poller. New optional link `sessions` (an extra of the same name).
 - The launcher offers interface 2: `running()` gives the launches running now, newest
   first, each a frozen `Running` with its request id, harness, the session id it was
   last known by, target, slot, project key, folder, name, comms name, start time and
