@@ -227,6 +227,8 @@ def test_a_refused_press_shows_its_reason_on_the_row_which_stays_loud(
     row = _session(ui_page, request_id)
     press = row.get_by_role("button", name="Keep warm")
     expect(press).to_be_enabled()
+    looks = "b => [getComputedStyle(b).color, getComputedStyle(b).opacity].join(' ')"
+    enabled_look = press.evaluate(looks)
 
     # A launch that starts wakes the joiner; once that pass has published, the next comes
     # no sooner than its interval, so the draft below is typed and cleared again before
@@ -246,5 +248,8 @@ def test_a_refused_press_shows_its_reason_on_the_row_which_stays_loud(
     # No value follows a refusal, so the button comes back after its wait and the note
     # stays until the row's value next changes.
     expect(press).to_be_disabled()
+    # A disabled button looks it, though the theme may give its two colours one value.
+    assert press.evaluate(looks) != enabled_look
     expect(press).to_be_enabled(timeout=PRESS_WAIT_MS)
+    assert press.evaluate(looks) == enabled_look
     expect(row.locator(".l3")).to_have_text(DRAFT)

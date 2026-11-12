@@ -46,7 +46,7 @@ export class LauncherRunning extends LitElement {
     button { font: inherit; color: var(--moxi-text-dim); background: none; border: 0; padding: 0; margin: 0;
              cursor: pointer; }
     button:hover:not(:disabled) { text-decoration: underline; }
-    button:disabled { color: var(--moxi-text-faint); cursor: default; }
+    button:disabled { color: var(--moxi-text-faint); opacity: 0.6; cursor: default; }
   `;
 
   static properties = {
