@@ -422,6 +422,15 @@ where it runs and its cache, with no time, no message and no `Open`. The row rea
 `GET /api/running` and follows the stream's topic `running`; that route is the one the
 phone's gateway reaches, and it sends no path: a launch's folder goes by its name alone.
 
+The count and the names come from the launch log and are never more than a few seconds
+behind it. The cache and the latest message are read by the page server apart from them,
+for the 24 newest running sessions, every 15 seconds and whenever a session starts, ends
+or changes its id: the cache from cache's own reading of the transcript, the message from
+the transcript's newest turn, read again only when the transcript changed. A read that
+takes longer than 8 seconds is left for the next round, and the session keeps what was
+read before for up to 45 seconds. A slow or missing module never holds up the count. The
+first look after the page server starts waits up to 3 seconds for these reads.
+
 A launch from the page or from the box runs with the shell's environment, so its harness
 must be on the shell's `PATH`; the preview says which `PATH` it searched when it isn't.
 The page server starts when the page or the shell's home is first opened and stops once

@@ -161,14 +161,15 @@ def test_a_call_of_the_route_starts_the_feed(conn, monkeypatch):
         assert status == 200 and len(calls) >= 1
         feed = pagehandlers._current
         assert feed is not None and feed.loop is asyncio.get_running_loop()
-        assert not feed.task.done()
+        assert not feed.task.done() and not feed.join_task.done()
         # The poller it started gathers the topic too, with no stream opened, and lays
-        # the feed's kept facts over it.
+        # the joiner's kept facts over it.
         async with asyncio.timeout(3):
             while len(calls) < 2:
                 await asyncio.sleep(0.05)
-        assert all(joined is feed.joined for joined in calls)
+        assert all(isinstance(joined, dict) for joined in calls)
         feed.task.cancel()
+        feed.join_task.cancel()
 
     asyncio.run(go())
 

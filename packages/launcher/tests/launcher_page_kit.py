@@ -19,6 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 import uuid
 import weakref
 from collections.abc import Callable, Iterator
@@ -27,12 +28,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from moxi import proc
+from moxi import modules, proc
 
 from moxi_launcher import store
 
-#: The shell's push channel carrying both of the launcher's topics.
-PUSH = "/m/ui/api/push?topics=launcher.launches,launcher.sessions"
+#: The shell's push channel carrying the launcher's three topics.
+PUSH = "/m/ui/api/push?topics=launcher.launches,launcher.sessions,launcher.running"
 #: The panel's launch log read: the route alone, not a status path's read of it.
 LAUNCHES = "/m/launcher/api/launches"
 #: The harnesses the fake stands in for.
@@ -96,10 +97,13 @@ def launch_log(shell: Any) -> Iterator[Any]:
 
 
 def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = False,
-         session_id: str | None = None, cwd: str = "/work/page", actor: str = "ann") -> str:
+         session_id: str | None = None, cwd: str = "/work/page", actor: str = "ann",
+         config_dir: str | os.PathLike | None = None) -> str:
     """A Claude launch's row made by `actor`, started; its process this test's own when
-    `live`, else one that has ended. Returns its session id."""
+    `live`, else one that has ended. With `config_dir` the row records it as the
+    session's `CLAUDE_CONFIG_DIR`, where `transcript` writes. Returns its session id."""
     sid = session_id or str(uuid.uuid4())
+    base_env = None if config_dir is None else {"CLAUDE_CONFIG_DIR": str(config_dir)}
     me = proc.identity(os.getpid())
     slot = "3" if target == "slot" else None
     # The values a resume replays: where the session ran, and how.
@@ -108,11 +112,31 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
     with launch_log(shell) as conn:
         store.insert(conn, request_id=request_id, actor=actor, harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},
-                     posture="operator", session_id=sid, slot=slot)
+                     posture="operator", session_id=sid, slot=slot, base_env=base_env)
         # A start time no running process has, so an ended launch's process reads ended.
         store.set_state(conn, request_id, "started", pid=me.pid,
                         pid_started=me.started if live else 1.0)
     return sid
+
+
+def transcript(config_dir: str | os.PathLike, session_id: str, *,
+               asked: str = "Fix the login form.", answered: str = "The login form is fixed.",
+               ago_s: float = 60.0, hour: bool = False, cwd: str = "/work/page") -> Any:
+    """A Claude transcript of `session_id` under `config_dir`'s projects root, written
+    with sessions' `ClaudeTranscript`, so cache and sessions read the launch `seed` made
+    with that `config_dir`: one prompt, then a reply whose request was made `ago_s`
+    seconds ago, writing the hour cache tier when `hour`, else writing none. Returns the
+    transcript, to add lines to and `flush`."""
+    testing = modules.load("sessions", interface=2).api.testing
+    root = Path(config_dir) / "projects"
+    written = testing.ClaudeTranscript(root, session_id=session_id, cwd=cwd,
+                                       project=re.sub(r"[^A-Za-z0-9]", "-", cwd),
+                                       start=time.time() - ago_s - 1.0)
+    written.user(asked)
+    written.assistant(answered, usage=testing.usage(cache_write=100 if hour else 0,
+                                                    cache_write_1h=100 if hour else 0))
+    written.write()
+    return written
 
 
 def learned(shell: Any, request_id: str, source: str = "clear") -> str:

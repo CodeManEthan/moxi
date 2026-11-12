@@ -11,6 +11,11 @@
   is always open. New route `GET /api/running`, reached by the gateway, with no path in
   its answer, and a third topic `running` on `/api/events`; a call of either starts the
   page server's poller. New optional link `sessions` (an extra of the same name).
+  The page server reads each running session's cache (when cache is installed) and its
+  latest message (when sessions is) apart from the launch log, for the 24 newest, every
+  15 seconds and when the running sessions change, on four threads with an 8 second
+  bound; what it read last stands for 45 seconds when a read does not finish. The first
+  call of `/api/running` waits up to 3 seconds for the first of these reads.
 - The launcher offers interface 2: `running()` gives the launches running now, newest
   first, each a frozen `Running` with its request id, harness, the session id it was
   last known by, target, slot, project key, folder, name, comms name, start time and
