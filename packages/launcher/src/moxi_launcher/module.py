@@ -39,8 +39,9 @@ OPTIONAL = {
              "directory (or its notes_dir), where the handoff pointer looks and a "
              "relaunch's handoff must be. Without it the launcher keeps its own folder.",
     "cache": "Prompt cache timing: keep_warm nudges a waiting session before its cache "
-             "expires, and recycle_on_expiry clears or compacts an idle session once it "
-             "has. Without it those rows aren't offered.",
+             "expires, as Keep warm on a running session's row does from the press on, "
+             "and recycle_on_expiry clears or compacts an idle session once it has. "
+             "Without it those rows and Keep warm aren't offered.",
     "usage": "Context warnings: warn_at sets the mark where usage warns the session, and "
              "recycle_at_limit with limit_at relaunches or compacts a session past its "
              "mark. Without it those rows aren't offered.",
@@ -55,11 +56,12 @@ INTERNAL_ENV = {
     "MOXI_COMMS_NAME": "comms stamp: the session's comms name, the handoff key of a "
                        "session the launcher did not start",
     "MOXI_LAUNCHER_REQUEST": "launcher stamp: the request id of the launch that started "
-                             "this session",
+                             "this session, read by cache's timer",
     "MOXI_LAUNCHER_RELAUNCH": "launcher stamp: the session is a relaunch, whose handoff "
                               "comes in its first turn",
     "MOXI_LAUNCHER_KEEP_WARM": "launcher stamp: the launch keeps its session warm, read by "
-                               "cache's timer",
+                               "a cache watcher started before the timer asked by "
+                               "MOXI_LAUNCHER_REQUEST",
     "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "launcher stamp: the launch clears or compacts its "
                                        "session once its cache expires, read by cache's "
                                        "timer",
