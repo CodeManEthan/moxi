@@ -192,6 +192,7 @@ class Pass:
         self.clocks: dict[str, tuple[Any, float]] = {}
         self.offline = False
         self._lock = threading.Lock()
+        self._locks: dict[str, threading.Lock] = {}
         self._shared: dict[str, tuple[bool, Any]] = {}
 
     def call(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
@@ -214,8 +215,12 @@ class Pass:
 
     def shared(self, name: str, fn: Callable[[], Any]) -> Any:
         """What `fn()` gives, called once in the pass whichever worker asks first; an
-        exception it raised is raised again to every worker that asks. `Late` is not kept."""
+        exception it raised is raised again to every worker that asks. `Late` is not kept.
+        Each name has its own lock, so a worker waits only on a call of the same name; `fn`
+        makes its calls through `call`."""
         with self._lock:
+            lock = self._locks.setdefault(name, threading.Lock())
+        with lock:
             if name not in self._shared:
                 try:
                     self._shared[name] = (True, fn())
@@ -342,7 +347,7 @@ def read_waits(each: Pass, launch: Launch) -> dict[str, Any]:
     open."""
     if each.turns is None:
         return {}
-    with store.reading() as conn:
+    with each.call(store.reading) as conn:
         if conn is None:
             return {}
         try:
@@ -447,9 +452,9 @@ def _covered(each: Pass, launch: Launch, conn: Any, found: Any, sid: str, facts:
         return False
     clock, now = read
     try:
-        current = each.shared("settings", settings.current)
-        records = each.shared("records", each.cache.clock_records)
-        tick_s = each.shared("tick", cache_tick_s)
+        current = each.shared("settings", lambda: each.call(settings.current))
+        records = each.shared("records", lambda: each.call(each.cache.clock_records))
+        tick_s = each.shared("tick", lambda: each.call(cache_tick_s))
     except Late:
         raise
     except Exception:  # noqa: BLE001  (a step that could not be read is not passed)

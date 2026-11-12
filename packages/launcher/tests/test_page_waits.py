@@ -7,15 +7,16 @@ stopping the pass's comms reads; a slot launch read with slots never asked; and
 from __future__ import annotations
 
 import os
+import threading
 import time
 from types import SimpleNamespace
 
 import launcher_page_kit as kit
 import pytest
 from test_keepwarm import FakeSession, agent
-from test_page_joiner import HERE, fresh, one_pass
+from test_page_joiner import HERE, Skewed, fresh, one_pass
 
-from moxi_launcher import catalog, first, joiner, slots, store
+from moxi_launcher import catalog, first, joiner, keepwarm, settings, slots, store
 
 __all__ = ["fresh"]
 
@@ -309,6 +310,81 @@ def test_a_waiting_session_keep_warm_will_not_nudge_is_not_covered(wired, change
                                                          else [sid])
     got = joined()
     assert got["waits"] == {"kind": "subagents", "count": 1} and got["covered"] is False
+
+
+#: The reads a waiting session's worker makes, in order, that the next test watches.
+LOCAL_STEPS = ("cache read", "launch log", "signal", "settings", "clock records", "tick")
+
+
+@pytest.mark.parametrize("late", ["none", "launch log", "settings", "clock records",
+                                  "tick"])
+def test_a_worker_reaching_a_local_read_past_the_deadline_stops_there(wired, monkeypatch,
+                                                                       late):
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid, entries=[agent("a1")])})
+    clock = Skewed()
+    asked: list[str] = []
+
+    def step(name, fn):
+        # The step before `late` ends past the pass's deadline.
+        def stepped(*args, **kwargs):
+            asked.append(name)
+            value = fn(*args, **kwargs)
+            if late != "none" and LOCAL_STEPS.index(late) == LOCAL_STEPS.index(name) + 1:
+                clock.skew += joiner.JOIN_BUDGET_S + 1.0
+            return value
+        return stepped
+
+    reading = store.reading
+
+    def worker_reading(*args, **kwargs):
+        if threading.current_thread().name.startswith("launcher join"):
+            asked.append("launch log")
+        return reading(*args, **kwargs)
+
+    cache = Cache([sid])
+    cache.read = step("cache read", cache.read)
+    cache.clock_records = step("clock records", cache.clock_records)
+    wired.cache = cache
+    monkeypatch.setattr(store, "reading", worker_reading)
+    monkeypatch.setattr(keepwarm, "signal_now", step("signal", keepwarm.signal_now))
+    monkeypatch.setattr(settings, "current", step("settings", settings.current))
+    monkeypatch.setattr(joiner, "cache_tick_s", step("tick", lambda: 10.0))
+    join = one_pass(joiner.Joiner(clock=clock))
+    if late == "none":
+        # `would_nudge` reads the signal again after the tick.
+        assert asked[:len(LOCAL_STEPS)] == list(LOCAL_STEPS)
+        assert join.kept["r1"].facts["covered"] is True
+    else:
+        assert asked == list(LOCAL_STEPS[:LOCAL_STEPS.index(late)])
+        assert join.kept == {}
+
+
+def test_a_shared_read_waits_only_on_a_read_of_the_same_name():
+    each = joiner.Pass(joiner.Joiner(), deadline=time.monotonic() + 60.0, cache=None,
+                       sessions=None, env={})
+    started, release = threading.Event(), threading.Event()
+
+    def slow():
+        started.set()
+        release.wait(10.0)
+        return "roster"
+
+    got = []
+    holder = threading.Thread(target=each.shared, args=("roster", slow))
+    asker = threading.Thread(target=lambda: got.append(each.shared("settings",
+                                                                   lambda: "settings")))
+    holder.start()
+    try:
+        assert started.wait(5.0)
+        asker.start()
+        asker.join(2.0)
+        assert got == ["settings"] and not release.is_set()
+    finally:
+        release.set()
+        holder.join(10.0)
+        asker.join(10.0)
+    assert each.shared("roster", lambda: "again") == "roster"
 
 
 def test_the_page_s_reads_write_nothing_to_the_launch_log(wired):
