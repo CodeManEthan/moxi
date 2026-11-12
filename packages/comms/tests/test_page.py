@@ -164,11 +164,13 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_two_reads_none_for_the_gateway():
+def test_the_page_declares_three_reads_and_only_the_mail_is_the_gateways():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
-    assert list(routes) == ["/api/roster", "/api/events"]
-    assert all(r["kind"] == "read" and not r["gateway"] for r in routes.values())
+    assert list(routes) == ["/api/roster", "/api/mail", "/api/events"]
+    assert all(r["kind"] == "read" and not r["confirmed"] for r in routes.values())
+    assert [path for path, r in routes.items() if r["gateway"]] == ["/api/mail"]
+    assert not routes["/api/mail"]["query"] and not routes["/api/mail"]["stream"]
     assert routes["/api/events"]["stream"] and list(routes["/api/events"]["topics"]) == ["roster"]
     assert exported["assets"] == ["build-stamp.txt", "page.js", "roster.js"]
     assert exported["budget"] == {"rss": "120M", "fds": 64}
@@ -179,6 +181,20 @@ def test_a_row_is_the_reads_fields_and_no_shape_carries_a_path_or_a_token():
     assert list(page.ROW.items) == list(api.RosterRow.__dataclass_fields__)
     keys = set(page.ROW.items) | set(page.ROSTER)
     assert not keys & {"cache_source", "cache_kind", "path", "socket", "token", "pid"}
+
+
+def _marks(shape) -> set:
+    found = {shape.mark} - {None}
+    items = shape.items
+    for item in ([items] if isinstance(items, page.lb.Out) else (items or {}).values()):
+        found |= _marks(item)
+    return found
+
+
+def test_the_mail_read_carries_names_counts_and_times_and_no_mark():
+    assert list(page.MAIL) == ["state", "detail", "waiting"]
+    assert list(pagehandlers.WAITING.items) == ["qualified", "name", "count", "since"]
+    assert set().union(*(_marks(shape) for shape in page.MAIL.values())) == set()
 
 
 # --- /api/roster ---------------------------------------------------------------------------
@@ -231,6 +247,134 @@ def test_a_failed_read_is_a_200_with_state_error_and_a_fixed_detail(monkeypatch,
     assert "/x/y" not in json.dumps(body)
     logged = [r for r in caplog.records if r.exc_info and r.exc_info[0] is type(error)]
     assert len(logged) == 1 and "/x/y" in caplog.text
+
+
+# --- /api/mail --------------------------------------------------------------------------------
+
+def stub_roster(monkeypatch, *, bound=(), waiting=()):
+    asked = []
+
+    def roster(**kw):
+        asked.append(kw)
+        return api.Roster(
+            bound=tuple(api.Agent(qualified=q, name=api.split_tag(q)[0], scope="proj-a",
+                                  tier="chosen", adapter="claude-shim") for q in bound),
+            waiting=tuple(api.Waiting(*w) for w in waiting))
+
+    monkeypatch.setattr(api, "roster", roster)
+    return asked
+
+
+def test_the_mail_over_a_rig_daemon_names_a_name_nobody_runs(rig):
+    """Mail sent to a name no session holds is on the read, in exactly the declared
+    shape, by its short name."""
+    rig.shim(name="planner", scope="proj-a")
+    sent_at = rig.clock()
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
+                         "the parser fix is ready"], name="planner", scope="proj-a")
+    assert code == 0, out
+    assert wait_until(lambda: api.roster().waiting)
+    status, body = run(get(served(), "/api/mail"))
+    assert status == 200
+    assert (body["state"], body["detail"]) == ("up", None)
+    (waiting,) = body["waiting"]
+    assert list(waiting) == ["qualified", "name", "count", "since"]
+    assert {**waiting, "since": 0} == {"qualified": "curator@proj-a", "name": "curator",
+                                       "count": 1, "since": 0}
+    assert isinstance(waiting["since"], float) and abs(waiting["since"] - sent_at) <= 5
+    assert "parser" not in json.dumps(body), "no message text"
+
+
+def test_the_mail_leaves_out_a_bound_name_and_keeps_an_unbound_one(monkeypatch):
+    stub_roster(monkeypatch, bound=["reviewer@proj-a"],
+                waiting=[("reviewer@proj-a", 4, 100.0), ("curator@proj-a", 2, 200.0)])
+    status, body = run(get(served(), "/api/mail"))
+    assert status == 200
+    assert body == {"state": "up", "detail": None, "waiting": [
+        {"qualified": "curator@proj-a", "name": "curator", "count": 2, "since": 200.0}]}
+
+
+def test_the_mail_puts_the_newest_since_last():
+    found = api.Roster(waiting=(api.Waiting("scout", 1, 300.0),
+                                api.Waiting("coder@proj-b", 2, 100.0),
+                                api.Waiting("pilot@proj-a", 1, 200)))
+    rows = pagehandlers._waiting(found)
+    assert [(r["qualified"], r["since"]) for r in rows] == [
+        ("coder@proj-b", 100.0), ("pilot@proj-a", 200.0), ("scout", 300.0)]
+    assert all(isinstance(r["since"], float) for r in rows)
+
+
+def test_two_waiting_names_that_share_a_short_name_are_shown_whole(monkeypatch):
+    stub_roster(monkeypatch, bound=["main@proj-b"],
+                waiting=[("main@proj-a", 1, 100.0), ("main", 1, 150.0),
+                         ("main@proj-b", 1, 175.0), ("herald", 2, 200.0)])
+    body = run(get(served(), "/api/mail"))[1]
+    assert [(r["qualified"], r["name"]) for r in body["waiting"]] == [
+        ("main@proj-a", "main@proj-a"), ("main", "main"), ("herald", "herald")]
+    # A bound name that shares it leaves the short name to the one left.
+    stub_roster(monkeypatch, bound=["main@proj-b"],
+                waiting=[("main@proj-a", 1, 100.0), ("main@proj-b", 1, 175.0)])
+    body = run(get(served(), "/api/mail"))[1]
+    assert [r["name"] for r in body["waiting"]] == ["main"]
+
+
+def test_the_mail_asks_the_daemon_once_with_the_pages_deadline(monkeypatch):
+    asked = stub_roster(monkeypatch)
+    body = run(get(served(), "/api/mail"))[1]
+    assert body == {"state": "up", "detail": None, "waiting": []}
+    assert asked == [{"timeout_s": pagehandlers.DEADLINE}]
+
+
+def test_the_mail_with_the_daemon_stopped_is_offline_with_no_detail(rig):
+    rig.daemon.stop()
+    status, body = run(get(served(), "/api/mail"))
+    assert status == 200
+    assert body == {"state": "offline", "detail": None, "waiting": []}
+
+
+@pytest.mark.parametrize(("error", "detail"), [
+    (api.DaemonError("OSError: /x/y"), pagehandlers.DAEMON_ERROR.format("DaemonError")),
+    (RuntimeError("at /x/y"), pagehandlers.UNEXPECTED.format("RuntimeError")),
+])
+def test_a_failed_mail_read_is_a_200_with_state_error_and_a_fixed_detail(monkeypatch, caplog,
+                                                                         error, detail):
+    def fail(**kw):
+        raise error
+
+    monkeypatch.setattr(api, "roster", fail)
+    with caplog.at_level(logging.ERROR, logger="moxi.comms.page"):
+        status, body = run(get(served(), "/api/mail"))
+        again = run(get(served(), "/api/mail"))[1]
+    assert again == body
+    assert status == 200
+    assert body == {"state": "error", "detail": detail, "waiting": []}
+    assert "/x/y" not in json.dumps(body)
+    logged = [r for r in caplog.records if r.exc_info and r.exc_info[0] is type(error)]
+    assert len(logged) == 1 and "/x/y" in caplog.text
+
+
+@pytest.mark.parametrize("bad", [("coder", True, 1.0), ("coder", 1.5, 1.0),
+                                 ("coder", 1, None), ("coder", 1, float("nan")),
+                                 (None, 1, 1.0)],
+                         ids=["bool-count", "float-count", "no-time", "nan-time", "no-name"])
+def test_a_waiting_value_its_declared_type_cannot_carry_is_state_error(monkeypatch, bad):
+    stub_roster(monkeypatch, waiting=[bad, ("scout", 1, 2.0)])
+    status, body = run(get(served(), "/api/mail"))
+    assert status == 200
+    assert body == {"state": "error", "detail": pagehandlers.UNEXPECTED.format("ValueError"),
+                    "waiting": []}
+
+
+def test_the_roster_read_is_unchanged_by_waiting_mail(rig):
+    rig.shim(name="planner", scope="proj-a")
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
+                         "waiting"], name="planner", scope="proj-a")
+    assert code == 0, out
+    assert wait_until(lambda: api.roster().waiting)
+    body = run(get(served(), "/api/roster"))[1]
+    assert set(body) == {"now", "state", "detail", "rows"}
+    assert "curator@proj-a" not in {r["qualified"] for r in body["rows"]}
+    assert body["rows"] == up(api.roster_rows())["rows"]
 
 
 LEAD_ROW = api.RosterRow(qualified="lead", name="lead", scope="global", live=True,

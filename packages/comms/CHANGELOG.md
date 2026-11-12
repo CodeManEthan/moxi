@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `moxi_comms.api.roster()` now carries the mail waiting per name: `Roster.waiting`, one
+  `Waiting(qualified, count, oldest)` for each name with mail queued, as the daemon's
+  `agents` answer holds it (`oldest` in epoch seconds).
+- comms' page server has a new read, `GET /api/mail`: `{state, detail, waiting}`, where
+  `waiting` lists `{qualified, name, count, since}` for each name with mail waiting that
+  no live session holds, newest `since` last. `name` is the part before `@`, or the
+  qualified name when two names listed share it. `state` and `detail` are as
+  `/api/roster`'s. It is the one route of comms the phone's gateway serves; it carries
+  names, counts and times, and no message text. `/api/roster` and its stream don't
+  change.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the

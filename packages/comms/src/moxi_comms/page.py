@@ -2,9 +2,12 @@
 
     GET /api/roster   who can be messaged, one row per address, with the server's `now`
     GET /api/events   the stream; its one topic, `roster`, is the same rows without `now`
+    GET /api/mail     Home's Comms row: the names with mail waiting that no session holds
 
-Both answer from `api.roster_rows()`, which `moxi comms agents --json` prints. Every route
-is a read, and none is the gateway's.
+The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
+--json` prints; the mail read from one `api.roster()`. Every route is a read. `/api/mail`
+is the one route the gateway reaches: it holds names, counts and times, and no message
+text or path, so it carries no mark.
 
 The browser UI shell starts the page server on the first request for comms' page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
@@ -49,14 +52,31 @@ ROSTER = {
     "rows": lb.Out("list", items=ROW),
 }
 
+#: Home's Comms row: the names with mail waiting that no live session holds, oldest
+#: `since` first. `name` is the part before `@`, or the qualified name when two names
+#: here share it; `since` is the oldest waiting message's time, in epoch seconds.
+#: `state` and `detail` are as `ROSTER`'s.
+MAIL = {
+    "state": lb.Out("string"),
+    "detail": lb.Out("string", nullable=True),
+    "waiting": lb.Out("list", items=lb.Out("table", items={
+        "qualified": lb.Out("string"),
+        "name": lb.Out("string"),
+        "count": lb.Out("int"),
+        "since": lb.Out("float"),
+    })),
+}
+
 PAGE = lb.Page(
     routes=(
         lb.Route("/api/roster", "read", "moxi_comms.pagehandlers:roster",
                  returns={"now": lb.Out("float"), **ROSTER}),
+        lb.Route("/api/mail", "read", "moxi_comms.pagehandlers:mail", returns=MAIL,
+                 gateway=True),
         lb.Route("/api/events", "read", "moxi_comms.pagehandlers:events", stream=True,
                  topics={"roster": lb.Out("table", items=ROSTER)}),
     ),
     assets="web",
 )
 
-__all__ = ["PAGE", "ROSTER", "ROW"]
+__all__ = ["MAIL", "PAGE", "ROSTER", "ROW"]
