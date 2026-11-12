@@ -1,7 +1,8 @@
 """Keep-warm against fakes of turns, slots and cache: the timer's subscription, the ask's
-reads in order and at each window edge, both cases and their texts, the run of nudges
-across turn numbers and a clear's new session id, the cap, agents dropped for the rest of
-a run, every delivery verdict, and the named holds across a launch chain."""
+reads in order and at each window edge, both cases and their texts, the signal's order and
+whether it rests on lists read whole, the run of nudges across turn numbers and a clear's
+new session id, the cap, agents dropped for the rest of a run, every delivery verdict, and
+the named holds across a launch chain."""
 
 from __future__ import annotations
 
@@ -12,7 +13,8 @@ import pytest
 from moxi import exit as codes
 from moxi import modules, paths, proc
 
-from moxi_launcher import api, cachetimers, job, keepwarm, recycle, relaunch, store, target
+from moxi_launcher import (api, cachetimers, job, keepwarm, recycle, relaunch, store, target,
+                           waits)
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -20,7 +22,8 @@ OTHER = "11111111-2222-4333-8444-555555555555"
 SETTINGS = {"relaunch.person_s": 120, "records.keep_days": 90,
             "keep_warm.subagent_cap": 3, "keep_warm.director_cap": 10,
             "keep_warm.subagent_texts": ["check", "decide", "last"],
-            "keep_warm.director_texts": ["reply warm", "recheck holds"]}
+            "keep_warm.director_texts": ["reply warm", "recheck holds"],
+            "keep_warm.directing_texts": ["directing", "directing again"]}
 #: An age inside the window of a one-hour cache.
 IN = 3000.0
 
@@ -289,6 +292,61 @@ def test_agents_turns_cannot_list_leave_the_director_case(conn):
     session.entries = RuntimeError("no list")
     got = ask(conn, session=session)
     assert got.verdict.word == "director"
+
+
+# -- the signal, from values -------------------------------------------------------------
+
+
+def listing(*entries, complete=True):
+    return SimpleNamespace(complete=complete, entries=list(entries))
+
+
+AT_WORK = waits.Directed(("coder@proj-a", "critic@proj-a"))
+
+
+def test_live_subagents_come_before_holds_and_holds_before_directed_agents():
+    by_agents, _ = keepwarm.signal_of(listing(agent("a1")), (), (), ["h"], directed=AT_WORK)
+    assert by_agents.case == keepwarm.SUBAGENTS and by_agents.directed == ()
+    by_hold, _ = keepwarm.signal_of(listing(), (), (), ["h"], directed=AT_WORK)
+    assert (by_hold.case, by_hold.holds, by_hold.directed) == (keepwarm.DIRECTOR, ("h",), ())
+    by_directed, _ = keepwarm.signal_of(listing(), (), (), [], directed=AT_WORK)
+    assert by_directed.case == keepwarm.DIRECTOR and by_directed.holds == ()
+    assert by_directed.directed == ("coder@proj-a", "critic@proj-a")
+    nobody, _ = keepwarm.signal_of(listing(), (), (), [], directed=waits.Directed())
+    assert nobody.case is None and nobody.directed == ()
+
+
+def test_the_signal_is_sure_only_on_lists_read_whole():
+    def sure(listed, directed=None):
+        return keepwarm.signal_of(listed, (), (), [], directed=directed)[0].sure
+
+    assert sure(listing()) and sure(listing(), waits.Directed())
+    assert not sure(None) and not sure(listing(complete=False))
+    for short in (waits.Directed(raised=True), waits.Directed(late=True),
+                  waits.Directed(unlisted=True)):
+        assert not sure(listing(), short)
+    assert sure(listing(), AT_WORK)
+
+
+def test_a_directed_agent_not_at_work_is_no_signal_even_on_a_list_not_read_whole():
+    signal, _ = keepwarm.signal_of(listing(), (), (), [],
+                                   directed=waits.Directed(raised=True))
+    assert signal.case is None and not signal.sure
+
+
+def test_the_directing_texts_go_in_order_naming_the_agents_and_no_hold():
+    signal, _ = keepwarm.signal_of(listing(), (), (), [], directed=AT_WORK)
+    for count, body in ((0, "directing"), (1, "directing again"), (5, "directing again")):
+        assert keepwarm.nudge_text(signal, count, SETTINGS).splitlines() == [
+            "Keep-warm from launcher", body, "- coder@proj-a", "- critic@proj-a"]
+
+
+def test_the_shipped_directing_text_is_one_line_for_every_nudge():
+    from moxi_launcher import settings
+
+    shipped = settings.current()[keepwarm.DIRECTING_TEXTS]
+    assert shipped == ["Keep-warm: agents you direct are still working. Reply warm unless "
+                       "you are mid-work."]
 
 
 # -- the ask: the window and the reads before it -----------------------------------------

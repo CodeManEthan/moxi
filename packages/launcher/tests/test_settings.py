@@ -32,7 +32,8 @@ DEFAULTS = {
     "records.keep_days": 90,
 }
 #: The list settings whose defaults are texts: checked for their count only.
-TEXTS = {"keep_warm.subagent_texts": 3, "keep_warm.director_texts": 2}
+TEXTS = {"keep_warm.subagent_texts": 3, "keep_warm.director_texts": 2,
+         "keep_warm.directing_texts": 1}
 
 
 def test_with_no_file_every_key_has_its_default():
