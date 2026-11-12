@@ -424,10 +424,10 @@ phone's gateway reaches, and it sends no path: a launch's folder goes by its nam
 
 The count and the names come from the launch log and are never more than a few seconds
 behind it. The cache, the latest message and what a session waits on are read by the page
-server apart from them, for the 24 newest running sessions, every 15 seconds and whenever
-a session starts, ends or changes its id: the cache from cache's own reading of the
+server apart from them, in a pass over the 24 newest running sessions every 15 seconds and
+whenever a session starts, ends or changes its id: the cache from cache's own reading of the
 transcript, the message from the transcript's newest turn, read again only when the
-transcript changed. A read that takes longer than 8 seconds is left for the next round,
+transcript changed. A read that takes longer than 8 seconds is left for the next pass,
 and the session keeps what was read before for up to 45 seconds. A slow or missing module
 never holds up the count. The first look after the page server starts waits up to 3
 seconds for these reads.
@@ -437,7 +437,7 @@ and teammates at work, counted as keep-warm counts them; with none, and comms in
 on the agents its comms name directs whose turn is open, or whose turn is closed while
 they wait on subagents of their own (a Claude session's; a Codex session counts only by
 its open turn). Each comms read may take 2 seconds, and once comms' daemon is found down
-the round asks it nothing more. A waiting session is kept warm when every step of
+the pass asks it nothing more. A waiting session is kept warm when every step of
 keep-warm's next ask that can be read without writing ends in a nudge, with an ask still
 certain to come before its window shuts: keep-warm on, no run open on the launch, cache's
 watcher timing the session, no turn open, a live subagent or an open hold, the run of
