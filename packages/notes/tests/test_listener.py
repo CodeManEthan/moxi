@@ -81,12 +81,12 @@ def test_the_processs_own_override_is_not_the_sessions(alpha, monkeypatch):
     assert listener.start(event) == expected(alpha)
 
 
-def test_no_notes_directory_gives_no_line():
+def test_no_notes_dir_gives_no_line():
     event = begin({"PWD": str(home())}, source="startup")
     assert listener.start(event) is None
 
 
-def test_the_folder_is_the_events_cwd_then_pwd_then_the_process(alpha, monkeypatch):
+def test_the_dir_is_the_events_cwd_then_pwd_then_the_process(alpha, monkeypatch):
     beta = repo(home() / "code" / "beta")
     beta_line = f"Notes directory: {home() / 'notes' / 'code' / 'beta'}"
     assert listener.start(begin({"PWD": str(beta)}, cwd=str(alpha))) == expected(alpha)

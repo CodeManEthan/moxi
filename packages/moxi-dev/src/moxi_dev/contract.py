@@ -269,7 +269,7 @@ class _WorkTree:
         except OSError:
             return None
 
-    def folder(self, path: str) -> list[str] | str:
+    def subdirs(self, path: str) -> list[str] | str:
         """The names of the subfolders of folder `path`, as the file system has them;
         else `missing` or `file`."""
         here = self.root / path
@@ -374,7 +374,7 @@ class _IndexTree:
             if p.startswith(prefix):
                 yield p[len(prefix):]
 
-    def folder(self, path: str) -> list[str] | str:
+    def subdirs(self, path: str) -> list[str] | str:
         """The names of the subfolders of folder `path`, each the first part of a path
         under it that has a file below it, or a symlink in it to such a folder (or one
         that can't be followed, for the caller to report); else `missing` or `file`."""
@@ -536,7 +536,7 @@ class _ImportVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         self.deferred -= 1
 
-    visit_FunctionDef = visit_AsyncFunctionDef = visit_Lambda = _function
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_Lambda = _function  # noqa: N815 -- ast.NodeVisitor protocol fixes visitor names
 
     def visit_If(self, node: ast.If) -> None:
         if _is_type_checking(node.test):
@@ -563,7 +563,7 @@ class _ImportVisitor(ast.NodeVisitor):
 class _Source:
     """One parsed Python file of the repo."""
 
-    def __init__(self, path: str, tree: ast.Module, module: str | None, is_package: bool):
+    def __init__(self, path: str, tree: ast.Module, module: str | None, *, is_package: bool):
         self.path = path
         self.tree = tree
         #: Its dotted name when it is in the repo's import package(s) under `src/`.
@@ -616,7 +616,7 @@ class _Repo:
             self.check_imports()       # check 1, the names import-linter cannot see
         self.check_extras_at_import()  # check 3
         self.check_extras()            # check 4
-        self.check_environment()       # check 5
+        self.check_env()       # check 5
         self.check_which()             # check 6
         if self.core:
             self.check_core_names()    # check 7, the core's form
@@ -722,7 +722,7 @@ class _Repo:
                     dotted.pop()
                     is_package = True
                 module = ".".join(dotted) if dotted else None
-            source = _Source(path, parsed, module, is_package)
+            source = _Source(path, parsed, module, is_package=is_package)
             self.sources[path] = source
             if module:
                 self.modules[module] = source
@@ -858,7 +858,7 @@ class _Repo:
         `API` it declares. Read from this environment's metadata without importing, else
         from a checkout of it beside this repo."""
         if module not in self._apis:
-            found = _api_from_environment(dist)
+            found = _api_from_env(dist)
             if found is None:
                 found = _api_from_checkout(self.root.resolve().parent / module, dist)
             self._apis[module] = found if found is not None else (False, None)
@@ -947,7 +947,7 @@ class _Repo:
 
     # -- checks 5 and 6 ----------------------------------------------------------------------
 
-    def check_environment(self) -> None:
+    def check_env(self) -> None:
         internal = self.ann_map("INTERNAL_ENV")
         exact = {k for k in internal if not k.endswith("_")}
         if self.core:
@@ -962,7 +962,7 @@ class _Repo:
                 continue
             names_ = _OsNames(source.tree)
             consts = _string_constants(source.tree)
-            for line, key in names_.environment_reads():
+            for line, key in names_.env_reads():
                 literal, prefix = _key_text(key, consts)
                 if literal is None:
                     if prefixes and prefix.startswith(prefixes):
@@ -1068,7 +1068,7 @@ class _Repo:
     def _requires(self, dist: str) -> set[str]:
         """The distributions `dist` requires (no extras of its own), read from this
         environment's metadata, else from its checkout beside this repo."""
-        found = _requires_from_environment(dist)
+        found = _requires_from_env(dist)
         if found is None:
             match = _MODULE_DIST.fullmatch(dist)
             if match:
@@ -1264,22 +1264,22 @@ class _Repo:
                                           "resolves the same on every platform")
             return
         parts = [p for p in resource.split("/") if p not in ("", ".")]
-        folder = str(PurePosixPath(source.path).parent.joinpath(*parts))
-        if self._link_problem(folder):
+        skills_dir = str(PurePosixPath(source.path).parent.joinpath(*parts))
+        if self._link_problem(skills_dir):
             return
-        listed = self.tree.folder(folder)
+        listed = self.tree.subdirs(skills_dir)
         if listed == "missing":
-            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {folder} does "
+            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {skills_dir} does "
                                           "not exist")
             return
         if listed == "file":
-            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {folder} is a "
+            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {skills_dir} is a "
                                           "file, not a folder")
             return
         for name in listed:
             if not names.is_skill_dir(name):
                 continue
-            where = f"{folder}/{name}"
+            where = f"{skills_dir}/{name}"
             if self._link_problem(where):
                 continue
             try:
@@ -1474,7 +1474,7 @@ class _OsNames:
     def __init__(self, tree: ast.Module):
         self.tree = tree
         self.os: set[str] = set()
-        self.environ: set[str] = set()
+        self.env_names: set[str] = set()
         self.getenv: set[str] = set()
         self.shutil: set[str] = set()
         self.which: set[str] = set()
@@ -1493,7 +1493,7 @@ class _OsNames:
                     bound = alias.asname or alias.name
                     if node.module == "os":
                         if alias.name in ("environ", "environb"):
-                            self.environ.add(bound)
+                            self.env_names.add(bound)
                         elif alias.name in ("getenv", "getenvb"):
                             self.getenv.add(bound)
                         elif self._is_process(alias.name):
@@ -1508,31 +1508,31 @@ class _OsNames:
     def _is_os(self, node: ast.AST) -> bool:
         return isinstance(node, ast.Name) and node.id in self.os
 
-    def _is_environ(self, node: ast.AST) -> bool:
+    def _is_env(self, node: ast.AST) -> bool:
         return ((isinstance(node, ast.Attribute) and node.attr in ("environ", "environb")
                  and self._is_os(node.value))
-                or (isinstance(node, ast.Name) and node.id in self.environ))
+                or (isinstance(node, ast.Name) and node.id in self.env_names))
 
-    def environment_reads(self) -> Iterable[tuple[int, ast.AST]]:
+    def env_reads(self) -> Iterable[tuple[int, ast.AST]]:
         """(line, key expression) for each keyed read of the environment."""
-        if not (self.os or self.environ or self.getenv):
+        if not (self.os or self.env_names or self.getenv):
             return
         for node in ast.walk(self.tree):
             if isinstance(node, ast.Call) and node.args:
                 func = node.func
                 if ((isinstance(func, ast.Attribute)
                      and func.attr in ("get", "pop", "setdefault")
-                     and self._is_environ(func.value))
+                     and self._is_env(func.value))
                         or (isinstance(func, ast.Attribute)
                             and func.attr in ("getenv", "getenvb") and self._is_os(func.value))
                         or (isinstance(func, ast.Name) and func.id in self.getenv)):
                     yield node.lineno, node.args[0]
             elif (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
-                  and self._is_environ(node.value)):
+                  and self._is_env(node.value)):
                 yield node.lineno, node.slice
             elif isinstance(node, ast.Compare):
                 for op, right in zip(node.ops, node.comparators, strict=True):
-                    if isinstance(op, (ast.In, ast.NotIn)) and self._is_environ(right):
+                    if isinstance(op, (ast.In, ast.NotIn)) and self._is_env(right):
                         yield node.lineno, node.left
 
     def which_calls(self) -> Iterable[tuple[int, ast.AST]]:
@@ -1613,7 +1613,7 @@ def _required(reqs: Iterable[str]) -> set[str]:
     return found
 
 
-def _requires_from_environment(dist: str) -> set[str] | None:
+def _requires_from_env(dist: str) -> set[str] | None:
     from importlib import metadata
 
     try:
@@ -1672,7 +1672,7 @@ def _module_file(bases: Iterable[str | Path], dotted: str) -> Path | None:
     return None
 
 
-def _api_from_environment(dist: str) -> tuple[bool, str | None] | None:
+def _api_from_env(dist: str) -> tuple[bool, str | None] | None:
     """Read a required module's announcement through this environment's metadata, finding
     its file without importing anything."""
     from importlib import metadata, util

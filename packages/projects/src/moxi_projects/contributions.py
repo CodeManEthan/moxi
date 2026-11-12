@@ -435,7 +435,7 @@ def notes_present() -> bool:
     return moxi.modules.present("notes")
 
 
-def _notes_gate(notes: bool | None) -> None:
+def _notes_gate(*, notes: bool | None) -> None:
     if not (notes_present() if notes is None else notes):
         raise Refused("a notes root is stored only while notes is installed",
                       "run `moxi install notes`, or leave the notes root out")
@@ -502,7 +502,7 @@ def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,
     key = check_key(key)
     kind = check_kind_name(kind)
     if notes_root is not None:
-        _notes_gate(notes)
+        _notes_gate(notes=notes)
     contributions = contributions if contributions is not None else load()
     if contributions.unloadable and kind not in contributions.names():
         contributions.kind(kind, "add")
@@ -550,7 +550,7 @@ def plan_set(key: str, *, contributions: Contributions | None = None,
         raise Usage(f"set can't change {', '.join(sorted(unknown))}",
                     "it changes root, kind, lead and notes_root")
     if changes.get("notes_root") is not None:
-        _notes_gate(notes)
+        _notes_gate(notes=notes)
     current = api.get(key)
     contributions = contributions if contributions is not None else load()
     row = {"key": current.key, "root": current.root, "kind": current.kind,

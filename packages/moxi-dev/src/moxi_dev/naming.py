@@ -218,7 +218,7 @@ def _env_owner(variable: str, packages: set[str]) -> str:
     return word if word in packages and word != "moxi-dev" else "moxi"
 
 
-def _environment_constants(root: Path) -> list[Hit]:
+def _env_constants(root: Path) -> list[Hit]:
     declarations: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
     hits = []
     packages = {path.name for path in (root / "packages").iterdir() if path.is_dir()}
@@ -669,7 +669,7 @@ def scan(root: Path | str) -> list[Hit]:
     root = Path(root)
     settings, _leaves = _settings(root)
     findings = (settings + _flags_and_verbs(root) + _parameters(root)
-                + _environment_constants(root) + _one_word_concepts(root))
+                + _env_constants(root) + _one_word_concepts(root))
     allowed = _allowed_marks(root)
     findings = [hit for hit in findings if hit.code not in allowed.get((hit.path, hit.line), set())]
     return sorted(findings + _marks(root))

@@ -167,7 +167,7 @@ def _strings(node: ast.Tuple | ast.List) -> list[str]:
             if isinstance(one, ast.Constant) and isinstance(one.value, str)]
 
 
-def _relative(module: str, level: int, named: str | None, package: bool = False) -> str:
+def _relative(module: str, level: int, named: str | None, *, package: bool = False) -> str:
     if level == 0:
         return named or ""
     # A package's `__init__` is the package itself: one dot names it.
@@ -251,7 +251,7 @@ class Project:
                     bind(local, ("mod:" if module in self.modules else "ext:") + module)
             else:
                 module = _relative(source.module, node.level, node.module,
-                                   source.path.endswith("/__init__.py"))
+                                   package=source.path.endswith("/__init__.py"))
                 for alias in node.names:
                     if alias.name == "*":
                         continue
@@ -707,7 +707,7 @@ def refusals(project: Project, rows: Sequence[Row], states: Sequence[str]) -> li
             imported = {id(alias) for node in other.nodes if isinstance(node, ast.ImportFrom)
                         for alias in node.names if _canonical(project, "sym:{}:{}".format(
                             _relative(other.module, node.level, node.module,
-                                      other.path.endswith("/__init__.py")),
+                                      package=other.path.endswith("/__init__.py")),
                             alias.name)) == target}
             local = [one for inner in _inner_scopes(other.tree)
                      if not isinstance(inner, ast.ClassDef)
@@ -778,7 +778,7 @@ def plan(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[s
         for node in other.nodes:
             if isinstance(node, ast.ImportFrom):
                 module = _relative(other.module, node.level, node.module,
-                                   other.path.endswith("/__init__.py"))
+                                   package=other.path.endswith("/__init__.py"))
                 for alias in node.names:
                     for row, target in by_old.get(alias.name, ()):
                         if _canonical(project, f"sym:{module}:{alias.name}") == target.symbol:

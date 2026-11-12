@@ -64,14 +64,14 @@ def handoffs_dir(path, *, create: bool = False, override=None):
     found = notes_dir(path, override=override).dir
     if found is None:
         return None
-    folder = found / HANDOFFS
+    found_dir = found / HANDOFFS
     if create:
         try:
-            os.makedirs(folder, exist_ok=True)
+            os.makedirs(found_dir, exist_ok=True)
         except FileExistsError:
-            raise Refused(f"{folder} exists and is not a folder",
+            raise Refused(f"{found_dir} exists and is not a folder",
                           "move it aside so notes can make the handoffs folder") from None
-    return folder
+    return found_dir
 
 
 def frontmatter(text: str):

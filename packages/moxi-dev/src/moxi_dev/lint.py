@@ -77,7 +77,7 @@ def plan(package: Path, workdir: Path, members: Iterable[Path] = ()) -> list[Com
     has_tests = any(p.startswith("tests/") and p.endswith(".py") for p in repo.tree.files())
     commands = []
     if not repo.dev:
-        config = _importlinter(repo, has_tests, _members(members, package))
+        config = _importlinter(repo, has_tests=has_tests, members=_members(members, package))
         if config is not None:
             workdir.mkdir(parents=True, exist_ok=True)
             path = workdir / IMPORTLINTER_CONFIG
@@ -85,7 +85,7 @@ def plan(package: Path, workdir: Path, members: Iterable[Path] = ()) -> list[Com
             commands.append(Command("another module's internals",
                                     ["lint-imports", "--config", str(path), "--no-cache"],
                                     [str(package)]))
-    commands += _deptry(repo, data, has_tests)
+    commands += _deptry(repo, data, has_tests=has_tests)
     return commands
 
 
@@ -125,7 +125,7 @@ def _core_private_modules() -> list[str]:
     return sorted(f"{CORE}.{name}" for name in found - CORE_MODULES)
 
 
-def _importlinter(repo: _Repo, has_tests: bool, members: Mapping[str, Path]) -> str | None:
+def _importlinter(repo: _Repo, *, has_tests: bool, members: Mapping[str, Path]) -> str | None:
     sources = sorted(repo.src_tops) + (["tests"] if has_tests else [])
     if not sources:
         return None
@@ -215,7 +215,7 @@ def _name_map(repo: _Repo, data: dict) -> str:
                     for written, names in modules.items())
 
 
-def _deptry(repo: _Repo, data: dict, has_tests: bool) -> list[Command]:
+def _deptry(repo: _Repo, data: dict, *, has_tests: bool) -> list[Command]:
     # Run from the package's directory: deptry matches --exclude against the paths it
     # scans as it names them, so they are named relative to it.
     base = ["deptry", "--config", "pyproject.toml", "--no-ansi", "--ignore", "DEP002"]

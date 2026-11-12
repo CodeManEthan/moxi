@@ -249,8 +249,8 @@ def load_sets() -> Sets:
     """sets.json, read once per process."""
     global _sets
     if _sets is None:
-        with open(sets_path(), "rb") as handle:
-            _sets = Sets(json.loads(handle.read()))
+        with open(sets_path(), "rb") as fh:
+            _sets = Sets(json.loads(fh.read()))
     return _sets
 
 
@@ -718,7 +718,7 @@ def describe() -> list:
                        if r["source"] == "gitleaks")
         source = (f"gitleaks {pin['tag']} ({upstream} rules) and "
                   f"{len(rules) - upstream} local rules")
-        out.append(SetInfo(name, rules, source, pin, sets.dropped[name], True))
+        out.append(SetInfo(name, rules, source, pin, sets.dropped[name], available=True))
     from . import names as _names
     from . import personal
 

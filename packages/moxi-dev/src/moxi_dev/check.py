@@ -291,12 +291,12 @@ def cpu_count() -> int:
         return os.cpu_count() or 1
 
 
-def worker_args(environ: Mapping[str, str], cpus: int | None = None) -> list[str]:
+def worker_args(env: Mapping[str, str], cpus: int | None = None) -> list[str]:
     """pytest-xdist's arguments: `-n N`, N the CPU count capped by MOXI_TEST_WORKERS.
 
     N is never 0, which would run the suite serially."""
     count = max(1, cpu_count() if cpus is None else cpus)
-    cap = environ.get(WORKERS_ENV, "").strip()
+    cap = env.get(WORKERS_ENV, "").strip()
     if cap:
         if not cap.isdigit() or int(cap) < 1:
             raise CheckError(f"{WORKERS_ENV} must be a whole number of workers, 1 or more; "
@@ -312,9 +312,9 @@ def _run(cmd: Sequence[str], cwd: Path, env: Mapping[str, str]) -> int:
         raise CheckError(f"could not run {cmd[0]} ({exc})") from exc
 
 
-def _base_env(environ: Mapping[str, str]) -> dict[str, str]:
+def _base_env(env: Mapping[str, str]) -> dict[str, str]:
     # `uv run` points VIRTUAL_ENV at the root's .venv; no step here may use or change it.
-    return {key: value for key, value in environ.items()
+    return {key: value for key, value in env.items()
             if key not in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT")}
 
 
@@ -449,11 +449,11 @@ def check_findings(findings: Sequence[str]) -> list[str]:
 
 
 def check(root: Path, *, full: bool = False, base: str | None = None,
-          finding: Sequence[str] = (), environ: Mapping[str, str] | None = None,
+          finding: Sequence[str] = (), env: Mapping[str, str] | None = None,
           run: Run | None = None, plan: Plan | None = None,
           probe: Probe | None = None) -> Result:
     """Run the check's steps on the workspace at `root`; the result holds the exit code."""
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     run = run or _run
     plan = plan or lint.plan
     probe = probe or chromium_probe
@@ -463,11 +463,11 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         findings = check_findings(finding)
         result.commit = _commit(root)
         packages = load_workspace(root)
-        workers = worker_args(environ)
+        workers = worker_args(env)
         changed = None if full else changed_paths(root, base or "main")
         chosen = list(packages) if changed is None else pick(packages, changed)
         result.packages = [package.dir for package in chosen]
-        steps = _Steps(root, packages, workers, environ, run, plan, result,
+        steps = _Steps(root, packages, workers, env, run, plan, result,
                        changed=changed, findings=findings, base=base or "main",
                        probe=probe)
         result.code = 0 if steps.all(chosen) else 1
@@ -483,7 +483,7 @@ class _Steps:
     root: Path
     packages: Sequence[Package]
     workers: Sequence[str]
-    environ: Mapping[str, str]
+    check_env: Mapping[str, str]
     run: Run
     plan: Plan
     result: Result
@@ -496,7 +496,7 @@ class _Steps:
         """The lock, the tags, the stamps, the sync, the lint and the suites, recorded in
         the result; True when all passed."""
         root, run, result = self.root, self.run, self.result
-        env = _base_env(self.environ)
+        env = _base_env(self.check_env)
         ok = run(["uv", "lock", "--check"], root, env) == 0
         result.lock = "pass" if ok else "fail"
         if not ok:
@@ -634,14 +634,14 @@ class _Steps:
         if not every:
             return
         result.durations = durations.summarize(every)
-        directory = durations.records_dir(self.root)
-        if directory is None:
+        records_dir = durations.records_dir(self.root)
+        if records_dir is None:
             return
         clean = not result.commit.endswith("+dirty")
         if passed and clean and not self.findings:
             head = _git(self.root, "rev-parse", "HEAD").strip()
             try:
-                result.kept = durations.keep(directory, head, passed)
+                result.kept = durations.keep(records_dir, head, passed)
             except OSError as exc:
                 # The record is a by-product; the check's own results and its line come
                 # first, so a disk that refuses the write costs the record, not the run.
@@ -649,7 +649,7 @@ class _Steps:
                       f"({exc})", file=sys.stderr, flush=True)
         if not self.findings:
             try:
-                result.delta = durations.against_main(self.root, directory, passed,
+                result.delta = durations.against_main(self.root, records_dir, passed,
                                                       self.base)
             except OSError as exc:
                 print(f"moxi-dev check: durations: no delta ({exc})", file=sys.stderr,

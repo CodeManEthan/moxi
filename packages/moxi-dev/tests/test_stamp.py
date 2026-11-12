@@ -107,7 +107,7 @@ def test_a_package_reads_its_own_sources_and_the_shared_ones_in_byte_order():
         "tools/web/b.mjs"]
 
 
-def test_the_output_directory_is_the_import_package_web_dir():
+def test_the_output_dir_is_the_import_package_web_dir():
     assert stamp.outdir("ui") == "packages/ui/src/moxi_ui/web"
     assert stamp.outdir("big-name") == "packages/big-name/src/moxi_big_name/web"
 
@@ -287,7 +287,7 @@ def test_check_fails_a_stale_stamp_before_the_sync(repo, capsys):
     git(repo, "switch", "-q", "-c", "work")
     write(repo, "packages/alpha/web/src/page.ts", "export const name = 2;\n")
     calls = []
-    result = check.check(repo, environ={"PATH": "/usr/bin"},
+    result = check.check(repo, env={"PATH": "/usr/bin"},
                          run=lambda cmd, cwd, env: calls.append(cmd) or 0)
     assert result.code == 1
     assert calls == [["uv", "lock", "--check"]]
@@ -295,7 +295,7 @@ def test_check_fails_a_stale_stamp_before_the_sync(repo, capsys):
             "release pass | stamps fail | web not run | sync not run |") in result.line()
     assert "npm run build" in capsys.readouterr().err
     rebuild(repo)
-    result = check.check(repo, environ={"PATH": "/usr/bin"}, run=lambda cmd, cwd, env: 0)
+    result = check.check(repo, env={"PATH": "/usr/bin"}, run=lambda cmd, cwd, env: 0)
     assert result.code == 0 and "stamps pass" in result.line()
 
 

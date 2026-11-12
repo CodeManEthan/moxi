@@ -96,7 +96,7 @@ SCREEN_MISMATCH = "screen-mismatch"
 
 #: The setting that turns each screen on, by the name slots declares it under.
 SCREENS = {
-    "claude": (("startup.trust_dialog", "CLAUDE_TRUST_FOLDER"),
+    "claude": (("startup.trust_dialog", "CLAUDE_TRUST_DIR"),
                ("startup.dev_channels_dialog", "CLAUDE_DEV_CHANNELS")),
 }
 

@@ -93,19 +93,19 @@ def where(root) -> Where:
 
     root = os.fspath(root)
     if not os.path.isdir(root):
-        return Where(root, False)
+        return Where(root, exists=False)
     run = _git(root)
     try:
         common = os.fsdecode(blobs.run(run, "rev-parse", "--path-format=absolute",
                                        "--git-common-dir")).strip()
     except blobs.GitError:
-        return Where(root, True)
+        return Where(root, exists=True)
     try:
         top = os.fsdecode(blobs.run(run, "rev-parse", "--path-format=absolute",
                                     "--show-toplevel")).strip() or None
     except blobs.GitError:
         top = None
-    return Where(root, True, common or None, top)
+    return Where(root, exists=True, common_dir=common or None, top=top)
 
 
 def private_allowlist(common_dir) -> str:
@@ -331,7 +331,7 @@ def _shown(path: str) -> str:
     return "~" if not parts else "~/" + "/".join(parts)
 
 
-def _yes(answer: str, default: bool) -> bool | None:
+def _yes(answer: str, *, default: bool) -> bool | None:
     text = answer.strip().lower()
     if not text:
         return default
@@ -365,7 +365,7 @@ def _ask_init(root: str, ask, out) -> bool:
               "notes can snapshot it", file=out)
         return True
     for _ in range(3):
-        answer = _yes(ask(question), True)
+        answer = _yes(ask(question), default=True)
         if answer is not None:
             return answer
     return True

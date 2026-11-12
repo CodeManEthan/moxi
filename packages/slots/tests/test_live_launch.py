@@ -202,7 +202,7 @@ def sentinel_server(tmux_path, monkeypatch):
         kill(tmux_path, places.socket(), proc)
 
 
-def test_no_environment_bleeds_into_a_launch(sentinel_server, base, tmp_path):
+def test_no_env_bleeds_into_a_launch(sentinel_server, base, tmp_path):
     """The server starts with a sentinel and later gets a global one; launch A sets A=1;
     the respawned launch B, whose env carries a foreign TMUX_PANE, sees exactly B's env
     plus the pane's terminal names, with tmux's own TMUX_PANE."""

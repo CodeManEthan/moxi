@@ -386,7 +386,7 @@ def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
                         if e.kind == startup.EVENT]
         finally:
             conn.close()
-        assert answered == ([("CLAUDE_TRUST_FOLDER", "gone")] if harness == "claude"
+        assert answered == ([("CLAUDE_TRUST_DIR", "gone")] if harness == "claude"
                             else []), answered
         # The slot it took now reads occupied by this launch, and a second launch that
         # names it is refused as taken, naming this one.

@@ -158,7 +158,7 @@ def test_a_stale_resolved_root_in_an_older_store_warns_and_writes_nothing(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
-def test_two_roots_naming_one_directory_warn(tmp_path):
+def test_two_roots_naming_one_dir_warn(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
     (tmp_path / "alias").symlink_to(real)

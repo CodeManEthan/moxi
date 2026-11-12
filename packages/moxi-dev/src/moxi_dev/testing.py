@@ -628,12 +628,12 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
     return env
 
 
-def _uv_dirs(environ: Mapping[str, str], home: str, *,
+def _uv_dirs(env: Mapping[str, str], home: str, *,
              windows: bool | None = None) -> dict[str, str]:
     """uv's cache and installed-Python directories, as uv finds them from `environ`;
     `windows` is `WINDOWS` unless given."""
     def given(key: str) -> str | None:
-        return environ.get(key) or None
+        return env.get(key) or None
 
     if WINDOWS if windows is None else windows:
         local = given("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
@@ -727,30 +727,30 @@ class Selection:
 _SELECTION = pytest.StashKey[Selection]()
 
 
-def selection(environ: Mapping[str, str]) -> Selection:
+def selection(env: Mapping[str, str]) -> Selection:
     """The selection the environment asks for; `pytest.UsageError` for a bad value."""
-    tiers = environ.get(TIERS_ENV, "").strip()
+    tiers = env.get(TIERS_ENV, "").strip()
     if tiers not in ("", "all"):
         raise pytest.UsageError(f"{TIERS_ENV} is 'all' or unset; it is {tiers!r}")
     changed: tuple[str, ...] = ()
-    where = environ.get(CHANGED_ENV, "")
+    where = env.get(CHANGED_ENV, "")
     if where:
         try:
             text = Path(where).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise pytest.UsageError(f"{CHANGED_ENV}: can't read {where} ({exc})") from exc
         changed = tuple(path for path in text.split("\0") if path)
-    names = [name.strip() for name in environ.get(FINDING_ENV, "").split(",")]
+    names = [name.strip() for name in env.get(FINDING_ENV, "").split(",")]
     names = [name for name in names if name]
     bad = [name for name in names if not FINDING_NAME.fullmatch(name)]
     if bad:
         raise pytest.UsageError(f"{FINDING_ENV} names findings as L<n>, comma-separated; "
                                 f"{', '.join(map(repr, bad))} is not one")
-    timed = environ.get(TIMED_ENV, "").strip()
+    timed = env.get(TIMED_ENV, "").strip()
     if timed not in ("", *TIMED_MODES):
         raise pytest.UsageError(f"{TIMED_ENV} is {' or '.join(map(repr, TIMED_MODES))} or "
                                 f"unset; it is {timed!r}")
-    left_out = [tier.strip() for tier in environ.get(LEAVE_OUT_ENV, "").split(",")]
+    left_out = [tier.strip() for tier in env.get(LEAVE_OUT_ENV, "").split(",")]
     left_out = [tier for tier in left_out if tier]
     bad = [tier for tier in left_out if tier not in LIFTABLE]
     if bad:
@@ -1130,11 +1130,11 @@ def can_symlink() -> bool:
 
     Only Windows' "a required privilege is not held" reads as no. Any other error is
     raised, `FenceError` among them, so a fence refusal is never taken for no."""
-    with tempfile.TemporaryDirectory(prefix="mx-link-") as folder:
+    with tempfile.TemporaryDirectory(prefix="mx-link-") as temp_dir:
         try:
-            os.symlink(os.path.join(folder, "target"), os.path.join(folder, "link"))
-        except OSError as error:
-            if getattr(error, "winerror", None) != _ERROR_PRIVILEGE_NOT_HELD:
+            os.symlink(os.path.join(temp_dir, "target"), os.path.join(temp_dir, "link"))
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != _ERROR_PRIVILEGE_NOT_HELD:
                 raise
             return False
     return True

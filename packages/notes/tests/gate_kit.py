@@ -43,11 +43,11 @@ def break_private_names() -> None:
 
 
 def sh(root: Path, *args: str, env: dict | None = None, check: bool = True,
-       input: str | None = None) -> subprocess.CompletedProcess:
+       stdin_data: str | None = None) -> subprocess.CompletedProcess:
     full = dict(os.environ)
     full.update(env or {})
     done = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
-                          env=full, timeout=60, input=input)
+                          env=full, timeout=60, input=stdin_data)
     if check and done.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} exited {done.returncode}:\n"
                              f"{done.stdout}{done.stderr}")

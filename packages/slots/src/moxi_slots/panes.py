@@ -121,7 +121,7 @@ def facts(number: int, panes: list[Pane]) -> Facts:
     """The state and idleness of slot `number` from its session's panes ([] when there is
     no session)."""
     if not panes:
-        return Facts(number, MISSING, False, 0, None, 0)
+        return Facts(number, MISSING, idle=False, attached=0, run=None, run_windows=0)
     windows: dict[str, list[Pane]] = {}
     for pane in panes:
         windows.setdefault(pane.window_id, []).append(pane)
@@ -199,7 +199,8 @@ def join(registry: Registry, panes: list[Pane], now: float | None = None) -> Lis
         if f.run_windows > 1:
             drift.append(Drift(number, "two-run-windows",
                                f"slot {number} has {f.run_windows} run windows"))
-    return Listing(True, "", tuple(slots), tuple(unregistered), tuple(drift))
+    return Listing(ok=True, why="", slots=tuple(slots),
+                   unregistered=tuple(unregistered), drift=tuple(drift))
 
 
 def listing(registry: Registry, now: float | None = None) -> Listing:

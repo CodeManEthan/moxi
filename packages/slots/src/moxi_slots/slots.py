@@ -53,7 +53,7 @@ def list_slots() -> Listing:
         reg = registry.read()
         return panes.listing(reg)
     except SlotsError as exc:
-        return Listing(False, str(exc))
+        return Listing(ok=False, why=str(exc))
 
 
 def show(slot: int | str) -> Slot | None:
@@ -303,12 +303,12 @@ def release(slot: int | str, holder: str) -> bool:
         return live
 
 
-def inside_this_server(environ=None) -> bool:
+def inside_this_server(env=None) -> bool:
     """Whether this process runs in a pane of this module's server (its `TMUX` names
     the same socket)."""
-    environ = os.environ if environ is None else environ
-    value = environ.get("TMUX", "")
-    if not value or not environ.get("TMUX_PANE"):
+    env = os.environ if env is None else env
+    value = env.get("TMUX", "")
+    if not value or not env.get("TMUX_PANE"):
         return False
     socket = value.split(",", 1)[0]
     try:
@@ -338,13 +338,13 @@ def attach_argv(slot: int | str) -> list[str]:
     return [path, "-S", places.socket(), verb, "-t", session_target(number)]
 
 
-def attach_env(argv: list[str], environ=None) -> dict[str, str]:
+def attach_env(argv: list[str], env=None) -> dict[str, str]:
     """The environment to exec `argv` in: a `switch-client` keeps `TMUX` (it names this
     server, and tells tmux which client to switch); an attach drops it."""
-    environ = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if env is None else env)
     if "switch-client" in argv:
-        return environ
-    return tmux.client_env(environ)
+        return env
+    return tmux.client_env(env)
 
 
 def busy() -> list[str]:

@@ -74,7 +74,7 @@ class _Line:
             normalise_text(text[hit.start:hit.end]) == self.value
 
 
-def _parse(raw: str, where: str, n: int, public: bool) -> _Line | None:
+def _parse(raw: str, where: str, n: int, *, public: bool) -> _Line | None:
     line = raw.rstrip("\r\n")
     if not line.strip() or line.lstrip().startswith("#"):
         return None
@@ -180,8 +180,8 @@ class Allowlist:
                                      "directory or the secrets config directory, where git "
                                      "never tracks it")
             try:
-                with path.open(encoding="utf-8", newline="") as handle:
-                    content = handle.read()
+                with path.open(encoding="utf-8", newline="") as fh:
+                    content = fh.read()
             except FileNotFoundError:
                 continue
             except UnicodeDecodeError:
@@ -190,7 +190,7 @@ class Allowlist:
                 own_text = content
             text = _translated(content)
             for n, raw in enumerate(text.split("\n"), 1):
-                parsed = _parse(raw, str(path), n, is_public)
+                parsed = _parse(raw, str(path), n, public=is_public)
                 if parsed is not None:
                     lines.append(parsed)
         return cls(lines, own_text)

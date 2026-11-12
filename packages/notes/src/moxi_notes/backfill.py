@@ -89,7 +89,7 @@ class Plan:
                 "proposals": [p.as_dict() for p in self.proposals]}
 
 
-def project_folders() -> tuple[list[tuple[str, str]], str]:
+def project_dirs() -> tuple[list[tuple[str, str]], str]:
     """`([(folder, key)], line)`: each project's notes folder, and one line saying where
     they came from or why there are none."""
     import moxi.modules
@@ -105,26 +105,26 @@ def project_folders() -> tuple[list[tuple[str, str]], str]:
         return [], f"projects can't be read ({exc.reason}), so no project is inferred"
     from .resolve import notes_root_for
 
-    folders = []
+    found_dirs = []
     for row in rows:
-        folder = row.notes_root or notes_root_for(row.root, row.kind, row.key)
-        if folder is not None:
-            folders.append((os.path.normpath(os.fspath(folder)), row.key))
-    if not folders:
+        notes_dir = row.notes_root or notes_root_for(row.root, row.kind, row.key)
+        if notes_dir is not None:
+            found_dirs.append((os.path.normpath(os.fspath(notes_dir)), row.key))
+    if not found_dirs:
         return [], "no project has a notes folder, so no project is inferred"
-    return folders, f"{len(folders)} project notes folder(s)"
+    return found_dirs, f"{len(found_dirs)} project notes folder(s)"
 
 
-def infer_project(path: str, folders: list[tuple[str, str]]) -> tuple[str | None, str]:
+def infer_project(path: str, project_dirs: list[tuple[str, str]]) -> tuple[str | None, str]:
     """The key of the project whose notes folder, the longest, holds `path`; or None and
     the reason."""
     from .resolve import under
 
-    hits = [(folder, key) for folder, key in folders if under(path, folder)]
+    hits = [(notes_dir, key) for notes_dir, key in project_dirs if under(path, notes_dir)]
     if not hits:
         return None, "in no project's notes folder"
-    longest = max(len(folder) for folder, _ in hits)
-    keys = sorted({key for folder, key in hits if len(folder) == longest})
+    longest = max(len(notes_dir) for notes_dir, _ in hits)
+    keys = sorted({key for notes_dir, key in hits if len(notes_dir) == longest})
     if len(keys) > 1:
         return None, f"in the notes folder of {len(keys)} projects ({', '.join(keys)})"
     return keys[0], ""
@@ -137,16 +137,16 @@ def plan(*, root=None, types: _doctypes.Types | None = None) -> Plan:
         return Plan(ok=False, root=report.root, reason=report.reason)
     out = Plan(ok=True, root=report.root, required=report.types.required)
     filed = report.filed
-    folders: list[tuple[str, str]] = []
+    found_dirs: list[tuple[str, str]] = []
     if any("project" in n.header.missing(out.required)
            for n in filed if n.header is not None and n.header.ok):
-        folders, out.projects = project_folders()
+        found_dirs, out.projects = project_dirs()
     for note in filed:
-        out.proposals.append(_propose(note, out, folders))
+        out.proposals.append(_propose(note, out, found_dirs))
     return out
 
 
-def _propose(note: _validate.Note, plan: Plan, folders) -> Proposal:
+def _propose(note: _validate.Note, plan: Plan, project_dirs) -> Proposal:
     proposal = Proposal(path=note.path, relative=note.relative, type=note.type)
     header = note.header
     if header is None:
@@ -166,11 +166,11 @@ def _propose(note: _validate.Note, plan: Plan, folders) -> Proposal:
         elif key == "type":
             proposal.additions[key] = note.type
         elif key == "project":
-            found, why = infer_project(note.path, folders)
+            found, why = infer_project(note.path, project_dirs)
             if found:
                 proposal.additions[key] = found
             else:
-                proposal.skipped.append((key, plan.projects if not folders else why))
+                proposal.skipped.append((key, plan.projects if not project_dirs else why))
         else:
             stamp = _modified(note.path)
             if stamp:
@@ -323,5 +323,5 @@ def render(plan: Plan, *, limit: int = 80) -> str:
     return "\n".join(out) + "\n"
 
 
-__all__ = ["INFERABLE", "Proposal", "Plan", "project_folders", "infer_project", "plan",
+__all__ = ["INFERABLE", "Proposal", "Plan", "project_dirs", "infer_project", "plan",
            "apply", "render"]

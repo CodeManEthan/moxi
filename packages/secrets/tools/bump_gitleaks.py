@@ -286,7 +286,7 @@ def hit_list(found: dict) -> list:
 class Comparison:
     """Go's rows against RE2 and the fallback, one row at a time; keeps counts, never texts."""
 
-    def __init__(self, pats, re2_engine, py_engine, run_gitleaks, text_class, show=False):
+    def __init__(self, pats, re2_engine, py_engine, run_gitleaks, text_class, *, show=False):
         self.pats = {p["id"]: p for p in pats}
         self.re2, self.py = re2_engine, py_engine
         self.run_gitleaks, self.Text = run_gitleaks, text_class
@@ -468,7 +468,7 @@ def scan_module():
     return importlib.import_module("moxi_secrets.scan")
 
 
-def compare(data: dict, samples: int, seed: int, show: bool) -> bool:
+def compare(data: dict, samples: int, seed: int, *, show: bool) -> bool:
     from moxi_secrets import engine
 
     scan = scan_module()
@@ -478,7 +478,7 @@ def compare(data: dict, samples: int, seed: int, show: bool) -> bool:
         raise Stop("google-re2 does not import; the comparison needs it")
     pats = patterns(data)
     comparison = Comparison(pats, engine.Re2Engine(module), engine.python(),
-                            scan.run_gitleaks, engine.Text, show)
+                            scan.run_gitleaks, engine.Text, show=show)
     for row in go_rows(pats, samples, seed):
         comparison.row(row)
     return comparison.report()
@@ -876,7 +876,7 @@ def main(argv: list[str] | None = None) -> int:
         data = regenerate()
         steps = (
             ("4. compare Go, RE2 and the fallback",
-             lambda: compare(data, args.samples, args.seed, args.show)),
+             lambda: compare(data, args.samples, args.seed, show=args.show)),
             ("5. cost on RE2", lambda: cost(args.cost_mb, args.cost_factor)),
             (f"6. gitleaks {args.tag} on the package's own files", lambda: own_tree(args.tag)),
             ("7. the fold table and the package's tests",

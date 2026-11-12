@@ -16,7 +16,7 @@ import pytest
 from moxi_slots import answer, places
 from moxi_slots.answer import Frame, drive, prune, save_mismatch
 from moxi_slots.model import NOT_SETTLED
-from moxi_slots.screens import CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_FOLDER
+from moxi_slots.screens import CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR
 
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/answer.py",
                                  "packages/slots/src/moxi_slots/screens*")
@@ -127,7 +127,7 @@ def exit_dialog(items=("shell · sleep 600",), **kw) -> FakeDialog:
 
 def test_the_trust_screen_gets_one_down_then_enter_on_the_settled_read():
     pane = trust()
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 5)
+    done = drive(pane, CLAUDE_TRUST_DIR, 5)
     assert (done.outcome, done.why) == ("gone", "")
     assert pane.sent() == ["Down", "Enter"]
     (down_at, _, _), (enter_at, _, marked_at_enter) = pane.keys
@@ -138,7 +138,7 @@ def test_the_trust_screen_gets_one_down_then_enter_on_the_settled_read():
 
 def test_a_slow_redraw_is_waited_for_not_answered_early():
     pane = trust(delay=1.2)
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 5)
+    done = drive(pane, CLAUDE_TRUST_DIR, 5)
     assert done.outcome == "gone" and pane.sent() == ["Down", "Enter"]
 
 
@@ -185,7 +185,7 @@ def test_exit_dialog_that_ignores_enter_is_not_ended():
 
 def test_a_key_that_never_takes_effect_is_not_settled_and_no_enter_follows():
     pane = trust(moves="no")
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 5)
+    done = drive(pane, CLAUDE_TRUST_DIR, 5)
     assert done.outcome == "mismatch"
     assert done.why.startswith(NOT_SETTLED) and "stayed on row" in done.why
     assert pane.sent() == ["Down"]
@@ -193,13 +193,13 @@ def test_a_key_that_never_takes_effect_is_not_settled_and_no_enter_follows():
 
 def test_a_torn_frame_inside_the_settle_window_keeps_polling():
     pane = trust(torn=0.25)
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 5)
+    done = drive(pane, CLAUDE_TRUST_DIR, 5)
     assert done.outcome == "gone" and pane.sent() == ["Down", "Enter"]
 
 
 def test_a_frame_torn_to_the_bound_is_not_settled():
     pane = trust(torn=10.0)
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 5)
+    done = drive(pane, CLAUDE_TRUST_DIR, 5)
     assert done.outcome == "mismatch" and done.why.startswith(NOT_SETTLED)
     assert "no longer fully matches" in done.why
     assert pane.sent() == ["Down"]
@@ -209,14 +209,14 @@ def test_a_marker_that_moves_away_ends_the_call():
     pane = trust(moves="wrong", marked=0)
     pane.choices.insert(0, "Maybe later")
     pane.marked = 1
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 5)
+    done = drive(pane, CLAUDE_TRUST_DIR, 5)
     assert done.outcome == "mismatch" and "moved away" in done.why
     assert pane.sent() == ["Down"]
 
 
 def test_a_dead_pane_is_never_a_settled_read():
     pane = trust(dead_at=0.0)
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 5)
+    done = drive(pane, CLAUDE_TRUST_DIR, 5)
     assert done.outcome == "ended-without-screen" and pane.sent() == []
     pane = exit_dialog(dead_at=0.0)
     assert drive(pane, CLAUDE_EXIT_DIALOG, 0).outcome == "ended-without-screen"
@@ -225,13 +225,13 @@ def test_a_dead_pane_is_never_a_settled_read():
 
 def test_a_pane_that_dies_after_a_move_gets_no_further_key():
     pane = trust(dead_at=0.7)
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 5)
+    done = drive(pane, CLAUDE_TRUST_DIR, 5)
     assert done.outcome == "ended-without-screen" and pane.sent() == ["Down"]
 
 
 def test_wait_bounds_the_whole_call():
     pane = trust(delay=1.5)
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 1.0)
+    done = drive(pane, CLAUDE_TRUST_DIR, 1.0)
     assert done.outcome == "mismatch" and done.why.startswith(NOT_SETTLED)
     assert "Enter" not in pane.sent()
     assert pane.now() <= 1.0 + 1e-9
@@ -239,14 +239,14 @@ def test_wait_bounds_the_whole_call():
 
 def test_no_key_is_sent_without_time_to_settle_it():
     pane = trust()
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 0)
+    done = drive(pane, CLAUDE_TRUST_DIR, 0)
     assert done.outcome == "mismatch" and done.why.startswith(NOT_SETTLED)
     assert pane.sent() == []
 
 
 def test_a_screen_that_never_settles_in_wait_is_a_mismatch():
     pane = trust(in_mode=True)
-    done = drive(pane, CLAUDE_TRUST_FOLDER, 2)
+    done = drive(pane, CLAUDE_TRUST_DIR, 2)
     assert done.outcome == "mismatch" and "copy mode" in done.why
     assert pane.sent() == [] and pane.now() <= 2.0
 
@@ -265,7 +265,7 @@ def test_a_gone_screen_whose_pane_dies_after_enter_is_a_mismatch():
 
 
 def test_one_call_presses_enter_at_most_once():
-    for make, screen, wait in ((trust, CLAUDE_TRUST_FOLDER, 5), (dev, CLAUDE_DEV_CHANNELS, 5),
+    for make, screen, wait in ((trust, CLAUDE_TRUST_DIR, 5), (dev, CLAUDE_DEV_CHANNELS, 5),
                                (exit_dialog, CLAUDE_EXIT_DIALOG, 0)):
         pane = make(on_enter="ignore")
         drive(pane, screen, wait)
@@ -280,7 +280,7 @@ def test_a_gone_pane_is_no_pane():
         now = staticmethod(lambda: 0.0)
         sleep = staticmethod(lambda s: None)
 
-    assert drive(Gone(), CLAUDE_TRUST_FOLDER, 5).outcome == "no-pane"
+    assert drive(Gone(), CLAUDE_TRUST_DIR, 5).outcome == "no-pane"
 
 
 # -- the mismatches store ---------------------------------------------------------------
@@ -289,12 +289,12 @@ def test_a_mismatch_saves_the_region_plain_and_with_colour():
     text = "history\n" + "─" * 20 + "\n ❯ No, exit\n   Yes\n\n\n"
     ansi = "\x1b[1mhistory\x1b[0m\n\x1b[33m" + "─" * 20 + "\x1b[0m\n \x1b[1m❯\x1b[0m No, exit\n" \
            "   Yes\n\n"
-    path = save_mismatch(CLAUDE_TRUST_FOLDER, "no row is the option", Frame(text, 20), ansi)
+    path = save_mismatch(CLAUDE_TRUST_DIR, "no row is the option", Frame(text, 20), ansi)
     assert path.parent == places.mismatches_dir()
     assert oct(path.stat().st_mode & 0o777) == "0o600"
     assert oct(path.parent.stat().st_mode & 0o777) == "0o700"
     record = json.loads(path.read_text())
-    assert record["screen"] == "CLAUDE_TRUST_FOLDER" and record["width"] == 20
+    assert record["screen"] == "CLAUDE_TRUST_DIR" and record["width"] == 20
     assert record["plain"] == [" ❯ No, exit", "   Yes"]
     assert record["ansi"] == [" \x1b[1m❯\x1b[0m No, exit", "   Yes"]
     assert "history" not in json.dumps(record)

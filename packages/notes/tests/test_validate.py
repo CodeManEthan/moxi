@@ -296,7 +296,7 @@ def test_a_file_that_can_not_be_read_is_a_finding(tree):
         path.chmod(0o644)
 
 
-def test_vendored_folders_and_git_are_pruned_before_the_walk_descends(tree, monkeypatch):
+def test_vendored_dirs_and_git_are_pruned_before_the_walk_descends(tree, monkeypatch):
     for marker in v.VENDORED + (".git",):
         write(f"alpha/plans/{marker}/inner.md", FULL)
     write("vendor-notes/plan.md", "# a folder that only starts with a marker\n")
@@ -304,9 +304,9 @@ def test_vendored_folders_and_git_are_pruned_before_the_walk_descends(tree, monk
     real = os.walk
 
     def spy(top, *a, **kw):
-        for folder, dirs, files in real(top, *a, **kw):
-            walked.append(Path(folder).name)
-            yield folder, dirs, files
+        for current_dir, dirs, files in real(top, *a, **kw):
+            walked.append(Path(current_dir).name)
+            yield current_dir, dirs, files
 
     monkeypatch.setattr(v.os, "walk", spy)
     report = api.validate()
@@ -317,7 +317,7 @@ def test_vendored_folders_and_git_are_pruned_before_the_walk_descends(tree, monk
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
-def test_a_symlinked_folder_or_file_is_never_followed(tree, tmp_path):
+def test_a_symlinked_dir_or_file_is_never_followed(tree, tmp_path):
     outside = tmp_path / "outside"
     (outside / "plans").mkdir(parents=True)
     (outside / "plans" / "secret.md").write_text(FULL)
@@ -337,7 +337,7 @@ def test_every_marker_is_counted_even_at_zero(tree):
         assert f"{marker} 0" in out
 
 
-def test_a_root_that_is_not_a_folder_refuses(tmp_path):
+def test_a_root_that_is_not_a_dir_refuses(tmp_path):
     configure(root=str(tmp_path / "nowhere"))
     report = api.validate()
     assert not report.ok and "is not a folder" in report.reason

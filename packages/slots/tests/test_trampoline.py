@@ -126,8 +126,8 @@ def test_a_launch_file_already_taken_runs_nothing(tmp_path):
     marker = tmp_path / "ran"
     path = launchfile.write(["touch", str(marker)], {"PATH": os.environ["PATH"]},
                             str(tmp_path))
-    with open(path, "w") as f:
-        f.write("taken\n")
+    with open(path, "w") as fh:
+        fh.write("taken\n")
     assert run(path).returncode == NOT_RUN
     assert not marker.exists()
 

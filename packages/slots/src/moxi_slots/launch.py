@@ -264,12 +264,12 @@ def wait_ended(slot: int | str, *, pane_id: str, timeout_s: float) -> Ended:
     while True:
         seen = launchfile.read_pane(pane_id)
         if not seen.exists:
-            return Ended(number, pane_id, True, None, gone=True)
+            return Ended(number, pane_id, ended=True, dead_status=None, gone=True)
         if seen.dead:
-            return Ended(number, pane_id, True, seen.dead_status)
+            return Ended(number, pane_id, ended=True, dead_status=seen.dead_status)
         left = deadline - time.monotonic()
         if left <= 0:
-            return Ended(number, pane_id, False)
+            return Ended(number, pane_id, ended=False)
         try:
             woke = tmux.attempt("wait-for", channel, timeout=min(1.0, left))
         except TryAgain:

@@ -210,15 +210,15 @@ CLAUDE_EXIT_DIALOG = Screen(
     phrases=("Background work is running", "will stop when you exit"),
     option="Exit and stop tasks", move=False, then="ended",
     items=Items(after="will stop when you exit", kinds=("shell", "monitor")))
-CLAUDE_TRUST_FOLDER = Screen(
-    name="CLAUDE_TRUST_FOLDER",
+CLAUDE_TRUST_DIR = Screen(
+    name="CLAUDE_TRUST_DIR",
     phrases=("Accessing workspace:", "Enter to confirm"),
     option="Yes, I trust this folder", move=True, then="gone")
 CLAUDE_DEV_CHANNELS = Screen(
     name="CLAUDE_DEV_CHANNELS",
     phrases=("Loading development channels", "Enter to confirm"),
     option="I am using this for local development", move=True, then="gone")
-SCREENS = {"CLAUDE_TRUST_FOLDER": CLAUDE_TRUST_FOLDER,
+SCREENS = {"CLAUDE_TRUST_DIR": CLAUDE_TRUST_DIR,
            "CLAUDE_DEV_CHANNELS": CLAUDE_DEV_CHANNELS,
            "CLAUDE_EXIT_DIALOG": CLAUDE_EXIT_DIALOG}
 

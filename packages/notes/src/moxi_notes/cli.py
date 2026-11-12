@@ -180,11 +180,11 @@ def _dir(args, out) -> int:
 
 
 def _handoffs(args, out) -> int:
-    folder = api.handoffs_dir(_path(args.path), override=_override())
-    if folder is None:
+    handoffs_dir = api.handoffs_dir(_path(args.path), override=_override())
+    if handoffs_dir is None:
         print("no notes directory for this folder, so no handoffs folder", file=sys.stderr)
         return codes.ERROR
-    print(folder, file=out)
+    print(handoffs_dir, file=out)
     return codes.OK
 
 

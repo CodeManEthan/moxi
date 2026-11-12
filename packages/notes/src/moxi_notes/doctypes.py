@@ -162,8 +162,8 @@ def load(file=None) -> Types:
 
     file = os.fspath(file if file is not None else path())
     try:
-        with open(file, "rb") as handle:
-            raw = handle.read()
+        with open(file, "rb") as fh:
+            raw = fh.read()
     except FileNotFoundError:
         return Types(path=file, present=False)
     except OSError as exc:

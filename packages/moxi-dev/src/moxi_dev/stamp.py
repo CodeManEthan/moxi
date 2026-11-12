@@ -100,9 +100,9 @@ def locked_esbuild(lock: bytes) -> str:
     return version
 
 
-def _git(root: Path, *args: str, input: bytes | None = None) -> bytes:
+def _git(root: Path, *args: str, stdin_data: bytes | None = None) -> bytes:
     try:
-        proc = subprocess.run(["git", *args], cwd=root, input=input, capture_output=True)
+        proc = subprocess.run(["git", *args], cwd=root, input=stdin_data, capture_output=True)
     except OSError as exc:
         raise StampError(f"could not run git ({exc})") from exc
     if proc.returncode != 0:
@@ -119,7 +119,7 @@ def _attributes(root: Path, paths: list[str], *, cached: bool) -> list[str]:
     if not paths:
         return []
     args = ["check-attr", "-z", "--stdin", *(["--cached"] if cached else []), "text", "eol"]
-    out = _split(_git(root, *args, input="\0".join(paths).encode() + b"\0"))
+    out = _split(_git(root, *args, stdin_data="\0".join(paths).encode() + b"\0"))
     attrs: dict[str, dict[str, str]] = {}
     for rel, attr, value in zip(out[0::3], out[1::3], out[2::3]):
         attrs.setdefault(rel, {})[attr] = value
@@ -178,7 +178,7 @@ class _Index:
     def _cat(self, blobs: list[str]) -> dict[str, bytes]:
         if not blobs:
             return {}
-        out = _git(self.root, "cat-file", "--batch", input="\n".join(blobs).encode() + b"\n")
+        out = _git(self.root, "cat-file", "--batch", stdin_data="\n".join(blobs).encode() + b"\n")
         data, at = {}, 0
         while at < len(out):
             end = out.index(b"\n", at)

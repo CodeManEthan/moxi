@@ -33,7 +33,7 @@ FIRED = "fired"
 SCRIPT = "moxi-notes-snapshot"
 
 
-def _folder(value) -> str | None:
+def _session_dir(value) -> str | None:
     if not isinstance(value, str) or not value or "\0" in value:
         return None
     if not os.path.isabs(value) or not os.path.isdir(value):
@@ -45,7 +45,7 @@ def session_path(event) -> str:
     """The session's folder: `event.cwd`, then `PWD` from its environment, then this
     process's working directory."""
     env = getattr(event, "env", None) or {}
-    return (_folder(getattr(event, "cwd", None)) or _folder(env.get("PWD"))
+    return (_session_dir(getattr(event, "cwd", None)) or _session_dir(env.get("PWD"))
             or os.getcwd())
 
 

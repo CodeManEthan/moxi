@@ -17,7 +17,7 @@ import pytest
 from moxi_slots import answer, cli, doctor, launch, places, slots, tmux
 from moxi_slots.answer import answer_screen, pane_use, read_screen
 from moxi_slots.errors import Refused, UsageError
-from moxi_slots.screens import (CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_FOLDER,
+from moxi_slots.screens import (CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR,
                                 SCREENS, plain)
 
 from slots_kit import pane_field, wait_for
@@ -109,8 +109,8 @@ def test_an_exit_dialog_that_ignores_enter_is_not_ended(wide, tmp_path, monkeypa
 def test_the_trust_screen_gets_down_then_enter(wide, tmp_path):
     _, log = draw(tmp_path, TRUST, choices=TRUST_CHOICES, on_enter="leave")
     seen = read_screen(1, SCREENS)
-    assert seen.screen is CLAUDE_TRUST_FOLDER and seen.full
-    done = answer_screen(1, CLAUDE_TRUST_FOLDER, wait_s=10)
+    assert seen.screen is CLAUDE_TRUST_DIR and seen.full
+    done = answer_screen(1, CLAUDE_TRUST_DIR, wait_s=10)
     assert (done.outcome, done.why) == ("gone", "")
     assert keys(log) == ["Down", "Enter"] and done.keys == ("Down", "Enter")
     assert read_screen(1, SCREENS).screen is None
@@ -135,7 +135,7 @@ def test_a_dead_pane_is_ended_without_screen(wide, tmp_path):
 def test_a_slot_with_no_run_pane(wide):
     assert read_screen(1, SCREENS).screen is None
     assert read_screen(1, SCREENS).why == "slot 1 has no run pane"
-    done = answer_screen(1, CLAUDE_TRUST_FOLDER)
+    done = answer_screen(1, CLAUDE_TRUST_DIR)
     assert done.outcome == "no-pane" and done.keys == ()
     use = pane_use(1)
     assert use.pane_id is None and use.slot == 1
@@ -146,9 +146,9 @@ def test_an_unknown_slot_is_refused(wide):
         read_screen(7, SCREENS)
     assert caught.value.reason == "no-slot"
     with pytest.raises(UsageError):
-        read_screen(1, ["CLAUDE_TRUST_FOLDER"])
+        read_screen(1, ["CLAUDE_TRUST_DIR"])
     with pytest.raises(UsageError):
-        answer_screen(1, CLAUDE_TRUST_FOLDER, wait_s=-1)
+        answer_screen(1, CLAUDE_TRUST_DIR, wait_s=-1)
 
 
 def test_pane_use_reads_copy_mode_and_activity(wide, tmp_path):
@@ -160,16 +160,16 @@ def test_pane_use_reads_copy_mode_and_activity(wide, tmp_path):
     tmux.call("copy-mode", "-t", pane)
     assert pane_use(1).pane_in_mode is True
     seen = read_screen(1, SCREENS)
-    assert seen.screen is CLAUDE_TRUST_FOLDER and not seen.full
+    assert seen.screen is CLAUDE_TRUST_DIR and not seen.full
     assert "copy mode" in seen.why
 
 
 def test_the_screen_verb(wide, tmp_path, capsys):
     draw(tmp_path, TRUST, choices=TRUST_CHOICES)
     assert cli.main(["screen", "1"]) == 0
-    assert capsys.readouterr().out.strip() == "CLAUDE_TRUST_FOLDER: full match"
+    assert capsys.readouterr().out.strip() == "CLAUDE_TRUST_DIR: full match"
     assert cli.main(["screen", "1", "--json"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["screen"] == "CLAUDE_TRUST_FOLDER" and out["full"] is True
+    assert out["screen"] == "CLAUDE_TRUST_DIR" and out["full"] is True
     assert "Yes, I trust this folder" in "\n".join(out["rows"])
     assert cli.main(["screen", "9"]) == 3

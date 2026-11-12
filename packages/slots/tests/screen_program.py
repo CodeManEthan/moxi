@@ -106,9 +106,9 @@ def main() -> int:
                 else:
                     words.append(repr(data))
                     data = b""
-            with open(args.log, "a", encoding="utf-8") as log:
+            with open(args.log, "a", encoding="utf-8") as fh:
                 for word in words:
-                    log.write(word + "\n")
+                    fh.write(word + "\n")
             for word in words:
                 if word in ("Up", "Down", "Enter"):
                     pending.append((time.monotonic() + args.delay, word))

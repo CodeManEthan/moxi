@@ -51,7 +51,7 @@ def stray() -> Path:
 
 # --- the environment -------------------------------------------------------------------
 
-def test_the_environment_is_what_the_fence_says(fence, tmp_path):
+def test_the_env_is_what_the_fence_says(fence, tmp_path):
     current = {k: v for k, v in os.environ.items() if k != "PYTEST_CURRENT_TEST"}
     assert current == {k: v for k, v in fence.env.items() if k != "PYTEST_CURRENT_TEST"}
     modules = testing._modules()
@@ -126,7 +126,7 @@ def test_the_fence_clears_everything_else(monkeypatch):
         "MOXI_COMMS_HOME": "/s/comms", "MOXI_ANCHOR_HOME": "/t/home"}
 
 
-def test_on_windows_the_fence_moves_the_user_s_folders_and_keeps_the_system_s(
+def test_on_windows_the_fence_moves_the_user_s_dirs_and_keeps_the_system_s(
         monkeypatch):
     monkeypatch.setattr(testing, "WINDOWS", True)
     home, short = PureWindowsPath("D:/t/home"), PureWindowsPath("D:/s")
@@ -211,7 +211,7 @@ def test_terminal_record_writes_the_recorded_names_under_the_tests_anchor(
 
 # --- uv in a child ---------------------------------------------------------------------
 
-def test_uv_finds_its_directories_as_uv_does():
+def test_uv_finds_its_dirs_as_uv_does():
     dirs, join = testing._uv_dirs, os.path.join     # joined by this system's separator
     assert dirs({}, "/h", windows=False) == {
         "UV_CACHE_DIR": join("/h", ".cache", "uv"),
@@ -226,15 +226,15 @@ def test_uv_finds_its_directories_as_uv_does():
         dirs({}, "/h", windows=False)
 
 
-def test_on_windows_uv_finds_its_directories_as_uv_does(monkeypatch, tmp_path):
+def test_on_windows_uv_finds_its_dirs_as_uv_does(monkeypatch, tmp_path):
     local, roaming, home = tmp_path / "L", tmp_path / "R", tmp_path / "H"
     older = tmp_path / "R2"
     (older / "uv").mkdir(parents=True)
     (older / "uv" / "data").write_text("")
     # Made before the platform is patched: the fence judges this test's own writes by it.
     monkeypatch.setattr(testing, "WINDOWS", True)
-    environ = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
-    assert testing._uv_dirs(environ, str(home)) == {
+    env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+    assert testing._uv_dirs(env, str(home)) == {
         "UV_CACHE_DIR": str(local / "uv" / "cache"),
         "UV_PYTHON_INSTALL_DIR": str(roaming / "uv" / "python")}
     # Without the two folders' variables, the folders under the home.
@@ -244,11 +244,11 @@ def test_on_windows_uv_finds_its_directories_as_uv_does(monkeypatch, tmp_path):
     # uv goes on using its older data folder where it is there, even as a file.
     assert testing._uv_dirs({"APPDATA": str(older)}, str(home))[
         "UV_PYTHON_INSTALL_DIR"] == str(older / "uv" / "data" / "python")
-    assert testing._uv_dirs({**environ, "UV_PYTHON_INSTALL_DIR": "P"}, str(home))[
+    assert testing._uv_dirs({**env, "UV_PYTHON_INSTALL_DIR": "P"}, str(home))[
         "UV_PYTHON_INSTALL_DIR"] == "P"
     # Off Windows the same environment gives the XDG places, whatever is in APPDATA.
     monkeypatch.setattr(testing, "WINDOWS", False)
-    assert testing._uv_dirs(environ, str(home)) == {
+    assert testing._uv_dirs(env, str(home)) == {
         "UV_CACHE_DIR": str(home / ".cache" / "uv"),
         "UV_PYTHON_INSTALL_DIR": str(home / ".local" / "share" / "uv" / "python")}
 
@@ -292,7 +292,7 @@ def test_uv_env_is_read_at_the_start(uv_env):
 '''
 
 
-def test_uv_env_reads_uv_before_the_fence_empties_the_environment(pytester, monkeypatch,
+def test_uv_env_reads_uv_before_the_fence_empties_the_env(pytester, monkeypatch,
                                                                     tmp_path):
     cache, data = str(tmp_path / "cache"), str(tmp_path / "data")
     # The variable uv takes its Pythons' folder from: APPDATA on Windows.
@@ -335,8 +335,8 @@ def test_a_write_in_the_tmp_goes_through(tmp_path):
     os.remove(name)
     sqlite3.connect(tmp_path / "db.sqlite").close()
     sqlite3.connect(":memory:").close()
-    with open(os.devnull, "w") as sink:
-        sink.write("x")
+    with open(os.devnull, "w") as fh:
+        fh.write("x")
     assert (tmp_path / "b").read_text() == "x"
 
 
@@ -400,8 +400,8 @@ def test_off_windows_a_long_form_path_is_a_name_like_any_other(monkeypatch):
 
 
 def test_reading_outside_the_tmp_is_not_a_write():
-    with open(testing.__file__, "rb") as f:
-        assert f.read(1)
+    with open(testing.__file__, "rb") as fh:
+        assert fh.read(1)
     os.close(os.open(testing.__file__, os.O_RDONLY))
 
 
@@ -491,7 +491,7 @@ def test_the_rest_of_the_temp_dirs_is_outside(outside, fence, tmp_path_factory):
     assert fence.roots == (basetemp.resolve(), fence.short.resolve())
 
 
-def test_temp_files_land_in_the_test_s_short_directory(fence):
+def test_temp_files_land_in_the_test_s_short_dir(fence):
     fd, name = tempfile.mkstemp()
     os.close(fd)
     assert Path(name).parent == fence.short
