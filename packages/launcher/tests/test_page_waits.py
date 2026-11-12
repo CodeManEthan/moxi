@@ -293,6 +293,27 @@ def test_without_comms_a_director_is_an_ordinary_session(wired):
     assert joined()["waits"] is None
 
 
+def test_an_installed_comms_that_does_not_load_is_read_as_a_join_that_raised(wired,
+                                                                             monkeypatch):
+    agents_case(wired, ("coder@proj-a", live("x", turn_open=True)))
+    wired.comms = waits.UNLOADED
+    found = []
+    real = waits.directed
+    monkeypatch.setattr(waits, "directed",
+                        lambda reads, sid: found.append(real(reads, sid)) or found[-1])
+    assert joined()["waits"] is None
+    assert found == [waits.Directed(raised=True)]
+
+
+def test_comms_api_tells_comms_not_installed_from_comms_that_does_not_load(monkeypatch):
+    monkeypatch.setattr(joiner.modules, "available", lambda name: True)
+    monkeypatch.setattr(joiner.modules, "load",
+                        lambda name, **kw: SimpleNamespace(ok=False, api=None))
+    assert joiner.comms_api() is waits.UNLOADED
+    monkeypatch.setattr(joiner.modules, "available", lambda name: False)
+    assert joiner.comms_api() is None
+
+
 # -- a slot launch ---------------------------------------------------------------------------
 
 

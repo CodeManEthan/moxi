@@ -371,6 +371,21 @@ def test_without_comms_installed_nobody_is_directed_and_the_cover_ends(conn, mon
     assert (got.outcome, got.word) == (None, "idle") and len(offs(conn)) == 1
 
 
+def test_an_installed_comms_that_does_not_load_keeps_the_cover_and_is_unreadable(
+        conn, monkeypatch):
+    off(conn)
+    covered(conn)
+    monkeypatch.setattr(modules, "available", lambda name: True)
+    real_load = modules.load
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=False, api=None) if name == "comms" else real_load(name, **kw)))
+    w = world()
+    got = keepwarm.ask(SID, conn=conn, turns=w.turns, slots_api=FakeSlots(),
+                       cache=FakeCache(), settings=SETTINGS)
+    assert (got.outcome, got.word) == (None, "unreadable") and offs(conn) == []
+    assert "comms or turns could not be read" in got.detail and w.comms.calls == []
+
+
 # -- holds under cover ------------------------------------------------------------------------
 
 

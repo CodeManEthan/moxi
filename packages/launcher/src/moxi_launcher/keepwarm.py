@@ -888,13 +888,14 @@ def _settings() -> Mapping[str, Any]:
 
 
 def _comms() -> Any | None:
-    """comms' interface 2, or None when comms is not installed or does not load."""
+    """comms' interface 2; None when comms is not installed, `waits.UNLOADED` when it is
+    installed and does not load."""
     from moxi import modules
 
     if not modules.available("comms"):
         return None
     found = modules.load("comms", interface=2)
-    return found.api if found.ok else None
+    return found.api if found.ok else waits.UNLOADED
 
 
 def _words(error: BaseException) -> str:

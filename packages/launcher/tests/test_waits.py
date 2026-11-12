@@ -89,6 +89,11 @@ def test_without_comms_or_an_owner_nobody_is_directed_and_the_read_is_sure():
     assert [name for name, _ in comms.calls] == ["owner"]
 
 
+def test_a_comms_that_does_not_load_is_a_read_that_raised():
+    found = waits.directed(reads_for(waits.UNLOADED, Turns({})), "boss")
+    assert found == waits.Directed(raised=True) and not found.sure
+
+
 @pytest.mark.parametrize("kind", ["DaemonOffline", "DaemonError"])
 def test_comms_raising_is_raised_with_the_names_found_before_it_and_not_logged(kind,
                                                                                caplog):

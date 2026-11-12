@@ -32,10 +32,10 @@ What a pass reads, each only when its module is installed:
   `waits.directed` reads them through the pass: comms' `owner`, one `roster` for the
   pass, `session_of` for each directed agent, then turns' facts of that agent's session.
   Each comms read may take `COMMS_TIMEOUT_S`, and once one finds the daemon down the pass
-  asks comms nothing more. A join that raised gives no `waits`, and one that met the
-  deadline leaves the launch unpublished in this pass. `covered` is
-  `keepwarm.would_nudge` over what the pass read, the directed join included, and is false
-  without cache. `coverable`, set only on a launch that waits and is not covered, is the
+  asks comms nothing more. A join that raised, or one through a comms that is installed
+  and does not load, gives no `waits`, and one that met the deadline leaves the launch
+  unpublished in this pass. `covered` is `keepwarm.would_nudge` over what the pass read,
+  the directed join included, and is false without cache. `coverable`, set only on a launch that waits and is not covered, is the
   cap of the case a press would nudge for, when `keepwarm.reading` with `pressed` passes
   every step; else null. None of them writes anything.
 
@@ -133,8 +133,12 @@ def sessions_api() -> Any | None:
 
 
 def comms_api() -> Any | None:
-    """comms' interface 2, or None when comms is not installed or does not load."""
-    return _optional("comms", 2)
+    """comms' interface 2; None when comms is not installed, `waits.UNLOADED` when it is
+    installed and does not load, so a join through it reads as one that raised."""
+    if not modules.available("comms"):
+        return None
+    found = modules.load("comms", interface=2)
+    return found.api if found.ok else waits.UNLOADED
 
 
 def cache_tick_s() -> float | None:

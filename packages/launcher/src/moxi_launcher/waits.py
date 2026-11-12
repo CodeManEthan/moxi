@@ -9,7 +9,8 @@ of a `Directed`; each caller derives its own answer from them.
 The read: comms' `owner` of the session, comms' `roster` (once per `Reads`), its bound
 agents whose `directors` name that owner, comms' `session_of` for each, then turns' `find`
 of that session and its `facts`. An agent is at work as `works` reads it. Each comms
-read may take `COMMS_TIMEOUT_S`.
+read may take `COMMS_TIMEOUT_S`. A comms that is installed and does not load stands as
+`UNLOADED`, and a read through it is one that raised.
 """
 
 from __future__ import annotations
@@ -23,6 +24,10 @@ from typing import Any
 
 #: Seconds each of comms' reads may take.
 COMMS_TIMEOUT_S = 2.0
+
+#: Stands for comms' API where comms is installed but does not load: `directed` reads
+#: through it as a read that raised, not as comms not installed.
+UNLOADED: Any = object()
 
 log = logging.getLogger("moxi.launcher.waits")
 
@@ -45,7 +50,7 @@ class Late(Exception):
 class Reads:
     """What bounds a set of reads: a deadline on `clock` after which no call starts, and
     comms' offline stop. `comms` and `turns` are their modules' APIs (None for one not
-    installed).
+    installed; `comms` is `UNLOADED` for a comms installed that does not load).
 
     `shared` holds what is read once for every reader of this `Reads`; `offline` is
     whether comms' daemon was found down, after which no comms call is made through it."""
@@ -122,10 +127,13 @@ def directed(reads: Reads, sid: str) -> Directed:
     """The agents session `sid`'s comms name directs that are at work. Stops at the first
     read that raises or meets the deadline, and raises nothing of its own reads. A read
     that fails other than with comms' `DaemonOffline` or `DaemonError` is logged once per
-    kind of failure. Without comms, nobody is directed."""
+    kind of failure. Without comms installed, nobody is directed; with comms `UNLOADED`,
+    the read raised."""
     comms = reads.comms
     if comms is None:
         return Directed()
+    if comms is UNLOADED:
+        return Directed(raised=True)
     names: list[str] = []
     unlisted = False
     try:
@@ -179,4 +187,4 @@ def _unlisted(facts: Any, harness: str | None) -> bool:
             and getattr(facts, "agents", None) is None)
 
 
-__all__ = ["COMMS_TIMEOUT_S", "Directed", "Late", "Reads", "directed", "works"]
+__all__ = ["COMMS_TIMEOUT_S", "UNLOADED", "Directed", "Late", "Reads", "directed", "works"]
