@@ -13,7 +13,8 @@ OPTIONAL = {
              "worker ceiling",
     "projects": "the token index records each session's project, so the projects report "
                 "and --project keep one project across worktrees and harnesses",
-    "ui": "the usage page, with its limits and cost blocks, in the browser UI shell",
+    "ui": "the usage page, with its limits and cost blocks and its row on Home, in the "
+          "browser UI shell",
 }
 GATED = {}
 #: The launcher stamps these per launch; usage reads them in the session's listener.
@@ -40,7 +41,8 @@ SETUP = None
 SEGMENT = None
 #: usage's page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_usage.page:PAGE"
-#: What usage offers the browser UI shell: its panel, and two blocks for the home view.
+#: What usage offers the browser UI shell: its panel, two blocks for the modules view, and
+#: its row on Home, which reads `/api/summary`.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Usage", "contract": 1, "place": "page",
              "group": "daily", "order": 30,
@@ -50,6 +52,9 @@ COMPONENTS = {
                "doc": "Each plan window: how much is used, when it resets and when it fills"},
     "cost": {"script": "cost.js", "title": "Cost", "contract": 1, "place": "block",
              "home": True, "doc": "Cost and tokens today and over the last 7 days"},
+    "row": {"script": "row.js", "title": "Usage", "contract": 1, "place": "block",
+            "home": True, "home_as": "row", "order": 300,
+            "doc": "How full the plan windows are and today's cost, on one line"},
 }
 # The announcement's version, and the optional names it declares.
 ANNOUNCES = 1
