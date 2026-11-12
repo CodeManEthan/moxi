@@ -22,7 +22,7 @@ import sys
 import time
 import uuid
 import weakref
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -448,17 +448,20 @@ def waiting(*, subagents: int = 1, draft: bool = False) -> dict[str, Any]:
                        for n in range(1, subagents + 1)]}
 
 
-def timed(shell: Any, session_id: str, *, ago_s: float = 60.0, ttl_s: int = 3600) -> Path:
+def timed(shell: Any, session_id: str, *, ago_s: float = 60.0, ttl_s: int = 3600,
+          asks: Sequence[str] | None = None) -> Path:
     """The cache watcher's clock record of `session_id` in the shell's runtime directory,
     as the watcher writes it while it times the session: warm, its last request `ago_s`
     seconds ago. Its `stale_after` outlasts any test, so it reads as fresh with no
-    rewrite. Returns its path."""
+    rewrite. With `asks` the record names those subscriptions as the ones the watcher's
+    timer asks about the session; without it the record has no `asks` key, as a watcher
+    that does not say writes it. Returns its path."""
     records = modules.load("cache", interface=1).api.records
     now = time.time()
     record = {"v": records.VERSION, "session": session_id, "harness": "claude",
               "pid": os.getpid(), "kind": "warm", "last_request": now - ago_s, "ttl": ttl_s,
               "read_at": now, "seen_at": now, "code": None, "warn_before": 900,
-              "stale_after": 86400}
+              "stale_after": 86400, **({} if asks is None else {records.ASKS: list(asks)})}
     assert records.valid(record), record
     path = records.record_dir(shell.env) / f"{session_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
