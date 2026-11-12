@@ -13,10 +13,10 @@ twice: on a small install, which holds the core, ui, cache and sessions and noth
 and on a full one, which holds every module of this environment. Both shells hold the same
 transcripts, written with sessions' builders under each shell's own home, and each walk
 writes the same clock records and watcher's reading into the shell it runs on, timed from
-one moment that the page's clock is pinned to. A walk keeps what the page showed at each
-step: the two installs must show the same, piece for piece; the page places no element
-but its own and the row; no session's id shows; and nothing names a cost or what keeps a
-session warm.
+one moment that the page's clock is pinned to and, but for the walk that waits for a row
+to go cold, stands still at. A walk keeps what the page showed at each step: the two
+installs must show the same, piece for piece; the page places no element but its own and
+the row; no session's id shows; and nothing names a cost or what keeps a session warm.
 
 A row's name is checked against the Sessions page's own naming rule, run on what the
 page's names read answered, never against a second copy of its words.
@@ -283,16 +283,22 @@ def named_by_rule(panel, names: dict[str, tuple[str, str | None]]) -> None:
 
 
 @pytest.fixture
-def on_both(installs, ui_contexts):
-    """`on_both(walk, **context_args)` runs `walk(page, shell)` on the small install and
-    on the full one, each in a context of its own. A walk returns what the page showed at
-    each of its steps; the two must be the same, hold no element that is not cache's page
-    or the row, no session's id and no word of a cost or of keeping a session warm.
-    Returns what was shown."""
-    def run(walk, **context_args) -> list:
+def on_both(installs, ui_contexts, moment):
+    """`on_both(walk, *, still=True, **context_args)` runs `walk(page, shell)` on the
+    small install and on the full one, each in a context of its own. Unless `still` is
+    false, the context's browser clock stands still at `moment` (its timers still run),
+    so the page's clock reads `moment` at every step and each time it shows, a countdown
+    among them, is the same on both installs however long a step takes. A walk returns
+    what the page showed at each of its steps; the two must be the same, hold no element
+    that is not cache's page or the row, no session's id and no word of a cost or of
+    keeping a session warm. Returns what was shown."""
+    def run(walk, *, still: bool = True, **context_args) -> list:
         seen = {}
         for name, shell in installs.items():
-            page = ui_contexts(shell, **context_args).pages[0]
+            context = ui_contexts(shell, **context_args)
+            if still:
+                context.clock.set_fixed_time(moment)
+            page = context.pages[0]
             try:
                 seen[name] = walk(page, shell)
                 expect(page.locator(PANEL).get_by_text(LEFT_OUT)).to_have_count(0)
@@ -423,7 +429,8 @@ def test_what_goes_cold_next_is_first_and_turns_cold_at_its_time(on_both, moment
         steps.append(shown(page))
         return steps
 
-    on_both(walk)
+    # The page's clock runs, so the row's time comes.
+    on_both(walk, still=False)
 
 
 def test_how_many_are_warm_and_cold_is_each_groups_label(on_both, moment):
@@ -538,7 +545,11 @@ def test_the_readings_say_how_far_they_can_be_trusted(on_both, moment, clipboard
         det = opened(panel, HEADED)
         expect(det.locator('[data-line="Read"]')).to_have_text(
             re.compile(rf"^Read\s*(.* )?{hhmmss(moment - 120)} · {re.escape(READ_TAIL)}$"))
-        expect(opened(panel, NAMED).locator('[data-line="Read"]')).to_have_count(0)
+        named = opened(panel, NAMED)
+        expect(named.locator('[data-line="Read"]')).to_have_count(0)
+        # Both opened rows have read their model before the page is taken down.
+        for one in (det, named):
+            expect(one.locator('[data-line="session"]')).not_to_contain_text("Reading…")
         steps.append(shown(page))
 
         # A watcher that runs but has not listed Claude's sessions since a time.
@@ -596,6 +607,10 @@ def test_both_links_land(on_both, moment):
         steps = []
         lay(shell, moment, record(NAMED, now=moment, age=600), reading=FRESH_READING)
         panel = open_page(page, moment)
+        # The page is drawn, its row named and its foot read, before it is taken down.
+        named_by_rule(panel, named_as(shell, NAMED))
+        expect(panel.locator('[data-part="foot"] [data-line="reading"]')).to_have_text(
+            re.compile(rf"^Last reading {hhmm(moment - 1)}$"))
         steps.append(shown(page))
         opened(panel, NAMED).get_by_role("link", name="Sessions").click()
         expect(page).to_have_url(re.compile(rf"/m/sessions/claude/{NAMED}$"))
