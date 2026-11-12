@@ -459,7 +459,7 @@ def test_a_press_wakes_the_running_feed_whose_next_pass_reads_it_covered(waiting
     asyncio.run(go())
 
 
-def test_wake_from_another_thread_starts_a_pass(monkeypatch):
+def test_wake_from_another_thread_starts_a_pass(wired, monkeypatch):
     monkeypatch.setattr(joiner, "JOIN_EVERY", 60.0)
 
     async def go():
