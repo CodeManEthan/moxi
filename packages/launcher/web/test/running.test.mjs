@@ -293,11 +293,12 @@ test("Keep warm keeps the row's other words as the uncovered case has them", () 
   assert.equal(row.lead, "waiting on 2 agents");
 });
 
-test("an answer that refuses nothing leaves no note, and a refusal leaves its problem", () => {
+test("an answer that refuses nothing leaves no note, and a refusal says it was not kept warm and why", () => {
   assert.equal(pressNote({ status: 200, data: { refused: null } }), null);
   const refused = { code: "draft", row: null, problem: "There is text typed in the session.",
                     hint: "clear the text typed in the session" };
-  assert.equal(pressNote({ status: 200, data: { refused } }), "There is text typed in the session.");
+  assert.equal(pressNote({ status: 200, data: { refused } }),
+               "Not kept warm: There is text typed in the session.");
 });
 
 test("an answer that is not the route's leaves a note of its own", () => {
@@ -333,17 +334,17 @@ test("a pressed button waits at most the press's wait", () => {
 });
 
 test("a refusal's note stays until the next value, and outlasts the press's wait", () => {
-  let presses = answered(pressed(NO_PRESSES, "r1"), "r1", "There is text typed in the session.");
-  assert.deepEqual(presses.notes, { r1: "There is text typed in the session." });
+  let presses = answered(pressed(NO_PRESSES, "r1"), "r1", "Not kept warm: there is text typed in the session.");
+  assert.deepEqual(presses.notes, { r1: "Not kept warm: there is text typed in the session." });
   presses = expired(presses, "r1");
-  assert.deepEqual(presses, { waiting: {}, notes: { r1: "There is text typed in the session." } });
+  assert.deepEqual(presses, { waiting: {}, notes: { r1: "Not kept warm: there is text typed in the session." } });
   presses = valueCame(presses, answer([coverable("r1")]));
   assert.deepEqual(presses.notes, {});
 });
 
 test("an answer after the press's wait still leaves its note", () => {
-  const presses = answered(expired(pressed(NO_PRESSES, "r1"), "r1"), "r1", "The cold time is too near.");
-  assert.deepEqual(presses, { waiting: {}, notes: { r1: "The cold time is too near." } });
+  const presses = answered(expired(pressed(NO_PRESSES, "r1"), "r1"), "r1", "Not kept warm: the cold time is too near.");
+  assert.deepEqual(presses, { waiting: {}, notes: { r1: "Not kept warm: the cold time is too near." } });
 });
 
 test("pressing again clears the row's note, and presses on two rows wait apart", () => {

@@ -381,20 +381,23 @@ export function pressBody(entry: RunningEntry): { request_id: string } {
 }
 
 /** The note a press's answer leaves on its row: null when the route did not refuse it,
- * the refusal's `problem` when it did, and a line of its own for an answer that is not
- * the route's. */
+ * `Not kept warm: ` and the refusal's `problem` when it did, and a line of its own for an
+ * answer that is not the route's. */
 export function pressNote(answer: Answer): string | null {
   const data = answer.data;
   if (answer.status === 200 && isTable(data) && "refused" in data) {
     if (data.refused === null) return null;
     if (isTable(data.refused) && typeof data.refused.problem === "string" && data.refused.problem) {
-      return data.refused.problem;
+      return `${NOT_KEPT}${data.refused.problem}`;
     }
   }
-  if (answer.status === 0) return "Not kept warm: no answer from the shell";
-  return answer.status === 200 ? "Not kept warm: the answer could not be read"
-    : `Not kept warm: the shell answered ${answer.status}`;
+  if (answer.status === 0) return `${NOT_KEPT}no answer from the shell`;
+  return answer.status === 200 ? `${NOT_KEPT}the answer could not be read`
+    : `${NOT_KEPT}the shell answered ${answer.status}`;
 }
+
+/** How each note a press leaves begins. */
+const NOT_KEPT = "Not kept warm: ";
 
 function without<T>(table: Readonly<Record<string, T>>, request: string): Record<string, T> {
   return Object.fromEntries(Object.entries(table).filter(([key]) => key !== request));

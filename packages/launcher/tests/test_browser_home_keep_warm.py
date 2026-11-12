@@ -41,7 +41,7 @@ PASS_MS = 30_000
 #: How long a pressed button waits for a value before it is enabled again, with a margin.
 PRESS_WAIT_MS = 25_000
 COST = "Sends a short turn before each cold time while it waits, at most 3 in a row."
-DRAFT = "there is text typed in the session's prompt box"
+DRAFT = "Not kept warm: there is text typed in the session's prompt box"
 
 
 @pytest.fixture(scope="module")
