@@ -773,7 +773,7 @@ dev = [
 
 [[package]]
 name = "moxi-cache"
-version = "0.1.5"
+version = "0.1.6"
 source = { editable = "packages/cache" }
 dependencies = [
     { name = "moxi" },

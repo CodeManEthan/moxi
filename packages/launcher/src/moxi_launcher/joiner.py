@@ -25,15 +25,19 @@ What a pass reads, each only when its module is installed:
   window read again only when the transcript's size or modification time changed since
   the last pass. `at` is when it was written, `by` is `you` for a message the person at
   the prompt sent and `agent` for the model's own, and `text` its first line.
-* `waits` and `covered` (`read_waits`), with turns, only while the launch's own turn is
-  closed. The session is found as an act finds it (`target.find`), but slots is never
+* `waits`, `covered` and `coverable` (`read_waits`), with turns, only while the launch's
+  own turn is closed. The session is found as an act finds it (`target.find`), but slots is never
   asked. `waits` counts its live subagents as keep-warm counts them (`keepwarm.signal_of`);
-  with none, and comms installed, the agents its comms name directs that work: comms'
-  `owner`, one `roster` for the pass, `session_of` for each directed agent, then turns'
-  facts of that agent's session. Each comms read may take `COMMS_TIMEOUT_S`, and once one
-  finds the daemon down the pass asks comms nothing more. `covered` is
-  `keepwarm.would_nudge` over what the pass read, and is false without cache. Neither
-  writes anything.
+  with none, and comms installed, the agents its comms name directs that work, as
+  `waits.directed` reads them through the pass: comms' `owner`, one `roster` for the
+  pass, `session_of` for each directed agent, then turns' facts of that agent's session.
+  Each comms read may take `COMMS_TIMEOUT_S`, and once one finds the daemon down the pass
+  asks comms nothing more. A join that raised, or one through a comms that is installed
+  and does not load, gives no `waits`, and one that met the deadline leaves the launch
+  unpublished in this pass. `covered` is `keepwarm.would_nudge` over what the pass read,
+  the directed join included, and is false without cache. `coverable`, set only on a launch that waits and is not covered, is the
+  cap of the case a press would nudge for, when `keepwarm.reading` with `pressed` passes
+  every step; else null. None of them writes anything.
 
 No fact holds the time it was read, so a pass over sessions that did nothing gives the
 same facts as the last one, and the topic publishes nothing.
@@ -50,11 +54,13 @@ from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from types import MappingProxyType
 from typing import Any
 
 from moxi import aio, config, modules
 
-from . import api, catalog, first, keepwarm, recycle, settings, store, target
+from . import api, catalog, first, keepwarm, recycle, settings, store, target, waits
+from .waits import COMMS_TIMEOUT_S, Late
 
 #: Seconds after a pass ended before the next, when the set of running launches and
 #: their session ids did not change before then.
@@ -75,8 +81,6 @@ ACTIVITY_TEXT_CHARS = 200
 UNTIL_SAME_S = 1.0
 #: The cache kinds a launch's `cache` fact is given for.
 CACHE_KINDS = ("warm", "cold")
-#: Seconds each of comms' reads may take.
-COMMS_TIMEOUT_S = 2.0
 
 log = logging.getLogger("moxi.launcher.page")
 
@@ -90,11 +94,6 @@ def _log_once(err: BaseException, what: str) -> None:
         _logged.add(type(err))
     if first:
         log.error("%s (%s)", what, type(err).__name__, exc_info=err)
-
-
-class Late(Exception):
-    """A call asked for after the pass's deadline: the worker stops, and what it read for
-    its launch is not published."""
 
 
 @dataclass(frozen=True)
@@ -134,8 +133,12 @@ def sessions_api() -> Any | None:
 
 
 def comms_api() -> Any | None:
-    """comms' interface 2, or None when comms is not installed or does not load."""
-    return _optional("comms", 2)
+    """comms' interface 2; None when comms is not installed, `waits.UNLOADED` when it is
+    installed and does not load, so a join through it reads as one that raised."""
+    if not modules.available("comms"):
+        return None
+    found = modules.load("comms", interface=2)
+    return found.api if found.ok else waits.UNLOADED
 
 
 def cache_tick_s() -> float | None:
@@ -170,10 +173,11 @@ def take(limit: int) -> list[Launch]:
             if (row := rows[each.request_id]) is not None]
 
 
-class Pass:
-    """What one pass's workers share: its deadline, the APIs of the modules it reads
-    (None for one not installed), the environment the reads resolve roots in, and the
-    joiner whose memory the reads consult.
+class Pass(waits.Reads):
+    """What one pass's workers share: the `waits.Reads` that bounds every call they make,
+    with the pass's deadline on the joiner's clock, and besides it the APIs of the modules
+    it reads (None for one not installed), the environment the reads resolve roots in, and
+    the joiner whose memory the reads consult.
 
     It also holds what one pass reads once for every launch (`shared`), the clock each
     launch's cache read gave (`clocks`, by request id, with the time it was read at), and
@@ -182,56 +186,12 @@ class Pass:
     def __init__(self, joiner: Joiner, *, deadline: float, cache: Any | None,
                  sessions: Any | None, env: Mapping[str, str], turns: Any | None = None,
                  comms: Any | None = None):
+        super().__init__(deadline=deadline, clock=joiner.clock, comms=comms, turns=turns)
         self.joiner = joiner
-        self.deadline = deadline
         self.cache = cache
         self.sessions = sessions
-        self.turns = turns
-        self.comms = comms
         self.env = env
         self.clocks: dict[str, tuple[Any, float]] = {}
-        self.offline = False
-        self._lock = threading.Lock()
-        self._locks: dict[str, threading.Lock] = {}
-        self._shared: dict[str, tuple[bool, Any]] = {}
-
-    def call(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
-        """`fn(*args, **kwargs)`, or `Late` when the deadline has passed."""
-        if self.joiner.clock() >= self.deadline:
-            raise Late()
-        return fn(*args, **kwargs)
-
-    def comms_call(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
-        """`call` of one of comms' reads, unless an earlier one of the pass found the
-        daemon down: then, and when this one does, comms' `DaemonOffline`."""
-        offline = self.comms.DaemonOffline
-        if self.offline:
-            raise offline("comms' daemon was found down earlier in this pass")
-        try:
-            return self.call(fn, *args, **kwargs)
-        except offline:
-            self.offline = True
-            raise
-
-    def shared(self, name: str, fn: Callable[[], Any]) -> Any:
-        """What `fn()` gives, called once in the pass whichever worker asks first; an
-        exception it raised is raised again to every worker that asks. `Late` is not kept.
-        Each name has its own lock, so a worker waits only on a call of the same name; `fn`
-        makes its calls through `call`."""
-        with self._lock:
-            lock = self._locks.setdefault(name, threading.Lock())
-        with lock:
-            if name not in self._shared:
-                try:
-                    self._shared[name] = (True, fn())
-                except Late:
-                    raise
-                except Exception as err:
-                    self._shared[name] = (False, err)
-            ok, value = self._shared[name]
-        if not ok:
-            raise value
-        return value
 
 
 # -- the reads --------------------------------------------------------------------------------
@@ -339,11 +299,13 @@ def read_activity(each: Pass, launch: Launch) -> dict[str, Any]:
 
 
 def read_waits(each: Pass, launch: Launch) -> dict[str, Any]:
-    """`waits` and `covered`, while the launch's own turn is closed: the session found as an
-    act finds it but without asking slots, its facts, then its live subagents counted as
-    keep-warm counts them, else the agents it directs that work (`directed_at_work`), and
-    whether keep-warm's next ask would nudge it (`keepwarm.would_nudge`). Nothing without
-    turns; no `waits` and `covered` false for a session not found live, or whose turn is
+    """`waits`, `covered` and `coverable`, while the launch's own turn is closed: the
+    session found as an act finds it but without asking slots, its facts, then its live
+    subagents counted as keep-warm counts them, else the agents it directs that work
+    (`waits.directed`); whether keep-warm's next ask would nudge it, on the launch value or
+    its cover (`keepwarm.would_nudge`); and, for a launch that waits and is not covered,
+    whether a press would cover it (`coverable`). Nothing without turns; no `waits`,
+    `covered` false and `coverable` null for a session not found live, or whose turn is
     open."""
     if each.turns is None:
         return {}
@@ -354,10 +316,10 @@ def read_waits(each: Pass, launch: Launch) -> dict[str, Any]:
             found = each.call(target.find, launch.session_id, conn=conn, turns=each.turns,
                               slot=False)
         except catalog.Refused:
-            return {"waits": None, "covered": False}
+            return {"waits": None, **UNCOVERED}
         try:
             if not found.live or found.session is None:
-                return {"waits": None, "covered": False}
+                return {"waits": None, **UNCOVERED}
             return _waits_and_cover(each, launch, conn, found)
         finally:
             found.close()
@@ -368,7 +330,7 @@ def _waits_and_cover(each: Pass, launch: Launch, conn: Any, found: Any) -> dict[
     sid = found.session_id or launch.session_id
     facts = each.call(session.facts)
     if getattr(facts, "turn_open", None) is not False:
-        return {"waits": None, "covered": False}
+        return {"waits": None, **UNCOVERED}
     try:
         listed = each.call(session.agents)
     except Late:
@@ -379,62 +341,23 @@ def _waits_and_cover(each: Pass, launch: Launch, conn: Any, found: Any) -> dict[
     nudges = each.call(keepwarm.run_of_nudges, conn, found.row.request_id,
                        getattr(facts, "session_id", None) or sid, number)
     signal = each.call(keepwarm.signal_now, conn, found.row, listed, nudges)
-    waits = None
+    fact = None
+    joined = None
     if signal.agents:
-        waits = {"kind": "subagents", "count": len(signal.agents)}
+        fact = {"kind": "subagents", "count": len(signal.agents)}
     elif each.comms is not None:
-        try:
-            count = directed_at_work(each, sid)
-        except Late:
-            raise
-        except Exception as err:  # noqa: BLE001  (comms down or a read failed: no waits)
-            if not isinstance(err, (each.comms.DaemonOffline, each.comms.DaemonError)):
-                _log_once(err, "reading the agents a running launch directs failed")
-            count = 0
-        waits = {"kind": "agents", "count": count} if count else None
-    return {"waits": waits, "covered": _covered(each, launch, conn, found, sid, facts,
-                                                listed)}
+        joined = waits.directed(each, sid)
+        if joined.late:
+            raise Late()
+        if not joined.raised and joined.names:
+            fact = {"kind": "agents", "count": len(joined.names)}
+    return {"waits": fact, **_covered(each, launch, conn, found, sid, facts, listed, fact,
+                                      joined)}
 
 
-def directed_at_work(each: Pass, session_id: str) -> int:
-    """How many agents the session's comms name directs are working: its turn open, or,
-    for a Claude session, closed while it waits on subagents of its own. Raises comms'
-    `DaemonOffline` or `DaemonError`, or what a turns read raises."""
-    comms = each.comms
-    owner = each.comms_call(comms.owner, session_id, timeout_s=COMMS_TIMEOUT_S).identity
-    if not owner:
-        return 0
-    roster = each.shared("roster", lambda: each.comms_call(comms.roster,
-                                                           timeout_s=COMMS_TIMEOUT_S))
-    count = 0
-    for agent in roster.bound:
-        if owner not in tuple(agent.directors or ()):
-            continue
-        sid = each.comms_call(comms.session_of, agent.qualified, timeout_s=COMMS_TIMEOUT_S)
-        if sid is None:
-            continue
-        session = each.call(each.turns.find, session_id=sid)
-        if session is None:
-            continue
-        try:
-            facts = each.call(session.facts)
-        finally:
-            session.close()
-        if works(facts, getattr(session, "harness", None)):
-            count += 1
-    return count
-
-
-def works(facts: Any, harness: str | None) -> bool:
-    """Whether a directed agent's session works: its turn is open, or it is a Claude
-    session whose closed turn waits on subagents of its own (`facts.agents` above zero;
-    for Codex that count holds background terminals too, so it is not read)."""
-    if getattr(facts, "turn_open", None) is True:
-        return True
-    if harness == "codex":
-        return False
-    busy = getattr(facts, "agents", None)
-    return isinstance(busy, int) and not isinstance(busy, bool) and busy > 0
+#: `covered` and `coverable` where keep-warm's next ask would not nudge and a press would
+#: not change that.
+UNCOVERED: Mapping[str, Any] = MappingProxyType({"covered": False, "coverable": None})
 
 
 def proc_gone(job: str) -> bool:
@@ -446,10 +369,15 @@ def proc_gone(job: str) -> bool:
 
 
 def _covered(each: Pass, launch: Launch, conn: Any, found: Any, sid: str, facts: Any,
-             listed: Any | None) -> bool:
+             listed: Any | None, fact: Mapping[str, Any] | None,
+             joined: waits.Directed | None) -> dict[str, Any]:
+    """`covered`, `keepwarm.would_nudge` over what the pass read, and `coverable`: for a
+    launch that waits (`fact`) and is not covered, `{"cap": n}` when the same reading
+    with `pressed` passes every step, `n` the cap of the case it found; else None.
+    `joined` is the directed join the pass read for `waits`, None when it was not made."""
     read = each.clocks.get(launch.request_id)
     if each.cache is None or read is None:
-        return False
+        return dict(UNCOVERED)
     clock, now = read
     try:
         current = each.shared("settings", lambda: each.call(settings.current))
@@ -458,9 +386,18 @@ def _covered(each: Pass, launch: Launch, conn: Any, found: Any, sid: str, facts:
     except Late:
         raise
     except Exception:  # noqa: BLE001  (a step that could not be read is not passed)
-        return False
-    return bool(each.call(keepwarm.would_nudge, conn, found.row, sid, clock, facts, listed,
-                          current, records, gone=proc_gone, now=now, tick_s=tick_s))
+        return dict(UNCOVERED)
+    reads = (conn, found.row, sid, clock, facts, listed, current, records)
+    options = {"gone": proc_gone, "now": now, "tick_s": tick_s, "directed": joined}
+    if each.call(keepwarm.would_nudge, *reads, **options):
+        return {"covered": True, "coverable": None}
+    if fact is None:
+        return dict(UNCOVERED)
+    pressed = each.call(keepwarm.reading, *reads, **options, pressed=True)
+    if pressed.step is not None:
+        return dict(UNCOVERED)
+    return {"covered": False,
+            "coverable": {"cap": int(current[keepwarm.CAPS[pressed.case]])}}
 
 
 #: A launch's reads, in the order a worker makes them. Each takes the pass and the launch
@@ -580,7 +517,6 @@ def _prepared() -> tuple[list[Launch], Any | None, Any | None, Any | None, Any |
 
 __all__ = ["ACTIVITY_LIMIT", "ACTIVITY_TEXT_CHARS", "CACHE_KINDS", "COMMS_TIMEOUT_S",
            "JOIN_BUDGET_S", "JOIN_EVERY", "JOIN_KEEP_S", "JOIN_MAX", "JOIN_THREADS", "READS",
-           "UNTIL_SAME_S", "Joiner", "Kept", "Late", "Launch", "Pass", "activity_of",
-           "cache_api", "cache_fact", "cache_tick_s", "comms_api", "directed_at_work",
-           "proc_gone", "read_activity", "read_cache", "read_waits", "sessions_api", "take",
-           "transcripts_root", "work", "works"]
+           "UNCOVERED", "UNTIL_SAME_S", "Joiner", "Kept", "Late", "Launch", "Pass", "activity_of",
+           "cache_api", "cache_fact", "cache_tick_s", "comms_api", "proc_gone", "read_activity",
+           "read_cache", "read_waits", "sessions_api", "take", "transcripts_root", "work"]

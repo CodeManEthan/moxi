@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.6 (unreleased)
+
+- Each clock record carries `asks`: the names of the timer's subscriptions the watcher
+  that wrote it will ask about the session when their window comes, by the environment
+  the session's process started with. It is null while the watcher's timer has loaded
+  nothing. The record format's version stays 1 and `asks` is optional, so a record
+  without it, from an older watcher, is still a record.
+- The watcher loads the timer's subscriptions once before its first tick, so the first
+  tick's records carry `asks` too.
+- The timer reads a session's process environment once per process while the session is
+  live, and again each tick only for one it can't read. It reads none when no loaded
+  subscription has a `requires_env`.
+- `api.asking(environ)` says what a watcher started now would put in `asks` for a process
+  with that environment, by the timer's own check of the installed modules' and the
+  config's subscriptions. It gives None where a process's environment can't be read, and
+  starts nothing.
+- A watcher already running when cache updates to 0.1.6 writes no `asks` until it
+  restarts on 0.1.6.
+
 ## 0.1.5 (unreleased)
 
 - The watcher writes its reading, `watch.json` beside the clock records, after every

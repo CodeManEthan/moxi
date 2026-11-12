@@ -2,7 +2,9 @@
 ask and the page share, and `would_nudge`, each of its nine steps false alone with the
 other eight passing. For each step that is the ask's, the same store and fakes given to
 `keepwarm.ask` end without a nudge and with that step's word; in the true case the ask
-nudges."""
+nudges. Then the same reading under cover and as if pressed (`reading`): each session a
+press would not cover, the watcher's `asks`, the directed agents, the cap a press starts
+again, and each end of an earlier ask that a press does or does not change."""
 
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ import pytest
 from test_keepwarm import (IN, SETTINGS, SID, FakeCache, FakeSession, Value, agent, ask,
                            conn, facts, me, nudged)
 
-from moxi_launcher import catalog, joiner, keepwarm, slots, store
+from moxi_launcher import cachetimers, catalog, joiner, keepwarm, slots, store, waits
 
 __all__ = ["conn"]
 
@@ -46,6 +48,7 @@ class Case:
         self.settings = dict(SETTINGS)
         self.tick_s: float | None = TICK_S
         self.gone = joiner.proc_gone
+        self.directed: waits.Directed | None = None
 
     def facts(self):
         value = facts(turn_open=self.turn_open, number=self.number)
@@ -58,7 +61,20 @@ class Case:
         return keepwarm.would_nudge(
             self.conn, row, SID, clock, self.facts(), listed(*self.agents,
                                                              complete=self.complete),
-            self.settings, self.records, gone=self.gone, now=self.now, tick_s=self.tick_s)
+            self.settings, self.records, gone=self.gone, now=self.now, tick_s=self.tick_s,
+            directed=self.directed)
+
+    def reading(self, *, pressed: bool = False) -> keepwarm.Reading:
+        row = store.resolve(self.conn, SID)
+        clock = SimpleNamespace(kind="warm", age_s=self.age, ttl_s=self.ttl)
+        return keepwarm.reading(
+            self.conn, row, SID, clock, self.facts(), listed(*self.agents,
+                                                             complete=self.complete),
+            self.settings, self.records, gone=self.gone, now=self.now, tick_s=self.tick_s,
+            directed=self.directed, pressed=pressed)
+
+    def coverable(self) -> bool:
+        return self.reading(pressed=True).step is None
 
     def asked(self):
         """The ask, on the same store and the same reads; a draft is refused at the
@@ -215,11 +231,11 @@ def test_step_eight_a_box_that_could_not_be_read_is_not_passed(case):
     assert case.would() is False
 
 
-def ended(conn, outcome, *, updated_at, number=None):
+def ended(conn, outcome, *, updated_at, number=None, word=None):
     run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
                            session_id=SID, actor="launcher", state="acting",
                            job=f"proc:{me()}", turn_number=number)
-    store.end_run(conn, run.run_id, outcome, word=outcome,
+    store.end_run(conn, run.run_id, outcome, word=word or outcome,
                   **({"turn_number": number + 1} if number is not None else {}))
     conn.execute("UPDATE runs SET created_at = ?, updated_at = ? WHERE run_id = ?",
                  (updated_at, updated_at, run.run_id))
@@ -319,3 +335,323 @@ def test_the_ask_still_writes_the_dropped_event_the_page_does_not(conn):
     assert words(got.verdict) == (None, "idle")
     assert [e.detail for e in store.run_events(conn, first.run_id)
             if e.kind == "dropped"] == [{"agents": ["a1"]}]
+
+
+# -- under cover, and as if pressed ---------------------------------------------------------
+
+#: The agents a session directs, found at work by the directed join.
+AT_WORK = waits.Directed(("coder@proj-a",))
+#: A directed join read whole that found nobody at work.
+NOBODY = waits.Directed()
+
+
+def asking(case, *, value="off"):
+    """The launch with its launch value `value`, its clock record written by a watcher
+    that asks keep-warm about it."""
+    case.conn.execute("UPDATE launches SET values_json = json_set(values_json, "
+                      "'$.keep_warm', ?) WHERE request_id = 'r1'", (value,))
+    case.records[0]["asks"] = [cachetimers.KEEP_WARM]
+    return case
+
+
+def press(case):
+    row = store.resolve(case.conn, SID)
+    return keepwarm.cover_on(case.conn, row, SID, turn_number=case.number,
+                             waits={"kind": "subagents", "count": 1})
+
+
+@pytest.fixture
+def off(case):
+    """A launch made with keep-warm off, waiting on a subagent, in the window, timed by a
+    watcher that asks about it."""
+    return asking(case)
+
+
+def test_reading_names_the_first_step_not_passed_and_would_nudge_is_true_only_with_none(
+        case):
+    changes = [
+        (lambda: None, None),
+        (lambda: setattr(case, "draft", True), 8),
+        (lambda: setattr(case, "agents", []), 6),
+        (lambda: setattr(case, "turn_open", True), 5),
+        (lambda: setattr(case, "age", case.ttl), 4),
+        (lambda: setattr(case, "records", []), 3),
+        (lambda: case.conn.execute("UPDATE launches SET values_json = json_set(values_json, "
+                                   "'$.keep_warm', 'off') WHERE request_id = 'r1'"), 1),
+    ]
+    for change, step in changes:
+        change()
+        got = case.reading()
+        assert got.step == step
+        assert case.would() is (step is None)
+    assert case.reading().case is None
+
+
+def test_reading_gives_the_case_step_six_found(case):
+    assert case.reading() == keepwarm.Reading(None, keepwarm.SUBAGENTS)
+    case.agents = []
+    store.open_hold(case.conn, "r1", "review")
+    assert case.reading() == keepwarm.Reading(None, keepwarm.DIRECTOR)
+    case.draft = True
+    assert case.reading() == keepwarm.Reading(8, keepwarm.DIRECTOR)
+
+
+def test_a_launch_made_with_keep_warm_off_is_coverable_and_covered_once_pressed(off):
+    assert off.would() is False and off.reading().step == 1
+    assert off.reading(pressed=True) == keepwarm.Reading(None, keepwarm.SUBAGENTS)
+    total = off.conn.total_changes
+    off.coverable()
+    assert off.conn.total_changes == total
+    press(off)
+    assert off.would() is True
+    assert words(off.asked()) == ("nudged", "subagents")
+
+
+def test_cover_for_another_session_id_is_not_cover_for_this_one(off):
+    row = store.resolve(off.conn, SID)
+    keepwarm.cover_on(off.conn, row, "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+                      turn_number=1, waits={"kind": "subagents", "count": 1})
+    assert off.reading().step == 1
+    assert off.coverable() is True
+
+
+# -- step 3, the watcher's `asks` -----------------------------------------------------------
+
+
+def test_a_record_whose_asks_names_the_subscription_and_cover_on_gives_covered(off):
+    press(off)
+    assert off.would() is True
+
+
+@pytest.mark.parametrize("value", ["on", "off"])
+def test_a_record_without_asks_gives_covered_only_with_the_launch_value_on(off, value):
+    asking(off, value=value)
+    del off.records[0]["asks"]
+    press(off)
+    assert off.would() is (value == "on")
+    assert off.coverable() is (value == "on")
+
+
+@pytest.mark.parametrize("asks", [[], ["cache.something-else"], None])
+@pytest.mark.parametrize("value", ["on", "off"])
+def test_a_record_whose_asks_lacks_the_subscription_gives_neither(off, asks, value):
+    asking(off, value=value)
+    off.records[0]["asks"] = asks
+    assert off.coverable() is False and off.reading(pressed=True).step == 3
+    if value == "off":
+        press(off)
+    assert off.would() is False and off.reading().step == 3
+
+
+# -- each session a press would not cover ---------------------------------------------------
+
+
+def test_a_codex_session_is_not_coverable(off):
+    off.conn.execute("UPDATE launches SET harness = 'codex' WHERE request_id = 'r1'")
+    assert off.reading(pressed=True).step == 3
+
+
+def test_a_headless_session_the_watcher_does_not_list_is_not_coverable(off):
+    off.conn.execute("UPDATE launches SET target = 'headless', slot = NULL "
+                     "WHERE request_id = 'r1'")
+    off.records = []
+    assert off.reading(pressed=True).step == 3
+
+
+@pytest.mark.parametrize("ttl, age", [(300.0, 10.0), (490.0, 0.0), (360.0, 0.0)])
+def test_a_lifetime_no_ask_is_certain_in_is_not_coverable(off, ttl, age):
+    off.ttl, off.age = ttl, age
+    assert off.reading(pressed=True).step == 4
+
+
+def test_an_hour_lifetime_is_coverable_until_age_3110_seconds(off):
+    off.age = 3109.0
+    assert off.coverable() is True
+    off.age = 3110.0
+    assert off.reading(pressed=True).step == 4
+
+
+def test_where_a_session_s_environment_can_t_be_read_asks_is_empty_and_not_coverable(off):
+    off.records[0]["asks"] = []
+    assert off.reading(pressed=True).step == 3
+
+
+@pytest.mark.parametrize("record", ["none", "stale", "no asks"])
+def test_a_watcher_stopped_or_from_before_asks_gives_no_cover_to_a_launch_off(off, record):
+    if record == "none":
+        off.records = []
+    elif record == "stale":
+        off.records[0]["seen_at"] = off.now - 3 * TICK_S - 1
+    else:
+        del off.records[0]["asks"]
+    assert off.reading(pressed=True).step == 3
+
+
+def test_a_subscription_the_watcher_refused_is_not_coverable(off):
+    off.records[0]["asks"] = ["cache.other"]
+    assert off.reading(pressed=True).step == 3
+
+
+@pytest.mark.parametrize("draft", [True, None])
+def test_a_draft_or_a_box_not_read_gives_neither_covered_nor_coverable(off, draft):
+    off.draft = draft
+    assert off.reading(pressed=True).step == 8
+    press(off)
+    assert off.would() is False and off.reading().step == 8
+
+
+def test_a_run_open_on_the_launch_gives_neither_covered_nor_coverable(off):
+    store.insert_run(off.conn, kind="clear", mode="expiry", request_id="r1",
+                     session_id=SID, actor="launcher", state="armed", job=f"proc:{me()}")
+    assert off.reading(pressed=True).step == 2
+    press(off)
+    assert off.would() is False and off.reading().step == 2
+
+
+# -- the signals under cover -----------------------------------------------------------------
+
+
+def test_under_cover_a_directed_agent_at_work_is_a_signal(off):
+    off.agents = []
+    off.directed = AT_WORK
+    assert off.reading(pressed=True) == keepwarm.Reading(None, keepwarm.DIRECTOR)
+    press(off)
+    assert off.would() is True
+
+
+def test_without_cover_or_a_press_a_directed_agent_is_not_read(case):
+    case.agents = []
+    case.directed = AT_WORK
+    assert case.reading().step == 6
+
+
+@pytest.mark.parametrize("join", [None, NOBODY, waits.Directed(raised=True),
+                                  waits.Directed(unlisted=True)])
+def test_under_cover_nobody_directed_at_work_is_no_signal(off, join):
+    off.agents = []
+    off.directed = join
+    press(off)
+    assert off.reading().step == 6
+    assert off.reading(pressed=True).step == 6
+
+
+def test_a_hold_in_the_chain_with_the_launch_value_off_and_cover_on_is_no_signal(off):
+    off.agents = []
+    store.open_hold(off.conn, "r1", "review")
+    press(off)
+    assert off.reading().step == 6
+    assert off.reading(pressed=True).step == 6
+
+
+# -- the cap ---------------------------------------------------------------------------------
+
+
+def test_a_session_at_its_cap_under_cover_is_not_covered_and_is_coverable(off):
+    press(off)
+    for number in (1, 2, 3):
+        nudged(off.conn, number=number, agents=["a1"])
+    assert off.reading() == keepwarm.Reading(7, keepwarm.SUBAGENTS)
+    assert off.coverable() is True
+
+
+def test_under_cover_only_the_nudges_since_the_press_count(off):
+    for number in (1, 2):
+        nudged(off.conn, number=number, agents=["a1"])
+    press(off)
+    nudged(off.conn, number=3, agents=["a1"])
+    assert off.would() is True
+
+
+def test_a_director_on_its_holds_at_its_cap_with_nobody_directed_at_work_is_not_coverable(
+        case):
+    # The launch value is on and a hold is open: a press can't start the hold's count
+    # again, since the next ask ends a cover that finds nobody directed at work.
+    asking(case, value="on")
+    case.agents = []
+    store.open_hold(case.conn, "r1", "review")
+    for number in range(1, 11):
+        nudged(case.conn, number=number)
+    case.number = 11
+    for join in (NOBODY, None):
+        case.directed = join
+        assert case.reading() == keepwarm.Reading(7, keepwarm.DIRECTOR)
+        assert case.reading(pressed=True) == keepwarm.Reading(7, keepwarm.DIRECTOR)
+    case.directed = AT_WORK
+    assert case.coverable() is True
+
+
+# -- step 9: each end of an earlier ask -------------------------------------------------------
+
+
+def test_a_capped_end_at_the_cap_is_coverable_and_covered_after_the_press(off):
+    press(off)
+    for number in (1, 2, 3):
+        nudged(off.conn, number=number, agents=["a1"])
+    ended(off.conn, "blocked", word="capped", updated_at=store.now())
+    assert off.reading() == keepwarm.Reading(7, keepwarm.SUBAGENTS)
+    assert off.coverable() is True
+    press(off)
+    assert off.would() is True
+
+
+def test_a_capped_end_with_the_launch_value_on_and_no_cover_reads_as_before(case):
+    for number in (1, 2, 3):
+        nudged(case.conn, number=number, agents=["a1"])
+    ended(case.conn, "blocked", word="capped", updated_at=store.now())
+    assert case.would() is False and case.reading().step == 7
+
+
+def test_a_capped_end_alone_counts_until_a_press_comes_after_it(off):
+    asking(off, value="on")
+    ended(off.conn, "blocked", word="capped", updated_at=at(off.now - 10))
+    assert off.reading().step == 9
+    assert off.coverable() is True
+
+
+#: Each end of an ask that a press does not change: outcome, word.
+UNCHANGED = [("failed", "unsupported"), ("failed", "failed"), ("unconfirmed", "timeout"),
+             ("error", "error"), store.JOB_GONE, ("blocked", "draft")]
+
+
+@pytest.mark.parametrize("outcome, word", UNCHANGED)
+def test_an_end_a_press_does_not_change_gives_neither_before_or_after_a_press(
+        off, outcome, word):
+    ended(off.conn, outcome, word=word, updated_at=store.now())
+    assert off.would() is False
+    assert off.reading(pressed=True) == keepwarm.Reading(9, keepwarm.SUBAGENTS)
+    press(off)
+    assert off.would() is False and off.reading().step == 9
+    assert off.reading(pressed=True).step == 9
+
+
+def test_a_capped_end_before_the_press_and_a_failed_end_after_it_give_neither(off):
+    ended(off.conn, "blocked", word="capped", updated_at=store.now())
+    press(off)
+    ended(off.conn, "failed", word="unsupported", updated_at=store.now())
+    assert off.reading().step == 9
+    assert off.reading(pressed=True).step == 9
+
+
+def test_a_capped_end_after_the_press_still_counts_under_cover(off):
+    press(off)
+    for number in (1, 2, 3):
+        nudged(off.conn, number=number, agents=["a1"])
+    ended(off.conn, "blocked", word="capped", updated_at=store.now())
+    off.settings = {**off.settings, "keep_warm.subagent_cap": 5}
+    assert off.reading().step == 9
+    assert off.coverable() is True
+
+
+def test_a_newer_nudge_after_a_failed_end_passes_step_nine_under_cover(off):
+    ended(off.conn, "failed", word="unsupported", updated_at=at(off.now - 60))
+    ended(off.conn, "nudged", updated_at=at(off.now - 30), number=3)
+    assert off.coverable() is True
+    press(off)
+    assert off.would() is True
+
+
+def test_a_failed_end_before_the_last_request_passes_step_nine_under_cover(off):
+    ended(off.conn, "failed", word="unsupported", updated_at=at(off.now - off.age - 60))
+    assert off.coverable() is True
+    press(off)
+    assert off.would() is True

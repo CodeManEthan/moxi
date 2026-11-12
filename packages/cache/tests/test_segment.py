@@ -37,7 +37,7 @@ def seg(rec, *, now=NOW):
 def test_a_record_holds_every_field_in_order():
     assert records.FIELDS == ("v", "session", "harness", "pid", "kind", "last_request",
                               "ttl", "read_at", "seen_at", "code", "warn_before",
-                              "stale_after")
+                              "stale_after", "asks")
     assert records.valid(record())
     assert records.valid(record(kind="fresh", age=None, ttl=None))
     assert records.thresholds(record()) == (900, 30)

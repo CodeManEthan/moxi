@@ -21,13 +21,18 @@ At each tick (`watch.tick_s`, 10 s by default):
    `segment.warn_before_s`) and `stale_after` (three times the effective tick), both in
    seconds, from the config as read at this tick, so a config change reaches every record
    within one tick (`records`). The tick that sets `stale_after` is the one the watcher
-   then waits, so a fresh record never shows dim.
+   then waits, so a fresh record never shows dim. Every record also carries `asks`, the
+   timer's subscriptions this watcher will ask about the session (`Timer.asking`), or
+   null while the timer has loaded nothing.
 4. After every tick, whatever it wrote, it replaces its reading, `RUNTIME/cache/watch.json`
    (`records`), through `moxi.files.atomic_write`: `tick_at` is this tick, and `listed_at`
    moves to it only at a tick that held the live list and was not halted, one with no live
    session included. A write that fails is logged once per change and the tick goes on.
    The reading is not under `clock/`, so no listing of the records sees it.
 5. It runs the timer's work for the tick (`timer`) over the records it wrote.
+
+Before the first tick, `run` loads the timer's subscriptions once (`Timer.reload`), so the
+first tick's records carry `asks` too.
 
 A session id is used in a path only after the reader's own check (`records.record_path`):
 an id it refuses, such as one holding `/` or `..`, gets no record and one log line.
@@ -201,12 +206,13 @@ class Seen:
 
 
 def make_record(session: str, seen: Seen, now: float, *, warn_before: float,
-                stale_after: float) -> dict:
+                stale_after: float, asks: Sequence[str] | None) -> dict:
     clock = seen.clock
     return {"v": records.VERSION, "session": session, "harness": "claude", "pid": seen.pid,
             "kind": clock.kind, "last_request": seen.last_request,
             "ttl": clock.ttl_s, "read_at": seen.read_at, "seen_at": now,
-            "code": clock.code, "warn_before": warn_before, "stale_after": stale_after}
+            "code": clock.code, "warn_before": warn_before, "stale_after": stale_after,
+            "asks": None if asks is None else list(asks)}
 
 
 def write_record(directory: Path, record: dict) -> Path:
@@ -228,9 +234,11 @@ class Watcher:
     """The watcher's state and its tick. Every outside effect can be replaced for tests:
     `agents` (the live list), `read` (the clock), `now`, `projects_root` (where
     transcripts are found), `directory` (where records go), `sessions` (the folder whose
-    changes ask for the list again) and `reading` (the reading's file; by default
+    changes ask for the list again), `reading` (the reading's file; by default
     `watch.json` beside `directory`, which is `records.reading_path()` for the default
-    directory).
+    directory) and `asking` (what the timer asks about a session and its pid, written as
+    the record's `asks`; `run` sets it to its timer's `Timer.asking`, and by default it
+    gives None).
 
     `warn_before` and `stale_after` are what the next tick writes into every record;
     `run` sets them from the config before each tick. They start at the keys' defaults."""
@@ -240,8 +248,10 @@ class Watcher:
                  now: Callable[[], float] = time.time,
                  projects_root: Callable[[], str] | None = None,
                  directory: Path | None = None, sessions: Path | None = None,
-                 reading: Path | None = None):
+                 reading: Path | None = None,
+                 asking: Callable[[str, int], Sequence[str] | None] | None = None):
         self.agents = agents
+        self.asking = asking or (lambda session, pid: None)
         self.read = read
         self.now = now
         self.projects_root = projects_root or (lambda: api.projects_root(None))
@@ -304,7 +314,7 @@ class Watcher:
             seen = self._observe(live, now)
             record = current[live.session] = make_record(
                 live.session, seen, now, warn_before=self.warn_before,
-                stale_after=self.stale_after)
+                stale_after=self.stale_after, asks=self.asking(live.session, live.pid))
             try:
                 write_record(self.directory, record)
                 self.say("write", None)
@@ -432,8 +442,9 @@ def _thresholds(config: Config, watcher: Watcher) -> int:
 def run(*, watcher: Watcher | None = None, stop: threading.Event | None = None,
         config: Config | None = None, timer: _timer.Timer | None = None) -> int:
     """Tick until `stop` is set (SIGTERM or SIGINT in the foreground), with the timer's
-    work after each tick. Returns the exit code: 0 on a stop, 2 when the config refuses
-    the start."""
+    work after each tick. The timer loads its subscriptions once before the first tick and
+    the watcher writes `Timer.asking` into its records. Returns the exit code: 0 on a stop,
+    2 when the config refuses the start."""
     config = config or Config(MODULE, schema(),
                               report=lambda e: log.warning("cache's config: %s", e))
     try:
@@ -445,7 +456,13 @@ def run(*, watcher: Watcher | None = None, stop: threading.Event | None = None,
     timer = timer or _timer.Timer(config_entries=lambda: config.use(_timer.CONFIG_KEY))
     stop = stop or threading.Event()
     log.info("watching live Claude sessions; records under %s", watcher.directory)
+    watcher.asking = timer.asking
     try:
+        try:
+            timer.reload()
+        except Exception as e:                                    # noqa: BLE001
+            watcher.say("timer-error", f"the timer's first load failed "
+                                       f"({type(e).__name__}: {e})")
         while not stop.is_set():
             interval = _thresholds(config, watcher)
             try:

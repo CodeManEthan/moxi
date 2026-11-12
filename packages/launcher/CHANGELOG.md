@@ -27,6 +27,60 @@
   writing. The ask does what it did.
 - `target.find(.., slot=False)` finds a launched session without asking slots; the
   default, which every act uses, still asks.
+- `Keep warm` for a session that is already running. On Home's Sessions row, opened at
+  the desk, a waiting session that nothing keeps warm and that a press would cover has a
+  `Keep warm` button before `Open`. Its tooltip says what a press costs, with the most
+  nudges in a row. A press sends nothing to the session: it records keep-warm cover, and
+  cache's timer's next ask sends the first nudge. The row then turns quiet, `kept warm
+  while 1 subagent runs`, with `Open` alone, and the focus moves to that `Open`. The
+  button stays disabled until the row's next update after the answer, or 20 s. A refused
+  press shows its reason under the row until the row next changes. The phone reads the
+  same rows and draws no button.
+- `POST /api/keep-warm` (`{"request_id"}`), the press. It reads the session now, within
+  8 s, as Home's row reads it. When keep-warm's next ask would nudge the session once
+  covered, it writes one `keep-warm-cover` event and wakes the row's reader. On a
+  session already covered it writes nothing. Otherwise it is refused with the first step
+  that fails: `not-launched`, `no-session`, `unclaimed`, `changed`, `no-turns`,
+  `turns-failed`, `not-live`, `run-open`, `no-timer`, `cold`, `no-window`, `too-late`,
+  `busy`, `not-waiting`, `unreadable`, `capped`, `draft` or `ask-failed`. The phone's
+  gateway does not reach it.
+- Cover belongs to one launch and the session id it has now: a `/clear`, a relaunch or a
+  resume starts without it. It is an event in the launch log, not a store step, so the
+  log's version does not move and an older launcher passes over it. `moxi launcher show`
+  reads a covered session as keep-warm on, with no holds listed. Holds still need the
+  launch value: `keep-warm hold`, `release` and `holds` refuse a launch with cover alone,
+  and an open hold keeps a session warm only when its launch was made with `keep_warm`
+  on.
+- Under cover a session is also kept warm while agents it directs through comms are at
+  work. With no subagent of its own at work, the ask reads those agents and nudges with
+  the new `keep_warm.directing_texts`, naming them; the `nudge` event records them as
+  `directed`. `keep_warm.director_cap` applies to both of a director's signals, and
+  under cover the cap counts only the nudges made since the press. The cover ends at the
+  first ask that reads the session's own subagents and its directed agents whole and
+  finds nobody at work; a read that falls short keeps the cover and ends the ask
+  `unreadable`.
+- Cache's timer now asks about every session the launcher started, by the request stamp
+  `MOXI_LAUNCHER_REQUEST`, which a press needs, since a running process can't gain the
+  old keep-warm stamp. An ask about a launch where keep-warm is off ends at its read of
+  the launch log. `cachetimers.KEEP_WARM` names the subscription. After upgrading,
+  restart cache's watcher (see the README's "Upgrading").
+- `moxi doctor` has a row `keep-warm.timer`, with cache installed: it warns when the
+  installed moxi-cache is older than 0.1.6, when cache refuses the keep-warm
+  subscription, or when cache's running watcher started before the upgrade and should be
+  restarted; it is `off` where a process's environment can't be read.
+- The `cache` extra now needs `moxi-cache>=0.1.6`.
+- Home's Sessions row reads cover. A waiting session counts as covered when its launch
+  keeps warm by the launch value or by cover, cache's watcher says it asks keep-warm about
+  it (its clock record's `asks`), and every other step of the next ask passes. A launch
+  made with `keep_warm` on is no longer read as covered when the watcher's record says it
+  doesn't ask. Each entry of `GET /api/running` and the `running` topic gains
+  `coverable`: `{cap}` on a waiting session that isn't covered when a press would cover
+  it, `cap` being the most nudges in a row the press would lead to; else null.
+- `keepwarm.reading` names the first step at which the next ask would not nudge;
+  `would_nudge` and `reading` take `directed` and `pressed`. The agents a session directs
+  that are at work are read by one function, `waits.directed`, shared by Home's row, the
+  ask and the press; it reports each way its read fell short as its own fact. The row
+  reads as before.
 - The launcher offers interface 2: `running()` gives the launches running now, newest
   first, each a frozen `Running` with its request id, harness, the session id it was
   last known by, target, slot, project key, folder, name, comms name, start time and

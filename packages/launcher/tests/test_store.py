@@ -418,6 +418,36 @@ def test_events_are_kept_in_order_with_their_detail(conn):
     assert got[1].kind == "gone" and got[1].session_id == CLAUDE_ID and got[1].detail == {}
 
 
+def test_last_event_is_the_newest_of_its_kind_on_the_launch(conn):
+    claude(conn)
+    claude(conn, request_id="r2", session_id="1c7a5b63-7b2e-4e1f-8b62-1d8a7b4e3f22")
+    assert store.last_event(conn, "r1", "cover") is None
+    store.add_event(conn, "cover", {"n": 1}, request_id="r1", at="2026-10-30T10:00:01.000000Z")
+    tied = store.add_event(conn, "cover", {"n": 2}, request_id="r1",
+                           at="2026-10-30T10:00:02.000000Z")
+    store.add_event(conn, "cover", {"n": 0}, request_id="r1", at="2026-10-30T10:00:00.000000Z")
+    store.add_event(conn, "other", {"n": 3}, request_id="r1", at="2026-10-30T10:00:09.000000Z")
+    store.add_event(conn, "cover", {"n": 4}, request_id="r2", at="2026-10-30T10:00:09.000000Z")
+    got = store.last_event(conn, "r1", "cover")
+    assert got.id == tied and got.detail == {"n": 2} and got.kind == "cover"
+    assert got.at == "2026-10-30T10:00:02.000000Z" and got.request_id == "r1"
+    again = store.add_event(conn, "cover", {"n": 5}, request_id="r1",
+                            at="2026-10-30T10:00:02.000000Z")
+    assert store.last_event(conn, "r1", "cover").id == again
+
+
+def test_last_event_is_one_query_on_the_launch_and_time_index(conn):
+    ran = []
+    conn.set_trace_callback(ran.append)
+    try:
+        store.last_event(conn, "r1", "cover")
+    finally:
+        conn.set_trace_callback(None)
+    [sql] = ran
+    plan = " ".join(r[-1] for r in conn.execute(f"EXPLAIN QUERY PLAN {sql}"))
+    assert "events_request_at" in plan
+
+
 # -- picks ---------------------------------------------------------------------------------
 
 

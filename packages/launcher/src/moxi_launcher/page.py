@@ -31,6 +31,8 @@
     POST /api/launch    the launch a ticket was issued for, run as a detached job (202)
     POST /api/resume    a past session resumed: a slot one as a detached job (202), a
                         terminal one answered with the command to copy
+    POST /api/keep-warm keep-warm cover for a running launch's session, set when a press
+                        would make keep-warm's next ask nudge it; nothing is sent to it
     GET  /api/running   the launches running now, as Home's Sessions row reads them; the
                         one route the gateway reaches
     GET  /api/events    the stream; topics `sessions`, `launches` and `running`
@@ -289,12 +291,16 @@ WAITS = _table(nullable=True, kind=_text(), count=Out("int"))
 #: or null) and its first line, which the gateway cuts.
 ACTIVITY = _table(nullable=True, at=_text(), by=_text(nullable=True),
                   text=_text(nullable=True, mark="redact"))
-#: One launch running now. `started_at` is when its row was written. `cache`, `waits`
-#: and `activity` are null and `covered` false while nothing was read of them.
+#: Whether a press of `Keep warm` would cover a running launch that waits and is not
+#: covered: `cap`, the most nudges in a row it would send for the case it would nudge for.
+#: Null where it would not.
+COVERABLE = _table(nullable=True, cap=Out("int"))
+#: One launch running now. `started_at` is when its row was written. `cache`, `waits`,
+#: `coverable` and `activity` are null and `covered` false while nothing was read of them.
 RUNNING_LAUNCH = _table(
     request_id=_text(), harness=_text(), session_id=_text(nullable=True), name=_text(),
     identity=_text(nullable=True), where=WHERE, started_at=_text(), cache=CACHE,
-    waits=WAITS, covered=Out("bool"), activity=ACTIVITY,
+    waits=WAITS, covered=Out("bool"), coverable=COVERABLE, activity=ACTIVITY,
 )
 #: The launches running now, newest first: `count` of them, every one in `sessions`.
 RUNNING = {**STANDING, "count": Out("int"), "sessions": Out("list", items=RUNNING_LAUNCH)}
@@ -385,8 +391,9 @@ PREVIEW = {
     "expires_at": _text(nullable=True),
 }
 
-#: A refusal a page launch or resume meets before anything runs; null when it went ahead
-#: (202) or, for a terminal resume, with the command to copy.
+#: A refusal a page launch, resume or keep-warm press meets before anything runs; null when
+#: it went ahead (202 for a launch or resume), for a terminal resume with the command to
+#: copy, or for a press when the session is covered.
 ACTED = {"refused": Out("table", items=REFUSAL.items, nullable=True)}
 #: A page launch's refusal; for a launch in a terminal, which the page never runs, the
 #: `moxi launcher run` command to copy too.
@@ -456,6 +463,8 @@ PAGE = lb.Page(
                  body={"session": Field("string", max=QUERY_MAX),
                        "slot": Field("string", required=False, max=QUERY_MAX)},
                  returns={**ACTED, "command": _text(nullable=True)}),
+        lb.Route("/api/keep-warm", "act", _target("keep_warm"),
+                 body={"request_id": Field("string", max=QUERY_MAX)}, returns=ACTED),
         lb.Route("/api/running", "read", _target("read_running"), returns=RUNNING,
                  gateway=True),
         lb.Route("/api/events", "read", _target("events"), stream=True,
@@ -468,9 +477,9 @@ PAGE = lb.Page(
     assets="web",
 )
 
-__all__ = ["ACTED", "ACTIVITY", "CACHE", "CATALOG", "FIELD", "FORM", "FORM_MODE", "FORM_ROW",
-           "HANDED", "LAST", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX", "NAME",
-           "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW",
+__all__ = ["ACTED", "ACTIVITY", "CACHE", "CATALOG", "COVERABLE", "FIELD", "FORM", "FORM_MODE",
+           "FORM_ROW", "HANDED", "LAST", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
+           "NAME", "PAGE", "PAST", "PATH_MAX", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW",
            "PROBLEM", "RECENT", "RECENTS", "RECENT_LAUNCH", "RECENT_REQUEST", "RECENT_SHOWS",
            "REFUSAL", "REQUEST", "RUN", "RUNNING", "RUNNING_LAUNCH", "RUNS", "RUN_EVENT",
            "RUN_LINE", "SESSIONS", "SESSION_STATE", "SLOT", "STANDING", "STATE", "TARGETS",

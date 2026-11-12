@@ -154,7 +154,7 @@ def test_a_tick_writes_a_record_for_each_live_session(root, sessions):
     assert a == {"v": 1, "session": A, "harness": "claude", "pid": 11, "kind": "warm",
                  "last_request": pytest.approx(1_800_000_000.0 - 120), "ttl": 3600,
                  "read_at": 1_800_000_000.0, "seen_at": 1_800_000_000.0, "code": None,
-                 "warn_before": 900, "stale_after": 30}
+                 "warn_before": 900, "stale_after": 30, "asks": None}
     b = rec(B)
     assert (b["kind"], b["code"], b["last_request"], b["ttl"]) == ("unknown", "no-record",
                                                                    None, None)
@@ -633,6 +633,78 @@ def test_a_new_watcher_writes_the_defaults(sessions):
     fake = Fake([entry(11, A)])
     make(fake, sessions).tick()
     assert (rec(A)["warn_before"], rec(A)["stale_after"]) == (900, 30)
+
+
+# --- what the timer asks ----------------------------------------------------------------------
+
+def test_a_record_carries_what_the_timer_asks_about_its_session(sessions):
+    fake = Fake([entry(11, A), entry(12, B)])
+    asked = []
+
+    def asking(session, pid):
+        asked.append((session, pid))
+        return ("launcher.keep-warm",) if session == A else ()
+
+    w = make(fake, sessions, asking=asking)
+    w.tick()
+    assert asked == [(A, 11), (B, 12)]
+    assert rec(A)["asks"] == ["launcher.keep-warm"] and rec(B)["asks"] == []
+    assert w.current[A]["asks"] == ["launcher.keep-warm"]
+    assert list(rec(A)) == list(records.FIELDS)
+
+
+def test_a_watcher_with_no_timer_writes_asks_as_null(sessions):
+    make(Fake([entry(11, A)]), sessions).tick()
+    assert "asks" in rec(A) and rec(A)["asks"] is None
+
+
+def first_tick_records(own_roots, sessions, t) -> dict:
+    """The records `watch.run` writes at its first tick, with the timer `t`."""
+    stop = threading.Event()
+    seen = {}
+
+    class Once(watch.Watcher):
+        def _tick(self):
+            stop.set()
+            live = super()._tick()
+            seen.update({s: rec(s) for s in (A, B)})
+            return live
+    write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
+    w = Once(agents=lambda: [entry(11, A), entry(12, B)], sessions=sessions)
+    assert watch.run(watcher=w, stop=stop, timer=t) == 0
+    return seen
+
+
+def test_the_first_tick_after_run_starts_carries_asks(own_roots, sessions, tmp_path):
+    from moxi_cache import timer
+
+    exe = tmp_path / "bin" / "verb"
+    exe.parent.mkdir()
+    exe.write_text("#!/bin/sh\nexit 0\n")
+    exe.chmod(0o755)
+    subs = [timer.check({"name": name, "at": -900, "run": [str(exe)], **extra},
+                        source=timer.CONFIG, resolve=timer.resolve_config_argv0)
+            for name, extra in (("plain", {}), ("needs-v", {"requires_env": {"V": "*"}}))]
+    t = timer.Timer(modules=subs, environ={11: {"V": "x"}, 12: {}}.get,
+                    spawn=lambda argv: None, log_file=tmp_path / "timer.jsonl")
+    seen = first_tick_records(own_roots, sessions, t)
+    assert seen[A]["asks"] == ["needs-v", "plain"]
+    assert seen[B]["asks"] == ["plain"]
+
+
+def test_a_timer_whose_first_load_raises_gives_asks_null(own_roots, sessions, tmp_path,
+                                                          caplog):
+    from moxi_cache import timer
+
+    class Failing(timer.Timer):
+        def reload(self):
+            raise OSError("config unreadable")
+
+    t = Failing(modules=[], spawn=lambda argv: None, log_file=tmp_path / "timer.jsonl")
+    with caplog.at_level(logging.WARNING, logger="moxi.cache"):
+        seen = first_tick_records(own_roots, sessions, t)
+    assert "asks" in seen[A] and seen[A]["asks"] is None
+    assert "the timer's first load failed (OSError: config unreadable)" in caplog.text
 
 
 def test_write_record_replaces_whole(tmp_path):

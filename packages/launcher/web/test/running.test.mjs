@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  allLabel, allPlace, caseOf, clock, factOf, hrefOf, leadOf, openPlace, ordered, parseRunning, rowAttrs, rowReport,
-  shownSessions, SHOWN, WAITING, whereText,
+  actsOf, allLabel, allPlace, answered, caseOf, clock, expired, factOf, hrefOf, KEEP_WARM_PATH, keepWarmOf, keepWarmTitle,
+  leadOf, NO_PRESSES, openPlace, ordered, parseRunning, pressBody, pressed, pressNote, PRESS_WAIT_MS, rowAttrs,
+  rowReport, shownSessions, SHOWN, valueCame, WAITING, whereText,
 } from "../src/running-model.ts";
 
 const SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f";
@@ -13,7 +14,8 @@ const hhmm = (at) => new Date(Date.parse(at)).toLocaleTimeString([], { hour: "2-
 const entry = (request, more = {}) => ({
   request_id: request, harness: "claude", session_id: SID, name: `${request}-name`, identity: null,
   where: { target: "slot", slot: "3", project_key: "proj-a", folder: "proj-a" },
-  started_at: "2026-03-01T10:00:00.000000Z", cache: null, waits: null, covered: false, activity: null, ...more,
+  started_at: "2026-03-01T10:00:00.000000Z", cache: null, waits: null, covered: false, coverable: null, activity: null,
+  ...more,
 });
 const warm = (until, estimated = false) => ({ state: "warm", until, estimated });
 const subagents = (count) => ({ kind: "subagents", count });
@@ -224,4 +226,134 @@ test("times are the time of day, and nothing for no time", () => {
   assert.equal(clock(null), "");
   assert.equal(clock("not a time"), "");
   assert.equal(clock(UNTIL), hhmm(UNTIL));
+});
+
+// --- Keep warm ----------------------------------------------------------------------------------
+
+const coverable = (request, cap = 3, more = {}) => uncovered(request, UNTIL, { coverable: { cap }, ...more });
+const one = (raw) => answer([raw]).sessions[0];
+
+test("coverable is read as a cap of nudges, and anything else as none", () => {
+  assert.deepEqual(one(coverable("r1", 3)).coverable, { cap: 3 });
+  assert.equal(one(entry("r1")).coverable, null);
+  const { coverable: _, ...without } = entry("r1");
+  assert.equal(one(without).coverable, null);
+  for (const bad of [{}, { cap: "3" }, { cap: 2.5 }, { cap: 0 }, [3], 3]) {
+    assert.equal(one(entry("r1", { coverable: bad })).coverable, null, JSON.stringify(bad));
+  }
+});
+
+test("an uncovered session a press would cover has Keep warm, before Open", () => {
+  const acts = actsOf(one(coverable("r1", 3)), true);
+  assert.deepEqual(acts.map((act) => act.kind), ["keep-warm", "open"]);
+  assert.equal(acts[0].title, keepWarmTitle(3));
+});
+
+test("Keep warm is not drawn on an uncovered session no press would cover", () => {
+  assert.deepEqual(actsOf(one(uncovered("r1")), true), [{ kind: "open" }]);
+  assert.equal(keepWarmOf(one(uncovered("r1")), true), null);
+});
+
+test("Keep warm is not drawn on a covered or an ordinary session, even with coverable set", () => {
+  const cases = [
+    entry("r1", { waits: agents(2), cache: warm(UNTIL), covered: true, coverable: { cap: 3 } }),
+    entry("r1", { coverable: { cap: 3 } }),
+    entry("r1", { cache: warm(UNTIL), coverable: { cap: 3 } }),
+    entry("r1", { waits: agents(2), cache: { state: "cold", until: null, estimated: false }, coverable: { cap: 3 } }),
+    entry("r1", { waits: agents(2), coverable: { cap: 3 } }),
+  ];
+  for (const raw of cases) {
+    const parsed = one(raw);
+    assert.notEqual(caseOf(parsed), "uncovered");
+    assert.deepEqual(actsOf(parsed, true), [{ kind: "open" }]);
+    assert.equal(keepWarmOf(parsed, true), null);
+  }
+});
+
+test("the phone draws no act, Keep warm included", () => {
+  assert.deepEqual(actsOf(one(coverable("r1")), false), []);
+  assert.equal(keepWarmOf(one(coverable("r1")), false), null);
+});
+
+test("Keep warm's title says what a press costs, with the cap", () => {
+  assert.equal(keepWarmTitle(3), "Sends a short turn before each cold time while it waits, at most 3 in a row.");
+  assert.equal(keepWarmOf(one(coverable("r1", 10)), true).title,
+               "Sends a short turn before each cold time while it waits, at most 10 in a row.");
+});
+
+test("a press posts the session's request id to the keep-warm route", () => {
+  assert.equal(KEEP_WARM_PATH, "api/keep-warm");
+  assert.deepEqual(pressBody(one(coverable("r1"))), { request_id: "r1" });
+});
+
+test("Keep warm keeps the row's other words as the uncovered case has them", () => {
+  const row = rowAttrs(one(coverable("r1")), true);
+  assert.deepEqual(row, rowAttrs(one(uncovered("r1")), true));
+  assert.equal(row.factHeavy, true);
+  assert.equal(row.lead, "waiting on 2 agents");
+});
+
+test("an answer that refuses nothing leaves no note, and a refusal says it was not kept warm and why", () => {
+  assert.equal(pressNote({ status: 200, data: { refused: null } }), null);
+  const refused = { code: "draft", row: null, problem: "There is text typed in the session.",
+                    hint: "clear the text typed in the session" };
+  assert.equal(pressNote({ status: 200, data: { refused } }),
+               "Not kept warm: There is text typed in the session.");
+});
+
+test("an answer that is not the route's leaves a note of its own", () => {
+  assert.equal(pressNote({ status: 0, data: null }), "Not kept warm: no answer from the shell");
+  assert.equal(pressNote({ status: 502, data: null }), "Not kept warm: the shell answered 502");
+  assert.equal(pressNote({ status: 200, data: null }), "Not kept warm: the answer could not be read");
+  assert.equal(pressNote({ status: 200, data: { refused: { code: "draft" } } }),
+               "Not kept warm: the answer could not be read");
+});
+
+test("a pressed button waits through the route's answer and stops at the next value after it", () => {
+  const value = answer([coverable("r1")]);
+  let presses = pressed(NO_PRESSES, "r1");
+  assert.deepEqual(presses.waiting, { r1: false });
+  presses = valueCame(presses, value);
+  assert.deepEqual(presses.waiting, { r1: false }, "a value before the answer does not end the press");
+  presses = answered(presses, "r1", null);
+  assert.deepEqual(presses, { waiting: { r1: true }, notes: {} });
+  presses = valueCame(presses, value);
+  assert.deepEqual(presses, NO_PRESSES);
+});
+
+test("a press ends at a value that shows the session covered, even before the answer", () => {
+  const covered = answer([entry("r1", { waits: agents(2), cache: warm(UNTIL), covered: true })]);
+  assert.deepEqual(valueCame(pressed(NO_PRESSES, "r1"), covered), NO_PRESSES);
+  assert.deepEqual(valueCame(pressed(NO_PRESSES, "r1"), answer([])), NO_PRESSES, "or the session has ended");
+});
+
+test("a pressed button waits at most the press's wait", () => {
+  assert.equal(PRESS_WAIT_MS, 20_000);
+  const presses = expired(pressed(NO_PRESSES, "r1"), "r1");
+  assert.deepEqual(presses, NO_PRESSES);
+});
+
+test("a refusal's note stays until the next value, and outlasts the press's wait", () => {
+  let presses = answered(pressed(NO_PRESSES, "r1"), "r1", "Not kept warm: there is text typed in the session.");
+  assert.deepEqual(presses.notes, { r1: "Not kept warm: there is text typed in the session." });
+  presses = expired(presses, "r1");
+  assert.deepEqual(presses, { waiting: {}, notes: { r1: "Not kept warm: there is text typed in the session." } });
+  presses = valueCame(presses, answer([coverable("r1")]));
+  assert.deepEqual(presses.notes, {});
+});
+
+test("an answer after the press's wait still leaves its note", () => {
+  const presses = answered(expired(pressed(NO_PRESSES, "r1"), "r1"), "r1", "Not kept warm: the cold time is too near.");
+  assert.deepEqual(presses, { waiting: {}, notes: { r1: "Not kept warm: the cold time is too near." } });
+});
+
+test("pressing again clears the row's note, and presses on two rows wait apart", () => {
+  let presses = answered(pressed(NO_PRESSES, "r1"), "r1", "Refused.");
+  presses = expired(presses, "r1");
+  presses = pressed(presses, "r1");
+  assert.deepEqual(presses, { waiting: { r1: false }, notes: {} });
+  presses = pressed(presses, "r2");
+  presses = answered(presses, "r2", null);
+  presses = valueCame(presses, answer([coverable("r1"), coverable("r2")]));
+  assert.deepEqual(presses.waiting, { r1: false });
 });

@@ -1,8 +1,10 @@
 """Home's Sessions row on the phone, through a gateway-mode test shell reached by
 `PhoneBridge`: the row the phone sees, opened with no click, with the count beside its
 label, each session's where on its second line and no act, time or message; the one
-launcher route the phone reaches, which carries no message text; and the row reading that
-route again every 30 s while the page is shown, and when it is shown again.
+launcher route the phone reaches, which carries no message text; the row reading that
+route again every 30 s while the page is shown, and when it is shown again; and a session
+a press would keep warm, whose `coverable` the phone reads and draws no act for, the press
+itself refused by the gateway.
 
 The shell runs the fake turns in turns' place and reads the real cache and sessions over
 transcripts the tests write; its launches are slot launches whose process is this test's
@@ -22,6 +24,8 @@ from playwright.sync_api import expect
 
 import launcher_page_kit as kit
 
+from moxi_launcher import cachetimers, keepwarm, store
+
 pytest.importorskip("moxi_cache.api", reason="cache is not installed")
 pytest.importorskip("moxi_sessions.api", reason="sessions is not installed")
 # ui is the launcher's optional module: its test kit is taken only where it is installed.
@@ -39,6 +43,9 @@ ANSWER = "The login form is fixed."
 HOUR = r"\d{1,2}[:.]\d{2}(\s?[AaPp][Mm])?"
 #: Seconds within which the phone's first reads carry what a joiner pass read.
 PASS_MS = 30_000
+#: The press of `Keep warm`, as the desk's component posts it through the shell.
+PRESS = "/m/launcher/api/keep-warm"
+KEEP_WARM = cachetimers.KEEP_WARM
 
 
 @pytest.fixture(scope="module")
@@ -77,21 +84,26 @@ def phones(ui_browser):
 
 @pytest.fixture
 def seeded(gw, tmp_path):
-    """`seeded(name, waits=False, covered=False)`: a live launch with a transcript, as
-    `test_browser_home_running.Launches.seed` makes one; every one is ended when the test
-    ends, and the fake's script cleared."""
+    """`seeded(name, waits=False, covered=False, coverable=False)`: a live launch with a
+    transcript, as `test_browser_home_running.Launches.seed` makes one; every one is ended
+    when the test ends, and the fake's script cleared. `coverable` gives it an hour
+    lifetime and a clock record whose watcher asks keep-warm about it, so a press would
+    cover it while it waits."""
     shell, _, turns = gw
     ids: list[str] = []
     sessions: dict[str, dict] = {}
 
-    def seed(name: str, *, waits: bool = False, covered: bool = False) -> str:
+    def seed(name: str, *, waits: bool = False, covered: bool = False,
+             coverable: bool = False) -> str:
         request_id = f"{name}-{uuid.uuid4().hex[:8]}"
         config = tmp_path / request_id
         sid = kit.seed(shell, request_id, live=True, claimed=True, config_dir=config,
                        values={"name": name, **({"keep_warm": "on"} if covered else {})})
-        kit.transcript(config, sid, answered=ANSWER)
+        kit.transcript(config, sid, answered=ANSWER, hour=coverable)
         if covered:
             kit.timed(shell, sid)
+        if coverable:
+            kit.timed(shell, sid, asks=[KEEP_WARM])
         if waits:
             sessions[sid] = kit.waiting()
             turns.script(sessions=sessions)
@@ -249,3 +261,43 @@ def test_on_the_phone_the_row_reads_again_every_30_s_while_shown_and_when_shown_
     assert _reads(page) == first + 2
     page.clock.fast_forward("00:30")
     assert _reads(page) == first + 3
+
+
+def test_on_the_phone_a_session_a_press_would_cover_has_no_act_and_the_press_is_refused(
+        gw, phones, seeded):
+    shell, bridge, _ = gw
+    request_id = seeded("planner", waits=True, coverable=True)
+    phone = bridge.pair(shell)
+    found: list = []
+
+    def arrived() -> bool:
+        found[:] = [phone.get(RUNNING)]
+        return any(entry["request_id"] == request_id and entry["coverable"]
+                   for entry in found[0][1]["sessions"])
+
+    # The phone's read carries `coverable`, as the desk's does.
+    wait_for(arrived, PASS_MS / 1000, interval=0.2, what=lambda: f"coverable; last {found}")
+    (entry,) = [e for e in found[0][1]["sessions"] if e["request_id"] == request_id]
+    assert entry["coverable"] == {"cap": 3} and entry["covered"] is False
+    assert entry["waits"] == {"kind": "subagents", "count": 1}
+
+    # The phone draws the uncovered row, loud, with no act.
+    page = pair_page(phones(bridge), shell)
+    row = _session(page, request_id)
+    expect(row.locator(".lead.strong")).to_have_text("waiting on 1 subagent", timeout=PASS_MS)
+    expect(row.locator(".fact.strong")).to_have_text(re.compile(f"^goes cold at {HOUR}"))
+    expect(row.locator("[slot='acts']")).to_have_count(0)
+    expect(_entry(page).locator("button[data-act='keep-warm']")).to_have_count(0)
+    expect(_entry(page).get_by_role("button", name="Keep warm")).to_have_count(0)
+
+    # The press is not the gateway's: the phone's post is refused and covers nothing.
+    status, _ = phone.post(PRESS, {"request_id": request_id})
+    assert status == 404, status
+    with kit.launch_log(shell) as conn:
+        assert [e for e in store.events(conn, request_id) if e.kind == keepwarm.COVER] == []
+    # The same post from the desk is the route's, and covers the session.
+    status, answer = kit.session(shell).post(PRESS, {"request_id": request_id})
+    assert (status, answer) == (200, {"refused": None})
+    with kit.launch_log(shell) as conn:
+        assert [e.detail["state"] for e in store.events(conn, request_id)
+                if e.kind == keepwarm.COVER] == ["on"]
