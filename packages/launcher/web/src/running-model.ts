@@ -7,6 +7,12 @@
 // other session is `ordinary`, among them a waiting session whose cache is already cold
 // or was not read.
 //
+// An uncovered session that a press would cover (`coverable`, sent by the server) gets
+// the act `Keep warm` at the desk. A press posts the session's request id to
+// `KEEP_WARM_PATH` and waits, the button disabled, for the route's answer and the next
+// value of `running` after it, or for `PRESS_WAIT_MS`. A refusal's words are the row's
+// note until the next value.
+//
 // The row's line counts the sessions. An uncovered one, closed at the desk, takes the
 // line's fact and the count moves to the right end. Opened, the list shows the first four
 // in order (uncovered first, the soonest cold first; then the latest activity first) and
@@ -42,6 +48,11 @@ export interface Activity {
   text: string | null;
 }
 
+/** What a press of `Keep warm` would start for a session: at most `cap` nudges in a row. */
+export interface Coverable {
+  cap: number;
+}
+
 /** One launch running now, as `/api/running` and the topic `running` send it. */
 export interface RunningEntry {
   request_id: string;
@@ -54,6 +65,7 @@ export interface RunningEntry {
   cache: Cache | null;
   waits: Waits | null;
   covered: boolean;
+  coverable: Coverable | null;
   activity: Activity | null;
 }
 
@@ -95,10 +107,30 @@ export interface Place {
   route: string;
 }
 
+/** What the route answered a press, as the ui client's `api` gives it: `status` 0 when no
+ * answer came, `data` the parsed body. */
+export interface Answer {
+  status: number;
+  data: unknown;
+}
+
+/** The presses of `Keep warm` the component waits on, by request id, each true once the
+ * route has answered it; and the note each refused one shows, by request id. */
+export interface Presses {
+  waiting: Readonly<Record<string, boolean>>;
+  notes: Readonly<Record<string, string>>;
+}
+
 /** The most sessions the opened list shows. */
 export const SHOWN = 4;
 /** On Home's needs scale: something waits for the user. */
 export const WAITING = 20;
+/** The route a press of `Keep warm` posts to, relative to the launcher's page. */
+export const KEEP_WARM_PATH = "api/keep-warm";
+/** How long a pressed `Keep warm` stays disabled at most, in milliseconds. */
+export const PRESS_WAIT_MS = 20_000;
+/** No press waiting and no note. */
+export const NO_PRESSES: Presses = { waiting: {}, notes: {} };
 
 function isTable(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -117,6 +149,11 @@ function parseWaits(value: unknown): Waits | null {
   if (!isTable(value) || (value.kind !== "agents" && value.kind !== "subagents")) return null;
   const count = typeof value.count === "number" && Number.isInteger(value.count) ? value.count : 0;
   return count > 0 ? { kind: value.kind, count } : null;
+}
+
+function parseCoverable(value: unknown): Coverable | null {
+  if (!isTable(value) || typeof value.cap !== "number" || !Number.isInteger(value.cap) || value.cap < 1) return null;
+  return { cap: value.cap };
 }
 
 function parseActivity(value: unknown): Activity | null {
@@ -140,6 +177,7 @@ function parseEntry(value: unknown): RunningEntry | null {
     cache: parseCache(value.cache),
     waits: parseWaits(value.waits),
     covered: value.covered === true,
+    coverable: parseCoverable(value.coverable),
     activity: parseActivity(value.activity),
   };
 }
@@ -312,4 +350,83 @@ export function allPlace(sessions: boolean): Place {
 /** A place as a link's `href`. */
 export function hrefOf(place: Place): string {
   return `/m/${place.module}/${place.route}`;
+}
+
+/** `Keep warm`'s title, which says what a press costs. */
+export function keepWarmTitle(cap: number): string {
+  return `Sends a short turn before each cold time while it waits, at most ${cap} in a row.`;
+}
+
+/** The act `Keep warm` on a session's row, with its title; null where it is not drawn.
+ * It is drawn at the desk only, on an uncovered session that a press would cover. */
+export function keepWarmOf(entry: RunningEntry, desk: boolean): { title: string } | null {
+  if (!desk || entry.coverable === null || caseOf(entry) !== "uncovered") return null;
+  return { title: keepWarmTitle(entry.coverable.cap) };
+}
+
+/** One act in a session's `acts` slot. */
+export type Act = { kind: "keep-warm"; title: string } | { kind: "open" };
+
+/** The acts of a session's row, in the order they are drawn: at the desk `Keep warm` where
+ * it is drawn, then `Open`; on the phone none. */
+export function actsOf(entry: RunningEntry, desk: boolean): Act[] {
+  if (!desk) return [];
+  const keep = keepWarmOf(entry, desk);
+  return keep === null ? [{ kind: "open" }] : [{ kind: "keep-warm", title: keep.title }, { kind: "open" }];
+}
+
+/** The body a press posts to `KEEP_WARM_PATH`. */
+export function pressBody(entry: RunningEntry): { request_id: string } {
+  return { request_id: entry.request_id };
+}
+
+/** The note a press's answer leaves on its row: null when the route did not refuse it,
+ * the refusal's `problem` when it did, and a line of its own for an answer that is not
+ * the route's. */
+export function pressNote(answer: Answer): string | null {
+  const data = answer.data;
+  if (answer.status === 200 && isTable(data) && "refused" in data) {
+    if (data.refused === null) return null;
+    if (isTable(data.refused) && typeof data.refused.problem === "string" && data.refused.problem) {
+      return data.refused.problem;
+    }
+  }
+  if (answer.status === 0) return "Not kept warm: no answer from the shell";
+  return answer.status === 200 ? "Not kept warm: the answer could not be read"
+    : `Not kept warm: the shell answered ${answer.status}`;
+}
+
+function without<T>(table: Readonly<Record<string, T>>, request: string): Record<string, T> {
+  return Object.fromEntries(Object.entries(table).filter(([key]) => key !== request));
+}
+
+/** `request` pressed: it waits, not yet answered, and its old note goes. */
+export function pressed(presses: Presses, request: string): Presses {
+  return { waiting: { ...presses.waiting, [request]: false }, notes: without(presses.notes, request) };
+}
+
+/** The route answered `request`'s press, with `note` (see `pressNote`). A press that has
+ * stopped waiting still takes its note. */
+export function answered(presses: Presses, request: string, note: string | null): Presses {
+  const waiting = request in presses.waiting ? { ...presses.waiting, [request]: true } : presses.waiting;
+  const notes = note === null ? presses.notes : { ...presses.notes, [request]: note };
+  return { waiting, notes };
+}
+
+/** A value of `running` came: every note goes, and a press stops waiting once it was
+ * answered, or when the value no longer draws its act (the session is covered, has no
+ * act, or has ended). */
+export function valueCame(presses: Presses, value: Running): Presses {
+  const acts = new Set(value.sessions.filter((entry) => keepWarmOf(entry, true) !== null)
+    .map((entry) => entry.request_id));
+  const waiting: Record<string, boolean> = {};
+  for (const [request, done] of Object.entries(presses.waiting)) {
+    if (!done && acts.has(request)) waiting[request] = done;
+  }
+  return { waiting, notes: {} };
+}
+
+/** `request`'s press has waited `PRESS_WAIT_MS`: it stops waiting, and its note stays. */
+export function expired(presses: Presses, request: string): Presses {
+  return { waiting: without(presses.waiting, request), notes: presses.notes };
 }
