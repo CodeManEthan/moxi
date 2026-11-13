@@ -221,7 +221,7 @@ def test_the_menu_lists_each_slot_with_its_state_and_only_a_free_one_can_be_pick
         fake, ui_page, ui_shell):
     # The launch in slot 1 is another user's, so it is no place of this shell's user.
     with kit.launch_log(ui_shell) as conn:
-        store.insert(conn, request_id="taken-by-planner", actor="alice",
+        store.insert(conn, request_id="taken-by-planner", by="alice",
                      harness="codex", target="slot", slot="1", cwd="/work/one", values={},
                      argv=["codex"], env={}, posture="operator", identity="planner")
     fake.script(placed=2, slots={

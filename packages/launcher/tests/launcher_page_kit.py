@@ -71,13 +71,13 @@ class Harness:
 
 
 @contextmanager
-def first_on_path(directory: Path) -> Iterator[None]:
+def first_on_path(bin_dir: Path) -> Iterator[None]:
     """`directory` first on this process's `PATH` for the block, undone after it. A test
     shell started in it copies that `PATH` and hands it to its page servers and their
     jobs. Used from a module-scoped fixture, so nothing of it outlives the module on its
     worker."""
     with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("PATH", str(directory), prepend=os.pathsep)
+        patch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
         yield
 
 
@@ -105,7 +105,7 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
     values = {"harness": "claude", "target": target, "cwd": cwd, "model": "opus",
               **({"slot": slot} if slot else {})}
     with launch_log(shell) as conn:
-        store.insert(conn, request_id=request_id, actor="ann", harness="claude",
+        store.insert(conn, request_id=request_id, by="ann", harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},
                      posture="operator", session_id=sid, slot=slot)
         # A start time no running process has, so an ended launch's process reads ended.
@@ -130,7 +130,7 @@ def failed_run(shell: Any, request_id: str, *, word: str = "relaunch-failed",
     with launch_log(shell) as conn:
         row = store.get(conn, request_id)
         run = store.insert_run(conn, kind="relaunch", mode="director", request_id=request_id,
-                               session_id=row.session_id, actor="launcher", state="acting",
+                               session_id=row.session_id, by="launcher", state="acting",
                                job=f"proc:{me.pid}@{me.started:.6f}")
         store.end_run(conn, run.run_id, "relaunch-failed", word=word, detail=detail)
     return run.run_id
@@ -293,9 +293,9 @@ def own_slots(shell: Any) -> Iterator[str]:
                             timeout=30).stdout.strip()
     assert socket.startswith(env["MOXI_HOME"]) or "/moxi-" in socket, socket
     log_path = shell.home / "slots-server.log"
-    with open(log_path, "wb") as log:
+    with open(log_path, "wb") as fh:
         server = subprocess.Popen([str(paths.script("moxi-slots-server"))], env=env,
-                                  stdin=subprocess.DEVNULL, stdout=log,
+                                  stdin=subprocess.DEVNULL, stdout=fh,
                                   stderr=subprocess.STDOUT, start_new_session=True)
     try:
         wait_for(lambda: subprocess.run([tmux, "-S", socket, "display-message", "-p",
@@ -340,7 +340,7 @@ def place(shell: Any, request_id: str, *, cwd: str, at: str,
     the line above Home's box offers."""
     who = actor(shell)
     with launch_log(shell) as conn:
-        store.insert(conn, request_id=request_id, actor=who, harness="codex",
+        store.insert(conn, request_id=request_id, by=who, harness="codex",
                      target="terminal", cwd=cwd, project_key=project_key, values={},
                      argv=["codex"], env={}, posture="operator", at=at)
 

@@ -47,7 +47,7 @@ def _launched(event, conn) -> str | None:
     key = handoffs.key_of_row(row)
     if key is None:
         return None
-    found = handoffs.waiting(conn, handoffs.folder_of_row(row), key)
+    found = handoffs.waiting(conn, handoffs.handoff_dir_of_row(row), key)
     if found is None:
         return None
     store.add_pick(conn, str(found.path), key, "shown",
@@ -60,7 +60,7 @@ def _by_hand(event, env, conn) -> str | None:
     key = handoffs.key_of_env(env)
     if key is None:
         return None
-    found = handoffs.waiting(conn, handoffs.folder(_cwd(event, env)), key)
+    found = handoffs.waiting(conn, handoffs.handoff_dir(_cwd(event, env)), key)
     return handoffs.pointer(found) if found is not None else None
 
 

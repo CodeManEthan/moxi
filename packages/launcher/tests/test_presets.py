@@ -133,7 +133,7 @@ WITH_PROJECTS = only("projects")
 # -- the file -----------------------------------------------------------------------------
 
 
-def test_the_file_lives_in_the_launchers_config_folder():
+def test_the_file_lives_in_the_launchers_config_dir():
     from moxi.paths import Layout
 
     assert presets.path() == Layout("launcher").config_dir() / "presets.toml"
@@ -355,14 +355,14 @@ def test_a_project_preset_starts_in_its_projects_root(projects):
     assert ("get", "moxi") in projects.calls
 
 
-def test_a_typed_directory_gets_its_project_key(projects):
+def test_a_typed_dir_gets_its_project_key(projects):
     inside = projects.roots["app"] / "src"
     got = resolve(available=WITH_PROJECTS, typed={"cwd": str(inside)})
     assert got.cwd == str(inside) and got.project_key == "app"
     assert projects.calls == [("for_path", str(inside))]
 
 
-def test_the_callers_directory_gets_its_project_key(projects):
+def test_the_callers_dir_gets_its_project_key(projects):
     got = resolve(available=WITH_PROJECTS, cwd=str(projects.roots["moxi"]))
     assert got.project_key == "moxi"
     assert resolve(available=WITH_PROJECTS, cwd="/nowhere").project_key is None
@@ -790,14 +790,14 @@ def test_check_an_agent_role_among_the_harnesss_role_files(claude_home, tmp_path
                                                   ("seat.e", "no-role")]
 
 
-def test_roles_reads_the_core_harness_tables_folder(tmp_path):
+def test_roles_reads_the_core_harness_tables_dir(tmp_path):
     from moxi import config
 
-    folder = tmp_path / "my-agents"
-    folder.mkdir()
-    (folder / "lead.md").write_text("x", encoding="utf-8")
+    agents_dir = tmp_path / "my-agents"
+    agents_dir.mkdir()
+    (agents_dir / "lead.md").write_text("x", encoding="utf-8")
     config.set_value("moxi", "harnesses",
-               [{"name": "claude", "skills": "", "agents": str(folder)},
+               [{"name": "claude", "skills": "", "agents": str(agents_dir)},
                 {"name": "codex", "skills": "", "agents": ""}], by="test")
     assert presets.roles("claude") == {"lead"}
 
@@ -929,8 +929,8 @@ PLACE_ROWS = ("cwd", "project", "scratch")
 def laid_or_refused(call):
     try:
         return call(), None
-    except catalog.Refused as refused:
-        return None, refused
+    except catalog.Refused as exc:
+        return None, exc
 
 
 @pytest.mark.parametrize("harness", [None, "claude", "codex"])

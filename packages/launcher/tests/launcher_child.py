@@ -46,11 +46,11 @@ def main(spec_path: str) -> int:
     out.write_text(json.dumps(seen), encoding="utf-8")
     try:
         result = api.launch(request)
-    except Exception as error:  # noqa: BLE001  (a refusal is what the test reads)
-        seen["refused"] = {"type": type(error).__name__, "text": str(error),
-                           "exit": api.exit_code(error)}
+    except Exception as exc:  # noqa: BLE001  (a refusal is what the test reads)
+        seen["refused"] = {"type": type(exc).__name__, "text": str(exc),
+                           "exit": api.exit_code(exc)}
         out.write_text(json.dumps(seen), encoding="utf-8")
-        return api.exit_code(error)
+        return api.exit_code(exc)
     seen["result"] = {"state": result.state, "reason": result.reason,
                       "exit": result.exit_code, "duplicate": result.duplicate}
     out.write_text(json.dumps(seen), encoding="utf-8")

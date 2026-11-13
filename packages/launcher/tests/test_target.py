@@ -67,14 +67,14 @@ class FakeSlots:
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, endpoint=None, target_name="slot", harness="claude",
              session_id=SID, request_id="r1"):
-    store.insert(conn, request_id=request_id, actor="someone", harness=harness,
+    store.insert(conn, request_id=request_id, by="someone", harness=harness,
                  target=target_name, cwd="/work", values={"model": "opus"},
                  argv=["claude"], env={}, posture="operator", session_id=session_id,
                  slot="3" if target_name == "slot" else None)

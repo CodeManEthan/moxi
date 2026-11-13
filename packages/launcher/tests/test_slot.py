@@ -51,33 +51,33 @@ def work(tmp_path) -> Path:
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
     """The fake slots behind the launcher's seam; `rig.plan(...)` scripts it."""
-    directory = tmp_path / "fake-slots"
-    directory.mkdir()
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
     monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()
-    script = directory / "script.json"
+    script = slots_dir / "script.json"
 
     def plan(**keys):
         now = json.loads(script.read_text()) if script.exists() else {}
         script.write_text(json.dumps({**now, **keys}))
 
-    return SimpleNamespace(dir=directory, plan=plan,
-                           calls=lambda name=None: fake.calls(directory, name))
+    return SimpleNamespace(dir=slots_dir, plan=plan,
+                           calls=lambda name=None: fake.calls(slots_dir, name))
 
 
 @pytest.fixture
 def turns(tmp_path, monkeypatch):
-    directory = tmp_path / "fake-turns"
-    directory.mkdir()
+    turns_dir = tmp_path / "fake-turns"
+    turns_dir.mkdir()
     monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
-    monkeypatch.setenv(fake_turns.DIR, str(directory))
+    monkeypatch.setenv(fake_turns.DIR, str(turns_dir))
     monkeypatch.syspath_prepend(str(TESTS))
-    script = directory / "script.json"
+    script = turns_dir / "script.json"
     return SimpleNamespace(
-        dir=directory, plan=lambda **keys: script.write_text(json.dumps(keys)),
-        calls=lambda name=None: [c for c in fake_turns.calls(directory)
+        dir=turns_dir, plan=lambda **keys: script.write_text(json.dumps(keys)),
+        calls=lambda name=None: [c for c in fake_turns.calls(turns_dir)
                                  if name is None or c["call"] == name])
 
 
@@ -290,7 +290,7 @@ def common_root_name() -> str:
     return compose.common.scratch_root().name
 
 
-def test_a_relative_temp_folder_still_gives_an_absolute_scratch_dir(tmp_path,
+def test_a_relative_temp_dir_still_gives_an_absolute_scratch_dir(tmp_path,
                                                                    monkeypatch):
     import tempfile
 
@@ -543,7 +543,7 @@ def test_a_codex_slot_launch_answers_no_screen_and_says_what_may_be_waiting(work
     screens_on()
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}])
     conn = store.connect()
-    store.insert(conn, request_id="r1", actor="ann", harness="codex", target="slot",
+    store.insert(conn, request_id="r1", by="ann", harness="codex", target="slot",
                  cwd=str(work), values={}, argv=["moxi-turns-codex-host"], env={},
                  posture="", brief=BRIEF)
     sent = []
@@ -773,14 +773,14 @@ def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float =
         seen.reads.append(clock.now)
         frame = frames[min(len(seen.reads) - 1, len(frames) - 1)]
         name = frame.get("screen")
-        return fake.Seen(fake.SCREENS[name] if name else None, True, "",
+        return fake.Seen(fake.SCREENS[name] if name else None, full=True, why="",
                          dead=frame.get("dead", False), pane_id="%7")
 
     def answer_screen(slot, screen, wait_s=5):
         seen.answers.append(wait_s)
         answer = answers[min(len(seen.answers) - 1, len(answers) - 1)]
         clock.now += min(answer_takes, wait_s) + overrun
-        last = fake.Seen(screen, False, answer.get("why", ""),
+        last = fake.Seen(screen, full=False, why=answer.get("why", ""),
                          dead=answer.get("dead", False), pane_id="%7")
         return fake.Answer(answer["outcome"], screen, answer.get("why", ""), last,
                            answer.get("capture"), tuple(answer.get("keys", ())))
@@ -798,12 +798,12 @@ def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float =
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    store.insert(connection, request_id="r1", actor="ann", harness="claude",
+    conn = store.connect()
+    store.insert(conn, request_id="r1", by="ann", harness="claude",
                  target="slot", cwd="/w", values={}, argv=["claude"], env={}, posture="",
                  session_id=SID)
-    yield connection
-    connection.close()
+    yield conn
+    conn.close()
 
 
 TRUST = [("CLAUDE_TRUST_DIR", fake.CLAUDE_TRUST_DIR)]
@@ -1193,7 +1193,7 @@ def test_the_core_runs_setup_in_a_process_of_its_own(rig, tmp_path):
 
 
 def test_the_fake_lists_the_scripts_slots_in_number_order(rig):
-    assert fake.list_slots() == fake.Listing(True)
+    assert fake.list_slots() == fake.Listing(ok=True)
     rig.plan(slots={"10": {"state": "free", "launchable": True},
                     "2": {"state": "occupied", "launchable": False,
                           "hold": {"holder": "planner", "until": 5.0},

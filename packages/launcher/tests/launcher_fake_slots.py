@@ -140,7 +140,7 @@ class Slot:
 CREATED = 1880000000.0
 
 
-def make_slot(number: int, state: str, launchable: bool = False, **fields) -> Slot:
+def make_slot(number: int, state: str, *, launchable: bool = False, **fields) -> Slot:
     """A registered `Slot` with every other field not given empty."""
     blank = {"name": None, "hold": None, "idle": False, "attached": 0, "label": None,
              "pane_id": None, "window_id": None, "pane_pid": None, "current_command": None,
@@ -254,12 +254,12 @@ def script() -> dict:
 
 
 def record(call: str, **detail) -> None:
-    with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as out:
-        out.write(json.dumps({"call": call, **detail}, default=str) + "\n")
+    with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"call": call, **detail}, default=str) + "\n")
 
 
-def calls(directory: Path, name: str | None = None) -> list[dict]:
-    path = Path(directory) / "calls.jsonl"
+def calls(slots_dir: Path, name: str | None = None) -> list[dict]:
+    path = Path(slots_dir) / "calls.jsonl"
     if not path.exists():
         return []
     found = [json.loads(line) for line in path.read_text().splitlines() if line]
@@ -285,18 +285,18 @@ def _listed(key, entry: dict, plan: dict) -> Slot:
         if placed is not None:
             fields.update(pane_id="%7", window_id="@3", pane_pid=placed["pid"],
                           dead_status=plan.get("dead_status"))
-    return make_slot(number, fields.pop("state"), fields.pop("launchable"), **fields)
+    return make_slot(number, fields.pop("state"), launchable=fields.pop("launchable"), **fields)
 
 
 def list_slots() -> Listing:
     record("list_slots")
     plan = script()
     if plan.get("list", "ok") == "error":
-        return Listing(False, "tmux list-panes failed")
+        return Listing(ok=False, why="tmux list-panes failed")
     found = sorted((_listed(key, entry, plan) for key, entry in plan.get("slots", {}).items()
                     if str(key).isdigit()), key=lambda slot: slot.number)
-    return Listing(True, "", tuple(s for s in found if s.created is not None),
-                   tuple(s for s in found if s.created is None))
+    return Listing(ok=True, slots=tuple(s for s in found if s.created is not None),
+                   unregistered=tuple(s for s in found if s.created is None))
 
 
 def show(slot):
@@ -430,7 +430,7 @@ def answer_screen(slot, screen, wait_s=5) -> Answer:
     answers = script().get("answers") or [{"outcome": "gone"}]
     answer = _nth(answers, _turns.answers)
     _turns.answers += 1
-    seen = Seen(screen, False, answer.get("why", ""), (), bool(answer.get("dead", False)),
-                "%7")
+    seen = Seen(screen, full=False, why=answer.get("why", ""),
+                dead=bool(answer.get("dead", False)), pane_id="%7")
     return Answer(answer["outcome"], screen, answer.get("why", ""), seen,
                   answer.get("capture"), tuple(answer.get("keys", ())))

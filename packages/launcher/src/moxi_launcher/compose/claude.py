@@ -103,7 +103,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         session_id=ctx.session_id, cwd=cwd, posture=ctx.posture_of(values),
         project_key=ctx.project_key, identity=identity, scope=scope,
         handoff_dir=ctx.handoff_dir,
-        agent_role=common.agent_role(str(values.get("agent") or ""), ctx.role_found),
+        agent_role=common.agent_role(str(values.get("agent") or ""), found=ctx.role_found),
         keep_warm=values.get("keep_warm") == "on")
     prompt_file = PromptFile(common.prompt_path(ctx.runs_dir, ctx.request_id),
                              common.seat_text(block, ctx.instructions))

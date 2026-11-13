@@ -260,8 +260,8 @@ def read_catalog(call: Any) -> dict[str, Any]:
             available = _available()
             harnesses = [{"name": harness, "fields": fields(harness, available)}
                          for harness in catalog.HARNESSES]
-        except Exception as err:
-            return _failed(err, "reading the catalog failed", harnesses=[])
+        except Exception as exc:
+            return _failed(exc, "reading the catalog failed", harnesses=[])
         return _up(harnesses=harnesses)
 
 
@@ -295,13 +295,13 @@ def read_presets(call: Any) -> dict[str, Any]:
         try:
             try:
                 found = presets.read()
-            except ConfigError as err:
-                return _up(presets=[], problems=[_file_problem(err)])
+            except ConfigError as exc:
+                return _up(presets=[], problems=[_file_problem(exc)])
             problems = presets.check(available=_available(), presets=found)
             return _up(presets=[_preset(p) for p in found.all()],
                        problems=[p.as_json() for p in problems])
-        except Exception as err:
-            return _failed(err, "reading the presets failed", presets=[], problems=[])
+        except Exception as exc:
+            return _failed(exc, "reading the presets failed", presets=[], problems=[])
 
 
 # -- /api/form ------------------------------------------------------------------------------
@@ -347,9 +347,9 @@ def form(seat: str | None = None, project_preset: str | None = None,
     request = presets.Request(seat=seat or None, project_preset=project_preset or None)
     try:
         laid = presets.layered(request, harness=harness, available=_available())
-    except REFUSALS as error:
+    except REFUSALS as exc:
         return _up(harness=_form_harness(request, harness), rows=[],
-                   refused=_refusal(error))
+                   refused=_refusal(exc))
     return _up(harness=laid.harness, rows=form_rows(laid), refused=None)
 
 
@@ -359,8 +359,8 @@ def read_form(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return form(query.get("seat"), query.get("project_preset"), query.get("harness"))
-        except Exception as err:
-            return _failed(err, "reading the launch form failed",
+        except Exception as exc:
+            return _failed(exc, "reading the launch form failed",
                            harness=_shipped_harness(), rows=[], refused=None)
 
 
@@ -372,8 +372,8 @@ def _store() -> Iterator[sqlite3.Connection | None]:
     """The launch log, or None when it was never made; nothing is made to say so."""
     try:
         conn = store.connect(create=False)
-    except core_store.StoreError as err:
-        if isinstance(err, core_store.StoreTooNew):
+    except core_store.StoreError as exc:
+        if isinstance(exc, core_store.StoreTooNew):
             raise
         yield None
         return
@@ -462,8 +462,8 @@ def read_launches(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return launches(limit=limit, before=before, request=query.get("request"))
-        except Exception as err:
-            return _failed(err, "reading the launch log failed", launches=[], refused=None,
+        except Exception as exc:
+            return _failed(exc, "reading the launch log failed", launches=[], refused=None,
                            why=None)
 
 
@@ -500,8 +500,8 @@ def read_runs(call: Any) -> dict[str, Any]:
                     found = store.runs(conn, request_id=query.get("request"), limit=limit,
                                        before=before)
                 return _up(runs=[run_entry(conn, run) for run in found])
-        except Exception as err:
-            return _failed(err, "reading the runs failed", runs=[])
+        except Exception as exc:
+            return _failed(exc, "reading the runs failed", runs=[])
 
 
 # -- /api/places ----------------------------------------------------------------------------
@@ -532,8 +532,8 @@ def read_places(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return places()
-        except Exception as err:
-            return _failed(err, "reading the places failed", projects=False,
+        except Exception as exc:
+            return _failed(exc, "reading the places failed", projects=False,
                            actor=first.actor(), home=_home(), places=[])
 
 
@@ -607,8 +607,8 @@ def read_targets(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return targets_now()
-        except Exception as err:
-            return _failed(err, "reading where a launch may run failed", slots=[],
+        except Exception as exc:
+            return _failed(exc, "reading where a launch may run failed", slots=[],
                            new_slot=False, unread=_slots_there(), default=dict(NO_SLOTS))
 
 
@@ -663,8 +663,8 @@ def live_states(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     for row in live(conn):
         try:
             found.append(_readable(state.of_launch(conn, row, slots_api=api)))
-        except Exception as err:
-            found.append(unreadable(row, err))
+        except Exception as exc:
+            found.append(unreadable(row, exc))
     return found
 
 
@@ -682,8 +682,8 @@ def session_state(session: str | None) -> dict[str, Any]:
             if conn is None:
                 raise target.NotLaunched()
             got = state.state(session, conn=conn, slots_api=slots.api())
-        except target.NotLaunched as err:
-            return _up(sessions=[], refused=_refused(err))
+        except target.NotLaunched as exc:
+            return _up(sessions=[], refused=_refused(exc))
         return _up(sessions=[_readable(got)], refused=None)
 
 
@@ -693,8 +693,8 @@ def read_state(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return session_state(call.query.get("session"))
-        except Exception as err:
-            return _failed(err, "reading the state failed", sessions=[], refused=None)
+        except Exception as exc:
+            return _failed(exc, "reading the state failed", sessions=[], refused=None)
 
 
 def read_sessions(call: Any) -> dict[str, Any]:
@@ -707,8 +707,8 @@ def read_sessions(call: Any) -> dict[str, Any]:
                 found = [] if conn is None else past_sessions(
                     limit=limit, before=before, conn=conn).data["sessions"]
             return _up(sessions=found)
-        except Exception as err:
-            return _failed(err, "reading the past sessions failed", sessions=[])
+        except Exception as exc:
+            return _failed(exc, "reading the past sessions failed", sessions=[])
 
 
 # -- /api/events and its poller -------------------------------------------------------------
@@ -719,8 +719,8 @@ def gather_sessions() -> dict[str, Any]:
     try:
         with _store() as conn:
             found = [] if conn is None else live_states(conn)
-    except Exception as err:
-        return _failed(err, "gathering the live launches' state failed", sessions=[])
+    except Exception as exc:
+        return _failed(exc, "gathering the live launches' state failed", sessions=[])
     return _up(sessions=found)
 
 
@@ -728,8 +728,8 @@ def gather_launches() -> dict[str, Any]:
     """The `launches` topic's value: the newest page of the launch log. Never raises."""
     try:
         found = launches(limit=LIMIT)
-    except Exception as err:
-        return _failed(err, "gathering the launch log failed", launches=[])
+    except Exception as exc:
+        return _failed(exc, "gathering the launch log failed", launches=[])
     return {key: found[key] for key in ("state", "detail", "launches")}
 
 
@@ -752,10 +752,10 @@ class _Version:
                                                check_same_thread=False)
                 self.opened += 1
             return self.opened, self.conn.execute("PRAGMA data_version").fetchone()[0]
-        except Exception as err:
-            if not isinstance(err, core_store.StoreError) or isinstance(
-                    err, core_store.StoreTooNew):
-                _log_once(err, "reading the launch log's data version failed")
+        except Exception as exc:
+            if not isinstance(exc, core_store.StoreError) or isinstance(
+                    exc, core_store.StoreTooNew):
+                _log_once(exc, "reading the launch log's data version failed")
             self.close()
             return None
 
@@ -787,8 +787,8 @@ class _Feed:
                 if version != seen or now >= due:
                     seen, due = version, now + REGATHER
                     await self.changed()
-            except Exception as err:
-                _log_once(err, "the state poller failed")
+            except Exception as exc:
+                _log_once(exc, "the state poller failed")
             await asyncio.sleep(TICK)
 
     async def changed(self) -> None:
@@ -1098,12 +1098,12 @@ def on_path(composition: Any) -> dict[str, Any] | None:
     """The refusal of a launch whose command is not found on the PATH the launch job
     would start it with, the page server's, naming that PATH; None when it is found. The
     check is the target's own, as `launch` makes it."""
-    env = common.environment(os.environ, composition, modules.session_env())
+    env = common.child_env(os.environ, composition, modules.session_env())
     try:
         targets.get(composition.target).prepare(composition, env)
-    except targets.NoCommand as error:
-        return {"code": error.code, "row": None,
-                "problem": NOT_ON_PATH.format(command=error.command,
+    except targets.NoCommand as exc:
+        return {"code": exc.code, "row": None,
+                "problem": NOT_ON_PATH.format(command=exc.command,
                                               path=env.get("PATH", os.defpath)),
                 "hint": NOT_ON_PATH_HINT}
     return None
@@ -1120,8 +1120,8 @@ def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
         job.placed(request)
         composition = api.preview(request)
         checked = [_refusal(found) for found in api.check(request)]
-    except REFUSALS as error:
-        return _previewed(refused=[_refusal(error)])
+    except REFUSALS as exc:
+        return _previewed(refused=[_refusal(exc)])
     terminal = composition.target == "terminal"
     refused: list[dict[str, Any]] = []
     for found in [*checked, None if terminal else on_path(composition)]:
@@ -1151,8 +1151,8 @@ def preview(call: Any) -> dict[str, Any]:
     with call.busy("preview"):
         try:
             return previewed(call.body)
-        except Exception as err:
-            return _previewed(refused=[_unexpected(err, "previewing a launch failed")])
+        except Exception as exc:
+            return _previewed(refused=[_unexpected(exc, "previewing a launch failed")])
 
 
 # -- /api/launch ----------------------------------------------------------------------------
@@ -1198,8 +1198,8 @@ def launched(body: Mapping[str, Any]) -> Any:
     try:
         request, words = launch_request(body, request_id)
         resolved = job.placed(request)
-    except REFUSALS as error:
-        return {"refused": _refusal(error), "command": None}
+    except REFUSALS as exc:
+        return {"refused": _refusal(exc), "command": None}
     if resolved.target == "terminal":
         return {"refused": {"code": "terminal", "row": "target",
                             "problem": "a launch in a terminal is not run by the page",
@@ -1225,11 +1225,11 @@ def _run_job(request_id: str, data: Mapping[str, Any], used: str = USED) -> Any:
         raise lb.Conflict(used.format(request_id))
     try:
         _start_job(request_id)
-    except Exception as err:
+    except Exception as exc:
         path.unlink(missing_ok=True)
-        _log_once(err, "the launch job did not start")
+        _log_once(exc, "the launch job did not start")
         return {"refused": {"code": targets.SPAWN_FAILED, "row": None,
-                            "problem": f"the launch job did not start ({type(err).__name__})",
+                            "problem": f"the launch job did not start ({type(exc).__name__})",
                             "hint": "try again; the page server's log has the details"},
                 "command": None}
     return lb.Accepted(STATUS.format(request_id))
@@ -1243,8 +1243,8 @@ def launch(call: Any) -> Any:
             return launched(call.body)
         except (lb.Conflict, lb.Refused):
             raise
-        except Exception as err:
-            return {"refused": _unexpected(err, "a launch from the page failed"),
+        except Exception as exc:
+            return {"refused": _unexpected(exc, "a launch from the page failed"),
                     "command": None}
 
 
@@ -1265,7 +1265,7 @@ def resumable(session: str) -> store.LaunchRow:
         refused = resuming.static_refusal(row, newest)
         if refused is None:
             live, unread = resuming.liveness(row, newest, first.turns_api(quiet=True))
-            refused = resuming.live_refusal(row, newest, live, unread)
+            refused = resuming.live_refusal(row, newest, live=live, unread=unread)
         if refused is not None:
             raise refused
         relaunch._no_open_run(conn, row, slots.api())
@@ -1280,8 +1280,8 @@ def resumed(body: Mapping[str, Any]) -> Any:
     slot = str(body.get("slot") or "").strip() or None
     try:
         row = resumable(session)
-    except REFUSALS as error:
-        return {"refused": _refusal(error), "command": None}
+    except REFUSALS as exc:
+        return {"refused": _refusal(exc), "command": None}
     if row.target != "slot":
         if slot is not None:
             return {"refused": {"code": "bad-value", "row": "slot",
@@ -1304,8 +1304,8 @@ def resume(call: Any) -> Any:
             return resumed(call.body)
         except (lb.Conflict, lb.Refused):
             raise
-        except Exception as err:
-            return {"refused": _unexpected(err, "a resume from the page failed"),
+        except Exception as exc:
+            return {"refused": _unexpected(exc, "a resume from the page failed"),
                     "command": None}
 
 __all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "NO_SLOTS", "PROJECTS",

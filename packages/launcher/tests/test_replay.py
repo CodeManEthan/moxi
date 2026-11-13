@@ -62,20 +62,20 @@ def no_exec(monkeypatch):
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
-    directory = tmp_path / "fake-slots"
-    directory.mkdir()
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
     monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()
-    script = directory / "script.json"
+    script = slots_dir / "script.json"
 
     def plan(**keys):
         now = json.loads(script.read_text()) if script.exists() else {}
         script.write_text(json.dumps({**now, **keys}))
 
-    return SimpleNamespace(dir=directory, plan=plan,
-                           calls=lambda name=None: fake.calls(directory, name))
+    return SimpleNamespace(dir=slots_dir, plan=plan,
+                           calls=lambda name=None: fake.calls(slots_dir, name))
 
 
 def request(work: Path, *, rid: str = "r1", sid: str | None = SID,
@@ -196,9 +196,9 @@ def test_a_relaunch_header_and_its_stamp():
 def test_the_first_turn_text_of_a_relaunch(tmp_path):
     handoff = tmp_path / "h.md"
     handoff.write_text("state\n")
-    assert first.text(actor="ann", handoff=handoff, relaunched=True) == \
+    assert first.text(by="ann", handoff=handoff, relaunched=True) == \
         f"Handoff from launcher, relaunched by ann: {handoff}\n\nstate"
-    assert first.text(actor="ann", handoff=handoff).startswith(
+    assert first.text(by="ann", handoff=handoff).startswith(
         "Handoff from launcher, launched by ann: ")
 
 
@@ -392,7 +392,7 @@ def test_a_replay_env_holds_no_variable_of_the_replaying_shell(work, harness, no
     assert "s3cr3t-value" not in new.base_env_json and "API_TOKEN" not in new.env_json
 
 
-def test_a_replay_writes_its_row_where_the_callers_environment_puts_the_store(
+def test_a_replay_writes_its_row_where_the_callers_env_puts_the_store(
         work, harness, no_exec, tmp_path):
     api.launch(request(work))
     caller = {**os.environ, "MOXI_LAUNCHER_STATE_HOME": str(tmp_path / "other-state")}
@@ -550,7 +550,7 @@ def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
     assert api.launch(request(work)).base is None
 
 
-def test_a_scratch_replay_keeps_the_rows_directory(harness, tmp_path, no_exec):
+def test_a_scratch_replay_keeps_the_rows_dir(harness, tmp_path, no_exec):
     api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
                              session_id=SID, actor="ann"))
     where = row("r1").cwd

@@ -86,11 +86,11 @@ def test_the_scrub_keeps_the_users_claude_configuration_and_sign_in():
                                      "CLAUDE_EFFORT", "CLAUDE_ENV_FILE"}
 
 
-def test_a_composed_claude_launch_runs_on_the_users_configuration_folder():
+def test_a_composed_claude_launch_runs_on_the_users_configuration_dir():
     caller = {**CALLER, "CLAUDE_CONFIG_DIR": "/home/u/.claude-work",
               "CLAUDE_CODE_OAUTH_TOKEN": "t"}
     composition = compose.compose({"harness": "claude", "cwd": "/work"}, ctx())
-    env = common.environment(caller, composition, modules.session_env(), windows=False)
+    env = common.child_env(caller, composition, modules.session_env(), windows=False)
     assert env["CLAUDE_CONFIG_DIR"] == "/home/u/.claude-work"
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "t"
     # The sign-in reaches the child only: the launch records its stamps alone.
@@ -104,7 +104,7 @@ def test_on_windows_names_compare_without_case():
     assert got == {"Path": "p", "Claude_Config_Dir": "c"}
 
 
-def test_the_scrub_leaves_the_callers_environment_alone():
+def test_the_scrub_leaves_the_callers_env_alone():
     caller = dict(CALLER)
     common.scrub(caller, frozenset({"MOXI_COMMS_"}))
     assert caller == CALLER
@@ -154,9 +154,9 @@ def test_the_additions_env_goes_in_only_for_claude_without_comms():
     assert "MOXI_EXTRA" not in wrapped.env
 
 
-def test_the_childs_environment_is_the_scrubbed_caller_with_the_stamps():
+def test_the_childs_env_is_the_scrubbed_caller_with_the_stamps():
     composition = compose.compose({"harness": "claude", "cwd": "/work"}, ctx())
-    env = common.environment(CALLER, composition, frozenset({"MOXI_LAUNCHER_REQUEST"}),
+    env = common.child_env(CALLER, composition, frozenset({"MOXI_LAUNCHER_REQUEST"}),
                              windows=False)
     assert env["MOXI_LAUNCHER_REQUEST"] == "r1" and env["PATH"] == "/usr/bin"
     assert not any(name.startswith("CLAUDE") for name in env) and "AI_AGENT" not in env

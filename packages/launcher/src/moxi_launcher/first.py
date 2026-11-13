@@ -114,8 +114,8 @@ class HandoffUnreadable(Exception):
 def actor(env: Mapping[str, str] | None = None) -> str:
     """Who launched, as the header names them: the caller's comms identity when its
     environment holds comms' stamp, else the OS user name."""
-    environ = os.environ if env is None else env
-    name = environ.get(comms_name_env() or "", "").strip()
+    caller_env = os.environ if env is None else env
+    name = caller_env.get(comms_name_env() or "", "").strip()
     if name:
         return name
     try:
@@ -124,14 +124,14 @@ def actor(env: Mapping[str, str] | None = None) -> str:
         return "unknown"
 
 
-def text(*, actor: str, brief: str | None = None, handoff: str | os.PathLike | None = None,
+def text(*, by: str, brief: str | None = None, handoff: str | os.PathLike | None = None,
          handoff_text: str | None = None, relaunched: bool = False) -> str | None:
     """The first turn a launch sends, or None when it has neither brief nor handoff.
 
-    It starts with one header line naming the launcher and `actor`. With a handoff the
+    It starts with one header line naming the launcher and `by`. With a handoff the
     header names its path and the handoff's text follows; a brief comes after the handoff
     when there are both. `relaunched` marks a relaunch's handoff, whose header says the
-    session was relaunched by `actor`. `handoff_text` is the handoff's text when the
+    session was relaunched by `by`. `handoff_text` is the handoff's text when the
     caller has read it already; otherwise the file is read here, any readable file, and
     one that can't be read raises `HandoffUnreadable`.
     """
@@ -139,12 +139,12 @@ def text(*, actor: str, brief: str | None = None, handoff: str | os.PathLike | N
     if handoff is None and brief is None:
         return None
     if handoff is None:
-        return BRIEF_HEADER.format(actor=actor) + "\n\n" + brief
+        return BRIEF_HEADER.format(actor=by) + "\n\n" + brief
     path = os.fspath(handoff)
     if handoff_text is None:
         handoff_text = read_handoff(path)
     header = RELAUNCH_HEADER if relaunched else HANDOFF_HEADER
-    parts = [header.format(actor=actor, path=path), handoff_text.strip("\n")]
+    parts = [header.format(actor=by, path=path), handoff_text.strip("\n")]
     if brief is not None:
         parts.append(brief)
     return "\n\n".join(parts)
@@ -154,8 +154,8 @@ def read_handoff(path: str | os.PathLike) -> str:
     """The text of the handoff at `path`; `HandoffUnreadable` when it can't be read."""
     try:
         return Path(path).expanduser().read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise HandoffUnreadable(os.fspath(path), _why(error)) from error
+    except (OSError, UnicodeDecodeError) as exc:
+        raise HandoffUnreadable(os.fspath(path), _why(exc)) from exc
 
 
 def on_argv(argv: Sequence[str]) -> bool:
@@ -287,10 +287,10 @@ def send(conn: sqlite3.Connection, request_id: str, *, pid: int | None = None,
     if row.state not in _CLAIMABLE:
         return Outcome(request_id, "not-claimed", detail=f"the launch is {row.state}")
     try:
-        body = text(actor=row.actor, brief=row.brief, handoff=row.handoff_path,
+        body = text(by=row.actor, brief=row.brief, handoff=row.handoff_path,
                     relaunched=bool(row.relaunch_of))
-    except HandoffUnreadable as error:
-        return _fail(conn, row, HANDOFF_UNREADABLE, error.why, leaving=_CLAIMABLE)
+    except HandoffUnreadable as exc:
+        return _fail(conn, row, HANDOFF_UNREADABLE, exc.why, leaving=_CLAIMABLE)
     turns = turns_api() if turns is None else turns
     if turns is None:
         return _fail(conn, row, NO_TURNS, "turns can't be loaded", leaving=_CLAIMABLE)
@@ -316,8 +316,8 @@ def send(conn: sqlite3.Connection, request_id: str, *, pid: int | None = None,
     except TimeoutError:
         return _unconfirmed(conn, row, session_id, delivery, the_ref,
                             f"not started within {first_wait_s:g} s")
-    except Exception as error:  # noqa: BLE001  (any failure here leaves the outcome unknown)
-        return _unconfirmed(conn, row, session_id, delivery, the_ref, _why(error))
+    except Exception as exc:  # noqa: BLE001  (any failure here leaves the outcome unknown)
+        return _unconfirmed(conn, row, session_id, delivery, the_ref, _why(exc))
     return _settled(conn, row, session_id, delivery, the_ref, value)
 
 
@@ -347,8 +347,8 @@ def _wait_ready(turns: Any, row: store.LaunchRow, pid: int | None,
         return turns.wait_ready(**where, timeout_s=timeout)
     except TimeoutError:
         return f"not ready within {timeout:g} s"
-    except Exception as error:  # noqa: BLE001  (turns could not find the session)
-        return _why(error)
+    except Exception as exc:  # noqa: BLE001  (turns could not find the session)
+        return _why(exc)
 
 
 def _settled(conn, row, session_id, delivery, the_ref, value) -> Outcome:
@@ -471,8 +471,8 @@ def deliver(request_id: str, *, pid: int | None = None, out: TextIO | None = Non
             return ended.exit_code
         outcome = send(conn, request_id, pid=pid, turns=turns, ready_wait_s=ready_wait_s,
                        first_wait_s=first_wait_s)
-    except store.Busy as error:
-        print(f"the launch log is busy: {error}", file=out, flush=True)
+    except store.Busy as exc:
+        print(f"the launch log is busy: {exc}", file=out, flush=True)
         return exits.TEMPFAIL
     finally:
         conn.close()

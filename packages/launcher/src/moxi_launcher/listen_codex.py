@@ -65,7 +65,7 @@ def answer(event) -> str | None:
     block = identity_block(
         session_id=getattr(event, "session_id", None) or row.session_id, cwd=row.cwd,
         posture=row.posture, project_key=row.project_key, identity=row.identity,
-        scope=row.scope, handoff_dir=handoffs.folder_of_row(row) if key else None)
+        scope=row.scope, handoff_dir=handoffs.handoff_dir_of_row(row) if key else None)
     return seat_text(block, instructions(values))
 
 

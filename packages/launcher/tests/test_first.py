@@ -28,35 +28,35 @@ BRIEF = "Read the design and start the build."
 @pytest.fixture
 def turns(tmp_path, monkeypatch):
     """The fake turns behind the seam, and a way to script it and read its calls."""
-    directory = tmp_path / "fake-turns"
-    directory.mkdir()
+    turns_dir = tmp_path / "fake-turns"
+    turns_dir.mkdir()
     monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    monkeypatch.setenv(fake.DIR, str(turns_dir))
 
     class Rig:
-        dir = directory
+        dir = turns_dir
 
         def script(self, **plan):
-            (directory / "script.json").write_text(json.dumps(plan))
+            (turns_dir / "script.json").write_text(json.dumps(plan))
 
         def calls(self, name=None):
-            return [c for c in fake.calls(directory) if name is None or c["call"] == name]
+            return [c for c in fake.calls(turns_dir) if name is None or c["call"] == name]
 
     return Rig()
 
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def launch(conn, request_id="r-1", *, harness="claude", state="started", brief=BRIEF,
-           handoff=None, argv=None, pid=None, mode=None, actor="ada"):
+           handoff=None, argv=None, pid=None, mode=None, by="ada"):
     """A launch row as the launcher leaves it before its first turn."""
     mode = mode or ("interactive" if harness == "claude" else "host")
-    store.insert(conn, request_id=request_id, actor=actor, harness=harness,
+    store.insert(conn, request_id=request_id, by=by, harness=harness,
                  target="terminal", cwd="/work", values={"mode": mode},
                  argv=argv or [harness, "--permission-mode", "default"], env={},
                  posture="go", session_id=CLAUDE_ID if harness == "claude" else None,
@@ -89,16 +89,16 @@ def outcomes(conn, request_id="r-1"):
 
 
 def test_a_brief_alone_starts_with_its_header():
-    assert first.text(actor="ada", brief=BRIEF) == (
+    assert first.text(by="ada", brief=BRIEF) == (
         "Brief from launcher, launched by ada\n\n" + BRIEF)
 
 
 def test_a_handoff_names_its_path_and_comes_before_the_brief(tmp_path):
     path = tmp_path / "2026-10-30-ada.md"
     path.write_text("# Handoff\n\nDone: the store.\n")
-    assert first.text(actor="ada@demo", handoff=path) == (
+    assert first.text(by="ada@demo", handoff=path) == (
         f"Handoff from launcher, launched by ada@demo: {path}\n\n# Handoff\n\nDone: the store.")
-    both = first.text(actor="ada@demo", brief=BRIEF, handoff=path)
+    both = first.text(by="ada@demo", brief=BRIEF, handoff=path)
     assert both.splitlines()[0] == f"Handoff from launcher, launched by ada@demo: {path}"
     assert both.index("Done: the store.") < both.index(BRIEF)
     assert both.endswith("\n\n" + BRIEF)
@@ -106,18 +106,18 @@ def test_a_handoff_names_its_path_and_comes_before_the_brief(tmp_path):
 
 def test_a_handoff_read_already_is_not_read_again(tmp_path):
     missing = tmp_path / "gone.md"
-    assert first.text(actor="a", handoff=missing, handoff_text="kept") == (
+    assert first.text(by="a", handoff=missing, handoff_text="kept") == (
         f"Handoff from launcher, launched by a: {missing}\n\nkept")
 
 
 def test_no_brief_and_no_handoff_is_no_first_turn():
-    assert first.text(actor="a") is None
-    assert first.text(actor="a", brief="  \n") is None
+    assert first.text(by="a") is None
+    assert first.text(by="a", brief="  \n") is None
 
 
 def test_an_unreadable_handoff_is_refused(tmp_path):
     with pytest.raises(first.HandoffUnreadable) as caught:
-        first.text(actor="a", handoff=tmp_path / "nowhere.md")
+        first.text(by="a", handoff=tmp_path / "nowhere.md")
     assert caught.value.exit_code == exits.REFUSED
     assert "nowhere.md" in str(caught.value)
 
@@ -200,10 +200,10 @@ def test_delivered(turns, conn):
 def test_a_relaunch_s_handoff_goes_under_the_relaunch_header(turns, conn, tmp_path):
     path = tmp_path / "handoff.md"
     path.write_text("Done: the store.\n")
-    store.insert(conn, request_id="r-0", actor="ada", harness="claude", target="terminal",
+    store.insert(conn, request_id="r-0", by="ada", harness="claude", target="terminal",
                  cwd="/work", values={"mode": "interactive"}, argv=["claude"], env={},
                  posture="go", session_id="0b1c2d3e-4f50-4617-8899-aabbccddeeff")
-    store.insert(conn, request_id="r-1", actor="ada", harness="claude", target="terminal",
+    store.insert(conn, request_id="r-1", by="ada", harness="claude", target="terminal",
                  cwd="/work", values={"mode": "interactive"}, argv=["claude"], env={},
                  posture="relaunched", session_id=CLAUDE_ID, handoff_path=str(path),
                  relaunch_of="r-0")
@@ -435,11 +435,11 @@ def test_two_senders_at_once_send_once(turns, conn):
     results = []
 
     def one():
-        mine = store.connect()
+        conn = store.connect()
         try:
-            results.append(send(mine).outcome)
+            results.append(send(conn).outcome)
         finally:
-            mine.close()
+            conn.close()
 
     threads = [threading.Thread(target=one) for _ in range(4)]
     for thread in threads:

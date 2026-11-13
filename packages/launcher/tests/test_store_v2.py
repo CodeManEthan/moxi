@@ -31,11 +31,11 @@ def at(seconds: float = 0) -> str:
 
 
 def version_1(path: Path) -> Path:
-    raw = sqlite3.connect(path)
-    raw.execute("PRAGMA journal_mode = WAL")
-    raw.executescript(V1_DUMP.read_text())
-    assert raw.execute("PRAGMA user_version").fetchone()[0] == 1
-    raw.close()
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.executescript(V1_DUMP.read_text())
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    conn.close()
     return path
 
 
@@ -50,14 +50,14 @@ def snapshot(conn):
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    yield conn
+    conn.close()
 
 
 def launch(conn, request_id="r1", session_id=None, **overrides):
     session_id = session_id or f"{request_id}-0000-4000-8000-000000000000"
-    args = {"request_id": request_id, "actor": "someone", "harness": "claude",
+    args = {"request_id": request_id, "by": "someone", "harness": "claude",
             "target": "slot", "cwd": "/work", "values": {"model": "opus"},
             "argv": ["claude", "--session-id", session_id],
             "env": {"MOXI_LAUNCHER_REQUEST": request_id}, "posture": "operator",
@@ -68,7 +68,7 @@ def launch(conn, request_id="r1", session_id=None, **overrides):
 
 def run(conn, request_id="r1", **overrides):
     args = {"kind": "relaunch", "mode": "self", "request_id": request_id,
-            "session_id": f"{request_id}-0000-4000-8000-000000000000", "actor": "someone",
+            "session_id": f"{request_id}-0000-4000-8000-000000000000", "by": "someone",
             "at": at()}
     args.update(overrides)
     return store.insert_run(conn, **args)
@@ -79,9 +79,9 @@ def run(conn, request_id="r1", **overrides):
 
 def test_a_version_1_log_is_carried_forward_with_no_row_lost(tmp_path):
     db = version_1(tmp_path / "launcher.db")
-    raw = sqlite3.connect(db)
-    before = snapshot(raw)
-    raw.close()
+    raw_conn = sqlite3.connect(db)
+    before = snapshot(raw_conn)
+    raw_conn.close()
     assert sum(len(v) for v in before.values()) == 14
 
     conn = store.connect(db)
@@ -148,26 +148,26 @@ def test_learning_an_id_still_leaves_it_with_the_launch_that_has_it(conn):
 
 def test_a_step_that_fails_leaves_the_version_1_log_whole(tmp_path):
     db = version_1(tmp_path / "launcher.db")
-    raw = sqlite3.connect(db)
-    raw.execute("CREATE TABLE runs (x)")  # step 2 can't make its own `runs` now
-    raw.commit()
-    before = snapshot(raw)
-    raw.close()
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE runs (x)")  # step 2 can't make its own `runs` now
+    conn.commit()
+    before = snapshot(conn)
+    conn.close()
     with pytest.raises(sqlite3.OperationalError):
         store.connect(db)
-    raw = sqlite3.connect(db)
+    conn = sqlite3.connect(db)
     try:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == 1
-        assert snapshot(raw) == before
-        columns = [r[1] for r in raw.execute("PRAGMA table_info(launches)")]
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert snapshot(conn) == before
+        columns = [r[1] for r in conn.execute("PRAGMA table_info(launches)")]
         assert "base_env_json" not in columns
-        assert [r[1] for r in raw.execute("PRAGMA table_info(session_ids)") if r[5]] == [
+        assert [r[1] for r in conn.execute("PRAGMA table_info(session_ids)") if r[5]] == [
             "session_id"]
     finally:
-        raw.close()
+        conn.close()
 
 
-def test_the_base_environment_column_is_empty_until_written(conn):
+def test_the_base_env_column_is_empty_until_written(conn):
     row = launch(conn)
     assert row.base_env_json is None and store.get(conn, "r1").base_env is None
     conn.execute("UPDATE launches SET base_env_json = ? WHERE request_id = 'r1'",
@@ -450,8 +450,8 @@ def test_prune_takes_at_most_its_limit_of_each_table_and_finishes_later(conn):
 def test_a_newer_store_than_version_2_is_refused(tmp_path):
     db = tmp_path / "launcher.db"
     store.connect(db).close()
-    raw = sqlite3.connect(db)
-    raw.execute("PRAGMA user_version = 3")
-    raw.close()
+    conn = sqlite3.connect(db)
+    conn.execute("PRAGMA user_version = 3")
+    conn.close()
     with pytest.raises(core_store.StoreTooNew):
         store.connect(db)

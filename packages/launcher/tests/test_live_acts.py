@@ -63,9 +63,9 @@ def needs_claude_with_turns(work: Path, env: dict[str, str]) -> None:
     try:
         added = compose.launch_additions(cwd=str(work), env=env,
                                          session_id=str(uuid.uuid4()))
-    except Exception as error:  # noqa: BLE001  (the fence's refusal, however turns words it)
-        if "endpoint.json" in str(error) or isinstance(error, PermissionError):
-            pytest.skip(f"{CLAUDE_WITH_TURNS}: {error}")
+    except Exception as exc:  # noqa: BLE001  (the fence's refusal, however turns words it)
+        if "endpoint.json" in str(exc) or isinstance(exc, PermissionError):
+            pytest.skip(f"{CLAUDE_WITH_TURNS}: {exc}")
         raise
     refused = [note for note in added.notes if "endpoint.json" in note]
     if refused:
@@ -74,7 +74,8 @@ def needs_claude_with_turns(work: Path, env: dict[str, str]) -> None:
 
 def slot_settings() -> None:
     """A slot launch answers Claude's folder-trust screen, as part 1's live tests do."""
-    config.set_value("launcher", "startup.trust_dialog", True, by="launcher live test")
+    config.set_value("launcher", "startup.trust_dialog", value=True,
+                     by="launcher live test")
     config.set_value("launcher", "startup.wait_s", 15, by="launcher live test")
 
 
@@ -221,7 +222,7 @@ def test_an_ended_claude_slot_session_resumes_in_its_slot_with_what_it_said(
                     if e["request_id"] == row.request_id]
         assert (listed["live"], listed["resumable"]) == (False, True), listed
 
-        got = resume.resume(row.session_id, turns=None, environ=live_env)
+        got = resume.resume(row.session_id, turns=None, caller_env=live_env)
         assert got.exit_code == 0, got.lines
         new = launch_row(got.data["request_id"])
         assert (new.resume_of, new.session_id, new.slot) == (
@@ -241,7 +242,7 @@ def test_an_ended_claude_slot_session_resumes_in_its_slot_with_what_it_said(
 
         before = launches()
         with pytest.raises(resume.Refused) as refused:
-            resume.resume(row.session_id, turns=None, environ=live_env)
+            resume.resume(row.session_id, turns=None, caller_env=live_env)
         assert refused.value.code == "live", refused.value.problem
         assert launches() == before
     finally:
@@ -401,7 +402,7 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
         director_env = {**live_env, director_var: "1", passed: "1"}
-        done = relaunch.call_director(row.session_id, environ=director_env,
+        done = relaunch.call_director(row.session_id, caller_env=director_env,
                                       comms=DirectorComms(comms, "boss"),
                                       cache=Cache("cold", 4000.0), follow=False)
         assert done.exit_code == 0, done.lines
@@ -454,7 +455,7 @@ def test_exit_session_ends_claude_through_the_exit_dialog_and_its_background_she
                  what=lambda: f"{answer} and {marker}; saw "
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
-        done = exits.exit_session(row.session_id, environ=live_env)
+        done = exits.exit_session(row.session_id, caller_env=live_env)
         assert (done.exit_code, done.data["outcome"]) == (0, "exited"), done.lines
         assert pane_dead(own_slots, row.pane_id, live_env)
         wait_for(lambda: not processes_running(marker), timeout=30, interval=0.5,
@@ -500,7 +501,7 @@ def test_a_clear_and_a_compact_on_expiry(live_env, work, own_slots, command):
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
         verdict = recycle.ask_expiry(row.session_id, cache=Cache("cold", 4000.0),
-                                     environ=live_env)
+                                     caller_env=live_env)
         done = "cleared" if command == "clear" else "compacted"
         assert verdict.outcome == done, verdict
         [run] = [r for r in runs_of(row.request_id) if r.mode == "expiry"]
@@ -549,7 +550,7 @@ def test_a_keep_warm_nudge_while_a_subagent_runs(live_env, work, own_slots):
 
         def nudged() -> keepwarm.Verdict | None:
             verdict = keepwarm.ask(row.session_id, cache=Cache("warm", 3000.0),
-                                   environ=live_env)
+                                   caller_env=live_env)
             seen.append((verdict.outcome, verdict.word))
             return verdict if verdict.outcome is not None else None
         verdict = wait_for(nudged, timeout=SUBAGENT_S - 60, interval=3.0,
@@ -581,4 +582,3 @@ def test_a_compact_at_the_limit(live_env, work, own_slots):
 def test_on_macos_a_keep_warm_ask_and_an_expiry_ask_fire(live_env, work):
     needs_claude_with_turns(work, live_env)
     pytest.skip("as on Linux, a Claude session's cache lifetime can't be shortened")
-

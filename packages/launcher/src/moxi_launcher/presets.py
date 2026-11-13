@@ -605,16 +605,16 @@ def roles(harness: str, *, cwd: str | os.PathLike | None = None,
     core's harness table, `moxi config moxi harnesses`; its built-in folder when the row
     leaves it empty) and, with `cwd`, in the project's own agents folder. A role is a
     file's name without `.md`, and the `name:` its front matter gives."""
-    environ = os.environ if env is None else env
-    folders = [_agents_folder(harness, environ)]
+    caller_env = os.environ if env is None else env
+    agents_dirs = [_agents_dir(harness, caller_env)]
     if cwd is not None and harness in PROJECT_AGENTS:
-        folders.append(Path(cwd) / PROJECT_AGENTS[harness])
+        agents_dirs.append(Path(cwd) / PROJECT_AGENTS[harness])
     found: set[str] = set()
-    for folder in folders:
-        if folder is None:
+    for agents_dir in agents_dirs:
+        if agents_dir is None:
             continue
         try:
-            files = [p for p in folder.iterdir() if p.suffix in (".md", ".toml")]
+            files = [p for p in agents_dir.iterdir() if p.suffix in (".md", ".toml")]
         except OSError:
             continue
         for file in files:
@@ -625,11 +625,11 @@ def roles(harness: str, *, cwd: str | os.PathLike | None = None,
     return frozenset(found)
 
 
-def _agents_folder(harness: str, environ: Mapping[str, str]) -> Path | None:
+def _agents_dir(harness: str, env: Mapping[str, str]) -> Path | None:
     configured = ""
     try:
         core = load_config("moxi", Schema.from_resource("moxi", "settings.toml"),
-                           env=environ)
+                           env=env)
         for entry in core["harnesses"]:
             if isinstance(entry, dict) and entry.get("name") == harness:
                 configured = str(entry.get("agents") or "")
@@ -639,7 +639,7 @@ def _agents_folder(harness: str, environ: Mapping[str, str]) -> Path | None:
     if configured:
         return Path(configured).expanduser()
     if harness == "claude":
-        base = environ.get("CLAUDE_CONFIG_DIR")
+        base = env.get("CLAUDE_CONFIG_DIR")
         return (Path(base).expanduser() if base else Path.home() / ".claude") / "agents"
     if harness == "codex":
         return Path.home() / ".codex" / "agents"
@@ -708,7 +708,7 @@ def _get_project(key: str, what: str, available=None):
     return _projects_call(api, api.get, key)
 
 
-def _project_for(directory: str, available) -> object | None:
+def _project_for(work_dir: str, available) -> object | None:
     """The project `directory` is in, or None; None without projects."""
     if not available("projects"):
         return None
@@ -716,7 +716,7 @@ def _project_for(directory: str, available) -> object | None:
         api = projects_api("this", available)
     except NeedsProjects:
         return None
-    return _projects_call(api, api.for_path, directory)
+    return _projects_call(api, api.for_path, work_dir)
 
 
 @dataclass(frozen=True)
@@ -1202,10 +1202,10 @@ def _place(place: Mapping[str, object], caller: str, avail, what: str
         project = _get_project(key, what, avail)
         return str(project.root), False, project
     if HOME in place:
-        directory = _home_path(str(place[HOME]), what, None)
+        place_dir = _home_path(str(place[HOME]), what, None)
     else:
-        directory = str(place.get("cwd") or os.path.abspath(caller))
-    return directory, False, _project_for(directory, avail)
+        place_dir = str(place.get("cwd") or os.path.abspath(caller))
+    return place_dir, False, _project_for(place_dir, avail)
 
 
 def _project_key_of(values: Mapping[str, object]) -> str | None:

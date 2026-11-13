@@ -122,17 +122,17 @@ def test_the_pointer_names_the_path_and_date(tmp_path):
 # -- the folder ----------------------------------------------------------------------------
 
 
-def test_without_notes_the_folder_is_the_launchers_own_and_private():
-    folder = handoffs.folder("/work", notes_dir="/notes")
-    assert folder == Layout("launcher").data_dir() / "handoffs"
-    assert folder.is_dir()
+def test_without_notes_the_dir_is_the_launchers_own_and_private():
+    handoff_dir = handoffs.handoff_dir("/work", notes_dir="/notes")
+    assert handoff_dir == Layout("launcher").data_dir() / "handoffs"
+    assert handoff_dir.is_dir()
     if os.name == "posix":
-        assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+        assert stat.S_IMODE(handoff_dir.stat().st_mode) == 0o700
 
 
-def test_the_folder_is_not_made_when_create_is_off():
-    folder = handoffs.folder("/work", create=False)
-    assert not folder.exists()
+def test_the_dir_is_not_made_when_create_is_off():
+    handoff_dir = handoffs.handoff_dir("/work", create=False)
+    assert not handoff_dir.exists()
 
 
 @pytest.fixture
@@ -151,50 +151,50 @@ def notes(monkeypatch, tmp_path):
     return SimpleNamespace(calls=calls, answer=answer, found=found)
 
 
-def test_with_notes_the_folder_is_notes_with_the_launchs_override(notes):
+def test_with_notes_the_dir_is_notes_with_the_launchs_override(notes):
     launch = row(cwd="/work/sub", values={"notes_dir": "/srv/notes-moxi"})
-    assert handoffs.folder_of_row(launch) == notes.answer["folder"]
+    assert handoffs.handoff_dir_of_row(launch) == notes.answer["folder"]
     assert notes.calls == [("/work/sub", True, "/srv/notes-moxi")]
 
 
 def test_with_notes_a_launch_without_notes_dir_passes_no_override(notes):
-    handoffs.folder_of_row(row(values={"notes_dir": ""}))
+    handoffs.handoff_dir_of_row(row(values={"notes_dir": ""}))
     assert notes.calls == [("/work", True, None)]
 
 
-def test_notes_with_no_folder_falls_back_to_the_launchers_own(notes):
+def test_notes_with_no_dir_falls_back_to_the_launchers_own(notes):
     notes.answer["folder"] = None
-    assert handoffs.folder("/work") == handoffs.own_folder()
+    assert handoffs.handoff_dir("/work") == handoffs.own_handoffs_dir()
 
 
 def test_a_broken_notes_falls_back_to_the_launchers_own(notes):
     notes.found.state = modules.BROKEN
-    assert handoffs.folder("/work") == handoffs.own_folder()
+    assert handoffs.handoff_dir("/work") == handoffs.own_handoffs_dir()
     assert notes.calls == []
 
 
 # -- the current session -------------------------------------------------------------------
 
 
-def test_the_current_folder_of_a_launched_seat():
+def test_the_current_dir_of_a_launched_seat():
     conn = store.connect()
     try:
-        store.insert(conn, request_id="r1", actor="a", harness="claude", target="slot",
+        store.insert(conn, request_id="r1", by="a", harness="claude", target="slot",
                      cwd="/work", values={}, argv=["claude"], env={}, posture="go",
                      session_id=CLAUDE_ID, preset_kind="seat", preset_name="lead")
     finally:
         conn.close()
     found = handoffs.current({"MOXI_LAUNCHER_REQUEST": "r1"})
-    assert (found.key, found.folder, found.request_id) == ("lead", handoffs.own_folder(),
+    assert (found.key, found.handoff_dir, found.request_id) == ("lead", handoffs.own_handoffs_dir(),
                                                             "r1")
 
 
-def test_the_current_folder_of_a_session_by_hand(tmp_path):
+def test_the_current_dir_of_a_session_by_hand(tmp_path):
     found = handoffs.current({"MOXI_COMMS_NAME": "planner@moxi"}, cwd=tmp_path)
     assert (found.key, found.request_id) == ("planner", None)
 
 
-def test_a_session_with_no_key_has_no_folder():
+def test_a_session_with_no_key_has_no_dir():
     with pytest.raises(handoffs.NoKey):
         handoffs.current({})
     with pytest.raises(handoffs.NoKey):
@@ -206,7 +206,7 @@ def test_a_session_with_no_key_has_no_folder():
 
 
 def launched(conn, rid, at, cwd="/work", values=None, **fields):
-    store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
+    store.insert(conn, request_id=rid, by="ann", harness="codex", target="headless",
                  cwd=cwd, values=values or {}, argv=["codex"], env={}, posture="", at=at,
                  **fields)
 
@@ -233,9 +233,9 @@ def test_with_no_launch_log_a_key_has_no_launch_and_none_is_made():
     assert not store.path().exists()
 
 
-def test_a_keys_folder_is_its_newest_launchs_else_the_callers(notes):
-    found = handoffs.folder_of_key("lead", cwd="/here")
-    assert (found.folder, found.launch) == (notes.answer["folder"], None)
+def test_a_keys_dir_is_its_newest_launchs_else_the_callers(notes):
+    found = handoffs.handoff_dir_of_key("lead", cwd="/here")
+    assert (found.handoff_dir, found.launch) == (notes.answer["folder"], None)
     assert notes.calls == [("/here", False, None)]
     conn = store.connect()
     try:
@@ -243,6 +243,6 @@ def test_a_keys_folder_is_its_newest_launchs_else_the_callers(notes):
                  values={"notes_dir": "/srv/notes"})
     finally:
         conn.close()
-    found = handoffs.folder_of_key("lead", cwd="/here")
+    found = handoffs.handoff_dir_of_key("lead", cwd="/here")
     assert found.launch.request_id == "r-1"
     assert notes.calls[-1] == ("/src/moxi", False, "/srv/notes")

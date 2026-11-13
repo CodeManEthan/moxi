@@ -65,7 +65,7 @@ LIMIT = 50
 QUERY_MAX = 128
 
 
-def _text(nullable: bool = False, mark: str | None = None) -> Out:
+def _text(*, nullable: bool = False, mark: str | None = None) -> Out:
     return Out("string", mark=mark, nullable=nullable)
 
 
@@ -73,7 +73,7 @@ def _texts(mark: str | None = None) -> Out:
     return Out("list", items=Out("string", mark=mark))
 
 
-def _table(nullable: bool = False, **items: Out) -> Out:
+def _table(*, nullable: bool = False, **items: Out) -> Out:
     return Out("table", items=items, nullable=nullable)
 
 

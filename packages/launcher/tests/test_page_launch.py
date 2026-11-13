@@ -95,7 +95,7 @@ class Spawned:
     """A stand-in for `proc.spawn` that records each call, and runs the launch job in
     this process when `run` is set."""
 
-    def __init__(self, run: bool = False):
+    def __init__(self, *, run: bool = False):
         self.calls: list[dict] = []
         self.run = run
         self.threads: list[threading.Thread] = []
@@ -588,8 +588,8 @@ EVERY_ROW = [(harness, name, layer)
 def _resolved(request) -> tuple:
     try:
         found = presets.resolve(request, available=slots.links)
-    except catalog.Refused as refused:
-        return ("refused", type(refused).__name__, str(refused))
+    except catalog.Refused as exc:
+        return ("refused", type(exc).__name__, str(exc))
     return dict(found.values), dict(found.sources), sorted(found.chosen)
 
 

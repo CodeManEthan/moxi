@@ -247,10 +247,10 @@ def launch(request, *, env: Mapping[str, str] | None = None,
 
     ids = _with_ids(request, resolved.harness)
     child, base = _child_base(request, caller)
-    composition = compose.build(ids, resolved, environ=env, child_environ=child,
+    composition = compose.build(ids, resolved, env=env, child_env=child,
                                 create=True)
     target = targets.get(composition.target)
-    launch_env = common.environment(child, composition, moxi_modules.session_env())
+    launch_env = common.child_env(child, composition, moxi_modules.session_env())
     command = target.prepare(composition, launch_env)
     values = composition.values
     resume = bool(getattr(request, "resume_of", None))
@@ -262,7 +262,7 @@ def launch(request, *, env: Mapping[str, str] | None = None,
     conn = store.connect(env=env)
     try:
         inserted = store.insert(
-            conn, request_id=ids.request_id, actor=_actor(ids, caller),
+            conn, request_id=ids.request_id, by=_actor(ids, caller),
             harness=composition.harness, target=composition.target,
             cwd=str(values["cwd"]), values=values, argv=composition.argv,
             env=composition.env, posture=str(resolved.posture or ""),
@@ -283,14 +283,14 @@ def launch(request, *, env: Mapping[str, str] | None = None,
             warnings += (NO_CREDENTIALS,)
         try:
             _make_files(composition, env, handoff_key)
-        except OSError as error:
+        except OSError as exc:
             failed = targets.fail(conn, rid, targets.SPAWN_FAILED,
-                                   f"the launch's files could not be made: {error}")
+                                   f"the launch's files could not be made: {exc}")
             return _result(composition, rid, session_id, failed, warnings)
         try:
             targets.sweep(conn, env=env)
-        except Exception as error:  # noqa: BLE001  (the sweep never stops a launch)
-            log.warning("the run-file sweep stopped: %s", error)
+        except Exception as exc:  # noqa: BLE001  (the sweep never stops a launch)
+            log.warning("the run-file sweep stopped: %s", exc)
         for line in warnings if warn is not None else ():
             warn(line)
         started = target.start(targets.Launch(
@@ -319,8 +319,8 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
         return [bad_id]
     try:
         resolved = _resolve(request, env)
-    except Refusal as refusal:
-        return [refusal]
+    except Refusal as exc:
+        return [exc]
     return _check(resolved, caller)
 
 
@@ -336,9 +336,9 @@ def preview(request, *, env: Mapping[str, str] | None = None) -> Composition:
         caller = dict(os.environ if env is None else env)
         child, _ = _child_base(request, caller)
         composition = compose.build(_with_ids(request, resolved.harness), resolved,
-                                    environ=env, child_environ=child)
+                                    env=env, child_env=child)
     else:
-        composition = compose.build(request, resolved, environ=env)
+        composition = compose.build(request, resolved, env=env)
     return dataclasses.replace(composition,
                                warnings=_warnings(resolved, composition))
 
@@ -352,10 +352,10 @@ def exit_code(error: BaseException) -> int:
 # -- the parts ----------------------------------------------------------------------------
 
 
-def _resolve(request, environ: Mapping[str, str] | None = None):
+def _resolve(request, env: Mapping[str, str] | None = None):
     if getattr(request, "replay", False):
         return _replayed(request)
-    return presets.resolve(request, env=environ)
+    return presets.resolve(request, env=env)
 
 
 #: What a replay does not take from the stored values as values: the composer's own
@@ -383,8 +383,8 @@ def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str
     if why is None and need is not None:
         try:
             catalog.refuse_values(harness, {"target": target, name: value})
-        except catalog.Refused as refused:
-            why = (refused.problem, "")
+        except catalog.Refused as exc:
+            why = (exc.problem, "")
     if why is None:
         return None
     values[name] = row_.default
@@ -504,14 +504,14 @@ def _request_id_refusal(request_id: str | None) -> Refusal | None:
 
 
 def _known(request_id: str | None,
-           environ: Mapping[str, str] | None) -> store.LaunchRow | None:
+           env: Mapping[str, str] | None) -> store.LaunchRow | None:
     """The row of a request id already in the launch log, read before anything else, so a
     retried request gets its stored outcome and is not refused by what its own first run
     holds (its comms name, its named slot). Reads only: a launch log not made yet is
     left unmade."""
-    if not request_id or not store.path(environ).exists():
+    if not request_id or not store.path(env).exists():
         return None
-    conn = store.connect(env=environ, create=False)
+    conn = store.connect(env=env, create=False)
     try:
         return store.get(conn, request_id)
     finally:
@@ -595,7 +595,7 @@ def _actor(request, caller: Mapping[str, str]) -> str:
     return getattr(request, "actor", None) or first.actor(caller)
 
 
-def _make_files(composition: Composition, environ: Mapping[str, str] | None = None,
+def _make_files(composition: Composition, env: Mapping[str, str] | None = None,
                 handoff_key: str | None = None) -> None:
     """What a launch makes before its start: Claude's system prompt file, a scratch
     launch's directory (0700, never removed by the launcher), and the handoff folder its
@@ -609,8 +609,8 @@ def _make_files(composition: Composition, environ: Mapping[str, str] | None = No
         files.private_dir(common.scratch_root())
         files.private_dir(where)
     if handoff_key and values.get("cwd"):
-        handoffs.folder(str(values["cwd"]), notes_dir=values.get("notes_dir") or None,
-                        env=environ)
+        handoffs.handoff_dir(str(values["cwd"]), notes_dir=values.get("notes_dir") or None,
+                        env=env)
     if composition.prompt_file is not None:
         common.write_prompt(composition.prompt_file)
 

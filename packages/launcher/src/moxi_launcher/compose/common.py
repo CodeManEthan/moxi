@@ -391,7 +391,7 @@ def seat_text(block: str, instructions: str | None) -> str:
     return block
 
 
-def agent_role(role: str | None, found: bool | None) -> str | None:
+def agent_role(role: str | None, *, found: bool | None) -> str | None:
     """The block's agent role line: the role, marked when it was asked for and did not
     resolve."""
     if not role:
@@ -412,7 +412,7 @@ def write_prompt(prompt_file: PromptFile) -> None:
 
 # -- the opening prompt -----------------------------------------------------------------
 
-def first_turn(actor: str, *, brief: str | None = None, handoff: str | None = None,
+def first_turn(by: str, *, brief: str | None = None, handoff: str | None = None,
                handoff_text: str | None = None, posture: str | None = None,
                relaunched: bool = False) -> str | None:
     """The text of a launch's first turn, or None when it owes none: the first turn's own
@@ -421,7 +421,7 @@ def first_turn(actor: str, *, brief: str | None = None, handoff: str | None = No
     never read as a flag or a subcommand; a relaunch's says it was relaunched."""
     from .. import first
 
-    text = first.text(actor=actor, brief=brief, handoff=handoff or None,
+    text = first.text(by=by, brief=brief, handoff=handoff or None,
                       handoff_text=(handoff_text or "") if handoff else None,
                       relaunched=relaunched)
     if text is None or not posture:
@@ -478,8 +478,8 @@ def scratch_root_problem(root: Path | None = None) -> str | None:
         st = os.lstat(root)
     except FileNotFoundError:
         return None
-    except OSError as error:
-        return f"{root} can't be read: {error}"
+    except OSError as exc:
+        return f"{root} can't be read: {exc}"
     if stat.S_ISLNK(st.st_mode):
         return f"{root} is a symbolic link"
     if not stat.S_ISDIR(st.st_mode):
@@ -494,7 +494,7 @@ def scratch_root_problem(root: Path | None = None) -> str | None:
 
 # -- the child's environment ------------------------------------------------------------
 
-def scrub(environ: Mapping[str, str], session_env: frozenset[str] | set[str] = frozenset(),
+def scrub(env: Mapping[str, str], session_env: frozenset[str] | set[str] = frozenset(),
           *, windows: bool = os.name == "nt") -> dict[str, str]:
     """A copy of `environ` without any session's stamps.
 
@@ -514,7 +514,7 @@ def scrub(environ: Mapping[str, str], session_env: frozenset[str] | set[str] = f
         return (name in names or name.startswith(prefixes)
                 or (name.startswith(claude) and name not in keep))
 
-    return {name: value for name, value in environ.items() if not scrubbed(name)}
+    return {name: value for name, value in env.items() if not scrubbed(name)}
 
 
 def commands(values: Mapping[str, object]) -> tuple[str, ...]:
@@ -564,12 +564,12 @@ def stamps(request_id: str, *, turns: bool = False, additions: Additions | None 
     return env
 
 
-def environment(environ: Mapping[str, str], composition: Composition,
+def child_env(caller_env: Mapping[str, str], composition: Composition,
                 session_env: frozenset[str] | set[str] = frozenset(), *,
                 windows: bool = os.name == "nt") -> dict[str, str]:
     """The whole environment the child gets: `environ` scrubbed, then the launch's
     stamps."""
-    env = scrub(environ, session_env, windows=windows)
+    env = scrub(caller_env, session_env, windows=windows)
     env.update(composition.env)
     return env
 
@@ -616,12 +616,12 @@ def env_class(name: str) -> str | None:
     return RECORDED if name.startswith(RECORDED_PREFIXES) else None
 
 
-def _short(name: str, windows: bool) -> bool:
+def _short(name: str, *, windows: bool) -> bool:
     return (name in BASE_NAMES or name.startswith(BASE_PREFIXES)
             or (windows and name in WINDOWS_BASE_NAMES))
 
 
-def base_env(environ: Mapping[str, str], *,
+def base_env(env: Mapping[str, str], *,
              windows: bool = os.name == "nt") -> dict[str, str | None]:
     """What a launch records of its child's environment `environ`: the value of each name
     of the recorded class that is set (the short list, `BASE_NAMES` and `BASE_PREFIXES`;
@@ -630,26 +630,26 @@ def base_env(environ: Mapping[str, str], *,
     value, which is never recorded. Each is kept under the name as `environ` spells it.
     Windows reads names without case, so there they are matched so too."""
     out: dict[str, str | None] = {}
-    for name, value in environ.items():
+    for name, value in env.items():
         key = name.upper() if windows else name
         kind = env_class(key)
         if kind == CREDENTIAL:
             out[name] = None
-        elif kind == RECORDED or _short(key, windows) or locator(key):
+        elif kind == RECORDED or _short(key, windows=windows) or locator(key):
             out[name] = value
     return out
 
 
-def short_env(environ: Mapping[str, str], *,
+def short_env(env: Mapping[str, str], *,
               windows: bool = os.name == "nt") -> dict[str, str]:
     """The short list alone (`BASE_NAMES`, `BASE_PREFIXES`) of `environ`, and on Windows
     the names a process there needs to start (`WINDOWS_BASE_NAMES`): the base of a replay
     of a row made before the base was recorded."""
     norm = str.upper if windows else (lambda name: name)
-    return {name: value for name, value in environ.items() if _short(norm(name), windows)}
+    return {name: value for name, value in env.items() if _short(norm(name), windows=windows)}
 
 
-def replay_env(base: Mapping[str, str | None], environ: Mapping[str, str],
+def replay_env(base: Mapping[str, str | None], caller_env: Mapping[str, str],
                pass_env: Sequence[str] = (), *,
                terminal: bool = False) -> dict[str, str]:
     """The environment a replay's child is built from, before the scrub and the stamps:
@@ -660,8 +660,8 @@ def replay_env(base: Mapping[str, str | None], environ: Mapping[str, str],
     `environ` comes in."""
     env = {name: value for name, value in base.items() if value is not None}
     if terminal:
-        env.update({name: environ[name] for name in TERMINAL_NAMES if name in environ})
-    env.update({name: environ[name] for name in pass_env if name in environ})
+        env.update({name: caller_env[name] for name in TERMINAL_NAMES if name in caller_env})
+    env.update({name: caller_env[name] for name in pass_env if name in caller_env})
     return env
 
 
@@ -723,7 +723,7 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD", "Additions", "Composition",
            "Context", "NoBrief", "NotYet", "PromptFile", "TooLong", "TurnsAdditions",
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
-           "env_class", "environment", "first_turn", "identity_block", "locator",
+           "env_class", "child_env", "first_turn", "identity_block", "locator",
            "no_credentials", "option_stamps", "prompt_path", "replay_env", "scratch_dir",
            "scratch_root", "scratch_root_problem", "scrub", "seat_text", "short_env",
            "stamps", "write_prompt"]

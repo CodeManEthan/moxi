@@ -81,7 +81,7 @@ def seed(request_id="r1", *, target_name="slot", harness="claude", session_id=SI
          slot="3", live=False, pid=True, identity=None, at=None) -> None:
     """A launch in the log, its process ended unless `live`; with no `pid`, none recorded."""
     def insert(conn):
-        store.insert(conn, request_id=request_id, actor="ann", harness=harness,
+        store.insert(conn, request_id=request_id, by="ann", harness=harness,
                      target=target_name, cwd="/work", values={"model": "opus"},
                      argv=[harness], env={}, posture="operator",
                      session_id=session_id if harness == "claude" else None,
@@ -162,7 +162,7 @@ def open_run(request_id="r1") -> None:
     """A relaunch run open on `request_id`'s launch, its job this test's own process."""
     mine = proc.identity(os.getpid())
     with_store(lambda c: store.insert_run(c, kind="relaunch", mode="self",
-                                          request_id=request_id, session_id=SID, actor="ann",
+                                          request_id=request_id, session_id=SID, by="ann",
                                           job=f"proc:{mine.pid}@{mine.started:.6f}"))
 
 
@@ -182,7 +182,7 @@ def test_a_run_whose_job_is_gone_does_not_hold_the_resume(monkeypatch):
     monkeypatch.setattr(pagehandlers, "_spawn", Spawned())
     seed()
     with_store(lambda c: store.insert_run(c, kind="relaunch", mode="self", request_id="r1",
-                                          session_id=SID, actor="ann",
+                                          session_id=SID, by="ann",
                                           job=f"proc:{os.getpid()}@{ENDED:.6f}",
                                           at="2020-01-01T00:00:00.000000Z"))
     status, _ = post("/api/resume", {"session": SID})
@@ -416,20 +416,20 @@ def test_an_act_the_job_doesnt_run_is_recorded():
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
-    directory = tmp_path / "fake-slots"
-    directory.mkdir()
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
     monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
     monkeypatch.syspath_prepend(str(TESTS))
     monkeypatch.setattr(slots, "api", SLOTS_API)
     fake.reset()
-    script = directory / "script.json"
+    script = slots_dir / "script.json"
 
     def plan(**keys):
         now = json.loads(script.read_text()) if script.exists() else {}
         script.write_text(json.dumps({**now, **keys}))
 
-    return SimpleNamespace(plan=plan, calls=lambda name=None: fake.calls(directory, name))
+    return SimpleNamespace(plan=plan, calls=lambda name=None: fake.calls(slots_dir, name))
 
 
 @pytest.fixture

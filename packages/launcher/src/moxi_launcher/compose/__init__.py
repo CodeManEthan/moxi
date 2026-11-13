@@ -33,7 +33,7 @@ from moxi.paths import Layout
 from .. import first, handoffs, presets, slots
 from . import claude, codex, common
 from .common import (Additions, Composition, Context, NoBrief, NotYet, PromptFile,
-                     TooLong, TurnsAdditions, Unreadable, environment, first_turn,
+                     TooLong, TurnsAdditions, Unreadable, child_env, first_turn,
                      identity_block, scrub, stamps, write_prompt)
 
 MODULE = "launcher"
@@ -80,11 +80,11 @@ def host_script() -> str | None:
 
 def context(values: Mapping[str, object], *, request_id: str,
             session_id: str | None = None, mode: str | None = None,
-            actor: str | None = None,
+            by: str | None = None,
             chosen: Iterable[str] = (), project_key: str | None = None,
             preset_kind: str | None = None, preset_name: str | None = None,
-            environ: Mapping[str, str] | None = None,
-            child_environ: Mapping[str, str] | None = None,
+            env: Mapping[str, str] | None = None,
+            child_env: Mapping[str, str] | None = None,
             modules: frozenset[str] | None = None, create: bool = False,
             replay: Mapping[str, object] | None = None) -> Context:
     """Gather the context of one launch. `mode` is the resolver's, None to let the
@@ -96,11 +96,11 @@ def context(values: Mapping[str, object], *, request_id: str,
     from, which turns' launch additions are asked with (default `environ`; a replay's
     differs). `replay` holds the `Context` fields a replay sets (`posture`, `resume`,
     `relaunched`, `extra_stamps`)."""
-    environ = dict(os.environ if environ is None else environ)
-    child = environ if child_environ is None else dict(child_environ)
+    env = dict(os.environ if env is None else env)
+    child = env if child_env is None else dict(child_env)
     links = installed() if modules is None else frozenset(modules)
     harness = values.get("harness") or "claude"
-    who = actor if actor is not None else first.actor(environ)
+    who = by if by is not None else first.actor(env)
 
     brief = values.get("brief") or _read("brief_file", values.get("brief_file"))
     handoff_text = _read("handoff", values.get("handoff"))
@@ -114,15 +114,15 @@ def context(values: Mapping[str, object], *, request_id: str,
         preset_name=preset_name, project_key=project_key))
     handoff_dir = None
     if key and values.get("cwd"):
-        handoff_dir = str(handoffs.folder(str(values["cwd"]),
+        handoff_dir = str(handoffs.handoff_dir(str(values["cwd"]),
                                           notes_dir=values.get("notes_dir") or None,
-                                          env=environ, create=create,
+                                          env=env, create=create,
                                           create_own=False))
 
     role_found = None
     if values.get("agent"):
         role_found = str(values["agent"]) in presets.roles(
-            harness, cwd=values.get("cwd") or None, env=environ)
+            harness, cwd=values.get("cwd") or None, env=env)
     host = host_script() if harness == "codex" else None
     additions = None
     if harness == "claude" and "turns" in links and not comms:
@@ -139,7 +139,7 @@ def context(values: Mapping[str, object], *, request_id: str,
                    handoff_text=handoff_text,
                    instructions=str(instructions) if instructions else None,
                    handoff_dir=handoff_dir, role_found=role_found, additions=additions,
-                   runs_dir=str(Layout(MODULE).state_dir(environ) / "runs"),
+                   runs_dir=str(Layout(MODULE).state_dir(env) / "runs"),
                    moxi=moxi_command(), host=host,
                    comms_codex=codex_comms and presets.comms_codex(),
                    comms_codex_resume=(codex_comms and bool((replay or {}).get("resume"))
@@ -166,17 +166,17 @@ def launch_additions(*, cwd: str, env: Mapping[str, str], session_id: str | None
     try:
         got = call("claude", cwd=cwd, env=dict(env), session_id=session_id,
                    commands=tuple(granted))
-    except caught as error:
+    except caught as exc:
         raise TurnsAdditions(None, f"turns could not give this launch its additions: "
-                                   f"{error}", "moxi doctor shows what is wrong with turns"
-                             ) from error
+                                   f"{exc}", "moxi doctor shows what is wrong with turns"
+                             ) from exc
     return Additions(argv=tuple(str(word) for word in got.argv),
                      env={str(k): str(v) for k, v in dict(got.env).items()},
                      notes=tuple(str(note) for note in (got.notes or ())))
 
 
-def build(request, resolved, *, environ: Mapping[str, str] | None = None,
-          child_environ: Mapping[str, str] | None = None,
+def build(request, resolved, *, env: Mapping[str, str] | None = None,
+          child_env: Mapping[str, str] | None = None,
           modules: frozenset[str] | None = None, create: bool = False) -> Composition:
     """Compose the launch `request` asks for, from its `resolved` values
     (`presets.resolve`'s `Resolved`).
@@ -206,12 +206,12 @@ def build(request, resolved, *, environ: Mapping[str, str] | None = None,
         values["off_posture"] = bool(resolved.off_posture)
     ctx = context(values, request_id=request_id, session_id=session_id,
                   mode=getattr(resolved, "mode", None),
-                  actor=getattr(request, "actor", None),
+                  by=getattr(request, "actor", None),
                   chosen=getattr(resolved, "chosen", ()),
                   project_key=getattr(resolved, "project_key", None),
                   preset_kind=getattr(resolved, "preset_kind", None),
                   preset_name=getattr(resolved, "preset_name", None),
-                  environ=environ, child_environ=child_environ, modules=modules,
+                  env=env, child_env=child_env, modules=modules,
                   create=create, replay=replay)
     return compose(values, ctx)
 
@@ -243,6 +243,6 @@ def _read(row: str, name: object) -> str | None:
 __all__ = ["COMPOSERS", "HOST", "LINKS", "TURNS_INTERFACE", "Additions", "Composition",
            "Context", "NoBrief", "NotYet", "PromptFile", "TooLong", "TurnsAdditions",
            "Unreadable",
-           "build", "compose", "context", "environment", "first_turn", "host_script",
+           "build", "compose", "context", "child_env", "first_turn", "host_script",
            "identity_block", "installed", "launch_additions", "moxi_command", "scrub", "stamps",
            "write_prompt"]

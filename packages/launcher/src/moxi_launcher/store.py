@@ -490,9 +490,9 @@ def _writing(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     try:
         with store.transaction(conn):
             yield conn
-    except sqlite3.OperationalError as error:
-        if _busy(error):
-            raise Busy(f"the launch log is busy: {error}") from error
+    except sqlite3.OperationalError as exc:
+        if _busy(exc):
+            raise Busy(f"the launch log is busy: {exc}") from exc
         raise
 
 
@@ -513,7 +513,7 @@ def _check_size(field: str, text: str | None) -> None:
         raise TooLarge(field, size)
 
 
-def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: str,
+def insert(conn: sqlite3.Connection, *, request_id: str, by: str, harness: str,
            target: str, cwd: str, values: Mapping[str, Any], argv: Sequence[str],
            env: Mapping[str, str], posture: str, session_id: str | None = None,
            preset_kind: str | None = None, preset_name: str | None = None,
@@ -565,7 +565,7 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
     if resume_of is not None and session_id and starting_s is None:
         starting_s = stale_after_s()
     row = {
-        "request_id": request_id, "created_at": at, "actor": actor, "harness": harness,
+        "request_id": request_id, "created_at": at, "actor": by, "harness": harness,
         "preset_kind": preset_kind, "preset_name": preset_name, "target": target,
         "slot": slot, "pane_id": None, "cwd": cwd, "project_key": project_key,
         "identity": identity, "scope": scope, "session_id": session_id,
@@ -580,7 +580,7 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
     try:
         with _writing(conn):
             if (stored := get(conn, request_id)) is not None:
-                return Inserted(stored, False)
+                return Inserted(stored, new=False)
             if session_id:
                 holders = [r[0] for r in conn.execute(
                     "SELECT request_id FROM session_ids WHERE session_id = ?",
@@ -607,7 +607,7 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
                              (handoff_path, handoff_key, session_id, request_id, at))
     finally:
         conn.execute("PRAGMA synchronous = NORMAL")
-    return Inserted(LaunchRow(**row), True)
+    return Inserted(LaunchRow(**row), new=True)
 
 
 def _running(row: LaunchRow, at: datetime, starting_s: float) -> str | None:
@@ -894,9 +894,9 @@ def kinds(session_ids: Iterable[str], *, timeout: float = 1.0,
                     for sid in ids}
         finally:
             conn.close()
-    except sqlite3.OperationalError as error:
-        if _busy(error):
-            raise Busy(f"the launch log is busy: {error}") from error
+    except sqlite3.OperationalError as exc:
+        if _busy(exc):
+            raise Busy(f"the launch log is busy: {exc}") from exc
         raise
 
 
@@ -941,16 +941,16 @@ class Place(NamedTuple):
     at: str
 
 
-def launched_by(row: LaunchRow, actor: str) -> bool:
-    """Whether `row` is a launch `actor` made and may make again: one that did not fail,
+def launched_by(row: LaunchRow, by: str) -> bool:
+    """Whether `row` is a launch `by` made and may make again: one that did not fail,
     that is no relaunch or resume of another, and that did not work in a scratch
     folder."""
     return (row.state != "failed" and row.relaunch_of is None and row.resume_of is None
-            and row.actor == actor and row.values.get("scratch") is not True)
+            and row.actor == by and row.values.get("scratch") is not True)
 
 
-def places(conn: sqlite3.Connection, actor: str, limit: int = 5) -> list[Place]:
-    """The places `actor` last launched in, newest first, at most `limit`: one per
+def places(conn: sqlite3.Connection, by: str, limit: int = 5) -> list[Place]:
+    """The places `by` last launched in, newest first, at most `limit`: one per
     project key, and one per folder for the launches that name no project, each from its
     newest launch that `launched_by` counts. Only the newest `PLACES_SCAN` rows of the
     log are read; a place older than those is not given."""
@@ -958,7 +958,7 @@ def places(conn: sqlite3.Connection, actor: str, limit: int = 5) -> list[Place]:
     for row in log(conn, limit=PLACES_SCAN):
         if len(found) >= limit:
             break
-        if not launched_by(row, actor):
+        if not launched_by(row, by):
             continue
         key = ("project", row.project_key) if row.project_key else ("cwd", row.cwd)
         found.setdefault(key, Place(row.project_key or None, row.cwd, row.created_at))
@@ -975,7 +975,7 @@ def running(conn: sqlite3.Connection) -> list[LaunchRow]:
 
 def events(conn: sqlite3.Connection, request_id: str) -> list[Event]:
     """The events of one launch, oldest first."""
-    return [Event(id, rid, sid, at, kind, json.loads(detail)) for id, rid, sid, at, kind,
+    return [Event(event_id, rid, sid, at, kind, json.loads(detail)) for event_id, rid, sid, at, kind,
             detail in conn.execute(
                 "SELECT id, request_id, session_id, at, kind, detail_json FROM events "
                 "WHERE request_id = ? ORDER BY at, id", (request_id,))]
@@ -1135,7 +1135,7 @@ def run_stale(run: Run, gone: Callable[[str], bool], now: datetime | None = None
 
 
 def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: str,
-               session_id: str, actor: str, state: str = "armed", job: str | None = None,
+               session_id: str, by: str, state: str = "armed", job: str | None = None,
                handoff_path: str | None = None, slot: str | None = None,
                pane_id: str | None = None, turn_number: int | None = None,
                repair_of: str | None = None, crossing_key: str | None = None,
@@ -1173,7 +1173,7 @@ def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: st
                 met = current
         if met is None:
             row = _insert_run(conn, kind=kind, mode=mode, request_id=request_id,
-                              session_id=session_id, actor=actor, state=state, job=job,
+                              session_id=session_id, by=by, state=state, job=job,
                               handoff_path=handoff_path, slot=slot, pane_id=pane_id,
                               turn_number=turn_number, repair_of=repair_of,
                               crossing_key=crossing_key, at=at, run_id=run_id)
@@ -1183,7 +1183,7 @@ def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: st
 
 
 def _insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: str,
-                session_id: str, actor: str, state: str, job: str | None,
+                session_id: str, by: str, state: str, job: str | None,
                 handoff_path: str | None, slot: str | None, pane_id: str | None,
                 turn_number: int | None, repair_of: str | None,
                 crossing_key: str | None, at: str, run_id: str | None) -> Run:
@@ -1193,7 +1193,7 @@ def _insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: s
                            (run_id,)).fetchone():
             run_id = new_run_id()
     row = Run(run_id=run_id, kind=kind, mode=mode, request_id=request_id,
-              session_id=session_id, actor=actor, handoff_path=handoff_path, slot=slot,
+              session_id=session_id, actor=by, handoff_path=handoff_path, slot=slot,
               pane_id=pane_id, turn_number=turn_number, new_request_id=None,
               repair_of=repair_of, crossing_key=crossing_key, job=job, state=state,
               outcome=None, word=None, detail=None, repeats=0, created_at=at,
@@ -1562,7 +1562,7 @@ def add_run_event(conn: sqlite3.Connection, run_id: str, kind: str,
 
 def run_events(conn: sqlite3.Connection, run_id: str) -> list[RunEvent]:
     """The events of one run, oldest first."""
-    return [RunEvent(id, rid, at, kind, json.loads(detail)) for id, rid, at, kind, detail
+    return [RunEvent(event_id, rid, at, kind, json.loads(detail)) for event_id, rid, at, kind, detail
             in conn.execute("SELECT id, run_id, at, kind, detail_json FROM run_events "
                             "WHERE run_id = ? ORDER BY at, id", (run_id,))]
 
@@ -1690,8 +1690,8 @@ def log_lines(*, limit: int | None = None, before: str | datetime | None = None,
     yet has no launches; nothing is created to say so."""
     try:
         conn = connect(db, env=env, create=False)
-    except store.StoreError as error:
-        if isinstance(error, store.StoreTooNew):
+    except store.StoreError as exc:
+        if isinstance(exc, store.StoreTooNew):
             raise
         return []
     try:
@@ -1728,8 +1728,8 @@ def table_lines(name: str, *, limit: int | None = None, before: str | datetime |
     nothing is created to say so."""
     try:
         conn = connect(db, env=env, create=False)
-    except store.StoreError as error:
-        if isinstance(error, store.StoreTooNew):
+    except store.StoreError as exc:
+        if isinstance(exc, store.StoreTooNew):
             raise
         return []
     try:

@@ -92,7 +92,7 @@ class Changed(catalog.Refused):
     code = "changed"
 
     def __init__(self, request_id: str, claimed: str, serving: str | None,
-                 reclaim_pending: bool):
+                 *, reclaim_pending: bool):
         self.request_id, self.claimed, self.serving = request_id, claimed, serving
         self.reclaim_pending = reclaim_pending
         if reclaim_pending:
@@ -179,8 +179,8 @@ def caller(*, pid: int | None = None, conn: sqlite3.Connection | None = None,
     turns = turns if turns is not None else _turns()
     try:
         session = turns.find(pid=os.getpid() if pid is None else pid)
-    except Exception as error:
-        raise TurnsFailed(error) from error
+    except Exception as exc:
+        raise TurnsFailed(exc) from exc
     if session is None:
         raise NotLaunched("no session turns serves was found above this process",
                           "run a self act from the session's own tool shell")
@@ -202,15 +202,15 @@ def _with_store(conn: sqlite3.Connection | None, run):
     if conn is not None:
         return run(conn)
     try:
-        opened = store.connect(create=False)
+        store_conn = store.connect(create=False)
     except core_store.StoreTooNew:
         raise
     except core_store.StoreError:
         raise NotLaunched() from None
     try:
-        return run(opened)
+        return run(store_conn)
     finally:
-        opened.close()
+        store_conn.close()
 
 
 def _find(conn: sqlite3.Connection, session_id: str, session: Any | None, turns: Any | None,
@@ -224,8 +224,8 @@ def _find(conn: sqlite3.Connection, session_id: str, session: Any | None, turns:
         turns = turns if turns is not None else _turns()
         try:
             session = turns.find(session_id=row.newest_session_id)
-        except Exception as error:
-            raise TurnsFailed(error) from error
+        except Exception as exc:
+            raise TurnsFailed(exc) from exc
     try:
         if session is not None:
             check_claim(row, session)
@@ -248,7 +248,7 @@ def check_claim(row: store.LaunchRow, session: Any) -> None:
     pending = serving_id is not None and store.endpoint_gone(claimed)
     named = (f"{serving_id.pid}@{serving_id.started:.6f}" if serving_id is not None
              else (str(serving) if serving is not None else None))
-    raise Changed(row.request_id, claimed, named, pending)
+    raise Changed(row.request_id, claimed, named, reclaim_pending=pending)
 
 
 def claims(endpoint: str, pid: int) -> bool:
@@ -269,12 +269,12 @@ def _slot(row: store.LaunchRow, slots_api: Any | None) -> Any | None:
         return None
     try:
         return api.show(row.slot)
-    except api.TryAgain as error:
+    except api.TryAgain as exc:
         raise targets.SlotsBusy("slot", f"slots did not answer about slot {row.slot}: "
-                                f"{error}", "try again in a moment") from error
-    except api.SlotsError as error:
-        raise targets.SlotsFailed("slot", f"slots could not show slot {row.slot}: {error}",
-                                  "moxi slots list shows the slots") from error
+                                f"{exc}", "try again in a moment") from exc
+    except api.SlotsError as exc:
+        raise targets.SlotsFailed("slot", f"slots could not show slot {row.slot}: {exc}",
+                                  "moxi slots list shows the slots") from exc
 
 
 def _turns() -> Any:

@@ -46,7 +46,7 @@ log = logging.getLogger("moxi.launcher.handoffs")
 
 MODULE = "launcher"
 #: The launcher's own handoff folder, under its data directory (the `handoffs` store).
-FOLDER = "handoffs"
+HANDOFFS_DIR = "handoffs"
 def comms_name_env() -> str | None:
     """Comms' identity stamp, when the optional comms module is available."""
     if not modules.available("comms"):
@@ -111,15 +111,15 @@ def key_of_env(env: Mapping[str, str]) -> str | None:
 # -- the folder --------------------------------------------------------------------------
 
 
-def own_folder(env: Mapping[str, str] | None = None, *, create: bool = True) -> Path:
+def own_handoffs_dir(env: Mapping[str, str] | None = None, *, create: bool = True) -> Path:
     """The launcher's own handoff folder, used when notes is absent."""
-    folder = Layout(MODULE).data_dir(env) / FOLDER
+    handoffs_dir = Layout(MODULE).data_dir(env) / HANDOFFS_DIR
     if create:
-        files.private_dir(folder)
-    return folder
+        files.private_dir(handoffs_dir)
+    return handoffs_dir
 
 
-def folder(cwd: str | Path, *, notes_dir: str | None = None,
+def handoff_dir(cwd: str | Path, *, notes_dir: str | None = None,
            env: Mapping[str, str] | None = None, create: bool = True,
            create_own: bool | None = None) -> Path:
     """The handoff folder for a session working in `cwd`.
@@ -129,38 +129,38 @@ def folder(cwd: str | Path, *, notes_dir: str | None = None,
     the launcher's own. `create` is passed to notes, and makes the launcher's own folder
     unless `create_own` says otherwise.
     """
-    notes_folder = _notes_folder(cwd, notes_dir, create)
-    if notes_folder is not None:
-        return Path(notes_folder)
-    return own_folder(env, create=create if create_own is None else create_own)
+    notes_handoff_dir = _notes_handoff_dir(cwd, notes_dir, create)
+    if notes_handoff_dir is not None:
+        return Path(notes_handoff_dir)
+    return own_handoffs_dir(env, create=create if create_own is None else create_own)
 
 
-def folder_of_row(row, *, env: Mapping[str, str] | None = None,
+def handoff_dir_of_row(row, *, env: Mapping[str, str] | None = None,
                   create: bool = True) -> Path:
     """A launch's handoff folder, for its cwd and its `notes_dir` value."""
     notes_dir = row.values.get("notes_dir")
-    return folder(row.cwd, notes_dir=notes_dir or None, env=env, create=create)
+    return handoff_dir(row.cwd, notes_dir=notes_dir or None, env=env, create=create)
 
 
 @dataclass(frozen=True)
 class KeyFolder:
-    """The handoff folder `folder_of_key` read for a key, and the launch it came from:
+    """The handoff folder `handoff_dir_of_key` read for a key, and the launch it came from:
     None when the key has no launch and the folder is the caller's directory's."""
 
-    folder: Path
+    handoff_dir: Path
     launch: LaunchRow | None
 
 
-def folder_of_key(key: str, *, cwd: str | Path | None = None,
+def handoff_dir_of_key(key: str, *, cwd: str | Path | None = None,
                   env: Mapping[str, str] | None = None, create: bool = False) -> KeyFolder:
-    """`key`'s own handoff folder: the one of its newest launch (`folder_of_row`), so a
+    """`key`'s own handoff folder: the one of its newest launch (`handoff_dir_of_row`), so a
     seat that works in another project is read where it files. A key with no launch, or
     no launch log at all, gets the folder of `cwd` (this directory by default)."""
     launch = newest_launch(key, env=env)
     if launch is not None:
-        return KeyFolder(folder_of_row(launch, env=env, create=create), launch)
+        return KeyFolder(handoff_dir_of_row(launch, env=env, create=create), launch)
     where = cwd if cwd is not None else Path.cwd()
-    return KeyFolder(folder(where, env=env, create=create), None)
+    return KeyFolder(handoff_dir(where, env=env, create=create), None)
 
 
 def newest_launch(key: str, *, env: Mapping[str, str] | None = None) -> LaunchRow | None:
@@ -194,7 +194,7 @@ def newest_launch(key: str, *, env: Mapping[str, str] | None = None) -> LaunchRo
         conn.close()
 
 
-def _notes_folder(cwd, notes_dir, create):
+def _notes_handoff_dir(cwd, notes_dir, create):
     if not modules.available("notes"):
         return None
     found = modules.load("notes", interface=1)
@@ -268,7 +268,7 @@ class Current:
     """The current session's key and handoff folder."""
 
     key: str
-    folder: Path
+    handoff_dir: Path
     request_id: str | None
 
 
@@ -298,15 +298,15 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
             if key is None:
                 raise NoKey(f"launch {request_id} has no identity, seat or project key, "
                             "so it has no handoff folder")
-            return Current(key, folder_of_row(row, create=create), request_id)
+            return Current(key, handoff_dir_of_row(row, create=create), request_id)
     key = key_of_env(env)
     if key is None:
         raise NoKey("this session has no comms name and no launch of the launcher's, so "
                     "it has no handoff folder")
-    return Current(key, folder(cwd if cwd is not None else Path.cwd(), create=create), None)
+    return Current(key, handoff_dir(cwd if cwd is not None else Path.cwd(), create=create), None)
 
 
-__all__ = ["comms_name_env", "FOLDER", "Current", "Handoff", "KeyFolder", "NoKey", "check_key",
-           "current", "file_name", "folder", "folder_of_key", "folder_of_row", "handoffs",
-           "key_of_env", "key_of_row", "newest_launch", "own_folder", "parse", "pointer",
+__all__ = ["comms_name_env", "HANDOFFS_DIR", "Current", "Handoff", "KeyFolder", "NoKey", "check_key",
+           "current", "file_name", "handoff_dir", "handoff_dir_of_key", "handoff_dir_of_row", "handoffs",
+           "key_of_env", "key_of_row", "newest_launch", "own_handoffs_dir", "parse", "pointer",
            "unpicked", "waiting"]

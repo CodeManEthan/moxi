@@ -31,6 +31,7 @@ cache	packages/cache/src/moxi_cache/cli.py	tim.add_argument("--json", action="st
 cache	packages/cache/src/moxi_cache/cli.py	verbs.add_parser("doctor", help="check cache's config, table, drift record and watcher",	keep	help	help
 cache	packages/cache/src/moxi_cache/cli.py	verbs.add_parser("watch", help="run the watcher in the foreground",	keep	help	help
 cache	packages/cache/src/moxi_cache/cli.py	words += f" (last request {_duration(clock.age_seconds)} ago)"	use	clock.age_seconds	clock.age_s
+cache	packages/cache/src/moxi_cache/cli.py	missing=", ".join(ask["missing_env"]),	keep	missing	missing
 cache	packages/cache/src/moxi_cache/clock.py	Clock	name	age_seconds	age_s
 cache	packages/cache/src/moxi_cache/clock.py	Clock	name	ttl_seconds	ttl_s
 cache	packages/cache/src/moxi_cache/codex.py	if (need.record is not None and need.context and need.settings_before	keep	record	record
@@ -56,6 +57,12 @@ cache	packages/cache/src/moxi_cache/drift.py	self.record = Record(missing=True)	
 cache	packages/cache/src/moxi_cache/drift.py	self.record = load(self.path)	keep	record	record
 cache	packages/cache/src/moxi_cache/drift.py	view, _kept, _rejected = judge(self.record, table)	keep	record	record
 cache	packages/cache/src/moxi_cache/drift.py	write(self.path, self.record.entries)	keep	record	record
+cache	packages/cache/src/moxi_cache/page.py	"code": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+cache	packages/cache/src/moxi_cache/page.py	"detail": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+cache	packages/cache/src/moxi_cache/page.py	"last_request": lb.Out("float", nullable=True),	keep	nullable=	nullable=
+cache	packages/cache/src/moxi_cache/page.py	"stale_after": lb.Out("float", nullable=True),	keep	nullable=	nullable=
+cache	packages/cache/src/moxi_cache/page.py	"ttl": lb.Out("float", nullable=True),	keep	nullable=	nullable=
+cache	packages/cache/src/moxi_cache/page.py	"warn_before": lb.Out("float", nullable=True),	keep	nullable=	nullable=
 cache	packages/cache/src/moxi_cache/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 cache	packages/cache/src/moxi_cache/records.py	"""Whether `record` holds to the format. The two `THRESHOLDS` are not asked for here:	keep	record	record
 cache	packages/cache/src/moxi_cache/render.py	if isinstance(mode, str) and WRITE_MODES & set(mode):	keep	set	set
@@ -705,6 +712,14 @@ comms	packages/comms/src/moxi_comms/owed.py	ReplyCheck.decide	name	e	exc
 comms	packages/comms/src/moxi_comms/owed.py	`R`'s payment to `A` owes nothing unless it is `[reply-once]`. A referent whose standing	keep	R	R
 comms	packages/comms/src/moxi_comms/owed.py	self.ledger.settle(answer, now)	keep	handled	handled
 comms	packages/comms/src/moxi_comms/owed.py	tail.append(TOOLS_FALLBACK.format(id=one))	keep	id	id
+comms	packages/comms/src/moxi_comms/page.py	"adapter": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"bound_at": lb.Out("float", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"detail": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"kind": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"module": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"scope": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"session_id": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"tier": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_Feed._poll	name	err	exc
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/pagehandlers.py	gather	name	err	exc
@@ -834,6 +849,7 @@ comms	packages/comms/src/moxi_comms/store/upgrade_0_2.py	plan.fenced = sorted(se
 comms	packages/comms/src/moxi_comms/store/upgrade_0_2.py	raise StoreRefused(path or plan.files.get("directory"), (	keep	directory	directory
 comms	packages/comms/src/moxi_comms/store/upgrade_0_2.py	read	name	e	exc
 comms	packages/comms/src/moxi_comms/store/upgrade_0_2.py	rows = set()	keep	set	set
+comms	packages/comms/src/moxi_comms/store/upgrade_0_2.py	return read(env, now=now).lines(target, dry_run=True)	keep	dry_run=	dry_run=
 comms	packages/comms/src/moxi_comms/tokens.py	-	name	STORE_ENV_VAR	TOKEN_STORE_ENV
 comms	packages/comms/src/moxi_comms/tokens.py	DIR_MODE if what == "directory" else FILE_MODE)	keep	directory	directory
 comms	packages/comms/src/moxi_comms/tokens.py	TokenStore._entries_for	name	e	exc
@@ -989,6 +1005,8 @@ comms	packages/comms/tests/test_binding_tokens.py	rows = rig.record.history(rig.
 comms	packages/comms/tests/test_books.py	t.join(timeout=10)	keep	timeout	timeout
 comms	packages/comms/tests/test_books.py	test_delete_racing_open_digest_ends_withdrawn_or_in_a_digest.worker	name	e	exc
 comms	packages/comms/tests/test_books.py	test_the_books_serve_many_threads_on_one_connection.work	name	e	exc
+comms	packages/comms/tests/test_books.py	books.add(NAME, 100, held=True)	keep	held=	held=
+comms	packages/comms/tests/test_books.py	books.add(NAME, 100, held=True)                 # waits for a release point	keep	held=	held=
 comms	packages/comms/tests/test_browser_roster.py	"waiting on planner", timeout=PUSH_MS)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	expect(chip(roster, R, new)).to_have_attribute("data-shows", "cold", timeout=PUSH_MS)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	expect(roster).to_have_attribute("data-state", "failed", timeout=10_000)	keep	timeout	timeout
@@ -1458,6 +1476,8 @@ comms	packages/comms/tests/test_operator_lane.py	long_text = "x" * (rig.record.m
 comms	packages/comms/tests/test_operator_lane.py	posted = rig.record.history(rig.names_channel)	keep	record	record
 comms	packages/comms/tests/test_operator_lane.py	return rig.record.history(rig.names_channel)[-1]	keep	record	record
 comms	packages/comms/tests/test_operator_lane.py	user=rig.prov.operator_user_id)	keep	user	user
+comms	packages/comms/tests/test_operator_lane.py	assert rig.daemon.attribute(older, live=False) == rig.daemon.attribute(posted[0],	keep	live=	live=
+comms	packages/comms/tests/test_operator_lane.py	live=False)	keep	live=	live=
 comms	packages/comms/tests/test_owner.py	-	name	test_an_unreadable_claim_directory_leaves_only_the_directors_empty	test_an_unreadable_claim_dir_leaves_only_the_directors_empty
 comms	packages/comms/tests/test_owner.py	{q: (b.session_id, b.turned, set(b.delivered))	keep	set	set
 comms	packages/comms/tests/test_page.py	assert asked == [{"deadline": 2.0}] and pagehandlers.DEADLINE == 2.0	use	"deadline"	"timeout_s"
@@ -1609,6 +1629,7 @@ comms	packages/comms/tests/test_send_rule.py	out = child.communicate(timeout=60)
 comms	packages/comms/tests/test_send_rule.py	provision.add_standing(rig.record, conn, "relay", "proj-a")	keep	record	record
 comms	packages/comms/tests/test_send_rule.py	return rig.record.history(rig.names_channel)	keep	record	record
 comms	packages/comms/tests/test_send_rule.py	shim = rig.shim(start=False, name=None, scope="proj-a",	keep	start	start
+comms	packages/comms/tests/test_send_rule.py	live = rig.daemon.attribute(message(rig, mid), live=True)	keep	live=	live=
 comms	packages/comms/tests/test_settings.py	-	name	test_a_given_environment_is_read_instead_of_the_process	test_a_given_env_is_read_instead_of_the_process
 comms	packages/comms/tests/test_settings.py	-	name	test_a_named_relative_file_is_read_from_the_working_directory	test_a_named_relative_file_is_read_from_the_working_dir
 comms	packages/comms/tests/test_settings.py	-	name	test_the_text_entry_reads_no_environment	test_the_text_entry_reads_no_env
@@ -1874,6 +1895,12 @@ launcher	packages/launcher/src/moxi_launcher/api.py	launch	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/api.py	launch_kind	name	timeout	timeout_s
 launcher	packages/launcher/src/moxi_launcher/api.py	launch_kinds	name	timeout	timeout_s
 launcher	packages/launcher/src/moxi_launcher/api.py	preview	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/api.py	_known	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/api.py	_make_files	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/api.py	_resolve	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/api.py	_unoffered_option	name	refused	exc
+launcher	packages/launcher/src/moxi_launcher/api.py	check	name	refusal	exc
+launcher	packages/launcher/src/moxi_launcher/api.py	launch	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/catalog.py	expected: set = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	found: set[str] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/catalog.py	if (not _str_list(raw) or not raw or len(set(raw)) != len(raw)	keep	set	set
@@ -1955,9 +1982,25 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	resume.add_argument("session
 launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run", help="launch a session", allow_abbrev=False,	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/cli.py	_handoffs	name	folder	handoff_dir
+launcher	packages/launcher/src/moxi_launcher/cli.py	main	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/cli.py	handoff_dir, launch = read.folder, read.launch	use	folder	handoff_dir
+launcher	packages/launcher/src/moxi_launcher/cli.py	hint = hint.format(run=run.run_id)	keep	run=	run=
+launcher	packages/launcher/src/moxi_launcher/cli.py	key, handoff_dir, launch = here.key, here.folder, None	use	folder	handoff_dir
+launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
+launcher	packages/launcher/src/moxi_launcher/cli.py	print(_dump({"key": here.key, "folder": str(here.folder),	use	.folder	.handoff_dir
+launcher	packages/launcher/src/moxi_launcher/cli.py	print(here.folder)	use	folder	handoff_dir
+launcher	packages/launcher/src/moxi_launcher/cli.py	print(_dump({"key": here.key, "handoff_dir": str(here.handoff_dir),	use	"handoff_dir"	"folder"
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	`environ` is the caller's environment; `child_environ` the one the child's is built	keep	environ	environ
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	from, which turns' launch additions are asked with (default `environ`; a replay's	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	build	name	child_environ	child_env
+launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	build	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	context	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	context	name	child_environ	child_env
+launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	context	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	launch_additions	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	`request` gives `request_id`, `session_id` and `actor`, each read as None when it is	keep	actor	actor
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	"""A copy of `environ` without any session's stamps.	keep	environ	environ
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	"""The short list alone (`BASE_NAMES`, `BASE_PREFIXES`) of `environ`, and on Windows	keep	environ	environ
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	"""The whole environment the child gets: `environ` scrubbed, then the launch's	keep	environ	environ
@@ -1972,26 +2015,105 @@ launcher	packages/launcher/src/moxi_launcher/compose/common.py	`environ` comes i
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	adds nothing), then each name `pass_env` lists that `environ`, the replaying	keep	environ	environ
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	these and `preview` shows them), which `environment` lays over the scrubbed caller's	keep	environment	environment
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	value, which is never recorded. Each is kept under the name as `environ` spells it.	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	-	name	environment	child_env
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	_short	kwonly	windows	windows
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	agent_role	kwonly	found	found
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	base_env	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	environment	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	first_turn	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	replay_env	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	scratch_root_problem	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	scrub	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/compose/common.py	short_env	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/exits.py	ExitRun.act	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/exits.py	_exit	kwonly	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/exits.py	_exit	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/exits.py	_refused	kwonly	dry_run	dry_run
+launcher	packages/launcher/src/moxi_launcher/exits.py	exit_session	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/exits.py	exit_session	name	refused	exc
+launcher	packages/launcher/src/moxi_launcher/exits.py	`at-dialog`, `not-exited`, or `refused`, the last for a refusal met once the launch was	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/first.py	-	name	COMMS_NAME	comms_name_env
 launcher	packages/launcher/src/moxi_launcher/first.py	-	name	TURNS_SEAM	TURNS_ENV
 launcher	packages/launcher/src/moxi_launcher/first.py	return turns.wait_ready(**where, timeout=timeout)	use	timeout=	timeout_s=
+launcher	packages/launcher/src/moxi_launcher/first.py	_wait_ready	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/first.py	actor	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/first.py	actor	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/first.py	deliver	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/first.py	read_handoff	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/first.py	send	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/first.py	text	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/first.py	parts = [header.format(actor=by, path=path), handoff_text.strip("\n")]	keep	actor=	actor=
+launcher	packages/launcher/src/moxi_launcher/first.py	return BRIEF_HEADER.format(actor=by) + "\n\n" + brief	keep	actor=	actor=
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	"current", "file_name", "folder", "folder_of_key", "folder_of_row", "handoffs",	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	COMMS_NAME	comms_name_env
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	__all__ = ["comms_name_env", "FOLDER", "Current", "Handoff", "KeyFolder", "NoKey", "check_key",	keep	FOLDER	FOLDER
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	request_id = env.get(listeners.REQUEST)	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	return handoffs_dir(str(cwd), create=create, override=notes_dir)	keep	create	create
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	FOLDER	HANDOFFS_DIR
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	_notes_folder	_notes_handoff_dir
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	folder	handoff_dir
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	folder_of_key	handoff_dir_of_key
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	folder_of_row	handoff_dir_of_row
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	-	name	own_folder	own_handoffs_dir
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	Current	name	folder	handoff_dir
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	KeyFolder	name	folder	handoff_dir
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	folder	name	notes_folder	notes_handoff_dir
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	own_folder	name	folder	handoffs_dir
+launcher	packages/launcher/src/moxi_launcher/identity.py	check	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/job.py	answer = api.answer_screen(slot, screen, wait=0)	use	wait=	wait_s=
 launcher	packages/launcher/src/moxi_launcher/job.py	elif set(reading.words) <= {"person"}:	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/job.py	ended = api.wait_ended(slot, pane_id=pane, timeout=1)	use	timeout=	timeout_s=
 launcher	packages/launcher/src/moxi_launcher/job.py	help="the run's id; for expiry and keep-warm, the session's id; "	keep	help	help
 launcher	packages/launcher/src/moxi_launcher/job.py	parser.add_argument("kind", choices=KINDS, help="the run's kind")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/job.py	"""`error`, a refusal from before a launch's row, as a `launch-refused` event's detail	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	chain	chain
+launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	held	held
+launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	respawn	respawn
+launcher	packages/launcher/src/moxi_launcher/job.py	CompactJob.steps	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._find	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._find	name	refused	refused_exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._prune	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._release	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob._replay	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.answer	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.dialog	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.exit	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.go	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.hold	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.hold	name	refused	refused_exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.name	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.respawn	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.respawn	name	refused	refused_exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.steps	name	again	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RelaunchJob.wait	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RepairJob._hold_recorded	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	RepairJob.steps	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	`relaunch-failed` or `gone`, or `error` after it acted on the session (or in a	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/job.py	run_request	name	error	request_exc
+launcher	packages/launcher/src/moxi_launcher/job.py	run_request.start	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/job.py	slot=choice.slot, respawn=choice.respawn,	keep	respawn	respawn
+launcher	packages/launcher/src/moxi_launcher/job.py	mode=original.mode, handoff=original.handoff_path, actor=original.actor,	use	actor=	by=
+launcher	packages/launcher/src/moxi_launcher/job.py	return its outcome: the launch row's state, `refused` (recorded before the row), or	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	dropped |= set(newly)	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	dropped: set[str] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	named: set[str] = set()	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	_ask	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	_ask	name	open_run	open_run_exc
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	_ask	name	refused	refused_exc
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	_nudge	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	_signal	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	ask	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	ask	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/keepwarm.py	delivered	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	if env.get(listeners.RELAUNCH):	use	listeners.RELAUNCH	listeners.RELAUNCH_ENV
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	if env.get(listeners.REQUEST):	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/src/moxi_launcher/listeners.py	-	name	RELAUNCH	RELAUNCH_ENV
 launcher	packages/launcher/src/moxi_launcher/listeners.py	-	name	REQUEST	REQUEST_ENV
+launcher	packages/launcher/src/moxi_launcher/notices.py	_record	kwonly	fallback	fallback
+launcher	packages/launcher/src/moxi_launcher/notices.py	_send	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/notices.py	note	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/notices.py	return NOTE.format(run=run.run_id, word=run.word or run.outcome or "ended",	keep	run=	run=
+launcher	packages/launcher/src/moxi_launcher/notices.py	| `relaunch-failed`, `first-turn-not-sent`, `gone`, `error` | down, or up without its handoff | directors, then fallback |	keep	error	error
 launcher	packages/launcher/src/moxi_launcher/page.py	"PAGE", "PAST", "PLACE", "PLACES", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",	keep	REQUEST	REQUEST
 launcher	packages/launcher/src/moxi_launcher/page.py	"before": Field("string", required=False, max=QUERY_MAX)}	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/page.py	"harness": Field("enum", required=False,	keep	required	required
@@ -2009,28 +2131,148 @@ launcher	packages/launcher/src/moxi_launcher/page.py	query={"seat": Field("strin
 launcher	packages/launcher/src/moxi_launcher/page.py	query={"session": Field("string", required=False, max=QUERY_MAX)},	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/page.py	query={**_PAGED, "request": Field("string", required=False, max=QUERY_MAX)},	keep	required	required
 launcher	packages/launcher/src/moxi_launcher/page.py	query={**_PAGED, "run": Field("string", required=False, max=QUERY_MAX),	keep	required	required
+launcher	packages/launcher/src/moxi_launcher/page.py	_table	kwonly	nullable	nullable
+launcher	packages/launcher/src/moxi_launcher/page.py	_text	kwonly	nullable	nullable
+launcher	packages/launcher/src/moxi_launcher/page.py	"default": _table(target=_text(), slot=Out("int", nullable=True))}	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	"refused": Out("table", items=REFUSAL.items, nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	"refused": Out("table", items=REFUSAL.items, nullable=True)}	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	ACTED = {"refused": Out("table", items=REFUSAL.items, nullable=True)}	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	_RUN_LINE_OR_NONE = Out("table", items=RUN_LINE.items, nullable=True)	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	holder=_text(nullable=True), until=Out("float", nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	items=Out("list", items=Out("string"), nullable=True))	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	return Out("string", mark=mark, nullable=nullable)	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	return Out("table", items=items, nullable=nullable)	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	state=_text(), session_id=_text(nullable=True), live=Out("bool", nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	updated_at=_text(), slot=_text(nullable=True), turn_number=Out("int", nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	raise lb.Refused(f"{key} is asked alone, without {', '.join(sorted(set(query) - {key}))}")	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	_Feed._poll	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	_Version.read	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	_run_job	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	_store	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	form	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	gather_launches	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	gather_sessions	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	launch	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	launched	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	live_states	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	on_path	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	preview	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	previewed	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_catalog	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_form	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_launches	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_places	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_presets	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_runs	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_sessions	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_state	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	read_targets	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	resume	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	resumed	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	session_state	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	expect into `state` `error` with a fixed `detail` naming only the exception's class, so no	keep	error	error
 launcher	packages/launcher/src/moxi_launcher/presets.py	"""The project `directory` is in, or None; None without projects."""	keep	directory	directory
 launcher	packages/launcher/src/moxi_launcher/presets.py	found: set[str] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/presets.py	return _unset_as_default(row, row.check(value))	keep	ok	ok
 launcher	packages/launcher/src/moxi_launcher/presets.py	row.check(value)	keep	ok	ok
+launcher	packages/launcher/src/moxi_launcher/presets.py	-	name	_agents_folder	_agents_dir
+launcher	packages/launcher/src/moxi_launcher/presets.py	_agents_folder	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/presets.py	_place	name	directory	place_dir
+launcher	packages/launcher/src/moxi_launcher/presets.py	_project_for	name	directory	work_dir
+launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	folder	agents_dir
+launcher	packages/launcher/src/moxi_launcher/presets.py	roles	name	folders	agents_dirs
 launcher	packages/launcher/src/moxi_launcher/quiet.py	self._thread.join(timeout=2)	keep	timeout	timeout
+launcher	packages/launcher/src/moxi_launcher/quiet.py	Watch._run	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/quiet.py	_try	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/recycle.py	`projects_root` over the launch's own `CLAUDE_CONFIG_DIR` (and `HOME`) as its row	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/recycle.py	environ["HOME"] = recorded["HOME"]	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/recycle.py	if recorded.get("HOME"):	keep	HOME	HOME
 launcher	packages/launcher/src/moxi_launcher/recycle.py	root = Path(home) if home else Path(env.get("HOME") or Path.home()) / ".codex"	keep	HOME	HOME
+launcher	packages/launcher/src/moxi_launcher/recycle.py	_act	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/recycle.py	_expiry	name	open_run	open_run_exc
+launcher	packages/launcher/src/moxi_launcher/recycle.py	_expiry	name	refused	refused_exc
+launcher	packages/launcher/src/moxi_launcher/recycle.py	_prune	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/recycle.py	ask_expiry	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/recycle.py	ask_expiry	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/recycle.py	claude_projects	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/recycle.py	on_crossing	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/recycle.py	start_compact	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/recycle.py	start_compact	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/recycle.py	env["HOME"] = recorded["HOME"]	keep	HOME	HOME
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	_no_live_agents	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	_session_of	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	_store	name	opened	store_conn
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	arm_self	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	call_director	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	check_handoff	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	check_handoff	name	folder	handoff_dir
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	check_handoff	name	handle	fh
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	from_record	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	from_record	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	offered	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	start_job	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	it (`relaunch-failed`, `gone`, or `error` after the exit, and a repair that failed so),	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/relaunch.py	text = ARMED.format(run=run.run_id, slot=row.slot,	keep	run=	run=
 launcher	packages/launcher/src/moxi_launcher/resume.py	result = launch(request, environ=environ, warn=warn)	use	environ=	env=
+launcher	packages/launcher/src/moxi_launcher/resume.py	choose_slot	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/resume.py	live_refusal	kwonly	live	live
+launcher	packages/launcher/src/moxi_launcher/resume.py	liveness	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/resume.py	resume	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/resume.py	resume	name	met	exc
 launcher	packages/launcher/src/moxi_launcher/slots.py	-	name	SEAM	SLOTS_ENV
 launcher	packages/launcher/src/moxi_launcher/startup.py	"claude": (("startup.trust_dialog", "CLAUDE_TRUST_FOLDER"),	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/src/moxi_launcher/startup.py	answer = api.answer_screen(slot, screen, wait=wait)	use	wait=	wait_s=
+launcher	packages/launcher/src/moxi_launcher/startup.py	setup	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/startup.py	watch	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/state.py	of_launch	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/state.py	show	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/state.py	state	name	environ	caller_env
+launcher	packages/launcher/src/moxi_launcher/store.py	_insert_run	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/store.py	_writing	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/store.py	insert	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/store.py	insert_run	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/store.py	kinds	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/store.py	launched_by	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/store.py	log_lines	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/store.py	places	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/store.py	return [Event(id, rid, sid, at, kind, json.loads(detail)) for id, rid, sid, at, kind,	use	id	event_id
+launcher	packages/launcher/src/moxi_launcher/store.py	return [RunEvent(id, rid, at, kind, json.loads(detail)) for id, rid, at, kind, detail	use	id	event_id
+launcher	packages/launcher/src/moxi_launcher/store.py	table_lines	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/store.py	`error`, word `job-gone`, and this run is inserted in the same transaction. The test	keep	error	error
+launcher	packages/launcher/src/moxi_launcher/target.py	Changed.__init__	kwonly	reclaim_pending	reclaim_pending
+launcher	packages/launcher/src/moxi_launcher/target.py	_find	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/target.py	_slot	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/target.py	_with_store	name	opened	store_conn
+launcher	packages/launcher/src/moxi_launcher/target.py	caller	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/targets.py	placed = api.start(named, list(launch.argv), **place, create=named is None)	keep	create	create
 launcher	packages/launcher/src/moxi_launcher/targets.py	return lambda timeout: turns.wait_ready(**where, timeout=timeout)	use	timeout=	timeout_s=
+launcher	packages/launcher/src/moxi_launcher/targets.py	Headless.start	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/targets.py	Slot.check	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/targets.py	Slot.start	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/targets.py	Slot.start	name	refused	refused_exc
+launcher	packages/launcher/src/moxi_launcher/targets.py	Terminal._start_child	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/targets.py	Terminal.start	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/targets.py	_cut	name	log	fh
+launcher	packages/launcher/src/moxi_launcher/targets.py	_start_deliverer	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/targets.py	_wrapper_ended	name	error	exc
+launcher	packages/launcher/src/moxi_launcher/targets.py	sweep	name	folder	run_dir
+launcher	packages/launcher/tests/launcher_child.py	main	name	error	exc
 launcher	packages/launcher/tests/launcher_fake_slots.py	-	name	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/launcher_fake_slots.py	SCREENS = {"CLAUDE_TRUST_DIR": CLAUDE_TRUST_FOLDER,	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/launcher_fake_slots.py	SCREENS = {"CLAUDE_TRUST_FOLDER": CLAUDE_TRUST_FOLDER,	use	"CLAUDE_TRUST_FOLDER"	"CLAUDE_TRUST_DIR"
 launcher	packages/launcher/tests/launcher_fake_slots.py	name="CLAUDE_TRUST_FOLDER",	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
+launcher	packages/launcher/tests/launcher_fake_slots.py	calls	name	directory	slots_dir
+launcher	packages/launcher/tests/launcher_fake_slots.py	make_slot	kwonly	launchable	launchable
+launcher	packages/launcher/tests/launcher_fake_slots.py	record	name	out	fh
+launcher	packages/launcher/tests/launcher_fake_turns.py	calls	name	directory	turns_dir
+launcher	packages/launcher/tests/launcher_fake_turns.py	record	name	out	fh
 launcher	packages/launcher/tests/launcher_page_kit.py	"""`directory` first on this process's `PATH` for the block, undone after it. A test	keep	directory	directory
 launcher	packages/launcher/tests/launcher_page_kit.py	config.set("slots", "tmux", sys.argv[1], by="launcher browser test")	use	set	set_value
 launcher	packages/launcher/tests/launcher_page_kit.py	config.set("slots", "tmux_conf", sys.argv[2], by="launcher browser test")	use	set	set_value
@@ -2039,6 +2281,13 @@ launcher	packages/launcher/tests/launcher_page_kit.py	self.bin.mkdir(parents=Tru
 launcher	packages/launcher/tests/launcher_page_kit.py	self.dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/launcher_page_kit.py	self.seen.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/launcher_page_kit.py	server.wait(timeout=10)	keep	timeout	timeout
+launcher	packages/launcher/tests/launcher_page_kit.py	first_on_path	name	directory	bin_dir
+launcher	packages/launcher/tests/launcher_page_kit.py	own_slots	name	log	fh
+launcher	packages/launcher/tests/test_bind.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_bind.py	rig	name	directory	slots_dir
+launcher	packages/launcher/tests/test_bind.py	rig.plan(placed=4, pane_pid=ended_pid(), exec="started", dead_status=3)	keep	exec=	exec=
+launcher	packages/launcher/tests/test_bind.py	rig.plan(placed=4, pane_pid=ended_pid(), exec="started", dead_status=75)	keep	exec=	exec=
+launcher	packages/launcher/tests/test_bind.py	rig.plan(placed=4, pane_pid=os.getpid(), exec="started")	keep	exec=	exec=
 launcher	packages/launcher/tests/test_browser_home_launch.py	assert len(set(tops)) == 1 and lefts == sorted(set(lefts)), (tops, lefts)	keep	set	set
 launcher	packages/launcher/tests/test_browser_home_launch.py	assert not {"handoff", "brief"} & set(body["values"]), body	keep	set	set
 launcher	packages/launcher/tests/test_browser_home_launch.py	assert {"handoff", "brief"} <= set(body["leave_out"]), body	keep	set	set
@@ -2047,6 +2296,11 @@ launcher	packages/launcher/tests/test_browser_home_launch.py	file.parent.mkdir(p
 launcher	packages/launcher/tests/test_browser_home_launch.py	timeout=15_000)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_home_where.py	found = Path(shell.env["HOME"]) / "work" / name	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_home_where.py	found.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_browser_home_where.py	-	name	test_a_long_folder_is_cut_in_its_dim_middle_and_its_name_is_whole	test_a_long_dir_is_cut_in_its_dim_middle_and_its_name_is_whole
+launcher	packages/launcher/tests/test_browser_home_where.py	-	name	test_a_typed_folder_is_taken_only_as_an_absolute_path_or_one_from_home	test_a_typed_dir_is_taken_only_as_an_absolute_path_or_one_from_home
+launcher	packages/launcher/tests/test_browser_home_where.py	-	name	test_home_opens_on_the_newest_place_with_the_home_folder_written_short	test_home_opens_on_the_newest_place_with_the_home_dir_written_short
+launcher	packages/launcher/tests/test_browser_home_where.py	-	name	test_without_projects_a_home_that_never_launched_opens_on_the_home_folder	test_without_projects_a_home_that_never_launched_opens_on_the_home_dir
+launcher	packages/launcher/tests/test_browser_home_where.py	-	name	test_without_projects_a_place_is_a_folder_and_a_pick_of_it_launches_in_that_folder	test_without_projects_a_place_is_a_dir_and_a_pick_of_it_launches_in_that_dir
 launcher	packages/launcher/tests/test_browser_page.py	expect(chip).to_have_attribute("data-red", "true", timeout=10_000)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_page.py	expect(refused).to_have_attribute("data-code", "no-cwd", timeout=10_000)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_page.py	expect(row).to_have_count(1, timeout=10_000)	keep	timeout	timeout
@@ -2076,6 +2330,18 @@ launcher	packages/launcher/tests/test_catalog.py	monkeypatch.setenv("HOME", str(
 launcher	packages/launcher/tests/test_catalog.py	old.check("x")	keep	ok	ok
 launcher	packages/launcher/tests/test_catalog.py	row.check("brief.md")	keep	ok	ok
 launcher	packages/launcher/tests/test_catalog.py	with pytest.raises(ValueError, match="directory"):	keep	directory	directory
+launcher	packages/launcher/tests/test_catalog.py	-	name	test_a_typed_relative_path_is_read_against_this_directory	test_a_typed_relative_path_is_read_against_this_dir
+launcher	packages/launcher/tests/test_catalog.py	-	name	test_launcher_rows_are_left_to_the_caller_but_codex_cwd_takes_the_launch_directory	test_launcher_rows_are_left_to_the_caller_but_codex_cwd_takes_the_launch_dir
+launcher	packages/launcher/tests/test_catalog.py	-	name	test_the_trust_override_names_the_launch_directory_as_a_toml_key	test_the_trust_override_names_the_launch_dir_as_a_toml_key
+launcher	packages/launcher/tests/test_catalog.py	FakeHarness.__init__	kwonly	fails	fails
+launcher	packages/launcher/tests/test_catalog.py	FakeHarness.__init__	kwonly	missing	missing
+launcher	packages/launcher/tests/test_catalog.py	assert row.tokens("interactive", value=True, cwd="/users/me/my.repo") == [	keep	value=	value=
+launcher	packages/launcher/tests/test_catalog.py	assert row.tokens("host", value=True, cwd='/a"b') == [	keep	value=	value=
+launcher	packages/launcher/tests/test_catalog.py	assert row.tokens("exec", value=True, cwd="/{value}") == [	keep	value=	value=
+launcher	packages/launcher/tests/test_catalog.py	word = row.tokens("exec", value=True, cwd='/a"b.c d')[1]	keep	value=	value=
+launcher	packages/launcher/tests/test_catalog.py	word = row.tokens("host", value=True, cwd="/a\x7fb.c")[1]	keep	value=	value=
+launcher	packages/launcher/tests/test_catalog.py	row.tokens("exec", value=True)	keep	value=	value=
+launcher	packages/launcher/tests/test_catalog.py	assert claude["remote_control"].check(value=True) is True	keep	value=	value=
 launcher	packages/launcher/tests/test_cli.py	assert (shown["folder"], shown["launch"]) == (str(here), None)	keep	folder	folder
 launcher	packages/launcher/tests/test_cli.py	assert (shown["folder"], shown["launch"]) == (str(there), "r-new")	keep	folder	folder
 launcher	packages/launcher/tests/test_cli.py	assert set(cli.VERBS) == {"run", "preview", "log", "presets", "catalog", "handoff",	keep	set	set
@@ -2086,41 +2352,119 @@ launcher	packages/launcher/tests/test_cli.py	file.parent.mkdir(parents=True, exi
 launcher	packages/launcher/tests/test_cli.py	found.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_cli.py	return lambda name: handoffs_dir(name, create=True)	keep	create	create
 launcher	packages/launcher/tests/test_cli.py	store.path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_cli.py	-	name	test_handoff_dir_prints_the_folder_of_this_sessions_key	test_handoff_dir_prints_the_dir_of_this_sessions_key
+launcher	packages/launcher/tests/test_cli.py	-	name	test_handoffs_of_a_key_read_the_folder_of_its_newest_launch	test_handoffs_of_a_key_read_the_dir_of_its_newest_launch
+launcher	packages/launcher/tests/test_cli.py	-	name	test_handoffs_of_a_key_with_no_launch_read_this_directorys_folder	test_handoffs_of_a_key_with_no_launch_read_this_directorys_dir
+launcher	packages/launcher/tests/test_cli.py	-	name	test_preview_prints_the_argv_and_the_stamped_environment	test_preview_prints_the_argv_and_the_stamped_env
+launcher	packages/launcher/tests/test_cli.py	handoff_files	name	folder	handoffs_dir
+launcher	packages/launcher/tests/test_cli.py	test_handoffs_lists_a_keys_files_newest_first_and_which_wait	name	folder	handoffs_dir
+launcher	packages/launcher/tests/test_cli.py	assert shown == {"key": "planner", "folder": str(handoffs.own_handoffs_dir(create=False)),	keep	folder	folder
 launcher	packages/launcher/tests/test_cli_acts.py	assert acts <= set(cli.VERBS)	keep	set	set
 launcher	packages/launcher/tests/test_cli_acts.py	store.path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_cli_acts.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_cli_acts.py	too_new	name	raw	conn
 launcher	packages/launcher/tests/test_compose.py	assert set(claude.ORDER) - {claude.ADDITIONS} == names	keep	set	set
 launcher	packages/launcher/tests/test_compose.py	assert set(codex.HOST_ORDER) == {row.name for row in catalog.load("codex")	keep	set	set
 launcher	packages/launcher/tests/test_compose.py	assert set(codex.ORDER) == names	keep	set	set
+launcher	packages/launcher/tests/test_compose.py	-	name	test_a_claude_launch_needs_its_session_id_and_an_absolute_directory	test_a_claude_launch_needs_its_session_id_and_an_absolute_dir
+launcher	packages/launcher/tests/test_compose.py	-	name	test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_directory	test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_dir
 launcher	packages/launcher/tests/test_compose_env.py	"PATH": "/usr/bin", "HOME": "/users/u", "LANG": "C.UTF-8",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_compose_env.py	assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",	keep	set	set
+launcher	packages/launcher/tests/test_compose_env.py	-	name	test_a_composed_claude_launch_runs_on_the_users_configuration_folder	test_a_composed_claude_launch_runs_on_the_users_configuration_dir
+launcher	packages/launcher/tests/test_compose_env.py	-	name	test_the_childs_environment_is_the_scrubbed_caller_with_the_stamps	test_the_childs_env_is_the_scrubbed_caller_with_the_stamps
+launcher	packages/launcher/tests/test_compose_env.py	-	name	test_the_scrub_leaves_the_callers_environment_alone	test_the_scrub_leaves_the_callers_env_alone
 launcher	packages/launcher/tests/test_doctor.py	assert set(rows) == {"catalog.claude", "catalog.codex"}	keep	set	set
 launcher	packages/launcher/tests/test_exits.py	assert set(exits.EXIT_CODES) == set(store.VERDICTS)	keep	set	set
+launcher	packages/launcher/tests/test_exits.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_exits.py	facts	kwonly	draft	draft
+launcher	packages/launcher/tests/test_exits.py	facts	kwonly	stale	stale
+launcher	packages/launcher/tests/test_exits.py	facts	kwonly	turn_open	turn_open
+launcher	packages/launcher/tests/test_exits.py	test_an_exits_run_makes_every_other_act_lose_at_insert.Watching.command	name	error	exc
+launcher	packages/launcher/tests/test_exits.py	test_an_unclaimed_launch_is_refused_and_logged_without_a_run	name	connection	conn
+launcher	packages/launcher/tests/test_exits.py	test_outside_a_slot_an_exit_turns_did_not_see_through_is_at_the_dialog	name	connection	conn
+launcher	packages/launcher/tests/test_exits.py	test_outside_a_slot_an_exit_turns_saw_through_is_exited	name	connection	conn
+launcher	packages/launcher/tests/test_first.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_first.py	launch	name	actor	by
+launcher	packages/launcher/tests/test_first.py	test_two_senders_at_once_send_once.one	name	mine	conn
+launcher	packages/launcher/tests/test_first.py	turns	name	directory	turns_dir
 launcher	packages/launcher/tests/test_handoffs.py	answer = {"folder": tmp_path / "notes" / "handoffs"}	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	assert (found.folder, found.launch) == (notes.answer["folder"], None)	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	assert (found.key, found.folder, found.request_id) == ("lead", handoffs.own_folder(),	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	assert handoffs.folder_of_row(launch) == notes.answer["folder"]	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	notes.answer["folder"] = None	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	return answer["folder"]	keep	folder	folder
+launcher	packages/launcher/tests/test_handoffs.py	-	name	test_a_keys_folder_is_its_newest_launchs_else_the_callers	test_a_keys_dir_is_its_newest_launchs_else_the_callers
+launcher	packages/launcher/tests/test_handoffs.py	-	name	test_a_session_with_no_key_has_no_folder	test_a_session_with_no_key_has_no_dir
+launcher	packages/launcher/tests/test_handoffs.py	-	name	test_notes_with_no_folder_falls_back_to_the_launchers_own	test_notes_with_no_dir_falls_back_to_the_launchers_own
+launcher	packages/launcher/tests/test_handoffs.py	-	name	test_the_current_folder_of_a_launched_seat	test_the_current_dir_of_a_launched_seat
+launcher	packages/launcher/tests/test_handoffs.py	-	name	test_the_current_folder_of_a_session_by_hand	test_the_current_dir_of_a_session_by_hand
+launcher	packages/launcher/tests/test_handoffs.py	-	name	test_the_folder_is_not_made_when_create_is_off	test_the_dir_is_not_made_when_create_is_off
+launcher	packages/launcher/tests/test_handoffs.py	-	name	test_with_notes_the_folder_is_notes_with_the_launchs_override	test_with_notes_the_dir_is_notes_with_the_launchs_override
+launcher	packages/launcher/tests/test_handoffs.py	-	name	test_without_notes_the_folder_is_the_launchers_own_and_private	test_without_notes_the_dir_is_the_launchers_own_and_private
+launcher	packages/launcher/tests/test_handoffs.py	test_the_folder_is_not_made_when_create_is_off	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_handoffs.py	test_without_notes_the_folder_is_the_launchers_own_and_private	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_handoffs.py	assert (found.key, found.folder, found.request_id) == ("lead", handoffs.own_handoffs_dir(),	use	folder	handoff_dir
+launcher	packages/launcher/tests/test_handoffs.py	assert handoffs.handoff_dir_of_row(launch) == notes.answer["folder"]	keep	folder	folder
+launcher	packages/launcher/tests/test_handoffs.py	assert (found.folder, found.launch) == (notes.answer["folder"], None)	use	.folder	.handoff_dir
+launcher	packages/launcher/tests/test_handoffs.py	assert (found.handoff_dir, found.launch) == (notes.answer["handoff_dir"], None)	use	"handoff_dir"	"folder"
+launcher	packages/launcher/tests/test_keepwarm.py	agent	kwonly	final	final
+launcher	packages/launcher/tests/test_keepwarm.py	agent	name	id	agent_id
+launcher	packages/launcher/tests/test_keepwarm.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_keepwarm.py	facts	kwonly	turn_open	turn_open
 launcher	packages/launcher/tests/test_kind.py	env={listeners.REQUEST: request_id}, posture="operator",	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/tests/test_kind.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_kind.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_kind.py	return lambda name: current.update(id=name)	keep	id	id
 launcher	packages/launcher/tests/test_kind.py	self.env = {listeners.REQUEST: request_id}	use	listeners.REQUEST	listeners.REQUEST_ENV
+launcher	packages/launcher/tests/test_kind.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_kind.py	test_a_log_held_past_the_wait_raises_busy_and_writes_nothing	name	raw	conn
 launcher	packages/launcher/tests/test_launch.py	api.launch(make(work))	keep	start	start
 launcher	packages/launcher/tests/test_launch.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_launch.py	folder.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_launch.py	return real(env, create=create)	keep	create	create
+launcher	packages/launcher/tests/test_launch.py	-	name	test_a_headless_run_log_goes_where_the_callers_environment_puts_the_store	test_a_headless_run_log_goes_where_the_callers_env_puts_the_store
+launcher	packages/launcher/tests/test_launch.py	-	name	test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row	test_a_launch_with_a_handoff_key_makes_its_handoff_dir_after_the_row
+launcher	packages/launcher/tests/test_launch.py	-	name	test_a_refusal_from_the_composer_leaves_the_handoff_folder_unmade	test_a_refusal_from_the_composer_leaves_the_handoff_dir_unmade
+launcher	packages/launcher/tests/test_launch.py	-	name	test_a_scratch_launch_makes_its_folder_and_never_removes_it	test_a_scratch_launch_makes_its_dir_and_never_removes_it
+launcher	packages/launcher/tests/test_launch.py	-	name	test_the_scratch_folder_of_a_request_id_that_is_not_a_plain_name_is_refused	test_the_scratch_dir_of_a_request_id_that_is_not_a_plain_name_is_refused
+launcher	packages/launcher/tests/test_launch.py	-	name	test_the_sweep_with_no_runs_folder_does_nothing	test_the_sweep_with_no_runs_dir_does_nothing
+launcher	packages/launcher/tests/test_launch.py	runs_file	name	folder	runs_dir
+launcher	packages/launcher/tests/test_launch.py	test_a_busy_launch_log_exits_75_and_writes_nothing	name	holder	conn
+launcher	packages/launcher/tests/test_launch.py	test_a_headless_run_log_goes_where_the_callers_environment_puts_the_store	name	environ	env
+launcher	packages/launcher/tests/test_launch.py	test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_launch.py	test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row	name	own_folder	own_handoffs_dir
+launcher	packages/launcher/tests/test_launch.py	turns	name	directory	turns_dir
+launcher	packages/launcher/tests/test_launch.py	monkeypatch.setattr(handoffs, "own_folder", own_handoffs_dir)	use	own_folder	own_handoffs_dir
+launcher	packages/launcher/tests/test_launch.py	runs_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok=	exist_ok=
 launcher	packages/launcher/tests/test_listeners.py	folder.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_listeners.py	-	name	test_the_own_folder_is_the_handoffs_store	test_the_own_dir_is_the_handoffs_store
+launcher	packages/launcher/tests/test_listeners.py	-	name	test_with_notes_a_launched_seat_is_pointed_into_notes_folder	test_with_notes_a_launched_seat_is_pointed_into_notes_dir
+launcher	packages/launcher/tests/test_listeners.py	-	name	test_with_notes_a_session_by_hand_is_pointed_into_notes_folder	test_with_notes_a_session_by_hand_is_pointed_into_notes_dir
+launcher	packages/launcher/tests/test_listeners.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_listeners.py	handoff	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_listeners.py	stand_in_notes	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_listeners.py	return SimpleNamespace(calls=calls, folder=handoff_dir)	use	folder=	handoff_dir=
+launcher	packages/launcher/tests/test_listeners.py	test_a_codex_seat_gets_its_identity_block_and_instructions	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_listeners.py	test_of_two_endpoints_claiming_at_once_exactly_one_wins.race	name	mine	conn
+launcher	packages/launcher/tests/test_listeners.py	test_of_two_endpoints_reclaiming_at_once_exactly_one_wins.race	name	mine	conn
+launcher	packages/launcher/tests/test_listeners.py	handoff_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok=	exist_ok=
+launcher	packages/launcher/tests/test_listeners.py	args = {"request_id": request_id, "actor": "someone", "harness": "claude",	use	"actor"	"by"
+launcher	packages/launcher/tests/test_listeners.py	args = {"request_id": request_id, "actor": "someone", "harness": "codex",	use	"actor"	"by"
 launcher	packages/launcher/tests/test_live.py	assert answered == ([("CLAUDE_TRUST_FOLDER", "gone")] if harness == "claude"	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/test_live.py	env["HOME"] = real_home	keep	HOME	HOME
 launcher	packages/launcher/tests/test_live.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_live.py	server.wait(timeout=10)	keep	timeout	timeout
+launcher	packages/launcher/tests/test_live.py	-	name	test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in_it	test_codex_trusts_the_launch_dir_from_the_trust_row_even_with_a_dot_in_it
+launcher	packages/launcher/tests/test_live.py	test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in_it	name	folder	project_dir
+launcher	packages/launcher/tests/test_live.py	words = row.tokens(mode, value=True, cwd=str(cwd))	keep	value=	value=
+launcher	packages/launcher/tests/test_live_acts.py	needs_claude_with_turns	name	error	exc
 launcher	packages/launcher/tests/test_module.py	assert own <= set(found.internal_env)	keep	set	set
 launcher	packages/launcher/tests/test_module.py	assert set(found.optional) == extras	keep	set	set
 launcher	packages/launcher/tests/test_module.py	assert set(found.optional) == {"turns", "comms", "slots", "projects", "ui", "notes",	keep	set	set
 launcher	packages/launcher/tests/test_module.py	assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",	keep	set	set
 launcher	packages/launcher/tests/test_module.py	assert set(stores) == {"launches", "runs", "handoffs"}	keep	set	set
 launcher	packages/launcher/tests/test_module.py	extras = set(metadata.distribution("moxi-launcher").metadata.get_all("Provides-Extra"))	keep	set	set
+launcher	packages/launcher/tests/test_module.py	-	name	test_it_ships_its_skills_folder	test_it_ships_its_skills_dir
 launcher	packages/launcher/tests/test_page.py	NEVER_SENT = {"env", "env_json", "base_env", "base_env_json", "environ", "brief",	keep	environ	environ
 launcher	packages/launcher/tests/test_page.py	assert found.ok and set(found.components) == {"page", "prompt", "sessions", "state"}	keep	set	set
 launcher	packages/launcher/tests/test_page.py	assert not set(found) & NEVER_SENT	keep	set	set
@@ -2135,14 +2479,28 @@ launcher	packages/launcher/tests/test_page.py	monkeypatch.setattr(pagehandlers, 
 launcher	packages/launcher/tests/test_page.py	monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))	keep	HOME	HOME
 launcher	packages/launcher/tests/test_page.py	out.setdefault(key, set()).add(sub.mark)	keep	set	set
 launcher	packages/launcher/tests/test_page.py	where.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_page.py	-	name	test_no_answer_declares_an_environment_a_brief_or_a_process	test_no_answer_declares_an_env_a_brief_or_a_process
+launcher	packages/launcher/tests/test_page.py	-	name	test_places_name_the_home_folder_the_page_server_sees	test_places_name_the_home_dir_the_page_server_sees
+launcher	packages/launcher/tests/test_page.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_page.py	fake_slots	name	directory	slots_dir
+launcher	packages/launcher/tests/test_page.py	log	name	connection	conn
+launcher	packages/launcher/tests/test_page.py	args = {"request_id": request_id, "actor": first.actor(), "harness": "codex",	use	"actor"	"by"
+launcher	packages/launcher/tests/test_page.py	launched(log, "d", "2026-01-01T12:00:00.000000Z", cwd="/work/theirs", actor="alice")	use	actor=	by=
+launcher	packages/launcher/tests/test_page.py	actor="planner")	use	actor=	by=
+launcher	packages/launcher/tests/test_page.py	slot(1, "occupied", launchable=False), slot(2, "ended", launchable=True),	keep	launchable=	launchable=
+launcher	packages/launcher/tests/test_page.py	slot(3, "free", launchable=False, holder="planner", until=1900000000.5),	keep	launchable=	launchable=
+launcher	packages/launcher/tests/test_page.py	slot(4, "missing", launchable=False), slot(10, "free", launchable=True)]	keep	launchable=	launchable=
 launcher	packages/launcher/tests/test_page_launch.py	assert set(codes(said)) >= {"no-cwd"} and len(said["refused"]) >= 2	keep	set	set
 launcher	packages/launcher/tests/test_page_launch.py	assert set(request.left_out) == {"add_dir", "remote_control", "extra_flags"}	keep	set	set
 launcher	packages/launcher/tests/test_page_launch.py	defaults = {} if {"cwd", "scratch"} & set(rows) else {"cwd": str(work)}	keep	set	set
 launcher	packages/launcher/tests/test_page_launch.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 launcher	packages/launcher/tests/test_page_launch.py	release.set()	keep	set	set
+launcher	packages/launcher/tests/test_page_launch.py	Spawned.__init__	kwonly	run	run
+launcher	packages/launcher/tests/test_page_launch.py	_resolved	name	refused	exc
 launcher	packages/launcher/tests/test_page_resume.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 launcher	packages/launcher/tests/test_page_resume.py	release.set()	keep	set	set
 launcher	packages/launcher/tests/test_page_resume.py	self.live, self.failing = set(live), set(failing)	keep	set	set
+launcher	packages/launcher/tests/test_page_resume.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_page_state.py	assert all(set(r) == set(page.PAST.items) for r in rows)	keep	set	set
 launcher	packages/launcher/tests/test_page_state.py	assert set(got) == set(page.SESSION_STATE.items)	keep	set	set
 launcher	packages/launcher/tests/test_page_state.py	assert set(seen) == {"sessions", "launches"}	keep	set	set
@@ -2150,12 +2508,28 @@ launcher	packages/launcher/tests/test_page_state.py	assert set(seen["launches"])
 launcher	packages/launcher/tests/test_page_state.py	if got == name and check(data):	keep	ok	ok
 launcher	packages/launcher/tests/test_page_state.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 launcher	packages/launcher/tests/test_page_state.py	self._gone.set()	keep	set	set
+launcher	packages/launcher/tests/test_page_state.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_page_state.py	test_a_launch_log_made_after_the_stream_opened_is_seen.go	name	made	conn
 launcher	packages/launcher/tests/test_presets.py	asked = {"harness"} if harness else set()	keep	set	set
 launcher	packages/launcher/tests/test_presets.py	assert laid.harness == got.harness and set(laid.values) == set(got.values)	keep	set	set
 launcher	packages/launcher/tests/test_presets.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_presets.py	-	name	test_a_typed_directory_gets_its_project_key	test_a_typed_dir_gets_its_project_key
+launcher	packages/launcher/tests/test_presets.py	-	name	test_roles_reads_the_core_harness_tables_folder	test_roles_reads_the_core_harness_tables_dir
+launcher	packages/launcher/tests/test_presets.py	-	name	test_the_callers_directory_gets_its_project_key	test_the_callers_dir_gets_its_project_key
+launcher	packages/launcher/tests/test_presets.py	-	name	test_the_file_lives_in_the_launchers_config_folder	test_the_file_lives_in_the_launchers_config_dir
+launcher	packages/launcher/tests/test_presets.py	laid_or_refused	name	refused	exc
+launcher	packages/launcher/tests/test_presets.py	test_roles_reads_the_core_harness_tables_folder	name	folder	agents_dir
 launcher	packages/launcher/tests/test_preview.py	({"harness": "claude", "cwd": "/work"}, set()),	keep	set	set
 launcher	packages/launcher/tests/test_preview.py	assert found <= set(compose.LINKS)	keep	set	set
 launcher	packages/launcher/tests/test_preview.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_preview.py	-	name	test_a_scratch_launch_works_in_a_folder_named_by_its_request_id	test_a_scratch_launch_works_in_a_dir_named_by_its_request_id
+launcher	packages/launcher/tests/test_preview.py	-	name	test_preview_of_a_scratch_codex_launch_names_the_scratch_folder	test_preview_of_a_scratch_codex_launch_names_the_scratch_dir
+launcher	packages/launcher/tests/test_preview.py	-	name	test_the_context_names_the_handoff_folder_only_with_a_key	test_the_context_names_the_handoff_dir_only_with_a_key
+launcher	packages/launcher/tests/test_preview.py	-	name	test_the_context_never_makes_the_launchers_own_handoff_folder	test_the_context_never_makes_the_launchers_own_handoff_dir
+launcher	packages/launcher/tests/test_preview.py	-	name	test_the_host_script_is_looked_for_in_this_environment	test_the_host_script_is_looked_for_in_this_env
+launcher	packages/launcher/tests/test_preview.py	test_preview_composes_what_resolve_returns.resolve	name	environ	env
+launcher	packages/launcher/tests/test_preview.py	monkeypatch.setattr(api, "_resolve", lambda request, environ=None: Resolved(dict(values)))	use	environ	env
+launcher	packages/launcher/tests/test_preview.py	test_the_context_never_makes_the_launchers_own_handoff_folder	name	folder	handoff_dir
 launcher	packages/launcher/tests/test_quiet.py	assert set(quiet.LIVE_KINDS) | {"shell"} == set(results.AGENT_KINDS)	keep	set	set
 launcher	packages/launcher/tests/test_quiet.py	assert set(quiet.LIVE_STATES) <= set(results.AGENT_STATES)	keep	set	set
 launcher	packages/launcher/tests/test_recycle.py	assert set(sub) <= {"name", "at", "until", "every", "requires_env", "run"}	keep	set	set
@@ -2163,9 +2537,42 @@ launcher	packages/launcher/tests/test_recycle.py	assert {"expiry", "compact"} <=
 launcher	packages/launcher/tests/test_recycle.py	home = environ.get("HOME", "/users/me")	keep	HOME	HOME
 launcher	packages/launcher/tests/test_recycle.py	launched(connection, base_env={"HOME": "/users/ann", "CLAUDE_CONFIG_DIR": "~/.seat",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_recycle.py	self._closed.set()	keep	set	set
+launcher	packages/launcher/tests/test_recycle.py	-	name	test_a_codex_session_reads_its_cache_with_the_codex_sessions_directory	test_a_codex_session_reads_its_cache_with_the_codex_sessions_dir
+launcher	packages/launcher/tests/test_recycle.py	RootedCache.projects_root	name	environ	env
+launcher	packages/launcher/tests/test_recycle.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_recycle.py	facts	kwonly	draft	draft
+launcher	packages/launcher/tests/test_recycle.py	facts	kwonly	stale	stale
+launcher	packages/launcher/tests/test_recycle.py	facts	kwonly	turn_open	turn_open
+launcher	packages/launcher/tests/test_recycle.py	shells	kwonly	complete	complete
+launcher	packages/launcher/tests/test_recycle.py	test_a_claude_launch_with_its_own_config_dir_reads_its_cache_under_it	name	connection	conn
+launcher	packages/launcher/tests/test_recycle.py	test_a_relaunch_crossing_keeps_its_line_when_the_store_is_locked	name	locker	lock_conn
+launcher	packages/launcher/tests/test_recycle.py	test_the_crossing_handler_gives_up_on_a_locked_store_within_its_bound	name	locker	lock_conn
+launcher	packages/launcher/tests/test_recycle.py	dict(complete=False),	keep	complete=	complete=
+launcher	packages/launcher/tests/test_recycle.py	home = env.get("HOME", "/users/me")	keep	HOME	HOME
+launcher	packages/launcher/tests/test_recycle.py	launched(conn, base_env={"HOME": "/users/ann", "CLAUDE_CONFIG_DIR": "~/.seat",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_relaunch.py	arm(conn, make(tmp_path), slots_api=slots_api)	keep	start	start
 launcher	packages/launcher/tests/test_relaunch.py	self.alive, self.shown, self.show_error = set(alive), shown, show_error	keep	set	set
+launcher	packages/launcher/tests/test_relaunch.py	-	name	_folder	_handoff_dir
+launcher	packages/launcher/tests/test_relaunch.py	-	name	environ	test_env
+launcher	packages/launcher/tests/test_relaunch.py	-	name	test_a_relative_handoff_is_read_from_the_working_folder	test_a_relative_handoff_is_read_from_the_working_dir
+launcher	packages/launcher/tests/test_relaunch.py	-	name	test_with_notes_installed_the_handoff_must_be_in_the_launchs_folder	test_with_notes_installed_the_handoff_must_be_in_the_launchs_dir
+launcher	packages/launcher/tests/test_relaunch.py	FakeSlots.__init__	name	exec	exec_state
+launcher	packages/launcher/tests/test_relaunch.py	agent	kwonly	final	final
+launcher	packages/launcher/tests/test_relaunch.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_relaunch.py	test_a_launch_not_in_a_slot_is_refused	name	connection	conn
+launcher	packages/launcher/tests/test_relaunch.py	test_a_name_that_is_not_a_session_id_goes_to_comms_even_when_a_launch_holds_it	name	connection	conn
+launcher	packages/launcher/tests/test_relaunch.py	test_only_a_director_the_launch_named_may_call	name	connection	conn
+launcher	packages/launcher/tests/test_relaunch.py	test_the_caller_as_its_own_target_is_refused	name	connection	conn
+launcher	packages/launcher/tests/test_relaunch.py	test_the_warm_check_reads_the_cache_under_the_launchs_own_config_dir	name	connection	conn
+launcher	packages/launcher/tests/test_relaunch.py	test_the_warm_check_reads_the_cache_under_the_launchs_own_config_dir.Rooted.projects_root	name	environ	env
+launcher	packages/launcher/tests/test_relaunch.py	test_with_notes_installed_the_handoff_must_be_in_the_launchs_folder	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_relaunch.py	monkeypatch.setattr(relaunch.handoffs, "folder_of_row",	use	folder_of_row	handoff_dir_of_row
+launcher	packages/launcher/tests/test_relaunch.py	run=run.run_id, slot="3", person="2 minutes").splitlines())	keep	run=	run=
 launcher	packages/launcher/tests/test_relaunch_job.py	self._closed.set()	keep	set	set
+launcher	packages/launcher/tests/test_relaunch_job.py	FakeSession.__init__	kwonly	agents_complete	agents_complete
+launcher	packages/launcher/tests/test_relaunch_job.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_relaunch_job.py	facts	kwonly	draft	draft
+launcher	packages/launcher/tests/test_relaunch_job.py	facts	kwonly	turn_open	turn_open
 launcher	packages/launcher/tests/test_replay.py	"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	"SESSIONNAME"} & set(short)	keep	set	set
 launcher	packages/launcher/tests/test_replay.py	assert base == {"HOME": "/h", "PATH": "/bin", "CLAUDE_CODE_OAUTH_TOKEN": None}	keep	HOME	HOME
@@ -2185,12 +2592,23 @@ launcher	packages/launcher/tests/test_replay.py	caller = {"PATH": "/now/bin", "H
 launcher	packages/launcher/tests/test_replay.py	child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_STATE_HOME": "/s",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	job = {"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_replay.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_replay.py	-	name	test_a_replay_writes_its_row_where_the_callers_environment_puts_the_store	test_a_replay_writes_its_row_where_the_callers_env_puts_the_store
+launcher	packages/launcher/tests/test_replay.py	-	name	test_a_scratch_replay_keeps_the_rows_directory	test_a_scratch_replay_keeps_the_rows_dir
+launcher	packages/launcher/tests/test_replay.py	rig	name	directory	slots_dir
 launcher	packages/launcher/tests/test_resume.py	other_done.set()	keep	set	set
 launcher	packages/launcher/tests/test_resume.py	self.live, self.failing, self.asked = set(live), set(failing), []	keep	set	set
+launcher	packages/launcher/tests/test_resume.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_resume.py	rig	name	directory	slots_dir
+launcher	packages/launcher/tests/test_resume.py	test_two_resumes_of_one_session_at_once_launch_it_once.one	name	error	exc
 launcher	packages/launcher/tests/test_resume_store.py	assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_resume_store.py	child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_RUNTIME_DIR": "/run/u",	keep	HOME	HOME
+launcher	packages/launcher/tests/test_resume_store.py	-	name	test_the_base_environment_is_recorded_and_holds_no_credential	test_the_base_env_is_recorded_and_holds_no_credential
+launcher	packages/launcher/tests/test_resume_store.py	conn	name	c	conn
 launcher	packages/launcher/tests/test_settings.py	assert set(settings.schema().keys) == set(DEFAULTS) | set(TEXTS)	keep	set	set
 launcher	packages/launcher/tests/test_settings.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_skill.py	-	name	test_the_skill_ships_in_the_skills_folder_with_its_name_and_description	test_the_skill_ships_in_the_skills_dir_with_its_name_and_description
+launcher	packages/launcher/tests/test_skill.py	-	name	test_the_skill_states_the_folder_and_the_file_name_rule	test_the_skill_states_the_dir_and_the_file_name_rule
+launcher	packages/launcher/tests/test_skill.py	skill_text	name	folder	skill_dir
 launcher	packages/launcher/tests/test_slot.py	"CLAUDE_TRUST_FOLDER", "CLAUDE_DEV_CHANNELS")	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/test_slot.py	("CLAUDE_TRUST_FOLDER", "gone"))	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/test_slot.py	("CLAUDE_TRUST_FOLDER", fake.CLAUDE_TRUST_FOLDER),	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
@@ -2219,10 +2637,34 @@ launcher	packages/launcher/tests/test_slot.py	rig.plan(frames=[{"screen": "CLAUD
 launcher	packages/launcher/tests/test_slot.py	rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}])	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/test_slot.py	rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}],	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/tests/test_slot.py	rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}], dead_status=1,	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
+launcher	packages/launcher/tests/test_slot.py	-	name	test_a_relative_temp_folder_still_gives_an_absolute_scratch_dir	test_a_relative_temp_dir_still_gives_an_absolute_scratch_dir
+launcher	packages/launcher/tests/test_slot.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_slot.py	rig	name	directory	slots_dir
+launcher	packages/launcher/tests/test_slot.py	turns	name	directory	turns_dir
+launcher	packages/launcher/tests/test_state.py	conn	name	connection	conn
 launcher	packages/launcher/tests/test_store.py	assert set(rows[0]) == set(store.COLUMNS) | {"stale"}	keep	set	set
+launcher	packages/launcher/tests/test_store.py	-	name	test_a_project_and_its_folder_launched_without_it_are_two_places	test_a_project_and_its_dir_launched_without_it_are_two_places
+launcher	packages/launcher/tests/test_store.py	-	name	test_places_are_the_newest_launch_of_each_project_and_folder	test_places_are_the_newest_launch_of_each_project_and_dir
+launcher	packages/launcher/tests/test_store.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_store.py	test_a_store_from_a_newer_launcher_is_refused	name	raw	conn
+launcher	packages/launcher/tests/test_store.py	test_a_write_lock_held_past_the_timeout_is_busy	name	holder	holder_conn
+launcher	packages/launcher/tests/test_store.py	test_a_write_lock_held_past_the_timeout_is_busy	name	waiter	waiter_conn
+launcher	packages/launcher/tests/test_store.py	args = {"request_id": request_id, "actor": "someone", "harness": "claude",	use	"actor"	"by"
+launcher	packages/launcher/tests/test_store.py	args = {"request_id": request_id, "actor": "someone", "harness": "codex",	use	"actor"	"by"
+launcher	packages/launcher/tests/test_store.py	codex(conn, request_id=request_id, at=at, **{"actor": "operator", **overrides})	use	"actor"	"by"
+launcher	packages/launcher/tests/test_store.py	placed(conn, "other", 13, cwd="/work/other", actor="alice")	use	actor=	by=
 launcher	packages/launcher/tests/test_store_v2.py	assert row.as_json()["base_env_json"] == {"HOME": "/users/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_store_v2.py	assert row.base_env == {"HOME": "/users/someone", "LANG": "C.UTF-8"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_store_v2.py	for order in set(itertools.permutations(writes)):	keep	set	set
+launcher	packages/launcher/tests/test_store_v2.py	-	name	test_the_base_environment_column_is_empty_until_written	test_the_base_env_column_is_empty_until_written
+launcher	packages/launcher/tests/test_store_v2.py	conn	name	connection	conn
+launcher	packages/launcher/tests/test_store_v2.py	test_a_newer_store_than_version_2_is_refused	name	raw	conn
+launcher	packages/launcher/tests/test_store_v2.py	test_a_step_that_fails_leaves_the_version_1_log_whole	name	raw	conn
+launcher	packages/launcher/tests/test_store_v2.py	test_a_version_1_log_is_carried_forward_with_no_row_lost	name	raw	raw_conn
+launcher	packages/launcher/tests/test_store_v2.py	version_1	name	raw	conn
+launcher	packages/launcher/tests/test_store_v2.py	args = {"request_id": request_id, "actor": "someone", "harness": "claude",	use	"actor"	"by"
+launcher	packages/launcher/tests/test_store_v2.py	"session_id": f"{request_id}-0000-4000-8000-000000000000", "actor": "someone",	use	"actor"	"by"
+launcher	packages/launcher/tests/test_target.py	conn	name	connection	conn
 loadout	packages/loadout/src/moxi_loadout/adoption.py	at_its_folder	name	folder	harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	folder = None if row is None else row.folder(placed.kind)	use	row.folder	row.harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	take	name	folder	loadout_dir
@@ -2354,6 +2796,13 @@ loadout	packages/loadout/src/moxi_loadout/manifest.py	the loadout folder `folder
 loadout	packages/loadout/src/moxi_loadout/page.py	_SECTION = lb.Field("string", required=False, max=PATH_MAX)	keep	required	required
 loadout	packages/loadout/src/moxi_loadout/page.py	_SECTIONS = lb.Field("list", required=False, max=LIST_MAX,	keep	required	required
 loadout	packages/loadout/src/moxi_loadout/page.py	_USER = lb.Field("bool", required=False)	keep	required	required
+loadout	packages/loadout/src/moxi_loadout/page.py	"argv": lb.Out("list", items=_SAYS, nullable=True),	keep	nullable=	nullable=
+loadout	packages/loadout/src/moxi_loadout/page.py	"exit": lb.Out("int", nullable=True),	keep	nullable=	nullable=
+loadout	packages/loadout/src/moxi_loadout/page.py	"harnesses": lb.Out("list", items=_TEXT, nullable=True),	keep	nullable=	nullable=
+loadout	packages/loadout/src/moxi_loadout/page.py	"outcome": lb.Out("table", items=OUTCOME, nullable=True),	keep	nullable=	nullable=
+loadout	packages/loadout/src/moxi_loadout/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
+loadout	packages/loadout/src/moxi_loadout/page.py	_MAYBE_PATH = lb.Out("string", mark="path", nullable=True)	keep	nullable=	nullable=
+loadout	packages/loadout/src/moxi_loadout/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	"""The line a read gives for `err`: the verb's own words for a manifest, ledger or	use	err	exc
 loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	_section	name	err	exc
@@ -3585,6 +4034,7 @@ moxi	packages/moxi/tests/test_terminal_step.py	def no_folder(name):	use	no_folde
 moxi	packages/moxi/tests/test_terminal_step.py	monkeypatch.setattr(_win, "known_folder", no_folder)	use	no_folder	no_dir
 moxi	packages/moxi/tests/test_terminal_step.py	path = terminal.write({"HOME": "/x"})	keep	HOME	HOME
 moxi	packages/moxi/tests/test_terminal_step.py	test_a_read_only_folder_gives_one_warning	name	folder	anchor_dir
+moxi	packages/moxi/tests/test_terminal_step.py	code = LIVE.format(found=found)	keep	found=	found=
 moxi	packages/moxi/tests/test_terminal_walk.py	(d / "environ").chmod(0)	keep	environ	environ
 moxi	packages/moxi/tests/test_terminal_walk.py	-	name	test_a_harness_resetting_its_tool_shells_environment_is_met_above_the_hop	test_a_harness_resetting_its_tool_shells_env_is_met_above_the_hop
 moxi	packages/moxi/tests/test_terminal_walk.py	-	name	test_a_tool_mark_in_the_runs_start_environment_stops_it_before_any_read	test_a_tool_mark_in_the_runs_start_env_stops_it_before_any_read
@@ -3704,6 +4154,7 @@ moxi	packages/moxi/tests/test_units_systemd_live.py	row.declare({"relay": {"comm
 moxi	packages/moxi/tests/test_units_systemd_live.py	row.declare({"shell": {"command": f"moxi-{row.module}-shell", "doc": doc,	keep	enabled	enabled
 moxi	packages/moxi/tests/test_units_systemd_live.py	row.script("shell", SHELL.format(python=sys.executable, record=str(record)))	keep	record	record
 moxi	packages/moxi/tests/test_units_systemd_live.py	self.config.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_units_systemd_live.py	seen.update(service=service, held=held, before=_listing(row.dir))	keep	held=	held=
 moxi	packages/moxi/tests/test_uv_probes.py	-	name	test_a_plain_environment_loses_moxi_with_a_module	test_a_plain_env_loses_moxi_with_a_module
 moxi	packages/moxi/tests/test_vendor.py	== set(pairs)	keep	set	set
 moxi	packages/moxi/tests/test_vendor.py	assert set(pairs) == {"tomlkit", "packaging"}	keep	set	set
@@ -4222,6 +4673,10 @@ projects	packages/projects/src/moxi_projects/doctor.py	-	name	_same_directory	_s
 projects	packages/projects/src/moxi_projects/page.py	_FLAG = lb.Field("bool", required=False)	keep	required	required
 projects	packages/projects/src/moxi_projects/page.py	_MAYBE_DIR = lb.Field("string", required=False, max=PATH_MAX)	keep	required	required
 projects	packages/projects/src/moxi_projects/page.py	_MAYBE_NAME = lb.Field("string", required=False, max=NAME_MAX)	keep	required	required
+projects	packages/projects/src/moxi_projects/page.py	"exit_code": lb.Out("int", nullable=True),	keep	nullable=	nullable=
+projects	packages/projects/src/moxi_projects/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
+projects	packages/projects/src/moxi_projects/page.py	_MAYBE_PATH = lb.Out("string", mark="path", nullable=True)	keep	nullable=	nullable=
+projects	packages/projects/src/moxi_projects/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 projects	packages/projects/src/moxi_projects/pagecheck.py	__all__ = ["STORE", "HOME", "UI_INTERFACE", "places", "line", "unchecked"]	keep	HOME	HOME
 projects	packages/projects/src/moxi_projects/pagecheck.py	return found.api.check(lambda env: places(env, consulted))	keep	ok	ok
 projects	packages/projects/src/moxi_projects/pagecheck.py	user's terminal: another `MOXI_HOME`, `MOXI_PROJECTS_*`, `XDG_DATA_HOME` or `HOME` puts	keep	HOME	HOME
@@ -4415,6 +4870,11 @@ repo	packages/repo/src/moxi_repo/gitrun.py	if status in ("R", "C"):	keep	R	R
 repo	packages/repo/src/moxi_repo/gitrun.py	raise ValueError("changes() reads what is staged, or a range=(a, b)")	use	range=(a, b)	rev_range=(a, b)
 repo	packages/repo/src/moxi_repo/gitrun.py	_users_ssh	kwonly	clean_env	clean_env
 repo	packages/repo/src/moxi_repo/gitrun.py	-	name	environment	git_env
+repo	packages/repo/src/moxi_repo/page.py	"hook": lb.Out("string", mark="path", nullable=True),	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	"refused_passes": lb.Out("int", nullable=True),	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
+repo	packages/repo/src/moxi_repo/page.py	_WHEN = lb.Out("float", nullable=True)	keep	nullable=	nullable=
 repo	packages/repo/src/moxi_repo/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 repo	packages/repo/src/moxi_repo/pagehandlers.py	_repo	name	err	unexpected_exc
 repo	packages/repo/src/moxi_repo/pagehandlers.py	gather	name	err	unexpected_exc
@@ -4685,6 +5145,7 @@ rounds	packages/rounds/src/moxi_rounds/folders.py	"""The rounds folder the `dir`
 rounds	packages/rounds/src/moxi_rounds/folders.py	"""The slug of each round in the rounds folder `folder`, sorted: every folder there	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/folders.py	return [f"{one.project}/{slug}" for one in found for slug in slugs(one.folder)]	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/folders.py	stores it, and `folder` its rounds folder, which need not exist yet."""	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/folders.py	__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_folder", "slugs",	keep	notes_folder	notes_folder
 rounds	packages/rounds/src/moxi_rounds/index.py	"""Every round in the rounds folder `folder` of the project `project`, by slug, each	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/index.py	"""The round `<project>/<slug>` in the rounds folder `folder`, or with no slug the	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/index.py	_refresh(conn, where.project, _PROJECT, where.folder, wrote=wrote_project)	keep	folder	folder
@@ -4777,6 +5238,7 @@ rounds	packages/rounds/src/moxi_rounds/state.py	taken = {key for key, _text in h
 rounds	packages/rounds/src/moxi_rounds/state.py	touched = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/write.py	"Where", "Entry", "View", "Written", "Gate", "record"]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/write.py	alone. `folder` is the project's rounds folder."""	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/write.py	facts=None if facts is None else facts(where))	keep	turn_open	turn_open
 rounds	packages/rounds/tests/conftest.py	argv = ["projects", "set", key, "--no-notes-root"]	keep	set	set
 rounds	packages/rounds/tests/conftest.py	argv = ["projects", "set", key, "--notes-root", str(notes_root)]	keep	set	set
 rounds	packages/rounds/tests/conftest.py	config_file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -5064,6 +5526,15 @@ services	packages/services/src/moxi_services/page.py	"every": lb.Field("string",
 services	packages/services/src/moxi_services/page.py	"health": lb.Field("string", required=False, max=COMMAND_MAX),	keep	required	required
 services	packages/services/src/moxi_services/page.py	_MAYBE_BOOL = lb.Field("bool", required=False)	keep	required	required
 services	packages/services/src/moxi_services/page.py	_MAYBE_TEXT = lb.Field("string", required=False, max=NAME_MAX)	keep	required	required
+services	packages/services/src/moxi_services/page.py	"seconds": lb.Out("float", nullable=True),	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	CHECKED = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	LAST_RUN = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	_COMMAND = lb.Out("list", items=_SAYS, mark="redact", nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	_MAYBE_FLAG = lb.Out("bool", nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	_MAYBE_INT = lb.Out("int", nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	_MAYBE_PATH = lb.Out("string", mark="path", nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._poll	name	err	exc
@@ -5216,6 +5687,7 @@ sessions	packages/sessions/src/moxi_sessions/lists.py	sessions_more	name	folder	
 sessions	packages/sessions/src/moxi_sessions/lists.py	sessions_newest	name	folder	work_dir
 sessions	packages/sessions/src/moxi_sessions/lists.py	turn of the rows it returns and of no other session, unless `folder` is asked.	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _folder(head.folder) if head is not None else None	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/lists.py	facts = cat.facts(entry)	keep	turn_open	turn_open
 sessions	packages/sessions/src/moxi_sessions/opencode.py	"session": ("id", "parent_id", "title", "directory", "version", "model", "agent",	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/opencode.py	directory=values["directory"], version=values["version"], model=model,	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/opencode.py	self._checked: set[str] = set()	keep	set	set
@@ -5241,6 +5713,16 @@ sessions	packages/sessions/src/moxi_sessions/page.py	items={"command": _TEXT, "f
 sessions	packages/sessions/src/moxi_sessions/page.py	lb.Route("/api/folders", "read", _target("folders"), query=FOLDERS_QUERY,	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/page.py	number; `folder`, an absolute path a session's own record names (compared as written,	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/page.py	starts with or the last segment of its folder contains, without regard to case. `/api/folders` takes them all but `folder`. `folder`,	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/page.py	"resume": lb.Out("table", nullable=True,	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	"subagents": lb.Out("list", items=SESSION_SUBAGENT, nullable=True),	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	MESSAGE = lb.Out("table", nullable=True,	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	SAID = lb.Out("table", nullable=True,	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_BOOL = lb.Out("bool", nullable=True)	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_FLOAT = lb.Out("float", nullable=True)	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_INT = lb.Out("int", nullable=True)	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_PATH = lb.Out("string", mark="path", nullable=True)	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	**The list.** `listing`, `more`, `session` and `folders` read through the process's one	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	__all__ = ["folders", "listing", "more", "session", "subagents", "view_row", "window"]	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	keep	folder	folder
@@ -5582,6 +6064,7 @@ tunnel	packages/tunnel/src/moxi_tunnel/acts.py	self.last = exc.record	keep	recor
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	skip = {p for h, p in self.retired if h == normal_host(host)} | set(foreign)	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	| set(_bad_keys(decls)))	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	_Live.__call__	name	caught	provider_exc
+tunnel	packages/tunnel/src/moxi_tunnel/acts.py	data = dict(rec=rec, decls=decls, ts=ts, ct=ct_hosts, held=held)	keep	held=	held=
 tunnel	packages/tunnel/src/moxi_tunnel/changes.py	for key in sorted(set(before.entries) | set(after.entries)):	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="also compare each entry with the live config")	keep	help	help
 tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="drop it from the record and leave the live config alone")	keep	help	help
@@ -5673,6 +6156,7 @@ turns	packages/turns/src/moxi_turns/claude_endpoint.py	self._gate_refused: set[s
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self.ended.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	self.session_known.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/claude_endpoint.py	slot[0].set()	keep	set	set
+turns	packages/turns/src/moxi_turns/claude_endpoint.py	ep.turn_started(turn_id, held=True)	keep	held=	held=
 turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	PACKAGE_FOLDER	PACKAGE_DIR
 turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	_market_folder	_marketplace_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	_same_folder	_same_dir
@@ -5819,6 +6303,7 @@ turns	packages/turns/src/moxi_turns/endpoint.py	self.dir.mkdir(mode=0o700, exist
 turns	packages/turns/src/moxi_turns/endpoint.py	self.layout.runtime_dir(self.env, create=True)	keep	create	create
 turns	packages/turns/src/moxi_turns/endpoint.py	slot[0].set()	keep	set	set
 turns	packages/turns/src/moxi_turns/endpoint.py	thread.join(timeout=OPEN_WAIT_S)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/endpoint.py	previous, turn = self.ledger.started(turn_id, None, held=True)	keep	held=	held=
 turns	packages/turns/src/moxi_turns/guards/__init__.py	extra = sorted(set(data) - {"guard"})	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/__init__.py	listed_set = set(listed)	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/__init__.py	loaded_modules: set[str] = set()	keep	set	set
@@ -5877,6 +6362,7 @@ turns	packages/turns/src/moxi_turns/opencode.py	self._stop.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/opencode.py	self._supervisor.join(timeout=2.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/opencode.py	sstatus, status = http.json("GET", "/session/status", timeout=2.0)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/opencode.py	timeout=SUMMARIZE_WAIT)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/opencode.py	self.endpoint.turn_started(turn_id, held=True)	keep	held=	held=
 turns	packages/turns/src/moxi_turns/opencode_server.py	EventStream._read	name	e	exc
 turns	packages/turns/src/moxi_turns/opencode_server.py	EventStream.start	name	e	exc
 turns	packages/turns/src/moxi_turns/opencode_server.py	Http.connect	name	e	exc
@@ -5885,6 +6371,17 @@ turns	packages/turns/src/moxi_turns/opencode_server.py	proc.wait(timeout=grace)	
 turns	packages/turns/src/moxi_turns/opencode_server.py	self._listening.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/opencode_server.py	self.closed.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/opencode_server.py	self.connected.set()	keep	set	set
+turns	packages/turns/src/moxi_turns/page.py	"agents": lb.Out("int", nullable=True),	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	"cwd": lb.Out("string", mark="path", nullable=True),	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	"description": lb.Out("string", mark="redact", nullable=True),	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	"final": lb.Out("bool", nullable=True),	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	"pid": lb.Out("int", nullable=True),	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	"trouble": lb.Out("string", mark="redact", nullable=True),	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	AGENTS = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	FACTS = lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "at": _MAYBE_WHEN})	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	_MAYBE_WHEN = lb.Out("float", nullable=True)	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/pagehandlers.py	_Feed._run	name	err	exc
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.kick.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.loop.call_soon_threadsafe(self.kick.set)	keep	set	set
@@ -6183,6 +6680,7 @@ turns	packages/turns/tests/test_delivery.py	timed(lambda: client.call("facts", {
 turns	packages/turns/tests/test_delivery.py	timeout=10)))	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_delivery.py	timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_delivery.py	watch.call("watch", {}, timeout=5)	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_delivery.py	ep.turn_started("t1", held=True)	keep	held=	held=
 turns	packages/turns/tests/test_doctor.py	-	name	test_a_v1_directory_is_named_and_left	test_a_v1_dir_is_named_and_left
 turns	packages/turns/tests/test_endpoint.py	"mod_version"} <= set(hello)	keep	set	set
 turns	packages/turns/tests/test_endpoint.py	-	name	test_a_dead_directory_is_swept_and_a_starting_one_is_not	test_a_dead_dir_is_swept_and_a_starting_one_is_not
@@ -6242,6 +6740,9 @@ turns	packages/turns/tests/test_guards.py	env = {"MOXI_FAKEMOD_CONFIG_HOME": str
 turns	packages/turns/tests/test_guards.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
 turns	packages/turns/tests/test_held_turns.py	assert [x.id for x in fake.handed(2, timeout=0.2)] == [d1.id]   # not decided yet	keep	timeout	timeout
 turns	packages/turns/tests/test_held_turns.py	out.append(events.get(timeout=timeout))	keep	timeout	timeout
+turns	packages/turns/tests/test_held_turns.py	ep.turn_started("P", held=True)	keep	held=	held=
+turns	packages/turns/tests/test_held_turns.py	ep.turn_started("T", held=True)	keep	held=	held=
+turns	packages/turns/tests/test_held_turns.py	ep.turn_started("T1", held=True)	keep	held=	held=
 turns	packages/turns/tests/test_install_without_claude.py	"HOME": str(self.home),	keep	HOME	HOME
 turns	packages/turns/tests/test_install_without_claude.py	_project	name	directory	package_dir
 turns	packages/turns/tests/test_install_without_claude.py	_project	name	f	fh
@@ -6336,6 +6837,7 @@ turns	packages/turns/tests/test_wire.py	timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	timeout=5) == {"taken": False}	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	timeout=5) == {"taken": True}	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_wire.py	watch.call("watch", {}, timeout=5)	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_wire.py	ep.turn_started("t1", held=True)	keep	held=	held=
 ui	packages/ui/src/moxi_ui/api.py	* `check(places, *, programs=None, page=True)`: None when the folders `places(env)`	use	page=True	for_page=True
 ui	packages/ui/src/moxi_ui/api.py	found.api.check(places, *, programs=None, page=True) -> str | None	use	page=True	for_page=True
 ui	packages/ui/src/moxi_ui/cli.py	"""The environment the unit's shell starts with: `environ` less the locators, then on	keep	environ	environ
@@ -6925,6 +7427,8 @@ usage	packages/usage/src/moxi_usage/index.py	touched: set[int] = set()	keep	set	
 usage	packages/usage/src/moxi_usage/index.py	wanted = None if lanes is None else set(lanes)	keep	set	set
 usage	packages/usage/src/moxi_usage/index.py	_under	name	directories	unreadable_dirs
 usage	packages/usage/src/moxi_usage/index.py	_under	name	directory	unreadable_dir
+usage	packages/usage/src/moxi_usage/index.py	fields.update(cursor=got.cursor, held=None, excluded=None, read_at=run.now)	keep	held=	held=
+usage	packages/usage/src/moxi_usage/index.py	fields.update(excluded=IMPORTED, held=None, cursor=None, read_at=run.now,	keep	held=	held=
 usage	packages/usage/src/moxi_usage/limits.py	Row	name	age_seconds	age_s
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/mark.py	-	name	CROSSING_AT	CROSSING_AT_ENV
@@ -6955,6 +7459,14 @@ usage	packages/usage/src/moxi_usage/page.py	query={"by": lb.Field("enum", requir
 usage	packages/usage/src/moxi_usage/page.py	query={"by": lb.Field("enum", required=False, values=("day", "month")),	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	query={"models": lb.Field("string", required=False, max=16384),	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	query={"top": lb.Field("int", required=False, max=TOP_MAX), **FILTERS},	keep	required	required
+usage	packages/usage/src/moxi_usage/page.py	"period": lb.Out("table", nullable=True, items={"from": _MAYBE, "to": _MAYBE}),	keep	nullable=	nullable=
+usage	packages/usage/src/moxi_usage/page.py	"pull": lb.Out("table", nullable=True, items={	keep	nullable=	nullable=
+usage	packages/usage/src/moxi_usage/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
+usage	packages/usage/src/moxi_usage/page.py	_MAYBE_INT = lb.Out("int", nullable=True)	keep	nullable=	nullable=
+usage	packages/usage/src/moxi_usage/page.py	_MAYBE_PATH = lb.Out("string", mark="path", nullable=True)	keep	nullable=	nullable=
+usage	packages/usage/src/moxi_usage/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
+usage	packages/usage/src/moxi_usage/page.py	_PRICE = lb.Out("float", nullable=True)	keep	nullable=	nullable=
+usage	packages/usage/src/moxi_usage/page.py	_WHEN = lb.Out("float", nullable=True)	keep	nullable=	nullable=
 usage	packages/usage/src/moxi_usage/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/pagehandlers.py	for model, provider in zip(ids, providers, strict=True):	keep	strict	strict
 usage	packages/usage/src/moxi_usage/pagehandlers.py	_Feed._poll	name	err	exc
@@ -7242,6 +7754,8 @@ usage	packages/usage/tests/test_index.py	parent = db.session(title="fix it", dir
 usage	packages/usage/tests/test_index.py	proc.wait(timeout=30)	keep	timeout	timeout
 usage	packages/usage/tests/test_index.py	reply.step(input=900, output=40, cache_read=100)	keep	input	input
 usage	packages/usage/tests/test_index.py	-	name	test_a_source_under_an_unreadable_directory_keeps_its_row	test_a_source_under_an_unreadable_dir_keeps_its_row
+usage	packages/usage/tests/test_index.py	Batch([marker(9)], reset=True, complete=True)])	keep	complete=	complete=
+usage	packages/usage/tests/test_index.py	batches = iter([Batch([marker(3)], reset=False, complete=False),	keep	complete=	complete=
 usage	packages/usage/tests/test_limits.py	assert (five.used_percent, five.source, five.age_seconds) == (25.0, "rollout", 2 * MIN)	use	five.age_seconds	five.age_s
 usage	packages/usage/tests/test_limits.py	assert five.age_seconds == 40 * MIN	use	five.age_seconds	five.age_s
 usage	packages/usage/tests/test_limits.py	assert set(data["unknown"]) == {"resets_at", "session_id", "plan_type"}	keep	set	set
