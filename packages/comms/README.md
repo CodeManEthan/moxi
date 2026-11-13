@@ -284,6 +284,52 @@ as any name, read the token store, or write comms' store. It is not access contr
 using comms on a machine other people log in to: it also covers the tools' loopback port
 and the OpenCode adapter's server.
 
+## Who the page's send box trusts
+
+The page's send box acts as you: `Check` asks whether a message would go and how it
+would be delivered, `Send` posts it under the operator's name, and `Take back` withdraws
+a message you sent. Each runs in comms' page server, which the shell starts for you.
+
+**The rule.** The three acts trust any process that holds the page server's runtime
+token. That token is no stronger than your own comms token: a process that can read one
+can read the other. So anything that confines your agents has to cover both. Whatever
+keeps an agent from the credential chain (the environment, the keychain, the token
+store) must also keep it from the page servers' runtime files: each is `page.json`, mode
+0600, in its module's directory under `$XDG_RUNTIME_DIR/moxi/`, and holds that server's
+token. A sandbox that denies an agent the token store but lets it read comms'
+`page.json` breaks this model.
+
+- **Your credential.** Each act reads it in the page server's process, from the same
+  chain `moxi comms send` reads in your terminal, and drops it when the act ends. The
+  browser never receives it, and no answer or log line carries it. `Check` reads it too,
+  since it runs every step of a send but the post, so the check that runs when you open
+  an agent's send box can unlock a locked keychain or ask you for its password. The
+  message goes out under your user id: `MOXI_COMMS_OPERATOR` in the page server's
+  environment when it is set, else the one operator comms' directory holds. With neither
+  the act refuses and posts nothing.
+- **The phone.** The acts are not the gateway's. `/api/mail` is the one route of comms
+  the phone's gateway serves, so nothing on the phone can send, check or take back.
+- **A request forged by another web page.** Every route of the page needs the shell's
+  cookie (HttpOnly, SameSite=Strict) and the `X-Moxi-Key` header, which only a page of
+  the shell's own origin can read and send. A form on another site can't add a custom
+  header, and DNS rebinding gets neither. On Linux the connection must also come from
+  your user. The shell passes the page server only a short list of the browser's
+  headers, and its own token.
+- **Script hidden in a message.** Agents write the text the page shows. What keeps that
+  text from running as script that could read the key is the shell's content security
+  policy, `script-src 'self'` and `require-trusted-types-for 'script'`. The page draws
+  every message as text, never as markup.
+- **A shell started inside an agent's session.** It starts its page servers there too,
+  and the acts then refuse as `moxi comms send` refuses in a session: `Send` and `Check`
+  answer `operator-in-session`, and `Take back` answers `no-identity`. That refusal keeps
+  a session from taking your lane by mistake. It is not a wall against a process of
+  yours.
+- **What it doesn't add.** Any process running as you can read the page server's runtime
+  file and call the acts with its token, and the page server can't tell that process
+  from the shell. That process can already read your comms token from the keychain or
+  the token store and post with it, so the send box gives it nothing new while the rule
+  above holds.
+
 ## Configuration and files
 
 Nothing needs configuring for the default path. Everything that can be set, every
