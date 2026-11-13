@@ -595,7 +595,7 @@ def test_an_answer_that_breaks_off_cuts_the_browsers_connection():
 
 def test_a_failed_start_is_a_502_naming_the_module_its_exit_and_log():
     async def body():
-        failure = StartFailed("pxfake", "the page server exited 3 at start", exit=3, log=LOG)
+        failure = StartFailed("pxfake", "the page server exited 3 at start", exit_code=3, log=LOG)
         got = await Browser(fake_proxy(FakeStarters(fail=failure)), fake_scope(
             "GET", "/m/pxfake/api/read")).start().answer()
         assert got.status == 502
@@ -635,7 +635,7 @@ def test_the_client_alone_gives_a_stream_that_a_drain_ends():
             assert starters.current.streams == 0
             release.set()
             with pytest.raises(UpstreamError) as failed:
-                await Client(FakeStarters(fail=StartFailed("pxfake", "x", exit=1, log=LOG))
+                await Client(FakeStarters(fail=StartFailed("pxfake", "x", exit_code=1, log=LOG))
                              ).request("pxfake", "GET", "/api/events", stream=True)
             assert failed.value.status == 502
 

@@ -215,7 +215,7 @@ def test_read_refuses_a_file_open_to_others(run_dir, mode):
 
 
 @posix
-def test_read_refuses_a_directory_open_to_others(run_dir):
+def test_read_refuses_a_dir_open_to_others(run_dir):
     put(run_dir, good())
     os.chmod(run_dir, 0o750)
     assert read_runtime(MODULE) is None
@@ -232,7 +232,7 @@ def test_read_refuses_a_runtime_dir_that_is_a_link(run_dir, tmp_path):
 
 
 @posix
-def test_read_refuses_a_directory_in_the_files_place(run_dir):
+def test_read_refuses_a_dir_in_the_files_place(run_dir):
     (run_dir / RUNTIME_FILE).mkdir(mode=0o700)
     assert read_runtime(MODULE) is None
 

@@ -63,6 +63,7 @@ cache	packages/cache/src/moxi_cache/page.py	"last_request": lb.Out("float", null
 cache	packages/cache/src/moxi_cache/page.py	"stale_after": lb.Out("float", nullable=True),	keep	nullable=	nullable=
 cache	packages/cache/src/moxi_cache/page.py	"ttl": lb.Out("float", nullable=True),	keep	nullable=	nullable=
 cache	packages/cache/src/moxi_cache/page.py	"warn_before": lb.Out("float", nullable=True),	keep	nullable=	nullable=
+cache	packages/cache/src/moxi_cache/page.py	lb.Route("/api/events", "read", "moxi_cache.pagehandlers:events", stream=True,	keep	stream=	stream=
 cache	packages/cache/src/moxi_cache/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 cache	packages/cache/src/moxi_cache/records.py	"""Whether `record` holds to the format. The two `THRESHOLDS` are not asked for here:	keep	record	record
 cache	packages/cache/src/moxi_cache/render.py	if isinstance(mode, str) and WRITE_MODES & set(mode):	keep	set	set
@@ -175,6 +176,9 @@ cache	packages/cache/tests/test_codex_clock.py	r.record("t2", NOW - 60)	keep	rec
 cache	packages/cache/tests/test_codex_clock.py	r.start("t1", NOW - 100).record("t1", NOW - 90)	keep	record	record
 cache	packages/cache/tests/test_codex_clock.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_codex_clock.py	without.kind, without.code, without.age_seconds)	use	without.age_seconds	without.age_s
+cache	packages/cache/tests/test_codex_clock.py	r.add(*breaker(A + 10))	keep	stream	stream
+cache	packages/cache/tests/test_codex_clock.py	r.add(*breaker(A + gap + 0.02))	keep	stream	stream
+cache	packages/cache/tests/test_codex_clock.py	r.add(*breaker(A - 20))	keep	stream	stream
 cache	packages/cache/tests/test_drift.py	assert again.ttl_seconds == first.ttl_seconds, "the written lowering is in force"	use	again.ttl_seconds	again.ttl_s
 cache	packages/cache/tests/test_drift.py	assert again.ttl_seconds == first.ttl_seconds, "the written lowering is in force"	use	first.ttl_seconds	first.ttl_s
 cache	packages/cache/tests/test_drift.py	assert clock.lowering["lifetime"] == lowered and clock.ttl_seconds == lowered	use	clock.ttl_seconds	clock.ttl_s
@@ -720,6 +724,7 @@ comms	packages/comms/src/moxi_comms/page.py	"module": lb.Out("string", nullable=
 comms	packages/comms/src/moxi_comms/page.py	"scope": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"session_id": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"tier": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	lb.Route("/api/events", "read", "moxi_comms.pagehandlers:events", stream=True,	keep	stream=	stream=
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_Feed._poll	name	err	exc
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/pagehandlers.py	gather	name	err	exc
@@ -1630,6 +1635,8 @@ comms	packages/comms/tests/test_send_rule.py	provision.add_standing(rig.record, 
 comms	packages/comms/tests/test_send_rule.py	return rig.record.history(rig.names_channel)	keep	record	record
 comms	packages/comms/tests/test_send_rule.py	shim = rig.shim(start=False, name=None, scope="proj-a",	keep	start	start
 comms	packages/comms/tests/test_send_rule.py	live = rig.daemon.attribute(message(rig, mid), live=True)	keep	live=	live=
+comms	packages/comms/tests/test_send_rule.py	driver = loop.hold("coder", "opencode")	keep	on	on
+comms	packages/comms/tests/test_send_rule.py	speaker = loop.hold("alice", "codex")	keep	on	on
 comms	packages/comms/tests/test_settings.py	-	name	test_a_given_environment_is_read_instead_of_the_process	test_a_given_env_is_read_instead_of_the_process
 comms	packages/comms/tests/test_settings.py	-	name	test_a_named_relative_file_is_read_from_the_working_directory	test_a_named_relative_file_is_read_from_the_working_dir
 comms	packages/comms/tests/test_settings.py	-	name	test_the_text_entry_reads_no_environment	test_the_text_entry_reads_no_env
@@ -1815,6 +1822,7 @@ connector	packages/connector/src/moxi_connector/oauth.py	self._tasks: set[asynci
 connector	packages/connector/src/moxi_connector/origin.py	parse	name	e	exc
 connector	packages/connector/src/moxi_connector/origin.py	read	name	e	exc
 connector	packages/connector/src/moxi_connector/origin.py	tunnel_address	name	e	exc
+connector	packages/connector/src/moxi_connector/origin.py	return found.api.address(*TARGET)	keep	retired	retired
 connector	packages/connector/src/moxi_connector/page.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/page.py	await send({"type": "http.response.body", "body": text})	keep	fail	fail
 connector	packages/connector/src/moxi_connector/page.py	await send({"type": "http.response.start", "status": 303,	keep	fail	fail
@@ -1858,6 +1866,7 @@ connector	packages/connector/tests/test_door.py	broken_manager.set_	kwonly	broke
 connector	packages/connector/tests/test_door.py	gate.set()	keep	set	set
 connector	packages/connector/tests/test_door.py	waiting = under.open(under.check({               # and a sign-in in progress	keep	ok	ok
 connector	packages/connector/tests/test_grants.py	start.set()	keep	set	set
+connector	packages/connector/tests/test_grants.py	store.change(lambda data: data["grants"][gid].update(retired=list(old)))	keep	retired=	retired=
 connector	packages/connector/tests/test_join_comms.py	assert rig.record.get_message(mid).author_id == ME	keep	record	record
 connector	packages/connector/tests/test_join_comms.py	assert unread(rig) == set(ids)	keep	set	set
 connector	packages/connector/tests/test_join_comms.py	began.set()	keep	set	set
@@ -2147,6 +2156,7 @@ launcher	packages/launcher/src/moxi_launcher/page.py	state=_text(), session_id=_
 launcher	packages/launcher/src/moxi_launcher/page.py	updated_at=_text(), slot=_text(nullable=True), turn_number=Out("int", nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	value_items=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
 launcher	packages/launcher/src/moxi_launcher/page.py	values=Out("list", items=Out("string"), nullable=True),	keep	nullable=	nullable=
+launcher	packages/launcher/src/moxi_launcher/page.py	lb.Route("/api/events", "read", _target("events"), stream=True,	keep	stream=	stream=
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	raise lb.Refused(f"{key} is asked alone, without {', '.join(sorted(set(query) - {key}))}")	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	typed[name] = row.check(direct)	keep	ok	ok
@@ -2816,6 +2826,7 @@ loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	projects	name	err	exc
 loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	return install.status(git=_git(), git_seconds=doctor.PLACE_GIT_SECONDS)	keep	git_seconds	git_seconds
 loadout	packages/loadout/src/moxi_loadout/pagehandlers.py	status	name	err	exc
 loadout	packages/loadout/src/moxi_loadout/pagejob.py	prune	name	folder	records_dir
+loadout	packages/loadout/src/moxi_loadout/pagejob.py	out.update(state="done", exit=code if isinstance(code, int) else 1,	keep	exit=	exit=
 loadout	packages/loadout/src/moxi_loadout/planner.py	-	name	_FOLDERS	_KIND_DIRS
 loadout	packages/loadout/src/moxi_loadout/planner.py	Plan	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/planner.py	_carry	name	folder	project_dir
@@ -4100,6 +4111,9 @@ moxi	packages/moxi/tests/test_units_home.py	[timer] = SystemdBackend(tmp_path).r
 moxi	packages/moxi/tests/test_units_home.py	_home.unit_env("comms", {"MOXI_HOME": s, "HOME": str(tmp_path)})["MOXI_HOME"])	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_home.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi	packages/moxi/tests/test_units_home.py	seen = {(_home.home_tag({"MOXI_HOME": s, "HOME": str(tmp_path)}),	keep	HOME	HOME
+moxi	packages/moxi/tests/test_units_home.py	assert SchtasksBackend(user="PC\\ana").task("comms", "daemon") == "\\Moxi\\comms-daemon"	keep	enabled	enabled
+moxi	packages/moxi/tests/test_units_home.py	assert SchtasksBackend(user="PC\\ana").task("comms", "daemon") == (	keep	enabled	enabled
+moxi	packages/moxi/tests/test_units_home.py	task = tasks.task("demo", "relay")	keep	enabled	enabled
 moxi	packages/moxi/tests/test_units_launchd.py	if check(value) or time.monotonic() > deadline:	keep	ok	ok
 moxi	packages/moxi/tests/test_units_launchd.py	m.declare(socket=False)	keep	socket	socket
 moxi	packages/moxi/tests/test_units_launchd.py	monkeypatch.setenv("HOME", "/Users/ana")	keep	HOME	HOME
@@ -5464,6 +5478,12 @@ secrets	packages/secrets/tools/bump_gitleaks.py	rules = {h[1] for h in set(r2) ^
 secrets	packages/secrets/tools/bump_gitleaks.py	say(f"  {plat}: {' '.join(sorted(set(by_platform[plat])))}")	keep	set	set
 secrets	packages/secrets/tools/bump_gitleaks.py	self.no_path = set()	keep	set	set
 secrets	packages/secrets/tools/bump_gitleaks.py	unique = sorted(set(keywords))	keep	set	set
+secrets	packages/secrets/tools/bump_gitleaks.py	add(f"global{i}.path{j}", f"global allowlist {i}", "path", p)	keep	stream	stream
+secrets	packages/secrets/tools/bump_gitleaks.py	add(f"global{i}.re{j}", f"global allowlist {i}", "allow", p)	keep	stream	stream
+secrets	packages/secrets/tools/bump_gitleaks.py	add(f"{r['id']}.allow{i}.path{j}", r["id"], "path", p)	keep	stream	stream
+secrets	packages/secrets/tools/bump_gitleaks.py	add(f"{r['id']}.allow{i}.re{j}", r["id"], "allow", p)	keep	stream	stream
+secrets	packages/secrets/tools/bump_gitleaks.py	add(r["id"] + ".path", r["id"], "path", r["path"])	keep	stream	stream
+secrets	packages/secrets/tools/bump_gitleaks.py	add(r["id"], r["id"], "rule", r["regex"], r["secretGroup"])	keep	stream	stream
 secrets	packages/secrets/tools/name_folds.py	help="write nothing; exit 1 when _folds.py differs from a fresh one")	keep	help	help
 secrets	packages/secrets/tools/name_folds.py	if not {chr(x) for x in s} <= set(held.get(chr(c), chr(c))))	keep	set	set
 secrets	packages/secrets/tools/name_folds.py	out: set[int] = set()	keep	set	set
@@ -5535,6 +5555,7 @@ services	packages/services/src/moxi_services/page.py	_MAYBE_FLAG = lb.Out("bool"
 services	packages/services/src/moxi_services/page.py	_MAYBE_INT = lb.Out("int", nullable=True)	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	_MAYBE_PATH = lb.Out("string", mark="path", nullable=True)	keep	nullable=	nullable=
 services	packages/services/src/moxi_services/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
+services	packages/services/src/moxi_services/page.py	lb.Route("/api/events", "read", _target("events"), stream=True,	keep	stream=	stream=
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	kwonly	health	health
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._gather	name	err	exc
 services	packages/services/src/moxi_services/pagehandlers.py	_Feed._poll	name	err	exc
@@ -6065,6 +6086,7 @@ tunnel	packages/tunnel/src/moxi_tunnel/acts.py	skip = {p for h, p in self.retire
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	| set(_bad_keys(decls)))	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	_Live.__call__	name	caught	provider_exc
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	data = dict(rec=rec, decls=decls, ts=ts, ct=ct_hosts, held=held)	keep	held=	held=
+tunnel	packages/tunnel/src/moxi_tunnel/acts.py	retired=rec.is_retired(entry.host, entry.port) if entry.known	keep	retired=	retired=
 tunnel	packages/tunnel/src/moxi_tunnel/changes.py	for key in sorted(set(before.entries) | set(after.entries)):	keep	set	set
 tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="also compare each entry with the live config")	keep	help	help
 tunnel	packages/tunnel/src/moxi_tunnel/cli.py	help="drop it from the record and leave the live config alone")	keep	help	help
@@ -6382,6 +6404,7 @@ turns	packages/turns/src/moxi_turns/page.py	FACTS = lb.Out("table", nullable=Tru
 turns	packages/turns/src/moxi_turns/page.py	READY = lb.Out("table", nullable=True, items={"source": _MAYBE, "at": _MAYBE_WHEN})	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	_MAYBE = lb.Out("string", nullable=True)	keep	nullable=	nullable=
 turns	packages/turns/src/moxi_turns/page.py	_MAYBE_WHEN = lb.Out("float", nullable=True)	keep	nullable=	nullable=
+turns	packages/turns/src/moxi_turns/page.py	lb.Route("/api/events", "read", _target("events"), stream=True,	keep	stream=	stream=
 turns	packages/turns/src/moxi_turns/pagehandlers.py	_Feed._run	name	err	exc
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.kick.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/pagehandlers.py	self.loop.call_soon_threadsafe(self.kick.set)	keep	set	set
@@ -6465,8 +6488,19 @@ turns	packages/turns/tests/fake_opencode.py	self._stop.set()	keep	set	set
 turns	packages/turns/tests/hooks/test_hooks_law.py	-	name	test_l1_the_suite_needs_no_environment	test_l1_the_suite_needs_no_env
 turns	packages/turns/tests/hooks/test_hooks_law.py	-	name	test_l2_no_module_reads_the_environment	test_l2_no_module_reads_the_env
 turns	packages/turns/tests/hooks/test_hooks_law.py	docstrings = set()	keep	set	set
+turns	packages/turns/tests/hooks/test_hooks_law.py	dict(body=lambda d: "x", stream=Broken()),                       # read	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_law.py	dict(body=lambda d: "x", stream=io.StringIO("[1,2]")),           # read	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_law.py	dict(body=lambda d: "x", stream=io.StringIO("not json")),        # read	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_law.py	dict(body=lambda d: "x", stream=io.StringIO("{}"), cap=5),       # render, no marker	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_law.py	dict(body=lambda d: 17, stream=io.StringIO("{}")),               # render	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_law.py	dict(body=raiser, stream=io.StringIO("{}")),                     # body	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_law.py	kwargs = dict(stream=io.StringIO("{}"), body=lambda d: "a payload")	keep	stream=	stream=
 turns	packages/turns/tests/hooks/test_hooks_pipe.py	-	name	test_the_package_needs_nothing_on_the_path_or_in_the_environment	test_the_package_needs_nothing_on_the_path_or_in_the_env
 turns	packages/turns/tests/hooks/test_hooks_pipe.py	out, err = proc.communicate(json.dumps({"cwd": "/piped"}).encode(), timeout=30)	keep	timeout	timeout
+turns	packages/turns/tests/hooks/test_hooks_run.py	("body", dict(stream=io.StringIO("{}"), body=lambda d: 1 / 0)),	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_run.py	("emitted", dict(stream=io.StringIO("{}"), body=lambda d: "x")),	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_run.py	("read", dict(stream=io.StringIO("nonsense"), body=lambda d: None)),	keep	stream=	stream=
+turns	packages/turns/tests/hooks/test_hooks_run.py	("render", dict(stream=io.StringIO("{}"), body=lambda d: object())),	keep	stream=	stream=
 turns	packages/turns/tests/hooks/test_hooks_surface.py	assert len(set(names)) == 9	keep	set	set
 turns	packages/turns/tests/hooks/test_hooks_surface.py	assert set(module.__all__) <= public, f"{module.__name__} lost a name"	keep	set	set
 turns	packages/turns/tests/hooks/test_hooks_surface.py	nine = set(hooks.wire.__all__) | set(hooks.text.__all__) | set(	keep	set	set
@@ -6840,6 +6874,7 @@ turns	packages/turns/tests/test_wire.py	watch.call("watch", {}, timeout=5)	use	t
 turns	packages/turns/tests/test_wire.py	ep.turn_started("t1", held=True)	keep	held=	held=
 ui	packages/ui/src/moxi_ui/api.py	* `check(places, *, programs=None, page=True)`: None when the folders `places(env)`	use	page=True	for_page=True
 ui	packages/ui/src/moxi_ui/api.py	found.api.check(places, *, programs=None, page=True) -> str | None	use	page=True	for_page=True
+ui	packages/ui/src/moxi_ui/checks.py	Checks._running	name	err	exc
 ui	packages/ui/src/moxi_ui/cli.py	"""The environment the unit's shell starts with: `environ` less the locators, then on	keep	environ	environ
 ui	packages/ui/src/moxi_ui/cli.py	"""The locator variables whose values differ between `environ` and the environment a	keep	environ	environ
 ui	packages/ui/src/moxi_ui/cli.py	"gateway", help="the UI on your phone, through the tunnel",	keep	help	help
@@ -6866,6 +6901,18 @@ ui	packages/ui/src/moxi_ui/cli.py	verbs.add_parser("serve", help="run the shell 
 ui	packages/ui/src/moxi_ui/cli.py	verbs.add_parser("signout", help="sign every browser out",	keep	help	help
 ui	packages/ui/src/moxi_ui/cli.py	verbs.add_parser("stop", help="stop the shell",	keep	help	help
 ui	packages/ui/src/moxi_ui/cli.py	with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:	keep	Environment	Environment
+ui	packages/ui/src/moxi_ui/cli.py	-	name	_stored_environment	_stored_env
+ui	packages/ui/src/moxi_ui/cli.py	-	name	_unit_environ	_unit_env
+ui	packages/ui/src/moxi_ui/cli.py	_check_locators	name	environ	env
+ui	packages/ui/src/moxi_ui/cli.py	_sweep_redirects	name	directory	redirect_dir
+ui	packages/ui/src/moxi_ui/cli.py	_unit_environ	name	environ	env
+ui	packages/ui/src/moxi_ui/cli.py	ensure_shell	name	environ	env
+ui	packages/ui/src/moxi_ui/cli.py	ensure_shell	name	err	exc
+ui	packages/ui/src/moxi_ui/cli.py	locator_problem	name	environ	env
+ui	packages/ui/src/moxi_ui/cli.py	locator_problem	name	unit_environ	unit_env
+ui	packages/ui/src/moxi_ui/cli.py	lock_held	name	directory	runtime_dir
+ui	packages/ui/src/moxi_ui/cli.py	main	name	err	exc
+ui	packages/ui/src/moxi_ui/cli.py	write_redirect	name	directory	redirect_dir
 ui	packages/ui/src/moxi_ui/gateway/access.py	_object(await _body(receive, _BEGIN_CAP), set(), empty=True)	keep	set	set
 ui	packages/ui/src/moxi_ui/gateway/access.py	admitted.set(None)	keep	set	set
 ui	packages/ui/src/moxi_ui/gateway/access.py	admitted.set(id_hash)	keep	set	set
@@ -6874,13 +6921,35 @@ ui	packages/ui/src/moxi_ui/gateway/access.py	await send({"type": "http.response.
 ui	packages/ui/src/moxi_ui/gateway/access.py	for gone in set(self._known) - set(devices):	keep	set	set
 ui	packages/ui/src/moxi_ui/gateway/access.py	if not isinstance(data, dict) or set(data) != keys:	keep	set	set
 ui	packages/ui/src/moxi_ui/gateway/access.py	self._revoked: set[str] = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/gateway/access.py	Access._finish_pairing	name	full	full_exc
+ui	packages/ui/src/moxi_ui/gateway/access.py	Access._finish_pairing	name	refused	refused_exc
+ui	packages/ui/src/moxi_ui/gateway/access.py	Access._finish_signin	name	refused	refused_exc
+ui	packages/ui/src/moxi_ui/gateway/access.py	Access.layer.routed	name	bad	bad_exc
 ui	packages/ui/src/moxi_ui/gateway/acts.py	if not isinstance(data, dict) or set(data) != keys:	keep	set	set
 ui	packages/ui/src/moxi_ui/gateway/acts.py	self._flying: set[str | None] = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/gateway/acts.py	Acts.__call__	name	refused	refused_exc
+ui	packages/ui/src/moxi_ui/gateway/acts.py	Acts._exchange	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/acts.py	Acts.prepare	name	bad	bad_exc
+ui	packages/ui/src/moxi_ui/gateway/acts.py	- **State** gives `prepared`, `sent`, `accepted` (with the status path), `refused` (with the	keep	refused	refused
+ui	packages/ui/src/moxi_ui/gateway/acts.py	row gives `accepted` with the module and no status path, `refused` with the status and no	keep	refused	refused
+ui	packages/ui/src/moxi_ui/gateway/audit.py	read_rows	name	folder	audit_files_dir
+ui	packages/ui/src/moxi_ui/gateway/desk.py	pair	name	err	exc
 ui	packages/ui/src/moxi_ui/gateway/doctor.py	"record": "the tunnel's record can't be read",	keep	record	record
+ui	packages/ui/src/moxi_ui/gateway/doctor.py	_bad	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/doctor.py	audit_row	name	folder	audit_files_dir
+ui	packages/ui/src/moxi_ui/gateway/doctor.py	read_facts	name	environ	env
+ui	packages/ui/src/moxi_ui/gateway/doctor.py	read_facts	name	err	exc
 ui	packages/ui/src/moxi_ui/gateway/endpoint.py	"""The gateway's socket path fails the check; `directory` is the first that failed	keep	directory	directory
 ui	packages/ui/src/moxi_ui/gateway/endpoint.py	"""The locator text when `environ` gives the ui a runtime directory other than the one	keep	environ	environ
 ui	packages/ui/src/moxi_ui/gateway/endpoint.py	self.directory = directory	keep	directory	directory
 ui	packages/ui/src/moxi_ui/gateway/endpoint.py	with the home its unit was written from (`moxi.units.environment`). The	use	moxi.units.environment`	moxi.units.unit_env`
+ui	packages/ui/src/moxi_ui/gateway/endpoint.py	PathRefused.__init__	name	directory	failed_dir
+ui	packages/ui/src/moxi_ui/gateway/endpoint.py	_refuse	name	directory	failed_dir
+ui	packages/ui/src/moxi_ui/gateway/endpoint.py	_walk	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/endpoint.py	check_socket_path	name	directory	parent_dir
+ui	packages/ui/src/moxi_ui/gateway/endpoint.py	runtime_problem	name	environ	env
+ui	packages/ui/src/moxi_ui/gateway/endpoint.py	self.directory = failed_dir	use	self.directory	self.failed_dir
+ui	packages/ui/src/moxi_ui/gateway/endpoint.py	"""The gateway's socket path fails the check; `directory` is the first that failed	use	`directory`	`failed_dir`
 ui	packages/ui/src/moxi_ui/gateway/listener.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 ui	packages/ui/src/moxi_ui/gateway/listener.py	await send({"type": "http.response.start", "status": status,	keep	fail	fail
 ui	packages/ui/src/moxi_ui/gateway/listener.py	elif not want and self._held is not None:	keep	_held	_held
@@ -6893,26 +6962,67 @@ ui	packages/ui/src/moxi_ui/gateway/listener.py	self._held = _Held(sock, stop, ta
 ui	packages/ui/src/moxi_ui/gateway/listener.py	self._held: _Held | None = None	keep	_held	_held
 ui	packages/ui/src/moxi_ui/gateway/listener.py	self.moved = endpoint.runtime_problem(self._environ)	keep	_environ	_environ
 ui	packages/ui/src/moxi_ui/gateway/listener.py	the tunnel entry, and `environ` is the environment the runtime-directory check reads.	keep	environ	environ
+ui	packages/ui/src/moxi_ui/gateway/listener.py	Gateway.__init__	name	_environ	_env
+ui	packages/ui/src/moxi_ui/gateway/listener.py	Gateway.__init__	name	environ	env
+ui	packages/ui/src/moxi_ui/gateway/listener.py	Gateway._build	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/listener.py	Gateway._hold	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/listener.py	Gateway._take	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/listener.py	Gateway.start	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/listener.py	read_tunnel	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/listener.py	self._find_uid, self._remove, self._environ = find_uid, remove, env	use	self._environ	self._env
+ui	packages/ui/src/moxi_ui/gateway/listener.py	self.moved = endpoint.runtime_problem(self._environ)	use	self._environ	self._env
 ui	packages/ui/src/moxi_ui/gateway/mount.py	- `record`: the last read of the tunnel's record failed, so the rest can't be read;	keep	record	record
 ui	packages/ui/src/moxi_ui/gateway/mount.py	REASONS = ("off", "record", "target", "tcp", "origin")	keep	record	record
 ui	packages/ui/src/moxi_ui/gateway/mount.py	return Mount(False, "record")	keep	record	record
+ui	packages/ui/src/moxi_ui/gateway/passkeys.py	assertion_parts	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/passkeys.py	from_b64url	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/passkeys.py	verify_assertion	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/passkeys.py	verify_creation	name	err	exc
 ui	packages/ui/src/moxi_ui/gateway/router.py	await self._holder._held(self._push, scope, receive, send, finish=True)	keep	_held	_held
 ui	packages/ui/src/moxi_ui/gateway/router.py	await self._holder._held(self.proxy, scope, receive, send, finish=False)	keep	_held	_held
 ui	packages/ui/src/moxi_ui/gateway/router.py	await send(message)	keep	fail	fail
 ui	packages/ui/src/moxi_ui/gateway/router.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 ui	packages/ui/src/moxi_ui/gateway/router.py	await send({"type": "http.response.start", "status": status, "headers": headers})	keep	fail	fail
+ui	packages/ui/src/moxi_ui/gateway/router.py	GatewayRouter._read	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/router.py	audit.refusal(code, {"path": raw, "status": status}, signed_in=signed_in)	keep	signed_in=	signed_in=
+ui	packages/ui/src/moxi_ui/gateway/router.py	audit.request(fields, signed_in=signed_in)	keep	signed_in=	signed_in=
+ui	packages/ui/src/moxi_ui/gateway/router.py	signed_in=signed_in)	keep	signed_in=	signed_in=
 ui	packages/ui/src/moxi_ui/gateway/verbs.py	-	name	cmd_off	cmd_disable
 ui	packages/ui/src/moxi_ui/gateway/verbs.py	-	name	cmd_on	cmd_enable
 ui	packages/ui/src/moxi_ui/gateway/verbs.py	url = mint(_layout().runtime_dir(environ, create=True), address)	keep	create	create
 ui	packages/ui/src/moxi_ui/gateway/verbs.py	words = ("set", "--", MODULE, "gateway.enabled", "true") if on \	keep	set	set
+ui	packages/ui/src/moxi_ui/gateway/verbs.py	_check_runtime	name	environ	env
+ui	packages/ui/src/moxi_ui/gateway/verbs.py	_set_switch	kwonly	on	on
+ui	packages/ui/src/moxi_ui/gateway/verbs.py	_start_shell	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/verbs.py	cmd_enable	name	environ	env
+ui	packages/ui/src/moxi_ui/gateway/verbs.py	cmd_enable	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/verbs.py	cmd_pair	name	environ	env
+ui	packages/ui/src/moxi_ui/gateway/verbs.py	cmd_pair	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/verbs.py	url = mint(_layout().runtime_dir(env, create=True), address)	keep	create=	create=
+ui	packages/ui/src/moxi_ui/health.py	probe	name	err	exc
 ui	packages/ui/src/moxi_ui/listen.py	least one; the three `LISTEN_*` variables are then removed from `environ`, so no	keep	environ	environ
+ui	packages/ui/src/moxi_ui/listen.py	_from_systemd	name	environ	env
+ui	packages/ui/src/moxi_ui/listen.py	_wrap	name	err	exc
+ui	packages/ui/src/moxi_ui/listen.py	bind	name	err	exc
+ui	packages/ui/src/moxi_ui/listen.py	take	name	environ	env
 ui	packages/ui/src/moxi_ui/loopback/api.py	token = _reached.set(reached)	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/check.py	folded = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/loopback/export.py	_one	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/export.py	load_page	name	err	exc
 ui	packages/ui/src/moxi_ui/loopback/headers.py	seen: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/routes.py	check(key, item)	keep	ok	ok
 ui	packages/ui/src/moxi_ui/loopback/routes.py	if len(set(values)) != len(values):	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/routes.py	paths: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/routes.py	seen: set[str] = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/loopback/routes.py	Table.add	kwonly	stream	stream
+ui	packages/ui/src/moxi_ui/loopback/routes.py	_cut	kwonly	strict	strict
+ui	packages/ui/src/moxi_ui/loopback/routes.py	build_table	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/routes.py	list_assets	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/routes.py	parse_body	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/runtime.py	_read_posix	name	directory	runtime_dir
+ui	packages/ui/src/moxi_ui/loopback/runtime.py	_read_windows	name	directory	runtime_dir
+ui	packages/ui/src/moxi_ui/loopback/runtime.py	read_runtime	name	directory	runtime_dir
+ui	packages/ui/src/moxi_ui/loopback/runtime.py	write_runtime	name	directory	runtime_dir
 ui	packages/ui/src/moxi_ui/loopback/serve.py	await send(message)	keep	fail	fail
 ui	packages/ui/src/moxi_ui/loopback/serve.py	help="don't stop when stdin closes (for a run by hand)")	keep	help	help
 ui	packages/ui/src/moxi_ui/loopback/serve.py	help="listen on TCP 127.0.0.1 instead of a Unix socket")	keep	help	help
@@ -6924,12 +7034,19 @@ ui	packages/ui/src/moxi_ui/loopback/serve.py	self._should_exit.set()	keep	set	se
 ui	packages/ui/src/moxi_ui/loopback/serve.py	self.connections: set[Any] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/serve.py	self.cycle.message_event.set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/serve.py	self.flag.set()	keep	set	set
+ui	packages/ui/src/moxi_ui/loopback/serve.py	_start	name	err	exc
 ui	packages/ui/src/moxi_ui/loopback/server.py	await send(message)	keep	fail	fail
 ui	packages/ui/src/moxi_ui/loopback/server.py	if len(set(names)) != len(names):	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/server.py	if set(topics.names) != set(route.topics):	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/server.py	self._dropped_seen: set[tuple[str, str]] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/server.py	self._subscribers: set[_Subscriber] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/server.py	self.ready.set()	keep	set	set
+ui	packages/ui/src/moxi_ui/loopback/server.py	PageApp.__init__	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/server.py	PageApp._confirmed_answer	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/server.py	PageApp._dispatch	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/server.py	PageApp._events	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/server.py	Snapshot._run	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/server.py	_resolve	name	err	exc
 ui	packages/ui/src/moxi_ui/loopback/transport.py	+ conn.send(h11.EndOfMessage()))	keep	fail	fail
 ui	packages/ui/src/moxi_ui/loopback/transport.py	message += conn.send(h11.Data(data=payload))	keep	fail	fail
 ui	packages/ui/src/moxi_ui/loopback/transport.py	message += conn.send(h11.EndOfMessage())	keep	fail	fail
@@ -6937,7 +7054,14 @@ ui	packages/ui/src/moxi_ui/loopback/transport.py	message = conn.send(h11.Request
 ui	packages/ui/src/moxi_ui/loopback/transport.py	ports = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/loopback/transport.py	return (conn.send(h11.Request(method="GET", target=PROVE_PATH,	keep	fail	fail
 ui	packages/ui/src/moxi_ui/loopback/transport.py	view = view[sock.send(view):]	keep	fail	fail
+ui	packages/ui/src/moxi_ui/loopback/transport.py	_no_ipv6_loopback	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/transport.py	bind_browser	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/transport.py	browser_names	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/transport.py	call	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/transport.py	check_private_dir	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/transport.py	open_connection	name	err	exc
 ui	packages/ui/src/moxi_ui/page.py	token = _shell.set(shell)	keep	set	set
+ui	packages/ui/src/moxi_ui/page.py	doctor_answer	name	err	exc
 ui	packages/ui/src/moxi_ui/proxy.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 ui	packages/ui/src/moxi_ui/proxy.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 ui	packages/ui/src/moxi_ui/proxy.py	await send({"type": "http.response.body", "body": chunk, "more_body": True})	keep	fail	fail
@@ -6947,6 +7071,15 @@ ui	packages/ui/src/moxi_ui/proxy.py	conn.writer.write(connection.send(h11.Data(d
 ui	packages/ui/src/moxi_ui/proxy.py	conn.writer.write(connection.send(h11.Data(data=chunk)))	keep	fail	fail
 ui	packages/ui/src/moxi_ui/proxy.py	conn.writer.write(connection.send(h11.EndOfMessage()))	keep	fail	fail
 ui	packages/ui/src/moxi_ui/proxy.py	head = connection.send(h11.Request(method=method, target=target, headers=headers))	keep	fail	fail
+ui	packages/ui/src/moxi_ui/proxy.py	Client._ensure	name	failure	start_exc
+ui	packages/ui/src/moxi_ui/proxy.py	Client.request	name	err	exc
+ui	packages/ui/src/moxi_ui/proxy.py	Proxy.__call__	name	err	exc
+ui	packages/ui/src/moxi_ui/proxy.py	Response._head	name	err	exc
+ui	packages/ui/src/moxi_ui/proxy.py	Response._send	name	err	exc
+ui	packages/ui/src/moxi_ui/proxy.py	Response.chunks	name	err	exc
+ui	packages/ui/src/moxi_ui/proxy.py	_relay.pump	name	err	exc
+ui	packages/ui/src/moxi_ui/proxy.py	act=entry.kind == "act", stream=entry.stream)	keep	stream=	stream=
+ui	packages/ui/src/moxi_ui/proxy.py	response.use = server.use(stream=stream, close=response._cut)	keep	stream=	stream=
 ui	packages/ui/src/moxi_ui/push.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 ui	packages/ui/src/moxi_ui/push.py	await send({"type": "http.response.body", "body": b": heartbeat\n\n",	keep	fail	fail
 ui	packages/ui/src/moxi_ui/push.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
@@ -6956,6 +7089,10 @@ ui	packages/ui/src/moxi_ui/push.py	await send({"type": "http.response.start", "s
 ui	packages/ui/src/moxi_ui/push.py	if len(set(pairs)) != len(pairs):	keep	set	set
 ui	packages/ui/src/moxi_ui/push.py	self._streams: set[_Stream] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/push.py	self.ready.set()	keep	set	set
+ui	packages/ui/src/moxi_ui/push.py	Push.__call__	name	err	exc
+ui	packages/ui/src/moxi_ui/push.py	_Upstream._read	name	err	exc
+ui	packages/ui/src/moxi_ui/push.py	_Upstream._run	name	err	exc
+ui	packages/ui/src/moxi_ui/push.py	self.module, "GET", target, headers=_ACCEPT, stream=True)	keep	stream=	stream=
 ui	packages/ui/src/moxi_ui/router.py	_session.connection.set((scope.get("client"), scope.get("server")))	keep	set	set
 ui	packages/ui/src/moxi_ui/router.py	await send(message)	keep	fail	fail
 ui	packages/ui/src/moxi_ui/router.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
@@ -6966,6 +7103,8 @@ ui	packages/ui/src/moxi_ui/router.py	loop.call_soon_threadsafe(ended.set)	keep	s
 ui	packages/ui/src/moxi_ui/serve.py	if len(set(units)) != len(units) or sorted(units) != sorted(listeners.fd_names):	keep	set	set
 ui	packages/ui/src/moxi_ui/serve.py	self._loop.call_soon_threadsafe(self._should_exit.set)	keep	set	set
 ui	packages/ui/src/moxi_ui/serve.py	self._should_exit.set()	keep	set	set
+ui	packages/ui/src/moxi_ui/serve.py	_run_held	name	err	exc
+ui	packages/ui/src/moxi_ui/serve.py	run	name	err	exc
 ui	packages/ui/src/moxi_ui/session.py	admitted.set(None)	keep	set	set
 ui	packages/ui/src/moxi_ui/session.py	admitted.set(id_hash)	keep	set	set
 ui	packages/ui/src/moxi_ui/session.py	files.private_dir(self.directory)	keep	directory	directory
@@ -6974,6 +7113,12 @@ ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	keep	director
 ui	packages/ui/src/moxi_ui/session.py	return self.directory / _hash(ticket)[:32]	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	self.directory = Path(directory)	keep	directory	directory
 ui	packages/ui/src/moxi_ui/session.py	uids = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/session.py	Tickets.__init__	name	directory	tickets_dir
+ui	packages/ui/src/moxi_ui/session.py	self.directory = Path(tickets_dir)	use	self.directory	self.tickets_dir
+ui	packages/ui/src/moxi_ui/session.py	files.private_dir(self.directory)	use	self.directory	self.tickets_dir
+ui	packages/ui/src/moxi_ui/session.py	names = os.listdir(self.directory)	use	self.directory	self.tickets_dir
+ui	packages/ui/src/moxi_ui/session.py	path = self.directory / name	use	self.directory	self.tickets_dir
+ui	packages/ui/src/moxi_ui/session.py	return self.directory / _hash(ticket)[:32]	use	self.directory	self.tickets_dir
 ui	packages/ui/src/moxi_ui/settings.py	"mark": _mark(module, name, item.get("read"), set(switches), platform, logins),	keep	set	set
 ui	packages/ui/src/moxi_ui/settings.py	done = run(argv, timeout=CONFIG_TIMEOUT, cwd=cwd, env=env)	use	timeout=	timeout_s=
 ui	packages/ui/src/moxi_ui/settings.py	done = run(show_argv(module), timeout=CONFIG_TIMEOUT, cwd=cwd, env=env)	use	timeout=	timeout_s=
@@ -6982,9 +7127,13 @@ ui	packages/ui/src/moxi_ui/settings.py	return [*head, "set", "--by", BY, "--", m
 ui	packages/ui/src/moxi_ui/settings.py	return [*head, "set", "--by", BY, f"--add={add}", "--", module, key]	keep	set	set
 ui	packages/ui/src/moxi_ui/settings.py	return [*head, "set", "--by", BY, f"--remove={remove}", "--", module, key]	keep	set	set
 ui	packages/ui/src/moxi_ui/settings.py	return set()	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	change	name	err	exc
+ui	packages/ui/src/moxi_ui/settings.py	read_section	name	err	exc
 ui	packages/ui/src/moxi_ui/snapshot.py	done = run(modules_argv(), timeout=timeout, cwd=str(cwd), env=env)	use	timeout=	timeout_s=
 ui	packages/ui/src/moxi_ui/snapshot.py	or len(set(values)) != len(values)):	keep	set	set
 ui	packages/ui/src/moxi_ui/snapshot.py	self._event().set()	keep	set	set
+ui	packages/ui/src/moxi_ui/snapshot.py	_mtimes	name	directory	watched_dir
+ui	packages/ui/src/moxi_ui/snapshot.py	read_modules	name	err	exc
 ui	packages/ui/src/moxi_ui/starter.py	**self.record.data(),	keep	record	record
 ui	packages/ui/src/moxi_ui/starter.py	done = run(argv, timeout=timeout, cwd=str(cwd))	use	timeout=	timeout_s=
 ui	packages/ui/src/moxi_ui/starter.py	modules.update((name, starter.record.data()) for name, starter in self._starters.items())	keep	record	record
@@ -6999,20 +7148,40 @@ ui	packages/ui/src/moxi_ui/starter.py	self.record.failed_starts += 1	keep	record
 ui	packages/ui/src/moxi_ui/starter.py	self.record.reason = None	keep	record	record
 ui	packages/ui/src/moxi_ui/starter.py	self.record.reason = failure.reason	keep	record	record
 ui	packages/ui/src/moxi_ui/starter.py	self.record.starts += 1	keep	record	record
+ui	packages/ui/src/moxi_ui/starter.py	StartFailed.__init__	name	exit	exit_code
+ui	packages/ui/src/moxi_ui/starter.py	Starter._held	name	err	exc
+ui	packages/ui/src/moxi_ui/starter.py	Starter._spawn	name	err	exc
+ui	packages/ui/src/moxi_ui/starter.py	Starter._start	name	failure	start_exc
+ui	packages/ui/src/moxi_ui/starter.py	export_tables	name	err	exc
+ui	packages/ui/src/moxi_ui/starter.py	read_servers	name	stream	fh
+ui	packages/ui/src/moxi_ui/starter.py	"""Count one open request (or, with `stream`, a stream) on this server until the	keep	stream	stream
+ui	packages/ui/src/moxi_ui/starter.py	`exit` is the child's exit code, or None when it gave no ready line in time (it was	keep	exit	exit
 ui	packages/ui/src/moxi_ui/terminal.py	"""No record at `record`: the step that makes one, and where to look when it doesn't."""	keep	record	record
 ui	packages/ui/src/moxi_ui/terminal.py	check	name	page	for_page
 ui	packages/ui/src/moxi_ui/terminal.py	check(places, *, programs=None, page=True) -> str | None	use	page=True	for_page=True
 ui	packages/ui/src/moxi_ui/terminal.py	givers: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/terminal.py	the next check pass. `page` words the line for the browser page (the default) or for a	use	`page	`for_page
+ui	packages/ui/src/moxi_ui/terminal.py	_absolute	kwonly	windows	windows
+ui	packages/ui/src/moxi_ui/terminal.py	_fix	kwonly	windows	windows
+ui	packages/ui/src/moxi_ui/terminal.py	_giver	kwonly	windows	windows
+ui	packages/ui/src/moxi_ui/terminal.py	_norm	kwonly	windows	windows
+ui	packages/ui/src/moxi_ui/terminal.py	_refuse_outside	kwonly	windows	windows
+ui	packages/ui/src/moxi_ui/terminal.py	_with_anchor	kwonly	anchor	anchor
+ui	packages/ui/src/moxi_ui/terminal.py	check	name	no	anchor_exc
+ui	packages/ui/src/moxi_ui/terminal.py	not_full	kwonly	here	here
+ui	packages/ui/src/moxi_ui/terminal.py	_with_anchor	kwonly	page	page
+ui	packages/ui/src/moxi_ui/terminal.py	return _with_anchor(unreadable(str(record), _error(outcome.exc), page=for_page),	use	outcome.exc	outcome.error
 ui	packages/ui/src/moxi_ui/testing/__init__.py	group.addoption("--ui-browser", default="chromium", choices=("chromium", "firefox", "webkit"),	keep	default	default
 ui	packages/ui/src/moxi_ui/testing/__init__.py	group.addoption("--ui-traces", default=None, metavar="DIR",	keep	default	default
 ui	packages/ui/src/moxi_ui/testing/__init__.py	help="the browser moxi_ui.testing's browser fixtures run (default chromium)")	keep	help	help
 ui	packages/ui/src/moxi_ui/testing/__init__.py	help="where a failed browser test's Playwright trace goes (default "	keep	help	help
 ui	packages/ui/src/moxi_ui/testing/__init__.py	pending: set[Any] = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/testing/__init__.py	ui_browser	name	err	exc
 ui	packages/ui/src/moxi_ui/testing/browser.py	"?.shadowRoot?.querySelector('*') != null", timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	held: set[str] = set()	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/browser.py	page.wait_for_function(_JS_RENDERED, arg=mark, timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	return set(), False	keep	set	set
+ui	packages/ui/src/moxi_ui/testing/browser.py	check_component	name	err	exc
 ui	packages/ui/src/moxi_ui/testing/phone.py	conn = self.bridge.connection(timeout=timeout)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/phone.py	held, self._open = list(self._open), set()	keep	set	set
 ui	packages/ui/src/moxi_ui/testing/phone.py	self._listeners, self._open = [], set()	keep	set	set
@@ -7025,23 +7194,35 @@ ui	packages/ui/src/moxi_ui/testing/shell.py	cwd = Layout("ui").runtime_dir(self.
 ui	packages/ui/src/moxi_ui/testing/shell.py	env["HOME"] = str(home)	keep	HOME	HOME
 ui	packages/ui/src/moxi_ui/testing/shell.py	if check(name, data):	keep	ok	ok
 ui	packages/ui/src/moxi_ui/testing/shell.py	its own: `HOME`, the XDG homes, `XDG_RUNTIME_DIR`, `TMPDIR` and `MOXI_HOME` all under	keep	HOME	HOME
+ui	packages/ui/src/moxi_ui/tunnel.py	upstream	name	environ	env
+ui	packages/ui/src/moxi_ui/tunnel.py	upstream	name	err	exc
 ui	packages/ui/tests/asgi_kit.py	(pkg / "web").mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/asgi_kit.py	gone.set()	keep	set	set
 ui	packages/ui/tests/asgi_kit.py	self._gone.set()	keep	set	set
 ui	packages/ui/tests/fixture/moxi_fixture/handlers.py	STATE.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/fixture/moxi_fixture/handlers.py	_append	name	out	fh
+ui	packages/ui/tests/fixture/moxi_fixture/handlers.py	_write	name	out	fh
+ui	packages/ui/tests/fixture/moxi_fixture/handlers.py	wait	name	out	fh
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	"mode": Field("string", required=False),	keep	required	required
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	"note": Field("string", required=False)},	keep	required	required
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	"pad": Field("string", required=False)},	keep	required	required
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	body={"by": Field("int", required=False),	keep	required	required
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	body={"by": Field("int", required=False)},	keep	required	required
 ui	packages/ui/tests/fixture/moxi_fixture/page.py	health=H + ":health",	keep	health	health
+ui	packages/ui/tests/fixture/moxi_fixture/page.py	Route("/api/events", "read", H + ":events", stream=True, gateway=True,	keep	stream=	stream=
 ui	packages/ui/tests/fixture_kit.py	flag.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/fixture_kit.py	site.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/fixture_kit.py	fail_check	kwonly	on	on
+ui	packages/ui/tests/fixture_kit.py	fail_start	kwonly	on	on
+ui	packages/ui/tests/fixture_kit.py	hold	kwonly	on	on
+ui	packages/ui/tests/fixture_kit.py	install	name	out	fh
 ui	packages/ui/tests/gateway_kit.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 ui	packages/ui/tests/gateway_kit.py	await send({"type": "http.response.body", "body": b"route"})	keep	fail	fail
 ui	packages/ui/tests/gateway_kit.py	await send({"type": "http.response.start", "status": 200, "headers": []})	keep	fail	fail
 ui	packages/ui/tests/gateway_kit.py	await send({"type": "http.response.start", "status": 404, "headers": []})	keep	fail	fail
 ui	packages/ui/tests/gateway_kit.py	self.runtime_dir.mkdir(mode=0o700, parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/gateway_kit.py	Authenticator._flags	kwonly	uv	uv
+ui	packages/ui/tests/gateway_kit.py	Authenticator._flags	kwonly	attested	attested
 ui	packages/ui/tests/shell_kit.py	(root / "net").mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/shell_kit.py	await send({"type": "http.response.body", "body": self.name.encode()})	keep	fail	fail
 ui	packages/ui/tests/shell_kit.py	await send({"type": "http.response.start", "status": 299, "headers": []})	keep	fail	fail
@@ -7066,6 +7247,8 @@ ui	packages/ui/tests/test_browser_push.py	expect(row).to_contain_text("The last 
 ui	packages/ui/tests/test_browser_push.py	expect(row).to_contain_text("the last 3 starts failed", timeout=5_000)	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_push.py	held = _in_thread(lambda: shell.session(timeout=30).get("/m/fixture/api/wait"))	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_push.py	waiting = _in_thread(lambda: shell.session(timeout=30).get("/m/fixture/api/summary"))	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_push.py	_hide	kwonly	hidden	hidden
+ui	packages/ui/tests/test_browser_push.py	_in_thread.run	name	err	exc
 ui	packages/ui/tests/test_browser_settings.py	["set", {"module": "fixture", "key": "limit", "value": "12"}],	keep	set	set
 ui	packages/ui/tests/test_browser_settings.py	["set", {"module": "fixture", "key": "rows", "add": "backup"}],	keep	set	set
 ui	packages/ui/tests/test_browser_settings.py	["set", {"module": "fixture", "key": "rows", "remove": "backup"}],	keep	set	set
@@ -7093,6 +7276,8 @@ ui	packages/ui/tests/test_browser_settings.py	expect(tags.locator("li.item")).to
 ui	packages/ui/tests/test_browser_settings.py	for name in ("greeting", "limit", "workers", "ratio", "folder"):	keep	folder	folder
 ui	packages/ui/tests/test_browser_settings.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/test_browser_settings.py	timeout=SETTINGS_MS)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	test_a_typing_slip_is_caught_before_any_request	name	folder	folder_control
+ui	packages/ui/tests/test_browser_settings.py	test_a_typing_slip_is_caught_before_any_request	name	folder_control	path_control
 ui	packages/ui/tests/test_browser_shell.py	.locator("[data-control=limit]")).to_be_attached(timeout=10_000)	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_shell.py	assert tones and set(tones) <= {"ok", "off", "warn", "fail"}	keep	set	set
 ui	packages/ui/tests/test_browser_shell.py	assert tops == sorted(set(tops)), "one name per line, in order"	keep	set	set
@@ -7105,19 +7290,36 @@ ui	packages/ui/tests/test_checks.py	assert set(value["rows"][0]) == set(page.CHE
 ui	packages/ui/tests/test_checks.py	doctor.go.set()	keep	set	set
 ui	packages/ui/tests/test_checks.py	state.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/test_cli.py	with files.lock(Layout("ui").runtime_dir(create=True) / "page.lock", timeout_s=0):	keep	create	create
+ui	packages/ui/tests/test_cli.py	-	name	test_on_windows_the_stored_environment_counts	test_on_windows_the_stored_env_counts
+ui	packages/ui/tests/test_cli.py	World.ensure	name	environ	env
+ui	packages/ui/tests/test_cli.py	task	kwonly	enabled	enabled
+ui	packages/ui/tests/test_cli.py	test_a_tagged_home_opens_through_its_own_socket	name	environ	env
+ui	packages/ui/tests/test_cli.py	test_off_linux_the_browser_gets_a_redirect_file_with_no_ticket	name	directory	redirect_dir
+ui	packages/ui/tests/test_cli.py	test_on_windows_a_tagged_homes_task_runs_with_its_home	name	environ	env
+ui	packages/ui/tests/test_cli.py	test_on_windows_the_stored_environment_counts	name	environ	env
+ui	packages/ui/tests/test_cli.py	monkeypatch.setattr(cli, "_stored_environment",	use	_stored_environment	_stored_env
+ui	packages/ui/tests/test_cli.py	monkeypatch.setattr(cli, "_stored_environment", lambda: {"Moxi_Ui_Home": moved})	use	_stored_environment	_stored_env
+ui	packages/ui/tests/test_cli.py	monkeypatch.setattr(cli, "_stored_environment", lambda: {})	use	_stored_environment	_stored_env
 ui	packages/ui/tests/test_confirm.py	assert set(rows["usage"]) == set(MODULES_SHAPE["modules"].items.items)	keep	set	set
 ui	packages/ui/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/test_doctor.py	return Layout("ui").runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_gateway_access.py	assert set(phone.repeat(10_000, "POST", "/api/signin/begin", {})) == {200}	keep	set	set
+ui	packages/ui/tests/test_gateway_access.py	assert phone.request("GET", "/m/ui/", cookie=False, navigate=True).status == 404	keep	cookie=	cookie=
 ui	packages/ui/tests/test_gateway_acts.py	admitted.set("s1")	keep	set	set
 ui	packages/ui/tests/test_gateway_acts.py	admitted.set(session)	keep	set	set
 ui	packages/ui/tests/test_gateway_acts.py	store.client.gate.set()	keep	set	set
+ui	packages/ui/tests/test_gateway_audit.py	_rows	name	folder	audit_dir
+ui	packages/ui/tests/test_gateway_audit.py	test_a_class_past_ten_rows_a_minute_becomes_one_summary	name	folder	audit_dir
+ui	packages/ui/tests/test_gateway_audit.py	test_a_day_file_past_two_mib_keeps_every_row_and_retention_deletes_old_days	name	folder	audit_dir
 ui	packages/ui/tests/test_gateway_bridge.py	release.set()	keep	set	set
+ui	packages/ui/tests/test_gateway_bridge.py	-	name	test_the_usual_test_environment_takes_no_hold	test_the_usual_test_env_takes_no_hold
 ui	packages/ui/tests/test_gateway_cli.py	assert world.words() == [["config", "set", "--", "ui", "gateway.enabled", "true"],	keep	set	set
 ui	packages/ui/tests/test_gateway_cli.py	assert world.words() == [["config", "set", "--", "ui", "gateway.enabled", "true"]]	keep	set	set
 ui	packages/ui/tests/test_gateway_cli.py	environ = {"HOME": str(tmp_path / "h"), "XDG_RUNTIME_DIR": str(tmp_path / "r"),	keep	HOME	HOME
 ui	packages/ui/tests/test_gateway_cli.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/test_gateway_cli.py	runtime = Layout("ui").runtime_dir(env, create=True)	keep	create	create
+ui	packages/ui/tests/test_gateway_cli.py	env	name	environ	shell_env
+ui	packages/ui/tests/test_gateway_cli.py	shell_env = {"HOME": str(tmp_path / "h"), "XDG_RUNTIME_DIR": str(tmp_path / "r"),	keep	HOME	HOME
 ui	packages/ui/tests/test_gateway_listener.py	Layout("ui").runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_gateway_listener.py	Layout("ui").runtime_dir(environ, create=True)	keep	create	create
 ui	packages/ui/tests/test_gateway_listener.py	assert _request(gw)[0] == 200 and read_acts(gw.runtime_dir)["reason"] == "record"	keep	record	record
@@ -7127,6 +7329,10 @@ ui	packages/ui/tests/test_gateway_listener.py	await send({"type": "http.response
 ui	packages/ui/tests/test_gateway_listener.py	environ = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r")}	keep	HOME	HOME
 ui	packages/ui/tests/test_gateway_listener.py	shell.gateway._held = None	keep	_held	_held
 ui	packages/ui/tests/test_gateway_listener.py	shell.gateway._held = object()	keep	_held	_held
+ui	packages/ui/tests/test_gateway_listener.py	-	name	test_a_shell_whose_environment_moves_its_runtime_dir_takes_no_hold	test_a_shell_whose_env_moves_its_runtime_dir_takes_no_hold
+ui	packages/ui/tests/test_gateway_listener.py	env	name	environ	shell_env
+ui	packages/ui/tests/test_gateway_listener.py	Layout("ui").runtime_dir(shell_env, create=True)	keep	create=	create=
+ui	packages/ui/tests/test_gateway_listener.py	shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r")}	keep	HOME	HOME
 ui	packages/ui/tests/test_gateway_pages.py	statuses = set()	keep	set	set
 ui	packages/ui/tests/test_gateway_phone.py	Layout("ui").runtime_dir(environ, create=True)	keep	create	create
 ui	packages/ui/tests/test_gateway_phone.py	assert phone.send("GET", "/m/fixture/api/read")[0] == 200	keep	fail	fail
@@ -7138,23 +7344,40 @@ ui	packages/ui/tests/test_gateway_phone.py	await send({"type": "http.response.bo
 ui	packages/ui/tests/test_gateway_phone.py	await send({"type": "http.response.start", "status": 200,	keep	fail	fail
 ui	packages/ui/tests/test_gateway_phone.py	environ = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r"),	keep	HOME	HOME
 ui	packages/ui/tests/test_gateway_phone.py	token = page._shell.set(shell)	keep	set	set
+ui	packages/ui/tests/test_gateway_phone.py	env	name	environ	shell_env
+ui	packages/ui/tests/test_gateway_phone.py	Layout("ui").runtime_dir(shell_env, create=True)	keep	create=	create=
+ui	packages/ui/tests/test_gateway_phone.py	shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r"),	keep	HOME	HOME
 ui	packages/ui/tests/test_gateway_pwa.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/test_gateway_pwa.py	answer = gate.get(path, headers=headers, cookie=cookie, key=key)	keep	cookie=	cookie=
+ui	packages/ui/tests/test_gateway_pwa.py	assert gate.get("/m/ui/", headers=_FORWARDED, cookie=False).status == 303	keep	cookie=	cookie=
 ui	packages/ui/tests/test_gateway_redact.py	assert all(not set(row) & audit_mod.FORBIDDEN for row in rows)	keep	set	set
 ui	packages/ui/tests/test_gateway_redact.py	assert set(state) == {"module", "state", "detail"} and state["module"] == "fixture"	keep	set	set
 ui	packages/ui/tests/test_gateway_redact.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 ui	packages/ui/tests/test_gateway_redact.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 ui	packages/ui/tests/test_gateway_redact.py	await send({"type": "http.response.start", "status": 204, "headers": []})	keep	fail	fail
 ui	packages/ui/tests/test_gateway_redact.py	await send({"type": "http.response.start", "status": status, "headers": headers})	keep	fail	fail
+ui	packages/ui/tests/test_gateway_redact.py	"credential": gate.phone.request("GET", "/m/fixture/api/rows", cookie=False).status,	keep	cookie=	cookie=
 ui	packages/ui/tests/test_gateway_rules.py	assert decide(on=True, kind="unix", endpoint=SOCK, address=sock, refused=True).reason == "record"	keep	record	record
 ui	packages/ui/tests/test_gateway_rules.py	assert err.value.directory == "/home"	keep	directory	directory
 ui	packages/ui/tests/test_gateway_rules.py	assert err.value.directory == "/tmp"	keep	directory	directory
 ui	packages/ui/tests/test_gateway_rules.py	assert err.value.directory == "/var"	keep	directory	directory
 ui	packages/ui/tests/test_gateway_rules.py	assert err.value.directory == where	keep	directory	directory
 ui	packages/ui/tests/test_gateway_rules.py	return {"HOME": str(tmp_path / "home"), "XDG_RUNTIME_DIR": str(tmp_path / "run")}	keep	HOME	HOME
+ui	packages/ui/tests/test_gateway_rules.py	-	name	test_a_directory_another_user_owns_or_can_write_is_refused_and_named	test_a_dir_another_user_owns_or_can_write_is_refused_and_named
+ui	packages/ui/tests/test_gateway_rules.py	-	name	test_on_windows_the_logon_tasks_stored_environment_counts	test_on_windows_the_logon_tasks_stored_env_counts
+ui	packages/ui/tests/test_gateway_rules.py	-	name	test_the_real_login_runtime_directory_passes	test_the_real_login_runtime_dir_passes
+ui	packages/ui/tests/test_gateway_rules.py	address	kwonly	retired	retired
+ui	packages/ui/tests/test_gateway_rules.py	assert err.value.directory == "/home"	use	.directory	.failed_dir
+ui	packages/ui/tests/test_gateway_rules.py	assert err.value.directory == "/tmp"	use	.directory	.failed_dir
+ui	packages/ui/tests/test_gateway_rules.py	assert err.value.directory == "/var"	use	.directory	.failed_dir
+ui	packages/ui/tests/test_gateway_rules.py	assert err.value.directory == where	use	.directory	.failed_dir
 ui	packages/ui/tests/test_listen.py	answer = shell.send("GET", "/m/fixture/api/summary", headers=[cookie, key, *FETCH],	keep	fail	fail
 ui	packages/ui/tests/test_loopback_api.py	assert set(api.__all__) == expected	keep	set	set
 ui	packages/ui/tests/test_loopback_api.py	expected = set().union(*SURFACE.values()) | {"gate_matrix"}	keep	set	set
 ui	packages/ui/tests/test_loopback_check.py	{"LOCALHOST", "Moxi.Localhost"}, set(),	keep	set	set
+ui	packages/ui/tests/test_loopback_check.py	br	kwonly	cookie	cookie
+ui	packages/ui/tests/test_loopback_closure.py	-	name	_environ	_env
+ui	packages/ui/tests/test_loopback_closure.py	test_a_page_server_imports_only_the_base_of_ui	name	err	stderr_fh
 ui	packages/ui/tests/test_loopback_confirmed.py	h.STATE["release"].set()	keep	set	set
 ui	packages/ui/tests/test_loopback_connect.py	Layout("demo").runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_loopback_connect.py	self.done.set()	keep	set	set
@@ -7166,16 +7389,27 @@ ui	packages/ui/tests/test_loopback_export.py	site.module("pgood", page=GOOD_PAGE
 ui	packages/ui/tests/test_loopback_export.py	site.module("pother", page="PAGE = {'routes': []}\n")	keep	page	page
 ui	packages/ui/tests/test_loopback_export.py	site.module("pprints", page=PRINTING_PAGE)	keep	page	page
 ui	packages/ui/tests/test_loopback_export.py	site.module("prefused", page=REFUSED_PAGE)	keep	page	page
+ui	packages/ui/tests/test_loopback_export.py	-	name	test_a_planted_moxi_ui_in_the_working_directory_is_never_imported	test_a_planted_moxi_ui_in_the_working_dir_is_never_imported
+ui	packages/ui/tests/test_loopback_export.py	_plant	name	directory	work_dir
+ui	packages/ui/tests/test_loopback_gateway_profile.py	req	kwonly	signed_in	signed_in
 ui	packages/ui/tests/test_loopback_headers.py	assert len(names) == len(set(names))	keep	set	set
 ui	packages/ui/tests/test_loopback_headers.py	assert set(headers.__all__) <= set(dir(headers))	keep	set	set
 ui	packages/ui/tests/test_loopback_headers.py	assert set(names) >= {name.lower().encode() for name, _ in SECURITY_HEADERS}	keep	set	set
 ui	packages/ui/tests/test_loopback_law_check.py	assert node.attr not in ("environ", "getenv", "monotonic", "time"), (	keep	environ	environ
 ui	packages/ui/tests/test_loopback_law_check.py	docstrings = set()	keep	set	set
+ui	packages/ui/tests/test_loopback_law_check.py	-	name	test_these_files_read_no_environment_and_hold_no_clock	test_these_files_read_no_env_and_hold_no_clock
 ui	packages/ui/tests/test_loopback_routes.py	assert set(routes) == {"/api/summary", "/api/refresh", "/api/events"}	keep	set	set
+ui	packages/ui/tests/test_loopback_routes.py	-	name	test_build_table_refuses_a_missing_directory_or_package	test_build_table_refuses_a_missing_dir_or_package
+ui	packages/ui/tests/test_loopback_routes.py	Table().add(*args)	use	*args	*args[:3], stream=args[3] if len(args) > 3 else False
 ui	packages/ui/tests/test_loopback_runner.py	done.set()	keep	set	set
 ui	packages/ui/tests/test_loopback_runner.py	runtime = Layout(MODULE).runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_loopback_runner.py	runtime.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/test_loopback_runner.py	-	name	test_a_planted_moxi_ui_in_the_working_directory_is_never_imported	test_a_planted_moxi_ui_in_the_working_dir_is_never_imported
+ui	packages/ui/tests/test_loopback_runner.py	Runner.__init__	name	environ	child_env
+ui	packages/ui/tests/test_loopback_runner.py	_plant	name	directory	work_dir
 ui	packages/ui/tests/test_loopback_runtime.py	return Layout(MODULE).runtime_dir(create=True)	keep	create	create
+ui	packages/ui/tests/test_loopback_runtime.py	-	name	test_read_refuses_a_directory_in_the_files_place	test_read_refuses_a_dir_in_the_files_place
+ui	packages/ui/tests/test_loopback_runtime.py	-	name	test_read_refuses_a_directory_open_to_others	test_read_refuses_a_dir_open_to_others
 ui	packages/ui/tests/test_loopback_serve.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 ui	packages/ui/tests/test_loopback_serve.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 ui	packages/ui/tests/test_loopback_serve.py	await send({"type": "http.response.start", "status": 200,	keep	fail	fail
@@ -7183,13 +7417,36 @@ ui	packages/ui/tests/test_loopback_serve.py	second_exit.set()	keep	set	set
 ui	packages/ui/tests/test_loopback_serve.py	self.loop.call_soon_threadsafe(self.should_exit.set)	keep	set	set
 ui	packages/ui/tests/test_loopback_serve.py	self.ready.set()	keep	set	set
 ui	packages/ui/tests/test_loopback_serve.py	should_exit.set()	keep	set	set
+ui	packages/ui/tests/test_loopback_serve.py	Proto.__init__	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	Served.__init__.thread	name	err	exc
+ui	packages/ui/tests/test_loopback_serve.py	test_a_raised_head_limit_lets_a_big_head_reach_the_app_and_refuses_a_bigger_one	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_a_second_serve_with_signals_off_leaves_the_first_ones_signal_handling	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_a_signal_sets_should_exit_and_serve_puts_the_old_handlers_back	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_after_the_decision_a_proof_is_answered_503_with_connection_close	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_after_the_decision_only_the_promised_request_is_handed_off	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_peer_gives_every_request_on_a_unix_connection_this_processs_uid	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_serve_answers_through_guard_and_prove_on_a_unix_socket	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_serve_awaits_drain_before_uvicorn_stops	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_serve_with_signals_off_installs_no_handler_and_puts_none_back	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_the_default_head_limit_refuses_300000_bytes	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_the_protocol_counts_each_request_in_the_step_that_hands_it_off	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_two_connections_at_once_each_see_only_their_own_peer	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	test_without_peer_the_scope_has_no_peer_key	name	directory	socket_dir
+ui	packages/ui/tests/test_loopback_serve.py	unix_listener	name	directory	socket_dir
 ui	packages/ui/tests/test_loopback_server.py	pages.STATE["release"].set()	keep	set	set
 ui	packages/ui/tests/test_loopback_server.py	pages.STATE["wait"].set()	keep	set	set
 ui	packages/ui/tests/test_loopback_transport.py	Layout("demo").runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_loopback_transport.py	directory = Layout("demo").runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_loopback_transport.py	run_dir = Layout("demo").runtime_dir(create=True)	keep	create	create
+ui	packages/ui/tests/test_loopback_transport.py	listener	kwonly	listen	listen
+ui	packages/ui/tests/test_loopback_transport.py	test_bind_unix_refuses_a_dir_open_to_others	name	directory	runtime_dir
+ui	packages/ui/tests/test_loopback_transport.py	test_bind_unix_refuses_a_path_that_is_not_a_socket	name	directory	runtime_dir
+ui	packages/ui/tests/test_loopback_transport.py	test_windows_restart_on_the_same_fixed_port_is_recorded	name	err	exc
+ui	packages/ui/tests/test_loopback_transport.py	runtime_dir = Layout("demo").runtime_dir(create=True)	keep	create=	create=
 ui	packages/ui/tests/test_loopback_wire.py	self.loop.call_soon_threadsafe(self.should_exit.set)	keep	set	set
 ui	packages/ui/tests/test_loopback_wire.py	self.ready.set()	keep	set	set
+ui	packages/ui/tests/test_loopback_wire.py	Wire.__init__.run	name	err	exc
+ui	packages/ui/tests/test_loopback_wire.py	wire	name	directory	socket_dir
 ui	packages/ui/tests/test_page.py	assert LOG_FILE_VARIABLE not in env and env == starters.child_env()	use	LOG_FILE_VARIABLE	LOG_FILE_ENV
 ui	packages/ui/tests/test_page.py	assert set(row) == set(page.SERVER_ROW.items), "the row keeps its declared shape"	keep	set	set
 ui	packages/ui/tests/test_page.py	from moxi_ui.starter import LOG_FILE_VARIABLE, Starters	use	LOG_FILE_VARIABLE	LOG_FILE_ENV
@@ -7220,6 +7477,8 @@ ui	packages/ui/tests/test_proxy.py	writer.write(conn.send(h11.EndOfMessage()))	k
 ui	packages/ui/tests/test_proxy.py	writer.write(conn.send(h11.Response(status_code=200,	keep	fail	fail
 ui	packages/ui/tests/test_proxy.py	writer.write(conn.send(h11.Response(status_code=200, headers=[	keep	fail	fail
 ui	packages/ui/tests/test_proxy.py	writer.write(conn.send(h11.Response(status_code=status, headers=pairs)))	keep	fail	fail
+ui	packages/ui/tests/test_proxy.py	"pxfake", "GET", "/api/events?topics=tick", stream=True))	keep	stream=	stream=
+ui	packages/ui/tests/test_proxy.py	).request("pxfake", "GET", "/api/events", stream=True)	keep	stream=	stream=
 ui	packages/ui/tests/test_push.py	(package / "page.py").write_text(textwrap.dedent(PAGE).replace("NAME", name))	keep	NAME	NAME
 ui	packages/ui/tests/test_push.py	assert set(mounts) == set(MODULES)	keep	set	set
 ui	packages/ui/tests/test_push.py	assert set(push._upstreams) == {"fx"}	keep	set	set
@@ -7246,6 +7505,7 @@ ui	packages/ui/tests/test_serve.py	Layout("ui").runtime_dir(create=True)	keep	cr
 ui	packages/ui/tests/test_serve.py	lock = Layout("ui").runtime_dir(create=True) / "page.lock"	keep	create	create
 ui	packages/ui/tests/test_serve.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/test_serve.py	release.set()	keep	set	set
+ui	packages/ui/tests/test_serve.py	_inherited	kwonly	inherited	inherited
 ui	packages/ui/tests/test_session.py	again = shell.send("POST", "/m/ui/api/signin", headers=ACT, body=body)	keep	fail	fail
 ui	packages/ui/tests/test_session.py	answer = shell.send("GET", "/", headers=[cookie, *FETCH])	keep	fail	fail
 ui	packages/ui/tests/test_session.py	answer = shell.send("GET", "/api/prove", headers=[(b"x-moxi-nonce", NONCE.encode())])	keep	fail	fail
@@ -7341,6 +7601,8 @@ ui	packages/ui/tests/test_starter.py	raise subprocess.TimeoutExpired(argv, kwarg
 ui	packages/ui/tests/test_starter.py	runtime = Layout(module).runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_starter.py	self._held = threading.Event()	keep	_held	_held
 ui	packages/ui/tests/test_starter.py	self._held.set()	keep	set	set
+ui	packages/ui/tests/test_starter.py	-	name	test_every_child_runs_as_python_P_m_from_the_shells_runtime_dir	test_every_child_runs_as_python_p_m_from_the_shells_runtime_dir
+ui	packages/ui/tests/test_starter.py	stream = old.use(stream=True, close=lambda: cut.append(True))	keep	stream=	stream=
 ui	packages/ui/tests/test_terminal.py	assert found.api.check(store) is None	keep	ok	ok
 ui	packages/ui/tests/test_terminal.py	env.get("HOME")	keep	HOME	HOME
 ui	packages/ui/tests/test_terminal.py	folder.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -7349,7 +7611,12 @@ ui	packages/ui/tests/test_terminal.py	monkeypatch.setattr(paths, "_account_home"
 ui	packages/ui/tests/test_terminal.py	record.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/test_terminal.py	write_record({**os.environ, "HOME": ""})	keep	HOME	HOME
 ui	packages/ui/tests/test_terminal.py	write_record({**os.environ, "HOME": "ada"})	keep	HOME	HOME
+ui	packages/ui/tests/test_terminal.py	-	name	test_iterating_the_environment_is_refused	test_iterating_the_env_is_refused
+ui	packages/ui/tests/test_terminal.py	at	name	folder	test_dir
+ui	packages/ui/tests/test_terminal.py	tool	name	folder	bin_dir
+ui	packages/ui/tests/test_terminal.py	bin_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok=	exist_ok=
 ui	packages/ui/tests/test_testing.py	for key in ("HOME", "MOXI_HOME", "XDG_STATE_HOME", "TMPDIR", "PYTHONPATH",	keep	HOME	HOME
+ui	packages/ui/tests/test_testing.py	test_a_shells_env_reaches_its_page_servers	name	environ	proc_env
 ui	packages/ui/tests/test_web.py	answer = shell.send("GET", "/m/fixture/some/route", headers=[cookie, *NAVIGATE])	keep	fail	fail
 ui	packages/ui/tests/test_web.py	answer = shell.send("GET", "/m/fixture/some/route", headers=list(NAVIGATE))	keep	fail	fail
 ui	packages/ui/tests/test_web.py	assert set(re.findall(r'from"([^"]+)"', text)) == {"/m/ui/client.js"}	keep	set	set
@@ -7467,6 +7734,7 @@ usage	packages/usage/src/moxi_usage/page.py	_MAYBE_PATH = lb.Out("string", mark=
 usage	packages/usage/src/moxi_usage/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
 usage	packages/usage/src/moxi_usage/page.py	_PRICE = lb.Out("float", nullable=True)	keep	nullable=	nullable=
 usage	packages/usage/src/moxi_usage/page.py	_WHEN = lb.Out("float", nullable=True)	keep	nullable=	nullable=
+usage	packages/usage/src/moxi_usage/page.py	lb.Route("/api/events", "read", "moxi_usage.pagehandlers:events", stream=True,	keep	stream=	stream=
 usage	packages/usage/src/moxi_usage/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/pagehandlers.py	for model, provider in zip(ids, providers, strict=True):	keep	strict	strict
 usage	packages/usage/src/moxi_usage/pagehandlers.py	_Feed._poll	name	err	exc

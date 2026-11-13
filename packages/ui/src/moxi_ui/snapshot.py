@@ -318,8 +318,8 @@ def read_modules(*, cwd: str | os.PathLike, env: Mapping[str, str] | None = None
         done = run(modules_argv(), timeout_s=timeout, cwd=str(cwd), env=env)
     except subprocess.TimeoutExpired:
         return None, f"moxi modules ran past {timeout:g} s"
-    except OSError as err:
-        return None, f"moxi modules could not run: {err}"
+    except OSError as exc:
+        return None, f"moxi modules could not run: {exc}"
     try:
         data = json.loads(done.stdout)
         listed = data["modules"]
@@ -349,9 +349,9 @@ def watched_dirs(env: Mapping[str, str] | None = None) -> list[str]:
 
 def _mtimes(dirs: Iterable[str]) -> tuple[float | None, ...]:
     out = []
-    for directory in dirs:
+    for watched_dir in dirs:
         try:
-            out.append(os.stat(directory).st_mtime)
+            out.append(os.stat(watched_dir).st_mtime)
         except OSError:
             out.append(None)
     return tuple(out)

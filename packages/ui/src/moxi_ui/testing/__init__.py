@@ -189,12 +189,12 @@ def ui_browser(request: pytest.FixtureRequest) -> Iterator[Any]:
     try:
         try:
             browser = getattr(playwright, name).launch()
-        except Error as err:
+        except Error as exc:
             if name == "chromium":
                 raise
-            said = next((line.strip() for line in str(err).splitlines()
+            said = next((line.strip() for line in str(exc).splitlines()
                          if "error" in line.lower() and "launch" not in line.lower()),
-                        str(err).splitlines()[0])
+                        str(exc).splitlines()[0])
             pytest.skip(f"{name} can't start on this machine: {said}")
         try:
             yield browser

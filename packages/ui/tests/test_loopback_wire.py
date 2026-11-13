@@ -51,8 +51,8 @@ class Wire:
         def run():
             try:
                 asyncio.run(main())
-            except BaseException as err:  # noqa: BLE001 - raised again at the stop
-                self.error = err
+            except BaseException as exc:  # noqa: BLE001 - raised again at the stop
+                self.error = exc
                 self.ready.set()
 
         self.thread = threading.Thread(target=run, daemon=True)
@@ -76,8 +76,8 @@ class Wire:
 
 @pytest.fixture(scope="module")
 def wire(page_package):
-    with short_dir() as directory:
-        served = Wire(directory / "page.sock")
+    with short_dir() as socket_dir:
+        served = Wire(socket_dir / "page.sock")
         try:
             yield served
         finally:

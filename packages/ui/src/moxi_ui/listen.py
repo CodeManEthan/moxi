@@ -78,14 +78,14 @@ def bind(port: int) -> Listeners:
     is taken, or the bind's own `OSError`."""
     try:
         bound = bind_browser(port)
-    except OSError as err:
-        if err.errno in _IN_USE or getattr(err, "winerror", None) in (10013, 10048):
-            raise PortInUse(port) from err
+    except OSError as exc:
+        if exc.errno in _IN_USE or getattr(exc, "winerror", None) in (10013, 10048):
+            raise PortInUse(port) from exc
         raise
     return Listeners(bound.sockets, bound.port, bound.names, inherited=False)
 
 
-def take(port: int | Callable[[], int], *, environ: MutableMapping[str, str] | None = None,
+def take(port: int | Callable[[], int], *, env: MutableMapping[str, str] | None = None,
          activate: Activate | None = None, platform: str | None = None) -> Listeners:
     """The shell's listeners: the sockets a socket unit passed, else its own on `port`.
 
@@ -98,9 +98,9 @@ def take(port: int | Callable[[], int], *, environ: MutableMapping[str, str] | N
     key; a process launchd did not start gets none. Inherited sockets that are not the
     shell's loopback listeners raise `NotLoopback`. Without any, it is `bind(port)`.
     """
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     platform = sys.platform if platform is None else platform
-    passed = _from_systemd(environ)
+    passed = _from_systemd(env)
     fd_names: tuple[str, ...] = ()
     if passed is not None:
         sockets, fd_names = passed
@@ -120,15 +120,15 @@ def take(port: int | Callable[[], int], *, environ: MutableMapping[str, str] | N
     return Listeners(tuple(sockets), found, names, inherited=True, fd_names=fd_names)
 
 
-def _from_systemd(environ: MutableMapping[str, str]
+def _from_systemd(env: MutableMapping[str, str]
                   ) -> tuple[list[socket.socket], tuple[str, ...]] | None:
     """The sockets systemd passed this process and their names, or None."""
-    pid, count = environ.get("LISTEN_PID"), environ.get("LISTEN_FDS")
+    pid, count = env.get("LISTEN_PID"), env.get("LISTEN_FDS")
     if pid is None or count is None:
         return None
-    named = environ.get("LISTEN_FDNAMES")
+    named = env.get("LISTEN_FDNAMES")
     for name in _SYSTEMD_VARIABLES:
-        environ.pop(name, None)
+        env.pop(name, None)
     if pid != str(os.getpid()) or not count.isdigit() or int(count) < 1:
         return None
     total = int(count)
@@ -167,10 +167,10 @@ def _wrap(fds) -> list[socket.socket]:
             sock = socket.socket(fileno=fd)
             sockets.append(sock)
             sock.set_inheritable(False)
-    except OSError as err:
+    except OSError as exc:
         for sock in sockets:
             sock.close()
-        raise NotLoopback(f"a passed socket cannot be read: {err}") from None
+        raise NotLoopback(f"a passed socket cannot be read: {exc}") from None
     return sockets
 
 

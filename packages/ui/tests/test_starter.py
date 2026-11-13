@@ -174,7 +174,7 @@ async def get(conn: Conn, info, path: str) -> tuple[int, bytes]:
 # --- no spawn ---------------------------------------------------------------------------
 
 
-def test_every_child_runs_as_python_P_m_from_the_shells_runtime_dir(shell_dirs, monkeypatch):
+def test_every_child_runs_as_python_p_m_from_the_shells_runtime_dir(shell_dirs, monkeypatch):
     monkeypatch.setenv("MOXI_LOG_FILE", "/elsewhere/shell.log")
     seen = []
 

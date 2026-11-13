@@ -115,7 +115,7 @@ def test_a_port_another_program_takes_before_the_shell_binds_it_gets_another(
             shell.stop()
 
 
-def test_the_usual_test_environment_takes_no_hold(tmp_path_factory, fixture_site):
+def test_the_usual_test_env_takes_no_hold(tmp_path_factory, fixture_site):
     home = tmp_path_factory.mktemp("usual")
     shell = phone_kit.gateway_shell(home, fixture_site, start=False)
     shell.env = shell_env(home, [fixture_site])  # TestShell's usual environment

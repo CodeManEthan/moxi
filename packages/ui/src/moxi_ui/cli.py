@@ -173,7 +173,7 @@ def _open_browser(url: str) -> bool:
     return webbrowser.open(url)
 
 
-def _stored_environment() -> dict[str, str]:
+def _stored_env() -> dict[str, str]:
     """The user's stored environment on Windows (`HKCU\\Environment`), which a logon task
     starts with."""
     import winreg
@@ -208,11 +208,11 @@ def layout() -> Layout:
 def lock_held() -> bool:
     """Whether a shell of this user is running or starting: one try at `page.lock`,
     released at once. No pid or clock is trusted."""
-    directory = layout().runtime_dir()
-    if not directory.is_dir():
+    runtime_dir = layout().runtime_dir()
+    if not runtime_dir.is_dir():
         return False
     try:
-        with files.lock(directory / LOCK_FILE, timeout_s=0):
+        with files.lock(runtime_dir / LOCK_FILE, timeout_s=0):
             return False
     except files.LockTimeout:
         return True
@@ -332,21 +332,21 @@ def task_row(rows: Sequence[Any]) -> Any | None:
     return row
 
 
-def locator_problem(environ: Mapping[str, str], unit_environ: Mapping[str, str]) -> list[str]:
+def locator_problem(env: Mapping[str, str], unit_env: Mapping[str, str]) -> list[str]:
     """The locator variables whose values differ between `environ` and the environment a
     unit's shell starts with, when the runtime dir they give differs; else []. Two
     spellings of one folder (a relative path, a link) are one runtime dir."""
     here = layout()
-    if _same_dir(here.runtime_dir(environ), here.runtime_dir(unit_environ)):
+    if _same_dir(here.runtime_dir(env), here.runtime_dir(unit_env)):
         return []
-    return [name for name in here.locators() if environ.get(name) != unit_environ.get(name)]
+    return [name for name in here.locators() if env.get(name) != unit_env.get(name)]
 
 
 def _same_dir(one: Path, other: Path) -> bool:
     return os.path.realpath(one) == os.path.realpath(other)
 
 
-def _unit_environ(environ: Mapping[str, str], stored: Mapping[str, str] | None) -> dict[str, str]:
+def _unit_env(env: Mapping[str, str], stored: Mapping[str, str] | None) -> dict[str, str]:
     """The environment the unit's shell starts with: `environ` less the locators, then on
     Windows the user's stored environment's locators (`stored`), then the variables the
     core writes the ui's units with (`moxi.units.unit_env`), which a tagged home's
@@ -354,28 +354,28 @@ def _unit_environ(environ: Mapping[str, str], stored: Mapping[str, str] | None) 
     from moxi import units
 
     names = set(layout().locators())
-    out = {key: value for key, value in environ.items() if key not in names}
+    out = {key: value for key, value in env.items() if key not in names}
     if stored is not None:
         # A logon task starts with the user's stored environment, so its locators count.
         folded = {key.upper(): value for key, value in stored.items()}
         for name in names:
             if name.upper() in folded:
                 out[name] = folded[name.upper()]
-    out.update(units.unit_env(MODULE, environ))
+    out.update(units.unit_env(MODULE, env))
     return out
 
 
-def _check_locators(rows: Sequence[Any], environ: Mapping[str, str]) -> None:
+def _check_locators(rows: Sequence[Any], env: Mapping[str, str]) -> None:
     sock, task = socket_row(rows), task_row(rows)
     if sock is None and task is None:
         return
     stored = None
     if task is not None:
         try:
-            stored = _stored_environment()
+            stored = _stored_env()
         except OSError:
             stored = {}
-    named = locator_problem(environ, _unit_environ(environ, stored))
+    named = locator_problem(env, _unit_env(env, stored))
     if not named:
         return
     variables = ", ".join(named)
@@ -475,15 +475,15 @@ def _check_written_port(port: int) -> None:
         raise Refused(f"the socket listens on {written}; run `moxi install ui`")
 
 
-def ensure_shell(port: int, *, environ: Mapping[str, str] | None = None,
+def ensure_shell(port: int, *, env: Mapping[str, str] | None = None,
                  say: Callable[[str], Any] = print) -> RuntimeInfo | None:
     """Make sure a shell of this user holds the port. Returns the shell's runtime info, or
     None when this user's socket holds the port and no shell runs yet. Raises `Refused`."""
     started = _clock()
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     read = _units_status()
     rows = read or []
-    _check_locators(rows, environ)
+    _check_locators(rows, env)
 
     state, info = probe()
     if state == "up":
@@ -534,8 +534,8 @@ def ensure_shell(port: int, *, environ: Mapping[str, str] | None = None,
         else:
             try:
                 acted = _units_start()
-            except Exception as err:  # noqa: BLE001 - any failure takes the detached start
-                acted, reason = [], str(err)
+            except Exception as exc:  # noqa: BLE001 - any failure takes the detached start
+                acted, reason = [], str(exc)
             else:
                 reason = "; ".join(line for a in acted for line in a.lines) or "no detail"
             if acted and all(a.ok for a in acted):
@@ -554,14 +554,14 @@ def ensure_shell(port: int, *, environ: Mapping[str, str] | None = None,
     return found
 
 
-def _sweep_redirects(directory: Path) -> None:
+def _sweep_redirects(redirect_dir: Path) -> None:
     now = _clock()
     try:
-        names = os.listdir(directory)
+        names = os.listdir(redirect_dir)
     except OSError:
         return
     for name in names:
-        path = directory / name
+        path = redirect_dir / name
         try:
             if now - path.stat().st_mtime > REDIRECT_AGE:
                 path.unlink()
@@ -577,10 +577,10 @@ _REDIRECT = ('<!doctype html>\n<html><head><meta charset="utf-8">'
 def write_redirect(url: str) -> Path:
     """A page in a user-only directory that sends the browser to `url`, for systems where
     the URL must not appear in any process's argv. Old pages there are swept first."""
-    directory = layout().state_dir() / "open"
-    files.private_dir(directory)
-    _sweep_redirects(directory)
-    path = directory / f"{secrets.token_hex(8)}.html"
+    redirect_dir = layout().state_dir() / "open"
+    files.private_dir(redirect_dir)
+    _sweep_redirects(redirect_dir)
+    path = redirect_dir / f"{secrets.token_hex(8)}.html"
     files.atomic_write(path, _REDIRECT.format(url=url), mode=0o600)
     return path
 
@@ -776,12 +776,12 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi ui") -> int:
                 "signout": cmd_signout, "gateway": cmd_gateway}
     try:
         return handlers[args.verb](args, say)
-    except Refused as err:
-        print(f"{prog}: {err}", file=sys.stderr)
-        return err.code
+    except Refused as exc:
+        print(f"{prog}: {exc}", file=sys.stderr)
+        return exc.code
     except NotOurServer:
         print(f"{prog}: {_held_text(None)}", file=sys.stderr)
         return 1
-    except (ValueError, ConfigError) as err:
-        print(f"{prog}: {err}", file=sys.stderr)
+    except (ValueError, ConfigError) as exc:
+        print(f"{prog}: {exc}", file=sys.stderr)
         return 1

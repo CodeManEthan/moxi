@@ -121,11 +121,11 @@ class StartFailed(Exception):
     child's stderr.
     """
 
-    def __init__(self, module: str, reason: str, *, exit: int | None, log: str):
+    def __init__(self, module: str, reason: str, *, exit_code: int | None, log: str):
         super().__init__(f"{module}: {reason}")
         self.module = module
         self.reason = reason
-        self.exit = exit
+        self.exit = exit_code
         self.log = log
 
     def body(self) -> dict[str, Any]:
@@ -474,8 +474,8 @@ def read_servers(path: str | os.PathLike) -> dict[str, dict[str, Any]]:
     """The per-module records of a `servers.json`, as written; an empty mapping for a
     file that is missing or doesn't read. Never raises."""
     try:
-        with open(path, "rb") as stream:
-            data = json.loads(stream.read(1024 * 1024))
+        with open(path, "rb") as fh:
+            data = json.loads(fh.read(1024 * 1024))
         modules = data.get("modules") if data.get("format") == SERVERS_FORMAT else None
         if not isinstance(modules, dict):
             return {}
@@ -640,8 +640,8 @@ class Starter:
                 drain = self.drain()
                 if drain is not None:
                     await asyncio.shield(drain)
-        except StartFailed as failure:
-            self._failed(failure)
+        except StartFailed as start_exc:
+            self._failed(start_exc)
             raise
         finally:
             self._starting = None
@@ -695,8 +695,8 @@ class Starter:
             popen = self._pool.spawn(argv, lifeline="stdin", stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, cwd=str(self._pool.cwd),
                                      env=self._pool.child_env())
-        except OSError as err:
-            raise self._failure_of(f"the page server could not be started: {err}",
+        except OSError as exc:
+            raise self._failure_of(f"the page server could not be started: {exc}",
                                    None) from None
         child = Child(self.module, popen, loop, self._on_exit)
         # Kept: every child still running, and the newest, for its stderr's tail.
@@ -746,8 +746,8 @@ class Starter:
                 try:
                     reader, writer = await open_connection(
                         info, timeout=max(min(HELD_PROOF_WAIT, deadline - loop.time()), 0.5))
-                except (NotOurServer, OSError, TimeoutError) as err:
-                    reason = f"another server holds the lock and fails its proof ({err})"
+                except (NotOurServer, OSError, TimeoutError) as exc:
+                    reason = f"another server holds the lock and fails its proof ({exc})"
                 else:
                     handoff = Conn(reader, writer, time.monotonic())
                     server = Server(self.module, info, mine, started=self._pool.clock(),
@@ -764,11 +764,11 @@ class Starter:
         if retry:
             _log.info("%s: %s; starting once more", self.module, reason)
             return None
-        raise StartFailed(self.module, reason, exit=LOCK_HELD, log=self._pool.log)
+        raise StartFailed(self.module, reason, exit_code=LOCK_HELD, log=self._pool.log)
 
     def _failure_of(self, reason: str, code: int | None, *, killed: bool = False) -> StartFailed:
         # A child the starter killed reports no exit code of its own.
-        return StartFailed(self.module, reason, exit=None if killed else code,
+        return StartFailed(self.module, reason, exit_code=None if killed else code,
                            log=self._pool.log)
 
     def _started(self, server: Server) -> None:
@@ -1072,8 +1072,8 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
                 found.errors.update(one.errors)
             return found
         return Exports(errors={m: f"the export command ran past {timeout:g} s" for m in modules})
-    except OSError as err:
-        return Exports(errors={m: f"the export command could not run: {err}" for m in modules})
+    except OSError as exc:
+        return Exports(errors={m: f"the export command could not run: {exc}" for m in modules})
     try:
         data = json.loads(done.stdout)
         if not isinstance(data, dict):
@@ -1092,8 +1092,8 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
             export = entry.get("export")
             try:
                 Table().mount(f"/m/{module}", export)
-            except (ValueError, TypeError) as err:
-                found.errors[module] = f"its export is refused: {err}"
+            except (ValueError, TypeError) as exc:
+                found.errors[module] = f"its export is refused: {exc}"
             else:
                 found.mounts[module] = export
     return found

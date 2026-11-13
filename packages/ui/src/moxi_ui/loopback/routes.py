@@ -583,7 +583,8 @@ class Table:
             new[key] = entry
         self._entries.update(new)
 
-    def add(self, method: str, raw_path: str, kind: str = "builtin", stream: bool = False) -> Entry:
+    def add(self, method: str, raw_path: str, kind: str = "builtin", *,
+            stream: bool = False) -> Entry:
         """Add one literal entry and return it."""
         entry = Entry(method, raw_path, kind, stream)
         self._put([entry])
@@ -645,8 +646,8 @@ def list_assets(page: Page) -> tuple[str, ...]:
         raise PageError("a page with assets needs its package; pass package= to Page")
     try:
         root = importlib.resources.files(page.package).joinpath(page.assets)
-    except (ImportError, TypeError, ValueError) as err:
-        raise PageError(f"the assets package {page.package} cannot be read: {err}") from None
+    except (ImportError, TypeError, ValueError) as exc:
+        raise PageError(f"the assets package {page.package} cannot be read: {exc}") from None
     if not root.is_dir():
         raise PageError(f"the asset directory {page.assets} is not in {page.package}")
     names = []
@@ -689,8 +690,8 @@ def build_table(page: Page) -> tuple[Table, tuple[str, ...]]:
     table = Table()
     try:
         table._put(entries)
-    except ValueError as err:
-        raise PageError(f"an asset collides with a route: {err}") from None
+    except ValueError as exc:
+        raise PageError(f"an asset collides with a route: {exc}") from None
     return table, names
 
 
@@ -850,8 +851,8 @@ def parse_body(route: Route, raw: bytes) -> dict[str, Any]:
     try:
         data = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_repeats,
                           parse_constant=_no_constant)
-    except (UnicodeDecodeError, ValueError) as err:
-        if isinstance(err, BadRequest):
+    except (UnicodeDecodeError, ValueError) as exc:
+        if isinstance(exc, BadRequest):
             raise
         raise BadRequest(None, "the body is not JSON") from None
     if not isinstance(data, dict):
@@ -934,10 +935,11 @@ def project(
     nullable raises `ProjectionError` whether strict or not. A declared nullable value
     that is `null` is kept as `null`. A declared key the value lacks stays absent.
     """
-    return _cut(value, shape, "", strict, dropped)
+    return _cut(value, shape, "", strict=strict, dropped=dropped)
 
 
-def _cut(value: Any, shape: Out, path: str, strict: bool, dropped: Callable[[str], None] | None) -> Any:
+def _cut(value: Any, shape: Out, path: str, *, strict: bool,
+         dropped: Callable[[str], None] | None) -> Any:
     if value is None:
         if shape.nullable:
             return None
@@ -954,7 +956,7 @@ def _cut(value: Any, shape: Out, path: str, strict: bool, dropped: Callable[[str
     elif kind == "list":
         if not isinstance(value, (list, tuple)):
             raise ProjectionError(path, "not a list")
-        return [_cut(sub, shape.items, _join(path, str(n)), strict, dropped)
+        return [_cut(sub, shape.items, _join(path, str(n)), strict=strict, dropped=dropped)
                 for n, sub in enumerate(value)]
     else:
         if not isinstance(value, Mapping):
@@ -969,7 +971,7 @@ def _cut(value: Any, shape: Out, path: str, strict: bool, dropped: Callable[[str
                 if dropped is not None:
                     dropped(where)
                 continue
-            out[key] = _cut(sub, declared, where, strict, dropped)
+            out[key] = _cut(sub, declared, where, strict=strict, dropped=dropped)
         return out
     if not ok:
         raise ProjectionError(path, f"not a {'finite ' if kind == 'float' else ''}{kind}")

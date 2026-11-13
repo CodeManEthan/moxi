@@ -272,7 +272,7 @@ def test_add_find_and_entry_kinds():
 ])
 def test_add_refuses_a_bad_entry(args):
     with pytest.raises(ValueError):
-        Table().add(*args)
+        Table().add(*args[:3], stream=args[3] if len(args) > 3 else False)
 
 
 def test_a_frozen_table_refuses_add_and_mount():
@@ -435,7 +435,7 @@ def test_build_table_refuses_an_asset_entry_that_is_not_a_file(make_package, tmp
         export(page)
 
 
-def test_build_table_refuses_a_missing_directory_or_package(make_package):
+def test_build_table_refuses_a_missing_dir_or_package(make_package):
     package = make_package("pagepkg_missing", [])
     with pytest.raises(PageError):
         list_assets(Page(routes=(), assets="static", package=package))

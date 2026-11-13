@@ -153,7 +153,7 @@ class Listener:
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(8)
-        self.sock.setblocking(False)
+        self.sock.setblocking(False)  # noqa: FBT003 -- socket API requires a positional bool
         self.port = self.sock.getsockname()[1]
 
     def connects(self):

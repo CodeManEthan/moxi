@@ -129,23 +129,27 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
     anchor = terminal.anchor_set(here_env, fold=windows)
     try:
         record = paths.terminal_record()
-    except paths.NoAnchor as no:
-        return _with_anchor(no_place(no.cause, no.step, page=for_page), anchor, for_page)
+    except paths.NoAnchor as anchor_exc:
+        return _with_anchor(
+            no_place(anchor_exc.cause, anchor_exc.step, page=for_page),
+            anchor=anchor,
+            page=for_page,
+        )
     outcome = terminal.read(record)
     if isinstance(outcome, terminal.NoRecord):
-        return _with_anchor(no_record(str(record), page=for_page), anchor, for_page)
+        return _with_anchor(no_record(str(record), page=for_page), anchor=anchor, page=for_page)
     if isinstance(outcome, terminal.Unreadable):
-        return _with_anchor(unreadable(str(record), _error(outcome.exc), page=for_page),
-                            anchor, for_page)
+        return _with_anchor(unreadable(str(record), _error(outcome.error), page=for_page),
+                            anchor=anchor, page=for_page)
     if isinstance(outcome, terminal.NewerFormat):
         return _with_anchor(newer(str(record), outcome.format, outcome.moxi,
-                                  outcome.reader, page=for_page), anchor, for_page)
+                                  outcome.reader, page=for_page), anchor=anchor, page=for_page)
     there_env = Noting(outcome.env, windows=windows)
     here = Noting(here_env, windows=windows)
     then = _resolve(places, there_env)
     now = _resolve(places, here)
     for env in (there_env, here):
-        _refuse_outside(env, windows)
+        _refuse_outside(env, windows=windows)
     problems: list[str] = []
     givers: set[str] = set()
     for label in dict.fromkeys([*then, *now]):
@@ -158,14 +162,14 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
             continue
         relative = False
         for side, path, env in ((True, mine, here), (False, there, there_env)):
-            if not _absolute(path, windows):
+            if not _absolute(path, windows=windows):
                 relative = True
-                name = _giver(path, env, windows)
+                name = _giver(path, env, windows=windows)
                 if name is not None:
                     givers.add(name)
-                problems.append(not_full(label, side, name,
-                                         None if name is None else env.value(name)))
-        if not relative and _norm(mine, windows) != _norm(there, windows):
+                problems.append(not_full(label, here=side, name=name,
+                                         value=None if name is None else env.value(name)))
+        if not relative and _norm(mine, windows=windows) != _norm(there, windows=windows):
             problems.append(differs(label, mine, there))
     read = list(dict.fromkeys([*there_env.read, *here.read]))
     missing = []
@@ -175,8 +179,8 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
             problems.append(program_missing(name, why))
     if not problems:
         return None
-    sets, takes = _fix(read, there_env, here, givers, missing, windows)
-    return _with_anchor(fix(problems, sets, takes, page=for_page), anchor, for_page)
+    sets, takes = _fix(read, there_env, here, givers, missing, windows=windows)
+    return _with_anchor(fix(problems, sets, takes, page=for_page), anchor=anchor, page=for_page)
 
 
 # -- the comparison --------------------------------------------------------------------------
@@ -186,7 +190,7 @@ def _resolve(places: Places, env: Noting) -> dict[str, str]:
     return {str(label): os.fspath(path) for label, path in found.items()}
 
 
-def _refuse_outside(env: Noting, windows: bool) -> None:
+def _refuse_outside(env: Noting, *, windows: bool) -> None:
     from moxi import terminal
 
     outside = [name for name in env.read if not terminal.in_set(name, fold=windows)]
@@ -196,14 +200,14 @@ def _refuse_outside(env: Noting, windows: bool) -> None:
                          "only the variables that place folders or find programs")
 
 
-def _absolute(path: str, windows: bool) -> bool:
+def _absolute(path: str, *, windows: bool) -> bool:
     import ntpath
     import posixpath
 
     return (ntpath if windows else posixpath).isabs(path)
 
 
-def _norm(path: str, windows: bool) -> str:
+def _norm(path: str, *, windows: bool) -> str:
     import ntpath
     import posixpath
 
@@ -211,12 +215,12 @@ def _norm(path: str, windows: bool) -> str:
     return flavour.normcase(flavour.abspath(path))
 
 
-def _giver(path: str, env: Noting, windows: bool) -> str | None:
+def _giver(path: str, env: Noting, *, windows: bool) -> str | None:
     """The variable read under `env` whose value gave the relative `path`: the first read
     whose value isn't a full path and starts `path`, else the first read whose value isn't
     a full path, else None."""
     loose = [name for name in env.read
-             if (value := env.value(name)) and not _absolute(value, windows)
+             if (value := env.value(name)) and not _absolute(value, windows=windows)
              and name not in ("PATH", "PATHEXT")]
     parts = PurePath(path).parts
     for name in loose:
@@ -227,7 +231,7 @@ def _giver(path: str, env: Noting, windows: bool) -> str | None:
 
 
 def _fix(read: list[str], terminal: Noting, here: Noting, givers: set[str],
-         missing: list[str], windows: bool) -> tuple[list[str], list[str]]:
+         missing: list[str], *, windows: bool) -> tuple[list[str], list[str]]:
     """The fix's words: each name read whose value differs, set to the terminal's value or
     taken out; a name that gave a relative path, set to a full path when the terminal's
     own value is relative (even when the two agree); `PATH` with each missing program's
@@ -237,7 +241,7 @@ def _fix(read: list[str], terminal: Noting, here: Noting, givers: set[str],
         if name in ("PATH", "PATHEXT") and missing:
             continue
         there, mine = terminal.value(name), here.value(name)
-        if name in givers and there and not _absolute(there, windows):
+        if name in givers and there and not _absolute(there, windows=windows):
             sets.append(to_full_path(name))
         elif there == mine:
             continue
@@ -259,7 +263,7 @@ def _error(error: OSError) -> str:
     return error.strerror or str(error) or type(error).__name__
 
 
-def _with_anchor(line: str, anchor: bool, page: bool) -> str:
+def _with_anchor(line: str, *, anchor: bool, page: bool) -> str:
     return f"{line} {anchor_clause(page=page)}" if anchor else line
 
 
@@ -281,7 +285,7 @@ def placed_only_there(label: str, there: str) -> str:
     return f"{label} isn't placed here, but the last run in a terminal used {there}"
 
 
-def not_full(label: str, here: bool, name: str | None, value: str | None) -> str:
+def not_full(label: str, *, here: bool, name: str | None, value: str | None) -> str:
     side = "here" if here else "in the last run in a terminal"
     text = f"{label} isn't a full path {side}"
     if name is not None:

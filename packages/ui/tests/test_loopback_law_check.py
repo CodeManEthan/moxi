@@ -55,7 +55,7 @@ def test_these_files_import_only_the_standard_library_and_each_other():
                 f"{path.name} imports {name}")
 
 
-def test_these_files_read_no_environment_and_hold_no_clock():
+def test_these_files_read_no_env_and_hold_no_clock():
     for path in FILES:
         tree = _tree(path)
         for name in _imports(tree):

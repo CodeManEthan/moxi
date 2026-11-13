@@ -438,8 +438,8 @@ class Snapshot:
                 except asyncio.CancelledError:
                     waiter.cancel()
                     raise
-                except Exception as err:
-                    waiter.set_exception(err)
+                except Exception as exc:
+                    waiter.set_exception(exc)
                     continue
                 if digest != self._last:
                     self.topics.publish(self.name, result)
@@ -692,8 +692,10 @@ def _resolve(target: str, what: str) -> Callable[..., Any]:
     try:
         module = importlib.import_module(module_name)
         found = getattr(module, name)
-    except Exception as err:
-        raise PageError(f"the {what} {target} cannot be loaded: {type(err).__name__}: {err}") from None
+    except Exception as exc:
+        raise PageError(
+            f"the {what} {target} cannot be loaded: {type(exc).__name__}: {exc}"
+        ) from None
     if not callable(found):
         raise PageError(f"the {what} {target} is not callable")
     return found
@@ -770,9 +772,9 @@ class PageApp:
             for name in names:
                 try:
                     body = root.joinpath(name).read_bytes()
-                except OSError as err:
+                except OSError as exc:
                     raise PageError(f"the asset {name} cannot be read: "
-                                    f"{err.strerror or type(err).__name__}") from None
+                                    f"{exc.strerror or type(exc).__name__}") from None
                 suffix = name[name.rfind("."):]
                 self._assets["/" + name] = (body, _etag(body), CONTENT_TYPES[suffix])
             if "/index.html" in self._assets:
@@ -860,17 +862,17 @@ class PageApp:
                 body = parse_body(route, raw)
                 if route.confirmed:
                     key = idempotency_key(scope)
-        except BadRequest as err:
-            return _bad_request(err)
+        except BadRequest as exc:
+            return _bad_request(exc)
         if key is not None:
             return await self._confirmed(route, Call(self.module, query, body, key), raw)
         call = Call(self.module, query, body)
         try:
             result = await self._run(self._handlers[route.path], call)
-        except Conflict as err:
-            return _json(409, {"conflict": err.text})
-        except Refused as err:
-            return _json(422, {"refused": err.text})
+        except Conflict as exc:
+            return _json(409, {"conflict": exc.text})
+        except Refused as exc:
+            return _json(422, {"refused": exc.text})
         if route.stream:
             return self._stream(route, result, names)
         if isinstance(result, Accepted):
@@ -880,8 +882,8 @@ class PageApp:
         try:
             value = project(result, route.shape, strict=self.strict,
                             dropped=lambda key: self._dropped(route.path, key))
-        except ProjectionError as err:
-            self.log.error("%s returned a value outside its shape: %s", route.path, err)
+        except ProjectionError as exc:
+            self.log.error("%s returned a value outside its shape: %s", route.path, exc)
             return _response(500)
         return _json(200, value)
 
@@ -918,10 +920,10 @@ class PageApp:
     async def _confirmed_answer(self, route: Route, call: Call) -> _Answer:
         try:
             result = await self._run(self._handlers[route.path], call)
-        except Conflict as err:
-            return 409, _json_bytes({"conflict": err.text}), _JSON
-        except Refused as err:
-            return 422, _json_bytes({"refused": err.text}), _JSON
+        except Conflict as exc:
+            return 409, _json_bytes({"conflict": exc.text}), _JSON
+        except Refused as exc:
+            return 422, _json_bytes({"refused": exc.text}), _JSON
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1029,10 +1031,10 @@ class PageApp:
                     continue
                 for name, value in topics._latest(sub.take()):
                     yield self._event(route, name, value)
-        except ProjectionError as err:
+        except ProjectionError as exc:
             # A topic carries state, so a skipped event would leave the page on a stale
             # value with no sign; the stream ends instead, and the error is logged.
-            self.log.error("%s topic event outside its shape, stream ended: %s", route.path, err)
+            self.log.error("%s topic event outside its shape, stream ended: %s", route.path, exc)
         finally:
             topics._close(sub)
 

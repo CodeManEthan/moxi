@@ -323,7 +323,8 @@ class Shell:
                     audit=audit, key=key, device_of=phone.device_of)
         router = self.gateway_router = GatewayRouter(
             phone, mounts=lambda: self._mounts, table=table,
-            mount=lambda: self.gateway.mount if self.gateway is not None else Mount(False, "off"),
+            mount=lambda: self.gateway.mount if self.gateway is not None else Mount(
+                mounted=False, reason="off"),
             page=own_page, push=self.push, starters=self.starters, acts=acts, key=key)
         parts = phone.parts(Parts(table=router.build, router=router, fallback=fallback,
                                   audit=write, refusals=router.refusals))
@@ -508,8 +509,8 @@ def run(*, bind: Callable[[Callable[[], int]], Listeners] = listen.take,
     layout = Layout(MODULE)
     try:
         runtime_dir = layout.runtime_dir(create=True)
-    except OSError as err:
-        say(f"moxi ui: the runtime directory cannot be made private: {err}")
+    except OSError as exc:
+        say(f"moxi ui: the runtime directory cannot be made private: {exc}")
         return 1
     try:
         with files.lock(runtime_dir / LOCK_FILE, timeout_s=LOCK_WAIT):
@@ -529,26 +530,26 @@ def _run_held(layout: Layout, bind: Callable[[Callable[[], int]], Listeners],
 
     try:
         listeners = bind(port)
-    except listen.PortInUse as err:
-        say(f"moxi ui: {err}")
+    except listen.PortInUse as exc:
+        say(f"moxi ui: {exc}")
         return 1
-    except listen.NotLoopback as err:
-        say(f"moxi ui: the sockets passed to the shell can't be served: {err}; "
+    except listen.NotLoopback as exc:
+        say(f"moxi ui: the sockets passed to the shell can't be served: {exc}; "
             "`moxi install ui` writes its socket units again")
         return 1
-    except OSError as err:
+    except OSError as exc:
         where = f" on port {asked[-1]}" if asked else ""
-        say(f"moxi ui: the listener{where} could not be bound: {err}")
+        say(f"moxi ui: the listener{where} could not be bound: {exc}")
         return 1
-    except Exception as err:  # noqa: BLE001 - a bad port setting is said and ends the start
-        say(f"moxi ui: {err}")
+    except Exception as exc:  # noqa: BLE001 - a bad port setting is said and ends the start
+        say(f"moxi ui: {exc}")
         return 1
     idle_s = None
     if listeners.inherited:
         try:
             idle_s = config.idle_s()
-        except Exception as err:  # noqa: BLE001 - a bad setting keeps the shell running
-            say(f"moxi ui: {err}; the shell won't exit idle")
+        except Exception as exc:  # noqa: BLE001 - a bad setting keeps the shell running
+            say(f"moxi ui: {exc}; the shell won't exit idle")
     shell = Shell(listeners, epoch=epoch_for(listeners), layout=layout, snapshot=True,
                   idle_s=idle_s, gateway=True)
     try:

@@ -398,8 +398,8 @@ def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
     except subprocess.TimeoutExpired:
         return _section(module, error=f"moxi config {module} show ran past "
                                       f"{CONFIG_TIMEOUT:g} s")
-    except OSError as err:
-        return _section(module, error=f"moxi config could not run: {err}")
+    except OSError as exc:
+        return _section(module, error=f"moxi config could not run: {exc}")
     try:
         data = json.loads(done.stdout)
     except (ValueError, TypeError):
@@ -439,15 +439,15 @@ def change(module: str, key: str, *, value: str | None = None, add: str | None =
                       "changed from a page")
     try:
         argv = change_argv(module, key, value=value, add=add, remove=remove, unset=unset)
-    except ValueError as err:
-        raise Refused(str(err)) from None
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
     try:
         done = run(argv, timeout_s=CONFIG_TIMEOUT, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
         raise Conflict(f"moxi config ran past {CONFIG_TIMEOUT:g} s; the change may not "
                        "be written") from None
-    except OSError as err:
-        raise Conflict(f"moxi config could not run: {err}") from None
+    except OSError as exc:
+        raise Conflict(f"moxi config could not run: {exc}") from None
     lines = [line for line in _decode(done.stdout).splitlines() if line.strip()]
     code = done.returncode
     if code == 0:

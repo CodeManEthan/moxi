@@ -180,10 +180,10 @@ class Response:
         while not self._complete:
             try:
                 event = await self._event()
-            except (OSError, h11.RemoteProtocolError) as err:
+            except (OSError, h11.RemoteProtocolError) as exc:
                 if self.cut:
                     return
-                raise UpstreamBroken(f"{self.module}'s answer broke off: {err!r}") from None
+                raise UpstreamBroken(f"{self.module}'s answer broke off: {exc!r}") from None
             if isinstance(event, h11.Data):
                 if event.data:
                     yield bytes(event.data)
@@ -243,8 +243,8 @@ class Response:
         assert conn is not None and connection is not None
         try:
             head = connection.send(h11.Request(method=method, target=target, headers=headers))
-        except h11.LocalProtocolError as err:
-            raise _NotSent(f"the request can't be framed: {err}") from None
+        except h11.LocalProtocolError as exc:
+            raise _NotSent(f"the request can't be framed: {exc}") from None
         try:
             conn.writer.write(head)
             if isinstance(body, (bytes, bytearray)):
@@ -260,8 +260,8 @@ class Response:
         except h11.LocalProtocolError:
             # The browser's body did not match its own Content-Length.
             raise BrowserGone("the browser's body ended short of its length") from None
-        except OSError as err:
-            raise _NoAnswer(f"sending to {self.module} failed: {err!r}") from None
+        except OSError as exc:
+            raise _NoAnswer(f"sending to {self.module} failed: {exc!r}") from None
 
     async def _event(self) -> Any:
         conn, connection = self.conn, self._h11
@@ -280,8 +280,8 @@ class Response:
                 if isinstance(event, h11.InformationalResponse):
                     continue
                 break
-        except (OSError, h11.RemoteProtocolError) as err:
-            raise _NoAnswer(f"{self.module} gave no answer: {err!r}") from None
+        except (OSError, h11.RemoteProtocolError) as exc:
+            raise _NoAnswer(f"{self.module} gave no answer: {exc!r}") from None
         if not isinstance(event, h11.Response):
             raise _NoAnswer(f"{self.module} closed the connection with no answer")
         self.status = event.status_code
@@ -326,12 +326,12 @@ class Client:
             try:
                 response.use = server.use(stream=stream, close=response._cut)
                 await response._connect(pooled=pooled, act=act)
-            except (NotOurServer, OSError, _NotSent) as err:
+            except (NotOurServer, OSError, _NotSent) as exc:
                 # Nothing but a proof went out: drop the server and start one more.
                 response._discard()
                 self.starters.lost(server)
                 if retry_unsent:
-                    _log.info("%s: %s; starting again and sending once more", module, err)
+                    _log.info("%s: %s; starting again and sending once more", module, exc)
                     retry_unsent = False
                     continue
                 raise UpstreamError(502, {"error": "unreachable", "module": module,
@@ -350,18 +350,18 @@ class Client:
                 else:
                     async with asyncio.timeout(FIRST_BYTE_WITHIN):
                         await response._head()
-            except _NotSent as err:
+            except _NotSent as exc:
                 response._discard()
                 raise UpstreamError(502, {"error": "unreachable", "module": module,
-                                          "log": self.starters.log}) from err
-            except _NoAnswer as err:
+                                          "log": self.starters.log}) from exc
+            except _NoAnswer as exc:
                 response._discard()
                 if retry_sent:
-                    _log.info("%s: %s; sending the GET once more", module, err)
+                    _log.info("%s: %s; sending the GET once more", module, exc)
                     retry_sent = False
                     pooled = False
                     continue
-                _log.warning("%s: %s; the module may have acted", module, err)
+                _log.warning("%s: %s; the module may have acted", module, exc)
                 raise UpstreamError(502, {"error": "upstream", "module": module,
                                           "log": self.starters.log}) from None
             except TimeoutError:
@@ -376,8 +376,8 @@ class Client:
     async def _ensure(self, module: str) -> Server:
         try:
             return await self.starters.ensure(module)
-        except StartFailed as failure:
-            raise UpstreamError(502, failure.body()) from None
+        except StartFailed as start_exc:
+            raise UpstreamError(502, start_exc.body()) from None
         except ServerGone:
             raise UpstreamError(503, {"error": "stopping", "module": module}) from None
 
@@ -490,8 +490,8 @@ class Proxy:
                 act=entry.kind == "act", stream=entry.stream)
         except BrowserGone:
             return
-        except UpstreamError as err:
-            await _answer(send, self.failed(err))
+        except UpstreamError as exc:
+            await _answer(send, self.failed(exc))
             return
         async with response:
             await _relay(response, receive, send)
@@ -509,8 +509,8 @@ async def _relay(response: Response, receive: Callable[..., Any],
         try:
             async for chunk in response.chunks():
                 await send({"type": "http.response.body", "body": chunk, "more_body": True})
-        except UpstreamBroken as err:
-            _log.warning("%s", err)
+        except UpstreamBroken as exc:
+            _log.warning("%s", exc)
             return False
         await send({"type": "http.response.body", "body": b""})
         return True

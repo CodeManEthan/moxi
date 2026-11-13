@@ -219,9 +219,9 @@ def test_a_module_that_prints_while_imported_keeps_stdout_one_json_line(modules,
     assert "written to fd 1 while imported" in done.stderr
 
 
-def _plant(directory: Path, package: str, marker: Path) -> None:
-    (directory / package).mkdir()
-    (directory / package / "__init__.py").write_text(
+def _plant(work_dir: Path, package: str, marker: Path) -> None:
+    (work_dir / package).mkdir()
+    (work_dir / package / "__init__.py").write_text(
         f"open({str(marker)!r}, 'a').write({package!r} + '\\n')\n")
 
 
@@ -236,7 +236,7 @@ def test_started_without_safe_path_it_exits_3_before_importing_anything(modules,
     assert not marker.exists(), marker.read_text()
 
 
-def test_a_planted_moxi_ui_in_the_working_directory_is_never_imported(modules, cwd, marker):
+def test_a_planted_moxi_ui_in_the_working_dir_is_never_imported(modules, cwd, marker):
     _plant(cwd, "moxi_ui", marker)
     _plant(cwd / "moxi_ui", "loopback", marker)
     (cwd / "moxi_ui" / "loopback" / "export.py").write_text(

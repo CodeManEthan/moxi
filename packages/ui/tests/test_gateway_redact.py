@@ -96,7 +96,8 @@ class Gate:
         access.open_paths = OPEN_PATHS | ICONS
         self.state_dir = self.phone.state_dir
         self.writer = audit_mod.Audit(self.state_dir)
-        self.mount = Mount(True, None) if mounted else Mount(False, "tcp")
+        self.mount = (Mount(mounted=True, reason=None) if mounted
+                      else Mount(mounted=False, reason="tcp"))
         self.reads = Reads()
         self.push = Push(FakeStarters([{"module": "fixture", "state": "up", "log": LOG}]),
                          mounts=MOUNTS, client=FakeClient())

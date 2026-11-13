@@ -29,10 +29,10 @@ def write_record(env, **kw):
 @pytest.fixture
 def at(tmp_path, monkeypatch):
     """Absolute folders under the test's tmp, and an environment that sets them."""
-    def folder(name):
+    def test_dir(name):
         return str(tmp_path / name)
 
-    return folder
+    return test_dir
 
 
 def without_anchor_clause(line):
@@ -201,7 +201,7 @@ def test_the_anchor_variable_is_outside_the_set():
         terminal.check(places)
 
 
-def test_iterating_the_environment_is_refused():
+def test_iterating_the_env_is_refused():
     write_record(None)
     with pytest.raises(TypeError):
         terminal.check(lambda env: {k: Path("/x") for k in env})
@@ -209,9 +209,9 @@ def test_iterating_the_environment_is_refused():
 
 # -- programs ----------------------------------------------------------------------------------
 
-def tool(folder: Path, name: str) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / (name + (".exe" if os.name == "nt" else ""))
+def tool(bin_dir: Path, name: str) -> Path:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    path = bin_dir / (name + (".exe" if os.name == "nt" else ""))
     path.write_text("")
     path.chmod(0o755)
     return path

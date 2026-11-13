@@ -150,8 +150,8 @@ class Acts:
             if method == "GET" and raw == STATE:
                 return await self.state(scope.get("query_string") or b""), None
             raise Refused(_empty(404), "route")
-        except Refused as refused:
-            return refused.answer, refused.code
+        except Refused as refused_exc:
+            return refused_exc.answer, refused_exc.code
 
     def _who(self) -> tuple[str | None, str | None]:
         id_hash = admitted.get()
@@ -174,8 +174,8 @@ class Acts:
             raise Refused(_empty(404), "route")
         try:
             check_body(body, route)
-        except BadBody as bad:
-            raise Refused(_json(400, {"error": str(bad)}), None) from None
+        except BadBody as bad_exc:
+            raise Refused(_json(400, {"error": str(bad_exc)}), None) from None
         device, session = self._who()
         stored = canonical(body)
         act = _Act(secrets.token_urlsafe(32), module, path, stored, device, session,
@@ -245,8 +245,8 @@ class Acts:
         try:
             response = await self.client.request(act.module, "POST", act.path,
                                                  headers=headers, body=act.body, act=True)
-        except UpstreamError as err:
-            return err.status, err.body
+        except UpstreamError as exc:
+            return exc.status, exc.body
         except Exception:  # noqa: BLE001 - anything after the send may have acted
             _log.warning("the act on %s got no answer", act.module, exc_info=True)
             return 0, None

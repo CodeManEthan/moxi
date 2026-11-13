@@ -401,9 +401,9 @@ class GatewayRouter:
         try:
             response = await self.client.request(module, "GET", target,
                                                  headers=scope.get("headers") or ())
-        except UpstreamError as err:
-            body = redact(err.body, ERROR_SHAPE, self.key())
-            return _json(err.status, body)
+        except UpstreamError as exc:
+            body = redact(exc.body, ERROR_SHAPE, self.key())
+            return _json(exc.status, body)
         async with response:
             body = b""
             try:

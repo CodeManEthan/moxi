@@ -340,8 +340,8 @@ class Access:
                 return
             try:
                 answer = await handler(scope, receive)
-            except _Bad as bad:
-                answer = bad.answer
+            except _Bad as bad_exc:
+                answer = bad_exc.answer
             await _send(send, answer)
 
         return routed
@@ -498,9 +498,9 @@ class Access:
             try:
                 made = passkeys.verify_creation(credential, challenge=state.challenge,
                                                 origin=origin(kept), rp_id=kept.host)
-            except passkeys.Refused as refused:
-                _log.info("a pairing's passkey was refused: %s", refused)
-                return self._refuse(refused.code, PAIR_FINISH)
+            except passkeys.Refused as refused_exc:
+                _log.info("a pairing's passkey was refused: %s", refused_exc)
+                return self._refuse(refused_exc.code, PAIR_FINISH)
         replaces = next((d for d in self.devices.all()
                          if d.stale and d.name == state.name), None)
         try:
@@ -510,8 +510,8 @@ class Access:
                 sign_count=made.sign_count if made else 0, host=kept.host,
                 provider=kept.provider, change=kept.change,
                 replaces=replaces.id if replaces else None)
-        except Full as full:
-            return _json(409, {"error": str(full)})
+        except Full as full_exc:
+            return _json(409, {"error": str(full_exc)})
         self._known[device.id] = device
         if replaces is not None:
             self._known.pop(replaces.id, None)
@@ -537,8 +537,8 @@ class Access:
         kept = self._where()
         try:
             credential_id, challenge = passkeys.assertion_parts(credential)
-        except passkeys.Refused as refused:
-            return self._refuse(refused.code, SIGNIN_FINISH)
+        except passkeys.Refused as refused_exc:
+            return self._refuse(refused_exc.code, SIGNIN_FINISH)
         expires = self.challenges.expiry(challenge)
         if expires is None:
             return self._refuse("challenge", SIGNIN_FINISH)
@@ -554,11 +554,11 @@ class Access:
             asserted = passkeys.verify_assertion(
                 credential, challenge=challenge, origin=origin(kept), rp_id=kept.host,
                 public_key=device.public_key, sign_count=device.sign_count)
-        except passkeys.Refused as refused:
-            if _SIGN_COUNT.search(str(refused)):
+        except passkeys.Refused as refused_exc:
+            if _SIGN_COUNT.search(str(refused_exc)):
                 _log.warning("device %s sent a sign count that didn't move forward; "
                              "its passkey may have been copied", device.id)
-            return self._refuse(refused.code, SIGNIN_FINISH, device=device.id)
+            return self._refuse(refused_exc.code, SIGNIN_FINISH, device=device.id)
         if not self.challenges.spend(challenge, expires):
             return self._refuse("challenge", SIGNIN_FINISH, device=device.id)
         try:

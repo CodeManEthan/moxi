@@ -368,11 +368,11 @@ class _Upstream:
                 try:
                     response = await self.push.client.request(
                         self.module, "GET", target, headers=_ACCEPT, stream=True)
-                except UpstreamError as err:
-                    if err.status == 503 and err.body.get("error") == "stopping":
+                except UpstreamError as exc:
+                    if exc.status == 503 and exc.body.get("error") == "stopping":
                         self.set_state("down", "the shell is stopping")
                         return
-                    self.set_state("down", _detail(err))
+                    self.set_state("down", _detail(exc))
                     await self._wait(failures)
                     failures += 1
                     continue
@@ -414,8 +414,8 @@ class _Upstream:
                     self._event(name, data)
         except UpstreamBroken:
             return "stream lost"
-        except ValueError as err:
-            _log.warning("%s's stream: %s; it is opened again", self.module, err)
+        except ValueError as exc:
+            _log.warning("%s's stream: %s; it is opened again", self.module, exc)
             return "event too large"
         return "cut" if response.cut else "stopped"
 
@@ -529,8 +529,8 @@ class Push:
         policy = "page" if key is None else "gateway"
         try:
             asked = read_topics(scope.get("query_string") or b"")
-        except BadTopics as err:
-            await _answer(send, 400, {"error": str(err)}, policy=policy)
+        except BadTopics as exc:
+            await _answer(send, 400, {"error": str(exc)}, policy=policy)
             return
         if self.closing:
             await _answer(send, 503, {"error": "stopping"}, policy=policy)

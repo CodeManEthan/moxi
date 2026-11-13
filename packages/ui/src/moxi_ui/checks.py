@@ -162,9 +162,9 @@ class Checks:
                     rows, error = [], "moxi doctor gave rows the shell can't read"
             except asyncio.CancelledError:
                 raise
-            except Exception as err:  # noqa: BLE001 - a failed run is kept as its error
+            except Exception as exc:  # noqa: BLE001 - a failed run is kept as its error
                 _log.exception("the kept doctor run failed")
-                rows, error = [], f"moxi doctor could not run: {type(err).__name__}"
+                rows, error = [], f"moxi doctor could not run: {type(exc).__name__}"
             at = datetime.fromtimestamp(self.clock(), UTC).strftime(_AT)
             self.kept = kept = {"at": at, "rows": rows, "error": error}
             try:

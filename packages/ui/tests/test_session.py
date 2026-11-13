@@ -242,7 +242,7 @@ def test_tickets_expire_and_are_swept(tmp_path):
 def _owned(tmp_path, uid, *, client=CLIENT, server=SERVER, six=False):
     rows = connection_rows(client, server, uid)
     root = record_proc(tmp_path / "proc", **({"tcp6": rows} if six else {"tcp": rows}))
-    return OwnerCheck(True, os.getuid(), str(root))
+    return OwnerCheck(enabled=True, uid=os.getuid(), root=str(root))
 
 
 def test_socket_owner_reads_the_client_row(tmp_path):
@@ -263,7 +263,7 @@ def test_a_ticket_redeemed_over_another_users_socket_is_refused_and_kept(tmp_pat
     for uid, expected in ((os.getuid() + 1, 403), (None, 403), (os.getuid(), 200)):
         if uid is None:
             root = record_proc(tmp_path / "empty")
-            owner = OwnerCheck(True, os.getuid(), str(root))
+            owner = OwnerCheck(enabled=True, uid=os.getuid(), root=str(root))
         else:
             owner = _owned(tmp_path / str(uid), uid, client=client, server=server, six=six)
         shell = Harness(tmp_path / f"state-{uid}", owner=owner, names=("127.0.0.1", "localhost"))

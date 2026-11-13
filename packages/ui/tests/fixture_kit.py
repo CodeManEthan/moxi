@@ -32,8 +32,8 @@ def install(site: Path, version: str = "0.1.0", *, main: bool = False) -> Path:
     if not target.exists():
         shutil.copytree(SOURCE, target, ignore=shutil.ignore_patterns("__pycache__"))
         if main:
-            with (target / "module.py").open("a") as out:
-                out.write(MAIN)
+            with (target / "module.py").open("a") as fh:
+                fh.write(MAIN)
     set_version(site, version)
     return site
 
@@ -51,7 +51,7 @@ def set_version(site: Path, version: str) -> None:
     os.utime(site)
 
 
-def fail_start(shell, on: bool = True) -> None:
+def fail_start(shell, *, on: bool = True) -> None:
     """While on, the fixture's page server exits 3 at its start."""
     flag = shell.state_dir("fixture") / "fail-start"
     if on:
@@ -61,7 +61,7 @@ def fail_start(shell, on: bool = True) -> None:
         flag.unlink(missing_ok=True)
 
 
-def fail_check(shell, on: bool = True) -> None:
+def fail_check(shell, *, on: bool = True) -> None:
     """While on, the fixture's doctor row `check` fails."""
     flag = shell.state_dir("fixture") / "fail-check"
     if on:
@@ -71,7 +71,7 @@ def fail_check(shell, on: bool = True) -> None:
         flag.unlink(missing_ok=True)
 
 
-def hold(shell, on: bool = True) -> None:
+def hold(shell, *, on: bool = True) -> None:
     """While on, a read of the fixture's `/api/wait` stays open."""
     flag = shell.state_dir("fixture") / "hold"
     if on:
