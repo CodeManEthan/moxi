@@ -249,10 +249,15 @@ def backend_name(explicit: str | None = None, env=None) -> str:
 
 
 def open_record(explicit: str | None = None, *, role: str = "reader", env=None,
-                 busy_timeout: float | None = None):
+                 busy_timeout: float | None = None, read_only: bool = False):
     """Open the record this run is configured for. `role` is accepted from every caller
     and means nothing to either backend. `busy_timeout` is the local record's wait for a
-    writer's lock, in seconds (None: its own default); the mock has no lock."""
+    writer's lock, in seconds (None: its own default); the mock has no lock.
+
+    `read_only` opens the local record read-only (`LocalRecord`'s `read_only`): no gate,
+    no move of comms 0.2's files, no migration, and a store at another schema step or
+    with those files unmoved refused as it opens. The mock has no store, so it opens
+    its file as it always does."""
     import os
 
     env = env if env is not None else os.environ
@@ -269,7 +274,7 @@ def open_record(explicit: str | None = None, *, role: str = "reader", env=None,
     from .local_record import LocalRecord
     local = cfg.local
     return LocalRecord(local.record or None, retain_days=local.retain_days,
-                        busy_timeout=busy_timeout)
+                        busy_timeout=busy_timeout, read_only=read_only)
 
 
 __all__ = ["AUTHOR_IDENTITY", "AUTHOR_OPERATOR", "AUTHOR_RESERVED", "AUTHOR_OPERATOR_OLD",
