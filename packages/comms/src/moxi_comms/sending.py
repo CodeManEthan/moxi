@@ -642,9 +642,11 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
                 "(Both stamps are named in this process's comms log.)")
         return _REFUSED
     if operator_id is not None and _inside_a_session():
-        # The operator's lane is a terminal outside every session: a process inside a
-        # live session is refused it, so an agent process that strips its stamp still
-        # cannot post as the operator.
+        # The operator's lane is a terminal outside every session: a process the
+        # membership rule places inside a live session is refused it, even when it
+        # carries no agent's claim. That keeps a session from taking the operator's lane
+        # by mistake. It is no wall against a process of this user outside every
+        # session, which can read the operator's credential just as this verb does.
         _refuse(ctx, "operator-in-session",
                 "comms cannot tell who this process is: it carries the operator's own "
                 "stamp inside an agent's session — nothing was sent. The operator's "
