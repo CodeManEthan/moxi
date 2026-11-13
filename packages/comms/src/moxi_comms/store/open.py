@@ -17,6 +17,9 @@ A refusal names the file and the reason and writes nothing.
 
 `open_read` writes nothing, takes no lock, and refuses (try again later) while comms
 0.2's files wait to be moved, since the store beside them doesn't hold their data yet.
+Asked to check the step, it also refuses a store whose schema is at another step than
+this comms knows: an older one the daemon hasn't brought up to date, which a read must
+not migrate, or a newer one a newer comms wrote.
 """
 
 from __future__ import annotations
@@ -68,6 +71,26 @@ class Unmoved(StoreRefused):
     start moves them; a command that stops on this exits `exit_code` (try again later)."""
 
     exit_code = _exit.TEMPFAIL
+
+
+class StepMismatch(StoreRefused):
+    """A read found the store at another schema step than this comms knows: `version`
+    is the store's `user_version`, `known` the number of steps (`len(STEPS)`). An older
+    store waits for the next writer's open to migrate it, so a command that stops on it
+    exits TEMPFAIL (try again later); a newer one was written by a newer comms, and a
+    command exits REFUSED, as on `moxi.store.StoreTooNew`."""
+
+    def __init__(self, path, version: int, known: int):
+        self.version = version
+        self.known = known
+        self.exit_code = _exit.TEMPFAIL if version < known else _exit.REFUSED
+        if version < known:
+            reason = (f"its schema is at step {version} of {known}; comms' next write "
+                      "brings it up to date")
+        else:
+            reason = (f"its schema is at step {version}, past the {known} this comms "
+                      "knows; a newer comms wrote it")
+        super().__init__(path, reason)
 
 
 def path(env=None) -> Path:
@@ -186,12 +209,15 @@ def open_write(target=None, *, env=None, timeout: float = 5.0,
 
 
 def open_read(target=None, *, env=None, timeout: float = 5.0,
-              check_same_thread: bool = False) -> sqlite3.Connection:
+              check_same_thread: bool = False,
+              check_step: bool = False) -> sqlite3.Connection:
     """Open comms.db read-only: an existing store, opened as it is, whose connection
     refuses every write (`query_only`). Takes no lock.
 
     Raises `Unmoved` while comms 0.2's files wait to be moved, and
-    `sqlite3.OperationalError` for a store that is missing or can't be opened.
+    `sqlite3.OperationalError` for a store that is missing or can't be opened. With
+    `check_step`, the store's `user_version` is read once, before the connection is
+    handed back, and a store at another step than `len(STEPS)` raises `StepMismatch`.
     """
     target = Path(target) if target is not None else path(env)
     found = zero_two_files(env, target)
@@ -210,6 +236,10 @@ def open_read(target=None, *, env=None, timeout: float = 5.0,
                           check_same_thread=check_same_thread)
     try:
         conn.execute("PRAGMA query_only = ON")
+        if check_step:
+            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if version != len(STEPS):
+                raise StepMismatch(target, version, len(STEPS))
     except BaseException:
         conn.close()
         raise
@@ -238,5 +268,5 @@ def _finish_0_2(found: list[Path], target: Path, env) -> list[str]:
 
 
 __all__ = ["MIGRATE_LOCK", "LOCK_WAIT", "ABSENT", "MARKED", "UNMARKED",
-           "StoreRefused", "Unmoved", "path", "zero_two_files",
+           "StoreRefused", "Unmoved", "StepMismatch", "path", "zero_two_files",
            "state_of", "open_write", "open_read"]
