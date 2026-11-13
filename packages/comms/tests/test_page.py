@@ -164,17 +164,30 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_three_reads_and_only_the_mail_is_the_gateways():
+def test_the_page_declares_three_reads():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
     assert list(routes) == ["/api/roster", "/api/mail", "/api/events"]
     assert all(r["kind"] == "read" and not r["confirmed"] for r in routes.values())
-    assert [path for path, r in routes.items() if r["gateway"]] == ["/api/mail"]
     assert not routes["/api/mail"]["query"] and not routes["/api/mail"]["stream"]
     assert routes["/api/events"]["stream"] and list(routes["/api/events"]["topics"]) == ["roster"]
     assert exported["assets"] == ["build-stamp.txt", "mail.js", "page.js", "roster.js"]
     assert exported["budget"] == {"rss": "120M", "fds": 64}
     assert page.PAGE.idle_s == 300 and page.PAGE.health is None
+
+
+def test_no_route_but_the_mail_is_the_gateways():
+    """Taken over every route the page declares, whatever it declares, so a route added
+    later is held to it too: `/api/mail` is the one route the phone's gateway reaches,
+    and the export the shell mounts says the same of each route as its declaration."""
+    declared = {route.path: route.gateway for route in page.PAGE.routes}
+    assert len(declared) == len(page.PAGE.routes)
+    exported = {route["path"]: route["gateway"]
+                for route in loopback().export(page.PAGE)["routes"]}
+    assert exported == declared
+    assert declared["/api/mail"] is True
+    assert {path for path, gateway in declared.items() if gateway is not False} == {
+        "/api/mail"}
 
 
 def test_a_row_is_the_reads_fields_and_no_shape_carries_a_path_or_a_token():
