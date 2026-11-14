@@ -183,12 +183,12 @@ def read_back_data(back: shown.ReadBack) -> dict:
 
 # -- the rows ----------------------------------------------------------------------------
 
-def _question(holder: str, item: index.Item, closed: Callable[[str], bool]) -> Entry:
+def _question(holder: str, item: index.Item, on_closed: Callable[[str], bool]) -> Entry:
     body = item.body
     return Entry(
         holder=holder, id=item.id, text=body.get("text"), origin=body.get("from"),
         blocks=_blocks(body.get("blocks")),
-        state=questions.listed(body, closed=closed), by=body.get("by"),
+        state=questions.listed(body, on_closed=on_closed), by=body.get("by"),
         at=body.get("at"),
         until=body.get("until"),
         options=tuple(Option(one["key"], one["text"])
@@ -201,12 +201,12 @@ def _blocks(value):
 
 
 #: What makes an entry of each kind of item the index keeps, as
-#: `fn(holder, item, closed) -> Entry`. A kind that is not here gives no row.
+#: `fn(holder, item, on_closed) -> Entry`. A kind that is not here gives no row.
 ENTRIES: dict[str, Callable[[str, index.Item, Callable[[str], bool]], Entry]] = {
     "question": _question}
 
 
-def _entries(summary: index.Summary, closed: Callable[[str], bool]) -> list[Entry]:
+def _entries(summary: index.Summary, on_closed: Callable[[str], bool]) -> list[Entry]:
     """The rows one log gives: its items of the kinds in `ENTRIES` that read as open or
     parked, in the log's order. In a round that has ended each is `LEFT`, which
     `_ordered` keeps out of every listing of what waits."""
@@ -216,7 +216,7 @@ def _entries(summary: index.Summary, closed: Callable[[str], bool]) -> list[Entr
         make = ENTRIES.get(item.kind)
         if make is None:
             continue
-        entry = make(summary.name, item, closed)
+        entry = make(summary.name, item, on_closed)
         if entry.state == questions.OPEN and entry.until is not None:
             # Its wait is over: it is put to him as any open question is, with no
             # word of what it waited for.
@@ -252,16 +252,16 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
     It reads the index where its rows are fresh and the logs where they are not, and
     writes nothing. A round whose log can't be read is in `unreadable`; the project's
     own log unreadable raises `Unreadable`."""
-    closed = _closed(own.load() if settings is None else settings)
+    on_closed = _closed(own.load() if settings is None else settings)
     listed = index.read(home.project, home.rounds_dir, env=env)
     if listed.unreadable is not None:
         raise listed.unreadable
-    entries, unreadable = _entries(listed, closed), []
+    entries, unreadable = _entries(listed, on_closed), []
     for summary in index.rounds(home.project, home.rounds_dir, env=env):
         if summary.unreadable is not None:
             unreadable.append(summary.unreadable)
         elif summary.status == states.OPEN:
-            entries += _entries(summary, closed)
+            entries += _entries(summary, on_closed)
     return Rows(_ordered(entries), tuple(unreadable))
 
 
@@ -276,8 +276,8 @@ def of_round(home: folders.Home, slug: str, *, settings=None, env=None) -> Rows:
         raise NoRound(f"{home.project}/{slug}") from None
     if summary.unreadable is not None:
         raise summary.unreadable
-    closed = _closed(own.load() if settings is None else settings)
-    found = _entries(summary, closed)
+    on_closed = _closed(own.load() if settings is None else settings)
+    found = _entries(summary, on_closed)
     return Rows(_ordered(found), ended=summary.ended,
                 left=tuple(entry for entry in found if entry.state == questions.LEFT))
 

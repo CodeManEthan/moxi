@@ -355,7 +355,7 @@ class Registry:
             log.info("tool token %s: claim %s as %s", outcome, claim, identity)
         return outcome
 
-    def released(self, binding_id: int | None) -> None:
+    def on_released(self, binding_id: int | None) -> None:
         """A binding was released: its rows lose it in memory. The store's side is in
         the release's own transaction (`BindingHistory.release`)."""
         if binding_id is None:

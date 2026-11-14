@@ -29,7 +29,7 @@ Codex or OpenCode host). This module is its harness-free core; an adapter
 turns decides nothing about content or timing: it delivers what it is handed, when it is
 handed it, under the preconditions the caller names.
 
-`open()` opens the endpoint; `stop()` (or the adapter's `gone()`) ends it. The core's
+`open()` opens the endpoint; `stop()` (or the adapter's `on_gone()`) ends it. The core's
 caller-side methods (`session`, `facts`, `agents`, `deliver`, `steer`, `wait`, `command`)
 take plain values, so a test can drive the core without the wire.
 
@@ -49,7 +49,7 @@ The rule: no handler on the loop waits on the harness or on a blocking write.
   adapter's `submit`, `append` and `command` one at a time, in the order the endpoint
   recorded them, so hand-offs reach the harness in that order. It skips a hand-off whose
   delivery or command settled while it waited, and passes a skipped steer to the
-  adapter's `expired`. A hand-off may block the worker (a line write the runner does not
+  adapter's `on_expired`. A hand-off may block the worker (a line write the runner does not
   read, a request the harness is slow to answer); callers still see every delivery and
   command settle, by `PENDING_TTL_S` at the latest, and each one queued behind it
   settles the same way, so nothing reaches the harness after its caller was told `lost`
@@ -418,7 +418,7 @@ class Endpoint:
                 server = await ipc.serve(self.address, handler,
                                          hello=ipc.Hello(protocol.VERSIONS,
                                                          self.capabilities),
-                                         on_close=handler.closed)
+                                         on_close=handler.on_closed)
             except BaseException as exc:
                 ready.set_exception(exc)
                 return
@@ -847,7 +847,7 @@ class Endpoint:
             self._pump()
         return reason
 
-    def refused(self, delivery_id: str, reason: str) -> None:
+    def on_refused(self, delivery_id: str, reason: str) -> None:
         """The adapter refused a delivery it was handed (a failed check where it took
         effect, a steer the harness had no turn for, a harness that would not take the
         text). The text never ran. A reason the contract does not name for a delivery
@@ -865,7 +865,7 @@ class Endpoint:
             self._refuse(d, reason)
         self._pump()
 
-    def steered(self, delivery_id: str) -> None:
+    def on_steered(self, delivery_id: str) -> None:
         """The harness took a steer into the running turn (Claude: `$.session.append`
         resolved without a deny; Codex: `turn/steer` answered). The delivery reads
         `Started` on the turn it was recorded against, the turn lists it, and watchers get
@@ -968,7 +968,7 @@ class Endpoint:
                 c.shells = shells if shells is not None else _unvouched()
             self._settle_if_ran(c)
 
-    def gone(self, reason: str = "the session ended") -> None:
+    def on_gone(self, reason: str = "the session ended") -> None:
         """The session ended."""
         self.stop(reason)
 
@@ -1322,7 +1322,7 @@ class Endpoint:
 
     def _handoff(self, d: Handed, call: Callable[[Delivery], None]) -> Callable[[], None]:
         """The worker's job for delivery `d`: hand it to the adapter unless it settled
-        while it waited. A skipped steer goes to the adapter's `expired`, so it lets go of
+        while it waited. A skipped steer goes to the adapter's `on_expired`, so it lets go of
         it (on Codex, a held `turn/completed`)."""
 
         def run() -> None:
@@ -1338,7 +1338,7 @@ class Endpoint:
                 call(d.spec)
             except Exception as exc:  # noqa: BLE001
                 log.warning("the adapter could not take delivery %s: %s", d.id, exc)
-                self.refused(d.id, "unsupported")
+                self.on_refused(d.id, "unsupported")
 
         return run
 
@@ -1367,7 +1367,7 @@ class Endpoint:
     def _tell_expired(self, delivery_ids: list[str]) -> None:
         for delivery_id in delivery_ids:
             try:
-                self.harness.expired(delivery_id)
+                self.harness.on_expired(delivery_id)
             except Exception:  # noqa: BLE001 - the delivery has settled either way
                 log.exception("the adapter failed at the expiry of %s", delivery_id)
 
@@ -1379,7 +1379,7 @@ class Endpoint:
         """Settle every delivery or command the adapter has held unsettled past
         `pending_ttl_s` (the submit in flight, each steer not yet confirmed, the command),
         and free its slot. A late word from the adapter about it is ignored, and its
-        `entering` answers `expired`. The adapter's `expired` runs on a thread of its own:
+        `entering` answers `on_expired`. The adapter's `on_expired` runs on a thread of its own:
         an adapter stuck in a hand-off never holds up this sweep."""
         ttl = self.pending_ttl_s
         freed: list[str] = []

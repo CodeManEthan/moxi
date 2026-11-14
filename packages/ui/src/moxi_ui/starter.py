@@ -190,7 +190,7 @@ class Use:
     def end(self) -> None:
         if not self._ended:
             self._ended = True
-            self.server._ended(self)
+            self.server._on_ended(self)
 
     def cut(self) -> None:
         if self._close is not None and not self._ended:
@@ -251,7 +251,7 @@ class Server:
         self._quiet.clear()
         return use
 
-    def _ended(self, use: Use) -> None:
+    def _on_ended(self, use: Use) -> None:
         self._uses.discard(use)
         if not self._uses:
             self._quiet.set()
@@ -365,9 +365,9 @@ class Child:
 
     def _watch(self) -> None:
         code = self.popen.wait()
-        self._post(self._exited, code)
+        self._post(self._on_exited, code)
 
-    def _exited(self, code: int) -> None:
+    def _on_exited(self, code: int) -> None:
         self.code = code
         _resolve(self.exited, code)
         self._on_exit(self, code)
@@ -625,7 +625,7 @@ class Starter:
                     server = await self._one_start(retry=False)
                 if server is None:  # pragma: no cover - a last try raises instead
                     raise AssertionError("not reached")
-                self._started(server)
+                self._on_started(server)
                 generation = self._pool.generation
                 if (generation == begun or self.wanted in (None, server.info.version)
                         or self._drained_for == generation):
@@ -641,7 +641,7 @@ class Starter:
                 if drain is not None:
                     await asyncio.shield(drain)
         except StartFailed as start_exc:
-            self._failed(start_exc)
+            self._on_failed(start_exc)
             raise
         finally:
             self._starting = None
@@ -771,7 +771,7 @@ class Starter:
         return StartFailed(self.module, reason, exit_code=None if killed else code,
                            log=self._pool.log)
 
-    def _started(self, server: Server) -> None:
+    def _on_started(self, server: Server) -> None:
         self._server = server
         self._failure = None
         self.record.failed_in_row = 0
@@ -779,7 +779,7 @@ class Starter:
         _log.info("%s's page server %s is up (version %s, %s)", self.module,
                   server.info.server_id, server.info.version, server.info.transport)
 
-    def _failed(self, failure: StartFailed) -> None:
+    def _on_failed(self, failure: StartFailed) -> None:
         self._failure = failure
         self._failed_until = self._pool.clock() + self._pool.failed_for
         self.record.failed_starts += 1
@@ -964,7 +964,7 @@ class Starters:
         call only."""
         rows = self.rows()
 
-        async def sampled(row: dict[str, Any]) -> None:
+        async def on_sampled(row: dict[str, Any]) -> None:
             starter = self._starters.get(row["module"])
             server = starter.server if starter is not None else None
             row["sample"] = None
@@ -974,7 +974,7 @@ class Starters:
             row["sample"] = await self.sample(server.info.pid)
             row["open"] = await self._offload(_health_open, server.info)
 
-        await asyncio.gather(*(sampled(row) for row in rows))
+        await asyncio.gather(*(on_sampled(row) for row in rows))
         return {"servers": rows}
 
     async def sample(self, pid: int) -> dict[str, Any] | None:

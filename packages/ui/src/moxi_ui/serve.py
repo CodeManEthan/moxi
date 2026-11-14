@@ -179,7 +179,7 @@ class Activity:
         return None if self.open else max(0.0, self._clock() - self._quiet_since)
 
     def wrap(self, inner: ASGIApp) -> ASGIApp:
-        async def counted(scope: dict[str, Any], receive: Callable[..., Any],
+        async def on_counted(scope: dict[str, Any], receive: Callable[..., Any],
                           send: Callable[..., Any]) -> None:
             if scope.get("type") != "http" or scope.get("path") in _NOT_COUNTED:
                 await inner(scope, receive, send)
@@ -192,7 +192,7 @@ class Activity:
                 if not self.open:
                     self._quiet_since = self._clock()
 
-        return counted
+        return on_counted
 
 
 class Shell:
@@ -259,7 +259,7 @@ class Shell:
         self.push = push if push is not None else Push(self.starters, mounts=self._mounts)
         self.checks = Checks(self.layout.state_dir() / CHECKS_FILE,
                              run=lambda: shell_page.doctor_answer(self),
-                             changed=self._checks_changed, enabled=run_checks)
+                             on_changed=self._checks_changed, enabled=run_checks)
         self._checks_changed(self.checks.value())
         self._proxy = proxy if proxy is not None else Proxy(
             self.starters, table=lambda: self.profile.table)
@@ -305,7 +305,7 @@ class Shell:
         def key() -> bytes:
             return _audit.key(state_dir)
 
-        def mounted() -> bool:
+        def on_mounted() -> bool:
             return self.gateway is not None and self.gateway.acts_now().mounted
 
         async def own_page(scope: dict[str, Any], receive: Callable[..., Any],
@@ -318,7 +318,7 @@ class Shell:
             profile = self.gateway.profile if self.gateway is not None else None
             return profile.table if profile is not None else Table()
 
-        acts = Acts(mounts=lambda: self._mounts, mounted=mounted,
+        acts = Acts(mounts=lambda: self._mounts, on_mounted=on_mounted,
                     client=getattr(self.push, "client", None) or Client(self.starters),
                     audit=audit, key=key, device_of=phone.device_of)
         router = self.gateway_router = GatewayRouter(

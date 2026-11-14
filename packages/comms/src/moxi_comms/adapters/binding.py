@@ -11,7 +11,7 @@ The owner is read for `_lock`, `_stop`, `socket_path` and `_on_push`, and writte
 `replaying`, `identity`, `tier`, `offline` and its claim holder (`claims`).
 
 **The tool token.** A session launched with comms' tools carries its token in
-`MOXI_COMMS_MCP_TOKEN`. The adapter reads it once (`ToolToken.from_environ`), keeps its
+`MOXI_COMMS_MCP_TOKEN`. The adapter reads it once (`ToolToken.from_env`), keeps its
 hash and drops the value. After every bind that took hold, the first and each rebind,
 the hash is registered on the connection that holds the binding (`mcp_token`), so the
 daemon maps the token to this binding again after a dropped connection or a daemon

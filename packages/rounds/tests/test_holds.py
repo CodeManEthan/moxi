@@ -199,12 +199,12 @@ def test_one_parked_until_a_round_holds_its_stages_again_once_that_round_is_clos
     rule(path, "park:Q1", until=f"round:{OTHER}")
     seen = []
 
-    def closed(name):
+    def on_closed(name):
         seen.append(name)
         return True
 
     assert held(path) == (NO_STAGE, ["Q1"])
-    assert held(path, closed=closed) == ({"B1": ["Q1"], "B2": [], "B3": []}, ["Q1"])
+    assert held(path, on_closed=on_closed) == ({"B1": ["Q1"], "B2": [], "B3": []}, ["Q1"])
     assert set(seen) == {OTHER}
 
     log.append(path.parent.parent / "b-round" / "round.jsonl", "round.closed",

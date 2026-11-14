@@ -211,7 +211,7 @@ class _Held:
             try:
                 watch = self.session.watch()
             except Exception as exc:  # noqa: BLE001 - any failure is the endpoint's
-                self.reader._failed(self, "watch", exc)
+                self.reader._on_failed(self, "watch", exc)
                 if self.stopped.wait(self.reader.retry_s):
                     return
                 continue
@@ -260,7 +260,7 @@ class _Held:
             value = row(call())
         except Exception as exc:  # noqa: BLE001 - any failure is the endpoint's
             if not self.stopped.is_set():
-                self.reader._failed(self, name, exc)
+                self.reader._on_failed(self, name, exc)
             return
         self.reader._read_ok(self, name, value)
 
@@ -422,7 +422,7 @@ class Reader:
 
     # -- what the session threads report --------------------------------------------------
 
-    def _failed(self, held: _Held, name: str, err: BaseException) -> None:
+    def _on_failed(self, held: _Held, name: str, err: BaseException) -> None:
         with self._lock:
             if self._held.get(held.key) is not held:
                 return

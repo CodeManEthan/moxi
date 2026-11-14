@@ -55,7 +55,7 @@ class Shown:
 
     A round whose log can't be read has its error in `unreadable` and no `state`. When
     only the project's log can't be read, `register` is None and its error is in
-    `register_unreadable`. `closed` answers whether a round, by name, is closed."""
+    `register_unreadable`. `on_closed` answers whether a round, by name, is closed."""
 
     name: str
     project: str
@@ -66,7 +66,7 @@ class Shown:
     notice: str | None = None
     unreadable: Unreadable | None = None
     register_unreadable: Unreadable | None = None
-    closed: Callable[[str], bool] | None = None
+    on_closed: Callable[[str], bool] | None = None
 
 
 def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
@@ -111,7 +111,7 @@ def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
         register_unreadable = exc
     return Shown(**found, state=state, register=register,
                  register_unreadable=register_unreadable,
-                 closed=lambda round_name: questions.is_closed(round_name, settings))
+                 on_closed=lambda round_name: questions.is_closed(round_name, settings))
 
 
 def _refreshed(home: folders.Home, slug: str) -> index.Summary:
@@ -137,7 +137,7 @@ class Section:
 def _questions(found: Shown) -> list:
     listed = []
     for question in found.state.questions:
-        reads = questions.current(question, found.state, closed=found.closed)
+        reads = questions.current(question, found.state, on_closed=found.on_closed)
         state = questions.shown_as(reads, ended=found.state.ended is not None)
         data = {"id": question.id, "text": question.text, "from": question.origin,
                 "blocks": (None if question.blocks is None

@@ -264,7 +264,7 @@ class Activity:
             scope[HANDED] = self
             self.pending += 1
 
-    def _settled(self) -> None:
+    def _on_settled(self) -> None:
         self.pending -= 1
 
     def quiet(self, now: float | None = None) -> float | None:
@@ -296,7 +296,7 @@ def settle(scope: dict[str, Any]) -> None:
     """End the hand-off count `Activity.hand_off` made for this request. Idempotent."""
     activity = scope.pop(HANDED, None)
     if activity is not None:
-        activity._settled()
+        activity._on_settled()
 
 
 # --- topics and the snapshot ---------------------------------------------------------
@@ -392,13 +392,13 @@ class Topics:
 class Snapshot:
     """A single-flight gatherer for one topic.
 
-    `await snapshot.changed()` asks for one rebuild: `gather()` runs (a plain function
+    `await snapshot.on_changed()` asks for one rebuild: `gather()` runs (a plain function
     through `moxi.aio.offload`, a coroutine function on the loop), and its result is
     published to `topics` under `name` only when its hash differs from the last one
     published. A fresh `Snapshot` has no last hash, so its first gather always
     publishes. Callers that ask while a rebuild waits to start share it; callers that ask
     while one is gathering share the one rebuild that follows it, so no change is missed.
-    `changed()` returns when the rebuild it shares has finished, and raises what that
+    `on_changed()` returns when the rebuild it shares has finished, and raises what that
     gather raised.
     """
 
@@ -416,7 +416,7 @@ class Snapshot:
         self._next: asyncio.Future[None] | None = None
         self._task: asyncio.Task[None] | None = None
 
-    async def changed(self) -> None:
+    async def on_changed(self) -> None:
         loop = asyncio.get_running_loop()
         if self._next is None:
             self._next = loop.create_future()
@@ -630,7 +630,7 @@ def guard(inner: Callable[..., Any], profile: Callable[[], Profile]) -> Callable
     any, is settled first, in the request's first step.
     """
 
-    async def guarded(scope: dict[str, Any], receive: Callable[..., Any],
+    async def on_guarded(scope: dict[str, Any], receive: Callable[..., Any],
                       send: Callable[..., Any]) -> None:
         settle(scope)
         if scope.get("type") != "http":
@@ -648,7 +648,7 @@ def guard(inner: Callable[..., Any], profile: Callable[[], Profile]) -> Callable
             return
         await inner({**scope, CHECKED: True}, receive, send)
 
-    return guarded
+    return on_guarded
 
 
 def prove(inner: Callable[..., Any], *, token: str, server_id: str,
@@ -881,7 +881,7 @@ class PageApp:
             raise TypeError(f"{route.path} is not the stream route but returned a stream")
         try:
             value = project(result, route.shape, strict=self.strict,
-                            dropped=lambda key: self._dropped(route.path, key))
+                            on_dropped=lambda key: self._on_dropped(route.path, key))
         except ProjectionError as exc:
             self.log.error("%s returned a value outside its shape: %s", route.path, exc)
             return _response(500)
@@ -960,7 +960,7 @@ class PageApp:
             return None, None
         return b"".join(chunks), None
 
-    def _dropped(self, route_path: str, key: str) -> None:
+    def _on_dropped(self, route_path: str, key: str) -> None:
         if (route_path, key) not in self._dropped_seen:
             self._dropped_seen.add((route_path, key))
             self.log.warning("%s returned the undeclared key %s; it was dropped", route_path, key)
@@ -1040,7 +1040,7 @@ class PageApp:
 
     def _event(self, route: Route, name: str, value: Any) -> bytes:
         cut = project(value, route.topics[name], strict=self.strict,
-                      dropped=lambda key: self._dropped(f"{route.path} topic {name}", key))
+                      on_dropped=lambda key: self._on_dropped(f"{route.path} topic {name}", key))
         return b"event: " + name.encode("ascii") + b"\ndata: " + _json_bytes(cut) + b"\n\n"
 
 

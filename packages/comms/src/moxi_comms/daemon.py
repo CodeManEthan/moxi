@@ -768,7 +768,7 @@ class Daemon:
                         "[mcp] port %d; launches get the port served", sock.getsockname()[1],
                         port)
         verifier = mcp_server.Verifier(self.mcp_tokens.verify, self.host.pool,
-                                       self.host.opened)
+                                       self.host.on_opened)
         from .mcp import inprocess
 
         # Where tool calls run: on the host's pool, a few at a time, so adapters' and
@@ -1533,7 +1533,7 @@ class Daemon:
                 # signal, so the connection's end is the release, here and nowhere else.
                 # Its tool tokens lose the binding in the same transaction.
                 self.binding_history.release(b.history_id)
-                self.mcp_tokens.released(b.history_id)
+                self.mcp_tokens.on_released(b.history_id)
                 log.info("unbind %s: its connection from pid %s ended (a peer that stops "
                          "reading is dropped after %.0f s)", b.qualified,
                          getattr(getattr(conn, "peer", None), "pid", None),
@@ -2323,7 +2323,7 @@ class Daemon:
             through = min(through, hold - 1)
         if through > 0 and self.books.is_open:
             self._book("raise the routed mark for", str(through),
-                       lambda: self.books.routed(through))
+                       lambda: self.books.on_routed(through))
 
     def _index_ask(self, msg, ml, author: Author, r: Resolution, *, opens: bool,
                    opening: bool | None) -> bool | None:

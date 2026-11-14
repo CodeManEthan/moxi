@@ -143,7 +143,7 @@ class _Feed:
     async def _poll(self) -> None:
         while True:
             try:
-                await self.snapshot.changed()
+                await self.snapshot.on_changed()
             except Exception as exc:
                 _log_once(exc, "the roster poller's gather failed")
             await asyncio.sleep(PERIOD)

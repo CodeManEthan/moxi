@@ -64,7 +64,7 @@ def invalid(message: str) -> ipc.RpcError:
 
 class Rpc:
     """The handler `moxi.ipc.serve` calls for one endpoint: `await rpc(conn, method,
-    params)`, and `rpc.closed(conn)` once a connection has closed."""
+    params)`, and `rpc.on_closed(conn)` once a connection has closed."""
 
     def __init__(self, endpoint: Endpoint):
         self.ep = endpoint
@@ -99,7 +99,7 @@ class Rpc:
         self._alive()
         return await handler(conn, params)
 
-    def closed(self, conn: ipc.Connection) -> None:
+    def on_closed(self, conn: ipc.Connection) -> None:
         """A connection closed: it no longer watches, and gives up the stop handler."""
         self.ep.drop_connection(conn)
 

@@ -1385,7 +1385,7 @@ class OpenCodeAdapter(HarnessAdapter):
         try:
             status, body = self.http.json("GET", "/session/status")
         except (Unreachable, NoAnswer) as exc:
-            self._failed(f"status read: {exc}")
+            self._on_failed(f"status read: {exc}")
             return REQUEUE
         if not idle_from_status(status, body, sid):
             # Not idle, or not known to be: nothing is posted. The stream's own status
@@ -1396,14 +1396,14 @@ class OpenCodeAdapter(HarnessAdapter):
         with self._lock:
             self.pending[mid] = Pending(high=int(high), count=count,
                                         batch=self.digest_batch(high))
-            self.ledger.injected(mid, high, self.digest_ids(high))
+            self.ledger.on_injected(mid, high, self.digest_ids(high))
             self.turn_open = True
         post = {"messageID": mid, "parts": [{"type": "text", "text": text}]}
         try:
             code, answer = self.http.request("POST", f"/session/{sid}/prompt_async", post)
         except Unreachable as exc:
             self._unpost(mid)
-            self._failed(f"no connection: {exc}")
+            self._on_failed(f"no connection: {exc}")
             return REQUEUE
         except NoAnswer as exc:
             with self._lock:
@@ -1415,11 +1415,11 @@ class OpenCodeAdapter(HarnessAdapter):
                         "say whether it was admitted", mid, identity, exc)
             return mid
         if 200 <= code < 300:
-            self._succeeded()
+            self._on_succeeded()
             return mid
         self._unpost(mid)
         if code >= 500 or code == 429:
-            self._failed(f"{code}")
+            self._on_failed(f"{code}")
             return REQUEUE
         self._close_for_launch(code, answer)
         return REQUEUE
@@ -1456,7 +1456,7 @@ class OpenCodeAdapter(HarnessAdapter):
                     "only", self.agent.qualified, code)
         return True
 
-    def delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
+    def on_delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
         if self._daemon is not None:
             self.notify_injected(identity, high, text)
         log.info("injected %d message(s) for %s through %s into prompt %s",
@@ -1469,12 +1469,12 @@ class OpenCodeAdapter(HarnessAdapter):
             self.ledger.end({"id": mid, "status": "not admitted"})
             self.turn_open = bool(self.pending)
 
-    def _succeeded(self) -> None:
+    def _on_succeeded(self) -> None:
         with self._lock:
             self.failures = 0
             self._streak_said = False
 
-    def _failed(self, last: str) -> None:
+    def _on_failed(self, last: str) -> None:
         with self._lock:
             self.failures += 1
             say = self.failures >= FAILURE_STREAK and not self._streak_said

@@ -85,19 +85,19 @@ class _Feed:
         self.kick = asyncio.Event()
         self.kick.set()
         self.task = loop.create_task(self._run(), name="turns sessions feed")
-        reader.listen(self._changed)
+        reader.listen(self._on_changed)
 
     async def _gather(self) -> dict[str, Any]:
         # The reader's lock is held only while rows are copied, so this runs on the loop.
         return self.reader.value()
 
-    def _changed(self) -> None:
+    def _on_changed(self) -> None:
         # From a reader thread.
         try:
             self.loop.call_soon_threadsafe(self.kick.set)
         except RuntimeError:
             # This feed's loop has closed; its streams are gone with it.
-            self.reader.unlisten(self._changed)
+            self.reader.unlisten(self._on_changed)
 
     async def _run(self) -> None:
         while True:
@@ -106,7 +106,7 @@ class _Feed:
             if not self.reader.listed:
                 continue
             try:
-                await self.snapshot.changed()
+                await self.snapshot.on_changed()
             except Exception as exc:  # noqa: BLE001 - the next change rebuilds again
                 log.warning("turns' page could not rebuild its topic: %s", exc, exc_info=exc)
 
@@ -121,7 +121,7 @@ def _feed() -> _Feed:
     loop = asyncio.get_running_loop()
     if _feed_now is None or _feed_now.loop is not loop:
         if _feed_now is not None:
-            _feed_now.reader.unlisten(_feed_now._changed)
+            _feed_now.reader.unlisten(_feed_now._on_changed)
         _feed_now = _Feed(loop, _reader())
     return _feed_now
 

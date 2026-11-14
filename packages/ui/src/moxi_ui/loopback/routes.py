@@ -925,21 +925,21 @@ def project(
     shape: Out,
     *,
     strict: bool = False,
-    dropped: Callable[[str], None] | None = None,
+    on_dropped: Callable[[str], None] | None = None,
 ) -> Any:
     """`value` cut to `shape` at every depth, ready to send as JSON.
 
-    A table key the shape does not declare is dropped: `dropped` is called with its
+    A table key the shape does not declare is dropped: `on_dropped` is called with its
     dotted path, or, when `strict` (the testing helper), `ProjectionError` is raised. A
     value of the wrong JSON type, a non-finite float, or a `null` where the shape is not
     nullable raises `ProjectionError` whether strict or not. A declared nullable value
     that is `null` is kept as `null`. A declared key the value lacks stays absent.
     """
-    return _cut(value, shape, "", strict=strict, dropped=dropped)
+    return _cut(value, shape, "", strict=strict, on_dropped=on_dropped)
 
 
 def _cut(value: Any, shape: Out, path: str, *, strict: bool,
-         dropped: Callable[[str], None] | None) -> Any:
+         on_dropped: Callable[[str], None] | None) -> Any:
     if value is None:
         if shape.nullable:
             return None
@@ -956,7 +956,7 @@ def _cut(value: Any, shape: Out, path: str, *, strict: bool,
     elif kind == "list":
         if not isinstance(value, (list, tuple)):
             raise ProjectionError(path, "not a list")
-        return [_cut(sub, shape.items, _join(path, str(n)), strict=strict, dropped=dropped)
+        return [_cut(sub, shape.items, _join(path, str(n)), strict=strict, on_dropped=on_dropped)
                 for n, sub in enumerate(value)]
     else:
         if not isinstance(value, Mapping):
@@ -968,10 +968,10 @@ def _cut(value: Any, shape: Out, path: str, *, strict: bool,
             if declared is None:
                 if strict:
                     raise ProjectionError(where, "a key the shape does not declare")
-                if dropped is not None:
-                    dropped(where)
+                if on_dropped is not None:
+                    on_dropped(where)
                 continue
-            out[key] = _cut(sub, declared, where, strict=strict, dropped=dropped)
+            out[key] = _cut(sub, declared, where, strict=strict, on_dropped=on_dropped)
         return out
     if not ok:
         raise ProjectionError(path, f"not a {'finite ' if kind == 'float' else ''}{kind}")

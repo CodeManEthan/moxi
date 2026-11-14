@@ -780,7 +780,7 @@ class CodexAdapter(HarnessAdapter):
             session_id = self.mirror_session()
             for p in batch:
                 self.reply_ledger.open(p, directors, session_id, now)
-        self.delivered(text, high, identity, len(batch), receipt)
+        self.on_delivered(text, high, identity, len(batch), receipt)
         return text
 
     def deliver(self, text: str, high: int, identity, count: int):
@@ -878,7 +878,7 @@ class CodexAdapter(HarnessAdapter):
                          len(hand.ids))
         self.report_turn_end(unhandled=hand.ids)
 
-    def delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
+    def on_delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
         if self._daemon is not None:
             self.notify_injected(identity, high, text)
         log.info("injected %d message(s) for %s through %s as digest %s",

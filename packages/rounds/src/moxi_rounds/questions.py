@@ -186,25 +186,25 @@ def is_closed(name: str, settings=None) -> bool:
 
 
 def reached(question: states.Question, state: states.State, *,
-            closed: Callable[[str], bool] | None = None) -> bool:
+            on_closed: Callable[[str], bool] | None = None) -> bool:
     """Whether what a parked question waits for has come: the stage is finished, or the
     round is closed. `state` is the state of the log that holds the question, and
-    `closed` answers whether a round, by name, is closed (`is_closed` when left out).
+    `on_closed` answers whether a round, by name, is closed (`is_closed` when left out).
     False for a question that waits for nothing."""
     until = question.until
     if question.state != PARKED or not until:
         return False
     if until.startswith(UNTIL_ROUND):
-        return bool((closed or is_closed)(until[len(UNTIL_ROUND):]))
+        return bool((on_closed or is_closed)(until[len(UNTIL_ROUND):]))
     return until in finished_stages(state)
 
 
 def current(question: states.Question, state: states.State, *,
-            closed: Callable[[str], bool] | None = None) -> str | None:
+            on_closed: Callable[[str], bool] | None = None) -> str | None:
     """The question's state as it reads now: the recorded one, except that a parked
     question reads `OPEN` once what it waits for has come. The arguments are `reached`'s.
     """
-    return OPEN if reached(question, state, closed=closed) else question.state
+    return OPEN if reached(question, state, on_closed=on_closed) else question.state
 
 
 def shown_as(reads: str | None, *, ended: bool) -> str | None:
@@ -254,16 +254,16 @@ def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
         yield question.id, body
 
 
-def listed(body: Mapping, *, closed: Callable[[str], bool] | None = None) -> str | None:
+def listed(body: Mapping, *, on_closed: Callable[[str], bool] | None = None) -> str | None:
     """The state a question reads as now, from the body the index keeps for it: what
     `current` gives from the question and its log. A parked question reads `OPEN` once
     the stage it waits for is finished, which the body says, or the round it waits for
-    is closed, which `closed` answers by the round's name (`is_closed` when left out)."""
+    is closed, which `on_closed` answers by the round's name (`is_closed` when left out)."""
     until = body.get("until")
     if body.get("state") != PARKED or not until:
         return body.get("state")
     if until.startswith(UNTIL_ROUND):
-        came = bool((closed or is_closed)(until[len(UNTIL_ROUND):]))
+        came = bool((on_closed or is_closed)(until[len(UNTIL_ROUND):]))
     else:
         came = body.get("reached") is True
     return OPEN if came else PARKED

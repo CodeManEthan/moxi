@@ -16,7 +16,7 @@ where they differed is a flag or a hook here, so moving onto it changed no behav
 port's `deliver` returns `REQUEUE`, and a port returns it only for an outcome after which
 an immediate retry cannot put the same digest into a live turn it already reached. Any
 other value is a receipt, and a receipt is a delivery: the digest is recorded and the
-receipt is handed to `delivered`. The base tests `receipt is REQUEUE` and never the
+receipt is handed to `on_delivered`. The base tests `receipt is REQUEUE` and never the
 receipt's truth, so a receipt of None is a delivery. Whether that digest is ever acked
 is the port's call, on its harness's own evidence that the turn completed.
 
@@ -119,7 +119,7 @@ class TurnLedger:
     def __init__(self):
         self._pending: dict[str, list[str]] = {}
 
-    def injected(self, turn_id: str | None, message_id, ids=()) -> None:
+    def on_injected(self, turn_id: str | None, message_id, ids=()) -> None:
         """Record a digest injected into `turn_id`: its highest message id and every id
         it carried (`ids`)."""
         if not turn_id:
@@ -226,7 +226,7 @@ class HarnessAdapter:
         #: The digest the daemon opened for each message id injected under this
         #: binding, until its turn's end is reported (`open_digest`, `turn_ended`).
         self.digest_of: dict[str, int] = {}
-        #: The digest of each batch by its high id, from its open until `injected`
+        #: The digest of each batch by its high id, from its open until `on_injected`
         #: names it (a port may report the turn's end before it reports the injection).
         self._opened: dict[str, int] = {}
         #: The ids of each digest the flush is handing the port, by its high id
@@ -836,7 +836,7 @@ class HarnessAdapter:
             session_id = self.mirror_session()
             for p in batch:
                 self.reply_ledger.open(p, directors, session_id, now)
-        self.delivered(text, high, identity, len(batch), receipt)
+        self.on_delivered(text, high, identity, len(batch), receipt)
         if not self.HOLDS_UNTIL_TURN_ENDS:
             self.release_held(ids)         # the digest's turn ended inside `deliver`
         return text
@@ -920,7 +920,7 @@ class HarnessAdapter:
         """Put the digest in front of the model. `REQUEUE`, or a receipt."""
         raise NotImplementedError
 
-    def delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
+    def on_delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
         """After the base recorded a delivered digest."""
 
     def retry_delay(self) -> float:

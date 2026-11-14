@@ -81,7 +81,7 @@ def record(call: str, **detail) -> None:
 #: Set by `hide`, so a launch a test runs in a process of its own (`launcher_child`) finds
 #: no turns either.
 HIDDEN = "LAUNCHER_NO_TURNS"
-#: The launcher's seam (`moxi_launcher.first.TURNS_SEAM`), named here so this module
+#: The launcher's seam (`moxi_launcher.first.TURNS_ENV`), named here so this module
 #: imports nothing of the launcher's.
 SEAM = "MOXI_LAUNCHER_TURNS"
 

@@ -155,12 +155,12 @@ def _note_again(project: str, rounds_dir: Path, slug: str,
 # -- a round's note ----------------------------------------------------------------------
 
 def note(project: str, slug: str, events: Iterable[dict],
-         project_events: Iterable[dict] = (), *, closed: Closed | None = None) -> str:
+         project_events: Iterable[dict] = (), *, on_closed: Closed | None = None) -> str:
     """The note of the round `<project>/<slug>`, as text: `events` is its whole log and
     `project_events` its project's, which says what the operator has read back.
-    `closed` answers whether a round, by name, is closed, for a parked question that
+    `on_closed` answers whether a round, by name, is closed, for a parked question that
     waits for one; the logs answer when it is left out."""
-    found = _read(project, events, project_events, closed, slug=slug)
+    found = _read(project, events, project_events, on_closed, slug=slug)
     shown_as = showing.data(found)
     lines = [*_header("round-note", project, shown_as["description"],
                       ["round", slug], shown_as["history"],
@@ -327,10 +327,10 @@ def rulings(project: str, project_events: Iterable[dict]) -> str:
 
 
 def questions(project: str, project_events: Iterable[dict], *,
-              closed: Closed | None = None) -> str:
+              on_closed: Closed | None = None) -> str:
     """The questions on the list of `project`, as text, by state, each with who asked
-    it and when. `closed` is as `note` takes it."""
-    found = _read(project, project_events, project_events, closed)
+    it and when. `on_closed` is as `note` takes it."""
+    found = _read(project, project_events, project_events, on_closed)
     shown_as = showing.data(found)
     lines = [*_header("questions", project,
                       f"The questions on the list of {project}, by state",
@@ -346,7 +346,7 @@ def questions(project: str, project_events: Iterable[dict], *,
 # -- shared ------------------------------------------------------------------------------
 
 def _read(project: str, events: Iterable[dict], project_events: Iterable[dict],
-          closed: Closed | None, *, slug: str | None = None) -> showing.Shown:
+          on_closed: Closed | None, *, slug: str | None = None) -> showing.Shown:
     """The logs as `showing` reads a round, so a file lists what `show` shows. A
     project's own log is read as a round with no slug. No folder is named: a file
     says nothing of the machine it was written on."""
@@ -354,7 +354,7 @@ def _read(project: str, events: Iterable[dict], project_events: Iterable[dict],
         name=project if slug is None else f"{project}/{slug}", project=project,
         slug=slug or "", round_dir=Path(),
         state=states.fold(events), register=states.fold(project_events),
-        closed=asked.is_closed if closed is None else closed)
+        on_closed=asked.is_closed if on_closed is None else on_closed)
 
 
 def _header(kind: str, project: str, description: str | None, tags: list[str],

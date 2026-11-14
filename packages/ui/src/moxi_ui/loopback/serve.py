@@ -256,7 +256,7 @@ def _lift_peer(app: Callable[..., Any]) -> Callable[..., Any]:
     sees another connection's peer or a value of its own making.
     """
 
-    async def lifted(scope: dict[str, Any], receive: Callable[..., Any],
+    async def on_lifted(scope: dict[str, Any], receive: Callable[..., Any],
                      send: Callable[..., Any]) -> None:
         if scope.get("type") == "http":
             state = dict(scope.get("state") or {})
@@ -264,7 +264,7 @@ def _lift_peer(app: Callable[..., Any]) -> Callable[..., Any]:
             scope = {**scope, "state": state, PEER: {"uid": uid}}
         await app(scope, receive, send)
 
-    return lifted
+    return on_lifted
 
 
 #: `struct xucred`'s head on macOS: `cr_version` and `cr_uid`, then the groups.

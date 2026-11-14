@@ -652,7 +652,7 @@ SHAPE = Route("/api/x", "read", H, returns={
 def test_projection_drops_an_undeclared_key_at_every_depth_and_reports_each():
     dropped = []
     got = project({"total": 3, "secret": "x", "rows": [{"n": 1, "name": "a", "extra": 1}]},
-                  SHAPE, dropped=dropped.append)
+                  SHAPE, on_dropped=dropped.append)
     assert got == {"total": 3, "rows": [{"n": 1, "name": "a"}]}
     assert dropped == ["secret", "rows.0.extra"]
 
@@ -716,5 +716,5 @@ def test_projection_keeps_marked_values_for_the_gateway_to_act_on():
 
 def test_a_non_string_key_is_dropped():
     dropped = []
-    assert project({1: "x", "total": 1}, SHAPE, dropped=dropped.append) == {"total": 1}
+    assert project({1: "x", "total": 1}, SHAPE, on_dropped=dropped.append) == {"total": 1}
     assert dropped == ["1"]

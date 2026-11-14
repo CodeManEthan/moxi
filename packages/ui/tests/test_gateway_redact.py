@@ -102,7 +102,7 @@ class Gate:
         self.push = Push(FakeStarters([{"module": "fixture", "state": "up", "log": LOG}]),
                          mounts=MOUNTS, client=FakeClient())
         self.page_answer: tuple[int, list, bytes] = (200, JSON, b"{}")
-        self.acts = Acts(mounts=lambda: MOUNTS, mounted=lambda: self.mount.mounted,
+        self.acts = Acts(mounts=lambda: MOUNTS, on_mounted=lambda: self.mount.mounted,
                          client=self.reads, audit=self.writer, key=lambda: KEY,
                          device_of=access.device_of)
         self.router = GatewayRouter(access, mounts=lambda: MOUNTS,

@@ -150,7 +150,7 @@ def fence(impl, runner=None) -> Fence:
 def _io(impl, runner, say, *, replace: bool) -> ApplyIO:
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     io = ApplyIO(fence(impl, runner), say=say, replace=replace,
-                 displaced=lambda path: _displaced(stamp, path))
+                 on_displaced=lambda path: _displaced(stamp, path))
     io.encoding = impl.encoding
     return io
 

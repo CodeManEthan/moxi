@@ -786,15 +786,15 @@ class _Feed:
                 now = time.monotonic()
                 if version != seen or now >= due:
                     seen, due = version, now + REGATHER
-                    await self.changed()
+                    await self.on_changed()
             except Exception as exc:
                 _log_once(exc, "the state poller failed")
             await asyncio.sleep(TICK)
 
-    async def changed(self) -> None:
+    async def on_changed(self) -> None:
         """Ask each topic for one rebuild; a gather that raises is logged and the other
         still runs."""
-        done = await asyncio.gather(*(s.changed() for s in self.snapshots),
+        done = await asyncio.gather(*(s.on_changed() for s in self.snapshots),
                                     return_exceptions=True)
         for result in done:
             if isinstance(result, Exception):

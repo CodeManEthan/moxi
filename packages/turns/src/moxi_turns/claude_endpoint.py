@@ -297,7 +297,7 @@ class ClaudeHarness(Harness):
             self._pending.append(delivery)
         self._hand_next()
 
-    def expired(self, delivery_id: str) -> None:
+    def on_expired(self, delivery_id: str) -> None:
         """The core expired the delivery (`PENDING_TTL_S`): its window closes now, admitted
         or not, so it holds no turn and no later submit (the liveness bound, above)."""
         with self._lock:
@@ -378,7 +378,7 @@ class ClaudeHarness(Harness):
                 # drop, `dropped`.
                 refused_by_gate = w.delivery in self._gate_refused
                 if not refused_by_gate:
-                    ep.refused(w.delivery, reason if reason in leg.GATE_CODES
+                    ep.on_refused(w.delivery, reason if reason in leg.GATE_CODES
                                else "dropped")
                 log.info("submit %s dropped%s: %s", w.delivery,
                          " by the gate" if refused_by_gate else "", reason)
@@ -447,11 +447,11 @@ class ClaudeHarness(Harness):
         elif kind == leg.R_APPEND_DONE:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
-                ep.steered(delivery)
+                ep.on_steered(delivery)
         elif kind == leg.R_APPEND_FAILED:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
-                ep.refused(delivery, "idle")
+                ep.on_refused(delivery, "idle")
         elif kind == leg.R_COMMAND_DONE:
             self._command_done(body)
 
@@ -565,7 +565,7 @@ class ClaudeHarness(Harness):
                 elif spec.refuse_agents and _busy_agents(body.get("agents")):
                     reason = "busy-agents"
                 if reason is not None:
-                    ep.refused(w.delivery, reason)
+                    ep.on_refused(w.delivery, reason)
             if reason is not None:
                 self._gate_refused.add(w.delivery)
                 log.info("entry of %s refused: %s", w.delivery, reason)

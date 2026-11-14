@@ -119,12 +119,12 @@ def test_a_question_parked_until_a_round_reads_open_once_that_round_is_closed():
     [question] = found.questions
     seen = []
 
-    def closed(name):
+    def on_closed(name):
         seen.append(name)
         return name == "proj-a/b-round"
 
-    assert questions.current(question, found, closed=closed) == "open"
-    assert questions.current(question, found, closed=lambda name: False) == "parked"
+    assert questions.current(question, found, on_closed=on_closed) == "open"
+    assert questions.current(question, found, on_closed=lambda name: False) == "parked"
     assert seen == ["proj-a/b-round"]
 
 

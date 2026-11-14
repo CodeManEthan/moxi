@@ -109,7 +109,7 @@ def test_the_endpoint_asks_at_ready_and_prompt_and_tells_turn_and_gone(make_endp
     assert ep.prompt() == "comms at prompt"
     fake.start_turn()
     fake.end_turn("aborted")
-    ep.gone("the session ended")
+    ep.on_gone("the session ended")
     time.sleep(0.1)
     assert [c[:4] for c in listener_targets.CALLS] == [
         ("comms", "start", "s-1", "startup"), ("comms", "prompt", "s-1", None),

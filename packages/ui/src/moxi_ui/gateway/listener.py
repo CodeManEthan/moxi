@@ -436,7 +436,7 @@ class Gateway:
                 endpoint.check_socket_path(self.path)
             except endpoint.PathRefused as exc:
                 await self._let_go()
-                await self._failed(str(exc))
+                await self._on_failed(str(exc))
         elif not want and self._held is not None:
             await self._let_go()
         if not want:
@@ -449,7 +449,7 @@ class Gateway:
             self.problem = str(exc)
             return
         except (endpoint.PathRefused, NotPrivate) as exc:
-            await self._failed(str(exc))
+            await self._on_failed(str(exc))
             return
         except OSError as exc:
             if self.kind == "tcp" and (exc.errno in _IN_USE
@@ -458,7 +458,7 @@ class Gateway:
                         f"was removed; free the port and run `moxi ui gateway enable`")
             else:
                 text = f"the gateway's endpoint can't be bound: {exc}"
-            await self._failed(text)
+            await self._on_failed(text)
             return
         stop = asyncio.Event()
         task = asyncio.ensure_future(serve(
@@ -482,7 +482,7 @@ class Gateway:
                            "another with `moxi config set ui gateway.port N`")
         return bind_tcp(self.port)
 
-    async def _failed(self, text: str) -> None:
+    async def _on_failed(self, text: str) -> None:
         if text != self.problem:
             _log.warning("the gateway can't hold its endpoint: %s", text)
             where = self.path if self.kind == "unix" else f"127.0.0.1:{self.port}"

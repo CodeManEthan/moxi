@@ -409,7 +409,7 @@ class HookServer:
                     reply = self._dispatch(frame, conn)
             if reply is not None:
                 conn.send(reply)
-                self._timed(frame)
+                self._on_timed(frame)
         except (OSError, TimeoutError, protocol.ProtocolError):
             pass
         finally:
@@ -459,7 +459,7 @@ class HookServer:
                 # The mark clears only once the answer is out: a send that fails leaves
                 # it, as if this start had not been answered.
                 conn.send(reply)
-                self._timed(frame)
+                self._on_timed(frame)
                 start_answered()
                 return None
             return reply
@@ -482,7 +482,7 @@ class HookServer:
         reason = endpoint.on_stop(facts)
         if reason:
             conn.send({"ok": True, "block": reason})
-            self._timed(frame)
+            self._on_timed(frame)
             # The ping still says when it has printed the block. Whether it did or not,
             # the turn's end is Codex's to report.
             try:
@@ -516,7 +516,7 @@ class HookServer:
             log.exception("the Codex %s hook failed", frame.get("event"))
             return {"ok": False, "error": f"the host's {name} failed: {type(exc).__name__}"}
 
-    def _timed(self, frame: dict) -> None:
+    def _on_timed(self, frame: dict) -> None:
         """Record the hook's wait: from the ping's stamp to this answer. A frame with no
         stamp (an older ping) and one from another session record nothing. A tool hook's
         wait is recorded as `guard` or `after-tool`."""
@@ -578,7 +578,7 @@ class _Ping:
 
         return envelope(event, text)
 
-    def emitted(self, text) -> None:
+    def on_emitted(self, text) -> None:
         self.answered = True
         try:
             if self.block and self.conn is not None:
@@ -638,7 +638,7 @@ def main(argv=None) -> int:
         ping.render if args.event == "PreToolUse" else None
     kwargs = {"render": render} if render is not None else {}
     run(args.event, ping.body, seconds=args.wait_s, on_error=ping.error,
-        on_emitted=ping.emitted, **kwargs)
+        on_emitted=ping.on_emitted, **kwargs)
     # The wall is down and nothing was printed: a covered call is refused here.
     refusal = ping.unanswered()
     if refusal is not None:

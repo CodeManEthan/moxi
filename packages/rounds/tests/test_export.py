@@ -704,5 +704,5 @@ def test_a_row_of_the_index_reads_as_its_question_does(rounds):
     assert bodies["Q2"]["reached"] is True and "reached" not in bodies["Q3"]
     for closed, reads in ((True, "open"), (False, "parked")):
         assert questions.listed({"state": "parked", "until": f"round:{B}"},
-                                closed=lambda name, closed=closed: closed) == reads
+                                on_closed=lambda name, closed=closed: closed) == reads
     assert index.read("proj-a", rounds, "a-round").items[1].body["reached"] is True

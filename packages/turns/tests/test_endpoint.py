@@ -244,7 +244,7 @@ def test_an_open_delivery_answers_lost_when_the_endpoint_goes(make_endpoint):
     t = threading.Thread(target=lambda: waiter.append(d.wait_ended(None)))
     t.start()
     time.sleep(0.1)
-    ep.gone("a reload")
+    ep.on_gone("a reload")
     t.join(3)
     # The endpoint's reason when its answer is out before the server closes; else the
     # wait's reconnect finds nothing serving, which reads the same `lost`.
@@ -274,7 +274,7 @@ def test_watch_yields_every_turn_event_then_gone(make_endpoint):
     d = s.deliver("x", only_if_idle=True)
     d.wait_started(1)
     fake.end_turn("error")
-    ep.gone("bye")
+    ep.on_gone("bye")
     t.join(3)
     opened = (turns.DeliveryRef(d.id, None, "opened"),)
     assert events == [

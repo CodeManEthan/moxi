@@ -45,14 +45,14 @@ SKIP = "skip:docket:"
 
 
 def on_stage(state: states.State, stage: str, *,
-             closed: Callable[[str], bool] | None = None
+             on_closed: Callable[[str], bool] | None = None
              ) -> tuple[states.Question, ...]:
     """The questions that hold the stage `stage` of the round `state` is of, in the
     order they were asked; none when nothing holds it.
 
     - `state`: the round's state, as its log folds.
     - `stage`: the stage's id, `B2`.
-    - `closed`: answers whether a round, by name, is closed, for a question parked
+    - `on_closed`: answers whether a round, by name, is closed, for a question parked
       until another round closes; `questions.is_closed`, which reads that round's
       log, when left out.
     """
@@ -64,7 +64,7 @@ def on_stage(state: states.State, stage: str, *,
         if question.id not in let_past
         and (question.blocks == questions.ALL
              or (not isinstance(question.blocks, str) and stage in (question.blocks or ())))
-        and questions.current(question, state, closed=closed) == questions.OPEN)
+        and questions.current(question, state, on_closed=on_closed) == questions.OPEN)
 
 
 def on_close(state: states.State) -> tuple[states.Question, ...]:

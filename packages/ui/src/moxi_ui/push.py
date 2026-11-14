@@ -296,7 +296,7 @@ class _Upstream:
 
     # -- the union ----------------------------------------------------------------------
 
-    def changed(self) -> None:
+    def on_changed(self) -> None:
         """The union may have changed: apply it 50 ms after the last change."""
         if self.timer is not None:
             self.timer.cancel()
@@ -478,13 +478,13 @@ class Push:
         for module, upstream in list(self._upstreams.items()):
             if old.get(module, ("",))[0] != self._routes.get(module, ("",))[0]:
                 upstream.reroute = True
-            upstream.changed()
+            upstream.on_changed()
         for stream in self._streams:
             for module in stream.by_module:
                 self._tell_dropped(stream, module)
                 if (module != OWN_MODULE and module not in self._upstreams
                         and self._exported(stream, module)):
-                    self._upstream_for(module).changed()
+                    self._upstream_for(module).on_changed()
 
     def publish(self, topic: str, value: Any) -> None:
         """Set the shell's own topic `ui.<topic>` (one of `OWN_TOPICS`) to `value`,
@@ -545,7 +545,7 @@ class Push:
                         "headers": response_headers(extra=[("Content-Type", "text/event-stream")],
                                                     policy=policy)})
             writing = asyncio.ensure_future(self._write(stream, send))
-            watching = asyncio.ensure_future(_disconnected(receive))
+            watching = asyncio.ensure_future(_on_disconnected(receive))
             try:
                 await asyncio.wait({writing, watching}, return_when=asyncio.FIRST_COMPLETED)
             finally:
@@ -655,14 +655,14 @@ class Push:
                     stream.put((STATE_EVENT, module), _state_frame(module, *upstream.state))
             self._tell_dropped(stream, module)
             if exported:
-                self._upstream_for(module).changed()
+                self._upstream_for(module).on_changed()
 
     def _leave(self, stream: _Stream) -> None:
         self._streams.discard(stream)
         for module in stream.by_module:
             upstream = self._upstreams.get(module)
             if upstream is not None:
-                upstream.changed()
+                upstream.on_changed()
 
     def _tell_dropped(self, stream: _Stream, module: str) -> None:
         """Say once which of the topics `stream` asked of `module` it won't get."""
@@ -717,7 +717,7 @@ class Push:
             await asyncio.sleep(SERVERS_EVERY)
 
 
-async def _disconnected(receive: Callable[..., Any]) -> None:
+async def _on_disconnected(receive: Callable[..., Any]) -> None:
     while True:
         message = await receive()
         if message.get("type") == "http.disconnect":

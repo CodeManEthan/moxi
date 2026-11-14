@@ -386,11 +386,11 @@ class ApplyIO:
     """
 
     def __init__(self, fence: Fence, *, say: Callable[[str], object] = print,
-                 replace: bool = False, displaced: Callable[[Path], Path] | None = None):
+                 replace: bool = False, on_displaced: Callable[[Path], Path] | None = None):
         self.fence = fence
         self._say = say
         self.replace = replace
-        self._displaced = displaced
+        self._on_displaced = on_displaced
         self.lines: dict[int, list[str]] = {}
         self.failed: set[int] = set()
         self.written: list[Path] = []
@@ -399,9 +399,9 @@ class ApplyIO:
     def write(self, change: UnitChange) -> None:
         from .. import files
 
-        if change.foreign is not None and self.replace and self._displaced is not None:
+        if change.foreign is not None and self.replace and self._on_displaced is not None:
             if change.foreign.exists():
-                aside = self._displaced(change.foreign)
+                aside = self._on_displaced(change.foreign)
                 aside.parent.mkdir(parents=True, exist_ok=True)
                 # `shutil.move`, not a rename: the displaced folder may be on another
                 # file system than the unit directory.

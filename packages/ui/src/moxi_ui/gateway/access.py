@@ -327,7 +327,7 @@ class Access:
     def layer(self, inner: Callable[..., Any]) -> Callable[..., Any]:
         """An ASGI layer answering this layer's paths and passing the rest to `inner`."""
 
-        async def routed(scope: dict[str, Any], receive: Callable[..., Any],
+        async def on_routed(scope: dict[str, Any], receive: Callable[..., Any],
                          send: Callable[..., Any]) -> None:
             method = scope.get("method", "")
             raw = (scope.get("raw_path") or b"").decode("latin-1")
@@ -344,7 +344,7 @@ class Access:
                 answer = bad_exc.answer
             await _send(send, answer)
 
-        return routed
+        return on_routed
 
     # --- the session callable ---------------------------------------------------------
 

@@ -249,10 +249,10 @@ class PhoneBridge:
             except OSError:
                 return
             self._keep(sock)
-            threading.Thread(target=self._guarded, args=(handle, sock), daemon=True,
+            threading.Thread(target=self._on_guarded, args=(handle, sock), daemon=True,
                              name="moxi-ui-phone-bridge-conn").start()
 
-    def _guarded(self, handle: Any, sock: socket.socket) -> None:
+    def _on_guarded(self, handle: Any, sock: socket.socket) -> None:
         try:
             handle(sock)
         except (OSError, ssl.SSLError, ValueError):

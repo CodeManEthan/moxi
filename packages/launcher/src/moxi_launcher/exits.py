@@ -78,12 +78,12 @@ def exit_session(session_id: str, *, dry_run: bool = False,
             api = _slots(slots_api)
             found = target.find(session_id, conn=c, turns=turns, slots_api=api)
         except (catalog.Refused, store.RunOpen) as exc:
-            _refused(c, row, exc, dry_run=dry_run)
+            _on_refused(c, row, exc, dry_run=dry_run)
             raise
         try:
             return _exit(c, found, api, env, current, dry_run=dry_run, clock=clock, wall=wall, sleep=sleep)
         except (catalog.Refused, store.RunOpen) as exc:
-            _refused(c, found.row, exc, dry_run=dry_run)
+            _on_refused(c, found.row, exc, dry_run=dry_run)
             raise
         finally:
             found.close()
@@ -219,7 +219,7 @@ def own_job() -> str:
     return f"proc:{me.pid}@{me.started:.6f}"
 
 
-def _refused(conn: sqlite3.Connection, row: store.LaunchRow, refused: BaseException,
+def _on_refused(conn: sqlite3.Connection, row: store.LaunchRow, refused: BaseException,
              *, dry_run: bool) -> None:
     """Log a refusal met once the launch was found, with no run."""
     if dry_run:

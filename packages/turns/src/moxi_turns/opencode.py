@@ -738,7 +738,7 @@ class OpenCodeHarness(Harness):
 
     def append(self, delivery: Delivery) -> None:
         # `can` holds no steer, so the core never calls this; refuse if it does.
-        self.endpoint.refused(delivery.id, "unsupported")
+        self.endpoint.on_refused(delivery.id, "unsupported")
 
     def command(self, request: CommandRequest) -> None:
         if request.name != "compact":
@@ -828,7 +828,7 @@ class OpenCodeHarness(Harness):
                     return found
         return model_option(self.options)
 
-    def expired(self, delivery_id: str) -> None:
+    def on_expired(self, delivery_id: str) -> None:
         with self._lock:
             if self._post is not None and self._post.delivery.id == delivery_id:
                 self._post = None
@@ -843,7 +843,7 @@ class OpenCodeHarness(Harness):
         road (the adapter's duty, `harness.py`)."""
         while True:
             if self._stop.is_set():
-                self.endpoint.refused(d.id, "gone")
+                self.endpoint.on_refused(d.id, "gone")
                 return
             if not self.endpoint.is_waiting(d.id):
                 return                  # expired or settled elsewhere
@@ -861,13 +861,13 @@ class OpenCodeHarness(Harness):
                     reason = "draft"
             if reason is not None:
                 if reason != EXPIRED:
-                    self.endpoint.refused(d.id, reason)
+                    self.endpoint.on_refused(d.id, reason)
                 return
             outcome = self._post_once(d)
             if outcome == "posted":
                 return
             if outcome == "busy" and d.only_if_idle:
-                self.endpoint.refused(d.id, "busy-turn")
+                self.endpoint.on_refused(d.id, "busy-turn")
                 return
             if outcome == "retry":
                 self._stop.wait(FLUSH_RETRY)
@@ -912,7 +912,7 @@ class OpenCodeHarness(Harness):
         if code >= 500 or code == 429:
             log.warning("post %s answered %s; trying again", mid, code)
             return "retry"
-        self.endpoint.refused(d.id, "unsupported")     # the server turned the post down
+        self.endpoint.on_refused(d.id, "unsupported")     # the server turned the post down
         self._fatal(code, answer)
         return "refused"
 
@@ -928,7 +928,7 @@ class OpenCodeHarness(Harness):
         reason = (f"the OpenCode server refused with {code} ({meaning}): {detail_text}")
         self.trouble = reason
         log.error("%s", reason)
-        threading.Thread(target=self.endpoint.gone, args=(reason,), daemon=True,
+        threading.Thread(target=self.endpoint.on_gone, args=(reason,), daemon=True,
                          name="turns-opencode-gone").start()
 
 

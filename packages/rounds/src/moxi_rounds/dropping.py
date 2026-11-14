@@ -121,7 +121,7 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
     again = (f"moxi rounds drop {name} --by {by} --record PTR"
              f"{' --withdraw-questions' if withdraw_questions else ''}")
 
-    def closed(other):
+    def on_closed(other):
         return questions.is_closed(other, settings)
 
     def has_not_ended(view):
@@ -160,7 +160,7 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
         if not withdraw_questions or ending.how(view.state) is not None:
             return None
         there = [f"{one.question} as {one.became}" for one in
-                 moving.arrivals(view.state, view.project_state, name, closed=closed)
+                 moving.arrivals(view.state, view.project_state, name, on_closed=on_closed)
                  if one.entry is None]
         if not there:
             return None
@@ -177,7 +177,7 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
             went = {question.id: WITHDRAWN for question in view.state.questions
                     if question.state in (questions.OPEN, questions.PARKED)}
         else:
-            found = moving.arrivals(view.state, view.project_state, name, closed=closed)
+            found = moving.arrivals(view.state, view.project_state, name, on_closed=on_closed)
             finished[0] = any(one.entry is None for one in found)
             # The arrivals go first: stopped after any of them, the round is still
             # open, its questions are asked in both logs, and nothing was let go.
@@ -306,7 +306,7 @@ def left_behind(project_state: states.State, home: folders.Home, *,
         if project == home.project and was_dropped(slug):
             left.append(Left(question, questions.current(
                 question, project_state,
-                closed=lambda other: questions.is_closed(other, settings))))
+                on_closed=lambda other: questions.is_closed(other, settings))))
     return tuple(left)
 
 

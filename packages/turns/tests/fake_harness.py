@@ -4,7 +4,7 @@ With `auto` on, a handed delivery enters at once (the re-check, then an only-if-
 delivery's own draft and subagent checks, then the turn starts with the tie); with it off
 the test calls `enter()` itself, so a turn can be typed between the submit and the entry.
 With `auto_steer` on, a handed steer is confirmed at once (`steered`), or refused `idle`
-when no turn is open; with it off the test calls `take()` or `endpoint.refused` itself.
+when no turn is open; with it off the test calls `take()` or `endpoint.on_refused` itself.
 
 Its subagents: `entries` is the harness's own record, read on every `agents()` call; left
 None, the record is made from the counts `live_agents` (None: unreadable) and `shells`.
@@ -109,7 +109,7 @@ class FakeHarness(Harness):
                 live is None or live.agents is None or live.agents):
             reason = "busy-agents"      # an unknown count never reads as 0
         if reason is not None:
-            self.endpoint.refused(delivery.id, reason)
+            self.endpoint.on_refused(delivery.id, reason)
             return reason
         self.start_turn(delivery.id)
         return None
@@ -135,9 +135,9 @@ class FakeHarness(Harness):
     def take(self, delivery: Delivery) -> None:
         """The harness's word on a steer: taken into the open turn, else `idle`."""
         if self.open_turn is None:
-            self.endpoint.refused(delivery.id, "idle")
+            self.endpoint.on_refused(delivery.id, "idle")
         else:
-            self.endpoint.steered(delivery.id)
+            self.endpoint.on_steered(delivery.id)
 
     def start_turn(self, delivery_id: str | None = None) -> str:
         turn_id = f"t{next(self._turns)}"

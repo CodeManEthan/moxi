@@ -425,13 +425,13 @@ class SessionStore:
 
     def _drop(self, id_hash: str) -> bool:
         """Remove one session, holding the lock; its watches are called once the lock is
-        let go (`_ended`)."""
+        let go (`_on_ended`)."""
         if self._sessions.pop(id_hash, None) is None:
             return False
         self._ending.extend(self._watches.pop(id_hash, ()))
         return True
 
-    def _ended(self) -> None:
+    def _on_ended(self) -> None:
         """Call the watches of the sessions dropped under the lock just let go."""
         with self._lock:
             calls, self._ending = self._ending, []
@@ -480,7 +480,7 @@ class SessionStore:
                 self._drop(oldest(list(self._sessions)))
             self._sessions[_hash(session_id)] = _Record(_hash(key), now, now, now, owner)
             self._save()
-        self._ended()
+        self._on_ended()
         return session_id, key
 
     def owner_of(self, id_hash: str) -> str | None:
@@ -497,7 +497,7 @@ class SessionStore:
                 self._drop(id_hash)
             if gone:
                 self._save()
-        self._ended()
+        self._on_ended()
         return len(gone)
 
     def use(self, session_ids: Sequence[str], key: str | None = None, *,
@@ -523,7 +523,7 @@ class SessionStore:
                     return id_hash
             return None
         finally:
-            self._ended()
+            self._on_ended()
 
     def end(self, session_ids: Iterable[str]) -> int:
         """End the sessions these ids name; returns how many there were."""
@@ -534,7 +534,7 @@ class SessionStore:
                     gone += 1
             if gone:
                 self._save()
-        self._ended()
+        self._on_ended()
         return gone
 
     def end_hash(self, id_hash: str) -> bool:
@@ -543,7 +543,7 @@ class SessionStore:
             gone = self._drop(id_hash)
             if gone:
                 self._save()
-        self._ended()
+        self._on_ended()
         return gone
 
     def clear(self) -> None:
@@ -552,7 +552,7 @@ class SessionStore:
             for id_hash in list(self._sessions):
                 self._drop(id_hash)
             self._save()
-        self._ended()
+        self._on_ended()
 
     def live(self) -> int:
         """How many sessions are live now."""
@@ -560,7 +560,7 @@ class SessionStore:
             if self._prune():
                 self._save()
             count = len(self._sessions)
-        self._ended()
+        self._on_ended()
         return count
 
 

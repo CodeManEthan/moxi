@@ -67,7 +67,7 @@ def link(rig):
 @pytest.fixture
 def tools(rig, link):
     assert wait_until(lambda: link.bound)
-    return tools_mod.Tools(link, result=Result, refused=Result.refused, wait_default_s=2,
+    return tools_mod.Tools(link, result=Result, on_refused=Result.refused, wait_default_s=2,
                            wait_max=5, record=rig.record)
 
 
@@ -122,7 +122,7 @@ def test_a_held_name_makes_the_tools_refuse_and_the_status_name_the_holder(rig):
         assert wait_until(lambda: link.state == HELD)
         [row] = link.status()
         assert row[:2] == ("identity", "fail") and "claude-shim" in row[2]
-        t = tools_mod.Tools(link, result=Result, refused=Result.refused, wait_default_s=2,
+        t = tools_mod.Tools(link, result=Result, on_refused=Result.refused, wait_default_s=2,
                             wait_max=5, record=rig.record)
         got, _ = call(t, "send", {"to": "planner@proj-a", "text": "x"})
         assert got.is_error and got.refusal == "name-held" and "claude-shim" in got.text

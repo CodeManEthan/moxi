@@ -66,8 +66,8 @@ through the endpoint's adapter-side calls:
                                           a delivery is about to take effect: an
                                           only-if-idle one is re-checked against the
                                           ledger; a reason refuses it
-    endpoint.steered(delivery_id)         the harness took a steer into the running turn
-    endpoint.refused(delivery_id, reason) the adapter refused a delivery it was handed
+    endpoint.on_steered(delivery_id)         the harness took a steer into the running turn
+    endpoint.on_refused(delivery_id, reason) the adapter refused a delivery it was handed
     endpoint.on_stop(facts) -> str | None a Stop of the main loop: the stop handler's
                                           answer
     endpoint.command_entering(request_id) -> str | None
@@ -88,12 +88,12 @@ through the endpoint's adapter-side calls:
                                           where the harness has no after-tool point
                                           (`pre`, the fallback): the after-tool rows'
                                           text, which the model reads at that point
-    endpoint.gone(reason)                 the session ended
+    endpoint.on_gone(reason)                 the session ended
 
 The adapter's duty to settle: every delivery handed to `submit` ends in exactly one
 `turn_started(…, delivery.id)` or `turn_tied(…, delivery.id)` (the tie),
-`refused(delivery.id, reason)` or `lost(delivery.id, reason)`; every delivery handed to
-`append` in one `steered(delivery.id)`, `refused(delivery.id, "idle")` (the harness had no
+`on_refused(delivery.id, reason)` or `lost(delivery.id, reason)`; every delivery handed to
+`append` in one `on_steered(delivery.id)`, `on_refused(delivery.id, "idle")` (the harness had no
 turn to take it into) or `lost(delivery.id, reason)`; and every request handed to `command`
 in one `command_settled(request.id, result)` or `command_ran(request.id, …)`. A compaction
 is confirmed by the session: the core settles it `ran` at the next Ready with source
@@ -123,8 +123,8 @@ a submitted delivery holds the endpoint's one in-flight slot (later only-if-idle
 deliveries refuse `busy-turn`, later plain ones queue) and a command holds the one command
 slot (later commands refuse `in-flight`). A steer holds no slot. The core does not trust
 this duty: past `endpoint.PENDING_TTL_S` it settles the delivery `Lost` or the command
-`Failed` with reason `expired`, frees the slot, ignores the adapter's late word about it,
-and answers `expired` to its `entering` or `command_entering`, which the adapter takes as a
+`Failed` with reason `on_expired`, frees the slot, ignores the adapter's late word about it,
+and answers `on_expired` to its `entering` or `command_entering`, which the adapter takes as a
 refusal.
 
 A hand-off already in flight when its delivery settles `lost` may still reach the harness:
@@ -281,7 +281,7 @@ class Harness:
     def command(self, request: CommandRequest) -> None:
         raise NotImplementedError
 
-    def expired(self, delivery_id: str) -> None:
+    def on_expired(self, delivery_id: str) -> None:
         pass
 
     def close(self) -> None:

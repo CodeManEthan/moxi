@@ -420,7 +420,7 @@ async def _streamed(receive: Callable[..., Any]) -> AsyncIterator[bytes]:
             return
 
 
-async def _disconnected(receive: Callable[..., Any]) -> None:
+async def _on_disconnected(receive: Callable[..., Any]) -> None:
     while True:
         message = await receive()
         if message.get("type") == "http.disconnect":
@@ -516,7 +516,7 @@ async def _relay(response: Response, receive: Callable[..., Any],
         return True
 
     pumping = asyncio.ensure_future(pump())
-    watching = asyncio.ensure_future(_disconnected(receive))
+    watching = asyncio.ensure_future(_on_disconnected(receive))
     try:
         await asyncio.wait({pumping, watching}, return_when=asyncio.FIRST_COMPLETED)
     finally:

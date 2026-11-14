@@ -13,7 +13,7 @@ earlier kept run stands. A run that ended without rows (past its time, no answer
 kept, as its `error`.
 
 `value()` is what the route and the topic `ui.checks` carry: `{at, running, rows, error}`.
-`changed(value)` is called when a run starts and when it ends.
+`on_changed(value)` is called when a run starts and when it ends.
 
 With `enabled` false nothing is ever started: both asks answer with what is kept. Test
 shells run that way unless a test asks for the runs.
@@ -90,7 +90,7 @@ class Checks:
     """The shell's kept doctor run. See the module docstring.
 
     `path` is the kept run's file. `run()` runs the doctor to its end and gives
-    `{"rows": [...], "error": <text or None>}`, as the doctor route answers. `changed`
+    `{"rows": [...], "error": <text or None>}`, as the doctor route answers. `on_changed`
     hears each new value. `clock` gives the time in seconds since the epoch.
 
     Everything but the file's write runs on the shell's loop.
@@ -98,11 +98,11 @@ class Checks:
 
     def __init__(self, path: str | os.PathLike, *,
                  run: Callable[[], Awaitable[dict[str, Any]]],
-                 changed: Callable[[dict[str, Any]], Any] | None = None,
+                 on_changed: Callable[[dict[str, Any]], Any] | None = None,
                  enabled: bool = True, clock: Callable[[], float] = time.time):
         self.path = Path(path)
         self.run = run
-        self.changed = changed
+        self.on_changed = on_changed
         self.enabled = enabled
         self.clock = clock
         self.kept = read_kept(self.path)
@@ -176,9 +176,9 @@ class Checks:
             self._tell()
 
     def _tell(self) -> None:
-        if self.changed is None:
+        if self.on_changed is None:
             return
         try:
-            self.changed(self.value())
+            self.on_changed(self.value())
         except Exception:  # noqa: BLE001 - a failed publish leaves the run as it is
             _log.exception("publishing the kept doctor run failed")

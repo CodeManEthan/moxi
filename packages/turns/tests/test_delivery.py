@@ -80,7 +80,7 @@ class Gated(FakeHarness):
         self._gate("command", request.id)
         super().command(request)
 
-    def expired(self, delivery_id):
+    def on_expired(self, delivery_id):
         self.expired_ids.append(delivery_id)
 
 
@@ -155,7 +155,7 @@ def test_an_adapters_own_word_reads_unsupported(make_endpoint):
     ep2, fake = make_endpoint(FakeHarness(auto=False), session_id="s-2")
     d = ep2.deliver("y")
     until(lambda: fake.submitted)
-    ep2.refused(d.id, "gone")
+    ep2.on_refused(d.id, "gone")
     assert ep2.wait(d.id, "started", 5).reason == "unsupported"
 
 
@@ -223,7 +223,7 @@ def test_a_stalled_worker_settles_everything_queued_and_hands_none_of_it_on(
     assert until(lambda: steer.id in fake.expired_ids)  # the skipped steer is let go
     time.sleep(0.2)
     assert [kind for kind, _ in fake.order] == ["submit"]   # only the stuck one ran
-    ep.steered(steer.id)                               # a late word changes nothing
+    ep.on_steered(steer.id)                               # a late word changes nothing
     assert ep.wait(steer.id, "ended", 0).reason.startswith("expired")
 
 
@@ -263,7 +263,7 @@ def test_a_steer_the_harness_turns_down_reads_idle_through_wait(make_endpoint):
     d = ep.steer("too late")
     assert d.early is None
     until(lambda: fake.appended)
-    ep.refused(d.id, "idle")
+    ep.on_refused(d.id, "idle")
     assert ep.wait(d.id, "started", 1) == results.Refused("idle", d.id)
 
 
@@ -362,7 +362,7 @@ def test_each_harness_refusal_is_a_value_through_wait(make_endpoint, connect, re
     client = connect(ep)
     d = client.call("deliver", {"text": "x", "ref": "r"}, timeout_s=5)
     assert until(lambda: fake.submitted)
-    ep.refused(d["delivery"], reason)
+    ep.on_refused(d["delivery"], reason)
     got = client.call("wait", {"delivery": d["delivery"], "until": "ended",
                                "timeout_ms": 1000}, timeout_s=5)
     assert results.from_wire(got["result"]) == results.Refused(reason, d["delivery"], "r")

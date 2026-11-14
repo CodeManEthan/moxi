@@ -142,10 +142,10 @@ def validate(*, root=None, types: _doctypes.Types | None = None) -> Report:
 def walk(root: str, excluded: dict[str, int]):
     """`(path, relative)` for every regular `*.md` file under `root`, sorted, pruning
     while walking. Each tree left out adds one to its marker in `excluded`."""
-    def unlisted(_error):
+    def on_unlisted(_error):
         excluded[UNLISTED] += 1
 
-    for current_dir, dirs, files in os.walk(root, onerror=unlisted, followlinks=False):
+    for current_dir, dirs, files in os.walk(root, onerror=on_unlisted, followlinks=False):
         keep = []
         for name in sorted(dirs):
             if name in VENDORED or name == GIT:

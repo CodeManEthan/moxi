@@ -302,7 +302,7 @@ def test_a_new_servers_first_gather_sends_an_event(pages):
     async def go():
         client = StreamClient(chain, events_scope())
         await client.started()
-        await snap.changed()
+        await snap.on_changed()
         got = await client.events(1)
         await client.close()
         return got
@@ -319,11 +319,11 @@ def test_snapshot_publishes_only_when_the_hash_changes(pages):
     snap = Snapshot(lambda: dict(value), topics, "today")
 
     async def go():
-        await snap.changed()
-        await snap.changed()
+        await snap.on_changed()
+        await snap.on_changed()
         value["total"] = 2
-        await snap.changed()
-        await snap.changed()
+        await snap.on_changed()
+        await snap.on_changed()
 
     run(go())
     assert published == [{"total": 1}, {"total": 2}]
@@ -343,9 +343,9 @@ def test_snapshot_callers_share_one_rebuild(pages):
     async def go():
         # Three callers before the rebuild starts share it; two asking while it gathers
         # share the one rebuild after it.
-        first = [asyncio.ensure_future(snap.changed()) for _ in range(3)]
+        first = [asyncio.ensure_future(snap.on_changed()) for _ in range(3)]
         await asyncio.sleep(0.01)
-        second = [asyncio.ensure_future(snap.changed()) for _ in range(2)]
+        second = [asyncio.ensure_future(snap.on_changed()) for _ in range(2)]
         await asyncio.gather(*first, *second)
 
     run(go())
@@ -367,9 +367,9 @@ def test_a_gather_that_raises_reaches_its_callers_and_publishes_nothing(pages):
 
     async def go():
         with pytest.raises(RuntimeError, match="gather broke"):
-            await snap.changed()
+            await snap.on_changed()
         assert "today" not in topics._values
-        await snap.changed()
+        await snap.on_changed()
 
     run(go())
     assert topics._values["today"] == {"total": 1}

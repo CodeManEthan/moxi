@@ -125,12 +125,12 @@ def strip(headers: Iterable[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
 def mark(inner: Callable[..., Any]) -> Callable[..., Any]:
     """`inner`, noting on the request that the check passed it on to the router."""
 
-    async def marked(scope: dict[str, Any], receive: Callable[..., Any],
+    async def on_marked(scope: dict[str, Any], receive: Callable[..., Any],
                      send: Callable[..., Any]) -> None:
         _note(scope)["routed"] = True
         await inner(scope, receive, send)
 
-    return marked
+    return on_marked
 
 
 def _view(scope: Mapping[str, Any]) -> RequestView:
@@ -152,7 +152,7 @@ def watch(inner: Callable[..., Any], profile: Callable[[], Any], audit: Audit, *
     """The gateway's outer layer inside the provider check: strips the proxy headers, then
     writes each request's audit row once it is answered."""
 
-    async def watched(scope: dict[str, Any], receive: Callable[..., Any],
+    async def on_watched(scope: dict[str, Any], receive: Callable[..., Any],
                       send: Callable[..., Any]) -> None:
         if scope.get("type") != "http":
             await inner(scope, receive, send)
@@ -177,7 +177,7 @@ def watch(inner: Callable[..., Any], profile: Callable[[], Any], audit: Audit, *
             except Exception:  # noqa: BLE001 - a row that can't be written never fails a request
                 _log.exception("the gateway's audit row can't be written")
 
-    return watched
+    return on_watched
 
 
 def _row(scope: Mapping[str, Any], note: Mapping[str, Any], status: int, ms: int,
@@ -285,7 +285,7 @@ class GatewayRouter:
 
     def build(self, mount: Mount) -> Table:
         """The gateway's table for `mount`, from the exports mounted now."""
-        return gateway_table(self.mounts(), entries=self.entries(mount), problem=_refused)
+        return gateway_table(self.mounts(), entries=self.entries(mount), problem=_on_refused)
 
     def refusals(self) -> dict[str, str]:
         """The modules mounted now that the gateway leaves out, module to why."""
@@ -417,6 +417,6 @@ class GatewayRouter:
             return self._redacted(response.status, downstream(response.headers), body, returns)
 
 
-def _refused(module: str, text: str) -> None:
+def _on_refused(module: str, text: str) -> None:
     _log.warning("%s gets no gateway mount: %s", module, text)
 

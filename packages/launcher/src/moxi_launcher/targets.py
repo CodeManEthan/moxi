@@ -300,7 +300,7 @@ class Terminal(Target):
             return self._start_child(launch)
         rid = launch.request_id
         pid = os.getpid()
-        _started(launch.conn, rid, pid)
+        _on_started(launch.conn, rid, pid)
         if launch.first_owed or _wrapped(launch.composition):
             failed = _start_deliverer(launch, pid)
             if failed is not None:
@@ -326,7 +326,7 @@ class Terminal(Target):
         except OSError as exc:
             return fail(launch.conn, rid, SPAWN_FAILED,
                            f"{launch.argv[0]} could not be started: {exc}")
-        _started(launch.conn, rid, child.pid)
+        _on_started(launch.conn, rid, child.pid)
         failed = _start_deliverer(launch, child.pid) if launch.first_owed else None
         while True:
             try:
@@ -360,7 +360,7 @@ class Headless(Target):
         except OSError as exc:
             return fail(launch.conn, rid, SPAWN_FAILED,
                            f"{launch.argv[0]} could not be started: {exc}")
-        _started(launch.conn, rid, pid)
+        _on_started(launch.conn, rid, pid)
         return Started("started", exits.OK, pid=pid,
                        line=f"launch {rid} started headless, pid {pid}; its output goes "
                             f"to {output}")
@@ -580,7 +580,7 @@ def failed_exit(reason: str | None) -> int:
     return exits.ERROR if reason in FAILED_ERRORS else exits.REFUSED
 
 
-def _started(conn: sqlite3.Connection, request_id: str, pid: int) -> None:
+def _on_started(conn: sqlite3.Connection, request_id: str, pid: int) -> None:
     ident = proc.identity(pid)
     store.set_state(conn, request_id, "started", leaving=("spawning",), pid=pid,
                     pid_started=ident.started if ident is not None else None)

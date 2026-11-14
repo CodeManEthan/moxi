@@ -194,7 +194,7 @@ class Calls:
         self.running = 0
 
     async def run(self, body, *args):
-        await self._host.opened()
+        await self._host.on_opened()
         await self._places.acquire()
         loop = asyncio.get_running_loop()
         try:
