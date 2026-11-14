@@ -37,25 +37,25 @@ def rounds(tmp_path, add_project, capsys, monkeypatch):
     add_project("proj-a", notes_root=tmp_path / "notes")
     for slug in ("a-round", "b-round"):
         opening.open_round(f"proj-a/{slug}", description="a placeholder round",
-                           actor="planner", flow="fix")
-    folder = tmp_path / "notes" / "rounds"
+                           by="planner", flow="fix")
+    rounds_dir = tmp_path / "notes" / "rounds"
     for stage in ("B1", "B2"):
-        log.append(log.round_log(folder / "a-round"), "stage.declared",
+        log.append(log.round_log(rounds_dir / "a-round"), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     capsys.readouterr()
     real = log.stamp
     monkeypatch.setattr(log, "stamp", lambda when_s=None: NOW if when_s is None
                         else real(when_s))
-    return folder
+    return rounds_dir
 
 
-def ask(target=A, text=SAID, *, at=T1, actor="scout", origin="comms:11", **more):
-    return asking.ask(target, text, actor=actor, origin=origin, at=at, **more)
+def ask(target=A, text=SAID, *, at=T1, by="scout", origin="comms:11", **more):
+    return asking.ask(target, text, by=by, origin=origin, at=at, **more)
 
 
 def rule(target=A, *, at=T5, record="comms:12", **more):
-    return ruling.rule(target, record=record, actor="planner", at=at, **more)
+    return ruling.rule(target, record=record, by="planner", at=at, **more)
 
 
 def park(target, question_id, *, until=None, at=T5):
@@ -65,7 +65,7 @@ def park(target, question_id, *, until=None, at=T5):
 def finish(rounds, stage, slug="a-round"):
     """Record a stage as finished, as a later verb will."""
     log.append(log.round_log(rounds / slug), "finish.done",
-               {"stage": stage, "tip": "1" * 40}, actor="pilot")
+               {"stage": stage, "tip": "1" * 40}, by="pilot")
 
 
 def entries(name=A):
@@ -82,10 +82,10 @@ def printed(capsys, *argv):
     return capsys.readouterr().out
 
 
-def everything(*folders):
+def everything(*root_dirs):
     """Every file under the folders, with its bytes and the time it was last written."""
     return {str(path): (path.read_bytes(), path.stat().st_mtime_ns)
-            for folder in folders for path in sorted(folder.rglob("*"))
+            for root_dir in root_dirs for path in sorted(root_dir.rglob("*"))
             if path.is_file()}
 
 
@@ -174,7 +174,7 @@ def test_out_with_json_writes_the_two_files_and_prints_their_paths(
         "entries"] == entries()
 
 
-def test_a_second_export_into_a_folder_replaces_the_first(rounds, tmp_path, capsys):
+def test_a_second_export_into_a_dir_replaces_the_first(rounds, tmp_path, capsys):
     ask()
     out = tmp_path / "out"
     printed(capsys, A, "--questions", "--out", str(out))
@@ -187,7 +187,7 @@ def test_a_second_export_into_a_folder_replaces_the_first(rounds, tmp_path, caps
                                                            "questions.md"]
 
 
-def test_a_folder_that_cant_be_written_is_an_error(rounds, tmp_path, capsys):
+def test_a_dir_that_cant_be_written_is_an_error(rounds, tmp_path, capsys):
     ask()
     (tmp_path / "taken").write_text("a file, not a folder", encoding="utf-8")
 
@@ -197,7 +197,7 @@ def test_a_folder_that_cant_be_written_is_an_error(rounds, tmp_path, capsys):
 
 
 @pytest.mark.parametrize("inside", ["", "a-round", "b-round"])
-def test_out_refuses_a_rounds_folder_and_a_rounds_own_folder(rounds, capsys, inside):
+def test_out_refuses_a_rounds_dir_and_a_rounds_own_dir(rounds, capsys, inside):
     ask()
     ask("proj-a", OTHER)
     before = everything(rounds)
@@ -210,7 +210,7 @@ def test_out_refuses_a_rounds_folder_and_a_rounds_own_folder(rounds, capsys, ins
     assert not list(rounds.rglob("questions.json"))
 
 
-def test_out_refuses_the_rounds_folder_of_another_project_reached_by_a_link(
+def test_out_refuses_the_rounds_dir_of_another_project_reached_by_a_link(
         rounds, tmp_path, add_project, capsys):
     add_project("proj-b", notes_root=tmp_path / "other")
     (tmp_path / "link").symlink_to(tmp_path / "other", target_is_directory=True)
@@ -220,7 +220,7 @@ def test_out_refuses_the_rounds_folder_of_another_project_reached_by_a_link(
     assert not (tmp_path / "other" / "rounds").exists()
 
 
-def test_out_takes_a_folder_inside_a_rounds_folder_that_is_no_round(rounds, capsys):
+def test_out_takes_a_dir_inside_a_rounds_dir_that_is_no_round(rounds, capsys):
     ask()
     out = rounds / "exports"
     assert printed(capsys, A, "--questions", "--out", str(out)).splitlines() == [
@@ -260,7 +260,7 @@ def test_a_question_the_index_has_not_seen_is_exported_and_the_index_is_left_sta
     # Another machine's verb: a line the index here has not seen.
     log.append(log.round_log(rounds / "a-round"), "question.asked",
                {"id": "Q2", "text": OTHER, "from": "comms:13", "blocks": "all",
-                "state": "open", "asked_by": "helper", "asked_at": T2}, actor="helper")
+                "state": "open", "asked_by": "helper", "asked_at": T2}, by="helper")
     before = store(rounds)
 
     assert [(entry.id, entry.by) for entry in export.questions_of(A).entries] == [
@@ -280,7 +280,7 @@ def test_an_export_with_no_index_makes_none(rounds):
 # -- an entry ----------------------------------------------------------------------------
 
 def test_a_bare_question_is_exported_bare(rounds, capsys):
-    ask(actor="scout", origin="comms:11", at=T1)
+    ask(by="scout", origin="comms:11", at=T1)
 
     assert entries() == [{"holder": A, "id": "Q1", "text": SAID, "from": "comms:11",
                           "blocks": "all", "state": "open", "by": "scout", "at": T1}]
@@ -293,7 +293,7 @@ def test_a_bare_question_is_exported_bare(rounds, capsys):
 def test_a_question_with_options_is_exported_with_them_in_the_order_added(
         rounds, capsys):
     ask(options=["b=both follow the settings", "a=prose yes, parsed rows no"])
-    options.fill(A, "Q1", actor="helper", options=["c=neither does"])
+    options.fill(A, "Q1", by="helper", options=["c=neither does"])
 
     [entry] = entries()
 
@@ -309,7 +309,7 @@ def test_a_question_with_options_is_exported_with_them_in_the_order_added(
 def test_a_retired_option_is_in_no_form_of_the_export(rounds, tmp_path, capsys):
     ask(options=["a=prose yes, parsed rows no", "b=both follow the settings",
                  "c=a line that was wrong"])
-    options.fill(A, "Q1", actor="helper", retire=["c"], options=["d=the right line"])
+    options.fill(A, "Q1", by="helper", retire=["c"], options=["d=the right line"])
 
     [entry] = entries()
     printed(capsys, A, "--questions", "--out", str(tmp_path / "out"))
@@ -323,10 +323,10 @@ def test_a_retired_option_is_in_no_form_of_the_export(rounds, tmp_path, capsys):
 
 
 def test_every_entry_says_who_asked_it_and_when(rounds, capsys):
-    ask(actor="scout", at=T1)
-    ask(text=OTHER, actor="critic", at=T2, options=["a=yes", "b=no"])
-    ask("proj-a", text=THIRD, actor="curator", at=T3)
-    ask(B, actor="helper", at=T4)
+    ask(by="scout", at=T1)
+    ask(text=OTHER, by="critic", at=T2, options=["a=yes", "b=no"])
+    ask("proj-a", text=THIRD, by="curator", at=T3)
+    ask(B, by="helper", at=T4)
     park(A, "Q2")
 
     for name in (A, "proj-a"):
@@ -356,7 +356,7 @@ def test_an_entry_says_what_its_question_holds_up(rounds, capsys):
 def test_a_question_moved_to_the_projects_list_says_where_it_was_and_what_it_held_up(
         rounds, capsys):
     ask(blocks="B1")
-    moving.move("proj-a", f"{A}:Q1", actor="planner", record="comms:14")
+    moving.move("proj-a", f"{A}:Q1", by="planner", record="comms:14")
 
     [entry] = entries("proj-a")
 
@@ -444,7 +444,7 @@ def test_a_parked_question_whose_wait_is_over_is_on_the_docket_as_open(rounds):
     assert named(entries()) == [(A, "Q1", "open"), (A, "Q2", "parked")]
     assert "until" not in entries()[0]
 
-    log.append(log.round_log(rounds / "b-round"), "round.closed", {}, actor="planner")
+    log.append(log.round_log(rounds / "b-round"), "round.closed", {}, by="planner")
     assert named(entries()) == [(A, "Q1", "open"), (A, "Q2", "open")]
 
 
@@ -493,7 +493,7 @@ def test_a_projects_export_holds_no_question_of_a_round_that_was_dropped(
     ask(B, text=THIRD, at=T2)
     ask(B, text=OTHER, at=T2)
     rule(B, item="Q2", text="It is.", at=T3)
-    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T4)
+    dropping.drop(B, by="operator", record="comms:30", run_by="planner", at=T4)
     # An answer taken back after the drop leaves its question unanswered in a round
     # that takes no answer: it is not put to him from there.
     rule(B, item="revoke:C1", at=T5)
@@ -528,7 +528,7 @@ def test_a_projects_export_holds_no_question_of_another_project(
         rounds, tmp_path, add_project, capsys):
     add_project("proj-b", notes_root=tmp_path / "other")
     opening.open_round("proj-b/c-round", description="a placeholder round",
-                       actor="planner", flow="fix")
+                       by="planner", flow="fix")
     ask("proj-b/c-round", text=OTHER)
     ask("proj-b", text=THIRD)
     ask()
@@ -556,11 +556,11 @@ def test_a_view_on_a_project_is_refused(rounds, capsys):
 def test_every_export_ends_with_the_rulings_not_yet_shown_which_are_no_entries(
         rounds, capsys):
     ask()
-    ruling.rule(A, text=RULED, record="comms:12", actor="planner", at=T2)
+    ruling.rule(A, text=RULED, record="comms:12", by="planner", at=T2)
     ruling.rule("proj-a", text="Rows keep their format.", record="comms:13",
-                actor="planner", at=T3)
+                by="planner", at=T3)
     ruling.rule(B, text="A ruling of the other round.", record="comms:15",
-                actor="planner", at=T4)
+                by="planner", at=T4)
 
     for name in (A, B, "proj-a"):
         found = export.questions_of(name).data()
@@ -584,12 +584,12 @@ def test_every_export_ends_with_the_rulings_not_yet_shown_which_are_no_entries(
 
 
 def test_a_ruling_shown_is_off_the_list_and_one_that_replaces_says_so(rounds, capsys):
-    ruling.rule(A, text=RULED, record="comms:12", actor="planner", at=T1)
+    ruling.rule(A, text=RULED, record="comms:12", by="planner", at=T1)
     ruling.rule(A, text="Usage is shown in the status line.", record="comms:13",
-                actor="planner", at=T2)
-    ruling.rule(A, text="Usage is shown nowhere.", record="comms:16", actor="planner",
+                by="planner", at=T2)
+    ruling.rule(A, text="Usage is shown nowhere.", record="comms:16", by="planner",
                 at=T3, supersedes="C2")
-    ruling.rule("proj-a", item=f"readback={T1}", record="comms:20", actor="planner",
+    ruling.rule("proj-a", item=f"readback={T1}", record="comms:20", by="planner",
                 at=T4)
 
     found = export.questions_of(A).data()["read_back"]
@@ -652,8 +652,8 @@ def test_a_project_the_projects_list_does_not_hold_is_refused(rounds, capsys):
 def test_a_round_whose_log_cant_be_read_is_not_exported_as_empty(rounds, capsys):
     ask()
     ask(B, text=OTHER, at=T2)
-    with log.round_log(rounds / "a-round").open("ab") as file:
-        file.write(b"not an event\n")
+    with log.round_log(rounds / "a-round").open("ab") as fh:
+        fh.write(b"not an event\n")
 
     assert main(["list", A, "--questions"]) == 3
     captured = capsys.readouterr()

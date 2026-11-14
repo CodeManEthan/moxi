@@ -24,13 +24,13 @@ def rounds(tmp_path, add_project, capsys):
     """The rounds folder of `proj-a`, with `a-round` opened in it and the stages B1,
     B2 and B3 declared."""
     add_project("proj-a", notes_root=tmp_path / "notes")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     found = tmp_path / "notes" / "rounds"
     for stage in STAGES:
         log.append(round_log(found), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     capsys.readouterr()
     return found
 
@@ -50,12 +50,12 @@ def round_log(rounds):
 
 
 def ask(target=ROUND, blocks=None, **more):
-    return asking.ask(target, ASKED, origin="comms:11", blocks=blocks, actor="scout",
+    return asking.ask(target, ASKED, origin="comms:11", blocks=blocks, by="scout",
                       **more).id
 
 
 def rule(item=None, target=ROUND, record="comms:12", **more):
-    return ruling.rule(target, item=item, record=record, actor="planner", **more)
+    return ruling.rule(target, item=item, record=record, by="planner", **more)
 
 
 def revoke(ruling_id, target=ROUND, **more):
@@ -284,7 +284,7 @@ def test_a_parking_that_was_ended_by_a_reopening_is_taken_back_and_changes_nothi
         rounds):
     ask()
     rule("park:Q1")
-    marking.reopen(ROUND, "Q1", actor="coder")
+    marking.reopen(ROUND, "Q1", by="coder")
 
     revoke("C1")
 
@@ -295,7 +295,7 @@ def test_a_parking_that_was_ended_by_a_reopening_is_taken_back_and_changes_nothi
 def test_a_reopened_question_is_parked_again_with_no_ruling_named(rounds):
     ask()
     rule("park:Q1")
-    marking.reopen(ROUND, "Q1", actor="coder")
+    marking.reopen(ROUND, "Q1", by="coder")
 
     assert rule("park:Q1").id == "C2"
 
@@ -377,7 +377,7 @@ def test_a_widening_made_while_a_narrowing_stood_is_kept_when_it_is_taken_back(
         rounds, asked, widened, left):
     ask(blocks=asked)
     rule("narrow:Q1=B1")
-    marking.widen(ROUND, "Q1", widened, actor="coder")
+    marking.widen(ROUND, "Q1", widened, by="coder")
 
     revoke("C1")
 
@@ -390,7 +390,7 @@ def test_a_widening_made_after_a_narrowing_was_taken_back_is_read_as_it_was_give
     rule("narrow:Q1=B1")
     revoke("C1")
 
-    marking.widen(ROUND, "Q1", "B1,B2,B3", actor="coder")
+    marking.widen(ROUND, "Q1", "B1,B2,B3", by="coder")
     rule("park:Q1")
     revoke("C3")
 
@@ -580,8 +580,8 @@ def test_a_taking_back_is_not_itself_taken_back_or_replaced(rounds):
 def test_a_move_of_a_question_is_not_taken_back_and_the_refusal_names_the_way_back(
         rounds):
     ask()
-    moving.move("proj-a", f"{ROUND}:Q1", actor="planner", record="comms:14")
-    moving.adopt(ROUND, "P1", actor="planner", blocks="B2", record="comms:15")
+    moving.move("proj-a", f"{ROUND}:Q1", by="planner", record="comms:14")
+    moving.adopt(ROUND, "P1", by="planner", blocks="B2", record="comms:15")
     before = logs(rounds)
     assert [one.rules for one in held(rounds).rulings] == ["move:Q1"]
     assert [one.rules for one in held(rounds, "proj-a").rulings] == ["move:P1"]
@@ -604,7 +604,7 @@ def test_a_move_of_a_question_is_not_taken_back_and_the_refusal_names_the_way_ba
 def test_a_ruling_of_a_question_that_was_moved_since_is_not_taken_back_there(rounds):
     ask()
     rule("park:Q1")
-    moving.move("proj-a", f"{ROUND}:Q1", actor="planner", record="comms:14")
+    moving.move("proj-a", f"{ROUND}:Q1", by="planner", record="comms:14")
     before = logs(rounds)
 
     with pytest.raises(Refused, match="Q1 was moved out of proj-a/a-round since and "
@@ -618,7 +618,7 @@ def test_a_ruling_of_a_kind_nothing_here_knows_is_neither_taken_back_nor_replace
         rounds):
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C1", "record": "comms:12", "kind": "process",
-                "rules": "skip:check:B2"}, actor="planner")
+                "rules": "skip:check:B2"}, by="planner")
     before = logs(rounds)
 
     with pytest.raises(Refused, match="C1 rules skip:check:B2, and nothing here says "
@@ -684,7 +684,7 @@ def test_a_correction_naming_a_ruling_of_the_other_log_is_refused(rounds, capsys
 
 def test_a_ruling_named_by_something_that_is_no_id_is_a_bad_argument():
     with pytest.raises(BadArgument, match="is not a ruling's id"):
-        ruling.rule(ROUND, text=SAID, record="comms:12", actor="planner",
+        ruling.rule(ROUND, text=SAID, record="comms:12", by="planner",
                     supersedes="first")
 
 
@@ -722,7 +722,7 @@ def test_a_correction_on_a_round_that_has_ended_is_recorded_and_reopens_nothing(
     ask()
     rule("Q1", text=ANSWER)
     rule(text=SAID)
-    log.append(round_log(rounds), f"round.{how}", {}, actor="planner")
+    log.append(round_log(rounds), f"round.{how}", {}, by="planner")
 
     assert main(["rule", ROUND, "revoke:C1", "--record", "comms:13"]) == 0
     out, err = capsys.readouterr()
@@ -743,7 +743,7 @@ def test_a_correction_on_a_round_that_has_ended_is_recorded_and_reopens_nothing(
 @pytest.mark.parametrize("how", ["closed", "dropped"])
 def test_a_ruling_that_corrects_nothing_is_refused_on_a_round_that_has_ended(
         rounds, capsys, how):
-    log.append(round_log(rounds), f"round.{how}", {}, actor="planner")
+    log.append(round_log(rounds), f"round.{how}", {}, by="planner")
     before = round_log(rounds).read_bytes()
 
     assert main(["rule", ROUND, "--text", SAID, "--record", "comms:13"]) == 3
@@ -779,7 +779,7 @@ def test_a_kind_added_to_the_table_is_taken_back_and_replaced(rounds, monkeypatc
     monkeypatch.setattr(corrections, "KINDS", (*corrections.KINDS, skip))
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C1", "record": "comms:12", "kind": "process",
-                "rules": "skip:check:B2"}, actor="planner")
+                "rules": "skip:check:B2"}, by="planner")
 
     revoke("C1")
 

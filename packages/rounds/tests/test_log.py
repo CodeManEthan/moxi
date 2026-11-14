@@ -20,9 +20,9 @@ AT = "2026-01-02T03:04:05Z"
 @pytest.fixture
 def path(tmp_path):
     """A round's log in a folder that exists; the file does not."""
-    folder = tmp_path / "rounds" / "a-round"
-    folder.mkdir(parents=True)
-    return log.round_log(folder)
+    round_dir = tmp_path / "rounds" / "a-round"
+    round_dir.mkdir(parents=True)
+    return log.round_log(round_dir)
 
 
 def line(number, **changes):
@@ -54,7 +54,7 @@ def test_a_stamp_is_utc_to_the_second():
 # -- append ------------------------------------------------------------------------------
 
 def test_an_append_writes_the_envelope_then_the_fields_as_one_line(path):
-    event = log.append(path, "round.opened", OPENED, actor="planner", at=AT)
+    event = log.append(path, "round.opened", OPENED, by="planner", at=AT)
 
     assert event == {"v": 1, "n": 1, "at": AT, "actor": "planner", "type": "round.opened",
                      **OPENED}
@@ -65,10 +65,10 @@ def test_an_append_writes_the_envelope_then_the_fields_as_one_line(path):
 
 
 def test_appends_number_from_one_with_no_gap(path):
-    log.append(path, "round.opened", OPENED, actor="planner")
-    log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, actor="coder")
+    log.append(path, "round.opened", OPENED, by="planner")
+    log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, by="coder")
     third = log.append(path, "ruling.shown", {"ids": ["C1"], "record": "comms:12"},
-                       actor="planner")
+                       by="planner")
 
     assert third["n"] == 3
     assert [event["n"] for event in log.read(path)] == [1, 2, 3]
@@ -76,17 +76,17 @@ def test_appends_number_from_one_with_no_gap(path):
 
 
 def test_an_append_with_no_time_given_is_stamped_now(path):
-    event = log.append(path, "round.opened", OPENED, actor="planner")
+    event = log.append(path, "round.opened", OPENED, by="planner")
 
     assert log.stamp(0) < event["at"] <= log.stamp()
 
 
 def test_an_append_leaves_the_earlier_bytes_as_they_were(path):
-    log.append(path, "round.opened", OPENED, actor="planner", at=AT)
-    log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, actor="coder")
+    log.append(path, "round.opened", OPENED, by="planner", at=AT)
+    log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, by="coder")
     before = path.read_bytes()
 
-    log.append(path, "finish.done", {"stage": "B2", "tip": "1" * 40}, actor="coder")
+    log.append(path, "finish.done", {"stage": "B2", "tip": "1" * 40}, by="coder")
 
     after = path.read_bytes()
     assert after[:len(before)] == before
@@ -96,7 +96,7 @@ def test_an_append_leaves_the_earlier_bytes_as_they_were(path):
 def test_an_append_starts_an_empty_file_at_one(path):
     path.write_bytes(b"")
 
-    assert log.append(path, "round.opened", OPENED, actor="planner")["n"] == 1
+    assert log.append(path, "round.opened", OPENED, by="planner")["n"] == 1
 
 
 def test_a_projects_log_is_appended_and_read_the_same_way(tmp_path):
@@ -104,23 +104,23 @@ def test_a_projects_log_is_appended_and_read_the_same_way(tmp_path):
 
     log.append(path, "ruling.recorded",
                {"id": "S1", "text": "a placeholder ruling", "record": "comms:12",
-                "kind": "substance"}, actor="planner")
+                "kind": "substance"}, by="planner")
 
     assert [event["type"] for event in log.read(path)] == ["ruling.recorded"]
 
 
 def test_an_event_the_check_refuses_is_not_written(path):
     with pytest.raises(ValueError, match="not an event type"):
-        log.append(path, "round.started", {}, actor="planner")
+        log.append(path, "round.started", {}, by="planner")
     with pytest.raises(ValueError, match="needs description"):
-        log.append(path, "round.opened", {"flow": "fix", "steps": []}, actor="planner")
+        log.append(path, "round.opened", {"flow": "fix", "steps": []}, by="planner")
 
     assert not path.exists()
 
 
 def test_an_append_with_no_actor_is_refused(path):
     with pytest.raises(ValueError, match="who ran the verb"):
-        log.append(path, "round.opened", OPENED, actor="")
+        log.append(path, "round.opened", OPENED, by="")
 
     assert not path.exists()
 
@@ -130,7 +130,7 @@ def test_an_unreadable_log_is_not_appended_to(path):
     before = path.read_bytes()
 
     with pytest.raises(Unreadable):
-        log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, actor="coder")
+        log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, by="coder")
 
     assert path.read_bytes() == before
 
@@ -138,35 +138,35 @@ def test_an_unreadable_log_is_not_appended_to(path):
 # -- one file of any size ----------------------------------------------------------------
 
 def test_the_cores_append_with_no_size_limit_never_moves_the_file_aside(tmp_path):
-    folder = tmp_path / "logs"
-    path = folder / "plain.jsonl"
+    logs_dir = tmp_path / "logs"
+    path = logs_dir / "plain.jsonl"
     long_line = {"text": "x" * 1_200_000}
 
     for _ in range(3):
         files.append_record(path, long_line, max_bytes=None, durable=True)
 
-    assert sorted(entry.name for entry in folder.iterdir()) == ["plain.jsonl"]
+    assert sorted(entry.name for entry in logs_dir.iterdir()) == ["plain.jsonl"]
     assert path.stat().st_size > 3_600_000
     assert path.read_bytes().count(b"\n") == 3
     # The same helper with its default limit refuses that line.
     with pytest.raises(ValueError, match="longer than the log's cap"):
-        files.append_record(folder / "capped.jsonl", long_line)
+        files.append_record(logs_dir / "capped.jsonl", long_line)
 
 
 def test_a_log_past_one_megabyte_is_still_one_file(path):
-    log.append(path, "round.opened", OPENED, actor="planner")
+    log.append(path, "round.opened", OPENED, by="planner")
     for number in range(6):
         log.append(path, "ruling.recorded",
                    {"id": f"C{number + 1}", "text": "x" * 300_000, "record": "comms:12",
                     "kind": "substance"},
-                   actor="planner")
+                   by="planner")
     first_megabyte = path.read_bytes()[:1_000_000]
 
     # One line that is itself past the size the core's append rolls at by default.
     last = log.append(path, "ruling.recorded",
                       {"id": "C7", "text": "y" * 1_200_000, "record": "comms:12",
                        "kind": "substance"},
-                      actor="planner")
+                      by="planner")
 
     assert last["n"] == 8
     assert sorted(entry.name for entry in path.parent.iterdir()) == ["round.jsonl"]
@@ -307,8 +307,8 @@ def test_bytes_already_read_parse_to_the_events_a_read_of_the_file_gives(tmp_pat
     path = tmp_path / "round.jsonl"
     log.append(path, "round.opened",
                {"description": "a placeholder round", "flow": "fix", "steps": []},
-               actor="planner")
-    log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, actor="planner")
+               by="planner")
+    log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40}, by="planner")
     data = path.read_bytes()
     assert log.parse(path, data) == log.read(path)
     assert log.parse(path, b"") == []
@@ -321,8 +321,8 @@ def test_bytes_already_read_parse_to_the_events_a_read_of_the_file_gives(tmp_pat
 
 def test_a_rounds_log_that_starts_with_its_opening_is_read_as_any_log(path):
     log.append(path, "round.opened", {"description": "a placeholder round",
-                                      "flow": "fix", "steps": []}, actor="planner")
-    log.append(path, "finish.done", {"stage": "B1", "tip": "1" * 40}, actor="pilot")
+                                      "flow": "fix", "steps": []}, by="planner")
+    log.append(path, "finish.done", {"stage": "B1", "tip": "1" * 40}, by="pilot")
 
     assert log.read_round(path) == log.read(path)
     assert log.parse_round(path, path.read_bytes()) == log.read(path)
@@ -339,7 +339,7 @@ def test_an_empty_rounds_log_is_unreadable_and_an_empty_log_of_another_kind_is_n
 
 
 def test_a_rounds_log_that_starts_with_another_event_is_unreadable(path):
-    log.append(path, "finish.done", {"stage": "B1", "tip": "1" * 40}, actor="pilot")
+    log.append(path, "finish.done", {"stage": "B1", "tip": "1" * 40}, by="pilot")
 
     with pytest.raises(Unreadable) as caught:
         log.read_round(path)

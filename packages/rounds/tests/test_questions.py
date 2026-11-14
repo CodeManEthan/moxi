@@ -131,7 +131,7 @@ def test_a_question_parked_until_a_round_reads_open_once_that_round_is_closed():
 def test_a_round_is_closed_once_its_log_holds_its_closing(tmp_path, add_project):
     add_project("proj-a", notes_root=tmp_path / "notes")
     opening.open_round("proj-a/b-round", description="a placeholder round",
-                       actor="planner", flow="fix")
+                       by="planner", flow="fix")
     found = state.fold([asked(1), parked(2, until="round:proj-a/b-round")])
     [question] = found.questions
 
@@ -139,7 +139,7 @@ def test_a_round_is_closed_once_its_log_holds_its_closing(tmp_path, add_project)
     assert questions.current(question, found) == "parked"
 
     log.append(log.round_log(tmp_path / "notes" / "rounds" / "b-round"), "round.closed",
-               {"numbers": {}}, actor="planner")
+               {"numbers": {}}, by="planner")
 
     assert questions.is_closed("proj-a/b-round")
     assert questions.current(question, found) == "open"

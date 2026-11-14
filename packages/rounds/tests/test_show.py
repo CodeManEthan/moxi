@@ -32,24 +32,24 @@ def rounds(tmp_path, add_project, capsys):
     `b-round` opened in it at `T1`."""
     add_project("proj-a", notes_root=tmp_path / "notes")
     for name in (A, B):
-        opening.open_round(name, description="a placeholder round", actor="planner",
+        opening.open_round(name, description="a placeholder round", by="planner",
                            flow="fix", at=T1)
     capsys.readouterr()
     return tmp_path / "notes" / "rounds"
 
 
-def ask(target=A, text=SAID, *, at=T2, actor="scout", origin="comms:11", **more):
-    return asking.ask(target, text, actor=actor, origin=origin, at=at, **more)
+def ask(target=A, text=SAID, *, at=T2, by="scout", origin="comms:11", **more):
+    return asking.ask(target, text, by=by, origin=origin, at=at, **more)
 
 
 def rule(target=A, *, at, record="comms:12", **more):
-    return ruling.rule(target, record=record, actor="planner", at=at, **more)
+    return ruling.rule(target, record=record, by="planner", at=at, **more)
 
 
 def stage(rounds, stage_id, slug="a-round"):
     log.append(log.round_log(rounds / slug), "stage.declared",
                {"id": stage_id, "repo": "proj-a", "branch": f"branch-{stage_id.lower()}"},
-               actor="planner")
+               by="planner")
 
 
 def printed(capsys, *argv):
@@ -109,8 +109,8 @@ def test_no_step_is_shown_as_the_one_the_round_is_at(rounds, capsys):
 def test_questions_are_shown_by_state_each_with_who_asked_it_and_when(rounds, capsys):
     stage(rounds, "B1")
     ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
-    ask(text=OTHER, at=T3, actor="critic", blocks="B1")
-    ask(text=THIRD, at=T4, actor="helper", origin="https://example.test/q")
+    ask(text=OTHER, at=T3, by="critic", blocks="B1")
+    ask(text=THIRD, at=T4, by="helper", origin="https://example.test/q")
     ask(text="Is a fourth one needed?", at=T5)
     rule(item="Q1", chose="a", at=T6)
     rule(item="park:Q2", until="B1", at=T6)
@@ -156,7 +156,7 @@ def test_a_parked_question_whose_wait_is_over_is_shown_open_with_its_parking(
     ask()
     rule(item="park:Q1", until="B1", at=T3)
     log.append(log.round_log(rounds / "a-round"), "finish.done",
-               {"stage": "B1", "tip": "1" * 40}, actor="pilot")
+               {"stage": "B1", "tip": "1" * 40}, by="pilot")
 
     [found] = data(capsys)["questions"]
     assert (found["state"], found["recorded"], found["until"]) == (
@@ -169,8 +169,8 @@ def test_a_parked_question_whose_wait_is_over_is_shown_open_with_its_parking(
 
 def test_a_question_moved_away_is_shown_as_moved_with_where_it_went(rounds, capsys):
     ask()
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
-    moving.adopt(B, "P1", actor="curator")
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
+    moving.adopt(B, "P1", by="curator")
 
     [left] = data(capsys)["questions"]
     assert (left["state"], left["moved_to"]) == ("moved", "P1")
@@ -186,7 +186,7 @@ def test_rulings_are_shown_with_their_pointers_and_whether_each_was_shown(
     rule(text=RULED, at=T2, reason="it is only a display")
     rule(text=RULED + " Again.", at=T3, record="https://example.test/said")
     rule(text=RULED + " Thrice.", at=T5)
-    shown.mark(A, "C2", record="comms:20", actor="planner")
+    shown.mark(A, "C2", record="comms:20", by="planner")
     rule("proj-a", item=f"readback={T2}", record="comms:90", at=T6)
 
     assert f"""\
@@ -234,7 +234,7 @@ def test_a_ruling_replaced_or_taken_back_says_by_which(rounds, capsys):
 def test_the_history_is_every_event_oldest_first(rounds, capsys):
     ask()
     rule(item="Q1", text=ANSWER, at=T3)
-    shown.mark(A, "C1", record="comms:20", actor="curator", at=T4)
+    shown.mark(A, "C1", record="comms:20", by="curator", at=T4)
 
     assert printed(capsys, A).endswith(f"""\
 history: 4 events
@@ -273,7 +273,7 @@ def test_showing_brings_the_rounds_row_of_the_index_up_to_its_log(rounds, capsys
     ask()
     log.append(log.round_log(rounds / "a-round"), "question.asked",
                {"id": "Q2", "text": OTHER, "from": "comms:13", "blocks": "all",
-                "state": "open", "asked_by": "helper", "asked_at": T3}, actor="helper")
+                "state": "open", "asked_by": "helper", "asked_at": T3}, by="helper")
     from moxi_rounds import folders
     home = folders.home("proj-a")
     assert index.disagreements([home]) != []
@@ -305,8 +305,8 @@ def test_a_round_that_cant_be_read_is_shown_as_unreadable_with_file_and_line(
     ask()
     rule(text=RULED, at=T3)
     file = log.round_log(rounds / "a-round")
-    with file.open("ab") as written:
-        written.write(b"not an event\n")
+    with file.open("ab") as fh:
+        fh.write(b"not an event\n")
 
     out = printed(capsys, A)
     assert out.startswith(f"round {A}   unreadable\nfolder: {rounds / 'a-round'}\n"
@@ -399,9 +399,9 @@ def test_with_the_projects_log_unreadable_a_ruling_is_not_said_to_be_unshown(
         rounds, capsys):
     rule(text=RULED, at=T2)
     rule(text=RULED + " Again.", at=T3)
-    shown.mark(A, "C1", record="comms:20", actor="planner")
-    with log.project_log(rounds).open("ab") as written:
-        written.write(b"not an event\n")
+    shown.mark(A, "C1", record="comms:20", by="planner")
+    with log.project_log(rounds).open("ab") as fh:
+        fh.write(b"not an event\n")
 
     found = data(capsys)
     assert [one["shown"] for one in found["rulings"]] == [True, None]

@@ -19,7 +19,7 @@ def path(tmp_path, add_project):
     """The log of the round `a-round` of `proj-a`, opened with the stages B1, B2 and
     B3 declared."""
     add_project("proj-a", notes_root=tmp_path / "notes")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     found = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     for stage in ("B1", "B2", "B3"):
@@ -30,39 +30,39 @@ def path(tmp_path, add_project):
 def declare(path, stage):
     log.append(path, "stage.declared",
                {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-               actor="planner")
+               by="planner")
 
 
 def ask(path, blocks=None, **more):
-    asking.ask(ROUND, ASKED, origin="comms:11", blocks=blocks, actor="scout", **more)
+    asking.ask(ROUND, ASKED, origin="comms:11", blocks=blocks, by="scout", **more)
 
 
 def rule(path, item, **more):
-    ruling.rule(ROUND, item=item, record="comms:12", actor="planner", **more)
+    ruling.rule(ROUND, item=item, record="comms:12", by="planner", **more)
 
 
 def widen(path, question_id, blocks):
-    marking.widen(ROUND, question_id, blocks, actor="coder")
+    marking.widen(ROUND, question_id, blocks, by="coder")
 
 
 def reopen(path, question_id):
-    marking.reopen(ROUND, question_id, actor="coder")
+    marking.reopen(ROUND, question_id, by="coder")
 
 
 def finish(path, stage):
-    log.append(path, "finish.done", {"stage": stage, "tip": "0" * 40}, actor="coder")
+    log.append(path, "finish.done", {"stage": stage, "tip": "0" * 40}, by="coder")
 
 
 def remove(path, stage):
     """A stage leaves the plan as a change to the stage records it."""
-    log.append(path, "stage.changed", {"id": stage, "removed": True}, actor="planner")
+    log.append(path, "stage.changed", {"id": stage, "removed": True}, by="planner")
 
 
 def unstage(path, stage):
     """A stage leaves the plan by the operator's ruling."""
     log.append(path, "ruling.recorded",
                {"id": "C90", "record": "comms:13", "kind": "process",
-                "rules": f"unstage:{stage}"}, actor="planner")
+                "rules": f"unstage:{stage}"}, by="planner")
 
 
 def skip(path, stage, *covers, step="docket", ruling_id="C80"):
@@ -70,11 +70,11 @@ def skip(path, stage, *covers, step="docket", ruling_id="C80"):
     log.append(path, "ruling.recorded",
                {"id": ruling_id, "record": "comms:13", "kind": "process",
                 "rules": f"skip:{step}:{stage}", "covers": list(covers)},
-               actor="planner")
+               by="planner")
 
 
 def offer(path, question_id, *given, retire=()):
-    options.fill(ROUND, question_id, actor="helper", options=given, retire=retire)
+    options.fill(ROUND, question_id, by="helper", options=given, retire=retire)
 
 
 def held(path, stages=("B1", "B2", "B3"), **more):
@@ -193,7 +193,7 @@ def test_one_that_holds_every_stage_holds_a_stage_declared_after_it_was_asked(pa
 
 def test_one_parked_until_a_round_holds_its_stages_again_once_that_round_is_closed(
         path):
-    opening.open_round(OTHER, description="a placeholder round", actor="planner",
+    opening.open_round(OTHER, description="a placeholder round", by="planner",
                        flow="fix")
     ask(path, "B1")
     rule(path, "park:Q1", until=f"round:{OTHER}")
@@ -208,7 +208,7 @@ def test_one_parked_until_a_round_holds_its_stages_again_once_that_round_is_clos
     assert set(seen) == {OTHER}
 
     log.append(path.parent.parent / "b-round" / "round.jsonl", "round.closed",
-               {"numbers": {}}, actor="planner")
+               {"numbers": {}}, by="planner")
 
     assert held(path) == ({"B1": ["Q1"], "B2": [], "B3": []}, ["Q1"])
 
@@ -248,7 +248,7 @@ def test_an_answer_that_names_an_option_ends_the_hold_as_any_answer(path):
 
 
 def test_a_projects_question_holds_no_stage(path):
-    asking.ask("proj-a", ASKED, origin="comms:11", actor="scout")
+    asking.ask("proj-a", ASKED, origin="comms:11", by="scout")
     found = state.fold(log.read(log.project_log(path.parent.parent)))
 
     assert [one.id for one in found.questions] == ["P1"]
@@ -298,7 +298,7 @@ def test_a_skip_that_was_taken_back_or_replaced_lets_its_stage_past_nothing(
 
     log.append(path, "ruling.recorded",
                {"id": "C81", "record": "comms:14", "kind": "process", names: "C80"},
-               actor="planner")
+               by="planner")
 
     found = state.fold(log.read(path))
     assert holds.skipped(found, "B2") == frozenset()

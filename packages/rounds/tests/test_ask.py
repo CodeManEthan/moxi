@@ -21,14 +21,14 @@ def rounds(tmp_path, add_project, capsys):
     add_project("proj-a", notes_root=tmp_path / "notes")
     for slug in ("a-round", "b-round"):
         opening.open_round(f"proj-a/{slug}", description="a placeholder round",
-                           actor="planner", flow="fix")
-    folder = tmp_path / "notes" / "rounds"
+                           by="planner", flow="fix")
+    rounds_dir = tmp_path / "notes" / "rounds"
     for stage in ("B1", "B2"):
-        log.append(log.round_log(folder / "a-round"), "stage.declared",
+        log.append(log.round_log(rounds_dir / "a-round"), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     capsys.readouterr()
-    return folder
+    return rounds_dir
 
 
 def run(target, *argv, text=SAID, origin="comms:12"):
@@ -69,7 +69,7 @@ def test_a_question_is_recorded_in_the_rounds_log_with_its_six_things(rounds, ca
 
 def test_a_rounds_state_holds_the_question(rounds):
     asking.ask("proj-a/a-round", SAID, origin="file:design.md#read-times", blocks="B2",
-               actor="scout", at=AT)
+               by="scout", at=AT)
 
     assert state.fold(log.read(round_log(rounds))).questions == [state.Question(
         id="Q1", text=SAID, origin="file:design.md#read-times", blocks=("B2",), state="open",
@@ -148,7 +148,7 @@ def test_no_origin_is_refused_wherever_the_command_is_run(rounds, tmp_path, monk
     monkeypatch.chdir(worktree)
 
     with pytest.raises(Refused, match="says where it came from"):
-        asking.ask("proj-a/a-round", SAID, actor="scout")
+        asking.ask("proj-a/a-round", SAID, by="scout")
 
 
 @pytest.mark.parametrize("pointer", ["he asked in chat", "comms:twelve", "comms:",
@@ -297,7 +297,7 @@ def test_an_id_is_one_past_the_highest_the_log_holds(rounds):
     log.append(round_log(rounds), "question.asked",
                {"id": "Q90", "text": SAID, "from": "comms:12", "blocks": "all",
                 "state": "open", "asked_by": "planner", "asked_at": AT},
-               actor="planner")
+               by="planner")
 
     assert run("proj-a/a-round") == 0
 
@@ -307,8 +307,8 @@ def test_an_id_is_one_past_the_highest_the_log_holds(rounds):
 # -- the index, and what can't be asked of ------------------------------------------------
 
 def test_an_open_question_is_in_the_index(rounds):
-    asking.ask("proj-a/a-round", SAID, origin="comms:12", actor="scout", at=AT)
-    asking.ask("proj-a", SAID, origin="comms:13", actor="scout", at=AT)
+    asking.ask("proj-a/a-round", SAID, origin="comms:12", by="scout", at=AT)
+    asking.ask("proj-a", SAID, origin="comms:13", by="scout", at=AT)
 
     [found] = index.read("proj-a", rounds, "a-round").items
     assert (found.kind, found.id, found.body) == (
@@ -325,7 +325,7 @@ def test_a_round_that_was_never_opened_is_refused(rounds, capsys):
 
     assert "moxi rounds open proj-a/c-round" in capsys.readouterr().err
     with pytest.raises(NoRound):
-        asking.ask("proj-a/c-round", SAID, origin="comms:12", actor="scout")
+        asking.ask("proj-a/c-round", SAID, origin="comms:12", by="scout")
     assert logs(rounds) == before and not (rounds / "c-round").exists()
 
 
@@ -340,7 +340,7 @@ def test_a_project_the_projects_list_does_not_hold_is_refused(rounds, capsys):
 def test_a_target_that_names_nothing_is_a_usage_error(rounds, capsys, target):
     assert run(target) == 2
     with pytest.raises((BadArgument, BadName)):
-        asking.ask(target, SAID, origin="comms:12", actor="scout")
+        asking.ask(target, SAID, origin="comms:12", by="scout")
 
 
 def test_a_rounds_question_takes_only_the_rounds_lock(rounds, holder, capsys):

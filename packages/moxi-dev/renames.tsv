@@ -124,6 +124,7 @@ cache	packages/cache/src/moxi_cache/timer.py	module_argv0_resolver.resolve	name	
 cache	packages/cache/src/moxi_cache/timer.py	plan	name	environ	env
 cache	packages/cache/src/moxi_cache/timer.py	-	name	proc_environ	read_process_env
 cache	packages/cache/src/moxi_cache/timer.py	self.environ = process_env	use	self.environ	self.process_env
+cache	packages/cache/src/moxi_cache/timer.py	"session": session, "pid": pid, "age": round(now - last_request, 3),	keep	round	round
 cache	packages/cache/src/moxi_cache/watch.py	"ttl": clock.ttl_seconds, "read_at": seen.read_at, "seen_at": now,	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/src/moxi_cache/watch.py	entries = list(self.directory.iterdir())	keep	directory	directory
 cache	packages/cache/src/moxi_cache/watch.py	f"({', '.join(map(repr, sorted(set(unsafe))))}); they get no clock record")	keep	set	set
@@ -1693,6 +1694,7 @@ comms	packages/comms/tests/test_register_concurrency.py	release.set()	keep	set	s
 comms	packages/comms/tests/test_register_concurrency.py	rig.record.max_message_id = gated	keep	record	record
 comms	packages/comms/tests/test_register_concurrency.py	rig.record.max_message_id = unreachable	keep	record	record
 comms	packages/comms/tests/test_register_concurrency.py	test_a_message_that_lands_during_the_round_trip_is_delivered_not_stranded.register	name	e	exc
+comms	packages/comms/tests/test_register_concurrency.py	f"{[round(s, 3) for s in contended]} against a {HOLD:.2f}s round trip -- the "	keep	round	round
 comms	packages/comms/tests/test_release.py	assert set(module.INTERNAL_ENV) == {	keep	set	set
 comms	packages/comms/tests/test_release.py	assert set(module.OPTIONAL) == set(PYPROJECT["project"]["optional-dependencies"])	keep	set	set
 comms	packages/comms/tests/test_release.py	docstrings = set()	keep	set	set
@@ -1884,6 +1886,7 @@ connector	packages/connector/src/moxi_connector/app.py	self._idle.set()	keep	set
 connector	packages/connector/src/moxi_connector/app.py	self._retiring: set[asyncio.Task] = set()	keep	set	set
 connector	packages/connector/src/moxi_connector/app.py	self._stop.set()	keep	set	set
 connector	packages/connector/src/moxi_connector/app.py	token = CALL.set(call)	keep	set	set
+connector	packages/connector/src/moxi_connector/app.py	"ms": round((time.monotonic() - self.started) * 1000, 1),	keep	round	round
 connector	packages/connector/src/moxi_connector/calllog.py	CallLog.__init__	name	directory	log_dir
 connector	packages/connector/src/moxi_connector/calllog.py	`directory` defaults to `calls_dir()`; `clock` gives seconds since the epoch and	keep	directory	directory
 connector	packages/connector/src/moxi_connector/calllog.py	last	name	directory	log_dir
@@ -2420,6 +2423,7 @@ launcher	packages/launcher/tests/test_browser_home_launch.py	assert {"handoff", 
 launcher	packages/launcher/tests/test_browser_home_launch.py	fake.script(placed=2, slots=kit.free(2, 3), start="refused",	keep	start	start
 launcher	packages/launcher/tests/test_browser_home_launch.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_browser_home_launch.py	timeout=15_000)	keep	timeout	timeout
+launcher	packages/launcher/tests/test_browser_home_launch.py	assert round(more["x"] + more["width"]) <= round(box["x"] + box["width"]), (more, box)	keep	round	round
 launcher	packages/launcher/tests/test_browser_home_where.py	found = Path(shell.env["HOME"]) / "work" / name	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_home_where.py	found.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_browser_home_where.py	-	name	test_a_long_folder_is_cut_in_its_dim_middle_and_its_name_is_whole	test_a_long_dir_is_cut_in_its_dim_middle_and_its_name_is_whole
@@ -3380,6 +3384,8 @@ moxi	packages/moxi/src/moxi/doctor/_run.py	hows = set()	keep	set	set
 moxi	packages/moxi/src/moxi/doctor/_run.py	parser.add_argument("--json", action="store_true", help="print the rows as one JSON list")	keep	help	help
 moxi	packages/moxi/src/moxi/doctor/_run.py	rows += check(ctx)	keep	ok	ok
 moxi	packages/moxi/src/moxi/doctor/_run.py	terminal_row	name	no	exc
+moxi	packages/moxi/src/moxi/doctor/_run.py	return (cpu - best[1]) / best[0], f"over the last {round(best[0] / 60)} min"	keep	round	round
+moxi	packages/moxi/src/moxi/doctor/_run.py	taken.append({"unit": unit, "at": _stamp(now), "cpu_s": round(got.cpu, 3)})	keep	round	round
 moxi	packages/moxi/src/moxi/files.py	"""Append `record` to the log `path` as one JSON line.	keep	record	record
 moxi	packages/moxi/src/moxi/files.py	# The descriptor of each lock file in `_held`, for the install's hand-off to its child.	keep	_held	_held
 moxi	packages/moxi/src/moxi/files.py	# The paths in `_held` that a `nested=True` call took itself: a standalone caller's hold	keep	_held	_held
@@ -3559,6 +3565,7 @@ moxi	packages/moxi/src/moxi/proc.py	found = first(snapshot, ctypes.byref(entry))
 moxi	packages/moxi/src/moxi/run.py	paths.core().runtime_dir(create=True)	keep	create	create
 moxi	packages/moxi/src/moxi/run.py	reader.join(timeout=2.0)  # a grandchild may still hold the pipe; leave it	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/run.py	result	name	environ	effective_env
+moxi	packages/moxi/src/moxi/run.py	"seconds": round(max(seconds, 0.0), 3), "result": result, "exit": code,	keep	round	round
 moxi	packages/moxi/src/moxi/store.py	connect	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/strays.py	-	name	_environment	_env
 moxi	packages/moxi/src/moxi/strays.py	cache_key	name	environ	env
@@ -4255,6 +4262,8 @@ moxi	packages/moxi/tests/test_units_schtasks.py	path.parent.mkdir(parents=True, 
 moxi	packages/moxi/tests/test_units_schtasks.py	self.stuck: set[str] = set()	keep	set	set
 moxi	packages/moxi/tests/test_units_schtasks.py	test_a_disabled_daemon_is_created_disabled_and_a_flip_takes_effect_now.declare	kwonly	enabled	enabled
 moxi	packages/moxi/tests/test_units_schtasks.py	with _backend.use(Old(user="PC\\ana")):	keep	user	user
+moxi	packages/moxi/tests/test_units_schtasks.py	keep("end_to_ready_s", round(took, 2))	keep	round	round
+moxi	packages/moxi/tests/test_units_schtasks.py	keep("run_to_running_s", round(took, 2))	keep	round	round
 moxi	packages/moxi/tests/test_units_systemd.py	-	name	test_the_unit_directory_follows_the_env	test_the_unit_dir_follows_the_env
 moxi	packages/moxi/tests/test_units_systemd.py	-	name	test_the_unit_directory_follows_the_environment	test_the_unit_directory_follows_the_env
 moxi	packages/moxi/tests/test_units_systemd.py	-	name	test_unwrap_leaves_another_file_in_the_drop_in_folder	test_unwrap_leaves_another_file_in_the_drop_in_dir
@@ -4328,6 +4337,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	paths |= set(_names(_git(root, 
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	picked: set[str] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	work.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	worker_args	name	environ	env
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	f"{round(summary.slowest_share * 100)}%")	keep	round	round
 moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="check that each web page's build stamp matches its sources")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="contract [--staged] [PATH]: check a module's directory against "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="new <module>: start a new package under packages/")	keep	help	help
@@ -4460,6 +4470,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	selection	name	environ	env
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	self.held: set[str] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	server = make(where / "sock")	keep	start	start
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	started.set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	entry[report.when] = round(entry.get(report.when, 0.0) + report.duration, 6)	keep	round	round
 moxi-dev	packages/moxi-dev/tests/test_check.py	-	name	test_each_lint_command_runs_in_the_check_s_environment	test_each_lint_command_runs_in_the_check_s_env
 moxi-dev	packages/moxi-dev/tests/test_check.py	-	name	test_the_records_are_in_git_s_own_directory_whatever_its_name	test_the_records_are_in_git_s_own_dir_whatever_its_name
 moxi-dev	packages/moxi-dev/tests/test_check.py	Timed.__init__	kwonly	write	write
@@ -4624,6 +4635,7 @@ notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("cat-file", "-e", f"
 notes	packages/notes/src/moxi_notes/gates.py	done = ctx.git("rev-parse", "-q", "--verify", "HEAD^{commit}", timeout=blobs.TIMEOUT)	use	timeout=	timeout_s=
 notes	packages/notes/src/moxi_notes/gates.py	if set(reset) >= set(by_path):	keep	set	set
 notes	packages/notes/src/moxi_notes/judge.py	return Finding(f"{hit.set}/{hit.rule}", hit.line)	keep	set	set
+notes	packages/notes/src/moxi_notes/judge.py	mb = max(1, round(size / MIB))	keep	round	round
 notes	packages/notes/src/moxi_notes/listener.py	-	name	_folder	_session_dir
 notes	packages/notes/src/moxi_notes/listener.py	marker = paths.Layout(settings.MODULE).runtime_dir(create=True) / FIRED	keep	create	create
 notes	packages/notes/src/moxi_notes/projects_link.py	"""How many files `folder` holds, at any depth; links are not followed."""	keep	folder	folder
@@ -4659,6 +4671,7 @@ notes	packages/notes/tests/notes_kit.py	Every test runs inside the test kit's fe
 notes	packages/notes/tests/notes_kit.py	path.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 notes	packages/notes/tests/settle_world.py	Ops.__init__	kwonly	settle_pass	settle_pass
 notes	packages/notes/tests/settle_world.py	lock, and a push is skipped inside `push_backoff` of the last failed one.	use	`push_backoff	`push_backoff_s
+notes	packages/notes/tests/settle_world.py	return round(rng.uniform(lo, hi) * 2) / 2 * MIN	keep	round	round
 notes	packages/notes/tests/test_backfill.py	-	name	test_apply_never_writes_outside_the_root_through_a_linked_folder	test_apply_never_writes_outside_the_root_through_a_linked_dir
 notes	packages/notes/tests/test_backfill.py	-	name	test_project_is_the_project_whose_notes_folder_holds_the_file	test_project_is_the_project_whose_notes_dir_holds_the_file
 notes	packages/notes/tests/test_backfill.py	-	name	test_two_projects_on_one_folder_skip_it	test_two_projects_on_one_dir_skip_it
@@ -5063,6 +5076,8 @@ repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="origin", mi
 repo	packages/repo/tests/test_commit_records.py	took.set()	keep	set	set
 repo	packages/repo/tests/test_commit_rules.py	imported = set()	keep	set	set
 repo	packages/repo/tests/test_commit_rules.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+repo	packages/repo/tests/test_commit_rules.py	refused = ["Co-Authored-By", "round"]	keep	round	round
+repo	packages/repo/tests/test_commit_rules.py	refused=["round"])) == 2	keep	round	round
 repo	packages/repo/tests/test_committer.py	("R", "notes/c.md", "notes/b.md")]	keep	R	R
 repo	packages/repo/tests/test_committer.py	("R", "notes/new.md", "notes/old.md")]	keep	R	R
 repo	packages/repo/tests/test_committer.py	assert from_b.status == "committed" and set(from_b.pushed) == {"a", "b"}	keep	set	set
@@ -5160,10 +5175,15 @@ repo	packages/repo/tests/test_records.py	demo.act(watch="record")	keep	record	re
 repo	packages/repo/tests/test_records.py	out = set()	keep	set	set
 repo	packages/repo/tests/test_records.py	out.add("record")	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/api.py	`folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/api.py	-	name	round	round_data
+rounds	packages/rounds/src/moxi_rounds/api.py	read, and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
 rounds	packages/rounds/src/moxi_rounds/asking.py	- `record`: the pointer to where the operator asked it, for a question that is his	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/asking.py	fields["record"] = record	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/asking.py	is given with `record`, the pointer to where he asked it, and that pointer is its origin.	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/asking.py	`ask("<project>/<slug>", "one sentence", origin=..., actor=...)` appends one	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/asking.py	ask	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/asking.py	written = write.record(write.Where(home.project, home.folder, slug), by=by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/cli.py	actor=_actor(args), flow=args.flow, record=args.record)	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	blocks=args.blocks, record=args.record)	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	declare(verbs)	keep	enabled	enabled
@@ -5227,9 +5247,20 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("round", metav
 rounds	packages/rounds/src/moxi_rounds/cli.py	record=args.record)	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	record=args.record, blocks=args.blocks, options=args.options)	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/cli.py	ruled = ruling.rule(args.target, actor=_actor(args), record=args.record,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/cli.py	found = showing.show(args.round)	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/cli.py	opened = opening.open_round(args.round, description=args.description,	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser.add_argument("round", metavar="ROUND",	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/doctor.py	*index.rounds(home.project, home.folder)]	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/doctor.py	f"the logs of {home.project} in {home.folder} can't be read: "	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/doctor.py	found = [index.read(home.project, home.folder),	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/doctor.py	*index.rounds(home.project, home.folder)]	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/doctor.py	-	name	_folders	_round_dirs
+rounds	packages/rounds/src/moxi_rounds/doctor.py	_index	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/doctor.py	_logs	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/doctor.py	f"the logs of {home.project} in {home.folder} can't be read: "	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/doctor.py	found = [index.read(home.project, home.folder),	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/doctor.py	git_version	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/doctor.py	rows	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/dropping.py	"""A round as it was dropped: its `name`, who it was `by` and the `record` given,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	**Whose act.** `by` is `OPERATOR` or `LEAD`. The operator drops any round, and `record`	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	- `record`: the operator's pointer to where he dropped it; for the lead's drop, a	keep	record	record
@@ -5240,11 +5271,22 @@ rounds	packages/rounds/src/moxi_rounds/dropping.py	if event["type"] == "round.op
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if question.record is not None]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	operator's acts, and `record` points to why. What counts as his (`his_acts`): a ruling,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/dropping.py	`drop("<project>/<slug>", by=..., record=..., actor=...)` withdraws a round. From then	use	actor=	run_by=
+rounds	packages/rounds/src/moxi_rounds/dropping.py	drop	name	actor	run_by
+rounds	packages/rounds/src/moxi_rounds/dropping.py	found = index.read(home.project, home.folder, slug, env=env)	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/dropping.py	write.Where(home.project, home.folder, slug), by=run_by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/errors.py	`other` too: both reach `folder`, once every link on the way is followed. A rounds	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/errors.py	f"the rounds folder of the project {project!r} is {self.folder}, and that "	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/errors.py	project's too. `other` is that project and `folder` the one folder both reach.	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/errors.py	self.folder = Path(folder)	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/errors.py	self.problem = (f"it is {self.folder}, which is the rounds folder of the "	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/errors.py	SharedFolder.__init__	name	folder	shared_dir
+rounds	packages/rounds/src/moxi_rounds/errors.py	`other` too: both reach `folder`, once every link on the way is followed. A rounds	use	`folder`	`shared_dir`
+rounds	packages/rounds/src/moxi_rounds/errors.py	f"the rounds folder of the project {project!r} is {self.folder}, and that "	use	self.folder	self.shared_dir
+rounds	packages/rounds/src/moxi_rounds/errors.py	project's too. `other` is that project and `folder` the one folder both reach.	use	`folder`	`shared_dir`
+rounds	packages/rounds/src/moxi_rounds/errors.py	self.folder = Path(folder)	use	self.folder	self.shared_dir
+rounds	packages/rounds/src/moxi_rounds/errors.py	self.folder = Path(shared_dir)	use	self.folder	self.shared_dir
+rounds	packages/rounds/src/moxi_rounds/errors.py	self.problem = (f"it is {self.folder}, which is the rounds folder of the "	use	self.folder	self.shared_dir
 rounds	packages/rounds/src/moxi_rounds/events.py	"builder", "record")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	# who asked it and when, which outlive a move to another log. `record` is the	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	("description", "flow", "steps", "parent", "inherits", "record"),	keep	record	record
@@ -5259,6 +5301,7 @@ rounds	packages/rounds/src/moxi_rounds/events.py	EventType("ruling.shown", ("ids
 rounds	packages/rounds/src/moxi_rounds/events.py	EventType("thread.decided", ("thread", "decision", "record")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	EventType("wait.marked", ("id", "state", "commits", "record")),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/events.py	required=("id", "record", "kind")),	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/events.py	EventType("stage.declared", ("id", "repo", "branch", "round", "after", "slices")),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/export.py	"""What `folder` is to rounds, once every link on the way is followed: the rounds	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/export.py	"""Write the export into `folder` as `questions.md` and `questions.json`, both from	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/export.py	"rules": row.rules, "record": row.record,	keep	record	record
@@ -5272,12 +5315,43 @@ rounds	packages/rounds/src/moxi_rounds/export.py	line += f" (record: {row.record
 rounds	packages/rounds/src/moxi_rounds/export.py	listed = index.read(home.project, home.folder, env=env)	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/export.py	round that has ended, `ended` says how (`how`, `by`, `record`, `at`) and `left`	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/export.py	summary = index.read(home.project, home.folder, slug, env=env)	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/export.py	"""One export: `name` is the round or the project it is of, `round` the round's name	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/export.py	"""What `folder` is to rounds, once every link on the way is followed: the rounds	use	`folder`	`export_dir`
+rounds	packages/rounds/src/moxi_rounds/export.py	"""Write the export into `folder` as `questions.md` and `questions.json`, both from	use	`folder`	`export_dir`
+rounds	packages/rounds/src/moxi_rounds/export.py	_kept_there	name	folder	export_dir
+rounds	packages/rounds/src/moxi_rounds/export.py	_kept_there	name	rounds_folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/export.py	export_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/export.py	for summary in index.rounds(home.project, home.folder, env=env):	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/export.py	homes += [(error.project, error.folder) for error in failed	use	error.folder	error.shared_dir
+rounds	packages/rounds/src/moxi_rounds/export.py	homes = [(one.project, one.folder) for one in found]	use	one.folder	one.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/export.py	listed = index.read(home.project, home.folder, env=env)	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/export.py	return {"of": self.name, "project": self.project, "round": self.round,	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/export.py	summary = index.read(home.project, home.folder, slug, env=env)	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/export.py	write	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/export.py	write	name	folder	export_dir
+rounds	packages/rounds/src/moxi_rounds/flows.py	ROUND = "round"	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/folders.py	"""The notes folder of the project `record`: the one its record names, else the one	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/folders.py	"""The rounds folder the `dir` setting gives the project `record`. Raises	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/folders.py	"""The slug of each round in the rounds folder `folder`, sorted: every folder there	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/folders.py	return [f"{one.project}/{slug}" for one in found for slug in slugs(one.folder)]	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/folders.py	stores it, and `folder` its rounds folder, which need not exist yet."""	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/folders.py	__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_folder", "slugs",	keep	notes_folder	notes_folder
+rounds	packages/rounds/src/moxi_rounds/folders.py	"""The slug of each round in the rounds folder `folder`, sorted: every folder there	use	`folder`	`rounds_dir`
+rounds	packages/rounds/src/moxi_rounds/folders.py	-	name	_folder	_rounds_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	-	name	_notes_folder	_notes_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	-	name	notes_folder	notes_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	Home	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	Home	name	round_folder	round_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	_record	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/folders.py	_records	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/folders.py	except Exception as error:  # noqa: BLE001 - whatever notes raises, the answer is none	use	error	exc
+rounds	packages/rounds/src/moxi_rounds/folders.py	f"({error})", known=False) from None	use	error	exc
+rounds	packages/rounds/src/moxi_rounds/folders.py	folder = Path(os.path.expanduser(own.round_setting(settings, record.key, "dir")))	use	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	homes	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/folders.py	return [f"{one.project}/{slug}" for one in found for slug in slugs(one.folder)]	use	one.folder	one.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	return folder if folder.is_absolute() else _notes_folder(record) / folder	use	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	slugs	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	stores it, and `folder` its rounds folder, which need not exist yet."""	use	`folder`	`rounds_dir`
 rounds	packages/rounds/src/moxi_rounds/index.py	"""Every round in the rounds folder `folder` of the project `project`, by slug, each	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/index.py	"""The round `<project>/<slug>` in the rounds folder `folder`, or with no slug the	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/index.py	_refresh(conn, where.project, _PROJECT, where.folder, wrote=wrote_project)	keep	folder	folder
@@ -5290,6 +5364,25 @@ rounds	packages/rounds/src/moxi_rounds/index.py	own. `folder` is the round's fol
 rounds	packages/rounds/src/moxi_rounds/index.py	path = _log_path(Path(home.folder), slug)	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/index.py	return {"how": end.how, "by": end.by, "record": end.record, "at": end.at}	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/index.py	seen = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/index.py	"""Every round in the rounds folder `folder` of the project `project`, by slug, each	use	`folder`	`rounds_dir`
+rounds	packages/rounds/src/moxi_rounds/index.py	"""The round `<project>/<slug>` in the rounds folder `folder`, or with no slug the	use	`folder`	`rounds_dir`
+rounds	packages/rounds/src/moxi_rounds/index.py	Summary	name	folder	log_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	_derive	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/index.py	_log_path	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	_put	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	_read	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	_refresh	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	_refresh(conn, where.project, _PROJECT, where.folder, wrote=wrote_project)	use	where.folder	where.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	_refresh(conn, where.project, where.slug, where.folder, wrote=wrote_round)	use	where.folder	where.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	_summary	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	`<project>/<slug>` in the rounds folder `folder`, or the project's own log. For a	use	`folder`	`rounds_dir`
+rounds	packages/rounds/src/moxi_rounds/index.py	for slug in (_PROJECT, *folders.slugs(home.folder)):	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	if _refresh(conn, home.project, slug, home.folder, wrote=False):	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	own. `folder` is the round's folder, or for a project its rounds folder. A round	use	`folder`	`log_dir`
+rounds	packages/rounds/src/moxi_rounds/index.py	path = _log_path(Path(home.folder), slug)	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	read	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	refresh	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/index.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/listing.py	#: has since (`how`), whose act it was (`by`), the pointer it carried (`record`)	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/listing.py	f"(record: {row.record}")	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/listing.py	f"record {one.ended.get('record')}")	keep	record	record
@@ -5297,37 +5390,102 @@ rounds	packages/rounds/src/moxi_rounds/listing.py	found = tuple(index.rounds(hom
 rounds	packages/rounds/src/moxi_rounds/listing.py	listed.append(Round(summary.name, summary.project, str(summary.folder),	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/listing.py	return {"name": self.name, "project": self.project, "folder": self.folder,	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/listing.py	summary.name, summary.project, str(summary.folder),	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/listing.py	"unreadable": list(self.unreadable), "no_folder": list(self.unplaced)}	keep	no_folder	no_folder
+rounds	packages/rounds/src/moxi_rounds/listing.py	Round	name	folder	round_dir
+rounds	packages/rounds/src/moxi_rounds/listing.py	Rounds	name	no_folder	unplaced
+rounds	packages/rounds/src/moxi_rounds/listing.py	Waiting	name	no_folder	unplaced
+rounds	packages/rounds/src/moxi_rounds/listing.py	_project	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/listing.py	_trouble	name	no_folder	unplaced
+rounds	packages/rounds/src/moxi_rounds/listing.py	found = tuple(index.rounds(home.project, home.folder))	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/listing.py	lines += _trouble(listing.unreadable, listing.no_folder)	use	listing.no_folder	listing.unplaced
+rounds	packages/rounds/src/moxi_rounds/listing.py	listed.append(Round(summary.name, summary.project, str(summary.folder),	use	summary.folder	summary.log_dir
+rounds	packages/rounds/src/moxi_rounds/listing.py	return {"name": self.name, "project": self.project, "folder": self.round_dir,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/listing.py	rounds	name	no_folder	unplaced
+rounds	packages/rounds/src/moxi_rounds/listing.py	summary.name, summary.project, str(summary.folder),	use	summary.folder	summary.log_dir
+rounds	packages/rounds/src/moxi_rounds/listing.py	trouble = _trouble(listing.unreadable, listing.no_folder)	use	listing.no_folder	listing.unplaced
+rounds	packages/rounds/src/moxi_rounds/listing.py	waiting	name	no_folder	unplaced
 rounds	packages/rounds/src/moxi_rounds/log.py	"""The log of the project whose rounds folder is `folder`."""	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/log.py	"""The log of the round whose folder is `folder`."""	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/log.py	found = [_event(path, number, raw) for number, raw in enumerate(lines, start=1)]	keep	start	start
+rounds	packages/rounds/src/moxi_rounds/log.py	"""The log of the project whose rounds folder is `folder`."""	use	`folder`	`rounds_dir`
+rounds	packages/rounds/src/moxi_rounds/log.py	"""The log of the round whose folder is `folder`."""	use	`folder`	`round_dir`
+rounds	packages/rounds/src/moxi_rounds/log.py	`append(path, name, fields, actor=...)` writes one event with the next `n`. The file is	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/log.py	append	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/log.py	project_log	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/log.py	round_log	name	folder	round_dir
 rounds	packages/rounds/src/moxi_rounds/marking.py	written = write.record(write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/marking.py	- `reopen(round, id, actor=...)` makes a parked question open again.	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/marking.py	- `widen(round, id, blocks, actor=...)` makes the question hold up more: every stage, or	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/marking.py	_mark	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/marking.py	reopen	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/marking.py	widen	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/marking.py	written = write.record(write.Where(home.project, home.folder, slug), by=by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/moving.py	- `record`: the operator's pointer for the list, which a list needs when the	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/moving.py	- `record`: the operator's pointer. Without one the move is accepted only when it	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/moving.py	fields["record"] = question.record	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/moving.py	if question.record is not None:	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/moving.py	written = write.record(write.Where(home.project, home.folder, slug),	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/moving.py	{"id": taken, "record": record, "kind": ruling.PROCESS,	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/moving.py	- `adopt("<project>/<slug>", "P3", actor=...)` brings a question of the project's list	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/moving.py	- `move("<project>", "<project>/<slug>:Q2", actor=...)` puts a round's question on the	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/moving.py	_carry	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/moving.py	adopt	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/moving.py	move	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/moving.py	written = write.record(write.Where(home.project, home.folder, slug),	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/opening.py	- `record`: the pointer to where the operator gave the go, kept as given once its	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/opening.py	fields["record"] = record	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/opening.py	folder.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/src/moxi_rounds/opening.py	written = write.record(write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/opening.py	Opened	name	folder	round_dir
+rounds	packages/rounds/src/moxi_rounds/opening.py	`open_round("<project>/<slug>", description=..., actor=...)` makes the round's folder in	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/opening.py	except OSError as error:	use	error	exc
+rounds	packages/rounds/src/moxi_rounds/opening.py	open_round	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/opening.py	open_round	name	folder	round_dir
+rounds	packages/rounds/src/moxi_rounds/opening.py	open_round	name	make_folder	make_round_dir
+rounds	packages/rounds/src/moxi_rounds/opening.py	raise RoundsError(f"the round's folder {folder} can't be made: {error}",	use	error	exc
+rounds	packages/rounds/src/moxi_rounds/opening.py	round_dir = home.round_folder(slug)	use	.round_folder	.round_dir
+rounds	packages/rounds/src/moxi_rounds/opening.py	round_dir = home.round_folder(slug)	use	home.round_folder	home.round_dir
+rounds	packages/rounds/src/moxi_rounds/opening.py	round_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/opening.py	written = write.record(write.Where(home.project, home.folder, slug), by=by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/options.py	left = len((keys | {key for key, _text in adding}) - set(retiring))	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/options.py	write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/options.py	actor=...)` appends one `question.changed` event through the write path and returns the	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/options.py	fill	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/options.py	write.Where(home.project, home.folder, slug), by=by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/questions.py	if wrong or len(set(ids)) != len(ids):	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/questions.py	return f"{letter}{max(numbers, default=0) + 1}"	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/questions.py	return set(old) <= set(new)	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/questions.py	events = log.read_round(log.round_log(home.round_folder(slug)))	use	.round_folder	.round_dir
+rounds	packages/rounds/src/moxi_rounds/questions.py	events = log.read_round(log.round_log(home.round_folder(slug)))	use	home.round_folder	home.round_dir
 rounds	packages/rounds/src/moxi_rounds/readback.py	"record": ruling.record, "supersedes": ruling.supersedes,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/readback.py	if time is not None), default=None)	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/rendering.py	("ruling", "ruling"), ("chose", "chose"), ("record", "record"),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/rendering.py	folder = Path(where.folder)	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/rendering.py	for one, recorded in zip(shown_as["rulings"], found.state.rulings, strict=True):	keep	strict	strict
 rounds	packages/rounds/src/moxi_rounds/rendering.py	said = [f"record: {one['record']}"]	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/rendering.py	["round", slug], shown_as["history"],	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/rendering.py	_note_again	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/rendering.py	_note_again	name	stop	exc
+rounds	packages/rounds/src/moxi_rounds/rendering.py	on_append	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/rendering.py	on_append	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/rendering.py	rounds_dir = Path(where.folder)	use	where.folder	where.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/ruling.py	"record": record, "kind": form.kind}	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/ruling.py	- `record`: the pointer to where the operator said it.	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/ruling.py	if wrong or len(set(ids)) != len(ids):	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/ruling.py	return f"{letter}{max(numbers, default=0) + 1}"	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/ruling.py	round's, None for a ruling on a project. `record` is the pointer as given, `until`	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/ruling.py	written = write.record(write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/ruling.py	`rule("<project>/<slug>", text=..., record=..., actor=...)` appends one `ruling.recorded`	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/ruling.py	rule	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/ruling.py	written = write.record(write.Where(home.project, home.folder, slug), by=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/settings.py	-	name	_check_folders_apart	_check_rounds_dirs_apart
+rounds	packages/rounds/src/moxi_rounds/settings.py	-	name	has_notes_folder	has_notes_dir
+rounds	packages/rounds/src/moxi_rounds/settings.py	except NoFolder as none:	use	none	exc
+rounds	packages/rounds/src/moxi_rounds/settings.py	folder = os.path.expanduser(table["dir"])	use	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/settings.py	folder = os.path.join(folders.notes_folder(name), folder)	use	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/settings.py	if not os.path.isabs(folder):	use	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/settings.py	real = os.path.realpath(folder)	use	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/settings.py	return False if none.known else None	use	none	exc
 rounds	packages/rounds/src/moxi_rounds/showing.py	"folder": home.round_folder(slug)}	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/showing.py	"folder": str(found.folder), "notice": found.notice}	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/showing.py	"id": ruling.id, "text": ruling.text, "record": ruling.record,	keep	record	record
@@ -5342,6 +5500,20 @@ rounds	packages/rounds/src/moxi_rounds/showing.py	return index.read(home.project
 rounds	packages/rounds/src/moxi_rounds/showing.py	return index.refresh(home.project, home.folder, slug)	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/showing.py	return {"how": end.how, "by": end.by, "record": end.record, "actor": end.actor,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/showing.py	said = [f"record: {one['record']}", f"kind: {one['kind']}",	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/showing.py	"folder": home.round_dir(slug)}	use	"folder"	"round_dir"
+rounds	packages/rounds/src/moxi_rounds/showing.py	"folder": home.round_folder(slug)}	use	.round_folder	.round_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	"folder": home.round_folder(slug)}	use	home.round_folder	home.round_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	"folder": str(found.folder), "notice": found.notice}	use	found.folder	found.round_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	Shown	name	folder	round_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	else index.read(home.project, home.folder, slug))	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	f"description: {shown_as['description']}", f"folder: {found.folder}"]	use	found.folder	found.round_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	lines = [f"round {found.name}   unreadable", f"folder: {found.folder}",	use	found.folder	found.round_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	register = states.fold(log.read(log.project_log(home.folder)))	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	return index.read(home.project, home.folder, slug)	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	return index.refresh(home.project, home.folder, slug)	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	show	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/showing.py	state = states.fold(log.read_round(log.round_log(home.round_folder(slug))))	use	.round_folder	.round_dir
+rounds	packages/rounds/src/moxi_rounds/showing.py	state = states.fold(log.read_round(log.round_log(home.round_folder(slug))))	use	home.round_folder	home.round_dir
 rounds	packages/rounds/src/moxi_rounds/shown.py	`S4,S5`. `record` points to where he was shown them: the message, the moment in a	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	and pointers.number(record) < pointers.number(ruling.record)):	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	and pointers.shape(ruling.record) == pointers.COMMS	keep	record	record
@@ -5359,6 +5531,16 @@ rounds	packages/rounds/src/moxi_rounds/shown.py	rules=body["rules"], record=body
 rounds	packages/rounds/src/moxi_rounds/shown.py	sentence; the item it `rules`, None for one that stands on its own; the `record`,	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	the pointer `record`, and the `event` written, None when every ruling was shown	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/shown.py	write.Where(home.project, home.folder, slug), actor=actor,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/shown.py	_logs	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/shown.py	events = log.read_round(log.round_log(home.round_folder(slug)))	use	.round_folder	.round_dir
+rounds	packages/rounds/src/moxi_rounds/shown.py	events = log.read_round(log.round_log(home.round_folder(slug)))	use	home.round_folder	home.round_dir
+rounds	packages/rounds/src/moxi_rounds/shown.py	for slug in folders.slugs(home.folder):	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/shown.py	for summary in (register, *index.rounds(home.project, home.folder, env=env)):	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/shown.py	home = folders.Home(view.where.project, view.where.folder)	use	where.folder	where.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/shown.py	mark	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/shown.py	project_state = states.fold(log.read(log.project_log(home.folder)))	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/shown.py	register = index.read(home.project, home.folder, env=env)	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/shown.py	write.Where(home.project, home.folder, slug), by=by,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/state.py	_change(state, {**change, "record": event.get("record"),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/state.py	at=event.get("asked_at") or event["at"], record=event.get("record"),	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/state.py	id=event.get("id"), text=event.get("text"), record=event.get("record"),	keep	record	record
@@ -5371,6 +5553,14 @@ rounds	packages/rounds/src/moxi_rounds/state.py	touched = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/write.py	"Where", "Entry", "View", "Written", "Gate", "record"]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/write.py	alone. `folder` is the project's rounds folder."""	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/write.py	facts=None if facts is None else facts(where))	keep	turn_open	turn_open
+rounds	packages/rounds/src/moxi_rounds/write.py	ROUND = "round"	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/write.py	Where	name	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/write.py	_append	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/write.py	_append	name	error	exc
+rounds	packages/rounds/src/moxi_rounds/write.py	_lock	name	stop	exc
+rounds	packages/rounds/src/moxi_rounds/write.py	`record(where, actor=..., event=..., gates=..., act=...)` runs the same steps for every	use	actor=	by=
+rounds	packages/rounds/src/moxi_rounds/write.py	alone. `folder` is the project's rounds folder."""	use	`folder`	`rounds_dir`
+rounds	packages/rounds/src/moxi_rounds/write.py	record	name	actor	by
 rounds	packages/rounds/tests/conftest.py	argv = ["projects", "set", key, "--no-notes-root"]	keep	set	set
 rounds	packages/rounds/tests/conftest.py	argv = ["projects", "set", key, "--notes-root", str(notes_root)]	keep	set	set
 rounds	packages/rounds/tests/conftest.py	config_file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -5382,9 +5572,15 @@ rounds	packages/rounds/tests/test_api.py	assert set(declared["project"]["entry-p
 rounds	packages/rounds/tests/test_api.py	assert set(one) == {"name", "project", "slug", "folder", "notice", "unreadable"}	keep	folder	folder
 rounds	packages/rounds/tests/test_api.py	assert set(row) == {"name", "project", "folder", "unreadable"}	keep	folder	folder
 rounds	packages/rounds/tests/test_api.py	found = set()	keep	set	set
+rounds	packages/rounds/tests/test_api.py	assert api.__all__ == ["rounds", "round", "waiting", "questions"]	use	"round"	"round_data"
+rounds	packages/rounds/tests/test_api.py	for folder in {tmp_path, Path.home(), paths.data_dir(), paths.state_dir()}	use	folder	root_dir
+rounds	packages/rounds/tests/test_api.py	for path in sorted(folder.rglob("*")) if path.is_file()}	use	folder	root_dir
+rounds	packages/rounds/tests/test_api.py	rounds	name	folder	rounds_dir
+rounds	packages/rounds/tests/test_api.py	spoil	name	file	fh
 rounds	packages/rounds/tests/test_ask.py	assert (event["from"], event["record"]) == ("comms:77", "comms:77")	keep	record	record
 rounds	packages/rounds/tests/test_ask.py	assert (found.origin, found.record) == ("comms:77", "comms:77")	keep	record	record
 rounds	packages/rounds/tests/test_ask.py	assert event["from"] == pointer and "record" not in event	keep	record	record
+rounds	packages/rounds/tests/test_ask.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_corrections.py	"record": "comms:12", "kind": "substance", "rules": "Q1", "supersedes": "C1"}	keep	record	record
 rounds	packages/rounds/tests/test_corrections.py	"revokes": "C1", "record": "comms:13", "kind": "process", "rules": "revoke:C1"}	keep	record	record
 rounds	packages/rounds/tests/test_corrections.py	"state": "open", "revokes": "C1", "record": "comms:13", "kind": "process",	keep	record	record
@@ -5393,6 +5589,14 @@ rounds	packages/rounds/tests/test_corrections.py	"text": "He took it back.", "re
 rounds	packages/rounds/tests/test_corrections.py	{"id": "C1", "record": "comms:12", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_doctor.py	folder.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_doctor.py	for name in (["git"], ["rounds", "folders"], ["logs"], ["index"]):	keep	folders	folders
+rounds	packages/rounds/tests/test_doctor.py	-	name	test_a_folder_given_by_the_setting_is_fine	test_a_dir_given_by_the_setting_is_fine
+rounds	packages/rounds/tests/test_doctor.py	-	name	test_a_project_whose_rounds_folder_cant_be_worked_out_is_named_with_the_fix	test_a_project_whose_rounds_dir_cant_be_worked_out_is_named_with_the_fix
+rounds	packages/rounds/tests/test_doctor.py	bin_dir.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_doctor.py	for folder in {tmp_path, Path.home(), paths.data_dir(), paths.state_dir()}	use	folder	root_dir
+rounds	packages/rounds/tests/test_doctor.py	for path in sorted(folder.rglob("*")) if path.is_file()}	use	folder	root_dir
+rounds	packages/rounds/tests/test_doctor.py	git_says.stand_in	name	folder	bin_dir
+rounds	packages/rounds/tests/test_doctor.py	spoil	name	file	fh
+rounds	packages/rounds/tests/test_doctor.py	test_a_log_whose_numbers_skip_one_is_named	name	file	fh
 rounds	packages/rounds/tests/test_drop.py	"by": "operator", "record": "comms:30", "questions": {}}	keep	record	record
 rounds	packages/rounds/tests/test_drop.py	"how": "dropped", "by": "operator", "record": "comms:30", "at": DROPPED_AT})	keep	record	record
 rounds	packages/rounds/tests/test_drop.py	"record": "comms:16"})	keep	record	record
@@ -5402,12 +5606,32 @@ rounds	packages/rounds/tests/test_drop.py	assert questions.find(after, "Q1").cha
 rounds	packages/rounds/tests/test_drop.py	assert questions.find(after, "Q2").changes[-1].record == "comms:30"	keep	record	record
 rounds	packages/rounds/tests/test_drop.py	more.setdefault("origin", None if "record" in more else "comms:11")	keep	record	record
 rounds	packages/rounds/tests/test_drop.py	more.setdefault("record", "comms:12")	keep	record	record
+rounds	packages/rounds/tests/test_drop.py	@pytest.mark.parametrize("which", ["round", "project"])	keep	round	round
+rounds	packages/rounds/tests/test_drop.py	path = (write.round_lock("proj-a", "a-round") if which == "round" else	keep	round	round
+rounds	packages/rounds/tests/test_drop.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_events.py	"inherits": ["S1"], "record": "comms:12"})	keep	record	record
 rounds	packages/rounds/tests/test_events.py	assert len(set(kind.fields)) == len(kind.fields)	keep	set	set
 rounds	packages/rounds/tests/test_events.py	assert not set(events.TYPES[name].fields) & set(events.ENVELOPE)	keep	set	set
 rounds	packages/rounds/tests/test_events.py	assert set(kind.required) <= set(kind.fields)	keep	set	set
 rounds	packages/rounds/tests/test_export.py	"record": "comms:12", "supersedes": None, "revokes": None, "at": T2}	keep	record	record
 rounds	packages/rounds/tests/test_export.py	assert set(entry) == BARE | {"options"}	keep	set	set
+rounds	packages/rounds/tests/test_export.py	"of": "proj-a", "project": "proj-a", "round": None, "view": None,	keep	round	round
+rounds	packages/rounds/tests/test_export.py	"of": A, "project": "proj-a", "round": A, "view": "docket", "computed": NOW}	keep	round	round
+rounds	packages/rounds/tests/test_export.py	-	name	test_a_folder_that_cant_be_written_is_an_error	test_a_dir_that_cant_be_written_is_an_error
+rounds	packages/rounds/tests/test_export.py	-	name	test_a_second_export_into_a_folder_replaces_the_first	test_a_second_export_into_a_dir_replaces_the_first
+rounds	packages/rounds/tests/test_export.py	-	name	test_out_refuses_a_rounds_folder_and_a_rounds_own_folder	test_out_refuses_a_rounds_dir_and_a_rounds_own_dir
+rounds	packages/rounds/tests/test_export.py	-	name	test_out_refuses_the_rounds_folder_of_another_project_reached_by_a_link	test_out_refuses_the_rounds_dir_of_another_project_reached_by_a_link
+rounds	packages/rounds/tests/test_export.py	-	name	test_out_takes_a_folder_inside_a_rounds_folder_that_is_no_round	test_out_takes_a_dir_inside_a_rounds_dir_that_is_no_round
+rounds	packages/rounds/tests/test_export.py	ask	name	actor	by
+rounds	packages/rounds/tests/test_export.py	assert found.round is None and found.view is None	keep	round	round
+rounds	packages/rounds/tests/test_export.py	assert list(of_round) == ["of", "project", "round", "view", "computed", "entries",	keep	round	round
+rounds	packages/rounds/tests/test_export.py	assert {key: of_project[key] for key in ("of", "project", "round", "view",	keep	round	round
+rounds	packages/rounds/tests/test_export.py	assert {key: of_round[key] for key in ("of", "project", "round", "view",	keep	round	round
+rounds	packages/rounds/tests/test_export.py	def everything(*folders):	use	folders	root_dirs
+rounds	packages/rounds/tests/test_export.py	for folder in folders for path in sorted(folder.rglob("*"))	use	folder	root_dir
+rounds	packages/rounds/tests/test_export.py	for root_dir in folders for path in sorted(root_dir.rglob("*"))	use	folders	root_dirs
+rounds	packages/rounds/tests/test_export.py	rounds	name	folder	rounds_dir
+rounds	packages/rounds/tests/test_export.py	test_a_round_whose_log_cant_be_read_is_not_exported_as_empty	name	file	fh
 rounds	packages/rounds/tests/test_flows.py	assert not {entry["step"] for entry in flow} & set(flows.UNLISTED_STEPS)	keep	set	set
 rounds	packages/rounds/tests/test_flows.py	assert set(flows.STEPS.values()) == {flows.ROUND, flows.STAGE}	keep	set	set
 rounds	packages/rounds/tests/test_flows.py	assert set(flows.UNLISTED_STEPS) == {"commission", "check", "ratify", "docket"}	keep	set	set
@@ -5423,6 +5647,53 @@ rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a", read)
 rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-b").folder == tmp_path / "notes" / "proj-b" / "designs"	keep	folder	folder
 rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-b").folder == tmp_path / "own"	keep	folder	folder
 rounds	packages/rounds/tests/test_folders.py	assert not folders.home("proj-a").folder.exists()	keep	folder	folder
+rounds	packages/rounds/tests/test_folders.py	(folder / "a-round" / "round.jsonl").mkdir(parents=True)	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	(folder / "no-log-here").mkdir()	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	(folder / "only-a-note" / "round-note.md").write_text("generated\n")	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	(folder / "only-a-note").mkdir()	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	(folder / "project.jsonl").write_text("")	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	(folder / "rulings.md").write_text("generated\n")	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_folder_of_its_own_ends_the_refusal	test_a_dir_of_its_own_ends_the_refusal
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_folder_two_projects_reach_is_refused_for_each_of_them	test_a_dir_two_projects_reach_is_refused_for_each_of_them
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_folder_whose_log_is_a_folder_is_no_round	test_a_dir_whose_log_is_a_dir_is_no_round
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_folder_whose_name_is_no_slug_is_no_round	test_a_dir_whose_name_is_no_slug_is_no_round
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_project_with_no_folder_shares_none	test_a_project_with_no_dir_shares_none
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_project_with_no_notes_folder_of_its_own_gets_the_one_notes_gives_it	test_a_project_with_no_notes_dir_of_its_own_gets_the_one_notes_gives_it
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_relative_dir_is_not_resolved_when_notes_has_no_folder_for_the_project	test_a_relative_dir_is_not_resolved_when_notes_has_no_dir_for_the_project
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_relative_dir_is_placed_in_the_notes_folder_the_projects_record_names	test_a_relative_dir_is_placed_in_the_notes_dir_the_projects_record_names
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_relative_dir_with_no_notes_folder_anywhere_names_the_setting_that_fixes_it	test_a_relative_dir_with_no_notes_dir_anywhere_names_the_setting_that_fixes_it
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_rounds_folder_that_is_not_there_holds_no_round	test_a_rounds_dir_that_is_not_there_holds_no_round
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_table_named_in_another_case_than_the_stored_key_places_the_folder	test_a_table_named_in_another_case_than_the_stored_key_places_the_dir
+rounds	packages/rounds/tests/test_folders.py	-	name	test_a_verb_writes_nothing_into_a_folder_two_projects_reach	test_a_verb_writes_nothing_into_a_dir_two_projects_reach
+rounds	packages/rounds/tests/test_folders.py	-	name	test_an_absolute_dir_is_the_folder_and_needs_no_notes_folder	test_an_absolute_dir_is_the_dir_and_needs_no_notes_dir
+rounds	packages/rounds/tests/test_folders.py	-	name	test_every_project_is_listed_with_its_folder_and_the_unresolved_beside_them	test_every_project_is_listed_with_its_dir_and_the_unresolved_beside_them
+rounds	packages/rounds/tests/test_folders.py	-	name	test_notes_is_not_asked_when_the_projects_record_names_a_notes_folder	test_notes_is_not_asked_when_the_projects_record_names_a_notes_dir
+rounds	packages/rounds/tests/test_folders.py	-	name	test_resolving_a_folder_makes_nothing	test_resolving_a_dir_makes_nothing
+rounds	packages/rounds/tests/test_folders.py	-	name	test_the_config_check_asks_this_lookup_whether_a_project_has_a_notes_folder	test_the_config_check_asks_this_lookup_whether_a_project_has_a_notes_dir
+rounds	packages/rounds/tests/test_folders.py	-	name	test_the_rounds_of_a_folder_are_its_folders_that_hold_a_log	test_the_rounds_of_a_dir_are_its_dirs_that_hold_a_log
+rounds	packages/rounds/tests/test_folders.py	-	name	test_two_projects_that_reach_one_folder_are_both_listed_as_unresolved	test_two_projects_that_reach_one_dir_are_both_listed_as_unresolved
+rounds	packages/rounds/tests/test_folders.py	assert (error.project, error.other, error.folder) == (asked, other, linked)	use	error.folder	error.shared_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.Home("proj-a", Path("rounds")).round_folder("a-round") \	use	.round_folder	.round_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a").folder == Path.home() / "kept" / "rounds"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a").folder == linked	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a").folder == tmp_path / "elsewhere"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a").folder == tmp_path / "from-notes" / "rounds"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a").folder == tmp_path / "notes" / "proj-a" / "plans/rounds"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a").folder == tmp_path / "notes" / "proj-a" / "rounds"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a").folder.name == "designs"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-a", read).folder.name == "rounds"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-b").folder == tmp_path / "notes" / "proj-b" / "designs"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.home("proj-b").folder == tmp_path / "own"	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.slugs(folder) == ["a-round", "round-3", "second-round"]	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.slugs(folder) == ["a-round"]	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert folders.slugs(folder) == []	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	assert not folders.home("proj-a").folder.exists()	use	.folder	.rounds_dir
+rounds	packages/rounds/tests/test_folders.py	folder = tmp_path / "rounds"	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	open_round	name	folder	round_dir
+rounds	packages/rounds/tests/test_folders.py	open_round(folder, "a-round")	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	open_round(folder, "round-3")	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	open_round(folder, "second-round")	use	folder	rounds_dir
+rounds	packages/rounds/tests/test_folders.py	open_round(folder, name)	use	folder	rounds_dir
 rounds	packages/rounds/tests/test_holds.py	assert set(seen) == {OTHER}	keep	set	set
 rounds	packages/rounds/tests/test_holds.py	{"id": "C81", "record": "comms:14", "kind": "process", names: "C80"},	keep	record	record
 rounds	packages/rounds/tests/test_holds.py	{"id": "C90", "record": "comms:13", "kind": "process",	keep	record	record
@@ -5431,6 +5702,19 @@ rounds	packages/rounds/tests/test_index.py	"record": "comms:30", "at": AT}	keep	
 rounds	packages/rounds/tests/test_index.py	"round.dropped", {"by": "operator", "record": "comms:30", "questions": {}}))	keep	record	record
 rounds	packages/rounds/tests/test_index.py	SHOWN = {"ids": ["S1"], "record": "comms:12"}	keep	record	record
 rounds	packages/rounds/tests/test_index.py	paths.index_file().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_index.py	-	name	test_a_write_leaves_the_rounds_folder_status_and_flow_and_its_logs_digest	test_a_write_leaves_the_rounds_dir_status_and_flow_and_its_logs_digest
+rounds	packages/rounds/tests/test_index.py	assert (found.slug, found.folder, found.status) == (None, home.rounds_dir, None)	use	found.folder	found.log_dir
+rounds	packages/rounds/tests/test_index.py	def files(*folders_: Path) -> dict[str, tuple[bytes, int]]:	use	folders_	root_dirs
+rounds	packages/rounds/tests/test_index.py	file = log.round_log(home.round_folder("a-round"))	use	.round_folder	.round_dir
+rounds	packages/rounds/tests/test_index.py	file = log.round_log(home.round_folder("a-round"))	use	home.round_folder	home.round_dir
+rounds	packages/rounds/tests/test_index.py	for folder in folders_ for path in sorted(folder.rglob("*")) if path.is_file()}	use	folder	root_dir
+rounds	packages/rounds/tests/test_index.py	for root_dir in folders_ for path in sorted(root_dir.rglob("*")) if path.is_file()}	use	folders_	root_dirs
+rounds	packages/rounds/tests/test_index.py	home	name	folder	rounds_dir
+rounds	packages/rounds/tests/test_index.py	home.round_folder("a-round").mkdir(parents=True)	use	.round_folder	.round_dir
+rounds	packages/rounds/tests/test_index.py	home.round_folder("a-round").mkdir(parents=True)	use	home.round_folder	home.round_dir
+rounds	packages/rounds/tests/test_index.py	home.round_folder(slug).mkdir()	use	.round_folder	.round_dir
+rounds	packages/rounds/tests/test_index.py	home.round_folder(slug).mkdir()	use	home.round_folder	home.round_dir
+rounds	packages/rounds/tests/test_index.py	test_an_unreadable_log_is_shown_as_unreadable_and_not_as_an_empty_round	name	file	fh
 rounds	packages/rounds/tests/test_list.py	"folder": str(rounds.parent.parent / "notes-b" / "rounds" / "c-round"),	keep	folder	folder
 rounds	packages/rounds/tests/test_list.py	"how": "dropped", "by": "lead", "record": "comms:30", "at": T6}	keep	record	record
 rounds	packages/rounds/tests/test_list.py	"record": "https://example.test/said", "supersedes": None, "revokes": None,	keep	record	record
@@ -5440,14 +5724,35 @@ rounds	packages/rounds/tests/test_list.py	assert set(first) == {"name", "project
 rounds	packages/rounds/tests/test_list.py	assert set(row) == {"name", "project", "folder", "unreadable"}	keep	folder	folder
 rounds	packages/rounds/tests/test_list.py	{"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),	keep	folder	folder
 rounds	packages/rounds/tests/test_list.py	{"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),	keep	folder	folder
+rounds	packages/rounds/tests/test_list.py	"unreadable", "no_folder"]	keep	no_folder	no_folder
+rounds	packages/rounds/tests/test_list.py	-	name	test_a_project_with_no_rounds_folder_is_named_and_the_rest_listed	test_a_project_with_no_rounds_dir_is_named_and_the_rest_listed
+rounds	packages/rounds/tests/test_list.py	[reason] = data(capsys)["no_folder"]	keep	no_folder	no_folder
+rounds	packages/rounds/tests/test_list.py	ask	name	actor	by
+rounds	packages/rounds/tests/test_list.py	assert found["unreadable"] == [] and found["no_folder"] == []	keep	no_folder	no_folder
+rounds	packages/rounds/tests/test_list.py	def logs(*folders):	use	folders	root_dirs
+rounds	packages/rounds/tests/test_list.py	for folder in folders for path in sorted(folder.rglob("*.jsonl"))}	use	folder	root_dir
+rounds	packages/rounds/tests/test_list.py	for root_dir in folders for path in sorted(root_dir.rglob("*.jsonl"))}	use	folders	root_dirs
+rounds	packages/rounds/tests/test_list.py	rounds	name	folder	rounds_dir
+rounds	packages/rounds/tests/test_list.py	spoil	name	file	fh
+rounds	packages/rounds/tests/test_list.py	test_a_project_whose_own_log_cant_be_read_is_named_and_its_counts_not_known	name	file	fh
 rounds	packages/rounds/tests/test_locks.py	assert len(set(locks)) == len(locks)	keep	set	set
 rounds	packages/rounds/tests/test_locks.py	for path, proc in zip(locks, held, strict=True))	keep	strict	strict
 rounds	packages/rounds/tests/test_locks.py	proc.communicate(timeout=30)	keep	timeout	timeout
 rounds	packages/rounds/tests/test_locks.py	return write.Entry("ruling.shown", {"ids": ["S1"], "record": "comms:12"},	keep	record	record
+rounds	packages/rounds/tests/test_locks.py	-	name	test_a_rounds_lock_and_a_projects_lock_are_in_the_state_directory	test_a_rounds_lock_and_a_projects_lock_are_in_the_state_dir
+rounds	packages/rounds/tests/test_locks.py	-	name	test_a_write_leaves_no_lock_file_in_the_rounds_folder	test_a_write_leaves_no_lock_file_in_the_rounds_dir
+rounds	packages/rounds/tests/test_locks.py	files_under	name	folder	root_dir
+rounds	packages/rounds/tests/test_locks.py	test_a_project_keyed_like_anothers_lock_file_is_written_beside_it	name	folder	lock_dir
+rounds	packages/rounds/tests/test_locks.py	test_a_project_keyed_like_anothers_lock_file_is_written_beside_it	name	folders	lock_dirs
+rounds	packages/rounds/tests/test_locks.py	test_the_cores_lock_locks_the_file_it_is_given_and_writes_the_holders_pid	name	folder	locks_dir
+rounds	packages/rounds/tests/test_locks.py	where	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_log.py	third = log.append(path, "ruling.shown", {"ids": ["C1"], "record": "comms:12"},	keep	record	record
 rounds	packages/rounds/tests/test_log.py	{"id": "C7", "text": "y" * 1_200_000, "record": "comms:12",	keep	record	record
 rounds	packages/rounds/tests/test_log.py	{"id": "S1", "text": "a placeholder ruling", "record": "comms:12",	keep	record	record
 rounds	packages/rounds/tests/test_log.py	{"id": f"C{number + 1}", "text": "x" * 300_000, "record": "comms:12",	keep	record	record
+rounds	packages/rounds/tests/test_log.py	path	name	folder	round_dir
+rounds	packages/rounds/tests/test_log.py	test_the_cores_append_with_no_size_limit_never_moves_the_file_aside	name	folder	logs_dir
+rounds	packages/rounds/tests/test_mark.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_module.py	assert defined <= set(modules.KNOWN)	keep	set	set
 rounds	packages/rounds/tests/test_module.py	assert set(found.stores) == {"index"}	keep	set	set
 rounds	packages/rounds/tests/test_moving.py	"record": "comms:20", "kind": "process", "rules": "move:Q1", "question": "Q1",	keep	record	record
@@ -5459,14 +5764,51 @@ rounds	packages/rounds/tests/test_moving.py	assert [(change.state, change.ruling
 rounds	packages/rounds/tests/test_moving.py	more.setdefault("origin", None if "record" in more else "comms:11")	keep	record	record
 rounds	packages/rounds/tests/test_moving.py	moved.question.record) == ("scout", ASKED_AT, "comms:15", "comms:15")	keep	record	record
 rounds	packages/rounds/tests/test_moving.py	{"id": "C9", "record": "comms:13", "kind": "process",	keep	record	record
+rounds	packages/rounds/tests/test_moving.py	@pytest.mark.parametrize("which", ["round", "project"])	keep	round	round
+rounds	packages/rounds/tests/test_moving.py	path = (write.round_lock("proj-a", "a-round") if which == "round" else	keep	round	round
+rounds	packages/rounds/tests/test_moving.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_open.py	assert "record" not in log.read(log.round_log(rounds / "b-round"))[0]	keep	record	record
 rounds	packages/rounds/tests/test_open.py	assert log.read(log.round_log(rounds / "a-round"))[0]["record"] == "comms:12"	keep	record	record
 rounds	packages/rounds/tests/test_open.py	assert log.read(log.round_log(rounds / "a-round"))[0]["record"] == pointer	keep	record	record
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_flow_the_config_does_not_have_is_refused_and_no_folder_is_made	test_a_flow_the_config_does_not_have_is_refused_and_no_dir_is_made
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_folder_that_already_holds_a_log_is_refused_and_left_as_it_was	test_a_dir_that_already_holds_a_log_is_refused_and_left_as_it_was
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_folder_that_is_there_and_empty_is_opened_into	test_a_dir_that_is_there_and_empty_is_opened_into
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_folder_with_a_note_and_a_log_is_refused_as_a_round_already_there	test_a_dir_with_a_note_and_a_log_is_refused_as_a_round_already_there
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_folder_with_another_tools_note_and_no_log_is_refused_and_the_note_kept	test_a_dir_with_another_tools_note_and_no_log_is_refused_and_the_note_kept
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_go_pointer_of_no_known_shape_is_refused_and_no_folder_is_made	test_a_go_pointer_of_no_known_shape_is_refused_and_no_dir_is_made
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_round_folder_that_cant_be_made_is_an_error_and_nothing_is_recorded	test_a_round_dir_that_cant_be_made_is_an_error_and_nothing_is_recorded
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_round_opens_in_a_folder_that_is_already_there	test_a_round_opens_in_a_dir_that_is_already_there
+rounds	packages/rounds/tests/test_open.py	-	name	test_a_rounds_folder_that_cant_be_worked_out_is_refused	test_a_rounds_dir_that_cant_be_worked_out_is_refused
+rounds	packages/rounds/tests/test_open.py	assert (found.status, found.flow, found.round_dir) == ("open", "fix", rounds / "a-round")	use	found.round_dir	found.log_dir
+rounds	packages/rounds/tests/test_open.py	files_under	name	folder	root_dir
+rounds	packages/rounds/tests/test_open.py	folded	name	folder	round_dir
+rounds	packages/rounds/tests/test_options.py	rounds	name	folder	rounds_dir
 rounds	packages/rounds/tests/test_paths.py	assert directory(env) == own / "rounds"	keep	directory	directory
 rounds	packages/rounds/tests/test_paths.py	assert set(paths.LAYOUT.locators()) == {*paths.LOCATOR_ENVS, HOME_ENV}	keep	set	set
+rounds	packages/rounds/tests/test_paths.py	-	name	test_a_root_variable_moves_its_own_directory_and_no_other	test_a_root_variable_moves_its_own_dir_and_no_other
+rounds	packages/rounds/tests/test_paths.py	-	name	test_the_module_home_holds_all_five_directories	test_the_module_home_holds_all_five_dirs
+rounds	packages/rounds/tests/test_paths.py	@pytest.mark.parametrize("variable, directory", [	use	directory	root_dir
+rounds	packages/rounds/tests/test_paths.py	assert directory(env) == own / "rounds"	use	directory	root_dir
+rounds	packages/rounds/tests/test_paths.py	def test_a_root_variable_moves_its_own_directory_and_no_other(tmp_path, variable,	use	directory	root_dir
+rounds	packages/rounds/tests/test_paths.py	directory):	use	directory	root_dir
+rounds	packages/rounds/tests/test_paths.py	paths.runtime_dir} - {directory}	use	directory	root_dir
 rounds	packages/rounds/tests/test_project_settings.py	assert not set(settings.ROUND_KEYS) & set(settings.BUILD_KEYS)	keep	set	set
 rounds	packages/rounds/tests/test_project_settings.py	assert set(settings.ROUND_KEYS) | {"check_on"} >= {	keep	set	set
+rounds	packages/rounds/tests/test_project_settings.py	-	name	test_a_relative_dir_is_accepted_when_notes_gives_the_project_a_folder	test_a_relative_dir_is_accepted_when_notes_gives_the_project_a_dir
+rounds	packages/rounds/tests/test_project_settings.py	-	name	test_a_relative_dir_is_accepted_when_the_projects_record_names_a_notes_folder	test_a_relative_dir_is_accepted_when_the_projects_record_names_a_notes_dir
+rounds	packages/rounds/tests/test_project_settings.py	-	name	test_a_relative_dir_is_refused_for_a_project_with_no_notes_folder	test_a_relative_dir_is_refused_for_a_project_with_no_notes_dir
+rounds	packages/rounds/tests/test_project_settings.py	-	name	test_an_absolute_dir_is_accepted_for_a_project_with_no_notes_folder	test_an_absolute_dir_is_accepted_for_a_project_with_no_notes_dir
+rounds	packages/rounds/tests/test_project_settings.py	-	name	test_two_relative_dirs_in_one_notes_folder_are_refused	test_two_relative_dirs_in_one_notes_dir_are_refused
+rounds	packages/rounds/tests/test_project_settings.py	-	name	test_two_tables_whose_dirs_reach_one_folder_are_refused	test_two_tables_whose_dirs_reach_one_dir_are_refused
+rounds	packages/rounds/tests/test_project_settings.py	-	name	test_two_tables_with_a_folder_each_pass_the_check	test_two_tables_with_a_dir_each_pass_the_check
 rounds	packages/rounds/tests/test_rendering.py	strict=True):	keep	strict	strict
+rounds	packages/rounds/tests/test_rendering.py	-	name	test_a_folder_with_no_log_is_never_written_into	test_a_dir_with_no_log_is_never_written_into
+rounds	packages/rounds/tests/test_rendering.py	-	name	test_a_note_names_no_folder_of_the_machine_it_was_written_on	test_a_note_names_no_dir_of_the_machine_it_was_written_on
+rounds	packages/rounds/tests/test_rendering.py	-	name	test_a_read_back_writes_into_no_folder_that_holds_no_log	test_a_read_back_writes_into_no_dir_that_holds_no_log
+rounds	packages/rounds/tests/test_rendering.py	-	name	test_someones_own_file_in_the_folder_is_left_as_it_is	test_someones_own_file_in_the_dir_is_left_as_it_is
+rounds	packages/rounds/tests/test_rendering.py	-	name	test_the_same_events_in_another_folder_give_the_same_note	test_the_same_events_in_another_dir_give_the_same_note
+rounds	packages/rounds/tests/test_rendering.py	ask	name	actor	by
+rounds	packages/rounds/tests/test_rendering.py	test_a_read_back_passes_over_a_round_whose_log_cant_be_read	name	file	fh
 rounds	packages/rounds/tests/test_rule.py	"blocks": recorded, "record": "comms:12", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	"question": "P1", "state": "ruled", "record": "comms:12", "kind": "substance",	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	"question": "Q1", "state": "ruled", "stages": stages, "record": "comms:12",	keep	record	record
@@ -5481,24 +5823,35 @@ rounds	packages/rounds/tests/test_rule.py	assert [event["record"] for event in r
 rounds	packages/rounds/tests/test_rule.py	assert rulings(log.project_log(rounds))[0]["record"] == pointer	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	assert rulings(round_log(rounds))[0]["record"] == pointer	keep	record	record
 rounds	packages/rounds/tests/test_rule.py	{"id": "C7", "text": "from another machine", "record": "comms:3",	keep	record	record
+rounds	packages/rounds/tests/test_rule.py	-	name	test_a_project_with_no_rounds_folder_yet_gets_its_register	test_a_project_with_no_rounds_dir_yet_gets_its_register
+rounds	packages/rounds/tests/test_settings.py	("round = 1\n", "round", "is not a setting of this module"),	keep	round	round
+rounds	packages/rounds/tests/test_settings.py	-	name	test_no_key_has_an_environment_override_and_each_is_read_at_its_use	test_no_key_has_an_env_override_and_each_is_read_at_its_use
 rounds	packages/rounds/tests/test_show.py	"folder": str(rounds / "b-round"), "notice": None, "status": "open",	keep	folder	folder
 rounds	packages/rounds/tests/test_show.py	"id": "C1", "text": RULED, "record": "comms:12",	keep	record	record
 rounds	packages/rounds/tests/test_show.py	assert [(one["id"], one["record"], one["shown"], one["shown_record"],	keep	record	record
 rounds	packages/rounds/tests/test_show.py	assert list(found) == ["name", "project", "slug", "folder", "notice", "status",	keep	folder	folder
 rounds	packages/rounds/tests/test_show.py	assert not {"step", "current", "next"} & set(found)	keep	set	set
 rounds	packages/rounds/tests/test_show.py	assert set(found) == {"name", "project", "slug", "folder", "notice", "unreadable"}	keep	folder	folder
+rounds	packages/rounds/tests/test_show.py	ask	name	actor	by
+rounds	packages/rounds/tests/test_show.py	test_a_round_that_cant_be_read_is_shown_as_unreadable_with_file_and_line	name	written	fh
+rounds	packages/rounds/tests/test_show.py	test_with_the_projects_log_unreadable_a_ruling_is_not_said_to_be_unshown	name	written	fh
 rounds	packages/rounds/tests/test_shown.py	"ids": ["C1", "C3"], "record": "comms:20"}	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	"record": "https://example.com/page", "kind": "process",	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	"record": "https://example.com/page"}	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	"text": SAID, "rules": None, "record": "https://example.test/said",	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	assert (event["type"], event["ids"], event["record"]) == (	keep	record	record
 rounds	packages/rounds/tests/test_shown.py	{"id": "C2", "text": SAID, "record": "comms:13", "kind": "substance",	keep	record	record
+rounds	packages/rounds/tests/test_shown.py	test_the_rulings_of_a_round_that_cant_be_read_are_left_out_and_the_round_named	name	file	fh
 rounds	packages/rounds/tests/test_state.py	NOT_APPLIED_HERE = sorted(set(events.TYPES)	keep	set	set
 rounds	packages/rounds/tests/test_state.py	assert set(state._HANDLERS) == set(events.TYPES)	keep	set	set
 rounds	packages/rounds/tests/test_state.py	{"ids": ["C1"]}, {"ids": ["C1"], "record": ""}, {"ids": ["C1"], "record": 20},	keep	record	record
 rounds	packages/rounds/tests/test_state.py	{"record": "comms:20"}, {"ids": "C1", "record": "comms:20"}])	keep	record	record
 rounds	packages/rounds/tests/test_write.py	SHOWN = {"ids": ["S1"], "record": "comms:12"}	keep	record	record
 rounds	packages/rounds/tests/test_write.py	writer.communicate(timeout=120)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_write.py	@pytest.mark.parametrize("which", ["round", "project"])	keep	round	round
+rounds	packages/rounds/tests/test_write.py	path = where.round_log if which == "round" else where.project_log	keep	round	round
+rounds	packages/rounds/tests/test_write.py	where	name	folder	rounds_dir
+rounds	packages/rounds/tests/test_write.py	write.record(where, actor=actor, event=lambda view, result: write.Entry(	use	actor=	by=
 secrets	packages/secrets/src/moxi_secrets/_generate.py	_Frame.__init__	kwonly	multiline	multiline
 secrets	packages/secrets/src/moxi_secrets/_generate.py	_char	kwonly	in_class	in_class
 secrets	packages/secrets/src/moxi_secrets/_generate.py	chars: set[int] = set()	keep	set	set
@@ -5654,6 +6007,8 @@ services	packages/services/src/moxi_services/cli.py	p.add_argument("name", metav
 services	packages/services/src/moxi_services/cli.py	return max(codes_, key=rank, default=codes.OK)	keep	default	default
 services	packages/services/src/moxi_services/cli.py	schedule.add_argument("--at", metavar="HH:MM[,HH:MM...]", help="run at these times")	keep	help	help
 services	packages/services/src/moxi_services/cli.py	schedule.add_argument("--every", metavar="N", help="run every N minutes (5m) or hours (2h)")	keep	help	help
+services	packages/services/src/moxi_services/cli.py	"rss_bytes": int(rss), "cpu_s": round(cpu.user + cpu.system, 2)}	keep	round	round
+services	packages/services/src/moxi_services/cli.py	return {"pid": pid, "uptime_s": round(max(0.0, time.time() - started), 1),	keep	round	round
 services	packages/services/src/moxi_services/jobs.py	Jobs._ended	name	err	exc
 services	packages/services/src/moxi_services/page.py	"at": lb.Field("list", required=False, max=48,	keep	required	required
 services	packages/services/src/moxi_services/page.py	"command": lb.Field("string", required=False, max=COMMAND_MAX),	keep	required	required
@@ -5778,6 +6133,7 @@ sessions	packages/sessions/src/moxi_sessions/catalog.py	return Details(work_dir=
 sessions	packages/sessions/src/moxi_sessions/catalog.py	_activity	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_tail	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/catalog.py	Catalog._tail	kwonly	program	program
+sessions	packages/sessions/src/moxi_sessions/catalog.py	None if updated is None else round(updated * 1000) * 1_000_000))	keep	round	round
 sessions	packages/sessions/src/moxi_sessions/claude.py	`~` and the home directory taken from its `HOME`. A process that reports its session's	keep	HOME	HOME
 sessions	packages/sessions/src/moxi_sessions/claude.py	for lineno, line in enumerate(text.splitlines(), start=1):	keep	start	start
 sessions	packages/sessions/src/moxi_sessions/claude.py	held = self._held	keep	_held	_held
@@ -6034,7 +6390,10 @@ sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	"directory": wo
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	tokens	name	input	input_tokens
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	OpenCodeAssistant.step_finish	name	input	input_tokens
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	a.step_finish(input=900, output=40, cache_read=1200)	use	input=	input_tokens=
+sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	return round(at * 1000)	keep	round	round
 sessions	packages/sessions/src/moxi_sessions/view.py	seen: set[Any] = set()	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/view.py	return f"{round(n):,}"	keep	round	round
+sessions	packages/sessions/src/moxi_sessions/view.py	s = round(ms / 1000)	keep	round	round
 sessions	packages/sessions/tests/browser_seed.py	a.step(text="opencode done", input=900, output=40)	keep	input	input
 sessions	packages/sessions/tests/browser_seed.py	k.step(text="looked", input=5, output=3)	keep	input	input
 sessions	packages/sessions/tests/browser_seed.py	a.step(text="opencode done", input=900, output=40)	use	input=	input_tokens=
@@ -6655,6 +7014,7 @@ turns	packages/turns/src/moxi_turns/codex_hooks.py	self.conn.send({"op": PRINTED
 turns	packages/turns/src/moxi_turns/codex_hooks.py	self.socket_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/src/moxi_turns/codex_hooks.py	self.wait_seconds = wait_s	use	self.wait_seconds	self.wait_s
 turns	packages/turns/src/moxi_turns/codex_hooks.py	session_flags	name	wait_seconds	event_wait_s
+turns	packages/turns/src/moxi_turns/codex_hooks.py	return round(max(0.0, wait_s) + TOOL_MARGIN_S, 1)	keep	round	round
 turns	packages/turns/src/moxi_turns/codex_host.py	_log_to	kwonly	window	window
 turns	packages/turns/src/moxi_turns/codex_host.py	_log_to	name	folder	state_dir
 turns	packages/turns/src/moxi_turns/codex_host.py	choice.add_argument("--sandbox", choices=SANDBOX_MODES, help="the sandbox mode")	keep	help	help
@@ -6725,6 +7085,8 @@ turns	packages/turns/src/moxi_turns/harness.py	return cls(count, draft, count - 
 turns	packages/turns/src/moxi_turns/hooks/__init__.py	return sorted(set(globals()) | set(_SUBMODULES))	keep	set	set
 turns	packages/turns/src/moxi_turns/hooktimes.py	self._stop.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/hooktimes.py	thread.join(timeout=2.0)	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/hooktimes.py	"at": round(time.time() if at is None else float(at), 3)}	keep	round	round
+turns	packages/turns/src/moxi_turns/hooktimes.py	record = {"harness": self.harness, "event": event, "ms": round(float(ms), 3),	keep	round	round
 turns	packages/turns/src/moxi_turns/listeners.py	_text	kwonly	done	done
 turns	packages/turns/src/moxi_turns/listeners.py	listed = set(registry.start_order())	keep	set	set
 turns	packages/turns/src/moxi_turns/listeners.py	read.done.set()	keep	set	set
@@ -7359,6 +7721,7 @@ ui	packages/ui/src/moxi_ui/gateway/router.py	GatewayRouter._read	name	err	exc
 ui	packages/ui/src/moxi_ui/gateway/router.py	audit.refusal(code, {"path": raw, "status": status}, signed_in=signed_in)	keep	signed_in=	signed_in=
 ui	packages/ui/src/moxi_ui/gateway/router.py	audit.request(fields, signed_in=signed_in)	keep	signed_in=	signed_in=
 ui	packages/ui/src/moxi_ui/gateway/router.py	signed_in=signed_in)	keep	signed_in=	signed_in=
+ui	packages/ui/src/moxi_ui/gateway/router.py	_row(scope, note, answer["status"], round((clock() - began) * 1000),	keep	round	round
 ui	packages/ui/src/moxi_ui/gateway/verbs.py	-	name	cmd_off	cmd_disable
 ui	packages/ui/src/moxi_ui/gateway/verbs.py	-	name	cmd_on	cmd_enable
 ui	packages/ui/src/moxi_ui/gateway/verbs.py	url = mint(_layout().runtime_dir(environ, create=True), address)	keep	create	create
@@ -7419,6 +7782,7 @@ ui	packages/ui/src/moxi_ui/loopback/server.py	PageApp._dispatch	name	err	exc
 ui	packages/ui/src/moxi_ui/loopback/server.py	PageApp._events	name	err	exc
 ui	packages/ui/src/moxi_ui/loopback/server.py	Snapshot._run	name	err	exc
 ui	packages/ui/src/moxi_ui/loopback/server.py	_resolve	name	err	exc
+ui	packages/ui/src/moxi_ui/loopback/server.py	"uptime_s": round(time.monotonic() - self._started, 3),	keep	round	round
 ui	packages/ui/src/moxi_ui/loopback/transport.py	+ conn.send(h11.EndOfMessage()))	keep	fail	fail
 ui	packages/ui/src/moxi_ui/loopback/transport.py	message += conn.send(h11.Data(data=payload))	keep	fail	fail
 ui	packages/ui/src/moxi_ui/loopback/transport.py	message += conn.send(h11.EndOfMessage())	keep	fail	fail
@@ -7434,6 +7798,7 @@ ui	packages/ui/src/moxi_ui/loopback/transport.py	check_private_dir	name	err	exc
 ui	packages/ui/src/moxi_ui/loopback/transport.py	open_connection	name	err	exc
 ui	packages/ui/src/moxi_ui/page.py	token = _shell.set(shell)	keep	set	set
 ui	packages/ui/src/moxi_ui/page.py	doctor_answer	name	err	exc
+ui	packages/ui/src/moxi_ui/page.py	"uptime_s": round(time.monotonic() - shell.started, 3),	keep	round	round
 ui	packages/ui/src/moxi_ui/proxy.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 ui	packages/ui/src/moxi_ui/proxy.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
 ui	packages/ui/src/moxi_ui/proxy.py	await send({"type": "http.response.body", "body": chunk, "more_body": True})	keep	fail	fail
@@ -7528,6 +7893,9 @@ ui	packages/ui/src/moxi_ui/starter.py	export_tables	name	err	exc
 ui	packages/ui/src/moxi_ui/starter.py	read_servers	name	stream	fh
 ui	packages/ui/src/moxi_ui/starter.py	"""Count one open request (or, with `stream`, a stream) on this server until the	keep	stream	stream
 ui	packages/ui/src/moxi_ui/starter.py	`exit` is the child's exit code, or None when it gave no ready line in time (it was	keep	exit	exit
+ui	packages/ui/src/moxi_ui/starter.py	"cpu_s": round(times.user + times.system, 3),	keep	round	round
+ui	packages/ui/src/moxi_ui/starter.py	"failed_for_s": (round(self._failed_until - self._pool.clock(), 3)	keep	round	round
+ui	packages/ui/src/moxi_ui/starter.py	"uptime_s": round(self._pool.clock() - server.started, 3) if server else None,	keep	round	round
 ui	packages/ui/src/moxi_ui/terminal.py	"""No record at `record`: the step that makes one, and where to look when it doesn't."""	keep	record	record
 ui	packages/ui/src/moxi_ui/terminal.py	check	name	page	for_page
 ui	packages/ui/src/moxi_ui/terminal.py	check(places, *, programs=None, page=True) -> str | None	use	page=True	for_page=True
@@ -8049,6 +8417,7 @@ usage	packages/usage/src/moxi_usage/cli.py	prices.add_argument("model", nargs="?
 usage	packages/usage/src/moxi_usage/cli.py	restart.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 usage	packages/usage/src/moxi_usage/cli.py	terms.add_argument("--by", choices=("model", "day", "month", "agent"), default="model",	keep	default	default
 usage	packages/usage/src/moxi_usage/cli.py	terms.add_argument("--session", metavar="ID", help="count one session only")	keep	help	help
+usage	packages/usage/src/moxi_usage/cli.py	return f"${price:,.2f}" if round(price, 2) == price else f"${price:,.6g}"	keep	round	round
 usage	packages/usage/src/moxi_usage/context.py	seen: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/convert.py	extra = sorted(set(row) - _MULTIPLIER_KEYS - {"source", "as_of"})	keep	set	set
 usage	packages/usage/src/moxi_usage/convert.py	extra = sorted(set(row) - _ROW_KEYS)	keep	set	set
@@ -8068,6 +8437,7 @@ usage	packages/usage/src/moxi_usage/index.py	_under	name	directories	unreadable_
 usage	packages/usage/src/moxi_usage/index.py	_under	name	directory	unreadable_dir
 usage	packages/usage/src/moxi_usage/index.py	fields.update(cursor=got.cursor, held=None, excluded=None, read_at=run.now)	keep	held=	held=
 usage	packages/usage/src/moxi_usage/index.py	fields.update(excluded=IMPORTED, held=None, cursor=None, read_at=run.now,	keep	held=	held=
+usage	packages/usage/src/moxi_usage/index.py	mark = mark._replace(seq=int(round(mark.ts * 1000)))	keep	round	round
 usage	packages/usage/src/moxi_usage/limits.py	Row	name	age_seconds	age_s
 usage	packages/usage/src/moxi_usage/limits.py	got = fn(timeout=PULL_TIMEOUT)	use	timeout=	timeout_s=
 usage	packages/usage/src/moxi_usage/mark.py	-	name	CROSSING_AT	CROSSING_AT_ENV
@@ -8085,6 +8455,7 @@ usage	packages/usage/src/moxi_usage/marks.py	sweep	name	directory	marks_dir
 usage	packages/usage/src/moxi_usage/measure.py	return harness == "codex" and originator is not None and originator in set(originators)	keep	set	set
 usage	packages/usage/src/moxi_usage/measure.py	_row	name	S	s
 usage	packages/usage/src/moxi_usage/measure.py	_row	name	P	p
+usage	packages/usage/src/moxi_usage/measure.py	return round(float(value), 3)	keep	round	round
 usage	packages/usage/src/moxi_usage/models.py	return sorted(set(self.rows) | exact)	keep	set	set
 usage	packages/usage/src/moxi_usage/page.py	"agent": lb.Field("string", required=False, max=512), **FILTERS},	keep	required	required
 usage	packages/usage/src/moxi_usage/page.py	"harness": lb.Field("enum", required=False, values=HARNESSES),	keep	required	required
@@ -8129,6 +8500,7 @@ usage	packages/usage/src/moxi_usage/reports.py	self.rules: set[str] = set()	keep
 usage	packages/usage/src/moxi_usage/reports.py	self.unpriced: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/reports.py	total = make({}) if total is None else total	keep	start	start
 usage	packages/usage/src/moxi_usage/reports.py	where, args = query.where(claimed=False)	keep	claimed	claimed
+usage	packages/usage/src/moxi_usage/reports.py	row["cost"] = (round(self.cost, 10) if self.priced or not self.sums["unpriced_tokens"]	keep	round	round
 usage	packages/usage/src/moxi_usage/settings.py	extra = sorted(set(row) - {"path", "id"})	keep	set	set
 usage	packages/usage/src/moxi_usage/settings.py	for n, row in enumerate(settings[ARCHIVE_KEY], start=1):	keep	start	start
 usage	packages/usage/src/moxi_usage/settings.py	if (prices or tiers is not None) and not {"input", "output"} <= set(prices):	keep	set	set
@@ -8140,6 +8512,7 @@ usage	packages/usage/src/moxi_usage/store.py	for file_id in set(file_ids):	keep	
 usage	packages/usage/src/moxi_usage/store.py	keys = set(keys)	keep	set	set
 usage	packages/usage/src/moxi_usage/store.py	unknown = sorted(set(fields) - set(FILE_COLUMNS))	keep	set	set
 usage	packages/usage/src/moxi_usage/store.py	wanted = sorted(set(lanes))	keep	set	set
+usage	packages/usage/src/moxi_usage/store.py	return int(round(number * 1000))	keep	round	round
 usage	packages/usage/src/moxi_usage/thresholds.py	filled = set(facts.provenance.filled)	keep	set	set
 usage	packages/usage/src/moxi_usage/thresholds.py	restart_cost	name	S	s
 usage	packages/usage/src/moxi_usage/thresholds.py	restart_cost	name	P	p
@@ -8491,6 +8864,7 @@ usage	packages/usage/tests/test_thresholds.py	test_the_exact_equations_on_the_me
 usage	packages/usage/tests/test_thresholds.py	test_the_exact_equations_on_the_measured_rows	name	P	p
 usage	packages/usage/tests/test_thresholds.py	test_the_rounded_coefficients_sit_a_few_tokens_under_the_exact_ones	name	S	s
 usage	packages/usage/tests/test_thresholds.py	test_the_rounded_coefficients_sit_a_few_tokens_under_the_exact_ones	name	P	p
+usage	packages/usage/tests/test_thresholds.py	assert round(s + g * k * n_star) == ROUNDED[model][mark]	keep	round	round
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--date", required=True,	keep	required	required
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--out", type=Path, default=DATA / "models.json")	keep	type	type
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--url", default=URL, help="where the copy was fetched from")	keep	help	help

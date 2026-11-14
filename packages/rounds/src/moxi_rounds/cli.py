@@ -135,10 +135,10 @@ def _open(args, out) -> int:
     from . import opening
 
     opened = opening.open_round(args.round, description=args.description,
-                                actor=_actor(args), flow=args.flow, record=args.record)
+                                by=_actor(args), flow=args.flow, record=args.record)
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
-    print(f"folder: {opened.folder}", file=out)
+    print(f"folder: {opened.round_dir}", file=out)
     for line in _left(opened):
         print(line, file=out)
     _warn_of(opened.failed, args.prog, args.verb)
@@ -231,7 +231,7 @@ def _declare_rule(verbs) -> None:
 def _rule(args, out) -> int:
     from . import ruling
 
-    ruled = ruling.rule(args.target, actor=_actor(args), record=args.record,
+    ruled = ruling.rule(args.target, by=_actor(args), record=args.record,
                         text=args.text, reason=args.reason, standing=args.standing,
                         scope=args.scope, stages=args.stages, item=args.item,
                         until=args.until, chose=args.chose,
@@ -344,7 +344,7 @@ def _ask(args, out) -> int:
         raise BadArgument("--retire takes an option out of a question on record",
                           "name the question by its id in place of a sentence: "
                           f"{args.prog} ask {args.target} ID --retire K")
-    asked = asking.ask(args.target, args.text, actor=_actor(args), origin=args.origin,
+    asked = asking.ask(args.target, args.text, by=_actor(args), origin=args.origin,
                        record=args.record, blocks=args.blocks, options=args.options)
     print(f"{asked.id}: {asked.text}", file=out)
     print(f"blocks: {questions.said(asked.blocks)}   from: {asked.origin}", file=out)
@@ -364,7 +364,7 @@ def _fill(args, out) -> int:
             raise BadArgument(f"{flag} is given when a question is asked, and "
                               f"{args.text} is a question on record",
                               f"leave {flag} out to change its options")
-    filled = choices.fill(args.target, args.text, actor=_actor(args),
+    filled = choices.fill(args.target, args.text, by=_actor(args),
                           options=args.options, retire=args.retire)
     found = filled.question
     print(f"{found.id}: {found.text}", file=out)
@@ -393,10 +393,10 @@ def _carry(args, out) -> int:
             raise BadArgument(f"{flag} carries a question as it is on record, and "
                               f"{other} is not for it", f"leave {other} out")
     if args.adopt is not None:
-        moved = moving.adopt(args.target, args.adopt, actor=_actor(args),
+        moved = moving.adopt(args.target, args.adopt, by=_actor(args),
                              blocks=args.blocks, record=args.record)
     else:
-        moved = moving.move(args.target, args.move, actor=_actor(args),
+        moved = moving.move(args.target, args.move, by=_actor(args),
                             record=args.record)
     found = moved.question
     print(f"{found.id}: {found.text}", file=out)
@@ -463,9 +463,9 @@ def _mark(args, out) -> int:
                           "a change to a question that anyone may make carries none",
                           "leave --record out")
     if args.reopen:
-        marked = marking.reopen(args.target, args.id, actor=_actor(args))
+        marked = marking.reopen(args.target, args.id, by=_actor(args))
     else:
-        marked = marking.widen(args.target, args.id, args.blocks, actor=_actor(args))
+        marked = marking.widen(args.target, args.id, args.blocks, by=_actor(args))
     found = marked.question
     print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
           file=out)
@@ -477,7 +477,7 @@ def _mark_shown(args, out) -> int:
     """`mark --shown`: say that rulings were shown to the operator, and where."""
     from . import shown
 
-    marked = shown.mark(args.target, args.id, actor=_actor(args), record=args.record)
+    marked = shown.mark(args.target, args.id, by=_actor(args), record=args.record)
     if marked.marked:
         print(f"{marked.name} {', '.join(marked.marked)}: shown   record: "
               f"{marked.record}", file=out)
@@ -524,7 +524,7 @@ def _drop(args, out) -> int:
     from . import dropping
 
     dropped = dropping.drop(args.round, by=args.by, record=args.record,
-                            actor=_actor(args),
+                            run_by=_actor(args),
                             withdraw_questions=args.withdraw_questions)
     project = dropped.name.partition("/")[0]
     print(f"dropped {dropped.name}   by: {dropped.by}   record: {dropped.record}",

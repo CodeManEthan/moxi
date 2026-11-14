@@ -253,11 +253,11 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
     writes nothing. A round whose log can't be read is in `unreadable`; the project's
     own log unreadable raises `Unreadable`."""
     closed = _closed(own.load() if settings is None else settings)
-    listed = index.read(home.project, home.folder, env=env)
+    listed = index.read(home.project, home.rounds_dir, env=env)
     if listed.unreadable is not None:
         raise listed.unreadable
     entries, unreadable = _entries(listed, closed), []
-    for summary in index.rounds(home.project, home.folder, env=env):
+    for summary in index.rounds(home.project, home.rounds_dir, env=env):
         if summary.unreadable is not None:
             unreadable.append(summary.unreadable)
         elif summary.status == states.OPEN:
@@ -271,7 +271,7 @@ def of_round(home: folders.Home, slug: str, *, settings=None, env=None) -> Rows:
     given in their place. Raises `NoRound` for a round that was never opened and `Unreadable`
     for one whose log can't be read. It writes nothing."""
     try:
-        summary = index.read(home.project, home.folder, slug, env=env)
+        summary = index.read(home.project, home.rounds_dir, slug, env=env)
     except NoLog:
         raise NoRound(f"{home.project}/{slug}") from None
     if summary.unreadable is not None:
@@ -418,8 +418,8 @@ def _read_back_lines(export: Export) -> list[str]:
     return [*lines, ""]
 
 
-def write(export: Export, folder: Path | str, *, settings=None) -> tuple[Path, Path]:
-    """Write the export into `folder` as `questions.md` and `questions.json`, both from
+def write(export: Export, export_dir: Path | str, *, settings=None) -> tuple[Path, Path]:
+    """Write the export into `export_dir` as `questions.md` and `questions.json`, both from
     the one export given, and give the two paths. The folder is made when it is not
     there. Each file is put in place whole, so a reader never finds half of one.
 
@@ -427,37 +427,37 @@ def write(export: Export, folder: Path | str, *, settings=None) -> tuple[Path, P
     (`Refused`) with nothing written: rounds keeps its own files there, a
     `questions.md` among them. `settings` is what `settings.load()` gives, read now
     when left out."""
-    folder = Path(folder).expanduser()
-    kept = _kept_there(folder, own.load() if settings is None else settings)
+    export_dir = Path(export_dir).expanduser()
+    kept = _kept_there(export_dir, own.load() if settings is None else settings)
     if kept is not None:
         raise Refused([Unmet(
-            f"{folder} is {kept}, where rounds keeps its own files: an export "
+            f"{export_dir} is {kept}, where rounds keeps its own files: an export "
             "written there would replace a file made from the logs, or sit among "
             "them; name another folder",
             f"moxi rounds list {export.name} --questions --out ANOTHER-DIR")])
-    written = (folder / MARKDOWN_FILE, folder / JSON_FILE)
+    written = (export_dir / MARKDOWN_FILE, export_dir / JSON_FILE)
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        export_dir.mkdir(parents=True, exist_ok=True)
         # For people and pages to read, so not private as a log is.
         files.atomic_write(written[0], as_markdown(export), mode=0o644)
         files.atomic_write(written[1], as_json(export), mode=0o644)
-    except OSError as error:
-        raise RoundsError(f"the export can't be written into {folder}: {error}",
+    except OSError as exc:
+        raise RoundsError(f"the export can't be written into {export_dir}: {exc}",
                           "name a folder that can be written with --out DIR") from None
     return written
 
 
-def _kept_there(folder: Path, settings) -> str | None:
-    """What `folder` is to rounds, once every link on the way is followed: the rounds
+def _kept_there(export_dir: Path, settings) -> str | None:
+    """What `export_dir` is to rounds, once every link on the way is followed: the rounds
     folder of a project, or the folder of a round in one. None for any other folder."""
     found, failed = folders.homes(settings)
     # Two projects that reach one folder have no home, and the folder is still theirs.
-    homes = [(one.project, one.folder) for one in found]
-    homes += [(error.project, error.folder) for error in failed
+    homes = [(one.project, one.rounds_dir) for one in found]
+    homes += [(error.project, error.shared_dir) for error in failed
               if isinstance(error, SharedFolder)]
-    real = Path(os.path.realpath(folder))
-    for project, rounds_folder in homes:
-        theirs = Path(os.path.realpath(rounds_folder))
+    real = Path(os.path.realpath(export_dir))
+    for project, rounds_dir in homes:
+        theirs = Path(os.path.realpath(rounds_dir))
         if real == theirs:
             return f"the rounds folder of the project {project}"
         if real.parent == theirs and log.exists(log.round_log(real)):

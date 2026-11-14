@@ -24,16 +24,16 @@ def rounds(tmp_path, add_project, capsys):
     """The rounds folder of the project `proj-a`, with the rounds `a-round` and
     `b-round` opened in it, each with the stages B1, B2 and B3."""
     add_project("proj-a", notes_root=tmp_path / "notes")
-    folder = tmp_path / "notes" / "rounds"
+    rounds_dir = tmp_path / "notes" / "rounds"
     for slug in ("a-round", "b-round"):
         opening.open_round(f"proj-a/{slug}", description="a placeholder round",
-                           actor="planner", flow="fix")
+                           by="planner", flow="fix")
         for stage in ("B1", "B2", "B3"):
-            log.append(log.round_log(folder / slug), "stage.declared",
+            log.append(log.round_log(rounds_dir / slug), "stage.declared",
                        {"id": stage, "repo": "proj-a",
-                        "branch": f"{slug}-{stage.lower()}"}, actor="planner")
+                        "branch": f"{slug}-{stage.lower()}"}, by="planner")
     capsys.readouterr()
-    return folder
+    return rounds_dir
 
 
 def round_log(rounds, slug="a-round"):
@@ -53,18 +53,18 @@ def logs(rounds):
 def ask(target=A, blocks=None, **more):
     """Ask a question of `target`, by `scout` at `ASKED_AT`, and return its id."""
     more.setdefault("origin", None if "record" in more else "comms:11")
-    return asking.ask(target, SAID, blocks=blocks, actor="scout", at=ASKED_AT,
+    return asking.ask(target, SAID, blocks=blocks, by="scout", at=ASKED_AT,
                       **more).id
 
 
 def park(target, question_id, until=None):
     ruling.rule(target, item=f"park:{question_id}", until=until, record="comms:12",
-                actor="planner")
+                by="planner")
 
 
 def finish(rounds, stage, slug="a-round"):
     log.append(round_log(rounds, slug), "finish.done", {"stage": stage, "tip": "0" * 40},
-               actor="coder")
+               by="coder")
 
 
 def held(path):
@@ -101,7 +101,7 @@ def from_a_round(rounds, blocks=None):
     """A question of `a-round` put on the project's list by the operator; returns its
     id there."""
     ask(A, blocks)
-    return moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner").id
+    return moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner").id
 
 
 # -- adopting a question of the project's list -------------------------------------------
@@ -131,7 +131,7 @@ def test_a_question_asked_on_the_projects_list_is_adopted_with_any_list(
         rounds, blocks, held_up):
     ask("proj-a")
 
-    moved = moving.adopt(A, "P1", blocks=blocks, actor="curator")
+    moved = moving.adopt(A, "P1", blocks=blocks, by="curator")
 
     assert (moved.id, moved.name, moved.source, moved.ruling) == ("Q1", A, "P1", None)
     assert moved.question.blocks == held_up
@@ -142,7 +142,7 @@ def test_a_question_asked_on_the_projects_list_is_adopted_with_any_list(
 def test_an_adopted_question_keeps_where_it_came_from_who_asked_it_and_when(rounds):
     ask("proj-a", origin="https://example.org/thread/4")
 
-    moving.adopt(A, "P1", actor="curator", at=MOVED_AT)
+    moving.adopt(A, "P1", by="curator", at=MOVED_AT)
 
     assert question(round_log(rounds), "Q1") == state.Question(
         id="Q1", text=SAID, origin="https://example.org/thread/4", blocks="all",
@@ -158,7 +158,7 @@ def test_an_adopted_question_keeps_where_it_came_from_who_asked_it_and_when(roun
 def test_a_question_that_is_the_operators_own_stays_his_own_when_adopted(rounds):
     ask("proj-a", record="comms:15")
 
-    moving.adopt(A, "P1", actor="curator")
+    moving.adopt(A, "P1", by="curator")
 
     found = question(round_log(rounds), "Q1")
     assert (found.origin, found.record) == ("comms:15", "comms:15")
@@ -169,8 +169,8 @@ def test_an_adopted_question_takes_the_next_id_of_the_round(rounds):
     ask("proj-a")
     ask("proj-a")
 
-    assert moving.adopt(A, "P2", actor="curator").id == "Q2"
-    assert moving.adopt(B, "P1", actor="curator").id == "Q1"
+    assert moving.adopt(A, "P2", by="curator").id == "Q2"
+    assert moving.adopt(B, "P1", by="curator").id == "Q1"
 
 
 def test_a_parked_question_is_adopted_parked_and_waits_for_the_round_it_waited_for(
@@ -178,7 +178,7 @@ def test_a_parked_question_is_adopted_parked_and_waits_for_the_round_it_waited_f
     ask("proj-a")
     park("proj-a", "P1", until=f"round:{B}")
 
-    moved = moving.adopt(A, "P1", actor="curator")
+    moved = moving.adopt(A, "P1", by="curator")
 
     assert (moved.question.state, moved.question.until) == ("parked", f"round:{B}")
     assert holds.on_stage(held(round_log(rounds)), "B1") == ()
@@ -189,23 +189,23 @@ def test_a_question_parked_until_a_round_that_has_closed_is_adopted_open(rounds)
     ask("proj-a")
     park("proj-a", "P1", until=f"round:{B}")
     log.append(round_log(rounds, "b-round"), "round.closed", {"numbers": {}},
-               actor="planner")
+               by="planner")
 
-    moved = moving.adopt(A, "P1", actor="curator")
+    moved = moving.adopt(A, "P1", by="curator")
 
     assert (moved.question.state, moved.question.until) == ("open", None)
 
 
 def test_an_adopted_question_keeps_its_options_and_the_keys_retired_from_it(rounds):
     ask("proj-a", options=["a=prose only", "b=everything", "c=nothing"])
-    options.fill("proj-a", "P1", actor="helper", retire=["c"])
+    options.fill("proj-a", "P1", by="helper", retire=["c"])
 
-    moved = moving.adopt(A, "P1", actor="curator")
+    moved = moving.adopt(A, "P1", by="curator")
 
     assert moved.question.options == (("a", "prose only"), ("b", "everything"))
     assert moved.question.retired == ("c",)
     with pytest.raises(Refused, match="the key c was retired from Q1"):
-        options.fill(A, "Q1", actor="helper", options=["c=nothing at all"])
+        options.fill(A, "Q1", by="helper", options=["c=nothing at all"])
 
 
 def test_a_stage_the_adopting_round_does_not_have_is_refused(rounds):
@@ -213,7 +213,7 @@ def test_a_stage_the_adopting_round_does_not_have_is_refused(rounds):
     before = logs(rounds)
 
     with pytest.raises(Refused, match="B7 is not a stage of proj-a/a-round"):
-        moving.adopt(A, "P1", blocks="B1,B7", actor="curator")
+        moving.adopt(A, "P1", blocks="B1,B7", by="curator")
 
     assert logs(rounds) == before
 
@@ -222,7 +222,7 @@ def test_a_question_the_list_does_not_have_is_not_adopted(rounds):
     before = logs(rounds)
 
     with pytest.raises(Refused, match="proj-a has no question P4"):
-        moving.adopt(A, "P4", actor="curator")
+        moving.adopt(A, "P4", by="curator")
 
     assert logs(rounds) == before
 
@@ -231,23 +231,23 @@ def test_a_question_the_list_does_not_have_is_not_adopted(rounds):
     ("P1", "Prose only.", "ruled"), ("withdraw:P1", None, "withdrawn")])
 def test_a_ruled_or_withdrawn_question_is_not_adopted(rounds, item, said, state_):
     ask("proj-a")
-    ruling.rule("proj-a", item=item, text=said, record="comms:12", actor="planner")
+    ruling.rule("proj-a", item=item, text=said, record="comms:12", by="planner")
     before = logs(rounds)
 
     with pytest.raises(Refused, match=f"P1 is {state_}, and only a question that is "
                                       "open or parked is moved"):
-        moving.adopt(A, "P1", actor="curator")
+        moving.adopt(A, "P1", by="curator")
 
     assert logs(rounds) == before
 
 
 def test_a_question_is_adopted_once(rounds):
     ask("proj-a")
-    moving.adopt(A, "P1", actor="curator")
+    moving.adopt(A, "P1", by="curator")
     before = logs(rounds)
 
     with pytest.raises(Refused, match=f"P1 was moved already and is now {A}:Q1"):
-        moving.adopt(B, "P1", actor="curator")
+        moving.adopt(B, "P1", by="curator")
 
     assert logs(rounds) == before
 
@@ -283,7 +283,7 @@ def test_a_call_that_cant_be_read_is_a_usage_error(rounds, capsys, argv, said):
 def test_a_question_that_came_from_a_round_is_adopted_holding_up_every_stage(rounds):
     from_a_round(rounds, blocks="B2")
 
-    moved = moving.adopt(B, "P1", actor="curator")
+    moved = moving.adopt(B, "P1", by="curator")
 
     assert moved.question.blocks == "all"
     assert moved.ruling is None
@@ -307,14 +307,14 @@ def test_a_list_for_a_question_that_came_from_a_round_is_refused_without_his_poi
 def test_every_stage_named_outright_needs_no_pointer(rounds):
     from_a_round(rounds)
 
-    assert moving.adopt(B, "P1", blocks="all", actor="curator").question.blocks == "all"
+    assert moving.adopt(B, "P1", blocks="all", by="curator").question.blocks == "all"
 
 
 def test_a_list_with_his_pointer_is_taken_and_the_adoption_is_his_ruling(rounds):
     from_a_round(rounds)
     before = count(round_log(rounds, "b-round")), count(project_log(rounds))
 
-    moved = moving.adopt(B, "P1", blocks="B2", record="comms:21", actor="curator")
+    moved = moving.adopt(B, "P1", blocks="B2", record="comms:21", by="curator")
 
     assert (moved.id, moved.ruling, moved.question.blocks) == ("Q1", "S1", ("B2",))
     [arrived] = added(round_log(rounds, "b-round"), before[0])
@@ -360,7 +360,7 @@ def test_a_pointer_of_no_known_shape_is_refused_at_an_adoption(rounds):
     before = logs(rounds)
 
     with pytest.raises(Refused, match="not-a-pointer"):
-        moving.adopt(B, "P1", blocks="B2", record="not-a-pointer", actor="curator")
+        moving.adopt(B, "P1", blocks="B2", record="not-a-pointer", by="curator")
 
     assert logs(rounds) == before
 
@@ -409,7 +409,7 @@ def test_a_moved_question_holds_up_nothing_and_keeps_what_it_held_up(
     ask(A, blocks)
     assert holds.on_close(held(round_log(rounds)))
 
-    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     assert (moved.id, moved.name, moved.source, moved.ruling) == (
         "P1", "proj-a", f"{A}:Q1", "C1")
@@ -428,7 +428,7 @@ def test_a_moved_question_holds_up_nothing_and_keeps_what_it_held_up(
 def test_a_moved_question_keeps_where_it_came_from_who_asked_it_and_when(rounds):
     ask(A, origin="file:design.md#read-times")
 
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner", at=MOVED_AT)
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner", at=MOVED_AT)
 
     assert question(project_log(rounds), "P1") == state.Question(
         id="P1", text=SAID, origin="file:design.md#read-times", blocks="none",
@@ -438,8 +438,8 @@ def test_a_moved_question_keeps_where_it_came_from_who_asked_it_and_when(rounds)
 def test_the_asker_and_the_time_outlast_a_move_and_an_adoption(rounds):
     ask(A, record="comms:15")
 
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner", at=MOVED_AT)
-    moved = moving.adopt(B, "P1", actor="curator", at=MOVED_AT)
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner", at=MOVED_AT)
+    moved = moving.adopt(B, "P1", by="curator", at=MOVED_AT)
 
     assert (moved.question.by, moved.question.at, moved.question.origin,
             moved.question.record) == ("scout", ASKED_AT, "comms:15", "comms:15")
@@ -449,7 +449,7 @@ def test_a_parked_question_is_moved_parked(rounds):
     ask(A)
     park(A, "Q1", until=f"round:{B}")
 
-    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     assert (moved.question.state, moved.question.until) == ("parked", f"round:{B}")
 
@@ -458,7 +458,7 @@ def test_a_wait_for_a_stage_of_the_round_is_not_carried_out_of_it(rounds):
     ask(A)
     park(A, "Q1", until="B2")
 
-    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     assert (moved.question.state, moved.question.until) == ("parked", None)
     assert question(round_log(rounds), "Q1").changes[0].until == "B2"
@@ -469,7 +469,7 @@ def test_a_question_whose_wait_is_over_is_moved_open(rounds):
     park(A, "Q1", until="B2")
     finish(rounds, "B2")
 
-    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     assert (moved.question.state, moved.question.until) == ("open", None)
 
@@ -479,15 +479,15 @@ def test_a_move_takes_the_next_id_of_the_projects_list(rounds):
     ask(A)
     ask(B)
 
-    assert moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner").id == "P2"
-    assert moving.move("proj-a", f"{B}:Q1", record="comms:20", actor="planner").id == "P3"
+    assert moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner").id == "P2"
+    assert moving.move("proj-a", f"{B}:Q1", record="comms:20", by="planner").id == "P3"
 
 
 def test_a_move_names_the_project_by_its_stored_key(rounds):
     ask(A)
 
     moved = moving.move("PROJ-A", "PROJ-A/a-round:Q1", record="comms:20",
-                        actor="planner")
+                        by="planner")
 
     assert (moved.name, moved.source) == ("proj-a", f"{A}:Q1")
 
@@ -497,23 +497,23 @@ def test_a_move_names_the_project_by_its_stored_key(rounds):
 @pytest.mark.parametrize("record", [None, "comms:20"])
 def test_a_ruled_or_withdrawn_question_is_not_moved(rounds, item, said, state_, record):
     ask(A)
-    ruling.rule(A, item=item, text=said, record="comms:12", actor="planner")
+    ruling.rule(A, item=item, text=said, record="comms:12", by="planner")
     before = logs(rounds)
 
     with pytest.raises(Refused, match=f"Q1 is {state_}, and only a question that is "
                                       "open or parked is moved"):
-        moving.move("proj-a", f"{A}:Q1", record=record, actor="planner")
+        moving.move("proj-a", f"{A}:Q1", record=record, by="planner")
 
     assert logs(rounds) == before
 
 
 def test_a_question_is_moved_once(rounds):
     ask(A)
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
     before = logs(rounds)
 
     with pytest.raises(Refused, match="Q1 was moved already and is now P1"):
-        moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+        moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     assert logs(rounds) == before
 
@@ -522,7 +522,7 @@ def test_a_question_the_round_does_not_have_is_not_moved(rounds):
     before = logs(rounds)
 
     with pytest.raises(Refused, match="proj-a/a-round has no question Q4"):
-        moving.move("proj-a", f"{A}:Q4", record="comms:20", actor="planner")
+        moving.move("proj-a", f"{A}:Q4", record="comms:20", by="planner")
 
     assert logs(rounds) == before
 
@@ -532,11 +532,11 @@ def test_a_round_that_was_never_opened_has_no_question_to_move_or_to_adopt(round
     before = logs(rounds)
 
     with pytest.raises(NoRound):
-        moving.move("proj-a", "proj-a/c-round:Q1", record="comms:20", actor="planner")
+        moving.move("proj-a", "proj-a/c-round:Q1", record="comms:20", by="planner")
     with pytest.raises(NoRound):
-        moving.adopt("proj-a/c-round", "P1", actor="curator")
+        moving.adopt("proj-a/c-round", "P1", by="curator")
     with pytest.raises(BadName):
-        moving.move("proj-a", "proj-a/C_Round:Q1", record="comms:20", actor="planner")
+        moving.move("proj-a", "proj-a/C_Round:Q1", record="comms:20", by="planner")
 
     assert logs(rounds) == before
 
@@ -548,7 +548,7 @@ def test_a_question_moves_to_the_list_of_its_own_project_only(rounds, add_projec
     before = logs(rounds)
 
     with pytest.raises(BadArgument, match="is not a round of proj-b"):
-        moving.move("proj-b", f"{A}:Q1", record="comms:20", actor="planner")
+        moving.move("proj-b", f"{A}:Q1", record="comms:20", by="planner")
 
     assert logs(rounds) == before
 
@@ -559,7 +559,7 @@ def test_a_pointer_of_no_known_shape_is_refused_at_a_move(rounds, record):
     before = logs(rounds)
 
     with pytest.raises(Refused):
-        moving.move("proj-a", f"{A}:Q1", record=record, actor="planner")
+        moving.move("proj-a", f"{A}:Q1", record=record, by="planner")
 
     assert logs(rounds) == before
 
@@ -573,7 +573,7 @@ def test_a_parked_question_whose_stages_are_all_finished_is_moved_by_anyone(roun
     finish(rounds, "B2")
     before = count(round_log(rounds))
 
-    moved = moving.move("proj-a", f"{A}:Q1", actor="planner")
+    moved = moving.move("proj-a", f"{A}:Q1", by="planner")
 
     assert (moved.id, moved.ruling, moved.question.state) == ("P1", None, "parked")
     [left] = added(round_log(rounds), before)
@@ -587,12 +587,12 @@ def test_a_stage_that_left_the_plan_counts_as_one_that_is_done(rounds):
     park(A, "Q1")
     finish(rounds, "B1")
     log.append(round_log(rounds), "stage.changed", {"id": "B2", "removed": True},
-               actor="planner")
+               by="planner")
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C9", "record": "comms:13", "kind": "process",
-                "rules": "unstage:B3"}, actor="planner")
+                "rules": "unstage:B3"}, by="planner")
 
-    assert moving.move("proj-a", f"{A}:Q1", actor="planner").id == "P1"
+    assert moving.move("proj-a", f"{A}:Q1", by="planner").id == "P1"
 
 
 def lead_moves(rounds, capsys):
@@ -695,30 +695,30 @@ def test_a_question_parked_until_a_stage_that_is_finished_reads_open_and_is_his_
 
 def test_a_moved_question_takes_no_ruling_no_mark_and_no_options_where_it_was(rounds):
     ask(A, "B1")
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
     before = logs(rounds)
 
     for item, said in (("Q1", "Prose only."), ("park:Q1", None), ("narrow:Q1=none", None),
                        ("withdraw:Q1", None)):
         with pytest.raises(Refused, match="Q1 was moved out of proj-a/a-round and is "
                                           "now P1"):
-            ruling.rule(A, item=item, text=said, record="comms:12", actor="planner")
+            ruling.rule(A, item=item, text=said, record="comms:12", by="planner")
     with pytest.raises(Refused, match="Q1 is moved and holds nothing up"):
-        marking.widen(A, "Q1", "all", actor="coder")
+        marking.widen(A, "Q1", "all", by="coder")
     with pytest.raises(Refused, match="Q1 is moved, and only a parked question"):
-        marking.reopen(A, "Q1", actor="coder")
+        marking.reopen(A, "Q1", by="coder")
     with pytest.raises(Refused, match="Q1 is moved; options are added"):
-        options.fill(A, "Q1", actor="helper", options=["a=one", "b=two"])
+        options.fill(A, "Q1", by="helper", options=["a=one", "b=two"])
 
     assert logs(rounds) == before
 
 
 def test_a_moved_question_is_ruled_where_it_is_now(rounds):
     ask(A)
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     ruled = ruling.rule("proj-a", item="P1", text="Prose only.", record="comms:22",
-                        actor="planner")
+                        by="planner")
 
     assert ruled.id == "S1"
     assert question(project_log(rounds), "P1").state == "ruled"
@@ -731,12 +731,12 @@ def test_a_moved_question_waits_on_him_in_the_log_it_is_in_now(rounds):
     ask(A)
     assert waiting("a-round") == ["Q1"]
 
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     assert waiting("a-round") == []
     assert waiting() == ["P1"]
 
-    moving.adopt(B, "P1", actor="curator")
+    moving.adopt(B, "P1", by="curator")
 
     assert waiting() == []
     assert waiting("b-round") == ["Q1"]
@@ -773,7 +773,7 @@ def test_a_move_stopped_between_the_two_logs_is_finished_by_running_it_again(
     before = count(round_log(rounds)), count(project_log(rounds))
 
     def call():
-        return moving.move("proj-a", f"{A}:Q1", record=record, actor="planner")
+        return moving.move("proj-a", f"{A}:Q1", record=record, by="planner")
 
     first = stopped_after_one_append(monkeypatch, call)
 
@@ -804,7 +804,7 @@ def test_an_adoption_stopped_between_the_two_logs_is_finished_by_running_it_agai
     before = count(round_log(rounds, "b-round")), count(project_log(rounds))
 
     def call():
-        return moving.adopt(B, "P1", blocks=blocks, record=record, actor="curator")
+        return moving.adopt(B, "P1", blocks=blocks, record=record, by="curator")
 
     first = stopped_after_one_append(monkeypatch, call)
 
@@ -828,16 +828,16 @@ def test_an_adoption_that_was_stopped_is_not_finished_with_another_list(
         rounds, monkeypatch):
     ask("proj-a")
     stopped_after_one_append(
-        monkeypatch, lambda: moving.adopt(A, "P1", blocks="B2", actor="curator"))
+        monkeypatch, lambda: moving.adopt(A, "P1", blocks="B2", by="curator"))
     before = logs(rounds)
 
     with pytest.raises(Refused) as refused:
-        moving.adopt(A, "P1", actor="curator")
+        moving.adopt(A, "P1", by="curator")
 
     assert "P1 is already in proj-a/a-round as Q1, holding up B2" in str(refused.value)
     assert f"run: moxi rounds ask {A} --adopt P1 --blocks B2" in str(refused.value)
     assert logs(rounds) == before
-    assert moving.adopt(A, "P1", blocks="B2", actor="curator").finished
+    assert moving.adopt(A, "P1", blocks="B2", by="curator").finished
 
 
 def test_a_narrowed_adoption_that_was_stopped_is_not_finished_without_his_pointer(
@@ -845,11 +845,11 @@ def test_a_narrowed_adoption_that_was_stopped_is_not_finished_without_his_pointe
     from_a_round(rounds)
     stopped_after_one_append(
         monkeypatch,
-        lambda: moving.adopt(B, "P1", blocks="B2", record="comms:21", actor="curator"))
+        lambda: moving.adopt(B, "P1", blocks="B2", record="comms:21", by="curator"))
     before = logs(rounds)
 
     with pytest.raises(Refused, match="which only the operator does"):
-        moving.adopt(B, "P1", blocks="B2", actor="curator")
+        moving.adopt(B, "P1", blocks="B2", by="curator")
 
     assert logs(rounds) == before
 
@@ -857,7 +857,7 @@ def test_a_narrowed_adoption_that_was_stopped_is_not_finished_without_his_pointe
 def test_a_move_that_was_not_stopped_is_two_events_one_in_each_log(rounds):
     ask(A)
 
-    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moved = moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     assert not moved.finished
     assert [event["type"] for event in moved.events] == ["question.asked",
@@ -876,8 +876,8 @@ def test_a_move_and_an_adoption_wait_for_both_locks(rounds, holder, which):
     busy = holder(path)
 
     for call in (lambda: moving.move("proj-a", f"{A}:Q1", record="comms:20",
-                                     actor="planner", wait_s=0.2),
-                 lambda: moving.adopt(A, "P1", actor="curator", wait_s=0.2)):
+                                     by="planner", wait_s=0.2),
+                 lambda: moving.adopt(A, "P1", by="curator", wait_s=0.2)):
         with pytest.raises(Locked) as stopped:
             call()
         assert (stopped.value.file, stopped.value.holder) == (path, busy.pid)
@@ -897,8 +897,8 @@ def test_the_open_and_parked_questions_of_a_round_are_made_ready_for_the_list(ro
     ask(A, "none")
     ask(A)
     park(A, "Q2", until=f"round:{B}")
-    ruling.rule(A, item="withdraw:Q3", record="comms:12", actor="planner")
-    moving.move("proj-a", f"{A}:Q4", record="comms:20", actor="planner")
+    ruling.rule(A, item="withdraw:Q3", record="comms:12", by="planner")
+    moving.move("proj-a", f"{A}:Q4", record="comms:20", by="planner")
 
     found = moving.arrivals(held(round_log(rounds)), held(project_log(rounds)), A)
 
@@ -919,7 +919,7 @@ def test_a_question_the_list_already_holds_is_not_made_ready_again(rounds, monke
     ask(A)
     stopped_after_one_append(
         monkeypatch,
-        lambda: moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner"))
+        lambda: moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner"))
 
     found = moving.arrivals(held(round_log(rounds)), held(project_log(rounds)), A)
 

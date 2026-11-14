@@ -1,6 +1,6 @@
 """Dropping a round: ending it short of its work.
 
-`drop("<project>/<slug>", by=..., record=..., actor=...)` withdraws a round. From then
+`drop("<project>/<slug>", by=..., record=..., run_by=...)` withdraws a round. From then
 on the round is dropped, which is not closed: it stays on record as it was, takes no
 new work, and a correction of one of its rulings is still recorded.
 
@@ -85,7 +85,7 @@ class Left:
     state: str
 
 
-def drop(name: str, *, by: str, record: str | None, actor: str,
+def drop(name: str, *, by: str, record: str | None, run_by: str,
          withdraw_questions: bool = False, settings=None,
          wait_s: float = write.WAIT_S, at: str | None = None) -> Dropped:
     """Drop the round `name`, `<project>/<slug>`, and return it as dropped.
@@ -93,7 +93,7 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
     - `by`: `OPERATOR` or `LEAD`.
     - `record`: the operator's pointer to where he dropped it; for the lead's drop, a
       pointer to why.
-    - `actor`: who runs it, the events' actor.
+    - `run_by`: who runs it, the events' actor.
     - `withdraw_questions`: withdraw the round's open and parked questions, where they
       would go to the project's list. The operator's alone.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
@@ -190,7 +190,7 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=run_by,
             gates=[has_not_ended, has_a_pointer, is_the_leads_to_drop,
                    withdrawing_is_his, finishes_as_it_began],
             event=dropped, with_project=True, wait_s=wait_s, at=at)
@@ -288,7 +288,7 @@ def left_behind(project_state: states.State, home: folders.Home, *,
     def was_dropped(slug: str) -> bool:
         if slug not in dropped:
             try:
-                found = index.read(home.project, home.folder, slug, env=env)
+                found = index.read(home.project, home.rounds_dir, slug, env=env)
             except NoLog:
                 found = None
             dropped[slug] = found is not None and found.status == states.DROPPED

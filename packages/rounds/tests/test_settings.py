@@ -120,7 +120,7 @@ def test_moxi_config_prints_one_line_per_key(config_file):
         assert line in text.splitlines(), line
 
 
-def test_no_key_has_an_environment_override_and_each_is_read_at_its_use():
+def test_no_key_has_an_env_override_and_each_is_read_at_its_use():
     for key in settings.schema().live():
         assert key.env is None and key.read == "use", key.name
 

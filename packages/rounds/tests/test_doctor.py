@@ -27,9 +27,9 @@ def rounds(tmp_path, add_project, capsys):
     asked. Returns its rounds folder."""
     add_project("proj-a", notes_root=tmp_path / "notes-a")
     for name in (A, B):
-        opening.open_round(name, description="a placeholder round", actor="planner",
+        opening.open_round(name, description="a placeholder round", by="planner",
                            flow="fix", at=T1)
-    asking.ask(A, SAID, actor="scout", origin="comms:11", at=T2)
+    asking.ask(A, SAID, by="scout", origin="comms:11", at=T2)
     capsys.readouterr()
     return tmp_path / "notes-a" / "rounds"
 
@@ -40,14 +40,14 @@ def git_says(tmp_path, monkeypatch):
     exits `code`. `git_says(None)`: no git is on PATH."""
 
     def stand_in(line: str | None, code: int = 0) -> None:
-        folder = tmp_path / "bin"
-        folder.mkdir(exist_ok=True)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir(exist_ok=True)
         if line is not None:
-            script = folder / "git"
+            script = bin_dir / "git"
             script.write_text(f"#!/bin/sh\necho '{line}'\nexit {code}\n",
                               encoding="utf-8")
             script.chmod(script.stat().st_mode | stat.S_IXUSR)
-        monkeypatch.setenv("PATH", str(folder))
+        monkeypatch.setenv("PATH", str(bin_dir))
 
     return stand_in
 
@@ -65,20 +65,20 @@ def everything(tmp_path):
     """Every file the test's rounds, projects and settings are kept in, with its bytes
     and the time it was last written."""
     return {str(path): (path.read_bytes(), path.stat().st_mtime_ns)
-            for folder in {tmp_path, Path.home(), paths.data_dir(), paths.state_dir()}
-            for path in sorted(folder.rglob("*")) if path.is_file()}
+            for root_dir in {tmp_path, Path.home(), paths.data_dir(), paths.state_dir()}
+            for path in sorted(root_dir.rglob("*")) if path.is_file()}
 
 
 def elsewhere(rounds, slug="a-round"):
     """A line another machine's verb appended, which the index here has not seen."""
     log.append(log.round_log(rounds / slug), "question.asked",
                {"id": "Q9", "text": SAID, "from": "comms:13", "blocks": "all",
-                "state": "open", "asked_by": "helper", "asked_at": T2}, actor="helper")
+                "state": "open", "asked_by": "helper", "asked_at": T2}, by="helper")
 
 
 def spoil(path):
-    with path.open("ab") as file:
-        file.write(b"not an event\n")
+    with path.open("ab") as fh:
+        fh.write(b"not an event\n")
 
 
 # -- the announcement ----------------------------------------------------------------------
@@ -176,7 +176,7 @@ def test_the_floor_is_the_git_that_first_removes_a_worktree():
 
 # -- the rounds folders ------------------------------------------------------------------------
 
-def test_a_project_whose_rounds_folder_cant_be_worked_out_is_named_with_the_fix(
+def test_a_project_whose_rounds_dir_cant_be_worked_out_is_named_with_the_fix(
         rounds, add_project, without_notes):
     add_project("proj-b")
 
@@ -191,7 +191,7 @@ def test_a_project_whose_rounds_folder_cant_be_worked_out_is_named_with_the_fix(
     assert found["logs"].state == "ok" and found["index"].state == "ok"
 
 
-def test_a_folder_given_by_the_setting_is_fine(rounds, add_project, without_notes,
+def test_a_dir_given_by_the_setting_is_fine(rounds, add_project, without_notes,
                                                write_config, tmp_path):
     add_project("proj-b")
     write_config(f"""
@@ -236,15 +236,15 @@ def test_a_round_log_that_does_not_parse_is_named_with_its_file_and_line(rounds)
 
 def test_a_log_whose_numbers_skip_one_is_named(rounds):
     path = log.round_log(rounds / "b-round")
-    with path.open("ab") as file:
-        file.write(path.read_bytes().splitlines(keepends=True)[0])
+    with path.open("ab") as fh:
+        fh.write(path.read_bytes().splitlines(keepends=True)[0])
 
     row = by_name()[f"log {B}"]
     assert row.state == "fail" and row.detail.startswith(f"{path} line 2 ")
 
 
 def test_a_projects_own_log_that_does_not_parse_is_named(rounds):
-    asking.ask("proj-a", SAID, actor="scout", origin="comms:11", at=T2)
+    asking.ask("proj-a", SAID, by="scout", origin="comms:11", at=T2)
     path = log.project_log(rounds)
     spoil(path)
 
@@ -309,7 +309,7 @@ def test_every_log_the_index_differs_on_is_named(rounds, capsys):
     (rounds / "c-round").mkdir()
     log.append(log.round_log(rounds / "c-round"), "round.opened",
                {"description": "a placeholder round", "flow": "fix", "steps": []},
-               actor="planner")
+               by="planner")
 
     row = by_name()["index"]
     assert row.state == "warn"

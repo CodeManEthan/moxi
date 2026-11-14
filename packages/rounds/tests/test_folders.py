@@ -41,16 +41,16 @@ def notes_gives(monkeypatch):
     return stand_in
 
 
-def open_round(folder: Path, slug: str) -> None:
-    (folder / slug).mkdir(parents=True)
-    log.append(log.round_log(folder / slug), "round.opened",
+def open_round(round_dir: Path, slug: str) -> None:
+    (round_dir / slug).mkdir(parents=True)
+    log.append(log.round_log(round_dir / slug), "round.opened",
                {"description": "a placeholder round", "flow": "fix", "steps": []},
-               actor="planner")
+               by="planner")
 
 
 # -- the rounds folder -------------------------------------------------------------------
 
-def test_a_relative_dir_is_placed_in_the_notes_folder_the_projects_record_names(
+def test_a_relative_dir_is_placed_in_the_notes_dir_the_projects_record_names(
         add_project, without_notes, tmp_path):
     add_project("proj-a", notes_root=tmp_path / "notes" / "proj-a")
     assert folders.home("proj-a") == folders.Home(
@@ -68,34 +68,34 @@ def test_a_projects_own_dir_is_used_in_place_of_the_default(
         dir = "plans/rounds"
     """)
     add_project("proj-b", notes_root=tmp_path / "notes" / "proj-b")
-    assert folders.home("proj-a").folder == tmp_path / "notes" / "proj-a" / "plans/rounds"
-    assert folders.home("proj-b").folder == tmp_path / "notes" / "proj-b" / "designs"
+    assert folders.home("proj-a").rounds_dir == tmp_path / "notes" / "proj-a" / "plans/rounds"
+    assert folders.home("proj-b").rounds_dir == tmp_path / "notes" / "proj-b" / "designs"
 
 
-def test_a_project_with_no_notes_folder_of_its_own_gets_the_one_notes_gives_it(
+def test_a_project_with_no_notes_dir_of_its_own_gets_the_one_notes_gives_it(
         add_project, notes_gives, tmp_path):
     root = add_project("proj-a")
     calls = notes_gives(tmp_path / "from-notes")
-    assert folders.home("proj-a").folder == tmp_path / "from-notes" / "rounds"
+    assert folders.home("proj-a").rounds_dir == tmp_path / "from-notes" / "rounds"
     assert calls == [(str(root), "project", "proj-a")]
 
 
-def test_notes_is_not_asked_when_the_projects_record_names_a_notes_folder(
+def test_notes_is_not_asked_when_the_projects_record_names_a_notes_dir(
         add_project, notes_gives, tmp_path):
     add_project("proj-a", notes_root=tmp_path / "notes" / "proj-a")
     calls = notes_gives(tmp_path / "from-notes")
-    assert folders.home("proj-a").folder == tmp_path / "notes" / "proj-a" / "rounds"
+    assert folders.home("proj-a").rounds_dir == tmp_path / "notes" / "proj-a" / "rounds"
     assert calls == []
 
 
-def test_an_absolute_dir_is_the_folder_and_needs_no_notes_folder(
+def test_an_absolute_dir_is_the_dir_and_needs_no_notes_dir(
         add_project, without_notes, write_config, tmp_path):
     add_project("proj-a")
     write_config(f"""
         [projects.proj-a]
         dir = "{tmp_path / 'elsewhere'}"
     """)
-    assert folders.home("proj-a").folder == tmp_path / "elsewhere"
+    assert folders.home("proj-a").rounds_dir == tmp_path / "elsewhere"
 
 
 def test_a_dir_under_the_users_home_is_absolute(add_project, without_notes, write_config):
@@ -104,12 +104,12 @@ def test_a_dir_under_the_users_home_is_absolute(add_project, without_notes, writ
         [projects.proj-a]
         dir = "~/kept/rounds"
     """)
-    assert folders.home("proj-a").folder == Path.home() / "kept" / "rounds"
+    assert folders.home("proj-a").rounds_dir == Path.home() / "kept" / "rounds"
 
 
-def test_resolving_a_folder_makes_nothing(add_project, without_notes, tmp_path):
+def test_resolving_a_dir_makes_nothing(add_project, without_notes, tmp_path):
     add_project("proj-a", notes_root=tmp_path / "notes" / "proj-a")
-    assert not folders.home("proj-a").folder.exists()
+    assert not folders.home("proj-a").rounds_dir.exists()
 
 
 def test_a_project_is_found_in_any_case_and_named_as_it_is_stored(
@@ -118,7 +118,7 @@ def test_a_project_is_found_in_any_case_and_named_as_it_is_stored(
     assert folders.home("PROJ-A").project == "proj-a"
 
 
-def test_a_table_named_in_another_case_than_the_stored_key_places_the_folder(
+def test_a_table_named_in_another_case_than_the_stored_key_places_the_dir(
         add_project, without_notes, write_config, tmp_path):
     add_project("proj-a")
     write_config(f"""
@@ -138,11 +138,11 @@ def test_settings_already_read_are_used_as_given(add_project, without_notes, wri
         [defaults]
         dir = "designs"
     """)
-    assert folders.home("proj-a", read).folder.name == "rounds"
-    assert folders.home("proj-a").folder.name == "designs"
+    assert folders.home("proj-a", read).rounds_dir.name == "rounds"
+    assert folders.home("proj-a").rounds_dir.name == "designs"
 
 
-def test_a_relative_dir_with_no_notes_folder_anywhere_names_the_setting_that_fixes_it(
+def test_a_relative_dir_with_no_notes_dir_anywhere_names_the_setting_that_fixes_it(
         add_project, without_notes):
     add_project("proj-a")
     with pytest.raises(NoFolder) as caught:
@@ -159,7 +159,7 @@ def test_a_relative_dir_with_no_notes_folder_anywhere_names_the_setting_that_fix
     (None, "notes gives it none"),
     (RuntimeError("no such place"), "no such place"),
 ])
-def test_a_relative_dir_is_not_resolved_when_notes_has_no_folder_for_the_project(
+def test_a_relative_dir_is_not_resolved_when_notes_has_no_dir_for_the_project(
         add_project, notes_gives, answer, said):
     add_project("proj-a")
     notes_gives(answer)
@@ -173,18 +173,18 @@ def test_a_relative_dir_is_not_resolved_when_notes_has_no_folder_for_the_project
     (None, False),
     (RuntimeError("no such place"), None),
 ])
-def test_the_config_check_asks_this_lookup_whether_a_project_has_a_notes_folder(
+def test_the_config_check_asks_this_lookup_whether_a_project_has_a_notes_dir(
         add_project, notes_gives, answer, has):
     from moxi_rounds import settings
 
     add_project("proj-a")
     notes_gives(answer)
-    assert settings.has_notes_folder("proj-a") is has
+    assert settings.has_notes_dir("proj-a") is has
     if has:
-        assert folders.notes_folder("proj-a") == Path(answer)
+        assert folders.notes_dir("proj-a") == Path(answer)
     else:
         with pytest.raises(NoFolder) as caught:
-            folders.notes_folder("proj-a")
+            folders.notes_dir("proj-a")
         assert caught.value.known is (has is False)
 
 
@@ -195,7 +195,7 @@ def test_a_project_the_projects_list_does_not_hold_is_its_own_error(without_note
     assert "moxi projects add proj-b" in caught.value.fix
 
 
-def test_every_project_is_listed_with_its_folder_and_the_unresolved_beside_them(
+def test_every_project_is_listed_with_its_dir_and_the_unresolved_beside_them(
         add_project, without_notes, tmp_path):
     add_project("proj-a", notes_root=tmp_path / "notes" / "proj-a")
     add_project("proj-b")
@@ -217,11 +217,11 @@ def linked(add_project, without_notes, tmp_path):
 
 
 @pytest.mark.parametrize("asked, other", [("proj-a", "proj-b"), ("proj-b", "proj-a")])
-def test_a_folder_two_projects_reach_is_refused_for_each_of_them(linked, asked, other):
+def test_a_dir_two_projects_reach_is_refused_for_each_of_them(linked, asked, other):
     with pytest.raises(SharedFolder) as caught:
         folders.home(asked)
     error = caught.value
-    assert (error.project, error.other, error.folder) == (asked, other, linked)
+    assert (error.project, error.other, error.shared_dir) == (asked, other, linked)
     assert error.exit_code == exits.REFUSED
     assert f"{asked!r}" in error.reason and f"{other!r}" in error.reason
     assert str(linked) in error.reason
@@ -229,7 +229,7 @@ def test_a_folder_two_projects_reach_is_refused_for_each_of_them(linked, asked, 
     assert f"[projects.{other}]" in error.fix
 
 
-def test_two_projects_that_reach_one_folder_are_both_listed_as_unresolved(
+def test_two_projects_that_reach_one_dir_are_both_listed_as_unresolved(
         linked, add_project, tmp_path):
     add_project("proj-c", notes_root=tmp_path / "notes" / "proj-c")
     found, failed = folders.homes()
@@ -238,7 +238,7 @@ def test_two_projects_that_reach_one_folder_are_both_listed_as_unresolved(
         (SharedFolder, "proj-a", "proj-b"), (SharedFolder, "proj-b", "proj-a")]
 
 
-def test_a_verb_writes_nothing_into_a_folder_two_projects_reach(linked, capsys):
+def test_a_verb_writes_nothing_into_a_dir_two_projects_reach(linked, capsys):
     from moxi_rounds.cli import main
 
     assert main(["open", "proj-b/a-round", "--description", "a placeholder round"]) == 3
@@ -247,50 +247,50 @@ def test_a_verb_writes_nothing_into_a_folder_two_projects_reach(linked, capsys):
     assert not linked.exists()
 
 
-def test_a_folder_of_its_own_ends_the_refusal(linked, write_config, tmp_path):
+def test_a_dir_of_its_own_ends_the_refusal(linked, write_config, tmp_path):
     write_config(f"""
         [projects.proj-b]
         dir = "{tmp_path / 'own'}"
     """)
-    assert folders.home("proj-a").folder == linked
-    assert folders.home("proj-b").folder == tmp_path / "own"
+    assert folders.home("proj-a").rounds_dir == linked
+    assert folders.home("proj-b").rounds_dir == tmp_path / "own"
 
 
-def test_a_project_with_no_folder_shares_none(add_project, without_notes, tmp_path):
+def test_a_project_with_no_dir_shares_none(add_project, without_notes, tmp_path):
     add_project("proj-a", notes_root=tmp_path / "notes" / "proj-a")
     add_project("proj-b")
-    assert folders.home("proj-a").folder == tmp_path / "notes" / "proj-a" / "rounds"
+    assert folders.home("proj-a").rounds_dir == tmp_path / "notes" / "proj-a" / "rounds"
 
 
 # -- the rounds in it --------------------------------------------------------------------
 
-def test_the_rounds_of_a_folder_are_its_folders_that_hold_a_log(tmp_path):
-    folder = tmp_path / "rounds"
-    open_round(folder, "second-round")
-    open_round(folder, "a-round")
-    open_round(folder, "round-3")
-    (folder / "no-log-here").mkdir()
-    (folder / "only-a-note").mkdir()
-    (folder / "only-a-note" / "round-note.md").write_text("generated\n")
-    (folder / "project.jsonl").write_text("")
-    (folder / "rulings.md").write_text("generated\n")
-    assert folders.slugs(folder) == ["a-round", "round-3", "second-round"]
+def test_the_rounds_of_a_dir_are_its_dirs_that_hold_a_log(tmp_path):
+    rounds_dir = tmp_path / "rounds"
+    open_round(rounds_dir, "second-round")
+    open_round(rounds_dir, "a-round")
+    open_round(rounds_dir, "round-3")
+    (rounds_dir / "no-log-here").mkdir()
+    (rounds_dir / "only-a-note").mkdir()
+    (rounds_dir / "only-a-note" / "round-note.md").write_text("generated\n")
+    (rounds_dir / "project.jsonl").write_text("")
+    (rounds_dir / "rulings.md").write_text("generated\n")
+    assert folders.slugs(rounds_dir) == ["a-round", "round-3", "second-round"]
 
 
-def test_a_folder_whose_log_is_a_folder_is_no_round(tmp_path):
-    folder = tmp_path / "rounds"
-    (folder / "a-round" / "round.jsonl").mkdir(parents=True)
-    assert folders.slugs(folder) == []
+def test_a_dir_whose_log_is_a_dir_is_no_round(tmp_path):
+    rounds_dir = tmp_path / "rounds"
+    (rounds_dir / "a-round" / "round.jsonl").mkdir(parents=True)
+    assert folders.slugs(rounds_dir) == []
 
 
-def test_a_folder_whose_name_is_no_slug_is_no_round(tmp_path):
-    folder = tmp_path / "rounds"
+def test_a_dir_whose_name_is_no_slug_is_no_round(tmp_path):
+    rounds_dir = tmp_path / "rounds"
     for name in ("Upper", "under_score", "dot.ted", "a-round"):
-        open_round(folder, name)
-    assert folders.slugs(folder) == ["a-round"]
+        open_round(rounds_dir, name)
+    assert folders.slugs(rounds_dir) == ["a-round"]
 
 
-def test_a_rounds_folder_that_is_not_there_holds_no_round(tmp_path):
+def test_a_rounds_dir_that_is_not_there_holds_no_round(tmp_path):
     assert folders.slugs(tmp_path / "rounds") == []
     (tmp_path / "a-file").write_text("")
     assert folders.slugs(tmp_path / "a-file") == []
@@ -307,7 +307,7 @@ def test_rounds_are_named_by_project_and_slug(tmp_path):
 
 def test_a_rounds_name_splits_into_its_project_and_slug():
     assert folders.split("proj-a/a-round-2") == ("proj-a", "a-round-2")
-    assert folders.Home("proj-a", Path("rounds")).round_folder("a-round") \
+    assert folders.Home("proj-a", Path("rounds")).round_dir("a-round") \
         == Path("rounds") / "a-round"
 
 

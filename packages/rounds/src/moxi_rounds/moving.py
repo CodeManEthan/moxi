@@ -2,9 +2,9 @@
 
 A question lives in one log. Two calls carry one to the other log of the same project:
 
-- `adopt("<project>/<slug>", "P3", actor=...)` brings a question of the project's list
+- `adopt("<project>/<slug>", "P3", by=...)` brings a question of the project's list
   into the round, as a new `Q<n>`.
-- `move("<project>", "<project>/<slug>:Q2", actor=...)` puts a round's question on the
+- `move("<project>", "<project>/<slug>:Q2", by=...)` puts a round's question on the
   project's list, as a new `P<n>`.
 
 **What is carried.** The sentence, where it came from, who asked it and when, the
@@ -85,13 +85,13 @@ class Arrival:
     entry: write.Entry | None
 
 
-def adopt(target: str, question_id: str, *, actor: str, blocks: str | None = None,
+def adopt(target: str, question_id: str, *, by: str, blocks: str | None = None,
           record: str | None = None, settings=None, wait_s: float = write.WAIT_S,
           at: str | None = None) -> Moved:
     """Bring the question `question_id` of the project's list into the round `target`,
     `<project>/<slug>`, and return it as the round has it.
 
-    - `actor`: who does it, the events' actor. The question keeps its own asker.
+    - `by`: who does it, the events' actor. The question keeps its own asker.
     - `blocks`: the stages it holds up in the round, `B2,B3` or `all`; every stage when
       left out.
     - `record`: the operator's pointer for the list, which a list needs when the
@@ -174,7 +174,7 @@ def adopt(target: str, question_id: str, *, actor: str, blocks: str | None = Non
             f"{again} --blocks {had}")
 
     return _carry(
-        home, slug, question_id, into_round=True, record=record, actor=actor,
+        home, slug, question_id, into_round=True, record=record, by=by,
         gates=[ending.takes_new_work(name, "a question"), exists,
                _still_asked(found, question_id, listing),
                names_stages_of_the_round, a_list_that_narrows_is_his,
@@ -182,12 +182,12 @@ def adopt(target: str, question_id: str, *, actor: str, blocks: str | None = Non
         blocks=wanted, settings=settings, wait_s=wait_s, at=at)
 
 
-def move(target: str, source: str, *, actor: str, record: str | None = None,
+def move(target: str, source: str, *, by: str, record: str | None = None,
          settings=None, wait_s: float = write.WAIT_S, at: str | None = None) -> Moved:
     """Put the question `source`, `<project>/<slug>:Q<n>`, on the list of the project
     `target`, which is the round's own, and return it as the list has it.
 
-    - `actor`: who does it, the events' actor. The question keeps its own asker.
+    - `by`: who does it, the events' actor. The question keeps its own asker.
     - `record`: the operator's pointer. Without one the move is accepted only when it
       ends nothing the question holds up, now or later: the question is parked, it
       holds up a list of stages, and each of them is finished or out of the plan.
@@ -250,7 +250,7 @@ def move(target: str, source: str, *, actor: str, record: str | None = None,
             f"token: {pointers.SHAPES}", again)
 
     return _carry(
-        home, slug, question_id, into_round=False, record=record, actor=actor,
+        home, slug, question_id, into_round=False, record=record, by=by,
         gates=[ending.takes_new_work(name, "a move of one of its questions"), exists,
                _still_asked(found, question_id, show), is_his_or_ends_nothing],
         blocks=questions.NONE, settings=settings, wait_s=wait_s, at=at)
@@ -367,7 +367,7 @@ def _arrival(question: state.Question, held: state.State, *, new_id: str, source
 
 
 def _carry(home: folders.Home, slug: str, question_id: str, *, into_round: bool,
-           record: str | None, actor: str, gates, blocks: questions.Blocks, settings,
+           record: str | None, by: str, gates, blocks: questions.Blocks, settings,
            wait_s: float, at: str | None) -> Moved:
     """Write a move: the arrival in one log, unless it is there, then the leaving in
     the other."""
@@ -412,8 +412,8 @@ def _carry(home: folders.Home, slug: str, question_id: str, *, into_round: bool,
         return entries
 
     try:
-        written = write.record(write.Where(home.project, home.folder, slug),
-                               actor=actor, gates=gates, event=moved, with_project=True,
+        written = write.record(write.Where(home.project, home.rounds_dir, slug),
+                               by=by, gates=gates, event=moved, with_project=True,
                                wait_s=wait_s, at=at)
     except NoLog:
         # Only a round's log can be missing here: a project's reads as empty.
