@@ -584,9 +584,9 @@ class Table:
         self._entries.update(new)
 
     def add(self, method: str, raw_path: str, kind: str = "builtin", *,
-            stream: bool = False) -> Entry:
+            streaming: bool = False) -> Entry:
         """Add one literal entry and return it."""
-        entry = Entry(method, raw_path, kind, stream)
+        entry = Entry(method, raw_path, kind, streaming)
         self._put([entry])
         return entry
 

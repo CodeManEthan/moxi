@@ -158,12 +158,12 @@ def walk(view=None, run: Run | None = None) -> Found:
     view = _view.default_view() if view is None else view
     run = Run.here() if run is None else run
     windows = bool(getattr(view, "windows", False))
-    return _Walk(view, run, windows=windows).go()
+    return _Walk(view, run, is_windows=windows).go()
 
 
 class _Walk:
-    def __init__(self, view, run: Run, *, windows: bool):
-        self.view, self.run, self.windows = view, run, windows
+    def __init__(self, view, run: Run, *, is_windows: bool):
+        self.view, self.run, self.windows = view, run, is_windows
         self.seen: set[int] = set()
 
     def go(self) -> Found:

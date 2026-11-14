@@ -36,7 +36,7 @@ CALLER = {
 def test_the_scrub_takes_claude_names_the_agent_marker_and_each_session_stamp():
     session_env = frozenset({"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",
                              "MOXI_COMMS_", "MOXI_TURNS_COMMANDS"})
-    assert common.scrub(CALLER, session_env, windows=False) == {
+    assert common.scrub(CALLER, session_env, is_windows=False) == {
         "PATH": "/usr/bin", "HOME": "/users/u", "LANG": "C.UTF-8",
         "MOXI_LAUNCHER_STATE_HOME": "/state", "MOXI_LAUNCHER_CONFIG_HOME": "/config",
         "MOXI_COMMSX": "kept", "MOXI_HOME": "/moxi"}
@@ -49,7 +49,7 @@ def test_the_launchers_own_stamps_are_named_exactly_so_its_configuration_stays()
                                      "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY",
                                      "MOXI_USAGE_CROSSING_AT", "MOXI_USAGE_WARN_AT"}
     assert not any(name.endswith("_") for name in found.session_env)
-    kept = common.scrub(CALLER, modules.session_env(), windows=False)
+    kept = common.scrub(CALLER, modules.session_env(), is_windows=False)
     assert "MOXI_LAUNCHER_REQUEST" not in kept and "MOXI_LAUNCHER_RELAUNCH" not in kept
     assert kept["MOXI_LAUNCHER_STATE_HOME"] == "/state"
     assert kept["MOXI_LAUNCHER_CONFIG_HOME"] == "/config"
@@ -58,7 +58,7 @@ def test_the_launchers_own_stamps_are_named_exactly_so_its_configuration_stays()
 def test_the_scrub_scrubs_the_whole_installed_set(monkeypatch):
     monkeypatch.setattr(modules, "session_env",
                         lambda: frozenset({"MOXI_LAUNCHER_REQUEST", "MOXI_COMMS_"}))
-    got = common.scrub(CALLER, modules.session_env(), windows=False)
+    got = common.scrub(CALLER, modules.session_env(), is_windows=False)
     assert "MOXI_COMMS_NAME" not in got and "MOXI_COMMS_SCOPE" not in got
 
 
@@ -73,7 +73,7 @@ def test_the_scrub_keeps_the_users_claude_configuration_and_sign_in():
               "CLAUDE_PID": "4242", "CLAUDE_CODE_SOMETHING_NEW": "x",
               # A posture with no row of its own is never carried in.
               "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS": "1"}
-    got = common.scrub(caller, frozenset(), windows=False)
+    got = common.scrub(caller, frozenset(), is_windows=False)
     assert {name for name in got if name.startswith("CLAUDE")} == {
         "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
         "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"}
@@ -90,7 +90,7 @@ def test_a_composed_claude_launch_runs_on_the_users_configuration_dir():
     caller = {**CALLER, "CLAUDE_CONFIG_DIR": "/home/u/.claude-work",
               "CLAUDE_CODE_OAUTH_TOKEN": "t"}
     composition = compose.compose({"harness": "claude", "cwd": "/work"}, ctx())
-    env = common.child_env(caller, composition, modules.session_env(), windows=False)
+    env = common.child_env(caller, composition, modules.session_env(), is_windows=False)
     assert env["CLAUDE_CONFIG_DIR"] == "/home/u/.claude-work"
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "t"
     # The sign-in reaches the child only: the launch records its stamps alone.
@@ -100,7 +100,7 @@ def test_a_composed_claude_launch_runs_on_the_users_configuration_dir():
 def test_on_windows_names_compare_without_case():
     got = common.scrub({"Claude_X": "1", "ai_agent": "x", "Path": "p",
                         "moxi_launcher_request": "r", "Claude_Config_Dir": "c"},
-                       frozenset({"MOXI_LAUNCHER_REQUEST"}), windows=True)
+                       frozenset({"MOXI_LAUNCHER_REQUEST"}), is_windows=True)
     assert got == {"Path": "p", "Claude_Config_Dir": "c"}
 
 
@@ -157,7 +157,7 @@ def test_the_additions_env_goes_in_only_for_claude_without_comms():
 def test_the_childs_env_is_the_scrubbed_caller_with_the_stamps():
     composition = compose.compose({"harness": "claude", "cwd": "/work"}, ctx())
     env = common.child_env(CALLER, composition, frozenset({"MOXI_LAUNCHER_REQUEST"}),
-                             windows=False)
+                             is_windows=False)
     assert env["MOXI_LAUNCHER_REQUEST"] == "r1" and env["PATH"] == "/usr/bin"
     assert not any(name.startswith("CLAUDE") for name in env) and "AI_AGENT" not in env
     # A launch records the stamps only, never the caller's environment.
@@ -184,7 +184,7 @@ def test_values_and_argv_past_the_cap_are_refused():
                         "instructions": "x" * store.CAP}, ctx())
     assert refused.value.field == "values_json"
     with pytest.raises(store.TooLarge) as refused:
-        common.check_sizes(["claude", "y" * store.CAP], values={}, windows=False)
+        common.check_sizes(["claude", "y" * store.CAP], values={}, is_windows=False)
     assert refused.value.field == "argv_json" and refused.value.largest is None
 
 
@@ -195,7 +195,7 @@ def test_a_brief_under_its_cap_that_fills_values_json_is_named_in_the_refusal():
     with pytest.raises(store.TooLarge) as refused:
         common.check_sizes(["claude"], values={"harness": "claude", "brief": brief,
                                                "instructions": "i" * 200},
-                           brief=brief, windows=False)
+                           brief=brief, is_windows=False)
     assert refused.value.field == "values_json"
     assert refused.value.largest == ("brief", len(brief) + 2)
     assert f"the largest part brief ({len(brief) + 2} bytes)" in str(refused.value)
@@ -203,10 +203,10 @@ def test_a_brief_under_its_cap_that_fills_values_json_is_named_in_the_refusal():
 
 def test_one_word_past_the_system_limit_is_refused():
     common.check_sizes(["claude"], values={}, env={"X": "a" * (common.WORD - 3)},
-                       windows=False)
+                       is_windows=False)
     with pytest.raises(common.TooLong, match="variable X"):
         common.check_sizes(["claude"], values={}, env={"X": "a" * (common.WORD - 2)},
-                           windows=False)
+                           is_windows=False)
 
 
 def test_on_windows_the_whole_line_is_limited():

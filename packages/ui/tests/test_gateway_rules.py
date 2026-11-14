@@ -326,21 +326,21 @@ def test_a_none_between_a_remove_and_an_add_changes_nothing_by_itself():
 
 def test_the_mount_and_its_reasons_in_order():
     sock = address()
-    assert decide(on=True, kind="unix", endpoint=SOCK, address=sock, refused=False) == Mount(
+    assert decide(enabled=True, kind="unix", endpoint=SOCK, address=sock, refused=False) == Mount(
         mounted=True, reason=None)
-    assert decide(on=False, kind="unix", endpoint=SOCK, address=sock, refused=False).reason == "off"
-    assert decide(on=True, kind="unix", endpoint=SOCK, address=sock, refused=True).reason == "record"
+    assert decide(enabled=False, kind="unix", endpoint=SOCK, address=sock, refused=False).reason == "off"
+    assert decide(enabled=True, kind="unix", endpoint=SOCK, address=sock, refused=True).reason == "record"
     for other in (address(target="/elsewhere/gateway.sock"), address(form="http", target=8461)):
-        assert decide(on=True, kind="unix", endpoint=SOCK, address=other,
+        assert decide(enabled=True, kind="unix", endpoint=SOCK, address=other,
                       refused=False).reason == "target"
     tcp = address(form="http", target=8461)
-    assert decide(on=True, kind="tcp", endpoint=8461, address=tcp, refused=False).reason == "tcp"
-    assert decide(on=True, kind="tcp", endpoint=8461, address=address(form="http", target=8462),
+    assert decide(enabled=True, kind="tcp", endpoint=8461, address=tcp, refused=False).reason == "tcp"
+    assert decide(enabled=True, kind="tcp", endpoint=8461, address=address(form="http", target=8462),
                   refused=False).reason == "target"
     retired = address(retired=True)
-    assert decide(on=True, kind="unix", endpoint=SOCK, address=retired,
+    assert decide(enabled=True, kind="unix", endpoint=SOCK, address=retired,
                   refused=False).reason == "origin"
-    assert decide(on=True, kind="tcp", endpoint=8461,
+    assert decide(enabled=True, kind="tcp", endpoint=8461,
                   address=address(form="http", target=8461, retired=True),
                   refused=False).reason == "tcp", "tcp comes before origin"
 

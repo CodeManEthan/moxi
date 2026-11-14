@@ -139,10 +139,10 @@ class Row:
     def output(self) -> list[str]:
         return self.out.read_text().splitlines() if self.out.exists() else []
 
-    def switch(self, *, on: bool) -> None:
+    def switch(self, *, enabled: bool) -> None:
         self.config.parent.mkdir(parents=True, exist_ok=True)
         table, _, key = KEY.partition(".")
-        self.config.write_text(f"[{table}]\n{key} = {'true' if on else 'false'}\n")
+        self.config.write_text(f"[{table}]\n{key} = {'true' if enabled else 'false'}\n")
 
     def clean(self) -> None:
         for name in (self.timer, self.service):
@@ -203,7 +203,7 @@ def test_wrap_on_this_boxs_user_manager(tmp_path, monkeypatch, capsys):
             assert [r["result"] for r in row.lines()] == ["off"]
 
             # On: the script runs and one `ran` line carries its exit and seconds.
-            row.switch(on=True)
+            row.switch(enabled=True)
             assert row.start().ok
             assert row.output() == [f"first {a}" for a in odd]
             ran = row.lines()[-1]

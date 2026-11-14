@@ -137,15 +137,15 @@ def files(env=None) -> dict[str, Path]:
             if (p.is_dir() if role == "cursors" else p.exists())}
 
 
-def moved_name(p: Path) -> Path:
+def moved_path(p: Path) -> Path:
     return p.with_name(p.name + MOVED_SUFFIX)
 
 
 def leftovers(env=None) -> list[Path]:
     """The renamed 0.2 files still on disk, for the doctor."""
-    return [moved_name(p) for p in (_paths.record_db(env), _paths.directory_db(env),
+    return [moved_path(p) for p in (_paths.record_db(env), _paths.directory_db(env),
                                     _paths.bindings_db(env), _paths.cursors_dir(env))
-            if moved_name(p).exists()]
+            if moved_path(p).exists()]
 
 
 # -- what the move found ----------------------------------------------------------------
@@ -197,7 +197,7 @@ class Plan:
         out.extend(self.skipped)
         out.extend(FENCED_LINE.format(name=n) for n in self.fenced)
         if dry_run:
-            out.extend(f"would rename {p} to {moved_name(p)}"
+            out.extend(f"would rename {p} to {moved_path(p)}"
                        for p in self.files.values())
         else:
             out.extend(f"renamed {a} to {b}" for a, b in self.renamed)
@@ -708,8 +708,8 @@ def _rename(found: dict, kept: dict, target: Path) -> list[tuple[Path, Path]]:
             changed.append(f"{p} (not there when the move ran)")
         elif not _same(role, p, kept_print) or _wal_has_frames(p):
             changed.append(str(p))
-        elif moved_name(p).exists():
-            changed.append(f"{p} ({moved_name(p)} is there already)")
+        elif moved_path(p).exists():
+            changed.append(f"{p} ({moved_path(p)} is there already)")
     if changed:
         raise StoreRefused(target, (
             "was moved from comms 0.2, but comms' 0.2 files changed after they were "
@@ -720,7 +720,7 @@ def _rename(found: dict, kept: dict, target: Path) -> list[tuple[Path, Path]]:
         p = found.get(role)
         if p is None or (role == "cursors" and role not in kept):
             continue
-        dest = moved_name(p)
+        dest = moved_path(p)
         os.replace(p, dest)
         for side in ("-wal", "-shm"):
             if Path(f"{p}{side}").exists():
@@ -782,7 +782,7 @@ def dry_run(target=None, env=None, *, now: float | None = None) -> list[str]:
                 "was moved from comms 0.2, but comms' 0.2 files changed after they were "
                 "moved: " + ", ".join(changed) + "; nothing would be renamed"))
         return [f"{target} was moved from comms 0.2; the move would finish by renaming:"] \
-            + [f"would rename {p} to {moved_name(p)}" for role, p in present.items()
+            + [f"would rename {p} to {moved_path(p)}" for role, p in present.items()
                if role in kept]
     if state != _open.ABSENT:
         raise StoreRefused(target, (
@@ -883,5 +883,5 @@ def waiting_fenced(env=None) -> list[str]:
 
 __all__ = ["FROM", "MOVED_SUFFIX", "NEW_SUFFIX", "META_MIGRATED_AT", "META_MIGRATED_FILES",
            "META_MIGRATED_FENCED", "FENCED_LINE", "DaemonLive", "Plan", "files",
-           "leftovers", "moved_name", "daemon_answers", "read", "move", "finish",
+           "leftovers", "moved_path", "daemon_answers", "read", "move", "finish",
            "dry_run", "doctor_rows", "waiting_fenced"]

@@ -798,17 +798,17 @@ def test_remove_of_a_module_takes_its_plists_and_wraps_nothing(mac):
 
 # -- the acts --------------------------------------------------------------------------------------
 
-def installed(mac, *, timer=False):
+def installed(mac, *, include_timer=False):
     """The relay daemon (and a switchless snapshot timer) written and loaded."""
     daemon = mac.backend.render(spec())[0]
     groups = [daemon] + ([mac.backend.render(spec("timer", name="snap",
                                                   schedule=Schedule(every=5)))[0]]
-                         if timer else [])
+                         if include_timer else [])
     for group in groups:
         for path, text in group.files:
             path.write_text(text)
     mac.ctl.loaded[RELAY] = [321, None]
-    if timer:
+    if include_timer:
         mac.ctl.loaded["moxi.demo.snap"] = [None, 0]
     return {r.name: r for r in mac.backend.marked("demo")}
 
@@ -845,7 +845,7 @@ def test_restart_of_a_daemon_that_is_not_loaded_bootstraps_it(mac):
 
 
 def test_timer_acts_by_the_verb_table(mac):
-    ref = installed(mac, timer=True)["snap"]
+    ref = installed(mac, include_timer=True)["snap"]
     target = f"{DOMAIN}/moxi.demo.snap"
     assert act(mac, "start", ref).ok and mac.ctl.verbs() == [("kickstart", "-k", target)]
     assert act(mac, "stop", ref).ok and mac.ctl.verbs() == [("kill", "SIGTERM", target)]
@@ -1216,7 +1216,7 @@ def test_foreign_with_no_fence_reads_the_same_unit_and_makes_no_call(mac):
 def test_ids_is_the_label_whether_or_not_a_plist_is_there(mac):
     assert mac.backend.ids("demo", "relay", "daemon") == (RELAY,)
     assert mac.backend.ids("demo", "snap", "timer") == ("moxi.demo.snap",)
-    refs = installed(mac, timer=True)
+    refs = installed(mac, include_timer=True)
     assert refs["relay"].ids == mac.backend.ids("demo", "relay", "daemon")
     assert refs["snap"].ids == mac.backend.ids("demo", "snap", "timer")
     assert mac.ctl.calls == []

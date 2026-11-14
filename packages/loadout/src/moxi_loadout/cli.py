@@ -227,7 +227,7 @@ def _toggle(args, write, done: str) -> int:
         ident = parse_id(args.ident)
     except ValueError as exc:
         raise ManifestError(None, [str(exc)]) from None
-    changed = write(ident, user=args.user, project=args.project)
+    changed = write(ident, user_only=args.user, project=args.project)
     lines = [f"{done} {ident} in {s}" for s in changed] or [f"{ident}: nothing to change"]
     return _write_then_install(args, lines, (ident.kind, ident.name))
 

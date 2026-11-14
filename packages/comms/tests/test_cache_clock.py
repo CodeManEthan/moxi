@@ -259,11 +259,11 @@ class OcDb:
         return mid
 
     def request(self, sid, t, provider, model, *, steps=((0.0, 3.0),), agent="build",
-                summary=None, created=None, user=True):
+                summary=None, created=None, include_user=True):
         """A user message and its assistant reply whose first step starts at `t`, each
         step `(start offset, end offset)` from `t`. The message is created at
         `created` (default `t`)."""
-        if user:
+        if include_user:
             self.user(sid, (created or t) - 0.5, model=(provider, model))
         data = {"role": "assistant", "agent": agent, "mode": agent, "providerID": provider,
                 "modelID": model, "time": {"created": int((created or t) * 1000)},

@@ -313,7 +313,7 @@ class Contributions:
                       "`moxi projects kinds` lists the kinds; a module may contribute more")
 
     def defaults(self, fields: Mapping[str, object], *,
-                 notes: bool | None = None) -> dict[str, tuple[str, str]]:
+                 notes_installed: bool | None = None) -> dict[str, tuple[str, str]]:
         """The defaults the contributions supply for an `add` given `fields`, as
         `{field: (value, module)}`.
 
@@ -322,7 +322,7 @@ class Contributions:
         in `fields` is neither merged nor compared. A value of None is no default. A
         default may name only `root` and `notes_root`, each an absolute path, given as a
         string; it is returned normalized. A `notes_root` default is dropped unchecked
-        while notes is not installed (`notes` overrides that test). Any other name, a
+        while notes is not installed (`notes_installed` overrides that test). Any other name, a
         value that isn't a string, a relative path, or a `prepare` that raises or answers
         other than a dict or None is `Broken` naming the module. Two modules defaulting
         one field to different values is `Broken` naming both; the user settles it by
@@ -351,9 +351,9 @@ class Contributions:
                 if value is None:
                     continue
                 if name == "notes_root":
-                    if notes is None:
-                        notes = notes_present()
-                    if not notes:
+                    if notes_installed is None:
+                        notes_installed = notes_present()
+                    if not notes_installed:
                         continue
                 if not isinstance(value, str):
                     raise Broken(c.module, f"{c.module}'s prepare defaults {name} to "
@@ -435,8 +435,8 @@ def notes_present() -> bool:
     return moxi.modules.present("notes")
 
 
-def _notes_gate(*, notes: bool | None) -> None:
-    if not (notes_present() if notes is None else notes):
+def _notes_gate(*, notes_installed: bool | None) -> None:
+    if not (notes_present() if notes_installed is None else notes_installed):
         raise Refused("a notes root is stored only while notes is installed",
                       "run `moxi install notes`, or leave the notes root out")
 
@@ -483,10 +483,10 @@ class Planned:
 def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,
              lead: str | None = None, notes_root: str | None = None,
              contributions: Contributions | None = None,
-             notes: bool | None = None) -> Planned:
+             notes_installed: bool | None = None) -> Planned:
     """Check an `add` against every rule before anything is made or written.
 
-    In order: the key's rules; a typed `notes_root` only while notes is installed (`notes`
+    In order: the key's rules; a typed `notes_root` only while notes is installed (`notes_installed`
     overrides that test); while some entry won't load, a kind some module declares (else
     `Broken`, since that entry may be the kind's home); the defaults the loaded
     contributions supply for fields the user left unset, merged; a root, typed or
@@ -502,7 +502,7 @@ def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,
     key = check_key(key)
     kind = check_kind_name(kind)
     if notes_root is not None:
-        _notes_gate(notes=notes)
+        _notes_gate(notes_installed=notes_installed)
     contributions = contributions if contributions is not None else load()
     if contributions.unloadable and kind not in contributions.names():
         contributions.kind(kind, "add")
@@ -514,7 +514,7 @@ def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,
         fields["lead"] = lead
     if notes_root is not None:
         fields["notes_root"] = check_root(notes_root, "notes_root")
-    supplied = contributions.defaults(fields, notes=notes)
+    supplied = contributions.defaults(fields, notes_installed=notes_installed)
     row = {"key": key, "root": fields.get("root"), "kind": kind,
            "lead": None if lead is None else check_agent(lead, "lead"),
            "notes_root": fields.get("notes_root")}
@@ -532,7 +532,7 @@ def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,
 
 
 def plan_set(key: str, *, contributions: Contributions | None = None,
-             notes: bool | None = None, **changes) -> Declared | None:
+             notes_installed: bool | None = None, **changes) -> Declared | None:
     """Check a `set` of `changes` on project `key` before it is written; return the kind
     whose check passed, or None when none ran.
 
@@ -550,7 +550,7 @@ def plan_set(key: str, *, contributions: Contributions | None = None,
         raise Usage(f"set can't change {', '.join(sorted(unknown))}",
                     "it changes root, kind, lead and notes_root")
     if changes.get("notes_root") is not None:
-        _notes_gate(notes=notes)
+        _notes_gate(notes_installed=notes_installed)
     current = api.get(key)
     contributions = contributions if contributions is not None else load()
     row = {"key": current.key, "root": current.root, "kind": current.kind,

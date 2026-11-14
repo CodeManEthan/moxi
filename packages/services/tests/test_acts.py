@@ -28,8 +28,8 @@ def key_on(name: str) -> bool:
     return state.key_on(name)
 
 
-def put_key(name: str, *, on: bool) -> None:
-    moxi.config.set_value("services", state.key(name), on, by="test")
+def put_key(name: str, *, enabled: bool) -> None:
+    moxi.config.set_value("services", state.key(name), enabled, by="test")
 
 
 def other_system(monkeypatch, platform: str = "darwin") -> None:
@@ -77,7 +77,7 @@ def test_add_written_from_the_page_needs_an_absolute_argv0(fake):
 
 
 def test_add_written_timer_takes_its_schedule(fake):
-    out = acts.add_written("nightly", [PY], timer=True, at=["03:00"], days=["mon"],
+    out = acts.add_written("nightly", [PY], is_timer=True, at=["03:00"], days=["mon"],
                            enable=True)
     assert out.code == 0, out
     row = store.get("nightly")
@@ -86,7 +86,7 @@ def test_add_written_timer_takes_its_schedule(fake):
 
 
 def test_add_written_timer_without_a_schedule_is_usage(fake):
-    assert acts.add_written("nightly", [PY], timer=True).code == 2
+    assert acts.add_written("nightly", [PY], is_timer=True).code == 2
 
 
 def test_add_written_refuses_a_taken_name(fake):
@@ -261,7 +261,7 @@ def test_a_failed_act_exits_1_with_the_supervisors_line(fake):
 
 
 def test_a_timers_run_now_is_judged_by_the_act_alone(fake):
-    acts.add_written("nightly", [PY], timer=True, every="1h", enable=True)
+    acts.add_written("nightly", [PY], is_timer=True, every="1h", enable=True)
     fake.drift = True
     calls = len([c for c in fake.calls if c[0] == "status"])
     out = acts.start("nightly")
@@ -271,7 +271,7 @@ def test_a_timers_run_now_is_judged_by_the_act_alone(fake):
 
 
 def test_stop_of_a_timer_records_nothing(fake):
-    acts.add_written("nightly", [PY], timer=True, every="1h")
+    acts.add_written("nightly", [PY], is_timer=True, every="1h")
     assert acts.stop("nightly").code == 0
     assert store.get("nightly").stopped is None
 
@@ -416,7 +416,7 @@ def test_adopt_without_enable_or_disable_says_what_the_supervisor_reads(fake, st
 def test_adopt_says_the_last_run_as_the_verdict_reads_it(fake, supervisor, ref, last, said):
     fake.supervisor = supervisor
     fake.foreign[ref] = Unit("timer", enabled=True, last=last)
-    out = acts.add_adopted("backup", ref, enable=None, timer=supervisor == "schtasks")
+    out = acts.add_adopted("backup", ref, enable=None, is_timer=supervisor == "schtasks")
     how = "adopt it as a timer" if supervisor == "schtasks" else "adopt it with"
     assert out.code == 2 and out.lines[0].startswith(f"{ref}: {said}; {how}")
 
@@ -507,7 +507,7 @@ def test_adopt_on_task_scheduler_is_a_daemon_unless_timer(fake, timer):
     kind = "timer" if timer else "daemon"
     fake.supervisor = "schtasks"
     fake.foreign[ref] = Unit(kind, enabled=False)
-    out = acts.add_adopted("agent", ref, enable=True, timer=timer)
+    out = acts.add_adopted("agent", ref, enable=True, is_timer=timer)
     assert out.code == 0, out
     assert store.get("agent").kind == kind
     assert f"services/agent adopts {ref} as a {kind}, on" in out.lines
@@ -535,7 +535,7 @@ def test_adopt_on_task_scheduler_with_timer_names_the_timer_kind(fake):
     ref = "\\Backups\\nightly"
     fake.supervisor = "schtasks"
     fake.foreign[ref] = Unit("timer", enabled=True)
-    out = acts.add_adopted("nightly", ref, enable=None, timer=True)
+    out = acts.add_adopted("nightly", ref, enable=None, is_timer=True)
     assert out.code == 2
     assert out.lines == (f"{ref}: schedule armed, no run known; adopt it as a timer "
                          "(judged by its schedule and last run) with --enable to keep it "
@@ -750,7 +750,7 @@ def test_adopt_off_systemd_compares_the_ref_alone(fake, tmp_path, monkeypatch):
     fake.foreign["backup.service"] = Unit("daemon", enabled=True, active=True)
     assert all(s.triggers is None for s in fake.status(
         [], foreign=["backup.timer", "backup.service"]))
-    out = acts.add_adopted("backup", "backup.timer", timer=True, enable=True)
+    out = acts.add_adopted("backup", "backup.timer", is_timer=True, enable=True)
     assert out.code == 0, out
     out = acts.add_adopted("run", "backup.service", enable=True)
     assert out.code == 0, out

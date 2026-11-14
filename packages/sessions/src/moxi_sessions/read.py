@@ -139,7 +139,7 @@ def _wanted(kinds: Iterable[str] | None) -> frozenset[str] | None:
     return frozenset(kinds)
 
 
-def _needs_session(source: Source) -> str:
+def _require_session(source: Source) -> str:
     if source.session_id is None:
         raise ValueError("an OpenCode read of records names its session "
                          "(Source.session_id); only records_since reads the database whole")
@@ -409,7 +409,7 @@ def records(source: Any, *, kinds: Iterable[str] | None = None,
     wanted = _wanted(kinds)
     if src.harness == OPENCODE:
         oc = _opencode()
-        session_id = _needs_session(src)
+        session_id = _require_session(src)
         snap = oc.Snapshot(src.path)
         try:
             row = snap.session(session_id)
@@ -542,7 +542,7 @@ class _ClaudeBack:
 
     def _map(self, raw: bytes, at_line: int | None, offset: int, prompt: str | None,
              *, unterminated: bool):
-        return claude.line_records(raw, at={"line": at_line, "offset": offset},
+        return claude.line_records(raw, position={"line": at_line, "offset": offset},
                                    session_id=self.source.session_id,
                                    agent_id=self.source.agent_id, prompt_id=prompt,
                                    keep_raw=self.keep_raw, unterminated=unterminated)
@@ -643,7 +643,7 @@ class _CodexBack:
 
     def _map(self, raw: bytes, at_line: int | None, offset: int, state: codex.State,
              *, unterminated: bool):
-        return codex.line_records(raw, at={"line": at_line, "offset": offset}, state=state,
+        return codex.line_records(raw, position={"line": at_line, "offset": offset}, state=state,
                                   agent_id=self.source.agent_id, keep_raw=self.keep_raw,
                                   unterminated=unterminated)
 
@@ -701,11 +701,11 @@ def _filtered(records: Iterable[Record], wanted: frozenset[str] | None) -> Itera
 
 
 def _file_back(src: Source, *, end: int | None, wanted: frozenset[str] | None,
-               block: int, limit: int, head: bool, keep_raw: bool) -> Back:
+               block: int, limit: int, read_head: bool, keep_raw: bool) -> Back:
     _refuse_compressed(src)
     codex_file = src.harness == CODEX
     try:
-        reader = read_back(src.path, block=block, limit=limit, read_head=head or codex_file,
+        reader = read_back(src.path, block=block, limit=limit, read_head=read_head or codex_file,
                            end=end, offsets=True)
     except OSError as read_exc:
         raise _cannot(src, read_exc) from read_exc
@@ -721,16 +721,16 @@ def _file_back(src: Source, *, end: int | None, wanted: frozenset[str] | None,
         line_one: list[Record] = []
         if reader.first is not None and reader.first.strip():
             line_one, state = codex.line_records(
-                reader.first, at={"line": 1, "offset": 0}, state=state,
+                reader.first, position={"line": 1, "offset": 0}, state=state,
                 agent_id=src.agent_id, keep_raw=keep_raw, unterminated=first_open)
         mapper: Any = _CodexBack(src, wanted, keep_raw=keep_raw, numbers=numbers, start=state)
-        if head:
+        if read_head:
             first = tuple(_filtered(line_one, wanted)) if reader.first is not None else None
         else:
             tail = tuple(_filtered(reversed(line_one), wanted))
     else:
         mapper = _ClaudeBack(src, wanted, keep_raw=keep_raw, numbers=numbers)
-        if head and reader.first is not None:
+        if read_head and reader.first is not None:
             first = tuple(_filtered(mapper.first(reader.first, unterminated=first_open), wanted)) \
                 if reader.first.strip() else ()
 
@@ -767,15 +767,15 @@ def records_back(source: Any, *, kinds: Iterable[str] | None = None, block: int 
     src, bound = unpack(source)
     wanted = _wanted(kinds)
     if src.harness == OPENCODE:
-        return _opencode_back(src, wanted, head=read_head, keep_raw=keep_raw)
-    return _file_back(src, end=bound, wanted=wanted, block=block, limit=limit, head=read_head,
+        return _opencode_back(src, wanted, read_head=read_head, keep_raw=keep_raw)
+    return _file_back(src, end=bound, wanted=wanted, block=block, limit=limit, read_head=read_head,
                       keep_raw=keep_raw)
 
 
-def _opencode_back(src: Source, wanted: frozenset[str] | None, *, head: bool,
+def _opencode_back(src: Source, wanted: frozenset[str] | None, *, read_head: bool,
                    keep_raw: bool) -> Back:
     oc = _opencode()
-    session_id = _needs_session(src)
+    session_id = _require_session(src)
     with oc.Snapshot(src.path) as snap:
         row = snap.session(session_id)
         snap.require("message", "part")
@@ -785,7 +785,7 @@ def _opencode_back(src: Source, wanted: frozenset[str] | None, *, head: bool,
                                                       keep_raw=keep_raw), wanted))
                     for message in snap._messages(session_id)]
     first = None
-    if head:
+    if read_head:
         first = tuple(messages.pop(0)) if messages else ()
     out = [record for recs in reversed(messages) for record in reversed(recs)]
     return Back(OPENCODE, _Once(value=opencode_header(src, row)), iter(out), first,
@@ -810,14 +810,14 @@ def last_request(source: Any, *, synthetic: bool = False, limit: int = BACK_LIMI
     src, bound = unpack(source)
     if src.harness == OPENCODE:
         oc = _opencode()
-        session_id = _needs_session(src)
+        session_id = _require_session(src)
         with oc.Snapshot(src.path) as snap:
             row = snap.session(session_id)
             found = snap.last_request(session_id)
         return LastRequest(found, None if found is not None else oc.BACK_ENDED,
                            _Once(value=opencode_header(src, row)))
     back = _file_back(src, end=bound, wanted=frozenset({"request"}), block=block,
-                      limit=limit, head=False, keep_raw=False)
+                      limit=limit, read_head=False, keep_raw=False)
     own_chain_only = src.agent_id is None
     with back:
         for record in back:
@@ -1092,7 +1092,7 @@ def window(source: Any, *, turns: int = 5, before: Any = None,
         if not _count(before):
             raise ValueError(f"before must be a byte offset in a file, not {before!r}")
         end = before if end is None else min(end, before)
-    back = _file_back(src, end=end, wanted=None, block=BLOCK, limit=limit, head=False,
+    back = _file_back(src, end=end, wanted=None, block=BLOCK, limit=limit, read_head=False,
                       keep_raw=False)
     taken = _Turns(turns)
     with back:
@@ -1111,7 +1111,7 @@ def window(source: Any, *, turns: int = 5, before: Any = None,
 
 def _opencode_window(src: Source, turns: int, before: Any) -> Window:
     oc = _opencode()
-    session_id = _needs_session(src)
+    session_id = _require_session(src)
     if before is not None and not isinstance(before, str):
         raise ValueError(f"before must be an OpenCode message id, not {before!r}")
     taken = _Turns(turns)

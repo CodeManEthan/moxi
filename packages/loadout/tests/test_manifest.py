@@ -233,13 +233,13 @@ def test_parse_id_round_trips_and_refuses_bad_ids():
 def test_source_expands_quoted_in_a_command_and_plain_elsewhere(tmp_path):
     loadout_dir = tmp_path / "my loadout"
     command = "python3 {source}/hooks/guard.py"
-    assert manifest.expand_command(command, loadout_dir, windows=False) == (
+    assert manifest.expand_command(command, loadout_dir, is_windows=False) == (
         f"python3 '{loadout_dir}'/hooks/guard.py")
-    assert manifest.expand_command(command, loadout_dir, windows=True) == (
+    assert manifest.expand_command(command, loadout_dir, is_windows=True) == (
         f'python3 "{loadout_dir}"/hooks/guard.py')
     assert manifest.expand("{source}/docs", loadout_dir) == f"{loadout_dir}/docs"
     plain = tmp_path / "plain"
-    assert manifest.expand_command(command, plain, windows=False) == (
+    assert manifest.expand_command(command, plain, is_windows=False) == (
         f"python3 {plain}/hooks/guard.py")
 
 

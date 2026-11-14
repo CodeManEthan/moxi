@@ -898,7 +898,7 @@ def test_the_watcher_hands_its_records_to_the_timer(tmp_path):
     fake = Fake([entry(11, A)])
     w = watch.Watcher(agents=fake.agents, read=fake.read, now=fake.now,
                       projects_root=lambda: str(root), records_dir=tmp_path / "clock",
-                      sessions=tmp_path / "sessions")
+                      session_files_dir=tmp_path / "sessions")
     w.tick()
     assert set(w.current) == {A} and w.current[A]["pid"] == 11
     assert w.tick_at == fake.t

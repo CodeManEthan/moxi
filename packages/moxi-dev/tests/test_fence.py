@@ -213,17 +213,17 @@ def test_terminal_record_writes_the_recorded_names_under_the_tests_anchor(
 
 def test_uv_finds_its_dirs_as_uv_does():
     dirs, join = testing._uv_dirs, os.path.join     # joined by this system's separator
-    assert dirs({}, "/h", windows=False) == {
+    assert dirs({}, "/h", is_windows=False) == {
         "UV_CACHE_DIR": join("/h", ".cache", "uv"),
         "UV_PYTHON_INSTALL_DIR": join("/h", ".local", "share", "uv", "python")}
-    assert dirs({"XDG_CACHE_HOME": "/c", "XDG_DATA_HOME": "/d"}, "/h", windows=False) == {
+    assert dirs({"XDG_CACHE_HOME": "/c", "XDG_DATA_HOME": "/d"}, "/h", is_windows=False) == {
         "UV_CACHE_DIR": join("/c", "uv"), "UV_PYTHON_INSTALL_DIR": join("/d", "uv", "python")}
     assert dirs({"UV_CACHE_DIR": "/uc", "UV_PYTHON_INSTALL_DIR": "/up", "XDG_CACHE_HOME": "/c",
-                 "XDG_DATA_HOME": "/d"}, "/h", windows=False) == {
+                 "XDG_DATA_HOME": "/d"}, "/h", is_windows=False) == {
         "UV_CACHE_DIR": "/uc", "UV_PYTHON_INSTALL_DIR": "/up"}
     # An empty value is unset, as uv reads it.
-    assert dirs({"UV_CACHE_DIR": "", "XDG_DATA_HOME": ""}, "/h", windows=False) == \
-        dirs({}, "/h", windows=False)
+    assert dirs({"UV_CACHE_DIR": "", "XDG_DATA_HOME": ""}, "/h", is_windows=False) == \
+        dirs({}, "/h", is_windows=False)
 
 
 def test_on_windows_uv_finds_its_dirs_as_uv_does(monkeypatch, tmp_path):

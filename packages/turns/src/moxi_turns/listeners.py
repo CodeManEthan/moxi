@@ -73,6 +73,7 @@ the floors is told each time a value changes.
 
 from __future__ import annotations
 
+import builtins
 import concurrent.futures
 import importlib
 import itertools
@@ -846,7 +847,7 @@ class Floors:
         self._said: set[tuple[str, str]] = set()
 
     @property
-    def any(self) -> bool:
+    def has_floor(self) -> bool:
         """Some row has a floor function."""
         return bool(self._by_listener)
 
@@ -906,7 +907,7 @@ class Floors:
 
     def _set(self, new: dict[str, int]) -> None:
         with self._lock:
-            changed = any(self._values.get(rid) != v for rid, v in new.items())
+            changed = builtins.any(self._values.get(rid) != v for rid, v in new.items())
             self._values.update(new)
             if changed and self._send is not None:
                 try:

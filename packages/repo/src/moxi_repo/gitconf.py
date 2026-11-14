@@ -380,9 +380,9 @@ def register(repo: Repo, piece, state: State) -> bool:
     return new
 
 
-def set_enabled(repo: Repo, piece_id: str, *, value: bool, state: State) -> None:
-    _set(repo, piece_key(piece_id, "enabled"), "true" if value else "false")
-    state.pieces.setdefault(piece_id, {})["enabled"] = ["true" if value else "false"]
+def set_enabled(repo: Repo, piece_id: str, *, enabled: bool, state: State) -> None:
+    _set(repo, piece_key(piece_id, "enabled"), "true" if enabled else "false")
+    state.pieces.setdefault(piece_id, {})["enabled"] = ["true" if enabled else "false"]
 
 
 def clear_recorded(repo: Repo, piece_id: str, state: State) -> None:

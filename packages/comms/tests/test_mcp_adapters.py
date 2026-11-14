@@ -462,19 +462,19 @@ def test_the_roster_leaves_an_unnamed_value_to_the_launch(tmp_path):
                      thread_file=None)
     assert row.network_access is None
     assert "network_access" not in " ".join(codex_wrapper.row_flags(row))
-    off = row.launch_options(network=False)["config"]["sandbox_workspace_write"]
+    off = row.launch_options(allow_network=False)["config"]["sandbox_workspace_write"]
     assert off["network_access"] is False
     row.network_access = True
-    on = row.launch_options(network=False)["config"]["sandbox_workspace_write"]
+    on = row.launch_options(allow_network=False)["config"]["sandbox_workspace_write"]
     assert on["network_access"] is True
 
 
 def test_comms_flags_add_the_default_only_where_nothing_names_it():
-    flags = codex_wrapper.comms_flags({"sandbox": "workspace-write"}, network=False)
+    flags = codex_wrapper.comms_flags({"sandbox": "workspace-write"}, allow_network=False)
     assert "sandbox_workspace_write.network_access=false" in flags
     named_ = codex_wrapper.comms_flags(
         {"sandbox": "workspace-write",
-         "config": {"sandbox_workspace_write": {"network_access": True}}}, network=False)
+         "config": {"sandbox_workspace_write": {"network_access": True}}}, allow_network=False)
     assert not any("network_access" in f for f in named_)
 
 

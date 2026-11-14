@@ -250,16 +250,16 @@ class Outcome:
 
 
 def child_argv(python: str, module: str, *, replace: bool = False,
-               teardown: bool = False, skills: bool | None = None) -> list[str]:
-    """The settle child's command line (or the teardown child's). `skills` is the
+               teardown: bool = False, install_skills: bool | None = None) -> list[str]:
+    """The settle child's command line (or the teardown child's). `install_skills` is the
     install's answer ahead to the skills question: True for `--skills`, False for
     `--no-skills`, None to ask."""
     argv = [str(python), "-m", "moxi._settle"]
     if teardown:
         return [*argv, "--teardown", module]
     argv += [module] + (["--replace"] if replace else [])
-    if skills is not None:
-        argv.append("--skills" if skills else "--no-skills")
+    if install_skills is not None:
+        argv.append("--skills" if install_skills else "--no-skills")
     return argv
 
 
@@ -405,7 +405,7 @@ class Settle:
     #: The version `SETUP` last ran at, read before anything writes it.
     before: str | None = None
     #: The stop record the move fills and the `finally` starts again.
-    record: list = field(default_factory=list)
+    stopped: list = field(default_factory=list)
     failed: bool = False
     #: The backend ids of the units the unit step removed or disabled: their `resume:`
     #: records clear at a clean end, since the declaration now sets their state.
@@ -427,7 +427,7 @@ class Settle:
         return self.found.version != self.before
 
 
-def settle(module: str, *, replace: bool = False, skills: bool | None = None) -> int:
+def settle(module: str, *, replace: bool = False, install_skills: bool | None = None) -> int:
     """Run `module`'s settle step in this process; returns the exit code: 0, 1 on a
     failure, `INTERRUPTED` on a stop request."""
     from . import modules
@@ -437,7 +437,7 @@ def settle(module: str, *, replace: bool = False, skills: bool | None = None) ->
         say(f"{module}: not set up, the module is {found.state}"
             + (f": {found.reason}" if found.reason else ""), err=True)
         return 1
-    step = Settle(module, found, replace, setup_version(module), skills=skills)
+    step = Settle(module, found, replace, setup_version(module), skills=install_skills)
     try:
         try:
             try:
@@ -460,7 +460,7 @@ def settle(module: str, *, replace: bool = False, skills: bool | None = None) ->
         started, problems = _restart(step)
         _state.phase = STEPS
     if _state.request is not None:
-        say(f"{module}: interrupted; started again {started} of the {len(step.record)} "
+        say(f"{module}: interrupted; started again {started} of the {len(step.stopped)} "
             f"units the move stopped", err=True)
         return INTERRUPTED
     code = 1 if step.failed or problems or not step.moved else 0
@@ -497,7 +497,7 @@ def _move(step: Settle) -> bool:
 
     try:
         with held():
-            home.move(step.module, step.record, replace=step.replace, say=say)
+            home.move(step.module, step.stopped, replace=step.replace, say=say)
     except home.MoveError as exc:
         say(exc.line, err=True)
         if exc.only_move:
@@ -562,7 +562,7 @@ def _units(step: Settle) -> bool:
     ok = _switches(step, changes)
     with held():
         applied = units.apply(changes, replace=step.replace, restart=step.restart, say=say)
-        _take_out(step.record, applied)
+        _take_out(step.stopped, applied)
     step.gone = _gone_ids(module, applied)
     return ok and all(a.ok for a in applied)
 
@@ -666,7 +666,7 @@ def _describe(change) -> str:
     return f"{doc}, {when}"
 
 
-def _take_out(record: list, applied) -> None:
+def _take_out(stopped: list, applied) -> None:
     """Drop the entries of units an `ok` `Applied` removed, or disabled because their
     declaration turned `enabled = false`: the unit step has set their state. The record
     holds daemons only, so a timer's change never drops an entry, even a daemon's of the
@@ -687,7 +687,7 @@ def _take_out(record: list, applied) -> None:
             gone_ids |= {path.name for path in change.paths}
         elif change.kind == "daemon":
             gone_names.add(change.name)
-    record[:] = [entry for entry in record
+    stopped[:] = [entry for entry in stopped
                  if entry.name not in gone_names
                  and not (entry.unit in gone_ids)]
 
@@ -723,20 +723,20 @@ def _gone_ids(module: str, applied) -> set[str]:
 def _restart(step: Settle) -> tuple[int, list[str]]:
     """The `finally`: start the record again; print and record each start that failed.
     Returns how many started, and the lines of those that didn't."""
-    if not step.record:
+    if not step.stopped:
         return 0, []
     from . import doctor, units
     from .units._act import RESUME_KEY
 
     module = step.module
     try:
-        acted = units.resume(step.record)
+        acted = units.resume(step.stopped)
     except Exception as exc:  # resume catches each entry's error; this is a last guard
         acted = [units.Acted(module, entry.name, "start", ok=False,
                              lines=(f"{entry.unit}: {_one_line(exc)}",))
-                 for entry in step.record]
+                 for entry in step.stopped]
     started, problems = 0, []
-    for entry, result in zip(step.record, acted):
+    for entry, result in zip(step.stopped, acted):
         if result.ok:
             started += 1
             continue
@@ -1242,7 +1242,7 @@ def main(argv: list[str] | None = None,
     try:
         if args.teardown:
             return teardown(args.module)
-        return settle(args.module, replace=args.replace, skills=args.skills)
+        return settle(args.module, replace=args.replace, install_skills=args.skills)
     finally:
         _ignore_signals()
 

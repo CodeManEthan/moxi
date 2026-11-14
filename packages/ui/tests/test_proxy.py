@@ -624,7 +624,7 @@ def test_the_client_alone_gives_a_stream_that_a_drain_ends():
             starters = FakeStarters(up)
             client = Client(starters)
             response = await client.request("pxfake", "GET", "/api/events?topics=tick",
-                                            stream=True)
+                                            streaming=True)
             async with response:
                 chunks = response.chunks()
                 assert b"tick" in await anext(chunks)
@@ -636,7 +636,7 @@ def test_the_client_alone_gives_a_stream_that_a_drain_ends():
             release.set()
             with pytest.raises(UpstreamError) as failed:
                 await Client(FakeStarters(fail=StartFailed("pxfake", "x", exit_code=1, log=LOG))
-                             ).request("pxfake", "GET", "/api/events", stream=True)
+                             ).request("pxfake", "GET", "/api/events", streaming=True)
             assert failed.value.status == 502
 
     run(body)

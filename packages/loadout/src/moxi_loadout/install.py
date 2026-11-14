@@ -404,7 +404,7 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
             continue
         rows.append(Row(name, "section", name, "*", "blocked", res.line, None, res.code))
     codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
-    repo_link.sync(machine.source, on=machine.reinstall_on_commit, say=say)
+    repo_link.sync(machine.source, enabled=machine.reinstall_on_commit, say=say)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
                    planner.exit_code(codes))
 

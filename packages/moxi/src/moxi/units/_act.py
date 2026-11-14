@@ -112,7 +112,7 @@ def stop(module: str, names=None, *, replace: bool = False, stopped: list | None
                                       if kind == "daemon" and name not in decl.daemons]
     if stopped is None:
         return _act("stop", module, names, foreign=foreign, runner=runner, kinds=kinds)
-    return _stop_recorded(module, _names(names), replace=replace, record=stopped, runner=runner)
+    return _stop_recorded(module, _names(names), replace=replace, stopped=stopped, runner=runner)
 
 
 def resume(record: Iterable[Stopped], *, runner=None) -> list[Acted]:
@@ -310,7 +310,7 @@ def foreign_unit(impl, ref: str, fence, kind: str | None = None) -> UnitRef | st
     return unit
 
 
-def _stop_recorded(module: str, names: list[str], *, replace: bool, record: list,
+def _stop_recorded(module: str, names: list[str], *, replace: bool, stopped: list,
                    runner) -> list[Acted]:
     with core_lock():
         impl = _implementation()
@@ -351,7 +351,7 @@ def _stop_recorded(module: str, names: list[str], *, replace: bool, record: list
             for unit, is_marked in ids:
                 if unit not in running:
                     continue
-                record.append(Stopped(module, name, unit, impl.name, is_marked, _issue()))
+                stopped.append(Stopped(module, name, unit, impl.name, is_marked, _issue()))
                 ran = impl.stop_id(unit, fence)
                 if ran.ok:
                     lines.append(f"{unit} stopped")

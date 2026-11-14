@@ -146,7 +146,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                         options=ctx.options(values))
     recorded = common.recorded(HARNESS, values, mode_, fit.not_applied)
     common.check_sizes(argv, values=recorded, brief=ctx.brief, env=env, prompt=prompt,
-                       windows=ctx.windows)
+                       is_windows=ctx.windows)
     return Composition(harness=HARNESS, mode=mode_,
                        target=str(values.get("target") or "terminal"), argv=tuple(argv),
                        env=env, values=recorded, prompt=prompt, first=first,

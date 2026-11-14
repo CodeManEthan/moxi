@@ -193,7 +193,7 @@ def test_an_inactive_marked_daemon_is_neither_stopped_nor_recorded(w):
     w.sup.units["moxi-demo-aux.service"]["active"] = False
     w.legacy()
     record = home.move("demo", [])
-    assert [s.unit for s in record] == [SERVICE]
+    assert [s.unit for s in stopped] == [SERVICE]
 
 
 @pytest.mark.parametrize("case", ["both", "units_from", "overrun", "unmarked", "device"])
@@ -245,7 +245,7 @@ def test_with_replace_the_unmarked_running_unit_is_stopped_and_recorded(w):
     w.sup.state(SERVICE)["active"] = True
     w.legacy()
     record = home.move("demo", [], replace=True)
-    assert [(s.unit, s.marked) for s in record] == [(SERVICE, False)]
+    assert [(s.unit, s.marked) for s in stopped] == [(SERVICE, False)]
     assert (w.home / "state" / "demo").is_dir()
 
 
@@ -304,7 +304,7 @@ def test_an_absolute_legacy_link_is_read_named_and_moved_as_the_link(w):
     assert (row.state, row.fix) == ("warn", "moxi install demo")
     assert str(link) in row.detail
     record = home.move("demo", [])
-    assert [s.unit for s in record] == [SERVICE]
+    assert [s.unit for s in stopped] == [SERVICE]
     assert new.is_symlink() and new.resolve() == elsewhere.resolve()
     assert (new / "data.txt").read_text() == "live"
     assert not os.path.lexists(link) and not link.parent.exists()
@@ -1549,8 +1549,8 @@ def test_a_refused_unit_or_a_relative_legacy_link_still_runs_the_later_steps(
 # -- the skills question and its flags --------------------------------------------------------
 
 def test_the_skills_answer_is_passed_to_the_child_and_parsed_there():
-    assert _settle.child_argv("py", "comms", skills=True)[-1] == "--skills"
-    assert _settle.child_argv("py", "comms", replace=True, skills=False)[-2:] == [
+    assert _settle.child_argv("py", "comms", install_skills=True)[-1] == "--skills"
+    assert _settle.child_argv("py", "comms", replace=True, install_skills=False)[-2:] == [
         "--replace", "--no-skills"]
     assert _settle.child_argv("py", "comms")[-1] == "comms"
     assert _settle._parse(["comms", "--skills"]).skills is True
@@ -1634,7 +1634,7 @@ def sk(w, monkeypatch):
 
 
 def place_settle(w, capsys, *, skills=None, replace=False):
-    code = _settle.settle("demo", replace=replace, skills=skills)
+    code = _settle.settle("demo", replace=replace, install_skills=skills)
     out, err = capsys.readouterr()
     return code, out + err
 

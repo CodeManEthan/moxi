@@ -65,14 +65,14 @@ class Refused(Exception):
 
 # -- the switch ------------------------------------------------------------------------------
 
-def _set_switch(*, value: bool, by: str) -> list[str]:
+def _set_switch(*, enabled: bool, by: str) -> list[str]:
     """Set `enabled` through `moxi.config.set`, which writes and applies the daemon's
     units. Returns the lines the core printed while it applied them."""
     from moxi import config
 
     lines = io.StringIO()
     with contextlib.redirect_stdout(lines):
-        config.set_value(MODULE, "enabled", value, by=by)
+        config.set_value(MODULE, "enabled", enabled, by=by)
     return [line for line in lines.getvalue().splitlines() if line.strip()]
 
 
@@ -104,7 +104,7 @@ def revoke_every_grant() -> str | None:
 
 
 def _on(args, out: TextIO) -> int:
-    for line in _set_switch(value=True, by="moxi connector enable"):
+    for line in _set_switch(enabled=True, by="moxi connector enable"):
         print(line, file=out)
     snap = doctor.take(ask=_no_ask)
     print("The connector is on.", file=out)
@@ -133,7 +133,7 @@ def _off(args, out: TextIO) -> int:
     else:
         if said:
             print(said, file=out)
-    for line in _set_switch(value=False, by="moxi connector disable"):
+    for line in _set_switch(enabled=False, by="moxi connector disable"):
         print(line, file=out)
     print("The connector is off.", file=out)
     address = doctor.take(ask=_no_ask).address

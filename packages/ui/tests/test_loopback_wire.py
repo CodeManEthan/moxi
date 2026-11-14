@@ -92,7 +92,7 @@ def send(sock, method, path, *, token=True, headers=(), body=b""):
     sock.sendall(b"\r\n".join(lines) + b"\r\n\r\n" + body)
 
 
-def answer(sock, *, stream=False):
+def answer(sock, *, streaming=False):
     """One response as an `Answer`: its head, and its body by Content-Length unless it
     is a stream."""
     data = b""
@@ -107,7 +107,7 @@ def answer(sock, *, stream=False):
         name, _, value = line.partition(b":")
         headers.append((name.strip().lower(), value.strip()))
     got = Answer(status=int(lines[0].split()[1]), headers=headers)
-    if not stream:
+    if not streaming:
         length = int(got.header("content-length") or 0)
         while len(rest) < length:
             chunk = sock.recv(65536)
@@ -174,7 +174,7 @@ def test_a_dropped_stream_is_uncounted_and_the_stream_cap_answers_503(wire, page
             sock = wire.connect()
             streams.append(sock)
             send(sock, "GET", "/api/events")
-            opened = answer(sock, stream=True)
+            opened = answer(sock, streaming=True)
             assert opened.status == 200
             assert opened.header("content-type").startswith("text/event-stream")
         wait_for(lambda: activity.streams == server.STREAM_CAP, 2, what="every stream counted")

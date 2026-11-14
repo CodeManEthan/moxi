@@ -367,12 +367,12 @@ class Gateway:
             self.kept, self.profile, self.uid = None, None, None
 
     def _mount(self) -> None:
-        mount = decide(on=self.on, kind=self.kind, endpoint=self.endpoint,
+        mount = decide(enabled=self.on, kind=self.kind, endpoint=self.endpoint,
                        address=self.address, refused=self.refused)
         if mount.mounted != self.mount.mounted and self.kept is not None:
             # The table holds the act paths only while the acts are mounted.
             self._build(mount)
-            mount = decide(on=self.on, kind=self.kind, endpoint=self.endpoint,
+            mount = decide(enabled=self.on, kind=self.kind, endpoint=self.endpoint,
                            address=self.address, refused=self.refused)
         changed = mount != self.mount
         self.mount = mount
@@ -414,7 +414,7 @@ class Gateway:
 
     def acts_now(self) -> Mount:
         """The mount as the inputs stand now, for a prepare or a commit to check again."""
-        return decide(on=self.on, kind=self.kind, endpoint=self.endpoint,
+        return decide(enabled=self.on, kind=self.kind, endpoint=self.endpoint,
                       address=self.address, refused=self.refused)
 
     # --- the hold -------------------------------------------------------------------

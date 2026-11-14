@@ -254,19 +254,19 @@ def write_state(path: Path, roster: dict[str, str]) -> bool:
 
 # ---------------------------------------------------------------------- the delta
 
-def diff(before: dict[str, str], now: dict[str, str],
+def diff(before: dict[str, str], current: dict[str, str],
          self_q: str | None) -> tuple[list[str], list[str]]:
     """(joins, leaves), keyed by qualified name, self filtered from both sides."""
-    joins = sorted(q for q in now if q not in before and q != self_q)
-    leaves = sorted(q for q in before if q not in now and q != self_q)
+    joins = sorted(q for q in current if q not in before and q != self_q)
+    leaves = sorted(q for q in before if q not in current and q != self_q)
     return joins, leaves
 
 
-def render_delta(joins: list[str], leaves: list[str], now: dict) -> str:
+def render_delta(joins: list[str], leaves: list[str], current: dict) -> str:
     """One parenthetical line. A join shows its tier the way the verb shows it;
     a leave is just the name -- the tier of someone gone is not news. The operator's
     join and leave read like any name's."""
-    parts = [f"{q} [{entry_of(now[q])['tier']}] is now reachable" for q in joins]
+    parts = [f"{q} [{entry_of(current[q])['tier']}] is now reachable" for q in joins]
     parts += [f"{q} left" for q in leaves]
     return DELTA_OPEN + "; ".join(parts) + DELTA_CLOSE
 
@@ -317,21 +317,21 @@ def delta(socket_path=None, state_path: Path | str = "", *, env=None,
     info = fetch(socket_path, timeout=timeout)
     if not usable(info):
         return None, False                     # silent skip: the file stays put
-    now = roster_of(info)
+    current = roster_of(info)
     raw = read_state(state_path)
     before = None if raw is None else {q: v for q, v in raw.items() if q != SHOWN_KEY}
     shown_before = list((raw or {}).get(SHOWN_KEY) or [])
     self_q = self_identity(env)
     owed_lines, shown = unanswered_for(info, self_q, shown_before)
-    memory = {**now, SHOWN_KEY: shown} if shown else dict(now)
+    memory = {**current, SHOWN_KEY: shown} if shown else dict(current)
     if before is None:
         # unknown baseline: seed, and announce no roster change
         if not write_state(state_path, memory):
             return None, True
         return ("\n".join(owed_lines) or None), True
-    joins, leaves = diff(before, now, self_q)
-    if (before != now or shown != shown_before) and not write_state(state_path, memory):
+    joins, leaves = diff(before, current, self_q)
+    if (before != current or shown != shown_before) and not write_state(state_path, memory):
         return None, True                      # could not advance -> nothing announced
-    parts = [render_delta(joins, leaves, now)] if joins or leaves else []
+    parts = [render_delta(joins, leaves, current)] if joins or leaves else []
     parts += owed_lines
     return ("\n".join(parts) or None), True

@@ -36,8 +36,8 @@ def at(tmp_path, monkeypatch):
 
 
 def without_anchor_clause(line):
-    return line.replace(" " + terminal.anchor_clause(page=True), "").replace(
-        " " + terminal.anchor_clause(page=False), "")
+    return line.replace(" " + terminal.anchor_clause(for_page=True), "").replace(
+        " " + terminal.anchor_clause(for_page=False), "")
 
 
 # -- agreement and differences -----------------------------------------------------------------
@@ -312,10 +312,10 @@ def test_no_anchor_variable_no_clause_and_no_place_line(monkeypatch, tmp_path):
 # -- Windows names ------------------------------------------------------------------------------
 
 def test_names_compare_without_case_on_windows():
-    env = terminal.Noting({"Path": "a", "moxi_home": "b"}, windows=True)
+    env = terminal.Noting({"Path": "a", "moxi_home": "b"}, is_windows=True)
     assert env.get("PATH") == "a" and env["MOXI_HOME"] == "b" and "path" in env
     assert list(env.read) == ["PATH", "MOXI_HOME"]
-    posix = terminal.Noting({"Path": "a"}, windows=False)
+    posix = terminal.Noting({"Path": "a"}, is_windows=False)
     assert posix.get("PATH") is None
 
 
@@ -352,7 +352,7 @@ def test_where_per_platform():
 
 def test_the_page_fix_reads_set_where_then_step(monkeypatch, at):
     for platform in ("linux", "darwin", "win32"):
-        line = terminal.fix(["x"], ["A to /b"], [], page=True, platform=platform)
+        line = terminal.fix(["x"], ["A to /b"], [], for_page=True, platform=platform)
         place, step = terminal.where(platform)
         assert line == f"x. Set A to /b {place}, then {step}; or run the command in a terminal."
 
@@ -361,7 +361,7 @@ def test_the_terminal_fix_always_names_the_step():
     # A terminal caller loaded ui to get the line, so the step that restarts the shell is
     # always ui's to name.
     for platform in ("linux", "darwin", "win32"):
-        line = terminal.fix(["x"], ["A to /b"], [], page=False, platform=platform)
+        line = terminal.fix(["x"], ["A to /b"], [], for_page=False, platform=platform)
         place, step = terminal.where(platform)
         assert line.endswith(f"set A to /b {place}, then {step}.")
 
@@ -369,18 +369,18 @@ def test_the_terminal_fix_always_names_the_step():
 def test_the_lines_name_the_cores_commands():
     record = str(paths.terminal_record())
     for page in (True, False):
-        line = terminal.no_record(record, page=page)
+        line = terminal.no_record(record, for_page=page)
         assert f"Type {core.RECORD_COMMAND} in a terminal of your own" in line
         assert f"run {core.DOCTOR_COMMAND} in that terminal" in line
         assert f"then type {core.RECORD_COMMAND} in" in terminal.unreadable(record, "x",
-                                                                          page=page)
+                                                                          for_page=page)
 
 
 def test_the_restart_step_names_uis_own_stop_verb():
     from moxi_ui import cli
 
     assert "moxi ui stop" in terminal.where("linux").step
-    assert "moxi ui stop" in terminal.newer("r", 2, "9", "1", page=True)
+    assert "moxi ui stop" in terminal.newer("r", 2, "9", "1", for_page=True)
     with pytest.raises(SystemExit) as done:
         cli.main(["stop", "--help"])
     assert done.value.code == 0

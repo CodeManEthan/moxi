@@ -195,7 +195,7 @@ def test_an_unreadable_saved_spec_errors_with_a_record(demo):
 def test_remove_spec_forgets_its_section_state_and_records(demo, clock, capsys):
     repo = demo.repo()
     bare = make_remote(demo, repo)
-    deny(bare, on=True)
+    deny(bare, enabled=True)
     s = spec(repo, push="origin")
     moxi_repo.save_spec(s)
     api.add(repo, ["demo/gate"])
@@ -223,7 +223,7 @@ def failed_push(demo, repo: Path, clock, *, branch: str = "main"):
     bare = demo.tmp / f"{repo.name}-remote.git"
     if not bare.exists():
         make_remote(demo, repo)
-    deny(bare, on=True)
+    deny(bare, enabled=True)
     write(repo, f"notes/{branch}-{clock[0]}.md")
     result = moxi_repo.commit(spec(repo, push="origin"))
     assert result.status == "committed" and result.push_error, result
@@ -240,7 +240,7 @@ def test_a_push_record_is_replaced_by_the_next_failure_and_cleared_by_a_push(dem
     again = moxi_repo.commit(spec(repo, push="origin"))
     assert again.push_error and is_open(key) == OPEN
     assert [k for k in doctor_records() if "::push::" in k] == [key]
-    deny(bare, on=False)
+    deny(bare, enabled=False)
     clock[0] += 400
     assert moxi_repo.commit(spec(repo, push="origin")).pushed == ("main",)
     assert is_open(key) == set() and state(repo)["push"] == {}
@@ -249,7 +249,7 @@ def test_a_push_record_is_replaced_by_the_next_failure_and_cleared_by_a_push(dem
 def test_a_branch_no_longer_ahead_clears_its_push_record(demo, clock):
     repo = demo.repo()
     bare = failed_push(demo, repo, clock)
-    deny(bare, on=False)
+    deny(bare, enabled=False)
     git(repo, "push", "-q", "origin", "main")
     result = moxi_repo.commit(spec(repo, push="origin"))
     assert result.pushed == () and is_open(push_key(repo)) == set()
@@ -282,7 +282,7 @@ def test_a_removed_remote_replaces_the_record_until_it_is_back(demo, clock):
     assert "not configured" in text(key)
     assert "add the remote origin" in doctor_records()[key]["fix"]
     git(repo, "remote", "add", "origin", str(bare))
-    deny(bare, on=False)
+    deny(bare, enabled=False)
     clock[0] += 400
     back = moxi_repo.commit(spec(repo, push="origin"))
     assert back.pushed == ("main",) and is_open(key) == set()
@@ -331,13 +331,13 @@ def test_lines_a_push_prints_on_a_throttled_pass_reach_the_commit_record(demo, c
     bare = make_remote(demo, repo)
     api.add(repo, ["demo/push-check"])
     demo.act(push_check="print")
-    deny(bare, on=True)
+    deny(bare, enabled=True)
     write(repo, "notes/a.md")
     s = spec(repo, push="origin", min_interval_s=3600)
     assert moxi_repo.commit(s).push_error
     key = commit_key(repo)
     assert is_open(key) == set()
-    deny(bare, on=False)
+    deny(bare, enabled=False)
     clock[0] += 400
     late = moxi_repo.commit(s)
     assert late.status == "throttled" and late.pushed == ("main",)

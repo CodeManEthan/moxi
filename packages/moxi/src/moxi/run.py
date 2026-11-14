@@ -147,7 +147,7 @@ class Args:
                  "condition", "result", "argv", "home")
 
     def __init__(self, *, switch: tuple[str, str] | None, module: str, name: str,
-                 log: str | None = None, restart: bool = False, runtime: bool = False,
+                 log: str | None = None, restart: bool = False, is_runtime: bool = False,
                  stop: str = "group", condition: bool = False, result: bool = False,
                  argv: tuple[str, ...] = (), home: str | None = None):
         self.switch = switch
@@ -155,7 +155,7 @@ class Args:
         self.name = name
         self.log = log
         self.restart = restart
-        self.runtime = runtime
+        self.runtime = is_runtime
         self.stop = stop
         self.condition = condition
         self.result = result
@@ -225,7 +225,7 @@ def parse(argv: list[str]) -> Args:
         raise UsageError(f"--stop {stop!r} is neither group nor process")
     return Args(switch=switch, module=module, name=name,
                 log=None if log is None else str(log), restart="--restart" in seen,
-                runtime="--runtime" in seen, stop=stop, argv=command, home=home)
+                is_runtime="--runtime" in seen, stop=stop, argv=command, home=home)
 
 
 def _record(value: str) -> tuple[str, str]:

@@ -500,7 +500,7 @@ class SessionStore:
         self._ended()
         return len(gone)
 
-    def find(self, session_ids: Sequence[str], key: str | None = None, *,
+    def use(self, session_ids: Sequence[str], key: str | None = None, *,
              need_key: bool) -> str | None:
         """The id hash of the first live session among `session_ids` (and, with
         `need_key`, whose key is `key`), marked used; or None."""
@@ -679,7 +679,7 @@ class Sessions:
         ids = cookie_ids(headers)
         if not ids or not self.owner.allows_current():
             return None
-        return self.store.find(ids, _key(headers), need_key=need_key)
+        return self.store.use(ids, _key(headers), need_key=need_key)
 
     def end_named(self, headers: Iterable[tuple[bytes, bytes]]) -> int:
         """End every session the request's cookie names (a worker's update check)."""

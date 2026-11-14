@@ -251,7 +251,7 @@ class Context:
     when it is not installed. `comms_codex` and `comms_headless` say whether comms takes
     its Codex wrapper's per-launch settings and its headless flags, and
     `comms_codex_resume` whether that wrapper resumes a thread it is told to (read only
-    for a resume). `windows` picks the command line limit.
+    for a resume). `is_windows` picks the command line limit.
 
     A replay of a stored launch sets the rest. `posture` is the start posture the
     identity block shows in place of the values' own (a relaunch's), which the values,
@@ -495,14 +495,14 @@ def scratch_root_problem(root: Path | None = None) -> str | None:
 # -- the child's environment ------------------------------------------------------------
 
 def scrub(env: Mapping[str, str], session_env: frozenset[str] | set[str] = frozenset(),
-          *, windows: bool = os.name == "nt") -> dict[str, str]:
+          *, is_windows: bool = os.name == "nt") -> dict[str, str]:
     """A copy of `environ` without any session's stamps.
 
     Removes every `CLAUDE*` name but the user's configuration and sign-in
     (`CLAUDE_KEEP`), `AI_AGENT`, and each name in `session_env`, the modules'
     `SESSION_ENV` keys, where a key ending in `_` is a prefix.
     """
-    norm = str.upper if windows else (lambda name: name)
+    norm = str.upper if is_windows else (lambda name: name)
     claude = tuple(norm(p) for p in SCRUB_PREFIXES)
     keep = {norm(n) for n in CLAUDE_KEEP}
     prefixes = tuple(norm(n) for n in session_env if n.endswith("_"))
@@ -566,10 +566,10 @@ def stamps(request_id: str, *, turns: bool = False, additions: Additions | None 
 
 def child_env(caller_env: Mapping[str, str], composition: Composition,
                 session_env: frozenset[str] | set[str] = frozenset(), *,
-                windows: bool = os.name == "nt") -> dict[str, str]:
+                is_windows: bool = os.name == "nt") -> dict[str, str]:
     """The whole environment the child gets: `environ` scrubbed, then the launch's
     stamps."""
-    env = scrub(caller_env, session_env, windows=windows)
+    env = scrub(caller_env, session_env, is_windows=is_windows)
     env.update(composition.env)
     return env
 
@@ -616,13 +616,13 @@ def env_class(name: str) -> str | None:
     return RECORDED if name.startswith(RECORDED_PREFIXES) else None
 
 
-def _short(name: str, *, windows: bool) -> bool:
+def _short(name: str, *, is_windows: bool) -> bool:
     return (name in BASE_NAMES or name.startswith(BASE_PREFIXES)
-            or (windows and name in WINDOWS_BASE_NAMES))
+            or (is_windows and name in WINDOWS_BASE_NAMES))
 
 
 def base_env(env: Mapping[str, str], *,
-             windows: bool = os.name == "nt") -> dict[str, str | None]:
+             is_windows: bool = os.name == "nt") -> dict[str, str | None]:
     """What a launch records of its child's environment `environ`: the value of each name
     of the recorded class that is set (the short list, `BASE_NAMES` and `BASE_PREFIXES`;
     the core's locators; the names `ENV_CLASS` classes recorded; on Windows
@@ -631,22 +631,22 @@ def base_env(env: Mapping[str, str], *,
     Windows reads names without case, so there they are matched so too."""
     out: dict[str, str | None] = {}
     for name, value in env.items():
-        key = name.upper() if windows else name
+        key = name.upper() if is_windows else name
         kind = env_class(key)
         if kind == CREDENTIAL:
             out[name] = None
-        elif kind == RECORDED or _short(key, windows=windows) or locator(key):
+        elif kind == RECORDED or _short(key, is_windows=is_windows) or locator(key):
             out[name] = value
     return out
 
 
 def short_env(env: Mapping[str, str], *,
-              windows: bool = os.name == "nt") -> dict[str, str]:
+              is_windows: bool = os.name == "nt") -> dict[str, str]:
     """The short list alone (`BASE_NAMES`, `BASE_PREFIXES`) of `environ`, and on Windows
     the names a process there needs to start (`WINDOWS_BASE_NAMES`): the base of a replay
     of a row made before the base was recorded."""
-    norm = str.upper if windows else (lambda name: name)
-    return {name: value for name, value in env.items() if _short(norm(name), windows=windows)}
+    norm = str.upper if is_windows else (lambda name: name)
+    return {name: value for name, value in env.items() if _short(norm(name), is_windows=is_windows)}
 
 
 def replay_env(base: Mapping[str, str | None], caller_env: Mapping[str, str],
@@ -689,7 +689,7 @@ def encode(value: object) -> str:
 
 def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
                 brief: str | None = None, env: Mapping[str, str] | None = None,
-                prompt: str | None = None, windows: bool = os.name == "nt") -> None:
+                prompt: str | None = None, is_windows: bool = os.name == "nt") -> None:
     """Refuse a launch past a limit: `store.TooLarge` for a brief, `values_json` or
     `argv_json` past the launch log's cap, `TooLong` for a command line past the
     system's. A `values_json` refusal names its largest value too, which is the one to
@@ -702,7 +702,7 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
                 largest = max(((key, len(encode(value).encode("utf-8")))
                                for key, value in values.items()), key=lambda kv: kv[1])
             raise store.TooLarge(name, size, largest)
-    if windows:
+    if is_windows:
         line = subprocess.list2cmdline(list(argv))
         if len(line) + 1 > WINDOWS_LINE:
             raise TooLong("the command line", len(line) + 1, WINDOWS_LINE, "characters")

@@ -272,7 +272,7 @@ def test_add_find_and_entry_kinds():
 ])
 def test_add_refuses_a_bad_entry(args):
     with pytest.raises(ValueError):
-        Table().add(*args[:3], stream=args[3] if len(args) > 3 else False)
+        Table().add(*args[:3], streaming=args[3] if len(args) > 3 else False)
 
 
 def test_a_frozen_table_refuses_add_and_mount():

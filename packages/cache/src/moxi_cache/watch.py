@@ -229,13 +229,13 @@ class Watcher:
                  read: Callable[..., Clock] = api.read,
                  now: Callable[[], float] = time.time,
                  projects_root: Callable[[], str] | None = None,
-                 records_dir: Path | None = None, sessions: Path | None = None):
+                 records_dir: Path | None = None, session_files_dir: Path | None = None):
         self.agents = agents
         self.read = read
         self.now = now
         self.projects_root = projects_root or (lambda: api.projects_root(None))
         self.records_dir = records.record_dir() if records_dir is None else Path(records_dir)
-        self.sessions = sessions_dir() if sessions is None else Path(sessions)
+        self.session_files_dir = sessions_dir() if session_files_dir is None else Path(session_files_dir)
         self.warn_before = default("segment.warn_before_s")
         self.stale_after = records.STALE_TICKS * max(MIN_TICK, default("watch.tick_s"))
         self.ticks = 0
@@ -268,7 +268,7 @@ class Watcher:
         """One tick. Returns the live sessions it wrote records for."""
         now = self.tick_at = self.now()
         self.current = None
-        stamp = sessions_stamp(self.sessions)
+        stamp = sessions_stamp(self.session_files_dir)
         if self._ask or self.ticks % AGENTS_EVERY == 0 or stamp != self._stamp:
             self._stamp = stamp
             if not self._refresh():
@@ -385,7 +385,7 @@ def _interval(config: Config, watcher: Watcher) -> int:
     return tick
 
 
-def _thresholds(config: Config, watcher: Watcher) -> int:
+def _set_thresholds(config: Config, watcher: Watcher) -> int:
     """Read the config once for this tick: set what the tick writes into every record
     and return the tick it then waits, the same read that set `stale_after`."""
     interval = _interval(config, watcher)
@@ -412,7 +412,7 @@ def run(*, watcher: Watcher | None = None, stop: threading.Event | None = None,
     log.info("watching live Claude sessions; records under %s", watcher.records_dir)
     try:
         while not stop.is_set():
-            interval = _thresholds(config, watcher)
+            interval = _set_thresholds(config, watcher)
             try:
                 watcher.tick()
                 watcher.say("tick-error", None)

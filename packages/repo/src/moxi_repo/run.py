@@ -307,7 +307,7 @@ def _record(where: Where, piece_id: str, text: str, fix: str, *, flagged: bool) 
         _records.open_record(
             _records.piece_key(common, piece_id), cgd=common, kind="piece",
             subject={"piece": piece_id, "root": where.root}, text=text, fix=fix,
-            before=None if flagged else (lambda: _flag(piece_id, value=True)))
+            before=None if flagged else (lambda: _flag(piece_id, enabled=True)))
     except Exception as exc:  # noqa: BLE001 - a record that can't be written is said
         say(f"the doctor record for {piece_id} could not be written ({describe(exc)})")
 
@@ -321,7 +321,7 @@ def _clear(where: Where, piece_id: str) -> None:
         from moxi_repo import _records
 
         _records.close_record(_records.piece_key(common, piece_id),
-                              after=lambda: _flag(piece_id, value=False))
+                              after=lambda: _flag(piece_id, enabled=False))
     except Exception as exc:  # noqa: BLE001
         say(f"the doctor record for {piece_id} could not be cleared ({describe(exc)})")
 
@@ -330,7 +330,7 @@ def _clear(where: Where, piece_id: str) -> None:
 FLAG_RETRY = (0.02, 0.05)
 
 
-def _flag(piece_id: str, *, value: bool) -> bool:
+def _flag(piece_id: str, *, enabled: bool) -> bool:
     """Set or unset `recorded` in the piece's section; True when git took it.
 
     Another git holding the config lock makes the write fail; it is tried twice more. A
@@ -340,7 +340,7 @@ def _flag(piece_id: str, *, value: bool) -> bool:
     import time
 
     key = f"{PIECE_PREFIX}{piece_id}.recorded"
-    argv = (["git", "config", key, "true"] if value
+    argv = (["git", "config", key, "true"] if enabled
             else ["git", "config", "--unset-all", key])
     for wait in (0.0, *FLAG_RETRY):
         if wait:
@@ -350,7 +350,7 @@ def _flag(piece_id: str, *, value: bool) -> bool:
         except OSError:
             return False
         # --unset-all exits 5 when the key is already gone.
-        if proc.returncode == 0 or (not value and proc.returncode == 5):
+        if proc.returncode == 0 or (not enabled and proc.returncode == 5):
             return True
     return False
 

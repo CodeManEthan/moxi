@@ -326,7 +326,7 @@ def test_the_worst_code():
     ("check 'two words' \"and more\"", ["check", "two words", "and more"]),
 ])
 def test_health_splits_as_posix_does(text, argv):
-    assert cli.split_command(text, windows=False) == argv
+    assert cli.split_command(text, is_windows=False) == argv
 
 
 @pytest.mark.parametrize("text, argv", [
@@ -339,7 +339,7 @@ def test_health_splits_as_posix_does(text, argv):
     (r'x.exe ""', ["x.exe", ""]),
 ])
 def test_health_splits_as_windows_does(text, argv):
-    assert cli.split_command(text, windows=True) == argv
+    assert cli.split_command(text, is_windows=True) == argv
 
 
 # --- watch ------------------------------------------------------------------------------

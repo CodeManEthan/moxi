@@ -181,8 +181,8 @@ def cmd_log(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
 # --- on, off --------------------------------------------------------------------------------
 
 
-def _set_switch(*, on: bool) -> None:
-    words = ("set", "--", MODULE, "gateway.enabled", "true") if on \
+def _set_switch(*, enabled: bool) -> None:
+    words = ("set", "--", MODULE, "gateway.enabled", "true") if enabled \
         else ("unset", "--", MODULE, "gateway.enabled")
     if _run(_moxi("config", *words)) != 0:
         raise Refused(f"`moxi config {' '.join(w for w in words if w != '--')}` failed")
@@ -235,7 +235,7 @@ def cmd_enable(args: argparse.Namespace, say: Callable[[str], Any], *,
             endpoint.check_socket_path(endpoint.socket_path(_layout(), env))
         except endpoint.PathRefused as exc:
             raise Refused(str(exc)) from None
-    _set_switch(on=True)
+    _set_switch(enabled=True)
     _start_shell(say)
     if kind == "tcp" and _wait_hold(_layout().runtime_dir(env)) is None:
         raise Refused(f"the shell didn't take the gateway's port within {HOLD_WAIT:g} s: "
@@ -251,7 +251,7 @@ def cmd_disable(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
     from .address import REFUSED
     from .listener import read_tunnel
 
-    _set_switch(on=False)
+    _set_switch(enabled=False)
     say("the gateway is off; every phone session ends within 2 s")
     read = read_tunnel()
     address = read.address

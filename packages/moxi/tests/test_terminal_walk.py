@@ -32,9 +32,9 @@ class Table:
     unlisted one and what `errors` names for a listed one; `parent` re-reads a pid's
     parent, from `reparented` first."""
 
-    def __init__(self, procs, *, windows=False, loose=False, errors=None, reparented=None):
+    def __init__(self, procs, *, is_windows=False, loose=False, errors=None, reparented=None):
         self.procs = {p.pid: p for p in procs}
-        self.windows = windows
+        self.windows = is_windows
         self.loose = loose
         self.errors = errors or {}
         self.reparented = reparented or {}
@@ -159,7 +159,7 @@ def test_a_windows_moxi_exe_is_e1():
                            p([r"C:\WINDOWS\System32\cmd.exe"]),
                            p([r"C:\Other\Scripts\MOXI.EXE", "slots"],
                              image=r"C:\Other\Scripts\MOXI.EXE"),
-                           p([r"C:\WINDOWS\explorer.exe"])), windows=True),
+                           p([r"C:\WINDOWS\explorer.exe"])), is_windows=True),
                run(executable=WIN_EXE, argv0=r"C:\elsewhere\moxi.exe"))
     assert got == Evidence("E1", RUN + 2, "moxi", "moxi")
 
@@ -189,7 +189,7 @@ def test_a_harness_resetting_its_tool_shells_env_is_met_above_the_hop():
 def test_a_windows_harness_exe_is_an_agent():
     got = walk(Table(chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE),
                            p([r"C:\Users\ada\bin\Claude.exe"]),
-                           p([r"C:\WINDOWS\explorer.exe"])), windows=True),
+                           p([r"C:\WINDOWS\explorer.exe"])), is_windows=True),
                run(executable=WIN_EXE, argv0=WIN_MOXI))
     assert got == Evidence("E2", RUN + 1, "claude", "claude")
 
@@ -259,7 +259,7 @@ def test_a_near_miss_is_not_an_agent(name):
 ])
 def test_on_windows_a_harness_matches_without_exe_and_case(argv0, program, harness):
     got = walk(Table(chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE), p([argv0]),
-                           p([r"C:\WINDOWS\explorer.exe"])), windows=True),
+                           p([r"C:\WINDOWS\explorer.exe"])), is_windows=True),
                run(executable=WIN_EXE, argv0=WIN_MOXI))
     assert got == Evidence("E2", RUN + 1, program, harness)
 
@@ -268,7 +268,7 @@ def test_on_windows_a_harness_matches_without_exe_and_case(argv0, program, harne
                                    r"C:\x\codex.exe.bak"])
 def test_on_windows_a_near_miss_is_not_an_agent(argv0):
     got = walk(Table(chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE), p([argv0]),
-                           p([r"C:\WINDOWS\explorer.exe"])), windows=True),
+                           p([r"C:\WINDOWS\explorer.exe"])), is_windows=True),
                run(executable=WIN_EXE, argv0=WIN_MOXI))
     assert got is None
 
@@ -455,7 +455,7 @@ def test_a_shielded_process_is_not_judged_by_the_mark():
 def test_on_windows_any_spelling_of_the_mark_counts():
     got = walk(Table(chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE),
                            p([r"C:\x\pwsh.exe"], env={"moxi_started_by": "m"}),
-                           p([r"C:\WINDOWS\explorer.exe"])), windows=True),
+                           p([r"C:\WINDOWS\explorer.exe"])), is_windows=True),
                run(executable=WIN_EXE, argv0=WIN_MOXI))
     assert got == Evidence("E4", RUN + 1, "pwsh", "m")
 
@@ -468,7 +468,7 @@ EXPLORER = p([r"C:\WINDOWS\explorer.exe"])
 
 
 def windows(*procs, executable=WIN_EXE, argv0=WIN_MOXI, **run_kw):
-    return walk(Table(chain(*procs), windows=True),
+    return walk(Table(chain(*procs), is_windows=True),
                 run(executable=executable, argv0=argv0, **run_kw))
 
 
@@ -679,12 +679,12 @@ def test_on_windows_a_parent_started_after_its_child_ends_the_walk():
     procs = chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE), PWSH,
                   p([r"C:\Other\moxi.exe"], image=r"C:\Other\moxi.exe"))
     procs[2] = Proc(**{**procs[2].__dict__, "started": 5000.0})
-    assert walk(Table(procs, windows=True), run(executable=WIN_EXE, argv0=WIN_MOXI)) is None
+    assert walk(Table(procs, is_windows=True), run(executable=WIN_EXE, argv0=WIN_MOXI)) is None
 
 
 def test_on_windows_a_parent_pid_with_no_process_ends_the_walk():
     procs = chain(p([WIN_EXE, WIN_MOXI], image=WIN_EXE), PWSH, top_parent=999)
-    assert walk(Table(procs, windows=True), run(executable=WIN_EXE, argv0=WIN_MOXI)) is None
+    assert walk(Table(procs, is_windows=True), run(executable=WIN_EXE, argv0=WIN_MOXI)) is None
 
 
 # -- the walk's limits on Linux and macOS -------------------------------------------------

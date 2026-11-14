@@ -198,12 +198,12 @@ def expand(text: str, loadout_dir: str | os.PathLike) -> str:
 
 
 def expand_command(text: str, loadout_dir: str | os.PathLike, *,
-                   windows: bool = sys.platform == "win32") -> str:
+                   is_windows: bool = sys.platform == "win32") -> str:
     """Hook command `text`, a shell string, with `{source}` replaced by the folder's
     absolute path quoted for the shell the harness runs hooks with: `shlex.quote` on Linux
     and macOS; on Windows, the quoting of `subprocess.list2cmdline`."""
     path = os.path.abspath(os.fspath(loadout_dir))
-    if windows:
+    if is_windows:
         import subprocess
 
         quoted = subprocess.list2cmdline([path])

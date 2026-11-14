@@ -128,17 +128,17 @@ def remove(kind: str, name: str, *, project: str | None = None,
     return edit(change, loadout_dir=loadout_dir)
 
 
-def disable(ident: str | Id, *, user: bool = False, project: str | None = None,
+def disable(ident: str | Id, *, user_only: bool = False, project: str | None = None,
             loadout_dir: str | os.PathLike | None = None) -> list[str]:
     """Write id `ident` (`<kind>:<name>@<harness>`) into `disabled` in every section that
-    lists the item, or only the user section (`user`) or project section `project`.
+    lists the item, or only the user section (`user_only`) or project section `project`.
     Returns the sections changed, each as `Section.label()` names it; a section where the
     id is already in force is left alone."""
     ident = _id(ident)
 
     def change(doc, manifest: Manifest) -> list[str]:
         changed = []
-        for section in _sections(manifest, ident, user=user, project=project):
+        for section in _sections(manifest, ident, user_only=user_only, project=project):
             if section.is_disabled(ident.kind, ident.name, ident.harness):
                 continue
             table = _section_table(doc, manifest, None if section.is_user else section.name,
@@ -153,7 +153,7 @@ def disable(ident: str | Id, *, user: bool = False, project: str | None = None,
     return edit(change, loadout_dir=loadout_dir) or []
 
 
-def enable(ident: str | Id, *, user: bool = False, project: str | None = None,
+def enable(ident: str | Id, *, user_only: bool = False, project: str | None = None,
            loadout_dir: str | os.PathLike | None = None) -> list[str]:
     """Take id `ident` out of `disabled` in every section that lists the item, or only the
     one named. With harness `*` every id of that item goes. An item switched off for every
@@ -163,7 +163,7 @@ def enable(ident: str | Id, *, user: bool = False, project: str | None = None,
 
     def change(doc, manifest: Manifest) -> list[str]:
         changed = []
-        sections = _sections(manifest, ident, user=user, project=project)
+        sections = _sections(manifest, ident, user_only=user_only, project=project)
         for section in sections:
             if ident.harness != EVERY and Id(ident.kind, ident.name, EVERY) in section.disabled:
                 raise ManifestError(manifest.path, [
@@ -287,13 +287,13 @@ def _matches(text: str, ident: Id) -> bool:
     return ident.harness == EVERY or other.harness == ident.harness
 
 
-def _sections(manifest: Manifest, ident: Id, *, user: bool, project: str | None):
+def _sections(manifest: Manifest, ident: Id, *, user_only: bool, project: str | None):
     """The sections `disable` and `enable` write: the one named, else every section that
     lists the item. A named section that doesn't list it, or no section at all, is
     refused."""
     what = f"{ident.kind} {ident.name}"
-    if user or project is not None:
-        section = manifest.section(None if user else project)
+    if user_only or project is not None:
+        section = manifest.section(None if user_only else project)
         if section is None:
             raise ManifestError(manifest.path, [f"no section [{PROJECT}.{project}]"])
         if not section.lists_item(ident.kind, ident.name):

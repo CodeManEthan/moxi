@@ -265,7 +265,7 @@ def test_the_recorded_base_holds_each_recorded_name_set_and_no_credential():
              "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "eu-west-1", "CODEX_HOME": "/x",
              "CLAUDE_CODE_OAUTH_TOKEN": "tok", "AWS_SECRET_ACCESS_KEY": "sec",
              "OPENAI_API_KEY": "key", "ARMED": "1", "TERM": "xterm", "TMPDIR": "/t"}
-    base = common.base_env(child, windows=False)
+    base = common.base_env(child, is_windows=False)
     assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_STATE_HOME": "/s",
                     "MOXI_HOME": "/m", "MOXI_COMMS_STATE_HOME": "/cs",
                     "CLAUDE_CONFIG_DIR": "/c", "CLAUDE_CODE_USE_BEDROCK": "1",
@@ -293,7 +293,7 @@ WINDOWS_CHILD = {
 
 
 def test_on_windows_the_base_keeps_the_system_names_a_process_needs_to_start():
-    base = common.base_env(WINDOWS_CHILD, windows=True)
+    base = common.base_env(WINDOWS_CHILD, is_windows=True)
     assert {k for k, v in base.items() if v is not None} == set(WINDOWS_CHILD) - {
         "API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MOXI_LAUNCHER_REQUEST", "SESSIONNAME"}
     assert base["CLAUDE_CODE_OAUTH_TOKEN"] is None and "API_KEY" not in base
@@ -304,12 +304,12 @@ def test_on_windows_the_base_keeps_the_system_names_a_process_needs_to_start():
 def test_a_row_with_no_base_takes_the_short_list_and_tmpdir_from_the_job():
     job = {"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C",
            "CLAUDE_CONFIG_DIR": "/c", "SYSTEMROOT": "C:\\Windows", "ARMED": "1"}
-    assert common.short_env(job, windows=False) == {
+    assert common.short_env(job, is_windows=False) == {
         "HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}
 
 
 def test_on_windows_a_row_with_no_base_takes_the_start_names_from_the_job():
-    short = common.short_env(WINDOWS_CHILD, windows=True)
+    short = common.short_env(WINDOWS_CHILD, is_windows=True)
     assert short["SystemRoot"] == "C:\\Windows" and short["ComSpec"].endswith("cmd.exe")
     assert short["Path"] == "C:\\Windows\\system32" and short["TEMP"] == "C:\\Temp"
     assert not {"API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MOXI_LAUNCHER_REQUEST",
@@ -317,7 +317,7 @@ def test_on_windows_a_row_with_no_base_takes_the_start_names_from_the_job():
 
 
 def test_elsewhere_the_base_leaves_the_windows_names_out():
-    base = common.base_env({**WINDOWS_CHILD, "HOME": "/h", "PATH": "/bin"}, windows=False)
+    base = common.base_env({**WINDOWS_CHILD, "HOME": "/h", "PATH": "/bin"}, is_windows=False)
     assert base == {"HOME": "/h", "PATH": "/bin", "CLAUDE_CODE_OAUTH_TOKEN": None}
 
 

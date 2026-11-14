@@ -615,7 +615,7 @@ class Endpoint:
         # The floors are read beside the listeners' asks, and any change is handed over
         # before this returns, so it reaches the harness before the ready's context.
         refresh = None
-        if self.floors.any:
+        if self.floors.has_floor:
             refresh = threading.Thread(target=self.floors.refresh, args=(event,),
                                        name="turns-floors", daemon=True)
             refresh.start()
@@ -957,7 +957,7 @@ class Endpoint:
         with `stop_shells` the stop's report. A `clear` or `exit` settles `ran` here. A
         compaction settles at the later of this and its Ready, since the session, not the
         call's return, confirms it; without `stop_shells` its Ready alone settles it. With
-        `stop_shells`, `shells` None reads as a list turns cannot vouch for."""
+        `stop_shells`, `include_shells` None reads as a list turns cannot vouch for."""
         with self._lock:
             c = self._commands.get(request_id)
             if c is None or c.result is not None:
@@ -1213,7 +1213,7 @@ class Endpoint:
                 reason = self._idle_refusal(first, second, if_turn_number)
                 if reason is None and (live is None or live.draft):
                     reason = "draft"         # an unreadable box holds
-                if reason is None and _busy(live, shells=not stop_shells):
+                if reason is None and _busy(live, include_shells=not stop_shells):
                     reason = "busy-agents"   # an unreadable list counts as busy
                 if reason is None:
                     reason = self._command_slot_refusal()
@@ -1606,11 +1606,11 @@ class Endpoint:
             log.warning("rewriting %s failed: %s", self.hello_path, exc)
 
 
-def _busy(live: Live | None, *, shells: bool = True) -> bool:
+def _busy(live: Live | None, *, include_shells: bool = True) -> bool:
     """A subagent pending, running or waiting, or a list that could not be read: unknown
-    counts as busy, never as 0. With `shells` False the background shells the adapter
+    counts as busy, never as 0. With `include_shells` False the background shells the adapter
     counts among `agents` are left out, as a command with `stop_shells` reads it."""
-    return live is None or live.busy(include_shells=shells)
+    return live is None or live.busy(include_shells=include_shells)
 
 
 def _unvouched() -> Shells:

@@ -87,7 +87,7 @@ def test_the_base_env_is_recorded_and_holds_no_credential(conn):
     child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_RUNTIME_DIR": "/run/u",
              "TZ": "UTC", "CLAUDE_CODE_OAUTH_TOKEN": "s3cr3t", "API_KEY": "k",
              "MOXI_LAUNCHER_REQUEST": "r"}
-    base = common.base_env(child, windows=False)
+    base = common.base_env(child, is_windows=False)
     assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C",
                     "XDG_RUNTIME_DIR": "/run/u", "TZ": "UTC",
                     "CLAUDE_CODE_OAUTH_TOKEN": None}

@@ -629,13 +629,13 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
 
 
 def _uv_dirs(env: Mapping[str, str], home: str, *,
-             windows: bool | None = None) -> dict[str, str]:
+             is_windows: bool | None = None) -> dict[str, str]:
     """uv's cache and installed-Python directories, as uv finds them from `environ`;
-    `windows` is `WINDOWS` unless given."""
+    `is_windows` is `WINDOWS` unless given."""
     def given(key: str) -> str | None:
         return env.get(key) or None
 
-    if WINDOWS if windows is None else windows:
+    if WINDOWS if is_windows is None else is_windows:
         local = given("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
         roaming = given("APPDATA") or os.path.join(home, "AppData", "Roaming")
         cache = os.path.join(local, "uv", "cache")

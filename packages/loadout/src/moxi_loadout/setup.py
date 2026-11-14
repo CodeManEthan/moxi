@@ -101,7 +101,7 @@ def setup(*, say: Callable[[str], object] = print,
             failed.append(f"loadout: the global mode wasn't written: {_one_line(exc)}")
     from moxi_loadout import repo_link
 
-    repo_link.sync(loadout_dir, on=machine.reinstall_on_commit, say=lambda line: say(
+    repo_link.sync(loadout_dir, enabled=machine.reinstall_on_commit, say=lambda line: say(
         f"loadout: {line}"))
     return "\n".join(failed) if failed else 0
 

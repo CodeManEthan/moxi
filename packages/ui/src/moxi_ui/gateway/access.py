@@ -313,7 +313,7 @@ class Access:
 
         return Parts(table=tables, session=self, fallback=_fallback(base.fallback),
                      router=self.layer(base.router), end_sessions=self.end_sessions,
-                     stale=self.stale, audit=self.audit, tick=self.tick,
+                     stale=self.mark_stale, audit=self.audit, tick=self.tick,
                      refusals=base.refusals)
 
     def add_entries(self, table: Table) -> Table:
@@ -378,7 +378,7 @@ class Access:
         ids = cookie_ids(headers, COOKIE)
         if not ids:
             return None
-        return self.store.find(ids, key_of(headers), need_key=need_key)
+        return self.store.use(ids, key_of(headers), need_key=need_key)
 
     def device_of(self, id_hash: str | None) -> str | None:
         """The device id of the live session `id_hash`."""
@@ -390,7 +390,7 @@ class Access:
         """End every gateway session."""
         self.store.clear()
 
-    def stale(self, old: Kept) -> None:
+    def mark_stale(self, old: Kept) -> None:
         """Mark stale the devices of the address the gateway just left."""
         try:
             marked = self.devices.stale_of(old.host, old.provider)

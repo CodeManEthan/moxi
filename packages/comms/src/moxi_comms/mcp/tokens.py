@@ -293,7 +293,7 @@ class Registry:
             return 0
         with self._lock:
             self._active = {r[0]: Row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in rows}
-        self.check_ended()
+        self.revoke_ended()
         with self._lock:
             return len(self._active)
 
@@ -379,7 +379,7 @@ class Registry:
                      "last one revoked %s", identity, n, NAME_LOST)
         return n
 
-    def check_ended(self, claims: Iterable[str] | None = None) -> int:
+    def revoke_ended(self, claims: Iterable[str] | None = None) -> int:
         """Revoke `session-ended` the active rows of each claim in `claims` (every
         active claim when None) whose session has positively ended. The evidence is read
         outside the lock. Returns how many rows were revoked."""

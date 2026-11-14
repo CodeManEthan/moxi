@@ -39,10 +39,10 @@ def _args(tmp_path, *flags) -> dict:
     return launch_args(["--cwd", str(tmp_path), *flags])
 
 
-def _roster_flags(roots, *, network=True):
+def _roster_flags(roots, *, allow_network=True):
     return ["--option", "agents.enabled=false",
             "--option", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}",
-            "--option", f"sandbox_workspace_write.network_access={str(network).lower()}"]
+            "--option", f"sandbox_workspace_write.network_access={str(allow_network).lower()}"]
 
 
 # Today's roster shapes: the flags comms' wrapper passes for each row, and the options
@@ -56,7 +56,7 @@ ROSTER_ROWS = {
                                         "network_access": True}}}),
     "roots, a model and the network off": (
         ["--sandbox", "workspace-write", "--model", "gpt-sample",
-         *_roster_flags(["/srv/row", "/srv/record"], network=False)],
+         *_roster_flags(["/srv/row", "/srv/record"], allow_network=False)],
         {"sandbox": "workspace-write", "model": "gpt-sample", "config": {
             "agents": {"enabled": False},
             "sandbox_workspace_write": {"writable_roots": ["/srv/row", "/srv/record"],
@@ -208,9 +208,9 @@ def test_missing_files_and_dirs_are_usage_errors(tmp_path):
 
 # -- the settings check ------------------------------------------------------------------
 
-def _options(tmp_path, roots=(), *, network=True):
+def _options(tmp_path, roots=(), *, allow_network=True):
     return _args(tmp_path, "--sandbox", "workspace-write",
-                 *_roster_flags([str(r) for r in roots], network=network))["options"]
+                 *_roster_flags([str(r) for r in roots], allow_network=allow_network))["options"]
 
 
 @pytest.mark.parametrize(("reported", "reason"), [

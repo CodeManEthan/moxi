@@ -219,17 +219,17 @@ def _unknown(reason: str) -> Verdict:
     return Verdict("warn", f"unknown: {reason}", None, unknown=True)
 
 
-def judge(row: Row, st: units.UnitState | None, *, flag: bool | None, health: tuple[str, str] | None = None, socket: units.UnitState | None = None,
+def judge(row: Row, st: units.UnitState | None, *, is_enabled: bool | None, health: tuple[str, str] | None = None, socket: units.UnitState | None = None,
           supervisor: bool = True, booted: float | None = None,
           unread: str | None = None) -> Verdict:
     """The verdict of one row.
 
     `st` is what the supervisor said of it (None when the read did not cover it, and
-    then `unread` says why), `flag` its on/off (`state.flag`; None when unreadable),
+    then `unread` says why), `is_enabled` its on/off (`state.flag`; None when unreadable),
     `health` its health check's `(verdict, line)` when one ran, `socket` a module
     daemon's listening-socket state, `supervisor` False when this system has none, and
     `booted` the last boot time, before which a recorded stop no longer holds."""
-    found = _state_verdict(row, st, flag, socket=socket, supervisor=supervisor,
+    found = _state_verdict(row, st, is_enabled, socket=socket, supervisor=supervisor,
                            booted=booted, unread=unread)
     if health is None or found.state not in ("ok", "warn") or found.unknown:
         return found
@@ -242,7 +242,7 @@ def judge(row: Row, st: units.UnitState | None, *, flag: bool | None, health: tu
     return found
 
 
-def _state_verdict(row: Row, st, flag, *, socket, supervisor, booted, unread) -> Verdict:
+def _state_verdict(row: Row, st, is_enabled, *, socket, supervisor, booted, unread) -> Verdict:
     user = isinstance(row, UserRow)
     if user and not row.here:
         return Verdict("off", f"added on {row.platform}")
@@ -250,9 +250,9 @@ def _state_verdict(row: Row, st, flag, *, socket, supervisor, booted, unread) ->
         return Verdict("off", "no supervisor")
     if user and row.removing:
         return Verdict("warn", "remove not finished", _cmd("remove", row))
-    if not user and flag is False:
+    if not user and is_enabled is False:
         return Verdict("off", f"its switch {row.switch} is off")
-    if flag is None:
+    if is_enabled is None:
         what = (f"its switch {row.switch}" if not user
                 else f"its key {state.key(row.name)}")
         return _unknown(f"{what} can't be read")
@@ -263,34 +263,34 @@ def _state_verdict(row: Row, st, flag, *, socket, supervisor, booted, unread) ->
     if st.state == "off":
         return Verdict("off", st.detail or "not for this system")
     if st.state == "missing":
-        return _missing(row, flag=flag)
+        return _missing(row, is_enabled=is_enabled)
     if user and state.is_wrapped(row) and st.wrapped is None:
         return Verdict("warn", "not wrapped: runs are neither gated nor recorded",
-                       _cmd("enable" if flag else "disable", row))
+                       _cmd("enable" if is_enabled else "disable", row))
     if row.kind == "daemon":
-        return _daemon(row, st, flag=flag, socket=socket, booted=booted)
-    return _timer(row, st, flag=flag)
+        return _daemon(row, st, is_enabled=is_enabled, socket=socket, booted=booted)
+    return _timer(row, st, is_enabled=is_enabled)
 
 
-def _missing(row: Row, *, flag: bool) -> Verdict:
+def _missing(row: Row, *, is_enabled: bool) -> Verdict:
     if isinstance(row, ModuleRow):
         fix = f"moxi install {row.module}"
     elif row.form == "written":
-        fix = _cmd("enable" if flag else "disable", row)
+        fix = _cmd("enable" if is_enabled else "disable", row)
     else:
         fix = _cmd("remove", row)
     what = "its unit is missing" if row.form != "adopted" else f"{row.unit} is missing"
-    return Verdict("fail" if flag else "warn", what, fix)
+    return Verdict("fail" if is_enabled else "warn", what, fix)
 
 
-def _daemon(row: Row, st, *, flag: bool, socket, booted) -> Verdict:
+def _daemon(row: Row, st, *, is_enabled: bool, socket, booted) -> Verdict:
     running = st.state == "active"
     listening = (socket is not None and socket.state == "active" and not running
                  and st.state == "inactive")
     enabled = st.enabled
     if enabled is None and socket is not None:
         enabled = socket.enabled
-    if flag:
+    if is_enabled:
         if listening:
             return Verdict("ok", "idle, socket listening")
         if not running:
@@ -318,9 +318,9 @@ def _daemon(row: Row, st, *, flag: bool, socket, booted) -> Verdict:
     return Verdict("off", "off")
 
 
-def _timer(row: Row, st, *, flag: bool) -> Verdict:
+def _timer(row: Row, st, *, is_enabled: bool) -> Verdict:
     module_or_wrapped = isinstance(row, ModuleRow) or state.is_wrapped(row)
-    if not flag:
+    if not is_enabled:
         if module_or_wrapped:
             return Verdict("off", "off; its gate holds the runs")
         if st.enabled is None:
@@ -361,7 +361,7 @@ def _adopted_task(row: Row, st) -> bool:
 @dataclass(frozen=True)
 class View:
     """One row as the reads show it: the row, what the supervisor said (`st`, None when
-    not read), its on/off (`flag`), its health check's `(verdict, line)` when one ran,
+    not read), its on/off (`is_enabled`), its health check's `(verdict, line)` when one ran,
     and its verdict."""
 
     row: Row
@@ -472,11 +472,11 @@ def within(fn: Callable[[], object], seconds: float):
     return True, value
 
 
-def views(rows: Sequence[Row], *, health: bool = False,
+def views(rows: Sequence[Row], *, check_health: bool = False,
           status_seconds: float | None = None,
           health_seconds: float | None = None, health_at_once: int | None = None,
           known_health: Mapping[str, tuple[str, str]] | None = None) -> list[View]:
-    """Every row's view, from one supervisor read. With `health`, every running
+    """Every row's view, from one supervisor read. With `check_health`, every running
     daemon's check runs, all at once or `health_at_once` at a time, waited on for
     `health_seconds` a turn (see `healths`);
     `known_health` gives results of an earlier run to judge with instead. With
@@ -494,9 +494,9 @@ def views(rows: Sequence[Row], *, health: bool = False,
         else:
             states, sockets = {r.id: None for r in rows}, {}
             unread = f"the supervisor did not answer in {status_seconds:g} s"
-            health = False
+            check_health = False
     on = flags(rows)
-    if health:
+    if check_health:
         checked = healths([(r, states.get(r.id)) for r in rows], health_seconds,
                           at_once=health_at_once)
     elif known_health is not None and unread is None:
@@ -508,7 +508,7 @@ def views(rows: Sequence[Row], *, health: bool = False,
     out = []
     for row in rows:
         st = states.get(row.id)
-        verdict = judge(row, st, flag=on[row.id], health=checked.get(row.id),
+        verdict = judge(row, st, is_enabled=on[row.id], health=checked.get(row.id),
                         socket=sockets.get(row.id), supervisor=supervisor, booted=booted,
                         unread=unread)
         out.append(View(row, st, on[row.id], checked.get(row.id), verdict))

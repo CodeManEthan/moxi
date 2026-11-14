@@ -311,7 +311,7 @@ def test_each_request_writes_its_row_and_each_gate_its_refusal_code(tmp_path: Pa
         assert [row.get("gate") for row in by_kind.get(code, [])] == [number], code
     (read,) = [row for row in by_kind["request"] if row["path"] == "/m/fixture/api/rows"]
     assert read["status"] == 200 and read["module"] == "fixture" and read["device"]
-    assert read["session"] == gate.phone.access.store.find(
+    assert read["session"] == gate.phone.access.store.use(
         [gate.phone.cookie], gate.phone.key, need_key=True)[:12]
     assert isinstance(read["ms"], int)
     assert all(not set(row) & audit_mod.FORBIDDEN for row in rows)

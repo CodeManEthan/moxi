@@ -165,7 +165,7 @@ def test_disable_writes_every_section_listing_the_item_or_the_one_named(loadout_
     with pytest.raises(ManifestError, match="no section lists"):
         writes.disable("agent:lead@codex", loadout_dir=loadout_dir)
     with pytest.raises(ManifestError, match="doesn't list"):
-        writes.disable("agent:lead@codex", user=True, loadout_dir=loadout_dir)
+        writes.disable("agent:lead@codex", user_only=True, loadout_dir=loadout_dir)
     with pytest.raises(ManifestError, match="not <kind>"):
         writes.disable("review", loadout_dir=loadout_dir)
 
@@ -173,12 +173,12 @@ def test_disable_writes_every_section_listing_the_item_or_the_one_named(loadout_
 def test_enable_takes_ids_out_and_refuses_one_harness_under_a_star(loadout_dir):
     start(loadout_dir)
     writes.disable("skill:review@codex", loadout_dir=loadout_dir)
-    writes.disable("skill:review@claude", user=True, loadout_dir=loadout_dir)
-    assert writes.enable("skill:review@codex", user=True, loadout_dir=loadout_dir) == ["user"]
+    writes.disable("skill:review@claude", user_only=True, loadout_dir=loadout_dir)
+    assert writes.enable("skill:review@codex", user_only=True, loadout_dir=loadout_dir) == ["user"]
     assert read(loadout_dir).user.disabled == (manifest.Id("skill", "review", "claude"),)
     assert writes.enable("skill:review@*", loadout_dir=loadout_dir) == ["user", "project web"]
     assert all(not s.disabled for s in read(loadout_dir).sections())
-    writes.disable("skill:review@*", user=True, loadout_dir=loadout_dir)
+    writes.disable("skill:review@*", user_only=True, loadout_dir=loadout_dir)
     with pytest.raises(ManifestError, match="for every harness"):
         writes.enable("skill:review@codex", loadout_dir=loadout_dir)
 

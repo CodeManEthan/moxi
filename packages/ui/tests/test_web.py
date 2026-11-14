@@ -205,7 +205,7 @@ def test_the_shells_own_components_are_placed_from_its_build():
     from moxi_ui.snapshot import check_components
 
     assets = export(page.PAGE)["assets"]
-    placed, refused = check_components("ui", module.COMPONENTS, page=True, assets=assets)
+    placed, refused = check_components("ui", module.COMPONENTS, has_page=True, assets=assets)
     assert refused == []
     assert {item["name"]: item["element"] for item in placed} == {
         "page": "moxi-ui-page", "servers": "moxi-ui-servers", "health": "moxi-ui-health"}

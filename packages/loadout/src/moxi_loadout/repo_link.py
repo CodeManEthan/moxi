@@ -73,8 +73,8 @@ def registered(link, loadout_dir) -> dict[str, dict]:
     return {p["id"]: p for p in found if p.get("id") in PIECES}
 
 
-def sync(loadout_dir: str | os.PathLike, *, on: bool, say: Callable[[str], object] = print) -> None:
-    """Register the pieces in the work tree holding `loadout_dir` while `on`, or remove them
+def sync(loadout_dir: str | os.PathLike, *, enabled: bool, say: Callable[[str], object] = print) -> None:
+    """Register the pieces in the work tree holding `loadout_dir` while `enabled`, or remove them
     while not. See the module's docs."""
     if not in_work_tree(loadout_dir):
         return
@@ -85,7 +85,7 @@ def sync(loadout_dir: str | os.PathLike, *, on: bool, say: Callable[[str], objec
         return
     try:
         have = registered(link, loadout_dir)
-        if on:
+        if enabled:
             for pid in PIECES:
                 if pid not in have:
                     _report(link.add(loadout_dir, pid), say)
@@ -94,15 +94,15 @@ def sync(loadout_dir: str | os.PathLike, *, on: bool, say: Callable[[str], objec
                 if pid in have:
                     _report(link.remove(loadout_dir, pid), say)
     except link.Failure as exc:
-        say(f"the git hook pieces weren't {_verb(on=on)}: {exc.text}")
+        say(f"the git hook pieces weren't {_verb(enabled=enabled)}: {exc.text}")
         for line in exc.lines:
             say(f"  {line}")
     except (OSError, subprocess.TimeoutExpired) as exc:
-        say(f"the git hook pieces weren't {_verb(on=on)}: {_git_failed(exc)}")
+        say(f"the git hook pieces weren't {_verb(enabled=enabled)}: {_git_failed(exc)}")
 
 
-def _verb(*, on: bool) -> str:
-    return "registered" if on else "removed"
+def _verb(*, enabled: bool) -> str:
+    return "registered" if enabled else "removed"
 
 
 def _git_failed(exc: BaseException) -> str:
@@ -124,7 +124,7 @@ def _report(report, say) -> None:
         say(str(problem))
 
 
-def state(loadout_dir: str | os.PathLike, *, on: bool, seconds: float | None = None):
+def state(loadout_dir: str | os.PathLike, *, enabled: bool, seconds: float | None = None):
     """The doctor's row for the link: `off` when the folder is in no git work tree, when
     repo is absent (with repo, a commit reinstalls) or when the setting is off; `warn`
     when repo can't be loaded or read, or a piece is unregistered or disabled while the
@@ -143,7 +143,7 @@ def state(loadout_dir: str | os.PathLike, *, on: bool, seconds: float | None = N
                    "moxi install loadout --with repo")
     if link is None:
         return Row("loadout", name, "warn", why, "moxi doctor")
-    if not on:
+    if not enabled:
         return Row("loadout", name, "off", f"{SETTING} is off, so a commit to the loadout "
                    "folder doesn't reinstall it",
                    f"moxi config set loadout {SETTING} true")

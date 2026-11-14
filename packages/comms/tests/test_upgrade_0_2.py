@@ -128,7 +128,7 @@ def test_the_move_carries_every_row_and_makes_rows_for_row_less_mail(soon):
                               "7 message(s), 5 queue row(s) (3 made")
     assert upgrade_0_2.FENCED_LINE.format(name="planner") in said
     for p in upgrade_0_2_paths().values():
-        assert not p.exists() and upgrade_0_2.moved_name(p).exists()
+        assert not p.exists() and upgrade_0_2.moved_path(p).exists()
     assert not Path(f"{store.path()}.new").exists()
 
 
@@ -230,7 +230,7 @@ def test_a_move_stopped_after_its_commit_finishes_its_renames(soon, monkeypatch)
     said = []
     store.open_write(report=said.extend).close()
     assert said[0].startswith("finished the move")
-    assert all(upgrade_0_2.moved_name(p).exists() for p in found.values())
+    assert all(upgrade_0_2.moved_path(p).exists() for p in found.values())
 
 
 def test_a_stopped_move_whose_cursor_dir_alone_is_left_finishes_it(soon, monkeypatch):
@@ -246,12 +246,12 @@ def test_a_stopped_move_whose_cursor_dir_alone_is_left_finishes_it(soon, monkeyp
     monkeypatch.setattr(upgrade_0_2, "_rename", real)
     for role, p in found.items():
         if role != "cursors":
-            os.replace(p, upgrade_0_2.moved_name(p))
+            os.replace(p, upgrade_0_2.moved_path(p))
     assert store.zero_two_files() == [found["cursors"]]
     said = []
     store.open_write(report=said.extend).close()
     assert said[0].startswith("finished the move")
-    assert upgrade_0_2.moved_name(found["cursors"]).is_dir()
+    assert upgrade_0_2.moved_path(found["cursors"]).is_dir()
     assert not found["cursors"].exists()
 
 
@@ -439,7 +439,7 @@ def test_setup_leaves_the_move_to_the_daemon_while_0_2s_daemon_answers(capsys):
 def test_setup_moves_0_2s_files_and_provisions(soon, capsys):
     found = zero_two_home()
     assert run_setup() == (0, None)
-    assert all(upgrade_0_2.moved_name(p).exists() for p in found.values())
+    assert all(upgrade_0_2.moved_path(p).exists() for p in found.values())
     assert rows("SELECT value FROM meta WHERE key = 'migrated_from'") == [("0.2",)]
 
 

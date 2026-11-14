@@ -68,7 +68,7 @@ def sessions() -> Path:
 
 def make(fake, sessions, **kw) -> watch.Watcher:
     return watch.Watcher(agents=fake.agents, read=fake.read, now=fake.now,
-                         sessions=sessions, **kw)
+                         session_files_dir=sessions, **kw)
 
 
 def poke(sessions: Path) -> None:
@@ -235,7 +235,7 @@ def test_a_fresh_session_with_no_transcript_is_read_once_a_transcript_appears(ro
     def read(harness, session, *, now):
         fake_read.append(session)
         return Clock("fresh")
-    w = watch.Watcher(agents=fake.agents, read=read, now=fake.now, sessions=sessions)
+    w = watch.Watcher(agents=fake.agents, read=read, now=fake.now, session_files_dir=sessions)
     w.tick()
     w.tick()
     assert fake_read == [A]
@@ -462,7 +462,7 @@ def test_run_ticks_until_stopped(sessions):
             ticks.append(1)
             stop.set()
             return []
-    assert watch.run(watcher=Once(agents=lambda: [], sessions=sessions), stop=stop) == 0
+    assert watch.run(watcher=Once(agents=lambda: [], session_files_dir=sessions), stop=stop) == 0
     assert ticks == [1]
 
 
@@ -479,7 +479,7 @@ def test_run_keeps_going_after_a_failed_tick(own_roots, sessions, caplog):
             return []
     write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
-        assert watch.run(watcher=Flaky(agents=lambda: [], sessions=sessions), stop=stop) == 0
+        assert watch.run(watcher=Flaky(agents=lambda: [], session_files_dir=sessions), stop=stop) == 0
     assert len(count) == 2 and "boom" in caplog.text
 
 
@@ -497,7 +497,7 @@ def test_a_tick_below_one_second_ticks_every_second(own_roots, sessions, caplog)
     write_cache_config(own_roots, "[watch]\ntick_s = 0\n")
     config = Config(MODULE, schema())
     config.start()
-    w = watch.Watcher(agents=lambda: [], sessions=sessions)
+    w = watch.Watcher(agents=lambda: [], session_files_dir=sessions)
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
         assert watch._interval(config, w) == 1.0
     assert "watch.tick_s is 0" in caplog.text

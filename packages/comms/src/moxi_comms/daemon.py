@@ -1544,7 +1544,7 @@ class Daemon:
             # revoked only on positive evidence.
             claims = {b.claim_key for b in gone if b.claim_key}
             if claims:
-                self.mcp_tokens.check_ended(claims)
+                self.mcp_tokens.revoke_ended(claims)
 
     # ------------------------------------------------------------------ the tool token
     def _mcp_token(self, conn, params: dict) -> dict:

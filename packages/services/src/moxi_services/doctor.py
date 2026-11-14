@@ -51,7 +51,7 @@ def rows() -> Iterator[Row]:
               else "no rows yet: the first `moxi services add` makes them")
     if not found:
         return
-    for view in views(found, health=True, status_seconds=STATUS_SECONDS,
+    for view in views(found, check_health=True, status_seconds=STATUS_SECONDS,
                       health_seconds=state.HEALTH_SECONDS):
         verdict = view.verdict
         yield Row(MODULE, view.row.id, verdict.state, verdict.reason, verdict.fix)

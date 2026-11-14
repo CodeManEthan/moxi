@@ -446,14 +446,14 @@ def snapshot(python: str) -> dict:
 
 
 def run_settle(python: str, module: str, *, replace: bool = False,
-               skills: bool | None = None):
+               install_skills: bool | None = None):
     """Run module `module`'s settle step in a fresh process under this install's hold of
     the core lock, and wait for it however long it takes (`moxi._settle.run_child`).
     Returns its `moxi._settle.Outcome`."""
     from . import _settle
 
     return _settle.run_child(_settle.child_argv(python, module, replace=replace,
-                                                skills=skills))
+                                                install_skills=install_skills))
 
 
 # -- the installer ------------------------------------------------------------------------
@@ -708,7 +708,7 @@ class Installer:
                 continue
             guard_streams()
             outcome = run_settle(self.env.python, name, replace=self.replace,
-                                 skills=self.skills)
+                                 install_skills=self.skills)
             if outcome.interrupted:
                 raise InstallError(f"interrupted in {name}'s settle step; no later step "
                                    f"ran. Run `moxi install {self.module}` again to finish.")

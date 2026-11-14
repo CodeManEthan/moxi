@@ -573,29 +573,29 @@ def _drop_stale(path, keys: list[str], report: Report, *, why: str) -> None:
 
 
 def enable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, value=True)
+    return _flip(path, piece_id, enabled=True)
 
 
 def disable(path: str | os.PathLike, piece_id: str) -> Report:
-    return _flip(path, piece_id, value=False)
+    return _flip(path, piece_id, enabled=False)
 
 
-def _flip(path: str | os.PathLike, piece_id: str, *, value: bool) -> Report:
+def _flip(path: str | os.PathLike, piece_id: str, *, enabled: bool) -> Report:
     repo = _resolve(path)
     state = _state(repo)
     if piece_id not in state.pieces:
         raise Usage(f"{piece_id} is not registered in {repo.root}")
     report = Report()
     try:
-        gitconf.set_enabled(repo, piece_id, value=value, state=state)
-        if not value:
+        gitconf.set_enabled(repo, piece_id, enabled=enabled, state=state)
+        if not enabled:
             # The record, its ledger key, then the flag.
             _records.close_piece(repo.common_dir, piece_id)
             gitconf.clear_recorded(repo, piece_id, state)
         report.take(repo.root, gitconf.sync(repo, state))
     except gitconf.GitError as exc:
         raise Failure(str(exc)) from None
-    report.lines.append(f"{'enabled' if value else 'disabled'} {piece_id} in {repo.root}")
+    report.lines.append(f"{'enabled' if enabled else 'disabled'} {piece_id} in {repo.root}")
     _sweep(repo)
     return report
 

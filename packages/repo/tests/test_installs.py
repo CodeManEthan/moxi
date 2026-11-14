@@ -302,7 +302,7 @@ def test_on_uninstall_removes_the_modules_pieces_and_specs_with_their_records(
     clock = [1000.0]
     demo.mp.setattr(committer, "_now", lambda: clock[0])
     bare = make_remote(demo, alpha)
-    deny(bare, on=True)
+    deny(bare, enabled=True)
     api.add(alpha, ["ears/gate", "ears/watch", "demo/lint"])
     api.add(beta, ["ears/gate"])
     moxi_repo.save_spec(spec(alpha, name="ears/snap", push="origin"))

@@ -485,13 +485,13 @@ _NAMED: dict[str, frozenset[str]] = {
 _LINE_KEYS = frozenset({"timestamp", "type", "payload"})
 
 
-def line_records(raw: bytes | str, *, at: dict, state: State, agent_id: str | None = None,
+def line_records(raw: bytes | str, *, position: dict, state: State, agent_id: str | None = None,
                  keep_raw: bool = False, unterminated: bool = False,
                  ) -> tuple[list[Record], State]:
     """One line's records, and the state after it.
 
     The state handed in is the state before the line (`State()` for line 1 of a read from
-    the start); nothing else is carried between lines. `at` is the record's position
+    the start); nothing else is carried between lines. `position` is the record's position
     (`{"line": n, "offset": b}`) and `agent_id` the source's. `unterminated` marks the
     file's last line written without its newline; only a malformed record carries it. A
     blank line gives no records.
@@ -507,7 +507,7 @@ def line_records(raw: bytes | str, *, at: dict, state: State, agent_id: str | No
         data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
         kind = entry.get("type") if entry is not None else None
         return [Malformed(harness=CODEX, session_id=state.session_id, agent_id=agent_id,
-                          at=at, turn_id=state.turn,
+                          at=position, turn_id=state.turn,
                           time=_time(entry) if entry is not None else UNKNOWN,
                           raw_kind=kind if isinstance(kind, str) else "",
                           raw=data.strip(b"\r\n"), unterminated=unterminated,
@@ -525,7 +525,7 @@ def line_records(raw: bytes | str, *, at: dict, state: State, agent_id: str | No
         if not isinstance(sub, str):
             data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
             return [Malformed(harness=CODEX, session_id=state.session_id,
-                              agent_id=agent_id, at=at, turn_id=state.turn,
+                              agent_id=agent_id, at=position, turn_id=state.turn,
                               time=_time(entry), raw_kind=kind, raw=data.strip(b"\r\n"),
                               unterminated=unterminated, why=BAD_STRUCTURE)], state
     raw_kind = f"{kind}/{sub}" if sub is not None else kind
@@ -535,7 +535,7 @@ def line_records(raw: bytes | str, *, at: dict, state: State, agent_id: str | No
     named = _NAMED.get(raw_kind, frozenset({"type", "turn_id"}))
     turn = _own_turn(payload) or state.turn
     common = {
-        "harness": CODEX, "session_id": state.session_id, "agent_id": agent_id, "at": at,
+        "harness": CODEX, "session_id": state.session_id, "agent_id": agent_id, "at": position,
         "time": _time(entry), "turn_id": turn, "raw_kind": raw_kind,
         "extra": {**{k: v for k, v in entry.items() if k not in _LINE_KEYS},
                   **{k: v for k, v in payload.items() if k not in named}},
@@ -553,7 +553,7 @@ def line_records(raw: bytes | str, *, at: dict, state: State, agent_id: str | No
             return [Malformed(**{**common, "raw": data.strip(b"\r\n")},
                               unterminated=unterminated, why=BAD_STRUCTURE)], state
         request_id = (_str(payload.get("response_id"))
-                      or f"tc:{_thread_label(state)}:{at.get('line')}")
+                      or f"tc:{_thread_label(state)}:{position.get('line')}")
         return [_request(common, state, request_id, usage, turn)], state
     if kind == "turn_context":
         return [_marker(common, "settings", model=_said(payload, "model"),
@@ -562,7 +562,7 @@ def line_records(raw: bytes | str, *, at: dict, state: State, agent_id: str | No
     if raw_kind in COMPACTION_KINDS:
         return [_marker(common, "compaction", trigger=UNKNOWN, pre_tokens=UNKNOWN)], state
     if kind == "event_msg":
-        return _event(common, sub, payload, state, before, at), state
+        return _event(common, sub, payload, state, before, position), state
     if kind == "response_item":
         return _item(common, sub, payload), state
     return [Other(**common, recognised=kind in TOP_KINDS)], state
@@ -574,11 +574,11 @@ def _time(entry: dict) -> Any:
 
 
 def _event(common: dict, sub: str, payload: dict, state: State, before: State,
-           at: dict) -> list[Record]:
+           position: dict) -> list[Record]:
     if sub == "token_count":
         out: list[Record] = []
         if state.legacy:
-            request = _legacy_request(common, state, before, payload, at.get("line"))
+            request = _legacy_request(common, state, before, payload, position.get("line"))
             if request is not None:
                 out.append(request)
         rate_limits = payload.get("rate_limits")
@@ -734,7 +734,7 @@ class Mapper:
         """One line, `line` its 1-based number and `offset` the byte offset of its start.
         Returns its records, in order."""
         records, self.state = line_records(
-            raw, at={"line": line, "offset": offset}, state=self.state,
+            raw, position={"line": line, "offset": offset}, state=self.state,
             agent_id=self.agent_id, keep_raw=self.keep_raw, unterminated=unterminated)
         return records
 
@@ -780,7 +780,7 @@ def read_records(path: str | Path, *, session_id: str | None = None,
 
 # --- limits readings from the app-server -------------------------------------------------
 
-def _app_server_limits(snapshot: Any, observed_at: Any, at: dict,
+def _app_server_limits(snapshot: Any, observed_at: Any, position: dict,
                        key: str | None) -> Limits:
     if not isinstance(snapshot, Mapping):
         raise ValueError("a rate-limit snapshot is a JSON object")
@@ -792,8 +792,8 @@ def _app_server_limits(snapshot: Any, observed_at: Any, at: dict,
     if limit_id is UNKNOWN and key is not None:
         limit_id = key
     return Limits(
-        harness=CODEX, session_id=None, at=at, time=observed_at,
-        raw_kind="app-server/" + at["app_server"],
+        harness=CODEX, session_id=None, at=position, time=observed_at,
+        raw_kind="app-server/" + position["app_server"],
         extra={k: v for k, v in snapshot.items() if k not in named},
         observed_at=observed_at, source="app-server", limit_id=limit_id,
         limit_name=_said(snapshot, "limitName"), plan_type=_said(snapshot, "planType"),

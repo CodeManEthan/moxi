@@ -49,7 +49,7 @@ def read_back(path: str | Path, *, block: int, limit: int, read_head: bool = Fal
     1 or a negative limit. Use the reader as a context manager, or iterate it to its end,
     to close the file.
     """
-    return Reader(path, block=block, limit=limit, head=read_head, end=end, offsets=offsets)
+    return Reader(path, block=block, limit=limit, read_head=read_head, end=end, offsets=offsets)
 
 
 class Reader:
@@ -74,7 +74,7 @@ class Reader:
     `stat` the open file's `os.stat_result`, so a caller can name the file it read.
     """
 
-    def __init__(self, path: str | Path, *, block: int, limit: int, head: bool = False,
+    def __init__(self, path: str | Path, *, block: int, limit: int, read_head: bool = False,
                  end: int | None = None, offsets: bool = False):
         if not isinstance(block, int) or isinstance(block, bool) or block < 1:
             raise ValueError(f"block must be a positive number of bytes, not {block!r}")
@@ -99,7 +99,7 @@ class Reader:
                 self._file.seek(self._size - 1)
                 self._unterminated = self._file.read(1) != b"\n"
             self._stop: int | None = 0
-            if head:
+            if read_head:
                 self._read_head()
         except BaseException:
             self._file.close()

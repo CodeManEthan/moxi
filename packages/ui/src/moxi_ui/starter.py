@@ -175,9 +175,9 @@ class Use:
     its client reconnects to the next server.
     """
 
-    def __init__(self, server: Server, *, stream: bool, close: Callable[[], Any] | None):
+    def __init__(self, server: Server, *, streaming: bool, close: Callable[[], Any] | None):
         self.server = server
-        self.stream = stream
+        self.stream = streaming
         self._close = close
         self._ended = False
 
@@ -242,11 +242,11 @@ class Server:
             raise ServerGone(f"{self.module}'s server {self.info.server_id} is "
                              f"{'gone' if self.gone else 'draining'}")
 
-    def use(self, *, stream: bool = False, close: Callable[[], Any] | None = None) -> Use:
-        """Count one open request (or, with `stream`, a stream) on this server until the
+    def use(self, *, streaming: bool = False, close: Callable[[], Any] | None = None) -> Use:
+        """Count one open request (or, with `streaming`, a stream) on this server until the
         returned `Use` ends. `close` is called if the server drains while it is open."""
         self._check()
-        use = Use(self, stream=stream, close=close)
+        use = Use(self, streaming=streaming, close=close)
         self._uses.add(use)
         self._quiet.clear()
         return use

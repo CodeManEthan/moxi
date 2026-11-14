@@ -682,7 +682,7 @@ _NAMED_FOR = {kind: _NAMED | named for kind, named in _NAMED_BY_KIND.items()}
 #: does not map the blocks.
 CONTENT_KINDS = frozenset({"message", "tool_call", "tool_result"})
 
-def line_records(raw: bytes | str, *, at: dict, session_id: Any = None,
+def line_records(raw: bytes | str, *, position: dict, session_id: Any = None,
                  agent_id: str | None = None, prompt_id: str | None = None,
                  keep_raw: bool = False, unterminated: bool = False,
                  ) -> tuple[Request | None, list[Record], str | None]:
@@ -693,18 +693,18 @@ def line_records(raw: bytes | str, *, at: dict, session_id: Any = None,
     the `promptId` current after the line (its own, else the one handed in). A blank line
     gives `(None, [], prompt_id)`.
 
-    `at` is the record's position (`{"line": n, "offset": b}`). `session_id` and
+    `position` is the record's position (`{"line": n, "offset": b}`). `session_id` and
     `agent_id` are the source's; where they are None the line's own `sessionId` and
     `agentId` are used. `prompt_id` is the turn the line is in, from the lines before it.
     `unterminated` marks the file's last line written without its newline; it is carried
     only by a malformed record.
     """
-    pending, records, prompt_id, _ends = _map_line(raw, at, session_id, agent_id,
+    pending, records, prompt_id, _ends = _map_line(raw, position, session_id, agent_id,
                                                    prompt_id, keep_raw=keep_raw, unterminated=unterminated)
     return (_build(pending, final=True) if pending is not None else None), records, prompt_id
 
 
-def _common(entry: dict, kind: str, raw_kind: str, at: dict, session_id: Any,
+def _common(entry: dict, kind: str, raw_kind: str, position: dict, session_id: Any,
             agent_id: str | None, prompt_id: str | None, *, keep_raw: bool) -> dict:
     """The fields every record of one line shares."""
     if session_id is None:
@@ -724,7 +724,7 @@ def _common(entry: dict, kind: str, raw_kind: str, at: dict, session_id: Any,
     else:
         extra = {key: value for key, value in entry.items() if key not in named}
     return {
-        "harness": CLAUDE, "session_id": session_id, "agent_id": agent_id, "at": at,
+        "harness": CLAUDE, "session_id": session_id, "agent_id": agent_id, "at": position,
         "time": UNKNOWN if stamp is None else stamp,
         "turn_id": prompt_id if prompt_id else UNKNOWN,
         "raw_kind": raw_kind,
@@ -737,13 +737,13 @@ def _build(pending: tuple, *, final: bool) -> Request:
     """The request a line wrote, from what `_map_line` kept of it."""
     entry, message, usage, common, key = pending
     if isinstance(common, tuple):
-        at, session_id, agent_id, prompt_id, keep_raw = common
-        common = _common(entry, "assistant", "assistant", at, session_id, agent_id,
+        position, session_id, agent_id, prompt_id, keep_raw = common
+        common = _common(entry, "assistant", "assistant", position, session_id, agent_id,
                          prompt_id, keep_raw=keep_raw)
     return _usage_request(entry, message, usage, common, key, final=final)
 
 
-def _map_line(raw: bytes | str, at: dict, session_id: Any, agent_id: str | None,
+def _map_line(raw: bytes | str, position: dict, session_id: Any, agent_id: str | None,
               prompt_id: str | None, *, keep_raw: bool, unterminated: bool,
               content: bool = True, others: bool = True,
               ) -> tuple[tuple | None, list[Record], str | None, bool]:
@@ -760,7 +760,7 @@ def _map_line(raw: bytes | str, at: dict, session_id: Any, agent_id: str | None,
     if why is not None:
         data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
         return None, [Malformed(harness=CLAUDE, session_id=session_id or UNKNOWN,
-                                agent_id=agent_id, at=at,
+                                agent_id=agent_id, at=position,
                                 turn_id=prompt_id if prompt_id else UNKNOWN,
                                 raw=data.strip(b"\r\n"),
                                 unterminated=unterminated, why=why)], prompt_id, False
@@ -785,13 +785,13 @@ def _map_line(raw: bytes | str, at: dict, session_id: Any, agent_id: str | None,
             usage = message.get("usage") if kind == "assistant" else None
             if not isinstance(usage, dict):
                 return None, [], prompt_id, False
-            lazy = (at, session_id, agent_id, prompt_id, keep_raw)
-            return ((entry, message, usage, lazy, request_key(entry, at.get("line"))), [],
+            lazy = (position, session_id, agent_id, prompt_id, keep_raw)
+            return ((entry, message, usage, lazy, request_key(entry, position.get("line"))), [],
                     prompt_id, False)
     elif not others and kind != "assistant" and kind != "user":
         return None, [], prompt_id, ends
 
-    common = _common(entry, kind, raw_kind, at, session_id, agent_id, prompt_id, keep_raw=keep_raw)
+    common = _common(entry, kind, raw_kind, position, session_id, agent_id, prompt_id, keep_raw=keep_raw)
     if kind == "assistant" or kind == "user":
         message = entry.get("message")
         if not isinstance(message, dict):
@@ -805,7 +805,7 @@ def _map_line(raw: bytes | str, at: dict, session_id: Any, agent_id: str | None,
             synthetic = message.get("model") == SYNTHETIC_MODEL
             usage = message.get("usage")
             if isinstance(usage, dict):
-                pending = (entry, message, usage, common, request_key(entry, at.get("line")))
+                pending = (entry, message, usage, common, request_key(entry, position.get("line")))
         if not content:
             return pending, [], prompt_id, False
         role = message.get("role")

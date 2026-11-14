@@ -124,10 +124,10 @@ class CodexAgent:
                 roots.append(added)
         return roots
 
-    def launch_options(self, added_root=None, *, network: bool = True) -> dict:
+    def launch_options(self, added_root=None, *, allow_network: bool = True) -> dict:
         """The roster-owned options for every `thread/start` and `thread/resume`.
 
-        `network` is the launch's network access for a row that names none (on, unless
+        `allow_network` is the launch's network access for a row that names none (on, unless
         the launch carries comms' tools); the row's own value wins over it.
 
         The first resume that loads a thread into an app-server process fixes the
@@ -157,7 +157,7 @@ class CodexAgent:
             config["sandbox_workspace_write"] = {
                 "writable_roots": self.effective_writable_roots(added_root),
                 # The one switch that lets the agent's shell reach the daemon socket.
-                "network_access": (network if self.network_access is None
+                "network_access": (allow_network if self.network_access is None
                                    else bool(self.network_access)),
             }
         params["config"] = config

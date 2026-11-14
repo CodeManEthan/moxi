@@ -98,7 +98,7 @@ def a_daemon(name: str = "web", **extra) -> None:
 
 
 def a_timer(name: str = "nightly", **extra) -> None:
-    out = acts.add_written(name, [PY], timer=True, every="1h", **extra)
+    out = acts.add_written(name, [PY], is_timer=True, every="1h", **extra)
     assert out.ok, out
 
 
@@ -135,7 +135,7 @@ def test_rows_carries_the_last_health_result_and_runs_no_check(monkeypatch):
                         lambda argv: ran.append(argv) or ("ok", "fine"))
     assert read("/api/rows")["rows"][0]["checked"] is None
     assert ran == []
-    pagehandlers.gather(health=True)
+    pagehandlers.gather(check_health=True)
     assert ran == [(PY, "-c", "pass")]
     assert read("/api/rows")["rows"][0]["checked"] == {"state": "ok", "line": "fine"}
     assert len(ran) == 1

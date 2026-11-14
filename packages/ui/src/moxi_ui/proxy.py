@@ -148,10 +148,10 @@ class Response:
     goes back to the pool. Use it as `async with`. `cut` is true once a drain ended it.
     """
 
-    def __init__(self, module: str, server: Server, *, stream: bool):
+    def __init__(self, module: str, server: Server, *, streaming: bool):
         self.module = module
         self.server = server
-        self.stream = stream
+        self.stream = streaming
         self.status = 0
         self.headers: list[tuple[bytes, bytes]] = []
         self.cut = False
@@ -305,11 +305,11 @@ class Client:
     async def request(self, module: str, method: str, target: str, *,
                       headers: Iterable[tuple[bytes, bytes]] = (),
                       body: bytes | AsyncIterable[bytes] = b"", act: bool = False,
-                      stream: bool = False) -> Response:
+                      streaming: bool = False) -> Response:
         """Send one request to `module`'s server and return its `Response` once the
         answer's head is in. `target` is the upstream path and query. `headers` are the
         browser's; only the allowlist of them is sent. `act` sends it on a newly proved
-        connection within 0.25 s of the proof; `stream` gives it a connection of its own,
+        connection within 0.25 s of the proof; `streaming` gives it a connection of its own,
         no read deadline, and the drain's cut.
 
         Raises `UpstreamError` with the browser's answer when the server gave none, and
@@ -319,12 +319,12 @@ class Client:
         browser = list(headers)
         retry_unsent = True
         retry_sent = method == "GET" and isinstance(body, (bytes, bytearray))
-        pooled = not act and not stream
+        pooled = not act and not streaming
         while True:
             server = await self._ensure(module)
-            response = Response(module, server, stream=stream)
+            response = Response(module, server, streaming=streaming)
             try:
-                response.use = server.use(stream=stream, close=response._cut)
+                response.use = server.use(streaming=streaming, close=response._cut)
                 await response._connect(pooled=pooled, act=act)
             except (NotOurServer, OSError, _NotSent) as exc:
                 # Nothing but a proof went out: drop the server and start one more.
@@ -345,7 +345,7 @@ class Client:
                            method, body)
             try:
                 await response._send(method, target, sent, body)
-                if stream:
+                if streaming:
                     await response._head()
                 else:
                     async with asyncio.timeout(FIRST_BYTE_WITHIN):
@@ -487,7 +487,7 @@ class Proxy:
                 body = _streamed(receive)
             response = await self.client.request(
                 module, method, target.decode("ascii"), headers=headers, body=body,
-                act=entry.kind == "act", stream=entry.stream)
+                act=entry.kind == "act", streaming=entry.stream)
         except BrowserGone:
             return
         except UpstreamError as exc:

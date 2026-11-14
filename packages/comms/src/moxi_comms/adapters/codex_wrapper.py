@@ -192,10 +192,10 @@ def row_flags(agent: codex_roster.CodexAgent) -> list[str]:
     return flags
 
 
-def comms_flags(options: dict, added_root=None, *, network: bool = True) -> list[str]:
+def comms_flags(options: dict, added_root=None, *, allow_network: bool = True) -> list[str]:
     """What comms adds to a launch whose host flags give `options` (the thread
     parameters `turns.codex.launch_args` reads from them). See the module's docstring.
-    `network` is the network access a sandbox gets when the flags name none: off for a
+    `allow_network` is the network access a sandbox gets when the flags name none: off for a
     launch that carries comms' tools, on for one that doesn't."""
     flags: list[str] = []
     sandbox = options.get("sandbox")
@@ -206,7 +206,7 @@ def comms_flags(options: dict, added_root=None, *, network: bool = True) -> list
         settings = (options.get("config") or {}).get("sandbox_workspace_write")
         settings = settings if isinstance(settings, dict) else {}
         if "network_access" not in settings:
-            flags += option(["sandbox_workspace_write", "network_access"], bool(network))
+            flags += option(["sandbox_workspace_write", "network_access"], bool(allow_network))
         roots = settings.get("writable_roots")
         roots = [str(r) for r in roots] if isinstance(roots, list) else []
         if added_root is not None:
@@ -423,7 +423,7 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
     tools_url, tools_why = endpoint() if endpoint is not None else (None, "")
     # One fact, the stamped pair, decides the default: a launch that carries comms' tools
     # starts with the network off.
-    flags = settings + comms_flags(asked, write_root, network=tools_url is None)
+    flags = settings + comms_flags(asked, write_root, allow_network=tools_url is None)
     if not window:
         flags.append("--no-window")
     read = launch_args(["--cwd", cwd, *flags])
