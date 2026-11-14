@@ -82,14 +82,14 @@ def turns_read(monkeypatch):
 
 # --- what names a session --------------------------------------------------------------------
 
-def test_a_typed_name_comes_with_the_folder_and_the_start(roots):
+def test_a_typed_name_comes_with_the_work_dir_and_the_start(roots):
     t = transcript(roots, cwd="/work/proj-a")
     t.user("please fix them", origin="human")
     t.title("fix the tests")
     t.assistant("All fixed.")
     t.write()
 
-    assert facts(roots) == Facts(name="fix the tests", folder="/work/proj-a",
+    assert facts(roots) == Facts(name="fix the tests", work_dir="/work/proj-a",
                                  started=START)
 
 
@@ -112,7 +112,7 @@ def test_an_ai_title_is_not_a_name(roots):
     t.assistant()
     t.write()
 
-    assert facts(roots) == Facts(name=None, folder="/work/proj-a", started=START)
+    assert facts(roots) == Facts(name=None, work_dir="/work/proj-a", started=START)
 
 
 def test_a_name_written_only_in_the_head_is_found(roots):
@@ -146,7 +146,7 @@ def test_a_session_whose_record_says_nothing_has_no_fact(roots):
     assert facts(roots) == Facts()
 
 
-def test_a_codex_session_has_its_folder_and_start_and_no_name(roots, turns_read):
+def test_a_codex_session_has_its_work_dir_and_start_and_no_name(roots, turns_read):
     r = CodexRollout(roots[CODEX], thread_id="0190c000-0000-7000-8000-000000000001",
                      cwd="/work/proj-b", start=START + 5)
     r.turn()
@@ -154,20 +154,20 @@ def test_a_codex_session_has_its_folder_and_start_and_no_name(roots, turns_read)
     r.write()
     cat = Catalog(roots)
 
-    assert cat.facts(only(cat)) == Facts(name=None, folder="/work/proj-b",
+    assert cat.facts(only(cat)) == Facts(name=None, work_dir="/work/proj-b",
                                          started=START + 5)
     assert turns_read == [] and cat.name_reads == 0      # no turn holds a name to read
 
 
-def test_an_opencode_session_has_its_folder_and_start_and_no_name(roots, turns_read):
+def test_an_opencode_session_has_its_work_dir_and_start_and_no_name(roots, turns_read):
     db = OpenCodeDb(roots[OPENCODE].parent)
-    session = db.session(title="a title of unknown hand", directory="/work/proj-b",
+    session = db.session(title="a title of unknown hand", work_dir="/work/proj-b",
                          at=START + 7)
     session.user("hello")
     db.write()
     cat = Catalog(roots)
 
-    assert cat.facts(only(cat)) == Facts(name=None, folder="/work/proj-b",
+    assert cat.facts(only(cat)) == Facts(name=None, work_dir="/work/proj-b",
                                          started=START + 7)
     assert turns_read == [] and cat.name_reads == 0
 
@@ -223,7 +223,7 @@ def test_a_failed_turn_read_gives_no_name_and_is_tried_again(roots, monkeypatch)
         raise Unreadable("the file cannot be read")
 
     monkeypatch.setattr(catalog_module, "window", broken)
-    assert cat.facts(only(cat)) == Facts(name=None, folder="/work/proj-a",
+    assert cat.facts(only(cat)) == Facts(name=None, work_dir="/work/proj-a",
                                          started=START)
 
     monkeypatch.setattr(catalog_module, "window", real)
@@ -231,7 +231,7 @@ def test_a_failed_turn_read_gives_no_name_and_is_tried_again(roots, monkeypatch)
     assert cat.name_reads == 2
 
 
-def test_a_failed_head_read_leaves_the_folder_and_start_unread(roots, monkeypatch):
+def test_a_failed_head_read_leaves_the_work_dir_and_start_unread(roots, monkeypatch):
     t = transcript(roots, cwd="/work/proj-a")
     past_head(t)
     t.user("one", origin="human")

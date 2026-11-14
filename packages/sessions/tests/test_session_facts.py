@@ -66,8 +66,8 @@ def codex(roots, n: int, **kw) -> CodexRollout:
     return r
 
 
-def item(harness: str, session: str, name=None, folder=None, started=None) -> dict:
-    return {"harness": harness, "session": session, "name": name, "folder": folder,
+def item(harness: str, session: str, name=None, work_dir=None, started=None) -> dict:
+    return {"harness": harness, "session": session, "name": name, "folder": work_dir,
             "started": started}
 
 
@@ -87,7 +87,7 @@ def turns_read(monkeypatch):
 
 # --- what a pair is answered -------------------------------------------------------------------
 
-def test_a_typed_name_is_answered_with_the_folder_and_the_start(roots):
+def test_a_typed_name_is_answered_with_the_work_dir_and_the_start(roots):
     claude(roots, 1, name="fix the tests")
 
     answer = name_sessions(Catalog(roots), [(CLAUDE, sid(1))])
@@ -122,10 +122,10 @@ def test_a_title_the_harness_made_up_gives_no_name(roots):
     assert answer["sessions"] == [item(CLAUDE, sid(1), None, "/work/proj-a", START)]
 
 
-def test_codex_and_opencode_sessions_have_a_folder_and_a_start_and_no_name(roots):
+def test_codex_and_opencode_sessions_have_a_work_dir_and_a_start_and_no_name(roots):
     codex(roots, 1, cwd="/work/proj-b", start=START + 5)
     db = OpenCodeDb(roots[OPENCODE].parent)
-    session = db.session(title="a title of unknown hand", directory="/work/proj-b",
+    session = db.session(title="a title of unknown hand", work_dir="/work/proj-b",
                          at=START + 7)
     session.user("hello")
     db.write()

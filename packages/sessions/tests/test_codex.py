@@ -48,7 +48,7 @@ def test_a_name_that_does_not_parse_is_not_a_candidate(sessions):
     assert codex.find_rollout(sessions, THREAD) == []
 
 
-def test_a_rollout_outside_the_day_directories_is_not_a_candidate(sessions):
+def test_a_rollout_outside_the_day_dirs_is_not_a_candidate(sessions):
     (sessions / f"rollout-2026-10-06T10-00-00-{THREAD}.jsonl").write_text("{}\n")
     deep = sessions / "2026" / "10" / "06" / "extra"
     deep.mkdir(parents=True)
@@ -56,7 +56,7 @@ def test_a_rollout_outside_the_day_directories_is_not_a_candidate(sessions):
     assert codex.find_rollout(sessions, THREAD) == []
 
 
-def test_a_directory_named_like_a_rollout_is_not_a_candidate(sessions):
+def test_a_dir_named_like_a_rollout_is_not_a_candidate(sessions):
     (sessions / "2026" / "10" / "06" / f"rollout-2026-10-06T10-00-00-{THREAD}.jsonl").mkdir(
         parents=True)
     assert codex.find_rollout(sessions, THREAD) == []
@@ -99,8 +99,8 @@ def test_the_stream_yields_every_entry_through_the_one_decoder(sessions):
     assert [e["type"] for e in entries] == ["session_meta", "event_msg", "turn_context",
                                             "token_usage_record"]
     assert [e["lineno"] for e in entries] == [1, 2, 3, 4]
-    with path.open(encoding="utf-8") as handle:
-        assert entries == list(claude.stream_entries(handle))
+    with path.open(encoding="utf-8") as fh:
+        assert entries == list(claude.stream_entries(fh))
 
 
 def test_a_line_being_written_is_yielded_malformed_never_dropped(sessions):
@@ -136,6 +136,6 @@ def test_a_missing_rollout_raises(tmp_path):
 def test_the_codex_reader_decodes_through_the_one_decoder():
     """Nothing in `codex` decodes a line itself (one decoder for both harnesses)."""
     source = codex.__file__
-    with open(source, encoding="utf-8") as f:
-        text = f.read()
+    with open(source, encoding="utf-8") as fh:
+        text = fh.read()
     assert "json.loads" not in text and "import json" not in text

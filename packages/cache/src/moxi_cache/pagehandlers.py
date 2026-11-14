@@ -85,11 +85,11 @@ def gather() -> dict[str, Any]:
     """The `clocks` topic's value: `state`, `detail` and the rows. Never raises."""
     try:
         rows = [_row(record) for record in api.clock_records()]
-    except Exception as err:
-        _log_once(err, "listing the clock records failed")
+    except Exception as exc:
+        _log_once(exc, "listing the clock records failed")
         return {"state": "error",
                 "detail": f"cache's page server hit an unexpected error "
-                          f"({type(err).__name__}); its log has the details",
+                          f"({type(exc).__name__}); its log has the details",
                 "clocks": []}
     return {"state": "up", "detail": None, "clocks": rows}
 
@@ -120,8 +120,8 @@ class _Feed:
         while True:
             try:
                 await self.snapshot.changed()
-            except Exception as err:
-                _log_once(err, "the clocks poller's gather failed")
+            except Exception as exc:
+                _log_once(exc, "the clocks poller's gather failed")
             await asyncio.sleep(PERIOD)
 
 

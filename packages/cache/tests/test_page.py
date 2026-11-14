@@ -60,9 +60,9 @@ def record(session=A, *, last_request=None, **extra) -> dict:
 
 
 def put(rec: dict, text: str | None = None) -> None:
-    directory = records.record_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{rec['session']}.json"
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True, exist_ok=True)
+    path = records_dir / f"{rec['session']}.json"
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(rec) if text is None else text)
     os.replace(tmp, path)

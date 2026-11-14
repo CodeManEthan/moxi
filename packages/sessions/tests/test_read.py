@@ -68,7 +68,7 @@ def every_claude_line(t: ClaudeTranscript) -> ClaudeTranscript:
     """A transcript with a line of every kind the builder writes."""
     t.other("file-history-snapshot", messageId="m0", snapshot={})
     t.user("read the notes")
-    req = t.request(usage_block=usage(input=3, cache_read=900, output=40))
+    req = t.request(usage_block=usage(input_tokens=3, cache_read=900, output=40))
     req.thinking("which file?")
     call = req.tool_use("Read", {"file_path": "/work/project/notes.md"})
     t.tool_result(call, "the notes")
@@ -208,7 +208,7 @@ def test_opencode_records_read_the_session_in_one_snapshot(db):
     s = db.session(title="the title")
     s.user()
     a = s.assistant()
-    a.step(input=5, output=3, text="hi")
+    a.step(input_tokens=5, output=3, text="hi")
     a.complete()
     path = db.write()
     with records(Source("opencode", str(path), s.id)) as read:
@@ -349,7 +349,7 @@ def test_opencode_records_back_is_the_exact_reverse_with_line_one_as_first(db):
     s = db.session()
     s.user("one")
     a = s.assistant()
-    a.step(input=5, output=3)
+    a.step(input_tokens=5, output=3)
     a.complete()
     s.user("two")
     path = db.write()
@@ -370,8 +370,8 @@ def test_last_request_on_a_built_subagent_file_is_its_newest_request(projects):
     t.assistant("main")
     sub = t.subagent("a0190b00000000aa")
     sub.user("do it")
-    sub.assistant("first", usage=usage(input=5))
-    newest = sub.assistant("second", usage=usage(input=9))
+    sub.assistant("first", usage=usage(input_tokens=5))
+    newest = sub.assistant("second", usage=usage(input_tokens=9))
     t.write()
     got = last_request(claude_source(sub))
     assert got.request.request_id == newest.request_id
@@ -382,7 +382,7 @@ def test_last_request_on_a_built_subagent_file_is_its_newest_request(projects):
 def test_last_request_on_a_main_transcript_passes_over_sidechain_and_synthetic(projects):
     t = ClaudeTranscript(projects)
     t.user()
-    own = t.assistant("own", usage=usage(input=100))
+    own = t.assistant("own", usage=usage(input_tokens=100))
     t.request().text("inline subagent", isSidechain=True)
     t.synthetic()
     t.write()
@@ -457,7 +457,7 @@ def test_last_request_after_a_long_tool_result_answers_the_same(projects):
     call = t.request()
     call.tool_use("Read", {"file_path": "/work/big.txt"}, call_id="toolu_big")
     t.tool_result("toolu_big", BIG)
-    after = t.assistant("read it", usage=usage(input=7))
+    after = t.assistant("read it", usage=usage(input_tokens=7))
     t.tool_result("toolu_none", "small")
     t.write()
     src = claude_source(t)
@@ -477,16 +477,16 @@ def test_last_request_over_long_and_malformed_lines_answers_as_a_full_decode(
         projects, tail):
     t = ClaudeTranscript(projects)
     t.user("go")
-    t.assistant("first", usage=usage(input=3))
+    t.assistant("first", usage=usage(input_tokens=3))
     if tail.startswith("a long tool result"):
         t.tool_result("toolu_a", BIG)
         t.add_raw('{"type":"user","promptId":"prompt-x","message":' + '"' + BIG)
     elif tail.startswith("a malformed"):
         t.add_raw('{"type":"user","promptId":"prompt-x","message":' + '"' + BIG)
-        t.assistant("second", usage=usage(input=5))
+        t.assistant("second", usage=usage(input_tokens=5))
     else:
         t.tool_result("toolu_a", BIG)
-        t.assistant("second", usage=usage(input=5))
+        t.assistant("second", usage=usage(input_tokens=5))
         t.add_raw(json.dumps({"type": "system", "subtype": "turn_duration",
                               "durationMs": 10}))
         t.user("again")
@@ -517,7 +517,7 @@ def test_filtered_backward_reads_answer_as_full_decodes_over_mixed_lines(project
         elif pick == 2:
             t.tool_result(f"toolu_{n}", "short")
         elif pick in (3, 4):
-            t.assistant(f"answer {n}", usage=usage(input=n))
+            t.assistant(f"answer {n}", usage=usage(input_tokens=n))
         elif pick == 5:
             t.request().text("inline subagent", isSidechain=True)
         elif pick == 6:
@@ -616,7 +616,7 @@ def test_opencode_last_request_leaves_an_open_step_out(db):
     s = db.session()
     s.user()
     a = s.assistant()
-    start, _ = a.step(input=5, output=3)
+    start, _ = a.step(input_tokens=5, output=3)
     a.step_start()
     path = db.write()
     got = last_request(Source("opencode", str(path), s.id))
@@ -739,7 +739,7 @@ def test_a_request_yielded_final_is_never_also_named_closed(projects, codex_root
     src = Source("opencode", str(path), s.id)
     first = records_since(src)
     assert [q.final for q in requests(first.records)] == [False]
-    m.step_finish(input=4, output=2)
+    m.step_finish(input_tokens=4, output=2)
     db.write()
     batch = records_since(src, first.cursor)
     assert [(q.request_id, q.final) for q in requests(batch.records)] == [(start, True)]
@@ -894,8 +894,8 @@ def two_batches(src: Source, data: bytes, cut: int, kinds):
     path = Path(src.path)
     path.write_bytes(data[:cut])
     first = records_since(src, kinds=kinds)
-    with path.open("ab") as handle:
-        handle.write(data[cut:])
+    with path.open("ab") as fh:
+        fh.write(data[cut:])
     second = records_since(src, first.cursor, kinds=kinds)
     assert not second.reset
     return first, second
@@ -1113,7 +1113,7 @@ def test_opencode_window_pages_by_message(db):
     for n in range(3):
         s.user(f"turn {n}")
         a = s.assistant()
-        a.step(input=5, output=3)
+        a.step(input_tokens=5, output=3)
         a.complete()
     path = db.write()
     src = Source("opencode", str(path), s.id)

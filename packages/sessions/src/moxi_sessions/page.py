@@ -177,7 +177,7 @@ TURNS_DEFAULT = 5
 #: request takes. A place is a change time, a harness and a session id.
 SECONDS_MAX = 32
 FIND_MAX = 256
-FOLDER_MAX = 4096
+WORK_DIR_MAX = 4096
 GROUP_MAX = 32
 PLACE_MAX = ID_MAX + 64
 
@@ -442,7 +442,7 @@ SESSION = {
 }
 
 #: `/api/folders`.
-FOLDERS = {
+WORK_DIRS = {
     "shape": _INT,
     "folders": lb.Out("list", items=lb.Out("table", items={
         "folder": _PATH, "count": _INT, "changed": _MAYBE_FLOAT})),
@@ -472,7 +472,7 @@ _FILTERS = {
     "until": _SECONDS,
     "find": lb.Field("string", required=False, max=FIND_MAX),
 }
-LIST_QUERY = {**_FILTERS, "folder": lb.Field("string", required=False, max=FOLDER_MAX)}
+LIST_QUERY = {**_FILTERS, "folder": lb.Field("string", required=False, max=WORK_DIR_MAX)}
 MORE_QUERY = {
     "group": lb.Field("string", max=GROUP_MAX),
     "kind": lb.Field("enum", required=False, values=(MAIN, PROGRAM)),
@@ -481,7 +481,7 @@ MORE_QUERY = {
     **LIST_QUERY,
 }
 SESSION_QUERY = {"harness": _HARNESS, "session": _ID}
-FOLDERS_QUERY = dict(_FILTERS)
+WORK_DIRS_QUERY = dict(_FILTERS)
 
 
 def _target(name: str) -> str:
@@ -515,12 +515,12 @@ PAGE = lb.Page(
         lb.Route("/api/more", "read", _target("more"), query=MORE_QUERY, returns=MORE),
         lb.Route("/api/session", "read", _target("session"), query=SESSION_QUERY,
                  returns=SESSION),
-        lb.Route("/api/folders", "read", _target("folders"), query=FOLDERS_QUERY,
-                 returns=FOLDERS),
+        lb.Route("/api/folders", "read", _target("work_dirs"), query=WORK_DIRS_QUERY,
+                 returns=WORK_DIRS),
     ),
 )
 
-__all__ = ["AT", "BUDGET", "FIND_MAX", "FOLDERS", "FOLDERS_QUERY", "FOLDER_MAX", "GROUP",
+__all__ = ["AT", "BUDGET", "FIND_MAX", "WORK_DIRS", "WORK_DIRS_QUERY", "WORK_DIR_MAX", "GROUP",
            "GROUP_MAX", "HEADER", "ID_MAX", "LIMIT_WINDOW", "LIST", "LIST_QUERY",
            "LIST_ROW", "MESSAGE", "MORE", "MORE_QUERY", "PAGE", "PLACE_MAX", "RECORD",
            "SAID", "SECONDS_MAX", "SESSION", "SESSION_QUERY", "SESSION_SUBAGENT",

@@ -62,14 +62,14 @@ class Agent:
     def __init__(self, agent_id=AGENT):
         self.t = ClaudeTranscript(Path(sessions.root("claude")), session_id=SESSION)
         self.t.user("go")
-        self.t.assistant("ok", usage=usage(input=10_000, cache_read=0, cache_write=0),
+        self.t.assistant("ok", usage=usage(input_tokens=10_000, cache_read=0, cache_write=0),
                          model=MODEL)
         self.agent_id = agent_id
         self.child = self.t.subagent(agent_id)
 
     def context(self, tokens):
         self.child.user("look")
-        self.child.assistant("found", usage=usage(input=tokens - 10, cache_read=10,
+        self.child.assistant("found", usage=usage(input_tokens=tokens - 10, cache_read=10,
                                                   cache_write=0), model=MODEL)
         self.t.write()
 

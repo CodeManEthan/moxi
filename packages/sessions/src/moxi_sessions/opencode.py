@@ -184,8 +184,8 @@ def connect(path: str | Path):
     try:
         conn = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True,
                                timeout=BUSY_MS / 1000, isolation_level=None)
-    except sqlite3.Error as e:
-        raise Unreadable(f"the OpenCode database {path} could not be opened ({e})") from e
+    except sqlite3.Error as exc:
+        raise Unreadable(f"the OpenCode database {path} could not be opened ({exc})") from exc
     conn.set_authorizer(authorize)
     return conn
 
@@ -277,7 +277,7 @@ def _injected(role: str, data: dict, synthetic: list[bool]) -> Any:
 
 
 def _step(message: dict, start: tuple | None, finish: tuple | None,
-          keep_raw: bool) -> Request:
+          *, keep_raw: bool) -> Request:
     """One model step's request. `start` and `finish` are `(row, data)` of its
     `step-start` and `step-finish` parts; one of them is set."""
     own_row, own = finish if finish is not None else start
@@ -402,15 +402,15 @@ def message_records(message: tuple, parts: Iterable[tuple], *, agent_id: str | N
                     size_bytes=len(output.encode("utf-8", "replace"))))
         elif ptype == "step-start":
             if open_step is not None:
-                after.append(_step(context, open_step, None, keep_raw))
+                after.append(_step(context, open_step, None, keep_raw=keep_raw))
             open_step = (prow, pdata)
         elif ptype == "step-finish":
-            after.append(_step(context, open_step, (prow, pdata), keep_raw))
+            after.append(_step(context, open_step, (prow, pdata), keep_raw=keep_raw))
             open_step = None
         else:
             after.append(Other(**pcommon, recognised=ptype in KNOWN_PART_TYPES))
     if open_step is not None:
-        after.append(_step(context, open_step, None, keep_raw))
+        after.append(_step(context, open_step, None, keep_raw=keep_raw))
 
     if isinstance(role, str):
         named = _NAMED_MESSAGE.get(role, frozenset({"role"}))
@@ -453,7 +453,7 @@ class SessionRow:
     id: str
     parent_id: str | None
     title: Any
-    directory: Any
+    work_dir: Any
     version: Any
     model: Any
     agent: Any
@@ -483,7 +483,7 @@ def _session_row(row: tuple) -> SessionRow:
 
     return SessionRow(
         id=values["id"], parent_id=values["parent_id"], title=values["title"],
-        directory=values["directory"], version=values["version"], model=model,
+        work_dir=values["directory"], version=values["version"], model=model,
         agent=values["agent"], revert_pending=values["revert"] is not None,
         **{key: values[key] for key in TOTALS},
         time_created=when("time_created"), time_updated=when("time_updated"),
@@ -569,8 +569,8 @@ class Snapshot:
         sqlite3 = _sqlite()
         try:
             return self.conn.execute(sql, tuple(args)).fetchall()
-        except sqlite3.Error as e:
-            raise QueryFailed(self.path, str(e)) from e
+        except sqlite3.Error as exc:
+            raise QueryFailed(self.path, str(exc)) from exc
 
     def rows(self, sql: str, args: Iterable[Any] = ()) -> Iterator[tuple]:
         """The query's rows one at a time, so a long result is never held whole."""
@@ -579,8 +579,8 @@ class Snapshot:
             cursor = self.conn.execute(sql, tuple(args))
             while (row := cursor.fetchone()) is not None:
                 yield row
-        except sqlite3.Error as e:
-            raise QueryFailed(self.path, str(e)) from e
+        except sqlite3.Error as exc:
+            raise QueryFailed(self.path, str(exc)) from exc
 
     def require(self, *tables: str) -> None:
         """Each column the reader reads from `tables` exists. Raises UnknownSchema
@@ -755,9 +755,9 @@ def _stat(path: Path) -> tuple[int, int, int]:
     """(ino, size, mtime_ns) of the database. Raises Unreadable."""
     try:
         st = os.stat(path)
-    except OSError as e:
-        raise Unreadable(f"the OpenCode database {path} cannot be read ({e.strerror})") \
-            from e
+    except OSError as exc:
+        raise Unreadable(f"the OpenCode database {path} cannot be read ({exc.strerror})") \
+            from exc
     return st.st_ino, st.st_size, st.st_mtime_ns
 
 
@@ -766,9 +766,9 @@ def _stat_wal(path: Path) -> tuple[int, int] | None:
         st = os.stat(f"{path}-wal")
     except FileNotFoundError:
         return None
-    except OSError as e:
+    except OSError as exc:
         raise Unreadable(f"the OpenCode database's write-ahead log beside {path} cannot "
-                         f"be read ({e.strerror})") from e
+                         f"be read ({exc.strerror})") from exc
     return st.st_size, st.st_mtime_ns
 
 

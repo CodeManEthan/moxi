@@ -462,8 +462,8 @@ class CodexRollout:
         new = self.lines[self._written:]
         data = "" if self._terminated else "\n"
         data += "\n".join(new) + ("\n" if terminated and new else "")
-        with self.path.open("ab") as handle:
-            handle.write(data.encode("utf-8"))
+        with self.path.open("ab") as fh:
+            fh.write(data.encode("utf-8"))
         self._written = len(self.lines)
         self._terminated = terminated or not new
         return self.path

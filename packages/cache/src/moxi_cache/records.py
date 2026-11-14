@@ -65,11 +65,11 @@ def record_dir(env=None) -> Path:
     return Layout("cache").runtime_dir(env) / DIR_NAME
 
 
-def record_path(session_id, directory: Path | None = None) -> Path | None:
+def record_path(session_id, records_dir: Path | None = None) -> Path | None:
     """The record file of one session, or None when the id cannot name a file."""
     if not isinstance(session_id, str) or not SAFE_ID_RE.fullmatch(session_id):
         return None
-    return (record_dir() if directory is None else Path(directory)) / f"{session_id}.json"
+    return (record_dir() if records_dir is None else Path(records_dir)) / f"{session_id}.json"
 
 
 def _number(value) -> bool:

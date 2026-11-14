@@ -326,7 +326,7 @@ def opencode_header(source: Source, row: Any) -> Header:
                       agent_id=source.agent_id)
     return Header(harness=OPENCODE, session_id=row.id,
                   agent_id=row.id if row.parent_id is not None else None,
-                  cwd=row.directory, title=row.title, version=row.version,
+                  cwd=row.work_dir, title=row.title, version=row.version,
                   started=UNKNOWN if row.time_created is None else row.time_created,
                   parent=row.parent_id, session_row=row)
 
@@ -346,8 +346,8 @@ ROOT_KEYS = {CLAUDE: "claude.projects", CODEX: "codex.sessions",
              OPENCODE: "opencode.database"}
 
 
-def _home(environ: Mapping[str, str]) -> str:
-    return environ.get("HOME") or str(Path.home())
+def _home(env: Mapping[str, str]) -> str:
+    return env.get("HOME") or str(Path.home())
 
 
 def _expand(value: str, home: str) -> Path:
@@ -356,32 +356,32 @@ def _expand(value: str, home: str) -> Path:
     return Path(value)
 
 
-def codex_root(environ: Mapping[str, str] | None = None) -> Path:
+def codex_root(env: Mapping[str, str] | None = None) -> Path:
     """Codex's sessions root: `${CODEX_HOME:-~/.codex}/sessions` over `environ`. With
     None, config `codex.sessions` when it is set, else the rule over this process's
     environment. Raises `moxi.config.ConfigError` when the config file cannot be read."""
-    if environ is None:
+    if env is None:
         configured = _configured(CODEX)
         if configured is not None:
             return configured
-        environ = os.environ
-    home = _home(environ)
-    base = environ.get("CODEX_HOME")
+        env = os.environ
+    home = _home(env)
+    base = env.get("CODEX_HOME")
     return (_expand(base, home) if base else Path(home) / ".codex") / "sessions"
 
 
-def opencode_root(environ: Mapping[str, str] | None = None) -> Path:
+def opencode_root(env: Mapping[str, str] | None = None) -> Path:
     """OpenCode's database: `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db` over
     `environ`. With None, config `opencode.database` when it is set, else the rule over
     this process's environment. A caller that knows the database its OpenCode server uses
     (`opencode db path` under the server's environment) hands that in instead."""
-    if environ is None:
+    if env is None:
         configured = _configured(OPENCODE)
         if configured is not None:
             return configured
-        environ = os.environ
-    home = _home(environ)
-    data = environ.get("XDG_DATA_HOME")
+        env = os.environ
+    home = _home(env)
+    data = env.get("XDG_DATA_HOME")
     base = _expand(data, home) if data else Path(home) / ".local" / "share"
     return base / "opencode" / "opencode.db"
 

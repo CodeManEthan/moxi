@@ -298,7 +298,7 @@ def measurable_sessions(count=20, *, entrypoint="cli", first=0):
         for k in range(1, 7):
             t.user("go")
             t.assistant("ok", request_id=f"req_{n}_{k}",
-                        usage=usage(input=2, cache_read=1000 * k, cache_write=1000,
+                        usage=usage(input_tokens=2, cache_read=1000 * k, cache_write=1000,
                                     output=11))
         t.write()
 

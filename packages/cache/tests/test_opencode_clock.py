@@ -75,9 +75,9 @@ def request(t, provider, model, *, steps=((0.0, 3.0),), agent="build", summary=N
 def change(s, sql):
     """Write the session's database, then run `sql` on it: a column or table taken away."""
     path = s.db.write()
-    with sqlite3.connect(path) as c:
-        c.execute(sql)
-    c.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute(sql)
+    conn.close()
     return path
 
 
@@ -233,15 +233,15 @@ def test_each_witness_that_fails_is_unknown(tmp_path, case):
         source = None
     try:
         if case == "locked-db":
-            holder = sqlite3.connect(path)
-            holder.execute("BEGIN EXCLUSIVE")
+            conn = sqlite3.connect(path)
+            conn.execute("BEGIN EXCLUSIVE")
             try:
                 start = time.monotonic()
                 clock = oc_read(s, turned=False, source=source)
                 assert time.monotonic() - start < 2
             finally:
-                holder.rollback()
-                holder.close()
+                conn.rollback()
+                conn.close()
         else:
             clock = oc_read(s, turned=False, source=source)
     finally:

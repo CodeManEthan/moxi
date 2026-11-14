@@ -12,6 +12,9 @@
 +loadout	packages/loadout/src/moxi_loadout/cli.py	_parser.verb	name	help	help_text
 +loadout	packages/loadout/src/moxi_loadout/cli.py	p = verbs.add_parser(name, help=help_text, description=description)	keep	help	help
 cache	packages/cache/src/moxi_cache/api.py	projects_root	name	environ	env
+cache	packages/cache/src/moxi_cache/api.py	_read	name	e	exc
+cache	packages/cache/src/moxi_cache/api.py	read	name	e	exc
+cache	packages/cache/src/moxi_cache/claude.py	read	name	e	exc
 cache	packages/cache/src/moxi_cache/cli.py	and clock.ttl_seconds is not None:	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/src/moxi_cache/cli.py	f"lifetime {_duration(clock.ttl_seconds)}{source}{key}")	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/src/moxi_cache/cli.py	help="the session or thread id")	keep	help	help
@@ -31,6 +34,11 @@ cache	packages/cache/src/moxi_cache/cli.py	tim.add_argument("--json", action="st
 cache	packages/cache/src/moxi_cache/cli.py	verbs.add_parser("doctor", help="check cache's config, table, drift record and watcher",	keep	help	help
 cache	packages/cache/src/moxi_cache/cli.py	verbs.add_parser("watch", help="run the watcher in the foreground",	keep	help	help
 cache	packages/cache/src/moxi_cache/cli.py	words += f" (last request {_duration(clock.age_seconds)} ago)"	use	clock.age_seconds	clock.age_s
+cache	packages/cache/src/moxi_cache/cli.py	_config_entries	name	e	exc
+cache	packages/cache/src/moxi_cache/cli.py	_doctor	name	e	exc
+cache	packages/cache/src/moxi_cache/cli.py	_segment	name	e	exc
+cache	packages/cache/src/moxi_cache/cli.py	_watcher_line	name	directory	records_dir
+cache	packages/cache/src/moxi_cache/cli.py	timers_view	name	environ	env
 cache	packages/cache/src/moxi_cache/cli.py	missing=", ".join(ask["missing_env"]),	keep	missing	missing
 cache	packages/cache/src/moxi_cache/clock.py	Clock	name	age_seconds	age_s
 cache	packages/cache/src/moxi_cache/clock.py	Clock	name	ttl_seconds	ttl_s
@@ -43,6 +51,9 @@ cache	packages/cache/src/moxi_cache/codex.py	need.newest_turn = _turn(need.recor
 cache	packages/cache/src/moxi_cache/codex.py	return _clock_from(scan, need.record, thread_id, table=table, now=now, drift=drift,	keep	record	record
 cache	packages/cache/src/moxi_cache/codex.py	self.record = None	keep	record	record
 cache	packages/cache/src/moxi_cache/codex.py	self.record = rec	keep	record	record
+cache	packages/cache/src/moxi_cache/codex.py	_next_pair	kwonly	whole	whole
+cache	packages/cache/src/moxi_cache/codex.py	_pair_at	kwonly	whole	whole
+cache	packages/cache/src/moxi_cache/codex.py	read	name	e	exc
 cache	packages/cache/src/moxi_cache/drift.py	"""(DriftView, kept entries, rejected entries) for `record` against the table.	keep	record	record
 cache	packages/cache/src/moxi_cache/drift.py	"entries": len(self.record.entries), "rejected": [],	keep	record	record
 cache	packages/cache/src/moxi_cache/drift.py	"missing": self.record.missing, "unreadable": self.record.unreadable,	keep	record	record
@@ -57,6 +68,16 @@ cache	packages/cache/src/moxi_cache/drift.py	self.record = Record(missing=True)	
 cache	packages/cache/src/moxi_cache/drift.py	self.record = load(self.path)	keep	record	record
 cache	packages/cache/src/moxi_cache/drift.py	view, _kept, _rejected = judge(self.record, table)	keep	record	record
 cache	packages/cache/src/moxi_cache/drift.py	write(self.path, self.record.entries)	keep	record	record
+cache	packages/cache/src/moxi_cache/drift.py	Store._take_lock	name	e	exc
+cache	packages/cache/src/moxi_cache/drift.py	Store._write	name	e	exc
+cache	packages/cache/src/moxi_cache/drift.py	load	name	e	exc
+cache	packages/cache/src/moxi_cache/drift.py	write	name	f	fh
+cache	packages/cache/src/moxi_cache/drift.py	write	name	e	exc
+cache	packages/cache/src/moxi_cache/opencode.py	_Session._open	name	e	exc
+cache	packages/cache/src/moxi_cache/opencode.py	_Session.records	name	e	exc
+cache	packages/cache/src/moxi_cache/opencode.py	_Session.row	name	e	exc
+cache	packages/cache/src/moxi_cache/opencode.py	_read	name	e	exc
+cache	packages/cache/src/moxi_cache/opencode.py	read	name	e	exc
 cache	packages/cache/src/moxi_cache/page.py	"code": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 cache	packages/cache/src/moxi_cache/page.py	"detail": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 cache	packages/cache/src/moxi_cache/page.py	"last_request": lb.Out("float", nullable=True),	keep	nullable=	nullable=
@@ -65,13 +86,19 @@ cache	packages/cache/src/moxi_cache/page.py	"ttl": lb.Out("float", nullable=True
 cache	packages/cache/src/moxi_cache/page.py	"warn_before": lb.Out("float", nullable=True),	keep	nullable=	nullable=
 cache	packages/cache/src/moxi_cache/page.py	lb.Route("/api/events", "read", "moxi_cache.pagehandlers:events", stream=True,	keep	stream=	stream=
 cache	packages/cache/src/moxi_cache/pagehandlers.py	_logged: set[type] = set()	keep	set	set
+cache	packages/cache/src/moxi_cache/pagehandlers.py	_Feed._poll	name	err	exc
+cache	packages/cache/src/moxi_cache/pagehandlers.py	gather	name	err	exc
 cache	packages/cache/src/moxi_cache/records.py	"""Whether `record` holds to the format. The two `THRESHOLDS` are not asked for here:	keep	record	record
+cache	packages/cache/src/moxi_cache/records.py	record_path	name	directory	records_dir
 cache	packages/cache/src/moxi_cache/render.py	if isinstance(mode, str) and WRITE_MODES & set(mode):	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	both = sorted(set(a.models) & set(b.models)) or [WILDCARD]	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	extra = set(doc) - {"lifetime"}	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	if a.wildcard or b.wildcard or set(a.models) & set(b.models):	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	if len(set(models)) != len(models):	keep	set	set
 cache	packages/cache/src/moxi_cache/table.py	unknown = set(raw) - ROW_KEYS	keep	set	set
+cache	packages/cache/src/moxi_cache/table.py	load_shipped	name	e	exc
+cache	packages/cache/src/moxi_cache/table.py	load_table	name	e	exc
+cache	packages/cache/src/moxi_cache/table.py	parse_table	name	e	exc
 cache	packages/cache/src/moxi_cache/timer.py	before = set(self.loaded.refused)	keep	set	set
 cache	packages/cache/src/moxi_cache/timer.py	environ = self.environ(pid)	keep	environ	environ
 cache	packages/cache/src/moxi_cache/timer.py	environment the session's process started with (`moxi.proc.environ`) and starts `run`	use	moxi.proc.environ`	moxi.proc.process_env`
@@ -81,6 +108,22 @@ cache	packages/cache/src/moxi_cache/timer.py	path.parent.mkdir(parents=True, exi
 cache	packages/cache/src/moxi_cache/timer.py	self.environ = environ	keep	environ	environ
 cache	packages/cache/src/moxi_cache/timer.py	subscriptions now: a callable, run at each tick, or a fixed list), `environ` (a	keep	environ	environ
 cache	packages/cache/src/moxi_cache/timer.py	unknown = sorted(set(map(str, raw)) - set(FIELDS))	keep	set	set
+cache	packages/cache/src/moxi_cache/timer.py	for ep in sorted(entry_points, key=lambda e: (e.name, e.value)):	use	e	entry
+cache	packages/cache/src/moxi_cache/timer.py	Timer.__init__	name	environ	process_env
+cache	packages/cache/src/moxi_cache/timer.py	Timer._end_output	name	e	exc
+cache	packages/cache/src/moxi_cache/timer.py	Timer._write	name	e	exc
+cache	packages/cache/src/moxi_cache/timer.py	Timer.ask	name	e	exc
+cache	packages/cache/src/moxi_cache/timer.py	Timer.tick	name	environ	env
+cache	packages/cache/src/moxi_cache/timer.py	_remove	name	e	exc
+cache	packages/cache/src/moxi_cache/timer.py	check	name	e	exc
+cache	packages/cache/src/moxi_cache/timer.py	env = self.environ(pid)	use	self.environ	self.process_env
+cache	packages/cache/src/moxi_cache/timer.py	env_met	name	environ	env
+cache	packages/cache/src/moxi_cache/timer.py	from_modules	name	e	exc
+cache	packages/cache/src/moxi_cache/timer.py	missing_env	name	environ	env
+cache	packages/cache/src/moxi_cache/timer.py	module_argv0_resolver.resolve	name	e	exc
+cache	packages/cache/src/moxi_cache/timer.py	plan	name	environ	env
+cache	packages/cache/src/moxi_cache/timer.py	-	name	proc_environ	read_process_env
+cache	packages/cache/src/moxi_cache/timer.py	self.environ = process_env	use	self.environ	self.process_env
 cache	packages/cache/src/moxi_cache/watch.py	"ttl": clock.ttl_seconds, "read_at": seen.read_at, "seen_at": now,	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/src/moxi_cache/watch.py	entries = list(self.directory.iterdir())	keep	directory	directory
 cache	packages/cache/src/moxi_cache/watch.py	f"({', '.join(map(repr, sorted(set(unsafe))))}); they get no clock record")	keep	set	set
@@ -98,11 +141,35 @@ cache	packages/cache/src/moxi_cache/watch.py	signal.signal(sig, lambda *_: stop.
 cache	packages/cache/src/moxi_cache/watch.py	so no id names a path outside `directory`."""	keep	directory	directory
 cache	packages/cache/src/moxi_cache/watch.py	transcripts are found), `directory` (where records go) and `sessions` (the folder	keep	directory	directory
 cache	packages/cache/src/moxi_cache/watch.py	write_record(self.directory, record)	keep	directory	directory
+cache	packages/cache/src/moxi_cache/watch.py	report=lambda e: log.warning("cache's config: %s", e))	use	e	config_exc
+cache	packages/cache/src/moxi_cache/watch.py	report=lambda exc: log.warning("cache's config: %s", exc))	use	exc	config_exc
+cache	packages/cache/src/moxi_cache/watch.py	Watcher.__init__	name	directory	records_dir
+cache	packages/cache/src/moxi_cache/watch.py	Watcher._observe	name	e	exc
+cache	packages/cache/src/moxi_cache/watch.py	Watcher._refresh	name	e	exc
+cache	packages/cache/src/moxi_cache/watch.py	Watcher._remove_others	name	e	exc
+cache	packages/cache/src/moxi_cache/watch.py	Watcher.tick	name	e	exc
+cache	packages/cache/src/moxi_cache/watch.py	claude_binary	name	environ	env
+cache	packages/cache/src/moxi_cache/watch.py	entries = list(self.directory.iterdir())	use	self.directory	self.records_dir
+cache	packages/cache/src/moxi_cache/watch.py	log.info("watching live Claude sessions; records under %s", watcher.directory)	use	watcher.directory	watcher.records_dir
+cache	packages/cache/src/moxi_cache/watch.py	if records.record_path(live.session, self.directory) is None:	use	self.directory	self.records_dir
+cache	packages/cache/src/moxi_cache/watch.py	run_agents	name	e	exc
+cache	packages/cache/src/moxi_cache/watch.py	self.directory = records.record_dir() if records_dir is None else Path(records_dir)	use	self.directory	self.records_dir
+cache	packages/cache/src/moxi_cache/watch.py	self.directory.mkdir(parents=True, exist_ok=True)	use	self.directory	self.records_dir
+cache	packages/cache/src/moxi_cache/watch.py	self.say("remove", f"cannot list {self.directory}: {exc}")	use	self.directory	self.records_dir
+cache	packages/cache/src/moxi_cache/watch.py	sessions_dir	name	environ	env
+cache	packages/cache/src/moxi_cache/watch.py	sessions_stamp	name	directory	sessions_dir
+cache	packages/cache/src/moxi_cache/watch.py	write_record(self.directory, record)	use	self.directory	self.records_dir
+cache	packages/cache/src/moxi_cache/watch.py	write_record	name	directory	records_dir
+cache	packages/cache/src/moxi_cache/watch.py	home = env.get("HOME") or str(Path.home())	keep	HOME	HOME
+cache	packages/cache/src/moxi_cache/watch.py	run	name	e	exc
 cache	packages/cache/tests/band_cases.py	"""`record` as it would be written for a reading at `now` in place of `NOW`."""	keep	record	record
 cache	packages/cache/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/page_kit.py	"""Write `record` (or `text` in its place) as its session's record, as the watcher	keep	record	record
 cache	packages/cache/tests/page_kit.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/page_kit.py	return events.until(lambda name, data: name == "cache.clocks" and check(data))[1]	keep	ok	ok
+cache	packages/cache/tests/page_kit.py	clear	name	directory	records_dir
+cache	packages/cache/tests/page_kit.py	put	name	directory	records_dir
+cache	packages/cache/tests/page_kit.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_api.py	"clock_records"} <= set(	keep	set	set
 cache	packages/cache/tests/test_api.py	assert doc["kind"] == "fresh" and set(doc) >= {"code", "ttl_source", "lowering"}	keep	set	set
 cache	packages/cache/tests/test_api.py	assert set(module.OPTIONAL) == {"ui"}	keep	set	set
@@ -139,7 +206,13 @@ cache	packages/cache/tests/test_claude_clock.py	assert cold.kind == "cold" and c
 cache	packages/cache/tests/test_claude_clock.py	assert read(SESS_A, tmp_path).ttl_seconds == 300	use	.ttl_seconds	.ttl_s
 cache	packages/cache/tests/test_claude_clock.py	assert warm.kind == "warm" and 55 <= warm.age_seconds <= 120	use	warm.age_seconds	warm.age_s
 cache	packages/cache/tests/test_cli.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+cache	packages/cache/tests/test_cli.py	_record	name	directory	records_dir
+cache	packages/cache/tests/test_cli.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_clock_records.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+cache	packages/cache/tests/test_clock_records.py	put	name	directory	records_dir
+cache	packages/cache/tests/test_clock_records.py	-	name	test_an_unreadable_directory_gives_no_records	test_an_unreadable_records_dir_gives_no_records
+cache	packages/cache/tests/test_clock_records.py	-	name	test_no_directory_gives_no_records	test_no_records_dir_gives_no_records
+cache	packages/cache/tests/test_clock_records.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_codex_clock.py	"usage": token_usage(input=inp, cached=cached, output=5, reasoning=0)})	use	input=	input_tokens=
 cache	packages/cache/tests/test_codex_clock.py	assert (clock.kind, clock.age_seconds) == ("warm", 0.0)	use	clock.age_seconds	clock.age_s
 cache	packages/cache/tests/test_codex_clock.py	assert (clock.kind, clock.age_seconds, clock.ttl_seconds) == ("cold", None, None)	use	clock.age_seconds	clock.age_s
@@ -179,6 +252,8 @@ cache	packages/cache/tests/test_codex_clock.py	without.kind, without.code, witho
 cache	packages/cache/tests/test_codex_clock.py	r.add(*breaker(A + 10))	keep	stream	stream
 cache	packages/cache/tests/test_codex_clock.py	r.add(*breaker(A + gap + 0.02))	keep	stream	stream
 cache	packages/cache/tests/test_codex_clock.py	r.add(*breaker(A - 20))	keep	stream	stream
+cache	packages/cache/tests/test_codex_clock.py	r.item("message", NOW - 9.9, role="developer", content=[])	keep	content	content
+cache	packages/cache/tests/test_codex_clock.py	r.item("message", NOW - 9.8, role="user", content=[])	keep	content	content
 cache	packages/cache/tests/test_drift.py	assert again.ttl_seconds == first.ttl_seconds, "the written lowering is in force"	use	again.ttl_seconds	again.ttl_s
 cache	packages/cache/tests/test_drift.py	assert again.ttl_seconds == first.ttl_seconds, "the written lowering is in force"	use	first.ttl_seconds	first.ttl_s
 cache	packages/cache/tests/test_drift.py	assert clock.lowering["lifetime"] == lowered and clock.ttl_seconds == lowered	use	clock.ttl_seconds	clock.ttl_s
@@ -190,6 +265,8 @@ cache	packages/cache/tests/test_opencode_clock.py	assert clock.age_seconds == py
 cache	packages/cache/tests/test_opencode_clock.py	assert clock.kind == "cold" and clock.age_seconds == pytest.approx(400, abs=0.01)	use	clock.age_seconds	clock.age_s
 cache	packages/cache/tests/test_opencode_clock.py	assert clock.kind == "no-cache" and clock.ttl_seconds is None	use	clock.ttl_seconds	clock.ttl_s
 cache	packages/cache/tests/test_opencode_clock.py	assert clock.kind == "warm" and clock.age_seconds == pytest.approx(100, abs=0.01)	use	clock.age_seconds	clock.age_s
+cache	packages/cache/tests/test_opencode_clock.py	change	name	c	conn
+cache	packages/cache/tests/test_opencode_clock.py	test_each_witness_that_fails_is_unknown	name	holder	conn
 cache	packages/cache/tests/test_page.py	assert set(body) == {"now", "state", "detail", "clocks"}	keep	set	set
 cache	packages/cache/tests/test_page.py	assert set(found.components) == {"page", "chip"}	keep	set	set
 cache	packages/cache/tests/test_page.py	assert set(module.COMPONENTS) == {"page", "chip"}	keep	set	set
@@ -199,9 +276,17 @@ cache	packages/cache/tests/test_page.py	keys = set(page.ROW.items) | set(page.CL
 cache	packages/cache/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 cache	packages/cache/tests/test_page.py	self._gone.set()	keep	set	set
 cache	packages/cache/tests/test_page.py	written = [case["record"] for case in CASES]	keep	record	record
+cache	packages/cache/tests/test_page.py	put	name	directory	records_dir
+cache	packages/cache/tests/test_page.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_render.py	assert set(doc) == {"text", "band", "age_s", "ttl_s", "dim"}	keep	set	set
 cache	packages/cache/tests/test_render.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+cache	packages/cache/tests/test_render.py	put_record	name	directory	records_dir
+cache	packages/cache/tests/test_render.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_segment.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+cache	packages/cache/tests/test_segment.py	put	name	directory	records_dir
+cache	packages/cache/tests/test_segment.py	test_segment_is_none_for_a_record_naming_another_session	name	directory	records_dir
+cache	packages/cache/tests/test_segment.py	-	name	test_the_records_live_under_the_runtime_directory	test_the_records_live_under_the_runtime_dir
+cache	packages/cache/tests/test_segment.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_table.py	assert (after.kind, after.ttl_seconds, after.key) == ("warm", 600, "codex openai/gpt-5.5")	use	after.ttl_seconds	after.ttl_s
 cache	packages/cache/tests/test_table.py	r.request(token_usage(input=100, cached=90))	use	input=	input_tokens=
 cache	packages/cache/tests/test_timer.py	asks.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -217,6 +302,16 @@ cache	packages/cache/tests/test_timer.py	monkeypatch.setattr(proc, "environ", la
 cache	packages/cache/tests/test_timer.py	monkeypatch.setattr(proc, "environ", refuse)	use	"environ"	"process_env"
 cache	packages/cache/tests/test_timer.py	path = make("moxi-lc-clear")	keep	start	start
 cache	packages/cache/tests/test_timer.py	stop.set()	keep	set	set
+cache	packages/cache/tests/test_timer.py	make_timer	name	environ	env
+cache	packages/cache/tests/test_timer.py	put_record	name	directory	records_dir
+cache	packages/cache/tests/test_timer.py	test_a_failing_timer_tick_is_logged_and_the_watcher_goes_on.W	name	directory	records_dir
+cache	packages/cache/tests/test_timer.py	-	name	test_proc_environ_is_moxi_procs_reader	test_read_process_env_is_moxi_procs_reader
+cache	packages/cache/tests/test_timer.py	-	name	test_proc_environ_reads_a_process_and_none_for_a_gone_one	test_read_process_env_reads_a_process_and_none_for_a_gone_one
+cache	packages/cache/tests/test_timer.py	test_requires_env_reads_the_sessions_process	name	environ	process_env
+cache	packages/cache/tests/test_timer.py	test_run_ticks_the_timer_after_the_watcher_and_closes_it.W	name	directory	records_dir
+cache	packages/cache/tests/test_timer.py	-	name	test_the_log_is_under_caches_state_directory	test_the_log_is_under_caches_state_dir
+cache	packages/cache/tests/test_timer.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+cache	packages/cache/tests/test_timer.py	monkeypatch.setattr(timer, "proc_environ", refuse)	use	"proc_environ"	"read_process_env"
 cache	packages/cache/tests/test_watch.py	assert set(fake.reads) == {A}              # an unsafe id is never read either	keep	set	set
 cache	packages/cache/tests/test_watch.py	assert set(tmp_path.rglob("*")) == before	keep	set	set
 cache	packages/cache/tests/test_watch.py	assert watch.sessions_dir({"HOME": "/h"}) == Path("/h/.claude/sessions")	keep	HOME	HOME
@@ -224,6 +319,12 @@ cache	packages/cache/tests/test_watch.py	before = set(tmp_path.rglob("*"))	keep	
 cache	packages/cache/tests/test_watch.py	env = {"PATH": str(tmp_path / "empty"), "HOME": str(tmp_path)}	keep	HOME	HOME
 cache	packages/cache/tests/test_watch.py	self.set()	keep	set	set
 cache	packages/cache/tests/test_watch.py	stop.set()	keep	set	set
+cache	packages/cache/tests/test_watch.py	test_a_restart_removes_records_of_sessions_no_longer_live	name	directory	records_dir
+cache	packages/cache/tests/test_watch.py	test_a_session_id_the_reader_refuses_is_skipped_with_one_log_line	name	directory	records_dir
+cache	packages/cache/tests/test_watch.py	-	name	test_the_list_is_asked_every_third_tick_or_when_the_sessions_folder_changes	test_the_list_is_asked_every_third_tick_or_when_the_sessions_dir_changes
+cache	packages/cache/tests/test_watch.py	test_write_record_refuses_an_id_that_cannot_name_a_file	name	directory	records_dir
+cache	packages/cache/tests/test_watch.py	test_write_record_replaces_whole	name	directory	records_dir
+cache	packages/cache/tests/test_watch.py	w = make(fake, sessions, directory=records_dir)	use	directory=	records_dir=
 comms	packages/comms/scripts/codex-smoke.py	env["HOME"] = str(root / "home-dir")	keep	HOME	HOME
 comms	packages/comms/scripts/codex-smoke.py	help="real comms and turns processes with the fake codex binary")	keep	help	help
 comms	packages/comms/scripts/codex-smoke.py	help="run a real Codex turn; spends tokens")	keep	help	help
@@ -233,6 +334,7 @@ comms	packages/comms/scripts/codex-smoke.py	parser.add_argument("--codex", defau
 comms	packages/comms/scripts/codex-smoke.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/scripts/codex-smoke.py	proc.wait(timeout=5)	keep	timeout	timeout
 comms	packages/comms/scripts/codex-smoke.py	proc.wait(timeout=timeout)	keep	timeout	timeout
+comms	packages/comms/scripts/codex-smoke.py	stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)	keep	text	text
 comms	packages/comms/scripts/opencode-home-check.py	ap.add_argument("--home", default=os.environ.get("HOME"),	keep	HOME	HOME
 comms	packages/comms/scripts/opencode-home-check.py	ap.add_argument("--opencode", default=shutil.which("opencode") or	keep	default	default
 comms	packages/comms/scripts/opencode-home-check.py	base["HOME"] = str(home)	keep	HOME	HOME
@@ -1034,6 +1136,7 @@ comms	packages/comms/tests/test_cache_clock.py	r.record("t2", end, inp=48_700, c
 comms	packages/comms/tests/test_cache_clock.py	root.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_cache_clock.py	self.path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_cache_clock.py	sent = rig.record.history(rig.names_channel)[-1]	keep	record	record
+comms	packages/comms/tests/test_cache_clock.py	oc_wrapper.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")	keep	text	text
 comms	packages/comms/tests/test_cache_seam.py	Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()	keep	record	record
 comms	packages/comms/tests/test_cache_seam.py	assert (clock.kind, clock.ttl_seconds, clock.ttl_source) == (cache.COLD, 300, "tier")	use	clock.ttl_seconds	clock.ttl_s
 comms	packages/comms/tests/test_cache_seam.py	assert clock.ttl_seconds == 3600 and clock.ttl_source == "config"	use	clock.ttl_seconds	clock.ttl_s
@@ -1067,6 +1170,7 @@ comms	packages/comms/tests/test_claim_send.py	return rig.record.history(rig.name
 comms	packages/comms/tests/test_claim_server.py	-	name	test_a_claim_socket_outside_comms_runtime_directory_is_never_asked	test_a_claim_socket_outside_comms_runtime_dir_is_never_asked
 comms	packages/comms/tests/test_claim_server.py	assert late.wait(timeout=30) == 0	keep	timeout	timeout
 comms	packages/comms/tests/test_claim_server.py	out = json.loads(child.communicate(timeout=30)[0])	keep	timeout	timeout
+comms	packages/comms/tests/test_claim_server.py	str(operator.socket_path)], stdout=subprocess.PIPE, text=True)	keep	text	text
 comms	packages/comms/tests/test_claim_wire.py	assert rig.record.max_message_id(rig.names_channel) == before	keep	record	record
 comms	packages/comms/tests/test_claim_wire.py	before = rig.record.max_message_id(rig.names_channel)	keep	record	record
 comms	packages/comms/tests/test_claim_wire.py	code, out = rig.send("nobody-here@proj-a", "to nobody", sender=planner)	keep	fail	fail
@@ -1396,6 +1500,13 @@ comms	packages/comms/tests/test_mcp_inprocess.py	first.set()	keep	set	set
 comms	packages/comms/tests/test_mcp_inprocess.py	gate.open.set()	keep	set	set
 comms	packages/comms/tests/test_mcp_inprocess.py	ids.append(client.send(PLANNER, credential, content)["message_id"])	keep	fail	fail
 comms	packages/comms/tests/test_mcp_inprocess.py	self.threads: set = set()	keep	set	set
+comms	packages/comms/tests/test_mcp_inprocess.py	kw = {"sent": dict(to="reviewer", text="hi"),	keep	text	text
+comms	packages/comms/tests/test_mcp_inprocess.py	"never-bound": dict(to="nobody-yet", text="hi"),	keep	text	text
+comms	packages/comms/tests/test_mcp_inprocess.py	"new-name": dict(to="nobody-yet", text="hi", new_name=True),	keep	text	text
+comms	packages/comms/tests/test_mcp_inprocess.py	"too-long": dict(to="reviewer", text=LONG),	keep	text	text
+comms	packages/comms/tests/test_mcp_inprocess.py	"send-only": dict(to=CONSOLE, text="report"),	keep	text	text
+comms	packages/comms/tests/test_mcp_inprocess.py	"posture-required": dict(to="reviewer", text="hi", posture=None),	keep	text	text
+comms	packages/comms/tests/test_mcp_inprocess.py	"would-send": dict(to="reviewer", text="hi", check=True)}[case]	keep	text	text
 comms	packages/comms/tests/test_mcp_launch.py	assert not set(STAMPS) & set(env) and env["PATH"] == "/bin"	keep	set	set
 comms	packages/comms/tests/test_mcp_launch.py	assert not set(STAMPS) & set(seen["env"]) and not set(STAMPS) & set(seen["asked"][0])	keep	set	set
 comms	packages/comms/tests/test_mcp_launch.py	assert set(STAMPS) <= set(announcement.INTERNAL_ENV)	keep	set	set
@@ -1457,6 +1568,8 @@ comms	packages/comms/tests/test_opencode_adapter.py	held = set(adapter.held_ids)
 comms	packages/comms/tests/test_opencode_adapter.py	high = max(int(m.id) for m in rig.record.history(rig.names_channel))	keep	record	record
 comms	packages/comms/tests/test_opencode_adapter.py	keys = set(keys_of(config))	keep	set	set
 comms	packages/comms/tests/test_opencode_adapter.py	rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,	keep	record	record
+comms	packages/comms/tests/test_opencode_adapter.py	fake.prompt(sid, oc.mint_message_id(), text="his own prompt")     # he is mid-turn	keep	text	text
+comms	packages/comms/tests/test_opencode_adapter.py	fake.prompt(adapter.session_id, oc.mint_message_id(), text="his own")	keep	text	text
 comms	packages/comms/tests/test_opencode_home_check.py	assert set(removed) == set(remove)	keep	set	set
 comms	packages/comms/tests/test_opencode_home_check.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_opencode_kind.py	(msg,) = rig.record.history(rig.names_channel)	keep	record	record
@@ -1637,6 +1750,9 @@ comms	packages/comms/tests/test_send_rule.py	shim = rig.shim(start=False, name=N
 comms	packages/comms/tests/test_send_rule.py	live = rig.daemon.attribute(message(rig, mid), live=True)	keep	live=	live=
 comms	packages/comms/tests/test_send_rule.py	driver = loop.hold("coder", "opencode")	keep	on	on
 comms	packages/comms/tests/test_send_rule.py	speaker = loop.hold("alice", "codex")	keep	on	on
+comms	packages/comms/tests/test_send_rule.py	stdout=subprocess.PIPE, text=True)	keep	text	text
+comms	packages/comms/tests/test_send_rule.py	stderr=subprocess.STDOUT, text=True)	keep	text	text
+comms	packages/comms/tests/test_send_rule.py	stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)	keep	text	text
 comms	packages/comms/tests/test_settings.py	-	name	test_a_given_environment_is_read_instead_of_the_process	test_a_given_env_is_read_instead_of_the_process
 comms	packages/comms/tests/test_settings.py	-	name	test_a_named_relative_file_is_read_from_the_working_directory	test_a_named_relative_file_is_read_from_the_working_dir
 comms	packages/comms/tests/test_settings.py	-	name	test_the_text_entry_reads_no_environment	test_the_text_entry_reads_no_env
@@ -3439,6 +3555,7 @@ moxi	packages/moxi/src/moxi/proc.py	return proc.communicate(timeout=KILL_GRACE)	
 moxi	packages/moxi/src/moxi/proc.py	run	name	input	stdin_data
 moxi	packages/moxi/src/moxi/proc.py	run	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/proc.py	common = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=out,	keep	stdin	stdin
+moxi	packages/moxi/src/moxi/proc.py	found = first(snapshot, ctypes.byref(entry))	keep	unterminated	unterminated
 moxi	packages/moxi/src/moxi/run.py	paths.core().runtime_dir(create=True)	keep	create	create
 moxi	packages/moxi/src/moxi/run.py	reader.join(timeout=2.0)  # a grandchild may still hold the pipe; leave it	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/run.py	result	name	environ	effective_env
@@ -3518,6 +3635,7 @@ moxi	packages/moxi/src/moxi/units/_plan.py	_Planner.__init__	name	environ	unit_e
 moxi	packages/moxi/src/moxi/units/_plan.py	_Planner.__init__	name	environment	unit_env
 moxi	packages/moxi/src/moxi/units/_plan.py	env=self.environment)	use	environment	unit_env
 moxi	packages/moxi/src/moxi/units/_plan.py	self.environment = tuple(sorted((unit_env or {}).items()))	use	environment	unit_env
+moxi	packages/moxi/src/moxi/units/_plan.py	common = dict(paths=paths, text="".join(texts), texts=texts, entry=entry,	keep	text	text
 moxi	packages/moxi/src/moxi/units/_schtasks.py	-	name	FOLDER	TASK_DIR
 moxi	packages/moxi/src/moxi/units/_schtasks.py	SchtasksBackend	name	home_folder	home_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	SchtasksBackend.__init__	name	folder	task_dir
@@ -5651,6 +5769,15 @@ sessions	packages/sessions/src/moxi_sessions/catalog.py	return Facts(name=name, 
 sessions	packages/sessions/src/moxi_sessions/catalog.py	seen: set[tuple[str, str]] = set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/catalog.py	the head's `folder` and `started`, and `name` by the rule `Details.name` states. It is for	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/catalog.py	unknown = set()	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/catalog.py	Head	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/catalog.py	Details	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/catalog.py	Facts	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/catalog.py	read_head	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/catalog.py	return Facts(name=name, work_dir=head.folder, started=head.started)	use	head.folder	head.work_dir
+sessions	packages/sessions/src/moxi_sessions/catalog.py	return Details(work_dir=head.folder, started=head.started,	use	head.folder	head.work_dir
+sessions	packages/sessions/src/moxi_sessions/catalog.py	_activity	kwonly	program	program
+sessions	packages/sessions/src/moxi_sessions/catalog.py	read_tail	kwonly	program	program
+sessions	packages/sessions/src/moxi_sessions/catalog.py	Catalog._tail	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/claude.py	`~` and the home directory taken from its `HOME`. A process that reports its session's	keep	HOME	HOME
 sessions	packages/sessions/src/moxi_sessions/claude.py	for lineno, line in enumerate(text.splitlines(), start=1):	keep	start	start
 sessions	packages/sessions/src/moxi_sessions/claude.py	held = self._held	keep	_held	_held
@@ -5661,6 +5788,16 @@ sessions	packages/sessions/src/moxi_sessions/claude.py	seen: set[str] = set()	ke
 sessions	packages/sessions/src/moxi_sessions/claude.py	self._held = None	keep	_held	_held
 sessions	packages/sessions/src/moxi_sessions/claude.py	self._held = pending	keep	_held	_held
 sessions	packages/sessions/src/moxi_sessions/claude.py	self._held: tuple | None = None	keep	_held	_held
+sessions	packages/sessions/src/moxi_sessions/claude.py	read_records	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/claude.py	_usage_request	kwonly	final	final
+sessions	packages/sessions/src/moxi_sessions/claude.py	_injected	kwonly	synthetic	synthetic
+sessions	packages/sessions/src/moxi_sessions/claude.py	_content_records	kwonly	synthetic	synthetic
+sessions	packages/sessions/src/moxi_sessions/claude.py	_common	kwonly	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/claude.py	_build	kwonly	final	final
+sessions	packages/sessions/src/moxi_sessions/claude.py	_map_line	kwonly	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/claude.py	_map_line	kwonly	unterminated	unterminated
+sessions	packages/sessions/src/moxi_sessions/claude.py	_map_line	kwonly	content	content
+sessions	packages/sessions/src/moxi_sessions/claude.py	_map_line	kwonly	others	others
 sessions	packages/sessions/src/moxi_sessions/cli.py	"list", help="print the newest sessions",	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	"read", help="print part of one session",	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	finder = verbs.add_parser("find", help="print where a session's records are",	keep	help	help
@@ -5687,8 +5824,24 @@ sessions	packages/sessions/src/moxi_sessions/cli.py	roots = verbs.add_parser("ro
 sessions	packages/sessions/src/moxi_sessions/cli.py	roots.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	row["name"] or row["folder"] or "-", row["session"])))	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/cli.py	which.add_argument("--all", action="store_true", help="the whole session")	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	work_dir=args.folder)	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/cli.py	_list_row	kwonly	text	text
 sessions	packages/sessions/src/moxi_sessions/codex.py	named = {"type", "call_id", "name"} | ({key} if key else set())	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/codex.py	_entries	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/codex.py	read_records	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/codex.py	read_head	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/codex.py	read_spawns	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/doctor.py	-	name	_directory	_dir_row
+sessions	packages/sessions/src/moxi_sessions/doctor.py	_absent	kwonly	configured	configured
 sessions	packages/sessions/src/moxi_sessions/find.py	"""`directory`'s entries by name, or none when it cannot be listed (noted)."""	keep	directory	directory
+sessions	packages/sessions/src/moxi_sessions/find.py	_Walk.entries	name	directory	target_dir
+sessions	packages/sessions/src/moxi_sessions/find.py	_Walk.header	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/find.py	_claude_agents	name	directory	agents_dir
+sessions	packages/sessions/src/moxi_sessions/find.py	_claude_subagents	name	directory	subagents_dir
+sessions	packages/sessions/src/moxi_sessions/find.py	_codex_child	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/find.py	_claude_agents	kwonly	heads	heads
+sessions	packages/sessions/src/moxi_sessions/find.py	_claude_sources	kwonly	heads	heads
+sessions	packages/sessions/src/moxi_sessions/find.py	_codex_sources	kwonly	heads	heads
 sessions	packages/sessions/src/moxi_sessions/lists.py	"""The entries that pass every filter but the harness (and, with `folder` false, the	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	"folder": details.folder, "started": details.started,	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	"name": facts.name, "folder": facts.folder,	keep	folder	folder
@@ -5709,12 +5862,36 @@ sessions	packages/sessions/src/moxi_sessions/lists.py	sessions_newest	name	folde
 sessions	packages/sessions/src/moxi_sessions/lists.py	turn of the rows it returns and of no other session, unless `folder` is asked.	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _folder(head.folder) if head is not None else None	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	facts = cat.facts(entry)	keep	turn_open	turn_open
+sessions	packages/sessions/src/moxi_sessions/lists.py	-	name	FOLDERS_MAX	WORK_DIRS_MAX
+sessions	packages/sessions/src/moxi_sessions/lists.py	_Filters	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	-	name	_folder	_work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	_filters	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	_found	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	_pool	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	_pool	name	by_folder	by_work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	list_sessions	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	newest_sessions	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	more_sessions	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	-	name	list_folders	list_work_dirs
+sessions	packages/sessions/src/moxi_sessions/lists.py	by_work_dir = f.folder if work_dir else None	use	f.folder	f.work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	where = _work_dir(head.folder) if head is not None else None	use	head.folder	head.work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	_said	kwonly	prompt	prompt
+sessions	packages/sessions/src/moxi_sessions/lists.py	"folder": details.folder, "started": details.started,	use	.folder	.work_dir
+sessions	packages/sessions/src/moxi_sessions/lists.py	"name": facts.name, "folder": facts.folder,	use	.folder	.work_dir
 sessions	packages/sessions/src/moxi_sessions/opencode.py	"session": ("id", "parent_id", "title", "directory", "version", "model", "agent",	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/opencode.py	directory=values["directory"], version=values["version"], model=model,	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/opencode.py	self._checked: set[str] = set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/opencode.py	stamped: dict[str, set[str]] = {"message": set(), "part": set()}	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/opencode.py	timeout=BUSY_MS / 1000, isolation_level=None)	keep	timeout	timeout
 sessions	packages/sessions/src/moxi_sessions/opencode.py	wanted = sorted(set(session_ids) - set(self._parents))	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/opencode.py	connect	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/opencode.py	SessionRow	name	directory	work_dir
+sessions	packages/sessions/src/moxi_sessions/opencode.py	Snapshot.query	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/opencode.py	Snapshot.rows	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/opencode.py	_stat	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/opencode.py	_stat_wal	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/opencode.py	work_dir=values["directory"], version=values["version"], model=model,	keep	directory	directory
+sessions	packages/sessions/src/moxi_sessions/opencode.py	_step	kwonly	keep_raw	keep_raw
 sessions	packages/sessions/src/moxi_sessions/page.py	"before": lb.Field("string", required=False, max=PLACE_MAX),	keep	required	required
 sessions	packages/sessions/src/moxi_sessions/page.py	"find": lb.Field("string", required=False, max=FIND_MAX),	keep	required	required
 sessions	packages/sessions/src/moxi_sessions/page.py	"folder": _MAYBE_PATH,	keep	folder	folder
@@ -5744,9 +5921,18 @@ sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_FLOAT = lb.Out("floa
 sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_INT = lb.Out("int", nullable=True)	keep	nullable=	nullable=
 sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_PATH = lb.Out("string", mark="path", nullable=True)	keep	nullable=	nullable=
 sessions	packages/sessions/src/moxi_sessions/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
+sessions	packages/sessions/src/moxi_sessions/page.py	-	name	FOLDER_MAX	WORK_DIR_MAX
+sessions	packages/sessions/src/moxi_sessions/page.py	-	name	FOLDERS	WORK_DIRS
+sessions	packages/sessions/src/moxi_sessions/page.py	-	name	FOLDERS_QUERY	WORK_DIRS_QUERY
+sessions	packages/sessions/src/moxi_sessions/page.py	LIST_QUERY = {**_FILTERS, "folder": lb.Field("string", required=False, max=WORK_DIR_MAX)}	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/page.py	LIST_QUERY = {**_FILTERS, "folder": lb.Field("string", required=False, max=WORK_DIR_MAX)}	keep	required	required
+sessions	packages/sessions/src/moxi_sessions/page.py	lb.Route("/api/folders", "read", _target("folders"), query=WORK_DIRS_QUERY,	use	_target("folders")	_target("work_dirs")
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	**The list.** `listing`, `more`, `session` and `folders` read through the process's one	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	__all__ = ["folders", "listing", "more", "session", "subagents", "view_row", "window"]	keep	folders	folders
 sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	_filters	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	-	name	folders	work_dirs
+sessions	packages/sessions/src/moxi_sessions/pagehandlers.py	out["folder"] = query.get("folder")	use	out["folder"]	out["work_dir"]
 sessions	packages/sessions/src/moxi_sessions/read.py	* `first`: with `head`, line 1's records (an OpenCode session's first message's), not	use	`head	`read_head
 sessions	packages/sessions/src/moxi_sessions/read.py	Window.__init__	kwonly	has_earlier	has_earlier
 sessions	packages/sessions/src/moxi_sessions/read.py	also among the records iterated; None without `head`, or when line 1 does not end	use	`head	`read_head
@@ -5754,6 +5940,31 @@ sessions	packages/sessions/src/moxi_sessions/read.py	earliest = min((r.at["offse
 sessions	packages/sessions/src/moxi_sessions/read.py	line 1 (line 2 with `head`) was read, `limit` when the byte limit stopped it with	use	`head	`read_head
 sessions	packages/sessions/src/moxi_sessions/read.py	records_back	name	head	read_head
 sessions	packages/sessions/src/moxi_sessions/read.py	self.seen: set[str] = set()	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/read.py	_open	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/read.py	_lazy_header.read	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/read.py	_file_records	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/read.py	_LineNumbers._newlines	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/read.py	_LineNumbers._newlines	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/read.py	_file_back.stream	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/read.py	records_since	name	e	exc
+sessions	packages/sessions/src/moxi_sessions/read.py	_file_back	name	e	read_exc
+sessions	packages/sessions/src/moxi_sessions/read.py	_mapper	kwonly	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	_file_records	kwonly	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	_ClaudeBack.__init__	kwonly	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	_ClaudeBack._map	kwonly	unterminated	unterminated
+sessions	packages/sessions/src/moxi_sessions/read.py	_ClaudeBack.first	kwonly	unterminated	unterminated
+sessions	packages/sessions/src/moxi_sessions/read.py	_CodexBack.__init__	kwonly	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	_CodexBack._map	kwonly	unterminated	unterminated
+sessions	packages/sessions/src/moxi_sessions/read.py	_opencode_back	kwonly	head	head
+sessions	packages/sessions/src/moxi_sessions/read.py	_file_since	kwonly	reset	reset
+sessions	packages/sessions/src/moxi_sessions/read.py	_opencode_since	kwonly	reset	reset
+sessions	packages/sessions/src/moxi_sessions/read.py	return mapper.feed(data, line=line, offset=offset, unterminated=unterminated)	keep	unterminated	unterminated
+sessions	packages/sessions/src/moxi_sessions/read.py	yield from snap.records(session_id, kinds=wanted, keep_raw=keep_raw)	keep	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	keep_raw=keep_raw), wanted))	keep	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	keep_raw=keep_raw)	keep	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	_opencode_back	kwonly	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	_file_since	kwonly	keep_raw	keep_raw
+sessions	packages/sessions/src/moxi_sessions/read.py	_opencode_since	kwonly	keep_raw	keep_raw
 sessions	packages/sessions/src/moxi_sessions/reader.py	* line 1, read first, when asked (`head=True`): a Codex rollout's line 1 says whether the	use	`head=	`read_head=
 sessions	packages/sessions/src/moxi_sessions/reader.py	1, or line 2 with `head`) has been yielded or there was none to yield, `limit` once the	use	`head	`read_head
 sessions	packages/sessions/src/moxi_sessions/reader.py	`first` is line 1's bytes without its newline when `head=True` (`b""` for an empty	use	`head=	`read_head=
@@ -5764,12 +5975,27 @@ sessions	packages/sessions/src/moxi_sessions/readguard.py	__all__ = ["NAME", "GU
 sessions	packages/sessions/src/moxi_sessions/readguard.py	_said: set[str] = set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/readguard.py	cut = min((i for i in (value.find(c) for c in _GLOB) if i >= 0), default=-1)	keep	default	default
 sessions	packages/sessions/src/moxi_sessions/readguard.py	home = _absolute(env.get("HOME"))	keep	HOME	HOME
+sessions	packages/sessions/src/moxi_sessions/readguard.py	transcript_roots	name	environ	roots_env
 sessions	packages/sessions/src/moxi_sessions/resume.py	"folder": folder if line.in_folder else None}	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/resume.py	`folder` beside a command means the command needs no folder."""	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/resume.py	command must be run in the session's folder when `folder` is not known.	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/resume.py	would read. `folder` is where to run it: the session's folder for a harness whose	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/resume.py	Line	name	in_folder	in_work_dir
+sessions	packages/sessions/src/moxi_sessions/resume.py	resume	name	folder	work_dir
+sessions	packages/sessions/src/moxi_sessions/resume.py	if line.in_folder and not work_dir:	use	line.in_folder	line.in_work_dir
+sessions	packages/sessions/src/moxi_sessions/resume.py	"folder": work_dir if line.in_folder else None}	use	line.in_folder	line.in_work_dir
+sessions	packages/sessions/src/moxi_sessions/resume.py	"folder": work_dir if line.in_folder else None}	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/retention.py	retention	name	environ	env
 sessions	packages/sessions/src/moxi_sessions/retention.py	return environ.get("HOME") or str(Path.home())	keep	HOME	HOME
+sessions	packages/sessions/src/moxi_sessions/retention.py	_home	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/retention.py	_under	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/retention.py	claude_settings	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/retention.py	codex_home	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/retention.py	_claude	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/retention.py	_count_rollouts	name	folder	rollouts_dir
+sessions	packages/sessions/src/moxi_sessions/retention.py	_codex	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/retention.py	lines	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/retention.py	return env.get("HOME") or str(Path.home())	keep	HOME	HOME
 sessions	packages/sessions/src/moxi_sessions/shape.py	unknown = set(obj.get("unknown") or ())	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/source.py	"""A harness's root, where it came from (`config`, `environment` or `default`), the	keep	environment	environment
 sessions	packages/sessions/src/moxi_sessions/source.py	"""Codex's sessions root: `${CODEX_HOME:-~/.codex}/sessions` over `environ`. With	keep	environ	environ
@@ -5781,22 +6007,47 @@ sessions	packages/sessions/src/moxi_sessions/source.py	return RootOrigin(harness
 sessions	packages/sessions/src/moxi_sessions/source.py	return RootOrigin(harness, path, "environment", "CODEX_HOME/sessions")	keep	environment	environment
 sessions	packages/sessions/src/moxi_sessions/source.py	return environ.get("HOME") or str(Path.home())	keep	HOME	HOME
 sessions	packages/sessions/src/moxi_sessions/source.py	root	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/source.py	_home	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/source.py	codex_root	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/source.py	opencode_root	name	environ	env
+sessions	packages/sessions/src/moxi_sessions/source.py	return env.get("HOME") or str(Path.home())	keep	HOME	HOME
+sessions	packages/sessions/src/moxi_sessions/source.py	cwd=row.directory, title=row.title, version=row.version,	use	.directory	.work_dir
 sessions	packages/sessions/src/moxi_sessions/testing/claude.py	self.path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+sessions	packages/sessions/src/moxi_sessions/testing/claude.py	ClaudeTranscript.subagent	name	directory	subagents_dir
+sessions	packages/sessions/src/moxi_sessions/testing/claude.py	ClaudeTranscript.flush	name	handle	fh
+sessions	packages/sessions/src/moxi_sessions/testing/claude.py	usage	name	input	input_tokens
+sessions	packages/sessions/src/moxi_sessions/testing/claude.py	req = t.request(usage=usage(input=3, cache_read=900, output=40))	use	input=	input_tokens=
 sessions	packages/sessions/src/moxi_sessions/testing/codex.py	for n, thread in enumerate(thread_ids, start=1)]	keep	start	start
 sessions	packages/sessions/src/moxi_sessions/testing/codex.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 sessions	packages/sessions/src/moxi_sessions/testing/codex.py	r.request(token_usage(input=1200, cached=1000, output=40))	use	input=	input_tokens=
 sessions	packages/sessions/src/moxi_sessions/testing/codex.py	self.path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 sessions	packages/sessions/src/moxi_sessions/testing/codex.py	token_usage	name	input	input_tokens
+sessions	packages/sessions/src/moxi_sessions/testing/codex.py	CodexRollout.flush	name	handle	fh
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	"directory": directory, "title": title, "version": version, "cost": 0,	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	"path": {"cwd": self.row["directory"], "root": "/"},	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	"session": ("id", "project_id", "parent_id", "slug", "directory", "title", "version",	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	`slug` text NOT NULL, `directory` text NOT NULL, `path` text, `title` text NOT NULL,	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	self._unsummed: set[str] = set()	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	self.path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	OpenCodeDb.session	name	directory	work_dir
+sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	"directory": work_dir, "title": title, "version": version, "cost": 0,	keep	directory	directory
+sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	tokens	name	input	input_tokens
+sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	OpenCodeAssistant.step_finish	name	input	input_tokens
+sessions	packages/sessions/src/moxi_sessions/testing/opencode.py	a.step_finish(input=900, output=40, cache_read=1200)	use	input=	input_tokens=
 sessions	packages/sessions/src/moxi_sessions/view.py	seen: set[Any] = set()	keep	set	set
 sessions	packages/sessions/tests/browser_seed.py	a.step(text="opencode done", input=900, output=40)	keep	input	input
 sessions	packages/sessions/tests/browser_seed.py	k.step(text="looked", input=5, output=3)	keep	input	input
+sessions	packages/sessions/tests/browser_seed.py	a.step(text="opencode done", input=900, output=40)	use	input=	input_tokens=
+sessions	packages/sessions/tests/browser_seed.py	k.step(text="looked", input=5, output=3)	use	input=	input_tokens=
 sessions	packages/sessions/tests/conftest.py	directory.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+sessions	packages/sessions/tests/conftest.py	write_config	name	directory	config_dir
+sessions	packages/sessions/tests/conftest.py	write_transcript	name	directory	project_dir
+sessions	packages/sessions/tests/conftest.py	write_rollout	name	directory	day_dir
+sessions	packages/sessions/tests/conftest.py	config_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+sessions	packages/sessions/tests/conftest.py	project_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+sessions	packages/sessions/tests/conftest.py	day_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+sessions	packages/sessions/tests/reference_readers.py	claude_walk	name	f	fh
+sessions	packages/sessions/tests/reference_readers.py	codex_walk	name	f	fh
 sessions	packages/sessions/tests/test_api.py	"recent_s", "now", "harness", "since", "until", "folder", "find"]	use	"folder"	"work_dir"
 sessions	packages/sessions/tests/test_api.py	LIST_READS = ("sessions_list", "sessions_more", "sessions_newest", "sessions_folders",	use	sessions_folders	session_dirs
 sessions	packages/sessions/tests/test_api.py	assert READ_NAMES | SHAPE_NAMES | {"opencode"} <= set(api.__all__)	keep	set	set
@@ -5813,7 +6064,14 @@ sessions	packages/sessions/tests/test_api.py	assert set(module.OPTIONAL) == {"ui
 sessions	packages/sessions/tests/test_api.py	assert sig.parameters["head"].default is False	use	"head"	"read_head"
 sessions	packages/sessions/tests/test_api.py	assert {"ClaudeTranscript", "CodexRollout", "OpenCodeDb"} <= set(dir(api.testing))	keep	set	set
 sessions	packages/sessions/tests/test_api.py	assert {"retention", "Retention"} <= set(api.__all__)	keep	set	set
+sessions	packages/sessions/tests/test_api.py	test_the_list_answers_through_the_api_over_the_roots_the_process_names	name	folders	session_dirs
+sessions	packages/sessions/tests/test_api.py	assert [(r["folder"], r["count"]) for r in work_dirs["folders"]] == [	keep	folder	folder
+sessions	packages/sessions/tests/test_api.py	assert [(r["folder"], r["count"]) for r in work_dirs["folders"]] == [	keep	folders	folders
+sessions	packages/sessions/tests/test_api.py	assert session_dirs["folders"][0]["folder"] == "/work/proj-a"	keep	folder	folder
+sessions	packages/sessions/tests/test_api.py	assert session_dirs["folders"][0]["folder"] == "/work/proj-a"	keep	folders	folders
 sessions	packages/sessions/tests/test_bench.py	a.step(input=900, output=120, text="It reads every file it is given. " * 10)	keep	input	input
+sessions	packages/sessions/tests/test_bench.py	bare_pass	name	handle	fh
+sessions	packages/sessions/tests/test_bench.py	a.step(input=900, output=120, text="It reads every file it is given. " * 10)	use	input=	input_tokens=
 sessions	packages/sessions/tests/test_catalog.py	assert (failed.folder, failed.started, failed.name) == (None, None, None)	keep	folder	folder
 sessions	packages/sessions/tests/test_catalog.py	assert (found.folder, found.name) == ("/work/proj-a", "given at launch")	keep	folder	folder
 sessions	packages/sessions/tests/test_catalog.py	assert (found.folder, found.started) == ("/work/proj-b", START + 5)	keep	folder	folder
@@ -5834,12 +6092,34 @@ sessions	packages/sessions/tests/test_catalog.py	assert set(entries) == {sid(1),
 sessions	packages/sessions/tests/test_catalog.py	assert set(entries) == {tid(1), tid(4)}	keep	set	set
 sessions	packages/sessions/tests/test_catalog.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_catalog.py	session = db.session(title="a title of unknown hand", directory="/work/proj-b",	keep	directory	directory
+sessions	packages/sessions/tests/test_catalog.py	-	name	test_a_root_the_environment_names_that_does_not_exist_is_absent	test_a_root_the_env_names_that_does_not_exist_is_absent
+sessions	packages/sessions/tests/test_catalog.py	-	name	test_a_project_folder_that_cannot_be_listed_is_counted_as_an_unread_part	test_a_project_dir_that_cannot_be_listed_is_counted_as_an_unread_part
+sessions	packages/sessions/tests/test_catalog.py	-	name	test_a_session_whose_subagents_folder_cannot_be_listed_has_no_count	test_a_session_whose_subagents_dir_cannot_be_listed_has_no_count
+sessions	packages/sessions/tests/test_catalog.py	-	name	test_a_codex_session_gives_its_folder_start_and_model_and_no_name	test_a_codex_session_gives_its_work_dir_start_and_model_and_no_name
+sessions	packages/sessions/tests/test_catalog.py	-	name	test_an_opencode_session_gives_its_folder_start_and_model_and_no_name	test_an_opencode_session_gives_its_work_dir_start_and_model_and_no_name
+sessions	packages/sessions/tests/test_catalog.py	test_a_file_written_again_in_place_and_smaller_has_its_head_read_again	name	handle	fh
+sessions	packages/sessions/tests/test_catalog.py	answer.step(text="Hello back.")	keep	text	text
+sessions	packages/sessions/tests/test_catalog.py	assert (found.folder, found.started) == ("/work/proj-b", START + 5)	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	session = db.session(title="a title of unknown hand", directory="/work/proj-b",	use	directory=	work_dir=
+sessions	packages/sessions/tests/test_catalog.py	assert (found.folder, found.started) == ("/work/proj-b", START + 7)	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert (failed.folder, failed.started, failed.name) == (None, None, None)	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert (found.folder, found.name) == ("/work/proj-a", "given at launch")	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert cat.head(only(cat)).folder is None	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert (head.folder, head.started, head.name) == (	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert cat.head(only(cat)).folder == "/work/proj-a"	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert cat.head(only(cat)).folder == "/work/proj-b"	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert cat.head(only(cat)).folder == t.cwd	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert cat.kept_head(first).folder == "/work/proj-1"	use	.folder	.work_dir
+sessions	packages/sessions/tests/test_catalog.py	assert all(cat.kept_head(e).folder is not None for e in cat.gather().entries)	use	.folder	.work_dir
 sessions	packages/sessions/tests/test_claude.py	assert projects_root({"CLAUDE_CONFIG_DIR": "/cfg", "HOME": "/h"}) == Path("/cfg/projects")	keep	HOME	HOME
 sessions	packages/sessions/tests/test_claude.py	assert projects_root({"HOME": "/h", "CLAUDE_CONFIG_DIR": ""}) == Path("/h/.claude/projects")	keep	HOME	HOME
 sessions	packages/sessions/tests/test_claude.py	assert projects_root({"HOME": "/h"}) == Path("/h/.claude/projects")	keep	HOME	HOME
 sessions	packages/sessions/tests/test_claude.py	assert projects_root({"HOME": "/s", "CLAUDE_CONFIG_DIR": "~/alt"}) == Path("/s/alt/projects")	keep	HOME	HOME
 sessions	packages/sessions/tests/test_claude.py	monkeypatch.setenv("HOME", str(tmp_path / "home"))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_claude.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
+sessions	packages/sessions/tests/test_claude.py	_stream	name	handle	fh
+sessions	packages/sessions/tests/test_claude.py	-	name	test_the_root_follows_claude_config_dir_in_the_environment_handed	test_the_root_follows_claude_config_dir_in_the_env_handed
+sessions	packages/sessions/tests/test_claude.py	-	name	test_the_root_ignores_this_processs_environment_when_handed_one	test_the_root_ignores_this_processs_env_when_handed_one
 sessions	packages/sessions/tests/test_claude_shape.py	transcript.other("progress", data={"message": {"type": "assistant", "message": {	keep	data	data
 sessions	packages/sessions/tests/test_claude_shape.py	{"type": "text", "text": "twice"}], is_error=True)	keep	is_error	is_error
 sessions	packages/sessions/tests/test_cli.py	"source": "environment",	keep	environment	environment
@@ -5847,10 +6127,24 @@ sessions	packages/sessions/tests/test_cli.py	"source": "environment", "detail": 
 sessions	packages/sessions/tests/test_cli.py	assert set(data) == {"shape", "claude", "codex", "opencode"}	keep	set	set
 sessions	packages/sessions/tests/test_cli.py	assert set(row["activity"]) == {"at", "who"} and set(row["prompt"]) == {"at"}	keep	set	set
 sessions	packages/sessions/tests/test_cli.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
+sessions	packages/sessions/tests/test_cli.py	-	name	test_list_narrows_by_harness_since_folder_and_limit	test_list_narrows_by_harness_since_work_dir_and_limit
+sessions	packages/sessions/tests/test_codex.py	-	name	test_a_rollout_outside_the_day_directories_is_not_a_candidate	test_a_rollout_outside_the_day_dirs_is_not_a_candidate
+sessions	packages/sessions/tests/test_codex.py	-	name	test_a_directory_named_like_a_rollout_is_not_a_candidate	test_a_dir_named_like_a_rollout_is_not_a_candidate
+sessions	packages/sessions/tests/test_codex.py	test_the_stream_yields_every_entry_through_the_one_decoder	name	handle	fh
+sessions	packages/sessions/tests/test_codex.py	test_the_codex_reader_decodes_through_the_one_decoder	name	f	fh
+sessions	packages/sessions/tests/test_codex_shape.py	rollout.item("agent_message", content=[])	keep	content	content
 sessions	packages/sessions/tests/test_doctor.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
+sessions	packages/sessions/tests/test_doctor.py	-	name	test_a_root_that_is_not_a_directory_warns	test_a_root_that_is_not_a_dir_warns
 sessions	packages/sessions/tests/test_find.py	(rollouts / "2026" / "stray.jsonl").parent.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
 sessions	packages/sessions/tests/test_find.py	assert set(by_thread) == {THREAD, THREAD_B, "0190c000-0000-7000-8000-0000000c0de3"}	keep	set	set
 sessions	packages/sessions/tests/test_find.py	r.item("function_call", id="fc_call_x", name="spawn_agent", namespace="collaboration",	keep	id	id
+sessions	packages/sessions/tests/test_find.py	-	name	test_a_directory_that_cannot_be_listed_is_named_and_the_walk_goes_on	test_a_dir_that_cannot_be_listed_is_named_and_the_walk_goes_on
+sessions	packages/sessions/tests/test_find.py	-	name	test_no_subagents_directory_is_none	test_no_subagents_dir_is_none
+sessions	packages/sessions/tests/test_find.py	-	name	test_an_empty_subagents_directory_is_none	test_an_empty_subagents_dir_is_none
+sessions	packages/sessions/tests/test_find.py	-	name	test_a_subagents_directory_that_cannot_be_listed_is_unreadable	test_a_subagents_dir_that_cannot_be_listed_is_unreadable
+sessions	packages/sessions/tests/test_find.py	-	name	test_a_workflow_directory_that_cannot_be_listed_is_named	test_a_workflow_dir_that_cannot_be_listed_is_named
+sessions	packages/sessions/tests/test_find.py	test_codex_a_parent_still_writing_is_read_to_its_listed_size	name	handle	fh
+sessions	packages/sessions/tests/test_find.py	test_live_a_real_spawn_lists_its_one_child	name	handle	fh
 sessions	packages/sessions/tests/test_guard.py	assert ("claude", str(moved)) in readguard.transcript_roots({"HOME": str(home)})	keep	HOME	HOME
 sessions	packages/sessions/tests/test_guard.py	env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(other)}	keep	HOME	HOME
 sessions	packages/sessions/tests/test_guard.py	env = {"HOME": str(home)} if home is not None else {}	keep	HOME	HOME
@@ -5861,7 +6155,13 @@ sessions	packages/sessions/tests/test_guard.py	input={"file_path": path}, cwd="/
 sessions	packages/sessions/tests/test_guard.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_guard.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 sessions	packages/sessions/tests/test_guard.py	tool_use_id="toolu_1", input=tool_input, cwd=cwd, env=env)	keep	input	input
+sessions	packages/sessions/tests/test_guard.py	-	name	test_claude_grep_by_its_path_or_the_working_directory	test_claude_grep_by_its_path_or_the_work_dir
+sessions	packages/sessions/tests/test_guard.py	-	name	test_the_roots_follow_the_launch_environment	test_the_roots_follow_the_launch_env
 sessions	packages/sessions/tests/test_injected.py	a.step_finish(input=5, output=6)	keep	input	input
+sessions	packages/sessions/tests/test_injected.py	user.text(text, synthetic=synthetic)	keep	synthetic	synthetic
+sessions	packages/sessions/tests/test_injected.py	a.step_finish(input=5, output=6)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_list_timed.py	-	name	FOLDERS	WORK_DIRS
+sessions	packages/sessions/tests/test_list_timed.py	seed_root	name	folder	work_dir
 sessions	packages/sessions/tests/test_lists.py	"command": "opencode --session ses_1", "folder": "/work/proj-a"}	keep	folder	folder
 sessions	packages/sessions/tests/test_lists.py	"folder": "/work/proj-a"}	keep	folder	folder
 sessions	packages/sessions/tests/test_lists.py	"folder": None}	keep	folder	folder
@@ -5883,6 +6183,38 @@ sessions	packages/sessions/tests/test_lists.py	{"folder": "/work/proj-a", "count
 sessions	packages/sessions/tests/test_lists.py	{"folder": "/work/proj-a", "count": 1, "changed": NOW - 3 * DAY}], "more": 0}	keep	folder	folder
 sessions	packages/sessions/tests/test_lists.py	{"folder": "/work/proj-a", "count": 3, "changed": NOW - 10},	keep	folder	folder
 sessions	packages/sessions/tests/test_lists.py	{"folder": "/work/proj-b", "count": 1, "changed": NOW - 20}], "more": 0}	keep	folder	folder
+sessions	packages/sessions/tests/test_lists.py	-	name	shared_directory	shared_dir
+sessions	packages/sessions/tests/test_lists.py	-	name	test_a_folder_counts_its_own_sessions_where_two_folders_share_a_directory	test_a_work_dir_counts_its_own_sessions_where_two_work_dirs_share_a_dir
+sessions	packages/sessions/tests/test_lists.py	-	name	test_a_folder_is_the_same_folder_with_or_without_a_slash_at_its_end	test_a_work_dir_is_the_same_work_dir_with_or_without_a_slash_at_its_end
+sessions	packages/sessions/tests/test_lists.py	test_a_folder_is_the_same_folder_with_or_without_a_slash_at_its_end	name	folders	work_dirs
+sessions	packages/sessions/tests/test_lists.py	-	name	test_folders_are_counted_under_the_other_filters_newest_first	test_work_dirs_are_counted_under_the_other_filters_newest_first
+sessions	packages/sessions/tests/test_lists.py	-	name	test_find_matches_an_id_start_or_the_folder_last_segment_and_nothing_else	test_find_matches_an_id_start_or_the_work_dir_last_segment_and_nothing_else
+sessions	packages/sessions/tests/test_lists.py	test_find_matches_an_id_start_or_the_folder_last_segment_and_nothing_else	name	by_folder	by_work_dir
+sessions	packages/sessions/tests/test_lists.py	-	name	test_a_command_that_needs_the_sessions_folder_is_not_given_without_it	test_a_command_that_needs_the_sessions_dir_is_not_given_without_it
+sessions	packages/sessions/tests/test_lists.py	-	name	test_a_row_whose_subagents_folder_cannot_be_listed_has_no_count	test_a_row_whose_subagents_dir_cannot_be_listed_has_no_count
+sessions	packages/sessions/tests/test_lists.py	work_dirs = {f["folder"]: f["count"] for f in list_work_dirs(catalog(roots))["folders"]}	keep	folder	folder
+sessions	packages/sessions/tests/test_lists.py	work_dirs = {f["folder"]: f["count"] for f in list_work_dirs(catalog(roots))["folders"]}	keep	folders	folders
+sessions	packages/sessions/tests/test_lists.py	assert [f["folder"] for f in found["folders"]] == ["/work/a", "/work/b", "/work/c"]	keep	folder	folder
+sessions	packages/sessions/tests/test_lists.py	assert [f["folder"] for f in found["folders"]] == ["/work/a", "/work/b", "/work/c"]	keep	folders	folders
+sessions	packages/sessions/tests/test_lists.py	assert found["folders"][0]["changed"] == T0 + 3 and found["more"] == 0	keep	folders	folders
+sessions	packages/sessions/tests/test_lists.py	assert by_work_dir["folders"] == [{"folder": "/work/last-a", "count": 1, "changed": T0}]	keep	folder	folder
+sessions	packages/sessions/tests/test_lists.py	assert by_work_dir["folders"] == [{"folder": "/work/last-a", "count": 1, "changed": T0}]	keep	folders	folders
+sessions	packages/sessions/tests/test_lists.py	assert list_work_dirs(cat, harness=CODEX) == {"folders": [	keep	folders	folders
+sessions	packages/sessions/tests/test_lists.py	assert list_work_dirs(cat, since=NOW - HOUR, limit=1) == {"folders": [	keep	folders	folders
+sessions	packages/sessions/tests/test_lists.py	assert list_work_dirs(cat, find="proj-b")["folders"][0]["folder"] == "/work/proj-b"	keep	folder	folder
+sessions	packages/sessions/tests/test_lists.py	assert list_work_dirs(cat, find="proj-b")["folders"][0]["folder"] == "/work/proj-b"	keep	folders	folders
+sessions	packages/sessions/tests/test_lists.py	one = listed(roots, folder="/work/proj-a")	use	folder=	work_dir=
+sessions	packages/sessions/tests/test_lists.py	other = listed(roots, folder="/work/proj-b")	use	folder=	work_dir=
+sessions	packages/sessions/tests/test_lists.py	assert listed(roots, folder="/work/proj")["total"] == 0	use	folder=	work_dir=
+sessions	packages/sessions/tests/test_lists.py	plain = listed(roots, folder="/work/proj-a")	use	folder=	work_dir=
+sessions	packages/sessions/tests/test_lists.py	slashed = listed(roots, folder="/work/proj-a/")	use	folder=	work_dir=
+sessions	packages/sessions/tests/test_lists.py	assert listed(roots, folder="/work/proj-A")["total"] == 0     # nothing else is folded	use	folder=	work_dir=
+sessions	packages/sessions/tests/test_lists.py	answer = listed(roots, folder="/work/proj-a", harness=CLAUDE)	use	folder=	work_dir=
+sessions	packages/sessions/tests/test_lists.py	for bad in ({"harness": "other"}, {"folder": "proj-a"}, {"find": "a"},	use	"folder"	"work_dir"
+sessions	packages/sessions/tests/test_names.py	-	name	test_a_typed_name_comes_with_the_folder_and_the_start	test_a_typed_name_comes_with_the_work_dir_and_the_start
+sessions	packages/sessions/tests/test_names.py	-	name	test_a_codex_session_has_its_folder_and_start_and_no_name	test_a_codex_session_has_its_work_dir_and_start_and_no_name
+sessions	packages/sessions/tests/test_names.py	-	name	test_an_opencode_session_has_its_folder_and_start_and_no_name	test_an_opencode_session_has_its_work_dir_and_start_and_no_name
+sessions	packages/sessions/tests/test_names.py	-	name	test_a_failed_head_read_leaves_the_folder_and_start_unread	test_a_failed_head_read_leaves_the_work_dir_and_start_unread
 sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=1, output=2)	keep	input	input
 sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=11)	keep	input	input
 sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=3)	keep	input	input
@@ -5894,6 +6226,18 @@ sessions	packages/sessions/tests/test_opencode.py	by_agent.step(input=1)	keep	in
 sessions	packages/sessions/tests/test_opencode.py	child.assistant().step(input=4)	keep	input	input
 sessions	packages/sessions/tests/test_opencode.py	finish = a.step_finish(input=3)	keep	input	input
 sessions	packages/sessions/tests/test_opencode.py	summary.step(input=1)	keep	input	input
+sessions	packages/sessions/tests/test_opencode.py	test_a_database_locked_past_the_busy_timeout_is_a_failed_query	name	holder	conn
+sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=900, output=40, reasoning=3, cache_read=1200, cache_write=7,	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=5, output=6, cache_read=2100)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	assert row.title == "fix the tests" and row.directory == "/work/project"	use	.directory	.work_dir
+sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=1, output=2)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	finish = a.step_finish(input=3)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=3)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=11)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	a.step_finish(input=8)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	by_agent.step(input=1)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	summary.step(input=1)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_opencode.py	child.assistant().step(input=4)	use	input=	input_tokens=
 sessions	packages/sessions/tests/test_page.py	a.step(text="looked", input=5, output=3)	keep	input	input
 sessions	packages/sessions/tests/test_page.py	a.step_finish(input=900, output=40, cache_read=1200)	keep	input	input
 sessions	packages/sessions/tests/test_page.py	assert all(set(r["at"]) == {"line", "offset"} for r in rows)	keep	set	set
@@ -5907,6 +6251,10 @@ sessions	packages/sessions/tests/test_page.py	assert {"message", "tool_call", "t
 sessions	packages/sessions/tests/test_page.py	assert {"page.js", "window.js"} <= set(exported["assets"])	keep	set	set
 sessions	packages/sessions/tests/test_page.py	inner = LB.app(ROUTES, module="sessions", server_id=SERVER_ID, strict=True)	keep	strict	strict
 sessions	packages/sessions/tests/test_page.py	package="moxi_sessions")	keep	package	package
+sessions	packages/sessions/tests/test_page.py	-	name	test_a_subagent_directory_that_cannot_be_listed_is_unreadable_with_why	test_a_subagent_dir_that_cannot_be_listed_is_unreadable_with_why
+sessions	packages/sessions/tests/test_page.py	test_a_subagent_directory_that_cannot_be_listed_is_unreadable_with_why	name	directory	subagents_dir
+sessions	packages/sessions/tests/test_page.py	a.step_finish(input=900, output=40, cache_read=1200)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_page.py	a.step(text="looked", input=5, output=3)	use	input=	input_tokens=
 sessions	packages/sessions/tests/test_page_list.py	"folder": "/work/proj-a"}	keep	folder	folder
 sessions	packages/sessions/tests/test_page_list.py	"harness", "since", "until", "folder",	keep	folder	folder
 sessions	packages/sessions/tests/test_page_list.py	ROW_PATH = {"path", "folder"}	keep	folder	folder
@@ -5932,6 +6280,11 @@ sessions	packages/sessions/tests/test_page_list.py	assert set(program) == {"shap
 sessions	packages/sessions/tests/test_page_list.py	assert set(rows(by_id)) >= {sid(2)} and rows(by_id)[sid(2)]["by_program"] is True	keep	set	set
 sessions	packages/sessions/tests/test_page_list.py	for key in ("folder", "started", "by_program", "name", "model", "activity",	keep	folder	folder
 sessions	packages/sessions/tests/test_page_list.py	for key in ("folder", "started", "name", "model", "activity", "prompt", "reply"):	keep	folder	folder
+sessions	packages/sessions/tests/test_page_list.py	-	name	test_what_a_person_or_a_model_wrote_is_redact_and_every_folder_and_path_is_path	test_what_a_person_or_a_model_wrote_is_redact_and_every_work_dir_and_path_is_path
+sessions	packages/sessions/tests/test_page_list.py	test_the_filters_narrow_the_list_and_keep_the_counts_exact	name	by_folder	by_work_dir
+sessions	packages/sessions/tests/test_page_list.py	-	name	test_folders_are_counted_under_the_filters_newest_first	test_work_dirs_are_counted_under_the_filters_newest_first
+sessions	packages/sessions/tests/test_page_list.py	-	name	test_two_folder_requests_at_once_read_each_head_once	test_two_work_dir_requests_at_once_read_each_head_once
+sessions	packages/sessions/tests/test_page_list.py	test_two_folder_requests_at_once_read_each_head_once.ask	name	folder	work_dir
 sessions	packages/sessions/tests/test_read.py	a.step(input=5, output=3)	keep	input	input
 sessions	packages/sessions/tests/test_read.py	a.step(input=5, output=3, text="hi")	keep	input	input
 sessions	packages/sessions/tests/test_read.py	for n, step in enumerate(steps, start=2):	keep	start	start
@@ -5939,12 +6292,26 @@ sessions	packages/sessions/tests/test_read.py	m.step_finish(input=4, output=2)	k
 sessions	packages/sessions/tests/test_read.py	start, _ = a.step(input=5, output=3)	keep	input	input
 sessions	packages/sessions/tests/test_read.py	t.other("attachment", type=None, promptId=t.prompt_id, note="n" * LONG)	keep	type	type
 sessions	packages/sessions/tests/test_read.py	t.tool_result(call2, "a b", is_error=False)	keep	is_error	is_error
+sessions	packages/sessions/tests/test_read.py	two_batches	name	handle	fh
+sessions	packages/sessions/tests/test_read.py	t.system("local_command", content="ls")	keep	content	content
+sessions	packages/sessions/tests/test_read.py	t.other("queue-operation", content="z" * LONG)         # a whole head, no promptId	keep	content	content
+sessions	packages/sessions/tests/test_read.py	m.step_finish(input=4, output=2)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_read.py	a.step(input=5, output=3, text="hi")	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_read.py	a.step(input=5, output=3)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_read.py	start, _ = a.step(input=5, output=3)	use	input=	input_tokens=
+sessions	packages/sessions/tests/test_read_back.py	test_bytes_appended_after_the_open_are_not_read	name	f	fh
 sessions	packages/sessions/tests/test_retention.py	assert by_harness({"HOME": str(other)})["claude"].value == 7	keep	HOME	HOME
 sessions	packages/sessions/tests/test_retention.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_retention.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+sessions	packages/sessions/tests/test_retention.py	by_harness	name	environ	env
+sessions	packages/sessions/tests/test_retention.py	-	name	test_claude_reads_the_environment_handed_in	test_claude_reads_the_env_handed_in
 sessions	packages/sessions/tests/test_session_facts.py	assert set(failure) == {"harness", "root", "reason"}	keep	set	set
 sessions	packages/sessions/tests/test_session_facts.py	return {"harness": harness, "session": session, "name": name, "folder": folder,	keep	folder	folder
 sessions	packages/sessions/tests/test_session_facts.py	{key: row[key] for key in ("harness", "session", "name", "folder", "started")}	keep	folder	folder
+sessions	packages/sessions/tests/test_session_facts.py	item	name	folder	work_dir
+sessions	packages/sessions/tests/test_session_facts.py	-	name	test_a_typed_name_is_answered_with_the_folder_and_the_start	test_a_typed_name_is_answered_with_the_work_dir_and_the_start
+sessions	packages/sessions/tests/test_session_facts.py	-	name	test_codex_and_opencode_sessions_have_a_folder_and_a_start_and_no_name	test_codex_and_opencode_sessions_have_a_work_dir_and_a_start_and_no_name
+sessions	packages/sessions/tests/test_session_facts.py	return {"harness": harness, "session": session, "name": name, "folder": work_dir,	keep	folder	folder
 sessions	packages/sessions/tests/test_sessions_read.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_shape.py	@pytest.mark.parametrize("record", [	keep	record	record
 sessions	packages/sessions/tests/test_shape.py	assert set(KINDS) == {"request", "message", "tool_call", "tool_result", "marker",	keep	set	set
@@ -5956,6 +6323,11 @@ sessions	packages/sessions/tests/test_source.py	assert opencode_root({"HOME": "/
 sessions	packages/sessions/tests/test_source.py	assert origin.source == "environment"	keep	environment	environment
 sessions	packages/sessions/tests/test_source.py	assert root("codex", {"HOME": "/h"}) == Path("/h/.codex/sessions")	keep	HOME	HOME
 sessions	packages/sessions/tests/test_source.py	monkeypatch.setenv("HOME", str(tmp_path / "home"))	keep	HOME	HOME
+sessions	packages/sessions/tests/test_source.py	header_of	name	handle	fh
+sessions	packages/sessions/tests/test_source.py	head_name	name	handle	fh
+sessions	packages/sessions/tests/test_source.py	test_a_head_is_complete_once_the_file_has_outgrown_it	name	handle	fh
+sessions	packages/sessions/tests/test_source.py	test_an_imported_codex_thread_shows_its_marks_and_a_missing_file_is_unknown	name	handle	fh
+sessions	packages/sessions/tests/test_source.py	-	name	test_the_codex_and_opencode_roots_follow_the_environment_handed_in	test_the_codex_and_opencode_roots_follow_the_env_handed_in
 sessions	packages/sessions/tests/test_testing_codex.py	assert set(line["payload"]) <= set(codex.META_KEYS)	keep	set	set
 slots	packages/slots/src/moxi_slots/answer.py	1. With `wait=0` it reads once. With `wait` above 0 it reads every 250 ms until the pane	use	`wait	`wait_s
 slots	packages/slots/src/moxi_slots/answer.py	`answer_screen(slot, screen, wait)` presses the screen's keys, and only those: Up and	use	wait)	wait_s)
@@ -7982,8 +8354,14 @@ usage	packages/usage/tests/test_bench.py	picked = set(rnd.sample(range(ROLLOUTS)
 usage	packages/usage/tests/test_bench.py	return {"PATH": os.environ.get("PATH", ""), "HOME": str(home),	keep	HOME	HOME
 usage	packages/usage/tests/test_bench.py	spent = token_usage(input=rnd.randint(2_000, 120_000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_bench.py	to.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+usage	packages/usage/tests/test_bench.py	usage_block=usage(input=rnd.randint(1, 20),	use	input=	input_tokens=
+usage	packages/usage/tests/test_bench.py	usage_block=usage(input=3, cache_read=context - 1_003,	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_page.py	CONFIG.format(model=MODEL, start=start, seeded=SEEDED_ID))	keep	start	start
 usage	packages/usage/tests/test_browser_page.py	holder.wait(timeout=30)	keep	timeout	timeout
+usage	packages/usage/tests/test_browser_page.py	t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),	use	input=	input_tokens=
+usage	packages/usage/tests/test_browser_page.py	child.assistant("Found it.", usage=T.usage(input=100, output=400),	use	input=	input_tokens=
+usage	packages/usage/tests/test_browser_page.py	t.assistant("Done.", usage=T.usage(input=100 * n, cache_read=30000 * n, output=500 * n,	use	input=	input_tokens=
+usage	packages/usage/tests/test_browser_page.py	child.assistant("Found it.", usage=T.usage(input=100, cache_read=5000, output=400),	use	input=	input_tokens=
 usage	packages/usage/tests/test_ceiling.py	got = loader().load(on=[])	keep	on	on
 usage	packages/usage/tests/test_ceiling.py	on = loader().load(on=[]).get("usage.ceiling")	keep	on	on
 usage	packages/usage/tests/test_ceiling.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -7993,10 +8371,15 @@ usage	packages/usage/tests/test_ceiling.py	tool_use_id="toolu_1", input=tool_inp
 usage	packages/usage/tests/test_ceiling.py	-	name	test_markers_live_in_a_private_directory_per_agent	test_markers_live_in_a_private_dir_per_agent
 usage	packages/usage/tests/test_ceiling.py	-	name	test_making_an_agents_directory_sweeps_old_ones	test_making_an_agents_dir_sweeps_old_ones
 usage	packages/usage/tests/test_ceiling.py	-	name	test_an_id_that_cannot_name_a_directory_still_warns_once_and_latches_in_memory	test_an_id_that_cannot_name_a_dir_still_warns_once_and_latches_in_memory
+usage	packages/usage/tests/test_ceiling.py	self.t.assistant("ok", usage=usage(input=10_000, cache_read=0, cache_write=0),	use	input=	input_tokens=
+usage	packages/usage/tests/test_ceiling.py	self.child.assistant("found", usage=usage(input=tokens - 10, cache_read=10,	use	input=	input_tokens=
 usage	packages/usage/tests/test_claims.py	assert touched == set()	keep	set	set
 usage	packages/usage/tests/test_claims.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_context.py	assert set(found.as_dict()["unknown"]) == {"window", "percent"}	keep	set	set
 usage	packages/usage/tests/test_context.py	r.request(token_usage(input=50_000, cached=40_000), response_id="resp_c1",	use	input=	input_tokens=
+usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=330, cache_read=400_000, cache_write=12_000))	use	input=	input_tokens=
+usage	packages/usage/tests/test_context.py	t.assistant("ok", usage=usage(input=330, cache_read=410_000, cache_write=2_000))	use	input=	input_tokens=
+usage	packages/usage/tests/test_context.py	child.assistant("found", usage=usage(input=5, cache_read=20_000, cache_write=1_000))	use	input=	input_tokens=
 usage	packages/usage/tests/test_doctor.py	"restart_point", "marks", "turns"} <= set(names)	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.optional) == {"turns", "projects", "ui"}	keep	set	set
 usage	packages/usage/tests/test_doctor.py	assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}	keep	set	set
@@ -8005,6 +8388,7 @@ usage	packages/usage/tests/test_doctor.py	assert set(found.timers) == {"measure"
 usage	packages/usage/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_doctor.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_doctor.py	test_the_marks_row_sweeps_old_files_and_counts	name	directory	marks_dir
+usage	packages/usage/tests/test_doctor.py	usage=usage(input=2, cache_read=1000 * k, cache_write=1000,	use	input=	input_tokens=
 usage	packages/usage/tests/test_end_to_end.py	assert {row[0] for row in stored} == set(THREADS)      # the pass sent both rollouts'	keep	set	set
 usage	packages/usage/tests/test_index.py	answer.step(input=100, output=7)	keep	input	input
 usage	packages/usage/tests/test_index.py	assert len(ticks) == 4 and set(ticks) == {index.POLL}     # the fifth look is at 5	keep	set	set
@@ -8024,6 +8408,10 @@ usage	packages/usage/tests/test_index.py	reply.step(input=900, output=40, cache_
 usage	packages/usage/tests/test_index.py	-	name	test_a_source_under_an_unreadable_directory_keeps_its_row	test_a_source_under_an_unreadable_dir_keeps_its_row
 usage	packages/usage/tests/test_index.py	Batch([marker(9)], reset=True, complete=True)])	keep	complete=	complete=
 usage	packages/usage/tests/test_index.py	batches = iter([Batch([marker(3)], reset=False, complete=False),	keep	complete=	complete=
+usage	packages/usage/tests/test_index.py	parent = db.session(title="fix it", directory="/work/project")	use	directory=	work_dir=
+usage	packages/usage/tests/test_index.py	reply.step(input=900, output=40, cache_read=100)	use	input=	input_tokens=
+usage	packages/usage/tests/test_index.py	child = parent.child(title="look", directory="/work/project")	use	directory=	work_dir=
+usage	packages/usage/tests/test_index.py	answer.step(input=100, output=7)	use	input=	input_tokens=
 usage	packages/usage/tests/test_limits.py	assert (five.used_percent, five.source, five.age_seconds) == (25.0, "rollout", 2 * MIN)	use	five.age_seconds	five.age_s
 usage	packages/usage/tests/test_limits.py	assert five.age_seconds == 40 * MIN	use	five.age_seconds	five.age_s
 usage	packages/usage/tests/test_limits.py	assert set(data["unknown"]) == {"resets_at", "session_id", "plan_type"}	keep	set	set
@@ -8040,7 +8428,15 @@ usage	packages/usage/tests/test_mark.py	reply.step(input=tokens - 1000, cache_re
 usage	packages/usage/tests/test_mark.py	reply.step_finish(input=125_000)	keep	input	input
 usage	packages/usage/tests/test_mark.py	test_the_floor_and_the_listener_take_turns_own_event	name	SessionEvent	session_event_type
 usage	packages/usage/tests/test_mark.py	`SessionEvent`; transcripts are sessions' builders; the measure and the model rows are	keep	SessionEvent	SessionEvent
+usage	packages/usage/tests/test_mark.py	self.t.assistant("ok", usage=usage(input=tokens - 1000, cache_read=1000,	use	input=	input_tokens=
+usage	packages/usage/tests/test_mark.py	child.assistant("found", usage=usage(input=tokens - 10, cache_read=10,	use	input=	input_tokens=
+usage	packages/usage/tests/test_mark.py	reply.step(input=tokens - 1000, cache_read=1000, output=10)	use	input=	input_tokens=
+usage	packages/usage/tests/test_mark.py	reply.step_finish(input=125_000)	use	input=	input_tokens=
 usage	packages/usage/tests/test_measure.py	reply.step(input=context_of(k) - read, cache_read=read, output=10)	keep	input	input
+usage	packages/usage/tests/test_measure.py	usage=usage(input=2, cache_read=read, cache_write=write,	use	input=	input_tokens=
+usage	packages/usage/tests/test_measure.py	usage=usage(input=2, cache_read=read,	use	input=	input_tokens=
+usage	packages/usage/tests/test_measure.py	t.assistant("ok", request_id=f"req_{n}_{k}", usage=usage(input=2, cache_read=read,	use	input=	input_tokens=
+usage	packages/usage/tests/test_measure.py	reply.step(input=context_of(k) - read, cache_read=read, output=10)	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	"/api/cost": ("read", set(), False),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/events": ("read", set(), True),	keep	set	set
 usage	packages/usage/tests/test_page.py	"/api/limits": ("read", set(), False),	keep	set	set
@@ -8086,6 +8482,8 @@ usage	packages/usage/tests/test_store.py	input=10, cache_read=0, cache_write=0, 
 usage	packages/usage/tests/test_store.py	store.upsert_file(conn, lane="claude", path="/p", touched=set(), harness="claude",	keep	set	set
 usage	packages/usage/tests/test_store.py	store.upsert_file(conn, lane="claude", path="/p", touched=set(), sizes=1)	keep	set	set
 usage	packages/usage/tests/test_store.py	touched: set[int] = set()	keep	set	set
+usage	packages/usage/tests/test_store.py	sidechain=0, synthetic=0, turn_id=None, agent_id=None, unknown=None)	keep	synthetic	synthetic
+usage	packages/usage/tests/test_store.py	t.assistant("one", usage=usage(input=3, cache_read=900, cache_write=50,	use	input=	input_tokens=
 usage	packages/usage/tests/test_thresholds.py	assert set(found) == {"1x", "1.5x", "2x"}	keep	set	set
 usage	packages/usage/tests/test_thresholds.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_thresholds.py	snapshot.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

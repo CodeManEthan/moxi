@@ -188,8 +188,8 @@ def test_doctor_exits_1_on_what_stops_reads(capsys, own_roots, damage):
 def _record(seen_at: float, session: str = SID, **thresholds) -> None:
     from moxi_cache import records
 
-    directory = records.record_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True, exist_ok=True)
     rec = {"v": 1, "session": session, "harness": "claude", "pid": 1, "kind": "warm",
            "last_request": seen_at - 60, "ttl": 3600, "read_at": seen_at, "seen_at": seen_at,
            "code": None, "warn_before": 900, "stale_after": 30}
@@ -197,7 +197,7 @@ def _record(seen_at: float, session: str = SID, **thresholds) -> None:
     for name, value in thresholds.items():
         if value is None:
             del rec[name]
-    (directory / f"{session}.json").write_text(json.dumps(rec))
+    (records_dir / f"{session}.json").write_text(json.dumps(rec))
 
 
 def test_doctor_reads_how_the_watchers_records_stand(capsys):

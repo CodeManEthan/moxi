@@ -32,13 +32,13 @@ def without_turns(monkeypatch):
 def transcript():
     t = ClaudeTranscript(Path(sessions.root("claude")), session_id=SESSION)
     t.user("go")
-    t.assistant("ok", usage=usage(input=330, cache_read=400_000, cache_write=12_000))
+    t.assistant("ok", usage=usage(input_tokens=330, cache_read=400_000, cache_write=12_000))
     t.user("more")
-    t.assistant("ok", usage=usage(input=330, cache_read=410_000, cache_write=2_000))
+    t.assistant("ok", usage=usage(input_tokens=330, cache_read=410_000, cache_write=2_000))
     t.synthetic()                                  # passed over
     child = t.subagent(AGENT)
     child.user("look")
-    child.assistant("found", usage=usage(input=5, cache_read=20_000, cache_write=1_000))
+    child.assistant("found", usage=usage(input_tokens=5, cache_read=20_000, cache_write=1_000))
     t.write()
     return t
 

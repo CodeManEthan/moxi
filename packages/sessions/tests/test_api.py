@@ -112,7 +112,7 @@ def test_the_list_answers_through_the_api_over_the_roots_the_process_names(
         row = answer["groups"][0]["rows"][0]
         newest = api.sessions_newest(now=answer["now"])
         more = api.sessions_more(group="recent", now=answer["now"])
-        folders = api.session_dirs()
+        session_dirs = api.session_dirs()
         opened = api.session_opened(harness="claude", session=row["session"],
                                     now=answer["now"])
         write_config(own_config, "[list]\nrecent_s = 0\n")
@@ -126,7 +126,7 @@ def test_the_list_answers_through_the_api_over_the_roots_the_process_names(
     assert answer["groups"][0]["key"] == "recent" and row["folder"] == "/work/proj-a"
     assert row["recent"] is True                  # the setting's hour
     assert newest["rows"] == [row] and more["rows"] == [row]
-    assert folders["folders"][0]["folder"] == "/work/proj-a"
+    assert session_dirs["folders"][0]["folder"] == "/work/proj-a"
     assert opened["reply"]["text"] == "Done."
     assert by_setting["groups"][0]["count"] == 0  # no session is recent at 0 seconds
     assert by_caller["groups"][0]["count"] == 1

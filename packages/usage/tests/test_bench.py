@@ -108,7 +108,7 @@ def _claude_requests(t: ClaudeTranscript, n: int, rnd: random.Random, ids: Itera
         if m % 4 == 0:
             t.user("Look at the module and say what is left.")
         req = t.request(request_id=request_id, message_id=message_id, model=model,
-                        usage_block=usage(input=rnd.randint(1, 20),
+                        usage_block=usage(input_tokens=rnd.randint(1, 20),
                                           cache_read=rnd.randint(5_000, 150_000),
                                           cache_write=rnd.randint(0, 4_000),
                                           output=rnd.randint(20, 2_000)))
@@ -703,7 +703,7 @@ class LongSession:
                 t.user("Look at the module and say what is left.")
             context = first + (last - first) * m // max(1, n - 1)
             req = t.request(model=HOOK_MODEL,
-                            usage_block=usage(input=3, cache_read=context - 1_003,
+                            usage_block=usage(input_tokens=3, cache_read=context - 1_003,
                                               cache_write=1_000, output=400))
             call = req.tool_use("Read", {"file_path": f"/work/project/src/m{m % 50}.py"})
             t.tool_result(call, tail if m == n - 1 else HOOK_RESULT)

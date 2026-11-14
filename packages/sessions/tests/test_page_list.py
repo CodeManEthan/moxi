@@ -124,7 +124,7 @@ def seed(roots) -> dict:
         b"not read")
 
     db = OpenCodeDb(roots["opencode"])
-    opencode = db.session(title="a title the harness made", directory="/work/proj-c",
+    opencode = db.session(title="a title the harness made", work_dir="/work/proj-c",
                           at=now - 5 * HOUR)
     opencode.user("Do the thing.", at=now - 5 * HOUR)
     db.write()
@@ -210,7 +210,7 @@ def test_every_string_leaf_is_plain_only_for_an_id_a_key_or_a_word():
     assert {k for k, v in every_leaf().items() if v is None} == plain
 
 
-def test_what_a_person_or_a_model_wrote_is_redact_and_every_folder_and_path_is_path():
+def test_what_a_person_or_a_model_wrote_is_redact_and_every_work_dir_and_path_is_path():
     found = every_leaf()
     assert {k for k, v in found.items() if v == "redact"} == _in_rows(ROW_REDACT) | {
         "/api/list roots[].reason", "/api/session reply.text",
@@ -376,8 +376,8 @@ def test_the_filters_narrow_the_list_and_keep_the_counts_exact(roots):
     assert [h["count"] for h in by_harness["harnesses"]] == [10, 1, 1]
     assert list(rows(by_harness)) == [tid(1)]
 
-    by_folder = read("/api/list", "folder=" + quote("/work/proj-b", safe=""))
-    assert by_folder["total"] == 1 and list(rows(by_folder)) == [tid(1)]
+    by_work_dir = read("/api/list", "folder=" + quote("/work/proj-b", safe=""))
+    assert by_work_dir["total"] == 1 and list(rows(by_work_dir)) == [tid(1)]
 
     since = read("/api/list", f"since={seeded['now'] - 2 * HOUR:.3f}")
     assert since["total"] == 2
@@ -531,7 +531,7 @@ def test_an_id_the_list_does_not_hold_is_refused(roots):
 
 # -- folders --------------------------------------------------------------------------------
 
-def test_folders_are_counted_under_the_filters_newest_first(roots):
+def test_work_dirs_are_counted_under_the_filters_newest_first(roots):
     seed(roots)
 
     answer = read("/api/folders")
@@ -561,7 +561,7 @@ def test_the_server_keeps_what_one_request_read_for_the_next(roots):
     assert (cat.head_reads, cat.tail_reads) == (heads, tails)
 
 
-def test_two_folder_requests_at_once_read_each_head_once(roots, monkeypatch):
+def test_two_work_dir_requests_at_once_read_each_head_once(roots, monkeypatch):
     now = time.time()
     for n in range(1, 21):
         claude(roots, n, now - n * HOUR, cwd=f"/work/proj-{n % 2}")
@@ -577,9 +577,9 @@ def test_two_folder_requests_at_once_read_each_head_once(roots, monkeypatch):
     start = threading.Barrier(2)
     answers: list[tuple[int, dict | None]] = []
 
-    def ask(folder: str) -> None:
+    def ask(work_dir: str) -> None:
         start.wait()
-        answers.append(get("/api/list", "folder=" + quote(folder, safe="")))
+        answers.append(get("/api/list", "folder=" + quote(work_dir, safe="")))
 
     threads = [threading.Thread(target=ask, args=(f"/work/proj-{n}",)) for n in (0, 1)]
     for thread in threads:

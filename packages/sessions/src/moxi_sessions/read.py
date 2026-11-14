@@ -85,13 +85,13 @@ def _open(source: Source, bound: int | None) -> tuple[BinaryIO, os.stat_result, 
     _refuse_compressed(source)
     try:
         handle = open(source.path, "rb")
-    except OSError as e:
-        raise _cannot(source, e) from e
+    except OSError as exc:
+        raise _cannot(source, exc) from exc
     try:
         st = os.fstat(handle.fileno())
-    except OSError as e:
+    except OSError as exc:
         handle.close()
-        raise _cannot(source, e) from e
+        raise _cannot(source, exc) from exc
     end = st.st_size if bound is None else min(st.st_size, bound)
     return handle, st, end
 
@@ -103,8 +103,8 @@ def _lazy_header(source: Source, dev: int, ino: int, end: int) -> Callable[[], H
     def read() -> Header:
         try:
             handle = open(source.path, "rb")
-        except OSError as e:
-            raise _cannot(source, e) from e
+        except OSError as exc:
+            raise _cannot(source, exc) from exc
         with handle:
             st = os.fstat(handle.fileno())
             if (st.st_dev, st.st_ino) != (dev, ino):
@@ -330,8 +330,7 @@ class Window:
 
 # --- the forward read ----------------------------------------------------------------------
 
-def _mapper(source: Source, keep_raw: bool, wanted: frozenset[str] | None, *,
-            prompt_id: str | None = None, open_key: str | None = None,
+def _mapper(source: Source, *, keep_raw: bool, wanted: frozenset[str] | None, prompt_id: str | None = None, open_key: str | None = None,
             state: codex.State | None = None):
     if source.harness == CLAUDE:
         return claude.Mapper(session_id=source.session_id, agent_id=source.agent_id,
@@ -367,9 +366,9 @@ def _feed(source: Source, mapper: Any, data: bytes, wanted: frozenset[str] | Non
 
 
 def _file_records(source: Source, handle: BinaryIO, end: int,
-                  wanted: frozenset[str] | None, keep_raw: bool) -> Iterator[Record]:
+                  wanted: frozenset[str] | None, *, keep_raw: bool) -> Iterator[Record]:
     try:
-        mapper = _mapper(source, keep_raw, wanted)
+        mapper = _mapper(source, keep_raw=keep_raw, wanted=wanted)
         handle.seek(0)
         offset = 0
         number = 0
@@ -386,8 +385,8 @@ def _file_records(source: Source, handle: BinaryIO, end: int,
         for record in mapper.finish():
             if wanted is None or record.kind in wanted:
                 yield record
-    except OSError as e:
-        raise _cannot(source, e) from e
+    except OSError as exc:
+        raise _cannot(source, exc) from exc
     finally:
         handle.close()
 
@@ -429,7 +428,7 @@ def records(source: Any, *, kinds: Iterable[str] | None = None,
         return Read(OPENCODE, _Once(value=opencode_header(src, row)), stream(), snap.close)
     handle, st, end = _open(src, bound)
     return Read(src.harness, _Once(_lazy_header(src, st.st_dev, st.st_ino, end)),
-                _file_records(src, handle, end, wanted, keep_raw), handle.close)
+                _file_records(src, handle, end, wanted, keep_raw=keep_raw), handle.close)
 
 
 # --- the backward read ---------------------------------------------------------------------
@@ -446,19 +445,19 @@ class _LineNumbers:
 
     def _newlines(self, start: int, stop: int) -> int:
         try:
-            with open(self.source.path, "rb") as handle:
-                handle.seek(start)
+            with open(self.source.path, "rb") as fh:
+                fh.seek(start)
                 count = 0
                 left = stop - start
                 while left > 0:
-                    data = handle.read(min(BLOCK, left))
+                    data = fh.read(min(BLOCK, left))
                     if not data:
                         break
                     count += data.count(b"\n")
                     left -= len(data)
                 return count
-        except OSError as e:
-            raise _cannot(self.source, e) from e
+        except OSError as exc:
+            raise _cannot(self.source, exc) from exc
 
     def number(self, offset: int) -> int:
         at, line = self.known
@@ -532,7 +531,7 @@ def _unnumbered(request_id: str) -> bool:
 class _ClaudeBack:
     """Claude Code lines, newest first, to records, newest first."""
 
-    def __init__(self, source: Source, wanted: frozenset[str] | None, keep_raw: bool,
+    def __init__(self, source: Source, wanted: frozenset[str] | None, *, keep_raw: bool,
                  numbers: _LineNumbers):
         self.source = source
         self.wanted = wanted
@@ -542,7 +541,7 @@ class _ClaudeBack:
         self.ended_newer = False       # a newer line ended every request older than it
 
     def _map(self, raw: bytes, at_line: int | None, offset: int, prompt: str | None,
-             unterminated: bool):
+             *, unterminated: bool):
         return claude.line_records(raw, at={"line": at_line, "offset": offset},
                                    session_id=self.source.session_id,
                                    agent_id=self.source.agent_id, prompt_id=prompt,
@@ -574,10 +573,10 @@ class _ClaudeBack:
             if self.wanted is not None and not claude.needs_decode(raw, self.wanted):
                 continue
             before = prompt
-            request, recs, prompt = self._map(raw, None, offset, prompt, unterminated)
+            request, recs, prompt = self._map(raw, None, offset, prompt, unterminated=unterminated)
             if request is not None and _unnumbered(request.request_id):
                 request, recs, prompt = self._map(raw, self.numbers.number(offset),
-                                                  offset, before, unterminated)
+                                                  offset, before, unterminated=unterminated)
             lines.append((request, recs))
         out: list[Record] = []
         for request, recs in reversed(lines):
@@ -591,8 +590,8 @@ class _ClaudeBack:
             out.extend(reversed(recs))
         return out
 
-    def first(self, raw: bytes, unterminated: bool) -> tuple[Record, ...]:
-        request, recs, _ = self._map(raw, 1, 0, None, unterminated)
+    def first(self, raw: bytes, *, unterminated: bool) -> tuple[Record, ...]:
+        request, recs, _ = self._map(raw, 1, 0, None, unterminated=unterminated)
         out = list(recs)
         if request is not None:
             out.insert(0, request)
@@ -633,7 +632,7 @@ class _CodexBack:
     settings line inside the run.
     """
 
-    def __init__(self, source: Source, wanted: frozenset[str] | None, keep_raw: bool,
+    def __init__(self, source: Source, wanted: frozenset[str] | None, *, keep_raw: bool,
                  numbers: _LineNumbers, start: codex.State):
         self.source = source
         self.wanted = wanted
@@ -643,7 +642,7 @@ class _CodexBack:
         self.cut = replace(start, provider=UNKNOWN)
 
     def _map(self, raw: bytes, at_line: int | None, offset: int, state: codex.State,
-             unterminated: bool):
+             *, unterminated: bool):
         return codex.line_records(raw, at={"line": at_line, "offset": offset}, state=state,
                                   agent_id=self.source.agent_id, keep_raw=self.keep_raw,
                                   unterminated=unterminated)
@@ -655,10 +654,10 @@ class _CodexBack:
                                                                   legacy=state.legacy):
                 continue
             before = state
-            recs, state = self._map(raw, None, offset, state, unterminated)
+            recs, state = self._map(raw, None, offset, state, unterminated=unterminated)
             if any(r.kind == "request" and _unnumbered(r.request_id) for r in recs):
                 recs, state = self._map(raw, self.numbers.number(offset), offset, before,
-                                        unterminated)
+                                        unterminated=unterminated)
             lines.append(recs)
         out: list[Record] = []
         for recs in reversed(lines):
@@ -686,7 +685,7 @@ class _CodexBack:
                 for item in pending:
                     looked.append(item)
                     if _codex_token_count(item[0]):
-                        _, state = self._map(item[0], None, item[2], state, False)
+                        _, state = self._map(item[0], None, item[2], state, unterminated=False)
                         break
                 pending.push(looked)
             yield from self.run(segment, state)
@@ -708,8 +707,8 @@ def _file_back(src: Source, *, end: int | None, wanted: frozenset[str] | None,
     try:
         reader = read_back(src.path, block=block, limit=limit, read_head=head or codex_file,
                            end=end, offsets=True)
-    except OSError as e:
-        raise _cannot(src, e) from e
+    except OSError as read_exc:
+        raise _cannot(src, read_exc) from read_exc
     header = _Once(_lazy_header(src, reader.stat.st_dev, reader.stat.st_ino, reader.size))
     numbers = _LineNumbers(src, reader.size)
     first: tuple[Record, ...] | None = None
@@ -724,15 +723,15 @@ def _file_back(src: Source, *, end: int | None, wanted: frozenset[str] | None,
             line_one, state = codex.line_records(
                 reader.first, at={"line": 1, "offset": 0}, state=state,
                 agent_id=src.agent_id, keep_raw=keep_raw, unterminated=first_open)
-        mapper: Any = _CodexBack(src, wanted, keep_raw, numbers, state)
+        mapper: Any = _CodexBack(src, wanted, keep_raw=keep_raw, numbers=numbers, start=state)
         if head:
             first = tuple(_filtered(line_one, wanted)) if reader.first is not None else None
         else:
             tail = tuple(_filtered(reversed(line_one), wanted))
     else:
-        mapper = _ClaudeBack(src, wanted, keep_raw, numbers)
+        mapper = _ClaudeBack(src, wanted, keep_raw=keep_raw, numbers=numbers)
         if head and reader.first is not None:
-            first = tuple(_filtered(mapper.first(reader.first, first_open), wanted)) \
+            first = tuple(_filtered(mapper.first(reader.first, unterminated=first_open), wanted)) \
                 if reader.first.strip() else ()
 
     back = Back(src.harness, header, iter(()), first, closer=reader.close)
@@ -743,8 +742,8 @@ def _file_back(src: Source, *, end: int | None, wanted: frozenset[str] | None,
             if tail and reader.ended == START:
                 yield from tail
             back.ended = reader.ended
-        except OSError as e:
-            raise _cannot(src, e) from e
+        except OSError as exc:
+            raise _cannot(src, exc) from exc
         finally:
             reader.close()
 
@@ -768,12 +767,12 @@ def records_back(source: Any, *, kinds: Iterable[str] | None = None, block: int 
     src, bound = unpack(source)
     wanted = _wanted(kinds)
     if src.harness == OPENCODE:
-        return _opencode_back(src, wanted, read_head, keep_raw)
+        return _opencode_back(src, wanted, head=read_head, keep_raw=keep_raw)
     return _file_back(src, end=bound, wanted=wanted, block=block, limit=limit, head=read_head,
                       keep_raw=keep_raw)
 
 
-def _opencode_back(src: Source, wanted: frozenset[str] | None, head: bool,
+def _opencode_back(src: Source, wanted: frozenset[str] | None, *, head: bool,
                    keep_raw: bool) -> Back:
     oc = _opencode()
     session_id = _needs_session(src)
@@ -931,23 +930,23 @@ def records_since(source: Any, cursor: str | None = None, *,
         raise ValueError(f"max_bytes must be a positive number of bytes, not {max_bytes!r}")
     obj, reset = _read_cursor(cursor, src.harness)
     if src.harness == OPENCODE:
-        return _opencode_since(src, obj, reset, wanted, keep_raw)
+        return _opencode_since(src, obj, reset=reset, wanted=wanted, keep_raw=keep_raw)
     fields = _file_cursor(obj, src.harness) if obj is not None else None
     if obj is not None and fields is None:
         reset = True
     handle, st, end = _open(src, bound)
     with handle:
         try:
-            return _file_since(src, handle, st, end, fields, reset, cursor, wanted,
-                               max_bytes, keep_raw)
-        except OSError as e:
-            if isinstance(e, Unreadable):
+            return _file_since(src, handle, st, end, fields, reset=reset, cursor=cursor, wanted=wanted,
+                               max_bytes=max_bytes, keep_raw=keep_raw)
+        except OSError as exc:
+            if isinstance(exc, Unreadable):
                 raise
-            raise _cannot(src, e) from e
+            raise _cannot(src, exc) from exc
 
 
 def _file_since(src: Source, handle: BinaryIO, st: os.stat_result, end: int,
-                fields: dict | None, reset: bool, cursor: str | None,
+                fields: dict | None, *, reset: bool, cursor: str | None,
                 wanted: frozenset[str] | None, max_bytes: int | None,
                 keep_raw: bool) -> Batch:
     head = handle.read(min(FINGERPRINT_BYTES, end))
@@ -963,14 +962,14 @@ def _file_since(src: Source, handle: BinaryIO, st: os.stat_result, end: int,
 
     if fields is None:
         offset, number = 0, 0
-        mapper = _mapper(src, keep_raw, wanted)
+        mapper = _mapper(src, keep_raw=keep_raw, wanted=wanted)
     elif src.harness == CLAUDE:
         offset, number = fields["offset"], fields["line"]
-        mapper = _mapper(src, keep_raw, wanted, prompt_id=fields.get("prompt_id"),
+        mapper = _mapper(src, keep_raw=keep_raw, wanted=wanted, prompt_id=fields.get("prompt_id"),
                          open_key=fields.get("open_key"))
     else:
         offset, number = fields["offset"], fields["line"]
-        mapper = _mapper(src, keep_raw, wanted, state=fields["state"])
+        mapper = _mapper(src, keep_raw=keep_raw, wanted=wanted, state=fields["state"])
 
     out: list[Record] = []
     taken = 0
@@ -1013,7 +1012,7 @@ def _file_since(src: Source, handle: BinaryIO, st: os.stat_result, end: int,
                  header=_Once(_lazy_header(src, st.st_dev, st.st_ino, end)))
 
 
-def _opencode_since(src: Source, obj: dict | None, reset: bool,
+def _opencode_since(src: Source, obj: dict | None, *, reset: bool,
                     wanted: frozenset[str] | None, keep_raw: bool) -> Batch:
     oc = _opencode()
     old = None

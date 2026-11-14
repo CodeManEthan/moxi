@@ -57,13 +57,13 @@ for n, spec in enumerate(json.loads(sys.argv[1])):
                            start=now - spec["hours_ago"] * 3600)
     for m in range(3):
         t.user("Fix the failing test.")
-        t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),
+        t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000 + m * 500),
                     request_id=f"req_{spec['session'][-2:]}{m}", model=sys.argv[2])
     if spec["agent"]:
         child = t.subagent(spec["agent"])
         for m in range(2):
             child.user("Look into it.")
-            child.assistant("Found it.", usage=T.usage(input=100, output=400),
+            child.assistant("Found it.", usage=T.usage(input_tokens=100, output=400),
                             request_id=f"req_{spec['agent'][-4:]}{m}", model=sys.argv[2])
     t.write()
 """
@@ -296,7 +296,7 @@ t = T.ClaudeTranscript(Path(sessions.root("claude")), session_id=session,
                        project="-work-delta", cwd="/work/delta", start=time.time() - 3600)
 
 def ask(n, **usage):
-    t.assistant("Done.", usage=T.usage(input=100 * n, cache_read=30000 * n, output=500 * n,
+    t.assistant("Done.", usage=T.usage(input_tokens=100 * n, cache_read=30000 * n, output=500 * n,
                                        **usage), request_id=f"req_e4{n}", model=model)
 
 t.user("Fix the failing test.")
@@ -314,7 +314,7 @@ ask(6, speed="fast")
 child = t.subagent(agent)
 child.user("Look into it.")
 for n in (1, 2):
-    child.assistant("Found it.", usage=T.usage(input=100, cache_read=5000, output=400),
+    child.assistant("Found it.", usage=T.usage(input_tokens=100, cache_read=5000, output=400),
                     request_id=f"req_e4a{n}", model=other)
 t.write()
 print(json.dumps(datetime.fromtimestamp(between, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")))

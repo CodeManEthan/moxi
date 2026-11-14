@@ -534,7 +534,7 @@ def _result_text(content: Any) -> str:
 
 
 def _usage_request(entry: dict, message: dict, usage: dict, common: dict,
-                   key: str, final: bool = True) -> Request:
+                   key: str, *, final: bool = True) -> Request:
     fresh = _count(usage, "input_tokens")
     read = _count(usage, "cache_read_input_tokens")
     written = _count(usage, "cache_creation_input_tokens")
@@ -584,7 +584,7 @@ def _origin(entry: dict) -> Any:
     return _text(entry, "userType")
 
 
-def _injected(entry: dict, role: str, text: str, synthetic: bool) -> Any:
+def _injected(entry: dict, role: str, text: str, *, synthetic: bool) -> Any:
     """Whether something other than the person at the prompt submitted a line's message.
 
     A composed flag (`COMPOSED_FLAGS`) makes it true. The model's own message is false,
@@ -608,7 +608,7 @@ def _injected(entry: dict, role: str, text: str, synthetic: bool) -> Any:
 
 
 def _content_records(entry: dict, message: dict, role: str, common: dict,
-                     synthetic: bool) -> list[Record]:
+                     *, synthetic: bool) -> list[Record]:
     """A user or assistant line's content blocks as records, in block order.
 
     The line's text and every block that is neither a thought nor a tool's make one
@@ -649,7 +649,7 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
                                    text=thought if isinstance(thought, str) else "",
                                    content_kinds=(btype,), flags=flags, origin=origin,
                                    synthetic=synthetic,
-                                   injected=_injected(entry, role, "", synthetic)))
+                                   injected=_injected(entry, role, "", synthetic=synthetic)))
             else:
                 if slot is None:
                     slot = len(out)
@@ -661,7 +661,7 @@ def _content_records(entry: dict, message: dict, role: str, common: dict,
         out.insert(slot, Message(**common, role=role, text=text,
                                  content_kinds=tuple(kinds), flags=flags, origin=origin,
                                  synthetic=synthetic,
-                                 injected=_injected(entry, role, text, synthetic)))
+                                 injected=_injected(entry, role, text, synthetic=synthetic)))
     return out
 
 
@@ -700,12 +700,12 @@ def line_records(raw: bytes | str, *, at: dict, session_id: Any = None,
     only by a malformed record.
     """
     pending, records, prompt_id, _ends = _map_line(raw, at, session_id, agent_id,
-                                                   prompt_id, keep_raw, unterminated)
-    return (_build(pending, True) if pending is not None else None), records, prompt_id
+                                                   prompt_id, keep_raw=keep_raw, unterminated=unterminated)
+    return (_build(pending, final=True) if pending is not None else None), records, prompt_id
 
 
 def _common(entry: dict, kind: str, raw_kind: str, at: dict, session_id: Any,
-            agent_id: str | None, prompt_id: str | None, keep_raw: bool) -> dict:
+            agent_id: str | None, prompt_id: str | None, *, keep_raw: bool) -> dict:
     """The fields every record of one line shares."""
     if session_id is None:
         session_id = entry.get("sessionId")
@@ -733,16 +733,18 @@ def _common(entry: dict, kind: str, raw_kind: str, at: dict, session_id: Any,
     }
 
 
-def _build(pending: tuple, final: bool) -> Request:
+def _build(pending: tuple, *, final: bool) -> Request:
     """The request a line wrote, from what `_map_line` kept of it."""
     entry, message, usage, common, key = pending
     if isinstance(common, tuple):
-        common = _common(entry, "assistant", "assistant", *common)
-    return _usage_request(entry, message, usage, common, key, final)
+        at, session_id, agent_id, prompt_id, keep_raw = common
+        common = _common(entry, "assistant", "assistant", at, session_id, agent_id,
+                         prompt_id, keep_raw=keep_raw)
+    return _usage_request(entry, message, usage, common, key, final=final)
 
 
 def _map_line(raw: bytes | str, at: dict, session_id: Any, agent_id: str | None,
-              prompt_id: str | None, keep_raw: bool, unterminated: bool,
+              prompt_id: str | None, *, keep_raw: bool, unterminated: bool,
               content: bool = True, others: bool = True,
               ) -> tuple[tuple | None, list[Record], str | None, bool]:
     """`line_records` for a read that may not keep every kind: `content` false when it
@@ -789,7 +791,7 @@ def _map_line(raw: bytes | str, at: dict, session_id: Any, agent_id: str | None,
     elif not others and kind != "assistant" and kind != "user":
         return None, [], prompt_id, ends
 
-    common = _common(entry, kind, raw_kind, at, session_id, agent_id, prompt_id, keep_raw)
+    common = _common(entry, kind, raw_kind, at, session_id, agent_id, prompt_id, keep_raw=keep_raw)
     if kind == "assistant" or kind == "user":
         message = entry.get("message")
         if not isinstance(message, dict):
@@ -808,7 +810,7 @@ def _map_line(raw: bytes | str, at: dict, session_id: Any, agent_id: str | None,
             return pending, [], prompt_id, False
         role = message.get("role")
         role = role if isinstance(role, str) else kind
-        return (pending, _content_records(entry, message, role, common, synthetic),
+        return (pending, _content_records(entry, message, role, common, synthetic=synthetic),
                 prompt_id, False)
 
     if kind == "system" and subtype == "compact_boundary":
@@ -897,7 +899,7 @@ class Mapper:
         """A line of request `key` (None for a turn's end) was read: end what it ends."""
         held = self._held
         if held is not None and held[4] != key:
-            out.append(_build(held, True))
+            out.append(_build(held, final=True))
             self._held = None
         if self.open_key is not None and self.open_key != key:
             self.closed.append(self.open_key)
@@ -949,7 +951,7 @@ class Mapper:
         Returns the records ready to hand on, in order."""
         pending, records, self.prompt_id, ends = _map_line(
             raw, {"line": line, "offset": offset}, self.session_id, self.agent_id,
-            self.prompt_id, self.keep_raw, unterminated, self._content, self._others)
+            self.prompt_id, keep_raw=self.keep_raw, unterminated=unterminated, content=self._content, others=self._others)
         out: list[Record] = []
         if pending is not None:
             key = pending[4]
@@ -969,7 +971,7 @@ class Mapper:
         if held is None:
             return []
         self.open_key = held[4]
-        return [_build(held, False)]
+        return [_build(held, final=False)]
 
 
 def read_records(path: str | Path, *, session_id: str | None = None,
@@ -987,12 +989,12 @@ def read_records(path: str | Path, *, session_id: str | None = None,
     wanted = frozenset(kinds) if kinds is not None else None
     mapper = Mapper(session_id=session_id, agent_id=agent_id, keep_raw=keep_raw,
                     kinds=wanted)
-    with open(path, "rb") as handle:
-        size = os.fstat(handle.fileno()).st_size
+    with open(path, "rb") as fh:
+        size = os.fstat(fh.fileno()).st_size
         offset = 0
         number = 0
         while offset < size:
-            data = handle.readline(size - offset)
+            data = fh.readline(size - offset)
             if not data:
                 break
             number += 1

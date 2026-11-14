@@ -210,11 +210,11 @@ def _seconds(query: Any, name: str) -> float | None:
     return float(text)
 
 
-def _filters(query: Any, *, folder: bool = True) -> dict[str, Any]:
+def _filters(query: Any, *, work_dir: bool = True) -> dict[str, Any]:
     out = {"harness": query.get("harness"), "since": _seconds(query, "since"),
            "until": _seconds(query, "until"), "find": query.get("find")}
-    if folder:
-        out["folder"] = query.get("folder")
+    if work_dir:
+        out["work_dir"] = query.get("folder")
     return out
 
 
@@ -280,14 +280,14 @@ def session(call: Any) -> dict[str, Any]:
     return out
 
 
-def folders(call: Any) -> dict[str, Any]:
+def work_dirs(call: Any) -> dict[str, Any]:
     """`GET /api/folders[?harness=][&since=][&until=][&find=]`: the folders the sessions
     under the filters ran in, newest change first."""
     try:
-        answer = lists.list_folders(**_filters(call.query, folder=False))
+        answer = lists.list_work_dirs(**_filters(call.query, work_dir=False))
     except ValueError as exc:
         raise lb.Refused(str(exc)) from None
     return {"shape": SHAPE, **answer}
 
 
-__all__ = ["folders", "listing", "more", "session", "subagents", "view_row", "window"]
+__all__ = ["work_dirs", "listing", "more", "session", "subagents", "view_row", "window"]

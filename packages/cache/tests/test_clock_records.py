@@ -31,9 +31,9 @@ def record(session, *, kind="warm", last_request=NOW - 100, ttl=3600, code=None,
 
 
 def put(name: str, content) -> Path:
-    directory = records.record_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / name
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True, exist_ok=True)
+    path = records_dir / name
     path.write_text(content if isinstance(content, str) else json.dumps(content))
     return path
 
@@ -71,12 +71,12 @@ def test_clock_records_sorts_by_session_not_by_file_name():
     assert [rec["session"] for rec in api.clock_records()] == ["a", "z"]
 
 
-def test_no_directory_gives_no_records():
+def test_no_records_dir_gives_no_records():
     assert not records.record_dir().exists()
     assert api.clock_records() == []
 
 
-def test_an_unreadable_directory_gives_no_records(monkeypatch):
+def test_an_unreadable_records_dir_gives_no_records(monkeypatch):
     def refuse(self):
         raise PermissionError(13, "Permission denied")
 

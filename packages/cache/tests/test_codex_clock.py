@@ -805,7 +805,7 @@ def test_a_rejected_entry_holds_every_measured_read(tmp_path, bad):
     never as the longer shipped number."""
     seconds = measured_seconds()
     e = {"unrecognised": {"what": "is this"}, "above": entry(seconds + 60),
-         "below": entry(1799), "not-int": entry(2400.5), "bool": entry(True)}[bad]
+         "below": entry(1799), "not-int": entry(2400.5), "bool": entry(lifetime=True)}[bad]
     view = view_of(e)
     root = sessions_root(tmp_path)
     one_turn(60, "gpt-5.6-sol").write(root)

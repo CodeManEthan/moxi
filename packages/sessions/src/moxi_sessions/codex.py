@@ -89,8 +89,8 @@ def stream_rollout(path: str | Path, *, start_line: int = 0) -> Iterator[dict]:
 
 
 def _entries(path: Path, start_line: int) -> Iterator[dict]:
-    with path.open(encoding="utf-8", errors="replace") as handle:
-        yield from stream_entries(handle, start_line=start_line)
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        yield from stream_entries(fh, start_line=start_line)
 
 
 # --- what Codex writes -----------------------------------------------------------------
@@ -759,12 +759,12 @@ def read_records(path: str | Path, *, session_id: str | None = None,
         raise ValueError(f"{path} is a compressed rollout; it is not read")
     wanted = frozenset(kinds) if kinds is not None else None
     mapper = Mapper(session_id=session_id, agent_id=agent_id, keep_raw=keep_raw)
-    with open(path, "rb") as handle:
-        size = os.fstat(handle.fileno()).st_size
+    with open(path, "rb") as fh:
+        size = os.fstat(fh.fileno()).st_size
         offset = 0
         number = 0
         while offset < size:
-            data = handle.readline(size - offset)
+            data = fh.readline(size - offset)
             if not data:
                 break
             number += 1
@@ -890,12 +890,12 @@ def read_head(path: str | Path) -> Head:
     """Read forward from line 1 until the first turn id, reading no byte past the size
     the file had when opened. Raises OSError when the file cannot be read."""
     meta: dict | None = None
-    with open(path, "rb") as handle:
-        size = os.fstat(handle.fileno()).st_size
+    with open(path, "rb") as fh:
+        size = os.fstat(fh.fileno()).st_size
         offset = 0
         number = 0
         while offset < size:
-            data = handle.readline(size - offset)
+            data = fh.readline(size - offset)
             if not data:
                 break
             number += 1
@@ -1133,14 +1133,14 @@ def read_spawns(path: str | Path, *, thread_id: str | None = None,
     kinds: dict[str, list[str]] = {}
     unread: str | None = None
     own_from: int | None = None
-    with open(path, "rb") as handle:
-        size = os.fstat(handle.fileno()).st_size
+    with open(path, "rb") as fh:
+        size = os.fstat(fh.fileno()).st_size
         if end is not None:
             size = min(size, end)
         offset = 0
         number = 0
         while offset < size:
-            data = handle.readline(size - offset)
+            data = fh.readline(size - offset)
             if not data:
                 break
             number += 1

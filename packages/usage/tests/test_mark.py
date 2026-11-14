@@ -78,7 +78,7 @@ class Session:
 
     def context(self, tokens, *, model=MODEL):
         self.t.user("go")
-        self.t.assistant("ok", usage=usage(input=tokens - 1000, cache_read=1000,
+        self.t.assistant("ok", usage=usage(input_tokens=tokens - 1000, cache_read=1000,
                                            cache_write=0), model=model)
         self.t.write()
 
@@ -86,7 +86,7 @@ class Session:
         child = self.agents.get(agent_id) or self.t.subagent(agent_id)
         self.agents[agent_id] = child
         child.user("look")
-        child.assistant("found", usage=usage(input=tokens - 10, cache_read=10,
+        child.assistant("found", usage=usage(input_tokens=tokens - 10, cache_read=10,
                                              cache_write=0), model=MODEL)
         self.t.write()
 
@@ -338,7 +338,7 @@ class OpenCode:
     def _step(session, tokens):
         session.user("go", model=("provider", MODEL))
         reply = session.assistant(model=("provider", MODEL))
-        reply.step(input=tokens - 1000, cache_read=1000, output=10)
+        reply.step(input_tokens=tokens - 1000, cache_read=1000, output=10)
         reply.complete()
 
     def context(self, tokens):
@@ -432,7 +432,7 @@ def test_an_open_opencode_step_neither_fires_nor_re_arms():
     reply.tool("bash", {"command": "ls"})
     h.db.write()
     assert mark.on_tool(h.event(env=one)) is None
-    reply.step_finish(input=125_000)
+    reply.step_finish(input_tokens=125_000)
     h.db.write()
     assert mark.on_tool(h.event(env=one)) is None
 

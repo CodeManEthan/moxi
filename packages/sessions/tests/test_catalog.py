@@ -242,7 +242,7 @@ def test_a_harness_whose_default_root_does_not_exist_is_absent_not_a_failure(hom
     assert gathered.roots == () and gathered.listed == (CLAUDE,)
 
 
-def test_a_root_the_environment_names_that_does_not_exist_is_absent(home, monkeypatch,
+def test_a_root_the_env_names_that_does_not_exist_is_absent(home, monkeypatch,
                                                                     tmp_path):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "nowhere"))
 
@@ -314,7 +314,7 @@ def locked():
 
 
 @not_root
-def test_a_project_folder_that_cannot_be_listed_is_counted_as_an_unread_part(roots,
+def test_a_project_dir_that_cannot_be_listed_is_counted_as_an_unread_part(roots,
                                                                              locked):
     seen = transcript(roots, 1)
     seen.user()
@@ -331,7 +331,7 @@ def test_a_project_folder_that_cannot_be_listed_is_counted_as_an_unread_part(roo
 
 
 @not_root
-def test_a_session_whose_subagents_folder_cannot_be_listed_has_no_count(roots, locked):
+def test_a_session_whose_subagents_dir_cannot_be_listed_has_no_count(roots, locked):
     one = transcript(roots, 1)
     one.user()
     sub = one.subagent("a0190b0000000001")
@@ -432,7 +432,7 @@ def test_a_claude_session_gives_every_detail(roots):
     t.write()
 
     assert details(roots) == Details(
-        folder="/work/proj-a", started=START, by_program=None, name="fix the tests",
+        work_dir="/work/proj-a", started=START, by_program=None, name="fix the tests",
         model="claude-model-y", activity=Said(START + 1, "agent", "All fixed."),
         prompt=Said(START, "you", "please fix them"))
 
@@ -445,7 +445,7 @@ def test_a_session_whose_record_says_nothing_gives_no_detail(roots):
     assert details(roots) == Details()
 
 
-def test_a_codex_session_gives_its_folder_start_and_model_and_no_name(roots):
+def test_a_codex_session_gives_its_work_dir_start_and_model_and_no_name(roots):
     r = rollout(roots, cwd="/work/proj-b", start=START + 5)
     r.turn(model="codex-model-y")
     r.user("do it")
@@ -454,16 +454,16 @@ def test_a_codex_session_gives_its_folder_start_and_model_and_no_name(roots):
 
     found = details(roots)
 
-    assert (found.folder, found.started) == ("/work/proj-b", START + 5)
+    assert (found.work_dir, found.started) == ("/work/proj-b", START + 5)
     assert found.by_program is None and found.name is None
     assert found.model == "codex-model-y"
     assert found.activity.who == "agent" and found.activity.text == "Did it."
     assert found.prompt is None                 # Codex names no submitter
 
 
-def test_an_opencode_session_gives_its_folder_start_and_model_and_no_name(roots):
+def test_an_opencode_session_gives_its_work_dir_start_and_model_and_no_name(roots):
     db = database(roots)
-    session = db.session(title="a title of unknown hand", directory="/work/proj-b",
+    session = db.session(title="a title of unknown hand", work_dir="/work/proj-b",
                          at=START + 7)
     session.user("hello")
     answer = session.assistant(model=("opencode", "model-z"))
@@ -473,7 +473,7 @@ def test_an_opencode_session_gives_its_folder_start_and_model_and_no_name(roots)
 
     found = details(roots)
 
-    assert (found.folder, found.started) == ("/work/proj-b", START + 7)
+    assert (found.work_dir, found.started) == ("/work/proj-b", START + 7)
     assert found.by_program is None and found.name is None
     assert found.model == "model-z"
     assert found.activity.who == "agent" and found.activity.text == "Hello back."
@@ -774,7 +774,7 @@ def test_a_failed_last_turn_read_gives_nulls_and_is_tried_again(roots, monkeypat
 
     monkeypatch.setattr(catalog_module, "window", broken)
     failed = cat.details(only(cat))
-    assert failed == Details(folder="/work/proj-a", started=START)
+    assert failed == Details(work_dir="/work/proj-a", started=START)
 
     monkeypatch.setattr(catalog_module, "window", real)
     assert cat.details(only(cat)).activity.text == "one"
@@ -792,13 +792,13 @@ def test_a_failed_head_read_gives_nulls_and_is_tried_again(roots, monkeypatch):
     monkeypatch.setattr(catalog_module, "read_head", lambda listed, imports=None: None)
 
     failed = cat.details(only(cat))
-    assert (failed.folder, failed.started, failed.name) == (None, None, None)
+    assert (failed.work_dir, failed.started, failed.name) == (None, None, None)
     assert failed.activity.text == "one"
     assert cat.kept_head(only(cat)) is None
 
     monkeypatch.setattr(catalog_module, "read_head", real)
     found = cat.details(only(cat))
-    assert (found.folder, found.name) == ("/work/proj-a", "given at launch")
+    assert (found.work_dir, found.name) == ("/work/proj-a", "given at launch")
     assert cat.head_reads == 2
 
 
@@ -839,7 +839,7 @@ def test_a_short_head_is_read_again_when_the_file_grows(roots):
     clock = Clock()
     cat = Catalog(roots, clock=clock)
 
-    assert cat.head(only(cat)).folder is None
+    assert cat.head(only(cat)).work_dir is None
     assert cat.head(only(cat)).settled is False
     assert cat.head_reads == 1                  # the file has not grown
 
@@ -849,7 +849,7 @@ def test_a_short_head_is_read_again_when_the_file_grows(roots):
     clock.now += 5
     head = cat.head(only(cat))
 
-    assert (head.folder, head.started, head.name) == (
+    assert (head.work_dir, head.started, head.name) == (
         "/work/project", START, "named a little later")
     assert cat.head_reads == 2
 
@@ -880,14 +880,14 @@ def test_a_file_written_anew_under_the_same_path_is_read_again(roots):
     t.write()
     clock = Clock()
     cat = Catalog(roots, clock=clock)
-    assert cat.head(only(cat)).folder == "/work/proj-a"
+    assert cat.head(only(cat)).work_dir == "/work/proj-a"
 
     again = transcript(roots, cwd="/work/proj-b")
     again.user("go", origin="human")
     again.write()                               # a new file, with a new inode
     clock.now += 5
 
-    assert cat.head(only(cat)).folder == "/work/proj-b"
+    assert cat.head(only(cat)).work_dir == "/work/proj-b"
     assert cat.head_reads == 2
 
 
@@ -904,12 +904,12 @@ def test_a_file_written_again_in_place_and_smaller_has_its_head_read_again(roots
     other.user("go", origin="human")
     lines = other.write().read_bytes()
     other.path.unlink()
-    with open(path, "r+b") as handle:           # the same file, the same inode
-        handle.truncate(0)
-        handle.write(lines)
+    with open(path, "r+b") as fh:           # the same file, the same inode
+        fh.truncate(0)
+        fh.write(lines)
     clock.now += 5
 
-    assert cat.head(only(cat)).folder == "/work/proj-b"
+    assert cat.head(only(cat)).work_dir == "/work/proj-b"
     assert cat.head_reads == 2
 
 
@@ -948,7 +948,7 @@ def test_a_root_that_was_not_listed_keeps_its_heads(roots):
 
     moved.rename(roots[CLAUDE])
     clock.now += 5
-    assert cat.head(only(cat)).folder == t.cwd
+    assert cat.head(only(cat)).work_dir == t.cwd
     assert cat.head_reads == 1
 
 
@@ -984,7 +984,7 @@ def test_reading_some_heads_reads_those_and_no_others(roots):
     cat.read_heads([first, third])
 
     assert cat.head_reads == 2
-    assert cat.kept_head(first).folder == "/work/proj-1"
+    assert cat.kept_head(first).work_dir == "/work/proj-1"
     assert cat.kept_head(second) is None
     cat.read_heads([first, third])
     assert cat.head_reads == 2
@@ -1022,6 +1022,6 @@ def test_two_callers_asking_for_every_head_read_each_head_once(roots, monkeypatc
 
     assert len(seen) == 21 and len(set(seen)) == 21
     assert cat.head_reads == 21
-    assert all(cat.kept_head(e).folder is not None for e in cat.gather().entries)
+    assert all(cat.kept_head(e).work_dir is not None for e in cat.gather().entries)
     cat.read_heads()
     assert cat.head_reads == 21

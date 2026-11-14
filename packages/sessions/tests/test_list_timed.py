@@ -24,7 +24,7 @@ pytestmark = [pytest.mark.slow, pytest.mark.timed]
 DAY = 86400.0
 SESSIONS = 5000
 LATE = 300           # how many of them changed in the last seven days
-FOLDERS = 40
+WORK_DIRS = 40
 
 
 def sid(n: int) -> str:
@@ -33,7 +33,7 @@ def sid(n: int) -> str:
 
 def seed_root(home: Path, now: float, *, sessions: int = SESSIONS, late: int = LATE
               ) -> dict[str, Path]:
-    """`sessions` small Claude Code sessions under `home`, across `FOLDERS` folders:
+    """`sessions` small Claude Code sessions under `home`, across `WORK_DIRS` folders:
     `late` of them changed in the last seven days (ten in the last hour, the rest over
     the six days before it and so on seven calendar days at most, every second one
     started by a program), the others spread over the 400 days before those. Codex's
@@ -48,9 +48,9 @@ def seed_root(home: Path, now: float, *, sessions: int = SESSIONS, late: int = L
             at, program = now - 3600 - (n - 10) * 6 * DAY / (late - 10), n % 2 == 0
         else:
             at, program = now - 8 * DAY - (n - late) * 400 * DAY / (sessions - late), False
-        folder = f"proj-{n % FOLDERS}"
-        t = ClaudeTranscript(projects, session_id=sid(n), cwd=f"/work/{folder}",
-                             project=f"-work-{folder}", start=at - 120,
+        work_dir = f"proj-{n % WORK_DIRS}"
+        t = ClaudeTranscript(projects, session_id=sid(n), cwd=f"/work/{work_dir}",
+                             project=f"-work-{work_dir}", start=at - 120,
                              entrypoint="sdk-cli" if program else "cli")
         if n % 3 == 0:
             t.title(f"task {n}")

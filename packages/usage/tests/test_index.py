@@ -517,15 +517,15 @@ def opencode(roots):
 
 def test_opencode_requests_are_filed_under_one_row_per_session(readings, roots):
     db = opencode(roots)
-    parent = db.session(title="fix it", directory="/work/project")
+    parent = db.session(title="fix it", work_dir="/work/project")
     parent.user("go")
     reply = parent.assistant()
-    reply.step(input=900, output=40, cache_read=100)
+    reply.step(input_tokens=900, output=40, cache_read=100)
     reply.complete()
-    child = parent.child(title="look", directory="/work/project")
+    child = parent.child(title="look", work_dir="/work/project")
     child.user("look")
     answer = child.assistant()
-    answer.step(input=100, output=7)
+    answer.step(input_tokens=100, output=7)
     answer.complete()
     db.write()
 

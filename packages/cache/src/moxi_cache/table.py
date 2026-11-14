@@ -221,8 +221,8 @@ def parse_table(text: str) -> Table:
     """The whole shipped table, or TableError. One bad row refuses the table."""
     try:
         doc = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as e:
-        raise TableError(f"the table is not TOML ({e})") from e
+    except tomllib.TOMLDecodeError as exc:
+        raise TableError(f"the table is not TOML ({exc})") from exc
     extra = set(doc) - {"lifetime"}
     if extra:
         raise TableError(f"the table has keys it does not read: {', '.join(sorted(extra))}")
@@ -256,8 +256,8 @@ def load_shipped(path=None) -> Table:
     path = Path(path or TABLE_PATH)
     try:
         st = os.stat(path)
-    except OSError as e:
-        raise TableError(f"{path} could not be read ({e.strerror or e})") from e
+    except OSError as exc:
+        raise TableError(f"{path} could not be read ({exc.strerror or exc})") from exc
     key = (str(path), st.st_mtime_ns, st.st_size)
     with _cache_lock:
         kept = _cache.get(str(path))
@@ -267,10 +267,10 @@ def load_shipped(path=None) -> Table:
         return kept[1]
     try:
         result = parse_table(path.read_text(encoding="utf-8"))
-    except OSError as e:
-        result = TableError(f"{path} could not be read ({e.strerror or e})")
-    except TableError as e:
-        result = e
+    except OSError as exc:
+        result = TableError(f"{path} could not be read ({exc.strerror or exc})")
+    except TableError as exc:
+        result = exc
     with _cache_lock:
         _cache[str(path)] = (key, result)
     if isinstance(result, TableError):
@@ -288,8 +288,8 @@ def load_table(path=None) -> Table:
     shipped = load_shipped(path)
     try:
         raws = current()["lifetime"]
-    except ConfigError as e:
-        raise TableError(f"cache's config could not be read ({e})") from e
+    except ConfigError as exc:
+        raise TableError(f"cache's config could not be read ({exc})") from exc
     return with_user_rows(shipped, raws)
 
 
