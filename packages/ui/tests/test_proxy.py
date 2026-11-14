@@ -655,7 +655,7 @@ def test_a_stream_cancelled_while_its_connection_is_proved_is_not_counted():
 
             server.connect = slow
             request = asyncio.ensure_future(Client(starters).request(
-                "pxfake", "GET", "/api/events?topics=tick", stream=True))
+                "pxfake", "GET", "/api/events?topics=tick", streaming=True))
             await until(lambda: server.streams == 1, what="the stream's count")
             request.cancel()
             await asyncio.gather(request, return_exceptions=True)

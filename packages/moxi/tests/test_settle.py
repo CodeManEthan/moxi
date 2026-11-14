@@ -177,9 +177,9 @@ def test_with_nothing_to_move_the_move_reads_and_stops_nothing(w, monkeypatch):
 def test_the_move_stops_records_renames_and_removes_the_host_dir(w):
     w.installed(DAEMONS=SOCKET)
     old, cache = w.legacy(), w.legacy("cache")
-    record: list = []
-    assert home.move("demo", record, say=w.lines.append) is record
-    assert [(s.unit, s.marked) for s in record] == [
+    stopped: list = []
+    assert home.move("demo", stopped, say=w.lines.append) is stopped
+    assert [(s.unit, s.marked) for s in stopped] == [
         ("moxi-demo-relay.socket", True), (SERVICE, True)]
     assert w.calls("stop") == [("stop", "moxi-demo-relay.socket"), ("stop", SERVICE)]
     assert (w.home / "state" / "demo" / "data.txt").read_text() == "live"
@@ -192,7 +192,7 @@ def test_an_inactive_marked_daemon_is_neither_stopped_nor_recorded(w):
     w.installed(DAEMONS=TWO)
     w.sup.units["moxi-demo-aux.service"]["active"] = False
     w.legacy()
-    record = home.move("demo", [])
+    stopped = home.move("demo", [])
     assert [s.unit for s in stopped] == [SERVICE]
 
 
@@ -223,10 +223,10 @@ def test_each_refusal_comes_before_any_stop(w, monkeypatch, case):
                     return os.stat_result((*st[:2], st.st_dev + 1, *st[3:]))
                 return st
             monkeypatch.setattr(os, name, stat)
-    record: list = []
+    stopped: list = []
     with pytest.raises(home.MoveError) as caught:
-        home.move("demo", record)
-    assert caught.value.refused and record == []
+        home.move("demo", stopped)
+    assert caught.value.refused and stopped == []
     assert w.calls("stop") == [] and (old / "data.txt").exists()
     line = caught.value.line
     assert {"both": f"both {old} and {w.home / 'state' / 'demo'} hold its state data",
@@ -244,7 +244,7 @@ def test_with_replace_the_unmarked_running_unit_is_stopped_and_recorded(w):
     w.sup.reload()
     w.sup.state(SERVICE)["active"] = True
     w.legacy()
-    record = home.move("demo", [], replace=True)
+    stopped = home.move("demo", [], replace=True)
     assert [(s.unit, s.marked) for s in stopped] == [(SERVICE, False)]
     assert (w.home / "state" / "demo").is_dir()
 
@@ -253,12 +253,12 @@ def test_a_stop_that_fails_on_the_second_unit_raises_before_the_rename(w):
     w.installed(DAEMONS=TWO)
     w.sup.fail[("stop", "moxi-demo-aux.service")] = "Job timed out."
     old = w.legacy()
-    record: list = []
+    stopped: list = []
     with pytest.raises(home.MoveError) as caught:
-        home.move("demo", record)
+        home.move("demo", stopped)
     assert not caught.value.refused
     assert caught.value.line == "demo: moxi-demo-aux.service did not stop; nothing moved"
-    assert [s.unit for s in record] == [SERVICE, "moxi-demo-aux.service"]
+    assert [s.unit for s in stopped] == [SERVICE, "moxi-demo-aux.service"]
     assert (old / "data.txt").exists()
 
 
@@ -303,7 +303,7 @@ def test_an_absolute_legacy_link_is_read_named_and_moved_as_the_link(w):
     row = home_rows()["home state"]
     assert (row.state, row.fix) == ("warn", "moxi install demo")
     assert str(link) in row.detail
-    record = home.move("demo", [])
+    stopped = home.move("demo", [])
     assert [s.unit for s in stopped] == [SERVICE]
     assert new.is_symlink() and new.resolve() == elsewhere.resolve()
     assert (new / "data.txt").read_text() == "live"
@@ -318,10 +318,10 @@ def test_a_relative_legacy_link_refuses_the_move_before_any_stop(w):
     link, elsewhere = linked_legacy(w, relative=True)
     new = w.home / "state" / "demo"
     assert moxi.paths.Layout("demo").state_dir() == link
-    record: list = []
+    stopped: list = []
     with pytest.raises(home.MoveError) as caught:
-        home.move("demo", record)
-    assert caught.value.refused and caught.value.only_move and record == []
+        home.move("demo", stopped)
+    assert caught.value.refused and caught.value.only_move and stopped == []
     assert w.calls("stop") == []
     assert caught.value.line == (
         f"demo: {link} is a link to a relative path; make {link} an absolute link, or "
@@ -637,15 +637,15 @@ def test_a_dropped_socket_unit_takes_its_own_entry_out():
     def entry(unit):
         return units.Stopped("demo", "relay", unit, "fake", marked=True)
 
-    record = [entry("moxi-demo-relay.socket"), entry("moxi-demo-relay-1.socket"),
+    stopped = [entry("moxi-demo-relay.socket"), entry("moxi-demo-relay-1.socket"),
               entry(SERVICE)]
     change = units.UnitChange("demo", "relay", "socket", "change", None,
                               (Path("/u/moxi-demo-relay.socket"),), None, "",
                               dropped=(Path("/u/moxi-demo-relay-1.socket"),))
-    _settle._take_out(record, [units.Applied(change, ok=False)])
-    assert len(record) == 3
-    _settle._take_out(record, [units.Applied(change, ok=True)])
-    assert [e.unit for e in record] == ["moxi-demo-relay.socket", SERVICE]
+    _settle._take_out(stopped, [units.Applied(change, ok=False)])
+    assert len(stopped) == 3
+    _settle._take_out(stopped, [units.Applied(change, ok=True)])
+    assert [e.unit for e in stopped] == ["moxi-demo-relay.socket", SERVICE]
 
 
 def test_only_a_daemons_or_its_sockets_change_takes_an_entry_out():
@@ -656,16 +656,16 @@ def test_only_a_daemons_or_its_sockets_change_takes_an_entry_out():
     def entry(name, unit):
         return units.Stopped("demo", name, unit, "fake", marked=True)
 
-    record = [entry("relay", SERVICE), entry("relay", "moxi-demo-relay.socket"),
+    stopped = [entry("relay", SERVICE), entry("relay", "moxi-demo-relay.socket"),
               entry("other", "moxi-demo-other.service")]
-    _settle._take_out(record, [applied("timer", "remove"), applied("wrap", "remove")])
-    assert [e.unit for e in record] == [SERVICE, "moxi-demo-relay.socket",
+    _settle._take_out(stopped, [applied("timer", "remove"), applied("wrap", "remove")])
+    assert [e.unit for e in stopped] == [SERVICE, "moxi-demo-relay.socket",
                                         "moxi-demo-other.service"]
-    _settle._take_out(record, [applied("socket", "remove",
+    _settle._take_out(stopped, [applied("socket", "remove",
                                        paths=(Path("/u/moxi-demo-relay.socket"),))])
-    assert [e.unit for e in record] == [SERVICE, "moxi-demo-other.service"]
-    _settle._take_out(record, [applied("daemon", "remove")])
-    assert [e.unit for e in record] == ["moxi-demo-other.service"]
+    assert [e.unit for e in stopped] == [SERVICE, "moxi-demo-other.service"]
+    _settle._take_out(stopped, [applied("daemon", "remove")])
+    assert [e.unit for e in stopped] == ["moxi-demo-other.service"]
 
 
 def test_a_start_the_supervisor_refuses_is_reported_and_recorded(w, capsys, monkeypatch):
@@ -1043,10 +1043,10 @@ def test_signals_during_the_restart_only_set_the_request(w, capsys, monkeypatch)
     _settle.install_handlers()
     real = units.resume
 
-    def resume(record, **kw):
+    def resume(stopped, **kw):
         os.kill(os.getpid(), signal.SIGINT)
         os.kill(os.getpid(), signal.SIGINT)
-        return real(record, **kw)
+        return real(stopped, **kw)
     monkeypatch.setattr(units, "resume", resume)
     code, out = settle(w, capsys, monkeypatch)
     assert code == _settle.INTERRUPTED

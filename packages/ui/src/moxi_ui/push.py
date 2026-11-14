@@ -367,7 +367,7 @@ class _Upstream:
                 target = f"{route[0]}?topics={','.join(sorted(topics))}"
                 try:
                     response = await self.push.client.request(
-                        self.module, "GET", target, headers=_ACCEPT, stream=True)
+                        self.module, "GET", target, headers=_ACCEPT, streaming=True)
                 except UpstreamError as exc:
                     if exc.status == 503 and exc.body.get("error") == "stopping":
                         self.set_state("down", "the shell is stopping")

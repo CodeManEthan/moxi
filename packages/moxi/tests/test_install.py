@@ -271,14 +271,14 @@ class Fake:
         importlib.invalidate_caches()
         return cli.describe()
 
-    def run_settle(self, python, module, *, replace=False, skills=None):
+    def run_settle(self, python, module, *, replace=False, install_skills=None):
         from moxi import _settle, files, paths
 
         # The install holds the core lock while it settles each module.
         files._descriptor(paths.core_lock())
         self.setups.append(module)
         self.replaces.append(replace)
-        self.skills.append(skills)
+        self.skills.append(install_skills)
         if module in self.interrupt:
             return _settle.Outcome(_settle.INTERRUPTED)
         return _settle.Outcome(1 if module in self.fail_setup else 0)

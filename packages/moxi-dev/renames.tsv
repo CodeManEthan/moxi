@@ -4482,6 +4482,7 @@ moxi	packages/moxi/tests/fake_backend.py	return any(line.startswith("install = "
 moxi	packages/moxi/tests/fake_backend.py	self.extra: set[str] = set()	keep	set	set
 moxi	packages/moxi/tests/fake_backend.py	self.loaded: set[str] = set()	keep	set	set
 moxi	packages/moxi/tests/settle_procs.py	done = super().__call__(cmd, env=env, timeout=timeout)	keep	timeout	timeout
+moxi	packages/moxi/tests/settle_procs.py	parent.run_settle	name	skills	install_skills
 moxi	packages/moxi/tests/settle_procs.py	self.extra = set(data.get("extra", ()))	keep	set	set
 moxi	packages/moxi/tests/settle_procs.py	self.loaded = set(data.get("loaded", ()))	keep	set	set
 moxi	packages/moxi/tests/test_aio.py	names: set[str] = set()	keep	set	set
@@ -4603,6 +4604,7 @@ moxi	packages/moxi/tests/test_install.py	-	name	test_install_in_a_plain_environm
 moxi	packages/moxi/tests/test_install.py	-	name	test_install_in_a_plain_environment_keeps_a_direct_source	test_install_in_a_plain_env_keeps_a_direct_source
 moxi	packages/moxi/tests/test_install.py	-	name	test_plain_environment_without_uv_uses_pip	test_plain_env_without_uv_uses_pip
 moxi	packages/moxi/tests/test_install.py	Fake	name	environment	install_env
+moxi	packages/moxi/tests/test_install.py	Fake.run_settle	name	skills	install_skills
 moxi	packages/moxi/tests/test_install.py	monkeypatch.setattr(install, "environment", self.install_env)	use	environment	install_env
 moxi	packages/moxi/tests/test_install.py	self.fail_setup: set[str] = set()	keep	set	set
 moxi	packages/moxi/tests/test_install.py	self.installed: set[str] = set()	keep	set	set
@@ -4913,6 +4915,16 @@ moxi	packages/moxi/tests/test_settle.py	-	name	test_a_skills_folder_not_on_disk_
 moxi	packages/moxi/tests/test_settle.py	-	name	test_an_empty_new_directory_is_replaced_and_an_empty_old_one_tidied	test_an_empty_new_dir_is_replaced_and_an_empty_old_one_tidied
 moxi	packages/moxi/tests/test_settle.py	-	name	test_the_move_stops_records_renames_and_removes_the_host_folder	test_the_move_stops_records_renames_and_removes_the_host_dir
 moxi	packages/moxi/tests/test_settle.py	-	name	test_the_step_counts_folders_only_and_reads_no_skill_md	test_the_step_counts_dirs_only_and_reads_no_skill_md
+moxi	packages/moxi/tests/test_settle.py	test_a_dropped_socket_unit_takes_its_own_entry_out	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_a_relative_legacy_link_refuses_the_move_before_any_stop	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_a_stop_that_fails_on_the_second_unit_raises_before_the_rename	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_an_absolute_legacy_link_is_read_named_and_moved_as_the_link	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_an_inactive_marked_daemon_is_neither_stopped_nor_recorded	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_each_refusal_comes_before_any_stop	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_only_a_daemons_or_its_sockets_change_takes_an_entry_out	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_signals_during_the_restart_only_set_the_request.resume	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_the_move_stops_records_renames_and_removes_the_host_dir	name	record	stopped
+moxi	packages/moxi/tests/test_settle.py	test_with_replace_the_unmarked_running_unit_is_stopped_and_recorded	name	record	stopped
 moxi	packages/moxi/tests/test_settle.py	_settle.setup_path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi	packages/moxi/tests/test_settle.py	assert set(_questions.recorded("demo")) == {"guard.push"}   # the second never asked	keep	set	set
 moxi	packages/moxi/tests/test_settle.py	assert set(json.loads(path.read_text())) == {"other"}	keep	set	set
@@ -9558,6 +9570,7 @@ ui	packages/ui/src/moxi_ui/proxy.py	response.use = server.use(stream=streaming, 
 ui	packages/ui/src/moxi_ui/push.py	Push.__call__	name	err	exc
 ui	packages/ui/src/moxi_ui/push.py	_Upstream._read	name	err	exc
 ui	packages/ui/src/moxi_ui/push.py	_Upstream._run	name	err	exc
+ui	packages/ui/src/moxi_ui/push.py	self.module, "GET", target, headers=_ACCEPT, stream=True)	use	stream=	streaming=
 ui	packages/ui/src/moxi_ui/push.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
 ui	packages/ui/src/moxi_ui/push.py	await send({"type": "http.response.body", "body": b": heartbeat\n\n",	keep	fail	fail
 ui	packages/ui/src/moxi_ui/push.py	await send({"type": "http.response.body", "body": body})	keep	fail	fail
@@ -10032,7 +10045,7 @@ ui	packages/ui/tests/test_page.py	token = page._shell.set(shell)	keep	set	set
 ui	packages/ui/tests/test_proxy.py	"pxfake", "GET", "/api/events?topics=tick", stream=True))	keep	stream=	stream=
 ui	packages/ui/tests/test_proxy.py	(package / "page.py").write_text(textwrap.dedent(PAGE).replace("NAME", name))	keep	NAME	NAME
 ui	packages/ui/tests/test_proxy.py	).request("pxfake", "GET", "/api/events", stream=True)	keep	stream=	stream=
-ui	packages/ui/tests/test_proxy.py	).request("pxfake", "GET", "/api/events", stream=True)	use	stream=	streaming=
+ui	packages/ui/tests/test_proxy.py	"pxfake", "GET", "/api/events?topics=tick", stream=True))	use	stream=	streaming=
 ui	packages/ui/tests/test_proxy.py	after = await rig.send("GET", "/m/pxpage/api/echo", query=b"n=2")	keep	fail	fail
 ui	packages/ui/tests/test_proxy.py	again = await rig.send("POST", "/m/pxbad/api/act", body=b"{}")	keep	fail	fail
 ui	packages/ui/tests/test_proxy.py	assert (await rig.send("GET", "/m/pxpage/api/echo")).status == 200	keep	fail	fail
