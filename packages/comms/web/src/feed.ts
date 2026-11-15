@@ -23,6 +23,23 @@ export interface RosterRow {
   bound_at: number | null;
   /** Whom the session waits on. */
   awaiting: string[];
+  /** The daemon's read of the session's cache; null for a standing row, any other read
+   * and a box without the cache module. */
+  cache: CacheFact | null;
+}
+
+/** A live name's cache: `warm` or `cold`, and when it goes or went cold, epoch seconds. */
+export interface CacheFact {
+  kind: "warm" | "cold";
+  until: number;
+}
+
+/** The fact in a row, or null when there is none or it is not one. */
+export function parseCacheFact(data: unknown): CacheFact | null {
+  if (typeof data !== "object" || data === null) return null;
+  const { kind, until } = data as Record<string, unknown>;
+  if ((kind !== "warm" && kind !== "cold") || typeof until !== "number" || !Number.isFinite(until)) return null;
+  return { kind, until };
 }
 
 /** The value of `/api/roster` (without `now`) and of the topic `roster`. */
@@ -58,7 +75,7 @@ export function parseRoster(data: unknown): Roster | null {
   const kept = rows
     .filter((row) => typeof row === "object" && row !== null && typeof row.qualified === "string")
     .map((row): RosterRow => ({ ...row, live: row.live === true, directors: strings(row.directors),
-                                awaiting: strings(row.awaiting) }));
+                                awaiting: strings(row.awaiting), cache: parseCacheFact(row.cache) }));
   return { state, detail: null, rows: kept };
 }
 
