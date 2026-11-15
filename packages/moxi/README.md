@@ -46,9 +46,12 @@ commands:
   chooses can't be read. It is what systemd and launchd do; on Windows every daemon starts
   at each logon. Python code gets the same value from `moxi.units.starts(found)`.
   `moxi modules --available` lists the first-party modules, installed or not, and
-  `--refresh` first fetches the newest list from the repository: the one listing
-  command that uses the network (`moxi install` and `moxi uninstall` run uv, which does
-  too).
+  `--refresh` first fetches the list a released core shipped: the one at the highest
+  `moxi-v<version>` tag whose version is on PyPI, since the repository's main branch
+  holds unreleased work. It is the one listing command that uses the network (`moxi
+  install` and `moxi uninstall` run uv, which does too). A module the list marks
+  `unreleased = true` is not on PyPI yet: `moxi install` refuses it unless `--from`
+  gives its source.
 - `moxi install <module>` installs a module with the modules it requires, runs its setup,
   and offers each optional extra with a line saying what it enables. `--with`,
   `--without`, `--all` and `--none` answer ahead.
