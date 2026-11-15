@@ -51,6 +51,32 @@ and `[local] retain_days = 7`. A key's fields:
 A `path` expands `~` and is refused when relative. A key holds no keys: declaring one
 under another key's path is refused when the schema is read.
 
+Page fields
+-----------
+
+A live key may also carry page fields, which say how the settings page shows it. Nothing
+else reads them: they never change what a key is or how it is read. Each is optional:
+
+    label      the plain words the row leads with; one line, at most 60 characters
+    line       the one sentence under the row; one line, at most 160 characters
+    common     a bool: true shows the key before the rest; at most seven keys of a schema
+    group      the sub-head the key sits under; one line, at most 40 characters
+    unit       the word after an int's or a float's field: one word or two, at most 20
+               characters
+    choices    on an enum, a table from each of some or all of its values to the words
+               shown for it
+    pick       a bool, on an enum: true shows its values as a pick list
+    hurts      a change that can hurt, on a bool or a list: `when` ("on" or "off" on a
+               bool, "add" or "remove" on a list), `says` and `confirm` (one line each),
+               and on a bool `rest`, true when holding the value `when` names is itself
+               the harm
+    terminal   on a bool turned on and off at the terminal: `on` and `off`, each the one
+               command that turns it so; the page shows the value and does not change it
+    elsewhere  one line naming the other page the key is edited on; the page leaves the
+               key out
+
+A retired key carries none of them.
+
 A switch table is a `table` key with `items = "bool"`, `read = "use"`, no `env` and
 `default = {}`. Each of its entries is a switch of its own, named `<table key>.<entry>`
 (the entry is lower-case letters, digits, `-` and `_`), and a missing entry reads false.
@@ -104,7 +130,14 @@ import sys
 
 TYPES = ("bool", "int", "float", "string", "enum", "path", "list", "table")
 READS = ("start", "use")
-FIELDS = ("type", "default", "doc", "read", "values", "env", "retired", "needs", "items")
+#: The fields a key may carry for the settings page; nothing else reads them (see "Page
+#: fields" above).
+PAGE_FIELDS = ("label", "line", "common", "group", "unit", "choices", "pick", "hurts",
+               "terminal", "elsewhere")
+FIELDS = ("type", "default", "doc", "read", "values", "env", "retired", "needs",
+          "items") + PAGE_FIELDS
+#: The most keys one schema may mark `common`.
+COMMON_MAX = 7
 #: The item types a `list` or `table` key may declare as its `items`.
 ITEMS = ("str", "int", "bool", "float")
 
@@ -182,19 +215,32 @@ class _Frozen:
         return f"{type(self).__name__}({inner})"
 
     def __reduce__(self):
-        return (type(self), self._fields())
+        return (_rebuilt, (type(self), self._fields()))
+
+
+def _rebuilt(cls, fields):
+    """A `_Frozen` record of class `cls` holding `fields`, in its slots' order: how a copy
+    or an unpickled record is made, whatever its constructor takes by keyword only."""
+    record = cls.__new__(cls)
+    for name, value in zip(cls.__slots__, fields):
+        object.__setattr__(record, name, value)
+    return record
 
 
 class Key(_Frozen):
-    """One declared key."""
+    """One declared key. Its page fields are None when the schema does not give them."""
 
     __slots__ = ("name", "type", "default", "doc", "read", "values", "env", "retired",
-                 "needs", "items")
+                 "needs", "items") + PAGE_FIELDS
 
     def __init__(self, name, value_type, default, doc, read, values=None, env=None,
-                 retired=None, needs=None, items=None):
+                 retired=None, needs=None, items=None, *, label=None, line=None,
+                 common=None, group=None, unit=None, choices=None, pick=None, hurts=None,
+                 terminal=None, elsewhere=None):
         for field, value in zip(self.__slots__, (name, value_type, default, doc, read, values,
-                                                 env, retired, needs, items)):
+                                                 env, retired, needs, items, label, line,
+                                                 common, group, unit, choices, pick, hurts,
+                                                 terminal, elsewhere)):
             object.__setattr__(self, field, value)
 
 
@@ -239,6 +285,11 @@ class Schema:
                               "correct the schema's TOML") from None
         keys: dict = {}
         _walk_schema(data, "", source, keys)
+        common = [key.name for key in keys.values() if key.common]
+        if len(common) > COMMON_MAX:
+            raise SchemaError(source, None, f"marks {len(common)} keys common "
+                              f"({', '.join(common)}), more than {COMMON_MAX}",
+                              f"mark at most {COMMON_MAX} keys common")
         return cls(keys, source)
 
     @classmethod
@@ -723,6 +774,10 @@ def _key(name, spec, source) -> Key:
     if retired is not None:
         if not isinstance(retired, str) or not retired.strip():
             raise bad("has an empty retired", "say what to do now instead")
+        shown = [field for field in PAGE_FIELDS if field in spec]
+        if shown:
+            raise bad(f"is retired but has {', '.join(shown)}",
+                      "remove the page fields; a retired key is not shown")
         return Key(name=name, value_type=spec.get("type"), default=spec.get("default"),
                    doc=spec.get("doc", ""), read=spec.get("read"), retired=retired)
 
@@ -772,12 +827,125 @@ def _key(name, spec, source) -> Key:
             raise bad(f"has items {items!r}", f"use one of {', '.join(ITEMS)}")
 
     key = Key(name=name, value_type=kind, default=spec["default"], doc=doc, read=read,
-              values=values, env=env, needs=needs, items=items)
+              values=values, env=env, needs=needs, items=items,
+              **_page_fields(spec, kind, values, bad))
     try:
         _check_value(key, key.default, source, os.environ)
     except ConfigError as exc:
         raise bad(f"has a default that {exc.problem}", exc.fix) from None
     return key
+
+
+#: The longest each one-line page field may be, in characters (None: no limit but one line).
+_PAGE_TEXT = {"label": 60, "line": 160, "group": 40, "unit": 20, "elsewhere": None}
+#: The direction of change a `hurts` may name, by the key's type.
+_HURTS_WHEN = {"bool": ("on", "off"), "list": ("add", "remove")}
+
+
+def _one_line(value) -> bool:
+    return (isinstance(value, str) and bool(value.strip()) and "\n" not in value
+            and "\r" not in value)
+
+
+def _page_fields(spec, kind, values, bad) -> dict:
+    """The page fields `spec` gives a live key of type `kind`, checked; `bad(problem, fix)`
+    makes the refusal."""
+    found: dict = {}
+    for field, most in _PAGE_TEXT.items():
+        if field not in spec:
+            continue
+        text = spec[field]
+        if not _one_line(text):
+            raise bad(f"has {field} {text!r}, which is not one line of text",
+                      f"give {field} as one line")
+        if most is not None and len(text) > most:
+            raise bad(f"has a {field} of {len(text)} characters, more than {most}",
+                      f"shorten {field} to {most} characters or fewer")
+        found[field] = text
+    if "unit" in found:
+        if kind not in ("int", "float"):
+            raise bad(f"has unit but is {_a(kind)}",
+                      "remove unit; only an int or a float has a unit")
+        if len(found["unit"].split()) > 2:
+            raise bad(f"has the unit {found['unit']!r}, more than two words",
+                      "give the unit in one word or two")
+    for field in ("common", "pick"):
+        if field in spec:
+            if not isinstance(spec[field], bool):
+                raise bad(f"has {field} {spec[field]!r}, not a bool",
+                          f"set {field} to true or false")
+            found[field] = spec[field]
+    if "pick" in found and kind != "enum":
+        raise bad(f"has pick but is {_a(kind)}", "remove pick; only an enum has a pick list")
+    if "choices" in spec:
+        found["choices"] = _choices(spec["choices"], kind, values, bad)
+    if "hurts" in spec:
+        found["hurts"] = _hurts(spec["hurts"], kind, bad)
+    if "terminal" in spec:
+        found["terminal"] = _terminal(spec["terminal"], kind, bad)
+    return found
+
+
+def _choices(choices, kind, values, bad) -> dict:
+    if kind != "enum":
+        raise bad(f"has choices but is {_a(kind)}",
+                  "remove choices; only an enum's values have words")
+    if not isinstance(choices, dict) or not choices:
+        raise bad("has choices that are not a table of words",
+                  "give choices as a table from each value to its words")
+    for value, words in choices.items():
+        if value not in values:
+            raise bad(f"has choices for {value!r}, which is not one of its values",
+                      f"name only its values: {', '.join(map(repr, values))}")
+        if not _one_line(words):
+            raise bad(f"has choices {words!r} for {value!r}, which is not one line of "
+                      "text", "give each value's words as one line")
+    return dict(choices)
+
+
+def _hurts(hurts, kind, bad) -> dict:
+    if kind not in _HURTS_WHEN:
+        raise bad(f"has hurts but is {_a(kind)}",
+                  "remove hurts; only a change of a bool or a list can hurt")
+    fields = ("when", "says", "confirm", "rest")
+    if not isinstance(hurts, dict):
+        raise bad("has hurts that is not a table", f"give hurts as a table of "
+                  f"{', '.join(fields)}")
+    unknown = sorted(frozenset(hurts) - frozenset(fields))
+    if unknown:
+        raise bad(f"has unknown hurts field(s) {', '.join(unknown)}",
+                  f"use only {', '.join(fields)}")
+    wanted = _HURTS_WHEN[kind]
+    if hurts.get("when") not in wanted:
+        raise bad(f"has hurts.when {hurts.get('when')!r}",
+                  f"on {_a(kind)} give {' or '.join(map(repr, wanted))}")
+    for field in ("says", "confirm"):
+        if not _one_line(hurts.get(field)):
+            raise bad(f"has hurts.{field} {hurts.get(field)!r}, which is not one line of "
+                      "text", f"give hurts.{field} as one line")
+    rest = hurts.get("rest", False)
+    if not isinstance(rest, bool):
+        raise bad(f"has hurts.rest {rest!r}, not a bool", "set hurts.rest to true or false")
+    if rest and kind != "bool":
+        raise bad(f"has hurts.rest but is {_a(kind)}",
+                  "remove hurts.rest; only a bool's value held can hurt")
+    return {"when": hurts["when"], "says": hurts["says"], "confirm": hurts["confirm"],
+            "rest": rest}
+
+
+def _terminal(terminal, kind, bad) -> dict:
+    if kind != "bool":
+        raise bad(f"has terminal but is {_a(kind)}",
+                  "remove terminal; only a bool is turned on and off at the terminal")
+    if not isinstance(terminal, dict) or set(terminal) != {"on", "off"}:
+        raise bad("has a terminal that is not a table of on and off",
+                  "give terminal the command that turns it on and the one that turns "
+                  "it off: { on = \"...\", off = \"...\" }")
+    for state in ("on", "off"):
+        if not _one_line(terminal[state]):
+            raise bad(f"has terminal.{state} {terminal[state]!r}, which is not one line "
+                      "of text", f"give terminal.{state} as one command on one line")
+    return {"on": terminal["on"], "off": terminal["off"]}
 
 
 # -- changing a module's settings ------------------------------------------------------
@@ -1235,7 +1403,7 @@ def _check_config(module: str, schema: Schema, check) -> None:
     _check_file(module, schema, check, text, path, None)
 
 
-__all__ = ["TYPES", "READS", "FIELDS", "ITEMS", "DEFAULT", "FILE", "ENV", "HISTORY",
-           "ConfigError", "SchemaError", "Key", "Schema", "Settings", "is_switch_table",
-           "is_entry_name", "schema_for", "check_text", "load", "Config", "set_value", "unset",
-           "add_item", "remove_item", "history"]
+__all__ = ["TYPES", "READS", "FIELDS", "PAGE_FIELDS", "COMMON_MAX", "ITEMS", "DEFAULT",
+           "FILE", "ENV", "HISTORY", "ConfigError", "SchemaError", "Key", "Schema", "Settings",
+           "is_switch_table", "is_entry_name", "schema_for", "check_text", "load", "Config",
+           "set_value", "unset", "add_item", "remove_item", "history"]
