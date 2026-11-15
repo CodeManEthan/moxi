@@ -409,12 +409,12 @@ def stored_keys(conn):
     source(conn, "/p/a.jsonl", [request("r1", t)], cwd="/w/app", project="key-app")
     source(conn, "/p/b.jsonl", [request("r2", t), request("r3", t + 60)], session_id="s2",
            cwd="/w/app-wt", project="key-app")
-    source(conn, "/p/c.jsonl", [request("r4", t, input=5000)], session_id="s3",
+    source(conn, "/p/c.jsonl", [request("r4", t, input_tokens=5000)], session_id="s3",
            cwd="/w/app")
     source(conn, "/p/d.jsonl", [request("r5", t, model="m-b")], session_id="s4")
 
 
-def test_projects_by_folder_group_by_cwd_alone(conn):
+def test_projects_by_dir_group_by_cwd_alone(conn):
     stored_keys(conn)
     report = reports.projects(conn, by="folder", table=table())
     assert [(r["project"], r["cwd"], r["requests"]) for r in report.rows] == [
@@ -430,7 +430,7 @@ def test_projects_by_folder_group_by_cwd_alone(conn):
         reports.projects(conn, by="session", table=table())
 
 
-def test_the_folder_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
+def test_the_dir_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
     stored_keys(conn)
 
     def count(**filters):
@@ -443,7 +443,7 @@ def test_the_folder_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
     assert count(folder="/w/app", project="key-app") == 1
     assert count(folder="/w") == 0                 # a folder above matches nothing under it
     assert count(folder=None) == count(folder="") == 5
-    assert reports.daily(conn, folder="/w/app/", table=table()).filters == {
+    assert reports.daily(conn, work_dir="/w/app/", table=table()).filters == {
         "folder": "/w/app"}
     for bad in ("app", "./app", "~/app"):
         with pytest.raises(reports.ReportError, match="whole path"):
@@ -456,34 +456,34 @@ def test_the_folder_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
         assert found.total["requests"] == 2, kind
         assert fn(conn, folder="/w/gone", table=table(), **given).total["requests"] == 0
     with pytest.raises(reports.ReportError, match="takes no folder"):
-        reports.status(conn, folder="/w/app")
+        reports.status(conn, work_dir="/w/app")
 
 
-def test_report_takes_a_folder_and_by_for_projects(conn, passes):
+def test_report_takes_a_dir_and_by_for_projects(conn, passes):
     stored_keys(conn)
-    assert api.report("sessions", folder="/w/app", fresh=False).total["requests"] == 2
-    found = api.report("projects", by="folder", folder="/w/app-wt", fresh=False)
+    assert api.report("sessions", work_dir="/w/app", fresh=False).total["requests"] == 2
+    found = api.report("projects", by="folder", work_dir="/w/app-wt", fresh=False)
     assert [(r["project"], r["cwd"]) for r in found.rows] == [(None, "/w/app-wt")]
     assert found.filters == {"folder": "/w/app-wt"}
     assert reports.read("projects", by="folder").total["requests"] == 5
     with pytest.raises(ValueError, match="not a key of the projects report"):
         api.report("projects", by="model")
     with pytest.raises(ValueError, match="whole path"):
-        api.report("daily", folder="app", fresh=False)
+        api.report("daily", work_dir="app", fresh=False)
     with pytest.raises(ValueError, match="takes no folder"):
-        api.report("status", folder="/w/app", fresh=False)
+        api.report("status", work_dir="/w/app", fresh=False)
     assert passes == []
 
 
-def test_a_folder_on_no_index_is_still_checked_and_named(monkeypatch):
+def test_a_dir_on_no_index_is_still_checked_and_named(monkeypatch):
     monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
     assert not store.index_path().exists()
-    found = api.report("projects", by="folder", folder="/w/app/")
+    found = api.report("projects", by="folder", work_dir="/w/app/")
     assert found.rows == [] and found.filters == {"folder": "/w/app"}
     with pytest.raises(ValueError, match="whole path"):
-        api.report("daily", folder="app")
+        api.report("daily", work_dir="app")
     with pytest.raises(ValueError, match="takes no folder"):
-        api.report("status", folder="/w/app")
+        api.report("status", work_dir="/w/app")
 
 
 def test_no_report_reads_projects(conn, monkeypatch):
@@ -989,7 +989,7 @@ def test_there_is_no_saving_when_a_group_with_cache_tokens_is_unpriced(conn, fie
 def test_a_saving_of_zero_or_less_is_stated_as_it_falls(conn):
     t = at("2026-10-01T12:00")
     # 10 reads save 27 millionths of a dollar and 1000 written tokens cost 750 more
-    source(conn, "/p/a.jsonl", [request("r1", t, input=2000, cache_read=10,
+    source(conn, "/p/a.jsonl", [request("r1", t, input_tokens=2000, cache_read=10,
                                         cache_write=1000)])
     saving = reports.terms(conn, tz="UTC", table=table()).total["saving"]
     assert saving["saved"] == pytest.approx((30 - 3 - 750) / 1e6) and saving["saved"] < 0
@@ -1425,22 +1425,22 @@ def context_index(conn):
     later child session, and one id two harnesses hold."""
     t = at("2026-10-01T12:00")
     source(conn, "/c/r.jsonl", [
-        request("t1", t, harness="codex", model="m-a", input=10_000, context_window=1000),
-        request("t2", t + 60, harness="codex", model="m-a", input=51_680,
+        request("t1", t, harness="codex", model="m-a", input_tokens=10_000, context_window=1000),
+        request("t2", t + 60, harness="codex", model="m-a", input_tokens=51_680,
                 context_window=258_400)],
         lane="codex", harness="codex", session_id="th1", rank=1)
-    source(conn, "/p/s1.jsonl", [request("r2", t + 600, input=40_000),
-                                 request("r1", t, input=30_000)], session_id="s1")
-    source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input=7)],
+    source(conn, "/p/s1.jsonl", [request("r2", t + 600, input_tokens=40_000),
+                                 request("r1", t, input_tokens=30_000)], session_id="s1")
+    source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input_tokens=7)],
            session_id="s1", kind="subagent", agent_id="a")
     db = "/oc/opencode.db"
-    source(conn, db, [request("o1", t, harness="opencode", model="mystery-9", input=600)],
+    source(conn, db, [request("o1", t, harness="opencode", model="mystery-9", input_tokens=600)],
            lane="opencode", harness="opencode", part="ses_p", session_id="ses_p", rank=2)
-    source(conn, db, [request("o2", t + 99, harness="opencode", input=9)],
+    source(conn, db, [request("o2", t + 99, harness="opencode", input_tokens=9)],
            lane="opencode", harness="opencode", part="ses_c", session_id="ses_c",
            parent_session="ses_p", agent_id="ses_c", kind="subagent", rank=2)
-    source(conn, "/p/both.jsonl", [request("b1", t, input=111)], session_id="both")
-    source(conn, "/c/both.jsonl", [request("b2", t, harness="codex", input=222)],
+    source(conn, "/p/both.jsonl", [request("b1", t, input_tokens=111)], session_id="both")
+    source(conn, "/c/both.jsonl", [request("b2", t, harness="codex", input_tokens=222)],
            lane="codex", harness="codex", session_id="both", rank=1)
 
 
@@ -1467,8 +1467,8 @@ def test_a_sessions_context_is_the_newest_request_of_its_main_file(conn):
 
 def test_a_context_is_none_when_the_newest_request_gave_no_prompt_size(conn):
     t = at("2026-10-01T12:00")
-    source(conn, "/p/a.jsonl", [request("r1", t, input=500),
-                                request("r2", t + 60, input=UNKNOWN)])
+    source(conn, "/p/a.jsonl", [request("r1", t, input_tokens=500),
+                                request("r2", t + 60, input_tokens=UNKNOWN)])
     assert reports.session_context(conn, "claude", "s1", table=table()) is None
 
 
@@ -1476,10 +1476,10 @@ def test_a_context_counts_only_a_claimed_request(conn):
     t = at("2026-10-01T12:00")
     # both files hold `shared`, the newest request of each; the earlier file's copy is
     # the claimed one, so the later file's newest claimed request is its own
-    source(conn, "/p/old.jsonl", [request("first", t, input=100),
-                                  request("shared", t + 60, input=700)], session_id="old")
-    source(conn, "/p/new.jsonl", [request("mine", t + 30, input=300),
-                                  request("shared", t + 60, input=700)], session_id="new")
+    source(conn, "/p/old.jsonl", [request("first", t, input_tokens=100),
+                                  request("shared", t + 60, input_tokens=700)], session_id="old")
+    source(conn, "/p/new.jsonl", [request("mine", t + 30, input_tokens=300),
+                                  request("shared", t + 60, input_tokens=700)], session_id="new")
     assert reports.session_context(conn, "claude", "old", table=table())["tokens"] == 700
     assert reports.session_context(conn, "claude", "new", table=table())["tokens"] == 300
 
@@ -1514,7 +1514,7 @@ def test_contexts_build_no_index(monkeypatch):
     assert not store.index_path().exists()
 
 
-def test_a_sessions_origin_is_its_folder_and_its_earliest_request_whatever_the_range(conn):
+def test_a_sessions_origin_is_its_dir_and_its_earliest_request_whatever_the_range(conn):
     t = at("2026-10-01T12:00")
     # the main file gives the folder though a subagent's file comes first in the index,
     # and the earliest request is the subagent's

@@ -176,7 +176,7 @@ def _render(written: Written) -> None:
     rendering.on_append(written)
 
 
-def _close(where: Where, round_events: Sequence[dict], *, actor: str,
+def _close(where: Where, round_events: Sequence[dict], *, by: str,
            at: str | None) -> dict | None:
     """Close the round whose log now holds `round_events`, when its close waits for
     nothing more, and return the closing event; None when the round stays as it is,
@@ -190,7 +190,7 @@ def _close(where: Where, round_events: Sequence[dict], *, actor: str,
     entry = closing.entry(state.fold(round_events))
     if entry is None:
         return None
-    return log.append(where.round_log, entry.type, entry.fields, by=actor, at=at)
+    return log.append(where.round_log, entry.type, entry.fields, by=by, at=at)
 
 
 #: The callbacks every write calls after its append, in order, each with the `Written`.
@@ -358,7 +358,7 @@ def _append(view: View, entries: list[Entry], result: object, *, by: str,
     failed = []
     closed = None
     try:
-        closed = _close(where, after[ROUND], actor=by, at=at)
+        closed = _close(where, after[ROUND], by=by, at=at)
     except Exception as exc:  # the verb's events are on disk; the next write closes
         failed.append((_close, exc))
     if closed is not None:

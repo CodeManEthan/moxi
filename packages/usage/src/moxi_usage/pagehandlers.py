@@ -229,7 +229,7 @@ def _origins(keys: list[tuple[str | None, str]]) -> dict[Any, dict[str, Any] | N
         raise lb.Refused(str(exc)) from None
 
 
-def _refs(pairs: Iterable[_Key], *, folders: Iterable[_Key] = (),
+def _refs(pairs: Iterable[_Key], *, work_dirs: Iterable[_Key] = (),
           ) -> Callable[..., dict[str, Any]]:
     """What names the sessions of one answer: a function giving the reference of one
     `(harness, session id)` of `pairs`, with the `cwd` the index gave its row.
@@ -241,7 +241,7 @@ def _refs(pairs: Iterable[_Key], *, folders: Iterable[_Key] = (),
     the index holds for it. Any other pair was not looked for and has a null `known`,
     name and start: one of a harness whose root was not listed whole, one with no
     session id, and every pair when the call raises, which is logged once per class.
-    A folder the sessions module did not give is the row's `cwd`; `folders` names the
+    A folder the sessions module did not give is the row's `cwd`; `work_dirs` names the
     pairs that come with no `cwd`, whose folder the index is asked for."""
     keys = list(dict.fromkeys((harness, sid) for harness, sid in pairs
                               if sid is not None and harness in HARNESSES))
@@ -254,27 +254,27 @@ def _refs(pairs: Iterable[_Key], *, folders: Iterable[_Key] = (),
             for item in answer["sessions"]:
                 items.setdefault((item["harness"], item["session"]), item)
             looked = set(HARNESSES) - unlisted
-        except Exception as err:
-            _log_once(err, "the sessions of an answer could not be named")
+        except Exception as exc:
+            _log_once(exc, "the sessions of an answer could not be named")
             items, looked = {}, set()
     gone = {key for key in keys if key not in items and key[0] in looked}
-    origins = _origins(sorted(gone | (set(folders) & set(keys))))
+    origins = _origins(sorted(gone | (set(work_dirs) & set(keys))))
 
     def ref(harness: str, session_id: str | None, cwd: str | None = None) -> dict[str, Any]:
         key = (harness, session_id)
         item, origin = items.get(key), origins.get(key) or {}
         name = started = known = None
-        folder = cwd if cwd is not None else origin.get("cwd")
+        work_dir = cwd if cwd is not None else origin.get("cwd")
         if item is not None:
             known = True
             name = item.get("name") if isinstance(item.get("name"), str) else None
             started = _num(item.get("started"))
             if isinstance(item.get("folder"), str):
-                folder = item["folder"]
+                work_dir = item["folder"]
         elif key in gone:
             known, started = False, _num(origin.get("first_ts"))
         return {"harness": harness, "session_id": session_id, "name": name or None,
-                "folder": _str(folder), "started": started, "known": known}
+                "folder": _str(work_dir), "started": started, "known": known}
 
     return ref
 
@@ -353,7 +353,7 @@ def session(call: Any) -> dict[str, Any]:
     harness = key[0] or (_origins([key]).get(key) or {}).get("harness")
     named = None
     if harness is not None:
-        named = _refs([(harness, key[1])], folders=[(harness, key[1])])(harness, key[1])
+        named = _refs([(harness, key[1])], work_dirs=[(harness, key[1])])(harness, key[1])
     return {**_report(answer, rows), "context": _context(_contexts([key]).get(key)),
             "ref": named}
 
@@ -845,7 +845,7 @@ def window(call: Any) -> dict[str, Any]:
     spent = [] if used is None else used["rows"]
     last = [] if read_by is None else [(harness, read_by)]
     ref = _refs([*last, *((item["harness"], item["session_id"]) for item in spent)],
-                folders=last)
+                work_dirs=last)
     if used is not None:
         used["rows"] = [{**ref(item["harness"], item["session_id"], item["cwd"]),
                          "requests": item["requests"], "cost": item["cost"]}

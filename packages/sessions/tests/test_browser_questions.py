@@ -121,14 +121,14 @@ def day_word(at: float) -> str:
     return "today" if datetime.fromtimestamp(at).date() == datetime.now().date() else "yesterday"
 
 
-def claude(root: Path, home: str, n: int, at: float, *, folder: str = "code/proj-a", name: str | None = None,
+def claude(root: Path, home: str, n: int, at: float, *, work_dir: str = "code/proj-a", name: str | None = None,
            typed: str | None = None, reply: str | None = "Done.", program: bool = False,
            subagents: tuple[tuple[str, str, str], ...] = (), took: float = 600) -> None:
-    """A Claude Code session in `folder` under the home folder, last changed at `at`:
+    """A Claude Code session in `work_dir` under the home folder, last changed at `at`:
     started in a terminal or by a program, with a typed message only when `typed` gives
     one, and one subagent per `(kind, task, what it said last)`."""
-    t = ClaudeTranscript(root, session_id=sid(n), cwd=f"{home}/{folder}",
-                         project="-home-" + folder.replace("/", "-"), entrypoint="sdk-cli" if program else "cli",
+    t = ClaudeTranscript(root, session_id=sid(n), cwd=f"{home}/{work_dir}",
+                         project="-home-" + work_dir.replace("/", "-"), entrypoint="sdk-cli" if program else "cli",
                          start=at - took)
     if name is not None:
         t.title(name)
@@ -146,10 +146,10 @@ def claude(root: Path, home: str, n: int, at: float, *, folder: str = "code/proj
     changed_at(t.write(), at)
 
 
-def codex(root: Path, home: str, n: int, at: float, *, folder: str, reply: str, child: int | None = None) -> None:
+def codex(root: Path, home: str, n: int, at: float, *, work_dir: str, reply: str, child: int | None = None) -> None:
     """A Codex thread last changed at `at`, with a thread it spawned when `child` names
     one."""
-    rollout = CodexRollout(root, thread_id=tid(n), cwd=f"{home}/{folder}", start=at - 600)
+    rollout = CodexRollout(root, thread_id=tid(n), cwd=f"{home}/{work_dir}", start=at - 600)
     rollout.turn()
     rollout.user("Move the two helpers.")
     if child is not None:
@@ -184,39 +184,39 @@ def seed(env: dict[str, str], now: float) -> str:
     claude(root, home, TOOLTIPS, now - 300, name="fix-tooltips", typed=TOOLTIPS_PROMPT, reply=TOOLTIPS_REPLY,
            took=2100, subagents=(("Explore", "Read the tooltip code", "The hide timer is never cleared."),
                                  ("general-purpose", "List the callers", "Found three callers.")))
-    claude(root, home, PARSER, now - 1500, folder="code/proj-b", typed=PARSER_PROMPT, reply=PARSER_REPLY)
-    claude(root, home, SCRATCH, now - 2700, folder="scratch", reply=SCRATCH_REPLY)
+    claude(root, home, PARSER, now - 1500, work_dir="code/proj-b", typed=PARSER_PROMPT, reply=PARSER_REPLY)
+    claude(root, home, SCRATCH, now - 2700, work_dir="scratch", reply=SCRATCH_REPLY)
     claude(root, home, NIGHTLY, now - 120, program=True, took=60)
 
     claude(root, home, CHANGELOG, noon(1).timestamp() + 1800, typed="Draft the changelog entry.")
-    claude(root, home, QUIET, noon(1).timestamp(), folder="code/proj-b")
+    claude(root, home, QUIET, noon(1).timestamp(), work_dir="code/proj-b")
     for k, n in enumerate(YESTERDAY_PROGRAMS):
         claude(root, home, n, noon(1).timestamp() - 3600 * (k + 1), program=True, took=60)
     rollouts = Path(env["CODEX_HOME"]) / "sessions"
-    codex(rollouts, home, CODEX, noon(1).timestamp() + 900, folder="code/proj-b", reply=CODEX_REPLY, child=CODEX_CHILD)
+    codex(rollouts, home, CODEX, noon(1).timestamp() + 900, work_dir="code/proj-b", reply=CODEX_REPLY, child=CODEX_CHILD)
 
     claude(root, home, 15, noon(2).timestamp(), typed="Split the settings form.")
-    claude(root, home, 16, noon(4).timestamp(), folder="scratch")
-    claude(root, home, 17, noon(4).timestamp() + 1800, folder="code/proj-b", typed="Why is the build slow?")
+    claude(root, home, 16, noon(4).timestamp(), work_dir="scratch")
+    claude(root, home, 17, noon(4).timestamp() + 1800, work_dir="code/proj-b", typed="Why is the build slow?")
     claude(root, home, 18, noon(5).timestamp(), typed="Add the missing index.")
 
     db = OpenCodeDb(Path(env["XDG_DATA_HOME"]) / "opencode", start=noon(3).timestamp() - 600)
-    s = db.session(title="a title the harness made", directory=f"{home}/scratch")
+    s = db.session(title="a title the harness made", work_dir=f"{home}/scratch")
     s.user("Rename the flag.")
     a = s.assistant()
     a.step(text=OPENCODE_REPLY, input=900, output=40)
     a.complete()
     db.write()
 
-    claude(root, home, RELEASE, noon(6).timestamp(), folder="code/proj-b", name="release-notes",
+    claude(root, home, RELEASE, noon(6).timestamp(), work_dir="code/proj-b", name="release-notes",
            typed=RELEASE_PROMPT, reply=RELEASE_REPLY,
            subagents=(("Explore", "Read the merged changes", "Fourteen changes since 0.3."),))
     for k, n in enumerate(BUSY_DAY[1:], start=1):
         claude(root, home, n, noon(6).timestamp() + 600 * k, typed=f"Task {k}.")
 
-    claude(root, home, OLDER, noon(10).timestamp(), folder="code/proj-b", typed="Try the new cache key.")
-    codex(rollouts, home, CODEX_OLD, noon(12).timestamp(), folder="scratch", reply="Done.")
-    claude(root, home, OLD_PROGRAM, noon(12).timestamp() - 3600, folder="code/proj-b", program=True, took=60)
+    claude(root, home, OLDER, noon(10).timestamp(), work_dir="code/proj-b", typed="Try the new cache key.")
+    codex(rollouts, home, CODEX_OLD, noon(12).timestamp(), work_dir="scratch", reply="Done.")
+    claude(root, home, OLD_PROGRAM, noon(12).timestamp() - 3600, work_dir="code/proj-b", program=True, took=60)
     claude(root, home, OLDEST, noon(30).timestamp())
     return s.id
 
@@ -252,8 +252,8 @@ def on_both(installs, ui_contexts):
             page = ui_contexts(shell, **context_args).pages[0]
             try:
                 seen[name] = walk(page, shell)
-            except AssertionError as failed:
-                failed.add_note(f"on the {name} install")
+            except AssertionError as exc:
+                exc.add_note(f"on the {name} install")
                 raise
         assert seen["small"] == seen["full"]
         for step in seen["full"]:

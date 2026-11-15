@@ -30,7 +30,7 @@ def launched(request_id: str, *, identity: str | None = None, name: str | None =
     values = {"harness": "claude", "target": "headless", "cwd": "/work/proj-a",
               **({"name": name} if name else {})}
     with kit.launch_log(HERE) as conn:
-        store.insert(conn, request_id=request_id, actor="alice", harness="claude",
+        store.insert(conn, request_id=request_id, by="alice", harness="claude",
                      target="headless", cwd="/work/proj-a", values=values, argv=["claude"],
                      env={}, posture="operator", session_id=f"session-{request_id}",
                      identity=identity, project_key=project_key, scope="proj-a")
@@ -72,7 +72,7 @@ def test_a_failed_launch_and_one_with_no_process_are_never_given():
     kit.seed(HERE, "r-failed", live=True)
     with kit.launch_log(HERE) as conn:
         store.set_state(conn, "r-failed", "failed", reason="test")
-        store.insert(conn, request_id="r-spawning", actor="alice", harness="claude",
+        store.insert(conn, request_id="r-spawning", by="alice", harness="claude",
                      target="headless", cwd="/work", values={}, argv=["claude"], env={},
                      posture="operator", session_id="session-spawning")
     assert [r.request_id for r in api.running(live_only=False)] == ["r-live"]
@@ -112,7 +112,7 @@ def test_a_launch_that_never_learned_an_id_has_none():
     assert api.running()[0].session_id is None
 
 
-def test_the_name_is_the_rows_name_else_its_comms_name_else_the_folder_and_time():
+def test_the_name_is_the_rows_name_else_its_comms_name_else_the_dir_and_time():
     launched("r-named", identity="planner", name="the parser", project_key="proj-a")
     launched("r-identity", identity="reviewer")
     launched("r-plain")
@@ -147,18 +147,18 @@ def test_a_log_held_past_the_wait_raises_busy_and_writes_nothing():
     """A version 1 log needs its schema step, which waits for the write lock."""
     path = store.path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    raw = sqlite3.connect(path, isolation_level=None)
-    raw.execute("PRAGMA journal_mode = WAL")
-    raw.executescript(V1_DUMP.read_text())
-    raw.execute("BEGIN IMMEDIATE")
+    raw_conn = sqlite3.connect(path, isolation_level=None)
+    raw_conn.execute("PRAGMA journal_mode = WAL")
+    raw_conn.executescript(V1_DUMP.read_text())
+    raw_conn.execute("BEGIN IMMEDIATE")
     try:
         with pytest.raises(api.Busy) as raised:
             api.running(timeout_s=0.05)
         assert raised.value.exit_code == 75
     finally:
-        raw.execute("ROLLBACK")
-    assert raw.execute("PRAGMA user_version").fetchone()[0] == 1
-    raw.close()
+        raw_conn.execute("ROLLBACK")
+    assert raw_conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    raw_conn.close()
 
 
 def test_a_log_a_newer_launcher_wrote_is_refused_not_read():

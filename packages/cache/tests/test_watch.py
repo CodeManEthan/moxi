@@ -482,9 +482,9 @@ def test_the_reading_is_no_file_under_clock(root, sessions):
         records.DIR_NAME, records.READING_NAME]
 
 
-def test_a_stand_in_directory_puts_the_reading_beside_it(tmp_path, sessions):
-    directory = tmp_path / "rt" / "cache" / "clock"
-    make(Fake([entry(11, A)]), sessions, directory=directory).tick()
+def test_a_stand_in_dir_puts_the_reading_beside_it(tmp_path, sessions):
+    records_dir = tmp_path / "rt" / "cache" / "clock"
+    make(Fake([entry(11, A)]), sessions, directory=records_dir).tick()
     assert records.reading(tmp_path / "rt" / "cache" / "watch.json")["listed_at"] is not None
     assert not records.reading_path().exists()
 
@@ -497,7 +497,7 @@ def test_the_reading_stays_when_the_watcher_stops(own_roots, sessions):
             stop.set()
             return super()._tick()
     write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
-    w = Once(agents=lambda: [], sessions=sessions)
+    w = Once(agents=lambda: [], session_files_dir=sessions)
     assert watch.run(watcher=w, stop=stop) == 0
     assert records.reading() == {"v": 1, "pid": os.getpid(), "tick_at": w.tick_at,
                                  "listed_at": w.tick_at, "stale_after": 3}
@@ -670,7 +670,7 @@ def first_tick_records(own_roots, sessions, t) -> dict:
             seen.update({s: rec(s) for s in (A, B)})
             return live
     write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
-    w = Once(agents=lambda: [entry(11, A), entry(12, B)], sessions=sessions)
+    w = Once(agents=lambda: [entry(11, A), entry(12, B)], session_files_dir=sessions)
     assert watch.run(watcher=w, stop=stop, timer=t) == 0
     return seen
 

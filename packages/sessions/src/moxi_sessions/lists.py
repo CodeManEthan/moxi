@@ -460,7 +460,7 @@ def newest_sessions(cat: Catalog | None = None, *, recent_s: float,
     `all`, `total`, `unreadable`, `roots`, `harnesses`), then `rows`, the first `limit`
     of them as a list's rows, and `before`, the place after them, None when `rows` holds
     them all. Beyond the Codex heads every gather reads, it reads the head, the last
-    turn and the prompt of the rows it returns and of no other session, unless `folder`
+    turn and the prompt of the rows it returns and of no other session, unless `work_dir`
     is asked.
 
     Raises ValueError for a filter that is not one, and for a `limit` under 1."""

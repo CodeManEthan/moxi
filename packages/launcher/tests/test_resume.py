@@ -180,7 +180,7 @@ def test_the_list_is_one_entry_per_launch_newest_first(conn):
 
 def test_an_entry_names_its_launchs_project_and_actor(conn):
     launched(conn, request_id="r1")
-    store.insert(conn, request_id="r2", actor="alice", harness="claude", target="slot",
+    store.insert(conn, request_id="r2", by="alice", harness="claude", target="slot",
                  cwd="/src/proj-a", values={}, argv=["claude"], env={}, posture="operator",
                  session_id=SID2, slot="2", project_key="proj-a")
     entries = {e["request_id"]: e for e in resume.sessions(conn=conn, turns=None).data[

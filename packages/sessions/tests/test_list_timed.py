@@ -161,9 +161,9 @@ def test_eight_long_sessions_that_grew_are_listed_in_1_s_from_their_new_bytes(
                              project="-work-proj-a", start=now - 7200)
         body = working_lines(t, LONG_BYTES // 16, rng)
         t.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(t.path, "wb") as handle:
+        with open(t.path, "wb") as fh:
             for _ in range(-(-LONG_BYTES // len(body))):
-                handle.write(body)
+                fh.write(body)
         stamp = int((now - 60 * (n + 2)) * 1_000_000_000)
         os.utime(t.path, ns=(stamp, stamp))
         long.append(t)
@@ -186,8 +186,8 @@ def test_eight_long_sessions_that_grew_are_listed_in_1_s_from_their_new_bytes(
     grown = 0
     for n, t in enumerate(long):
         more = working_lines(t, GROWTH, rng)
-        with open(t.path, "ab") as handle:
-            handle.write(more)
+        with open(t.path, "ab") as fh:
+            fh.write(more)
         grown += len(more)
         stamp = int((now - n) * 1_000_000_000)
         os.utime(t.path, ns=(stamp, stamp))

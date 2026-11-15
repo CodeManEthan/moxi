@@ -129,7 +129,7 @@ def test_the_step_the_round_is_at_is_shown_with_what_it_waits_for(rounds, capsys
 
 
 def test_a_round_that_has_ended_is_shown_at_no_step(rounds, capsys):
-    dropping.drop(A, by="operator", record="comms:30", actor="planner")
+    dropping.drop(A, by="operator", record="comms:30", run_by="planner")
     assert data(capsys)["step"] is None
     assert not any(line.startswith("step:") for line in printed(capsys, A).splitlines())
 

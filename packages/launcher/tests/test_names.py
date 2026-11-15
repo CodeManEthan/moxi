@@ -177,7 +177,7 @@ def test_instance_is_the_lowest_number_no_live_launch_is_named_with():
 def seeded(conn, request_id, *, name=None, identity=None, running=True,
            at_="2026-11-08T16:27:00.000000Z"):
     values = {"model": "opus"} if name is None else {"model": "opus", "name": name}
-    store.insert(conn, request_id=request_id, actor="alice", harness="claude",
+    store.insert(conn, request_id=request_id, by="alice", harness="claude",
                  target="terminal", cwd="/work/proj-b", values=values, argv=["claude"],
                  env={}, posture="operator", session_id=f"session-{request_id}", slot=None,
                  identity=identity, at=at_)
@@ -198,7 +198,7 @@ def test_the_taken_names_are_those_of_the_live_launches():
         conn.close()
 
 
-def test_a_launch_is_shown_by_its_name_else_its_identity_else_its_folder_and_start():
+def test_a_launch_is_shown_by_its_name_else_its_identity_else_its_dir_and_start():
     conn = store.connect()
     try:
         named = seeded(conn, "a", name="proj-a-1", identity="planner")

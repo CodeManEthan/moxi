@@ -850,7 +850,7 @@ def marks(shape, path: str = "") -> dict[str, str]:
     return found
 
 
-def test_the_names_mark_the_name_redact_and_each_folder_path():
+def test_the_names_mark_the_name_redact_and_each_dir_path():
     assert marks(lb_table(page.NAMES)) == {
         "home": "path", "sessions[].name": "redact", "sessions[].folder": "path"}
     assert marks(lb_table(page.SESSION)) == {}

@@ -386,7 +386,7 @@ def _resolve(request, env: Mapping[str, str] | None = None):
     return presets.resolve(request, env=env)
 
 
-def _named(request, resolved, environ: Mapping[str, str] | None = None):
+def _named(request, resolved, env: Mapping[str, str] | None = None):
     """`resolved` with the launch's name: as it is for a replay, which keeps its row's
     name, and for a launch whose `name` row is set; else with the name its template
     gives it (`names.chosen`), and the warning of a template the settings hold that was
@@ -400,11 +400,11 @@ def _named(request, resolved, environ: Mapping[str, str] | None = None):
     seat = resolved.preset_name if resolved.preset_kind == "seat" else None
     cwd = str(values.get("cwd") or "") or None
     pieces = names.Pieces(
-        project=resolved.project_key or names.folder(cwd),
+        project=resolved.project_key or names.dir_name(cwd),
         agent=str(seat or values.get("agent") or ""), model=str(values.get("model") or ""),
         identity=str(values.get("identity") or ""), scope=str(values.get("scope") or ""))
     picked = names.chosen(settings.current(), resolved.project_key)
-    taken = _live_names(environ) if "<instance>" in picked.template else frozenset()
+    taken = _live_names(env) if "<instance>" in picked.template else frozenset()
     name = names.render(picked.template, pieces, now=names.now(), taken=taken)
     named = dataclasses.replace(resolved, values=MappingProxyType({**values, "name": name}))
     if picked.warning is None:
@@ -412,11 +412,11 @@ def _named(request, resolved, environ: Mapping[str, str] | None = None):
     return dataclasses.replace(named, warnings=(*resolved.warnings, picked.warning))
 
 
-def _live_names(environ: Mapping[str, str] | None) -> frozenset[str]:
+def _live_names(env: Mapping[str, str] | None) -> frozenset[str]:
     """The names of the live launches; none when the launch log was never made."""
-    if not store.path(environ).exists():
+    if not store.path(env).exists():
         return frozenset()
-    conn = store.connect(env=environ, create=False)
+    conn = store.connect(env=env, create=False)
     try:
         return names.taken(conn)
     finally:

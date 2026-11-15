@@ -155,13 +155,13 @@ def mail(call: Any) -> dict[str, Any]:
         waiting = _waiting(api.roster(timeout_s=DEADLINE))
     except api.DaemonOffline:
         return {"state": "offline", "detail": None, "waiting": []}
-    except api.DaemonError as err:
-        _log_once(err, "the comms daemon answered the mail read with an error")
-        return {"state": "error", "detail": DAEMON_ERROR.format(type(err).__name__),
+    except api.DaemonError as exc:
+        _log_once(exc, "the comms daemon answered the mail read with an error")
+        return {"state": "error", "detail": DAEMON_ERROR.format(type(exc).__name__),
                 "waiting": []}
-    except Exception as err:
-        _log_once(err, "reading the mail failed")
-        return {"state": "error", "detail": UNEXPECTED.format(type(err).__name__),
+    except Exception as exc:
+        _log_once(exc, "reading the mail failed")
+        return {"state": "error", "detail": UNEXPECTED.format(type(exc).__name__),
                 "waiting": []}
     return {"state": "up", "detail": None, "waiting": waiting}
 

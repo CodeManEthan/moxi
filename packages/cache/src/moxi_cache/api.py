@@ -126,11 +126,11 @@ def clock_records() -> list[dict]:
     return sorted(found, key=lambda record: record["session"])
 
 
-def asking(environ) -> tuple[str, ...] | None:
+def asking(env) -> tuple[str, ...] | None:
     """What a watcher started now would write as `asks` for a process whose environment is
-    `environ`: the sorted names of the subscriptions the timer's own check (`timer.load`)
+    `env`: the sorted names of the subscriptions the timer's own check (`timer.load`)
     accepts at the inputs as they are now, the installed modules' and cache's config's as
-    `moxi cache timers` reads them, whose `requires_env` `environ` meets (`timer.env_met`).
+    `moxi cache timers` reads them, whose `requires_env` `env` meets (`timer.env_met`).
     None where `timer.env_checkable()` is false. It starts no process and writes no file.
     """
     from . import timer as _timer
@@ -140,7 +140,7 @@ def asking(environ) -> tuple[str, ...] | None:
         return None
     entries, _ = _config_entries()
     loaded = _timer.load(entries)
-    return tuple(sorted(s.name for s in loaded.subscriptions if _timer.env_met(s, environ)))
+    return tuple(sorted(s.name for s in loaded.subscriptions if _timer.env_met(s, env)))
 
 
 def __getattr__(name):

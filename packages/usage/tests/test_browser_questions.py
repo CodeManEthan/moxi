@@ -58,7 +58,7 @@ SONNET = "claude-sonnet-4-5"
 HAIKU = "claude-haiku-4-5"
 CODEX_MODEL = "gpt-5-codex"
 PROJECTS = ("proj-a", "proj-b")
-FOLDERS = ("proj-a", "proj-b", "scratch")
+WORK_DIRS = ("proj-a", "proj-b", "scratch")
 TYPED = "fix the tests"
 AGENTS = ("a0190b0000000101", "a0190b0000000102")
 
@@ -75,7 +75,7 @@ HOUR, DAY = 3600, 86400
 def _week(n: int) -> dict:
     """The week's n-th dearest Claude session: fewer requests the further down."""
     return {"harness": "claude", "session": session_id(n), "requests": 16 - n,
-            "folder": "proj-a" if n == 0 else "proj-b" if n == 1 else FOLDERS[n % 3],
+            "folder": "proj-a" if n == 0 else "proj-b" if n == 1 else WORK_DIRS[n % 3],
             "ago": 40 * 60 if n == 0 else 80 * 60 if n == 1 else 3 * HOUR + 5 * HOUR * n,
             "model": HAIKU if n == 12 else SONNET, "title": TYPED if n == 0 else None,
             "agents": list(AGENTS) if n == 0 else []}
@@ -87,9 +87,9 @@ def _week(n: int) -> dict:
 WEEK = [_week(n) for n in range(13)]
 CODEX = {"harness": "codex", "session": THREAD, "requests": 3, "folder": "proj-b", "ago": 3 * DAY,
          "model": CODEX_MODEL, "title": None, "agents": []}
-EARLIER = [{"harness": "claude", "session": session_id(20 + k), "requests": 3 - k, "folder": folder,
+EARLIER = [{"harness": "claude", "session": session_id(20 + k), "requests": 3 - k, "folder": dir_name,
             "ago": days * DAY, "model": SONNET, "title": None, "agents": []}
-           for k, (folder, days) in enumerate((("proj-b", 12), ("scratch", 20)))]
+           for k, (dir_name, days) in enumerate((("proj-b", 12), ("scratch", 20)))]
 SESSIONS = WEEK + [CODEX] + EARLIER
 #: A session that starts after the page has opened, for the walk that reads new sessions.
 LATE = {"harness": "claude", "session": session_id(30), "requests": 2, "folder": "proj-a", "ago": 10 * 60,
@@ -243,8 +243,8 @@ def seeded(ui_shells, name: str, leave_out: list[str], moment: float):
     shell = ui_shells(leave_out=leave_out)
     shell.small = bool(leave_out)
     shell.moment = moment
-    for folder in FOLDERS:
-        (work_of(shell) / folder).mkdir(parents=True, exist_ok=True)
+    for work_dir in WORK_DIRS:
+        (work_of(shell) / work_dir).mkdir(parents=True, exist_ok=True)
     for key in PROJECTS:
         done = shell.moxi("projects", "add", key, "--root", str(work_of(shell) / key))
         assert done.returncode == 0, done.stdout + done.stderr
@@ -279,8 +279,8 @@ def on_both(ui_contexts):
             page = ui_contexts(shell).pages[0]
             try:
                 seen[name] = walk(page, shell)
-            except AssertionError as failed:
-                failed.add_note(f"on the {name} install")
+            except AssertionError as exc:
+                exc.add_note(f"on the {name} install")
                 raise
         assert seen["small"] == seen["full"]
         ids = [spec["session"] for spec in SESSIONS + [LATE]]

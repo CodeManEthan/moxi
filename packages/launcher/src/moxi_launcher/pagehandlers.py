@@ -732,16 +732,16 @@ def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
     keep, editing = query.get("keep"), "template" in query
     available = _available()
     comms = available("comms")
-    key, folder = project, ""
+    key, dir_name = project, ""
     try:
         current = settings.current()
         if project is None and query.get("cwd"):
-            cwd, key = presets.folder_place(query["cwd"], available=available)
-            folder = names.folder(cwd)
-    except REFUSALS as error:
-        return _up(**_unnamed(refused=_refusal(error)))
+            cwd, key = presets.dir_place(query["cwd"], available=available)
+            dir_name = names.dir_name(cwd)
+    except REFUSALS as exc:
+        return _up(**_unnamed(refused=_refusal(exc)))
     pieces = names.Pieces(
-        project=key or folder,
+        project=key or dir_name,
         agent=query.get("seat") or query.get("agent") or "",
         model=query.get("model") or "",
         identity=(query.get("identity") or "") if comms else "",
@@ -779,8 +779,8 @@ def read_name(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return name_now(call.query)
-        except Exception as err:
-            return _failed(err, "reading the session name failed", **_unnamed())
+        except Exception as exc:
+            return _failed(exc, "reading the session name failed", **_unnamed())
 
 
 # -- live launches and their state ------------------------------------------------------------
@@ -895,8 +895,8 @@ def gather_running(joined: Mapping[str, Mapping[str, Any]] | None = None) -> dic
     unless they hold a `session_id` other than the launch's. Never raises."""
     try:
         found = api.running()
-    except Exception as err:
-        return _failed(err, "gathering the running launches failed", count=0, sessions=[])
+    except Exception as exc:
+        return _failed(exc, "gathering the running launches failed", count=0, sessions=[])
     kept = joined or {}
     entries = []
     for launch in found:
@@ -988,11 +988,11 @@ class _Feed:
                     await asyncio.wait_for(self._wake.wait(), joiner.JOIN_EVERY)
                 self._wake.clear()
                 await self.joiner.run(self._published)
-            except Exception as err:
-                _log_once(err, "a join pass failed")
+            except Exception as exc:
+                _log_once(exc, "a join pass failed")
 
     async def _published(self) -> None:
-        await self.snapshots[2].changed()
+        await self.snapshots[2].on_changed()
         self.joined_once.set()
 
     async def first_join(self) -> None:
@@ -1426,11 +1426,11 @@ def whose(query: Mapping[str, Any]) -> tuple[str, str] | None:
     for key in WHOSE:
         value = query.get(key)
         if value:
-            return key, _folder(value) if key == "cwd" else value
+            return key, _norm_dir(value) if key == "cwd" else value
     return None
 
 
-def _folder(text: str) -> str:
+def _norm_dir(text: str) -> str:
     return os.path.normpath(os.path.expanduser(text))
 
 
@@ -1440,15 +1440,15 @@ def _is_of(row: store.LaunchRow, key: str, value: str) -> bool:
         return seat and row.preset_name == value
     if key == "project":
         return not seat and row.project_key == value
-    return not seat and _folder(row.cwd) == value
+    return not seat and _norm_dir(row.cwd) == value
 
 
-def made_again(row: store.LaunchRow, actor: str) -> bool:
-    """Whether `row` is a launch the page offers to make again: one `actor` made
+def made_again(row: store.LaunchRow, by: str) -> bool:
+    """Whether `row` is a launch the page offers to make again: one `by` made
     (`store.launched_by`: not failed, no relaunch or resume, not in a scratch folder)
     that recorded where its values came from. A launch made by an older launcher did
     not, so what its request gave can't be told from what its preset gave."""
-    return store.launched_by(row, actor) and isinstance(row.values.get("sources"), dict)
+    return store.launched_by(row, by) and isinstance(row.values.get("sources"), dict)
 
 
 def launches_of(conn: sqlite3.Connection | None, key: str,
@@ -1493,8 +1493,8 @@ def read_last(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return last(call.query)
-        except Exception as err:
-            return _failed(err, "reading the last launch failed", at=None, harness=None,
+        except Exception as exc:
+            return _failed(exc, "reading the last launch failed", at=None, harness=None,
                            values=[])
 
 
@@ -1656,8 +1656,8 @@ def read_recents(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return recents(call.query)
-        except Exception as err:
-            return _failed(err, "reading the recent launches failed", recents=[])
+        except Exception as exc:
+            return _failed(exc, "reading the recent launches failed", recents=[])
 
 
 def _not_again(refused: dict[str, Any]) -> dict[str, Any]:
@@ -1701,8 +1701,8 @@ def recent(query: Mapping[str, Any]) -> dict[str, Any]:
         request, _, resolved, composition, checked = _previewing(
             body_of({**asked, "off_posture": True}), str(uuid.uuid4()))
         defaults = presets.layered(request, available=available).defaults
-    except REFUSALS as error:
-        return _not_again(_refusal(error))
+    except REFUSALS as exc:
+        return _not_again(_refusal(exc))
     refused = _refusals(checked, composition)
     if refused:
         return _not_again(refused[0])
@@ -1727,8 +1727,8 @@ def read_recent(call: Any) -> dict[str, Any]:
     with call.busy("read"):
         try:
             return recent(call.query)
-        except Exception as err:
-            return _failed(err, "reading a recent launch failed", request=None, shows=None,
+        except Exception as exc:
+            return _failed(exc, "reading a recent launch failed", request=None, shows=None,
                            refused=None)
 
 
@@ -1915,8 +1915,8 @@ def press(request_id: str) -> dict[str, Any]:
         turns = first.turns_api(quiet=True)
         try:
             found = target.find(sid, conn=conn, turns=turns, slot=False)
-        except catalog.Refused as err:
-            return {"refused": _refused(err)}
+        except catalog.Refused as exc:
+            return {"refused": _refused(exc)}
         try:
             if not found.live or found.session is None:
                 return _no("not-live", f"the session of launch {request_id} is not live")
@@ -1961,9 +1961,9 @@ def _cover(conn: sqlite3.Connection, found: target.Target, sid: str,
     except waits.Late:
         return _no("unreadable", "the session was not read within "
                                  f"{joiner.JOIN_BUDGET_S:g} s", TRY_AGAIN)
-    except Exception as err:
-        _log_once(err, "reading a session for keep-warm failed")
-        return _no("unreadable", f"the session could not be read ({type(err).__name__})",
+    except Exception as exc:
+        _log_once(exc, "reading a session for keep-warm failed")
+        return _no("unreadable", f"the session could not be read ({type(exc).__name__})",
                    TRY_AGAIN)
     if cache is not None and tick_s is None:
         return _no("unreadable", "cache's watcher tick could not be read", TRY_AGAIN)
@@ -2080,8 +2080,8 @@ def keep_warm(call: Any) -> dict[str, Any]:
     with call.busy("keep-warm"):
         try:
             return press(call.body["request_id"])
-        except Exception as err:
-            return {"refused": _unexpected(err, "a keep-warm press failed")}
+        except Exception as exc:
+            return {"refused": _unexpected(exc, "a keep-warm press failed")}
 
 
 __all__ = ["EVENT_CUT", "FIRST_JOIN_WAIT_S", "GIVEN", "KEY_BYTES", "KEY_FILE", "HEAD_MAX", "NOT_ON_PATH", "NO_RECENT", "NO_RECENT_HINT",

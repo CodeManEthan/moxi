@@ -92,15 +92,15 @@ def _step(summary: index.Summary, project: Project) -> dict | None:
     if kept is None:
         return None
 
-    def closed(name: str) -> bool:
+    def on_closed(name: str) -> bool:
         return questions.is_closed(name, project.settings)
 
-    if any(closed(name) for name in kept.get("until", ())):
+    if any(on_closed(name) for name in kept.get("until", ())):
         try:
-            folded = states.fold(log.read_round(log.round_log(summary.folder)))
+            folded = states.fold(log.read_round(log.round_log(summary.log_dir)))
         except RoundsError:
             return None
-        at = steps.current(folded, name=summary.name, closed=closed)
+        at = steps.current(folded, name=summary.name, on_closed=on_closed)
         kept = {} if at is None else {"step": at.step, "stage": at.stage,
                                       "state": at.state}
     if kept.get("step") is None:

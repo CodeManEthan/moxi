@@ -611,11 +611,11 @@ class Timer:
         if not self._loaded_once:
             return None
         subs = self.loaded.subscriptions
-        environ = (self._environ(session, pid) if any(s.requires_env for s in subs)
+        env = (self._process_env(session, pid) if any(s.requires_env for s in subs)
                    else None)
-        return tuple(sorted(s.name for s in subs if env_met(s, environ)))
+        return tuple(sorted(s.name for s in subs if env_met(s, env)))
 
-    def _environ(self, session: str, pid: int) -> Mapping[str, str] | None:
+    def _process_env(self, session: str, pid: int) -> Mapping[str, str] | None:
         """The process's environment, kept by `(session, pid)`. A None read is not kept,
         and is not made twice before the tick ends."""
         key = (session, pid)
@@ -623,12 +623,12 @@ class Timer:
             return self.environs[key]
         if key in self._unread:
             return None
-        environ = self.environ(pid)
-        if environ is None:
+        env = self.process_env(pid)
+        if env is None:
             self._unread.add(key)
         else:
-            self.environs[key] = environ
-        return environ
+            self.environs[key] = env
+        return env
 
     # -- the tick ---------------------------------------------------------------------------
 
@@ -670,7 +670,7 @@ class Timer:
                 pid = record.get("pid")
                 if not isinstance(pid, int) or isinstance(pid, bool):
                     continue
-                if sub.requires_env and not env_met(sub, self._environ(session, pid)):
+                if sub.requires_env and not env_met(sub, self._process_env(session, pid)):
                     continue
                 if track is None:
                     track = self.tracks[key] = Track(last_request)

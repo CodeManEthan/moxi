@@ -97,8 +97,8 @@ class Reads:
                     self._shared[name] = (True, fn())
                 except Late:
                     raise
-                except Exception as err:
-                    self._shared[name] = (False, err)
+                except Exception as exc:
+                    self._shared[name] = (False, exc)
             ok, value = self._shared[name]
         if not ok:
             raise value
@@ -163,9 +163,9 @@ def directed(reads: Reads, sid: str) -> Directed:
                 unlisted = True
     except Late:
         return Directed(tuple(names), late=True, unlisted=unlisted)
-    except Exception as err:  # noqa: BLE001  (each failure is a fact the caller reads)
-        if not isinstance(err, (comms.DaemonOffline, comms.DaemonError)):
-            _log_once(err, "reading the agents a session directs failed")
+    except Exception as exc:  # noqa: BLE001  (each failure is a fact the caller reads)
+        if not isinstance(exc, (comms.DaemonOffline, comms.DaemonError)):
+            _log_once(exc, "reading the agents a session directs failed")
         return Directed(tuple(names), raised=True, unlisted=unlisted)
     return Directed(tuple(names), unlisted=unlisted)
 

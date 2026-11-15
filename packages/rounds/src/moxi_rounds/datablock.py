@@ -135,9 +135,9 @@ def find(file: Path | str, what: str) -> Found:
     file = Path(file)
     try:
         raw = file.read_bytes()
-    except OSError as error:
+    except OSError as exc:
         raise BadBlock(file, what, [Problem(
-            None, f"it can't be read: {error.strerror or error}",
+            None, f"it can't be read: {exc.strerror or exc}",
             "name a file that is there and that you may read")]) from None
     try:
         # A byte-order mark that opens the file is no part of its first line.
@@ -169,8 +169,8 @@ def find(file: Path | str, what: str) -> Found:
     top = first.start + 2
     try:
         data = tomllib.loads(source)
-    except tomllib.TOMLDecodeError as error:
-        at, said = _decode_error(error, len(body))
+    except tomllib.TOMLDecodeError as exc:
+        at, said = _decode_error(exc, len(body))
         raise BadBlock(file, what, [Problem(
             top + at - 1, f"the block is not TOML: {said}",
             "correct the TOML on that line; a string is in quotes, a table is "

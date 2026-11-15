@@ -102,8 +102,8 @@ def names(monkeypatch):
     return found
 
 
-def ref(harness, session_id, *, name=None, folder=None, started=None, known=False):
-    return {"harness": harness, "session_id": session_id, "name": name, "folder": folder,
+def ref(harness, session_id, *, name=None, work_dir=None, started=None, known=False):
+    return {"harness": harness, "session_id": session_id, "name": name, "folder": work_dir,
             "started": started, "known": known}
 
 
@@ -357,7 +357,7 @@ def test_usage_offers_interfaces_1_and_2_and_no_other():
         assert found.api is api
     assert not modules.load("usage", interface=3).ok
     # what interface 2 adds is there to call: the folder filter and projects by folder
-    assert reports.report("projects", by="folder", folder="/w/app", fresh=False).rows == []
+    assert reports.report("projects", by="folder", work_dir="/w/app", fresh=False).rows == []
     assert "opened" in limits.Row.__dataclass_fields__
     assert reports.report("terms", fresh=False).total["saving"] is None
 
@@ -695,7 +695,7 @@ def keyed(monkeypatch):
         conn.close()
 
 
-def test_projects_by_folder_group_by_cwd_alone_over_stored_keys(keyed):
+def test_projects_by_dir_group_by_cwd_alone_over_stored_keys(keyed):
     by_key = get("/api/projects", utc="true")
     assert {(r["project"], r["cwd"], r["requests"]) for r in by_key["rows"]} == {
         ("key-app", None, 3), ("key-tool", None, 1), (None, "/w/app", 1)}
@@ -711,7 +711,7 @@ def test_projects_by_folder_group_by_cwd_alone_over_stored_keys(keyed):
     assert status == 400
 
 
-def test_the_folder_filter_matches_a_cwd_whatever_key_its_file_carries(keyed):
+def test_the_dir_filter_matches_a_cwd_whatever_key_its_file_carries(keyed):
     def count(path, **query):
         return get(path, utc="true", **query)["total"]["requests"]
 
@@ -740,7 +740,7 @@ def test_the_folder_filter_matches_a_cwd_whatever_key_its_file_carries(keyed):
     assert "whole path" in refused("/api/daily", folder="app")
 
 
-def test_projects_send_the_home_folder_in_both_groupings(keyed, monkeypatch):
+def test_projects_send_the_home_dir_in_both_groupings(keyed, monkeypatch):
     monkeypatch.setattr(pagehandlers, "_home", lambda: "/home/alice")
     assert get("/api/projects")["home"] == "/home/alice"
     assert get("/api/projects", by="folder")["home"] == "/home/alice"
@@ -748,7 +748,7 @@ def test_projects_send_the_home_folder_in_both_groupings(keyed, monkeypatch):
     assert get("/api/projects")["home"] is None
 
 
-def test_the_home_folder_is_the_accounts_or_none_when_it_cannot_be_said(monkeypatch):
+def test_the_home_dir_is_the_accounts_or_none_when_it_cannot_be_said(monkeypatch):
     assert pagehandlers._home() == str(Path.home())
 
     def lost():
@@ -1398,9 +1398,9 @@ def codex_window(used: float, ago: float, *, now: float, resets: float | None = 
                    now + HOUR if resets is None else resets, now - ago, "rollout", session_id)
 
 
-def codex_session(conn, sid: str, *times: float, input: int = 1000) -> None:
+def codex_session(conn, sid: str, *times: float, input_tokens: int = 1000) -> None:
     source(conn, f"/c/{sid}.jsonl",
-           [request(f"{sid}-{n}", ts, harness="codex", input=input)
+           [request(f"{sid}-{n}", ts, harness="codex", input=input_tokens)
             for n, ts in enumerate(times)],
            lane="codex", harness="codex", session_id=sid, cwd="/w/app")
 
@@ -1520,8 +1520,8 @@ def test_a_main_window_lists_the_sessions_that_used_it_since_it_opened(monkeypat
     try:
         codex_session(conn, "both-sides", opened - HOUR, opened + 60, opened + 120)
         codex_session(conn, "before", opened - 2 * HOUR, opened - 1)
-        codex_session(conn, "dear", opened + 600, input=50_000)
-        codex_session(conn, "at-the-start", opened, input=20_000)
+        codex_session(conn, "dear", opened + 600, input_tokens=50_000)
+        codex_session(conn, "at-the-start", opened, input_tokens=20_000)
         source(conn, "/p/other.jsonl", [request("o1", opened + 60, input=90_000)],
                session_id="other-harness", cwd="/w/app")
     finally:
@@ -1545,8 +1545,8 @@ def test_a_window_lists_its_ten_dearest_sessions_under_a_total_of_all(monkeypatc
     conn = store.open_index()
     try:
         for n in range(12):
-            codex_session(conn, f"s{n:02d}", now - HOUR + n, input=1000 * (n + 1))
-        codex_session(conn, "unpriced", now - HOUR, input=10)
+            codex_session(conn, f"s{n:02d}", now - HOUR + n, input_tokens=1000 * (n + 1))
+        codex_session(conn, "unpriced", now - HOUR, input_tokens=10)
         source(conn, "/c/unpriced-2.jsonl",
                [request("u2", now - HOUR, harness="codex", model="mystery-9")],
                lane="codex", harness="codex", session_id="unpriced-2", cwd="/w/app")
@@ -1631,18 +1631,18 @@ def test_each_sessions_row_carries_what_names_it(named):
     body = get("/api/sessions", **RANGE)
     assert refs_of(body["rows"]) == [
         # the name typed, and the folder and start of the session's record, not the index's
-        ref("claude", "typed", name="fix the tests", folder="/w/app", started=T0 - 30,
+        ref("claude", "typed", name="fix the tests", work_dir="/w/app", started=T0 - 30,
             known=True),
         # no typed name: the page words the row from its folder and start
-        ref("claude", "plain", folder="/w/app", started=T0 + 50, known=True),
+        ref("claude", "plain", work_dir="/w/app", started=T0 + 50, known=True),
         # a Codex thread and an OpenCode session have no name
-        ref("codex", "thread", folder="/w/tool", started=T0 + 110, known=True),
-        ref("opencode", "ses_a", folder="/w/oc", started=T0 + 170, known=True),
+        ref("codex", "thread", work_dir="/w/tool", started=T0 + 110, known=True),
+        ref("opencode", "ses_a", work_dir="/w/oc", started=T0 + 170, known=True),
         # a record that is gone: the index's folder, and its earliest request for the
         # session, a day before the range
-        ref("claude", "gone", folder="/w/gone", started=T0 - 86_400, known=False),
+        ref("claude", "gone", work_dir="/w/gone", started=T0 - 86_400, known=False),
         # no session id: its folder alone, and nothing asked of it
-        ref("claude", None, folder="/w/loose", known=None),
+        ref("claude", None, work_dir="/w/loose", known=None),
     ]
     assert named.asked == [[("claude", "typed"), ("claude", "plain"), ("codex", "thread"),
                             ("opencode", "ses_a"), ("claude", "gone")]]
@@ -1656,21 +1656,21 @@ def test_a_session_in_a_root_not_listed_whole_is_not_said_to_be_gone(named):
     rows = get("/api/sessions", **RANGE)["rows"]
     assert refs_of(rows) == [
         # one the sessions module still answered is known
-        ref("claude", "typed", name="fix the tests", folder="/w/app", started=T0 - 30,
+        ref("claude", "typed", name="fix the tests", work_dir="/w/app", started=T0 - 30,
             known=True),
-        ref("claude", "plain", folder="/w/app", started=T0 + 50, known=True),
-        ref("codex", "thread", folder="/w/tool", started=T0 + 110, known=True),
-        ref("opencode", "ses_a", folder="/w/oc", started=T0 + 170, known=True),
+        ref("claude", "plain", work_dir="/w/app", started=T0 + 50, known=True),
+        ref("codex", "thread", work_dir="/w/tool", started=T0 + 110, known=True),
+        ref("opencode", "ses_a", work_dir="/w/oc", started=T0 + 170, known=True),
         # one it did not was not looked for everywhere: no start stands in
-        ref("claude", "gone", folder="/w/gone", known=None),
-        ref("claude", None, folder="/w/loose", known=None),
+        ref("claude", "gone", work_dir="/w/gone", known=None),
+        ref("claude", None, work_dir="/w/loose", known=None),
     ]
 
 
-def test_a_record_that_gives_no_folder_or_start_keeps_the_index_folder_and_no_start(named):
+def test_a_record_that_gives_no_dir_or_start_keeps_the_index_dir_and_no_start(named):
     named.held["claude", "plain"] = {}
     row = get("/api/sessions", **RANGE)["rows"][1]
-    assert refs_of([row]) == [ref("claude", "plain", folder="/w/app", known=True)]
+    assert refs_of([row]) == [ref("claude", "plain", work_dir="/w/app", known=True)]
     assert row["first_ts"] == T0 + 60
 
 
@@ -1681,15 +1681,15 @@ def test_the_answer_goes_out_unnamed_when_the_sessions_module_raises(named, capl
         again = get("/api/sessions", **RANGE)
         one = get("/api/session", session="typed", harness="claude")
     assert refs_of(body["rows"]) == [
-        ref("claude", "typed", folder="/w/index-says", known=None),
-        ref("claude", "plain", folder="/w/app", known=None),
-        ref("codex", "thread", folder="/w/tool", known=None),
-        ref("opencode", "ses_a", folder="/w/oc", known=None),
-        ref("claude", "gone", folder="/w/gone", known=None),
-        ref("claude", None, folder="/w/loose", known=None)]
+        ref("claude", "typed", work_dir="/w/index-says", known=None),
+        ref("claude", "plain", work_dir="/w/app", known=None),
+        ref("codex", "thread", work_dir="/w/tool", known=None),
+        ref("opencode", "ses_a", work_dir="/w/oc", known=None),
+        ref("claude", "gone", work_dir="/w/gone", known=None),
+        ref("claude", None, work_dir="/w/loose", known=None)]
     assert again["rows"] == body["rows"] and body["count"] == 6
     assert body["rows"][0]["cost"] > 0 and body["rows"][0]["context"] is not None
-    assert one["ref"] == ref("claude", "typed", folder="/w/index-says", known=None)
+    assert one["ref"] == ref("claude", "typed", work_dir="/w/index-says", known=None)
     assert len(named.asked) == 3
     assert len([r for r in caplog.records if r.exc_info]) == 1      # once per class
 
@@ -1708,8 +1708,8 @@ def test_a_sessions_module_that_cannot_name_sessions_is_a_call_that_raised(
     monkeypatch.setattr(modules, "load", older)
     with caplog.at_level(logging.ERROR, logger="moxi.usage.page"):
         rows = get("/api/sessions", top="2", **RANGE)["rows"]
-    assert refs_of(rows) == [ref("claude", "typed", folder="/w/index-says", known=None),
-                             ref("claude", "plain", folder="/w/app", known=None)]
+    assert refs_of(rows) == [ref("claude", "typed", work_dir="/w/index-says", known=None),
+                             ref("claude", "plain", work_dir="/w/app", known=None)]
     assert "sessions offers no interface 5" in caplog.text
 
 
@@ -1745,15 +1745,15 @@ def test_an_answer_of_200_rows_asks_the_sessions_module_once(monkeypatch, names)
 def test_one_session_carries_what_names_it(named):
     typed = get("/api/session", session="typed", harness="claude")
     assert set(typed) == set(page.SESSION)
-    assert typed["ref"] == ref("claude", "typed", name="fix the tests", folder="/w/app",
+    assert typed["ref"] == ref("claude", "typed", name="fix the tests", work_dir="/w/app",
                                started=T0 - 30, known=True)
     assert named.asked == [[("claude", "typed")]]
     # with no harness asked for: the one that holds a session of that id
     assert get("/api/session", session="thread")["ref"] == ref(
-        "codex", "thread", folder="/w/tool", started=T0 + 110, known=True)
+        "codex", "thread", work_dir="/w/tool", started=T0 + 110, known=True)
     # a record that is gone, whatever the range: the index's folder and first request
     gone = get("/api/session", session="gone", harness="claude", since="2026-10-01")
-    assert gone["ref"] == ref("claude", "gone", folder="/w/gone", started=T0 - 86_400)
+    assert gone["ref"] == ref("claude", "gone", work_dir="/w/gone", started=T0 - 86_400)
     # a session the index does not hold, under a harness and under none
     assert get("/api/session", session="nobody", harness="codex")["ref"] == ref(
         "codex", "nobody")
@@ -1771,7 +1771,7 @@ def test_one_session_of_an_id_two_harnesses_hold_is_named_only_under_a_harness(n
     assert get("/api/session", session="both")["ref"] is None
     assert names.asked == []
     assert get("/api/session", session="both", harness="codex")["ref"] == ref(
-        "codex", "both", folder="/w/b", started=T0 + 1)
+        "codex", "both", work_dir="/w/b", started=T0 + 1)
 
 
 def test_an_opened_window_names_its_last_readings_session_and_the_sessions_listed(
@@ -1784,21 +1784,21 @@ def test_an_opened_window_names_its_last_readings_session_and_the_sessions_liste
     conn = store.open_index()
     try:
         codex_session(conn, "reader", opened - HOUR, opened + 60)
-        codex_session(conn, "dear", opened + 600, input=50_000)
-        codex_session(conn, "gone", opened - 2 * HOUR, opened + 30, input=20_000)
+        codex_session(conn, "dear", opened + 600, input_tokens=50_000)
+        codex_session(conn, "gone", opened - 2 * HOUR, opened + 30, input_tokens=20_000)
     finally:
         conn.close()
     names.held = {("codex", "reader"): {"folder": "/w/reader", "started": opened - 2 * HOUR},
                   ("codex", "dear"): {"folder": "/w/app", "started": opened + 590}}
     body = get("/api/window", harness="codex", limit_id="codex", minutes=300)
     assert body["readings"]["last"]["session"] == ref(
-        "codex", "reader", folder="/w/reader", started=opened - 2 * HOUR, known=True)
+        "codex", "reader", work_dir="/w/reader", started=opened - 2 * HOUR, known=True)
     assert "session" not in body["readings"]["first"]
     assert [{key: row[key] for key in page.SESSION_REF} for row in body["used"]["rows"]] == [
-        ref("codex", "dear", folder="/w/app", started=opened + 590, known=True),
+        ref("codex", "dear", work_dir="/w/app", started=opened + 590, known=True),
         # gone: its start is its earliest request in the index, before the window opened
-        ref("codex", "gone", folder="/w/app", started=opened - 2 * HOUR, known=False),
-        ref("codex", "reader", folder="/w/reader", started=opened - 2 * HOUR, known=True)]
+        ref("codex", "gone", work_dir="/w/app", started=opened - 2 * HOUR, known=False),
+        ref("codex", "reader", work_dir="/w/reader", started=opened - 2 * HOUR, known=True)]
     assert [(row["session_id"], row["requests"]) for row in body["used"]["rows"]] == [
         ("dear", 1), ("gone", 1), ("reader", 1)]
     # one call, the reading's session asked once though it is also listed
@@ -1813,7 +1813,7 @@ def test_an_opened_windows_reading_names_a_session_the_index_may_not_hold(names)
     assert last["session"] == ref("codex", "unindexed")       # looked for, held nowhere
     names.held = {("codex", "unindexed"): {"folder": "/w/live", "started": now - HOUR}}
     assert get("/api/window", **asked)["readings"]["last"]["session"] == ref(
-        "codex", "unindexed", folder="/w/live", started=now - HOUR, known=True)
+        "codex", "unindexed", work_dir="/w/live", started=now - HOUR, known=True)
     assert not store.index_path().exists()
 
 
@@ -1860,7 +1860,7 @@ def test_names_come_from_the_sessions_modules_own_read_of_the_roots(monkeypatch,
     rollout.user("Do the thing.")
     rollout.write()
     db = sessions.testing.OpenCodeDb(Path(os.environ["XDG_DATA_HOME"]) / "opencode")
-    opencode = db.session(title="A title of unknown hand", directory="/work/proj-b",
+    opencode = db.session(title="A title of unknown hand", work_dir="/work/proj-b",
                           at=start + 7)
     opencode.user("hello")
     db.write()
@@ -1878,13 +1878,13 @@ def test_names_come_from_the_sessions_modules_own_read_of_the_roots(monkeypatch,
                           cwd=tmp_path, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
     assert json.loads(done.stdout.strip().splitlines()[-1]) == [
-        ref("claude", ids["typed"], name="fix the tests", folder="/work/proj-a",
+        ref("claude", ids["typed"], name="fix the tests", work_dir="/work/proj-a",
             started=start, known=True),
-        ref("claude", ids["plain"], folder="/work/proj-a", started=start, known=True),
-        ref("claude", ids["titled"], folder="/work/proj-a", started=start, known=True),
-        ref("codex", thread, folder="/work/proj-b", started=start + 5, known=True),
-        ref("opencode", opencode.id, folder="/work/proj-b", started=start + 7, known=True),
-        ref("claude", ids["gone"], folder="/work/proj-gone", started=start - 600)]
+        ref("claude", ids["plain"], work_dir="/work/proj-a", started=start, known=True),
+        ref("claude", ids["titled"], work_dir="/work/proj-a", started=start, known=True),
+        ref("codex", thread, work_dir="/work/proj-b", started=start + 5, known=True),
+        ref("opencode", opencode.id, work_dir="/work/proj-b", started=start + 7, known=True),
+        ref("claude", ids["gone"], work_dir="/work/proj-gone", started=start - 600)]
 
 
 # --- the stream and its limits poller -------------------------------------------------------

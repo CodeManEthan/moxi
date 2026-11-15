@@ -302,8 +302,8 @@ def on_both(installs, ui_contexts, moment):
             try:
                 seen[name] = walk(page, shell)
                 expect(page.locator(PANEL).get_by_text(LEFT_OUT)).to_have_count(0)
-            except AssertionError as failed:
-                failed.add_note(f"on the {name} install")
+            except AssertionError as exc:
+                exc.add_note(f"on the {name} install")
                 raise
         assert seen["small"] == seen["full"]
         for step in seen["full"]:

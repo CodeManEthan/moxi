@@ -545,8 +545,8 @@ def read_prompt(listed: Listed, kept: Kept | None = None) -> PromptRead:
     length; nothing is returned of a read that failed part-way."""
     source = listed.source
     try:
-        with open(source.path, "rb") as handle:
-            st = os.fstat(handle.fileno())
+        with open(source.path, "rb") as fh:
+            st = os.fstat(fh.fileno())
             end = st.st_size
             if kept is not None and kept.stamp == (st.st_dev, st.st_ino, end,
                                                    st.st_mtime_ns):
@@ -554,15 +554,15 @@ def read_prompt(listed: Listed, kept: Kept | None = None) -> PromptRead:
             offset, prompt, before = 0, None, b""
             if (kept is not None and kept.offset >= WINDOW and kept.offset <= end
                     and (kept.dev, kept.ino) == (st.st_dev, st.st_ino)):
-                handle.seek(kept.offset - WINDOW)
-                held = handle.read(WINDOW)
+                fh.seek(kept.offset - WINDOW)
+                held = fh.read(WINDOW)
                 if (len(held) == WINDOW
                         and hashlib.sha256(held).digest() == kept.digest):
                     offset, prompt, before = kept.offset, kept.prompt, held
             start = offset
-            handle.seek(start)
+            fh.seek(start)
             while offset < end:
-                line = handle.readline(end - offset)
+                line = fh.readline(end - offset)
                 if not line.endswith(b"\n"):
                     if len(line) < end - offset:
                         raise Unreadable(f"{source.path} ended before its size")

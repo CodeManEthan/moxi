@@ -121,8 +121,8 @@ def record(session, *, asks=("launcher.keep-warm",), ago_s=1.0, stale_after=30.0
 def cache(*, expected=("launcher.keep-warm",), records=(), asking=True):
     api = SimpleNamespace(clock_records=lambda: [dict(r) for r in records], asked=[])
     if asking:
-        def ask(environ):
-            api.asked.append(dict(environ))
+        def ask(env):
+            api.asked.append(dict(env))
             return expected
         api.asking = ask
     return api
@@ -151,7 +151,7 @@ def test_a_cache_without_asking_warns_to_upgrade_it_and_offers_no_restart(log):
     assert row.fix is None
 
 
-def test_a_system_that_cannot_read_an_environment_is_off(log):
+def test_a_system_that_cannot_read_an_env_is_off(log):
     api = cache(expected=None, records=[record(SID, keyed=False)])
     row = keep_warm(api)
     assert row.state == "off" and row.fix is None

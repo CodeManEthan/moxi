@@ -233,9 +233,9 @@ def write_record(records_dir: Path, record: dict) -> Path:
 class Watcher:
     """The watcher's state and its tick. Every outside effect can be replaced for tests:
     `agents` (the live list), `read` (the clock), `now`, `projects_root` (where
-    transcripts are found), `directory` (where records go), `sessions` (the folder whose
+    transcripts are found), `records_dir` (where records go), `session_files_dir` (the folder whose
     changes ask for the list again), `reading` (the reading's file; by default
-    `watch.json` beside `directory`, which is `records.reading_path()` for the default
+    `watch.json` beside `records_dir`, which is `records.reading_path()` for the default
     directory) and `asking` (what the timer asks about a session and its pid, written as
     the record's `asks`; `run` sets it to its timer's `Timer.asking`, and by default it
     gives None).
@@ -257,7 +257,7 @@ class Watcher:
         self.projects_root = projects_root or (lambda: api.projects_root(None))
         self.records_dir = records.record_dir() if records_dir is None else Path(records_dir)
         self.session_files_dir = sessions_dir() if session_files_dir is None else Path(session_files_dir)
-        self.reading = (self.directory.parent / records.READING_NAME if reading is None
+        self.reading = (self.records_dir.parent / records.READING_NAME if reading is None
                         else Path(reading))
         self.warn_before = default("segment.warn_before_s")
         self.stale_after = records.STALE_TICKS * max(MIN_TICK, default("watch.tick_s"))
@@ -318,8 +318,8 @@ class Watcher:
             try:
                 write_record(self.records_dir, record)
                 self.say("write", None)
-            except OSError as e:
-                self.say("write", f"cannot write the clock record of {live.session}: {e}")
+            except OSError as exc:
+                self.say("write", f"cannot write the clock record of {live.session}: {exc}")
         self.current = current
         self.listed_at = now
         return list(self.live)
@@ -334,8 +334,8 @@ class Watcher:
         try:
             atomic_write(self.reading, json.dumps(doc) + "\n")
             self.say("reading", None)
-        except OSError as e:
-            self.say("reading", f"cannot write the watcher's reading {self.reading}: {e}")
+        except OSError as exc:
+            self.say("reading", f"cannot write the watcher's reading {self.reading}: {exc}")
 
     def _refresh(self) -> bool:
         """Ask for the live list. False when this tick writes nothing."""

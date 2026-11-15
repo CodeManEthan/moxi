@@ -342,14 +342,14 @@ def _head(found: Shown) -> dict:
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
     state = found.state
-    at = steps.current(state, name=found.name, closed=found.closed)
+    at = steps.current(state, name=found.name, on_closed=found.on_closed)
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "inherits": list(state.inherits),
             "flow": state.flow, "steps": state.steps,
             "step": None if at is None else at.data(),
             "close": (None if state.status != states.OPEN
-                      else {"waits": list(closing.waits(state, closed=found.closed))}),
+                      else {"waits": list(closing.waits(state, on_closed=found.on_closed))}),
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
             "trace": tracing.shown(state, found.register),

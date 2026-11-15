@@ -261,7 +261,7 @@ def test_the_pages_past_sessions_name_each_launchs_project_and_actor():
     seed("r1", at="2026-01-01T00:00:00.000000Z")
 
     def in_project(conn):
-        store.insert(conn, request_id="r2", actor="alice", harness="claude", target="slot",
+        store.insert(conn, request_id="r2", by="alice", harness="claude", target="slot",
                      cwd="/src/proj-a", values={}, argv=["claude"], env={},
                      posture="operator", session_id=OTHER, slot="2",
                      project_key="proj-a", at="2026-01-02T00:00:00.000000Z")

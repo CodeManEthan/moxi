@@ -122,9 +122,9 @@ def keep_warm_row(cache: Any, *, now: float | None = None) -> Row:
                    "is not offered; restart the watcher", RESTART)
     try:
         launched = _launched(fresh)
-    except (StoreError, sqlite3.Error, OSError) as error:
+    except (StoreError, sqlite3.Error, OSError) as exc:
         return Row(MODULE, KEEP_WARM, "warn",
-                   f"the launch log could not be read ({error}), so whether cache's "
+                   f"the launch log could not be read ({exc}), so whether cache's "
                    "watcher asks about the launched sessions is not known")
     behind = [record for record in launched
               if cachetimers.KEEP_WARM not in (record["asks"] or ())]

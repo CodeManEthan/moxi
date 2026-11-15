@@ -398,7 +398,7 @@ def test_project_offers_all_alone_when_no_session_has_a_project(page):
     expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*all$")])
 
 
-def test_without_projects_the_filter_is_folder_and_filters_by_the_whole_path(small, ui_contexts):
+def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small, ui_contexts):
     page = ui_contexts(small).pages[0]
     panel = open_page(page)
     box = filter_of(panel, "place")

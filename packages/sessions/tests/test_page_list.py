@@ -482,7 +482,7 @@ def test_more_refuses_what_it_cannot_answer(roots):
     assert get("/api/more", "")[0] == 400
 
 
-def test_the_list_and_an_opened_session_carry_the_accounts_home_folder(roots, monkeypatch):
+def test_the_list_and_an_opened_session_carry_the_accounts_home_dir(roots, monkeypatch):
     seed(roots)
     monkeypatch.setenv("HOME", "/home/alice")
 
@@ -499,7 +499,7 @@ def test_an_opened_session_carries_the_servers_today_as_the_list_does(roots):
     assert opened["today"] == read("/api/list")["today"]
 
 
-def test_an_account_with_no_home_folder_answers_a_null_home(roots, monkeypatch):
+def test_an_account_with_no_home_dir_answers_a_null_home(roots, monkeypatch):
     seed(roots)
 
     def no_home():

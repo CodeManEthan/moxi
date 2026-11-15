@@ -43,13 +43,13 @@ def path(tmp_path, add_project, write_config, capsys):
 
 
 def open_round(tmp_path, flow, capsys):
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow=flow)
     found = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     for stage in STAGES:
         log.append(found, "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     capsys.readouterr()
     return found
 
@@ -62,11 +62,11 @@ def light(tmp_path, add_project, capsys):
 
 
 def ask(blocks=None):
-    return asking.ask(ROUND, ASKED, origin="comms:11", blocks=blocks, actor="scout").id
+    return asking.ask(ROUND, ASKED, origin="comms:11", blocks=blocks, by="scout").id
 
 
 def rule(item, record="comms:12", **more):
-    return ruling.rule(ROUND, item=item, record=record, actor="planner", **more)
+    return ruling.rule(ROUND, item=item, record=record, by="planner", **more)
 
 
 def folded(path):
@@ -206,7 +206,7 @@ def test_a_skip_that_cant_be_read_is_a_usage_error(path, target, item, more):
     before = path.read_bytes()
 
     with pytest.raises(BadArgument):
-        ruling.rule(target, item=item, record="comms:12", actor="planner", **more)
+        ruling.rule(target, item=item, record="comms:12", by="planner", **more)
 
     assert path.read_bytes() == before
 
@@ -312,7 +312,7 @@ def test_a_question_widened_onto_the_stage_after_the_skip_holds_it(path):
     ask("B1")
     rule("skip:docket:B2")
 
-    marking.widen(ROUND, "Q2", "B1,B2", actor="coder")
+    marking.widen(ROUND, "Q2", "B1,B2", by="coder")
 
     assert held(path)["B2"] == ["Q2"]
 
@@ -323,7 +323,7 @@ def test_a_question_parked_when_the_stage_was_skipped_holds_it_once_reopened(pat
     rule("skip:docket:B2", record="comms:13")
     assert last(path)["covers"] == []
 
-    marking.reopen(ROUND, "Q1", actor="coder")
+    marking.reopen(ROUND, "Q1", by="coder")
 
     assert held(path)["B2"] == ["Q1"]
 
@@ -334,7 +334,7 @@ def test_a_listed_question_narrowed_off_the_stage_and_widened_back_holds_it_agai
     rule("narrow:Q1=B1", record="comms:13")
     assert held(path) == {"B1": ["Q1"], "B2": [], "B3": []}
 
-    marking.widen(ROUND, "Q1", "B1,B2", actor="coder")
+    marking.widen(ROUND, "Q1", "B1,B2", by="coder")
 
     assert held(path) == {"B1": ["Q1"], "B2": ["Q1"], "B3": []}
     found = folded(path)
@@ -351,7 +351,7 @@ def test_a_listed_question_narrowed_to_none_and_widened_back_holds_the_stage_aga
     rule("skip:docket:B2")
     rule("narrow:Q1=none", record="comms:13")
 
-    marking.widen(ROUND, "Q1", "all", actor="coder")
+    marking.widen(ROUND, "Q1", "all", by="coder")
 
     assert held(path) == {"B1": ["Q1"], "B2": ["Q1"], "B3": ["Q1"]}
 
@@ -372,7 +372,7 @@ def test_a_listed_question_narrowed_to_a_list_that_keeps_the_stage_stays_let_pas
     rule("skip:docket:B2")
 
     rule("narrow:Q1=B2,B3", record="comms:13")
-    marking.widen(ROUND, "Q1", "all", actor="coder")
+    marking.widen(ROUND, "Q1", "all", by="coder")
 
     assert held(path) == {"B1": ["Q1"], "B2": [], "B3": ["Q1"]}
     assert folded(path).rulings[0].let_go == ()

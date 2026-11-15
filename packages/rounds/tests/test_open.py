@@ -415,7 +415,7 @@ def test_open_takes_no_parent(rounds, capsys):
 
 def standing(text="Times are shown in the reader's zone.", **more):
     """Record a standing ruling of `proj-a` and return its id."""
-    return ruling.rule("proj-a", actor="planner", record="comms:1234567", text=text,
+    return ruling.rule("proj-a", by="planner", record="comms:1234567", text=text,
                        **more).id
 
 
@@ -443,7 +443,7 @@ def test_a_standing_ruling_named_twice_is_kept_once(rounds):
     standing()
 
     opened = opening.open_round("proj-a/a-round", description="a round",
-                                actor="planner", inherits=["S1", "S1"])
+                                by="planner", inherits=["S1", "S1"])
 
     assert opened.inherits == ("S1",) and opened.event["inherits"] == ["S1"]
 
@@ -452,7 +452,7 @@ def refused(rounds, *inherits) -> list[str]:
     """Open `a-round` from `inherits`, which is refused: the reasons, with nothing
     left behind."""
     with pytest.raises(Refused) as stop:
-        opening.open_round("proj-a/a-round", description="a round", actor="planner",
+        opening.open_round("proj-a/a-round", description="a round", by="planner",
                            inherits=inherits)
     assert not (rounds / "a-round").exists()
     assert all(one.fix == "moxi rounds open proj-a/a-round --description TEXT "
@@ -473,13 +473,13 @@ def test_a_standing_ruling_that_was_replaced_is_not_inherited(rounds):
 
     assert [why.partition(";")[0] for why in refused(rounds, "S1")] == [
         "S1 was replaced by S2, which is the ruling that stands in its place"]
-    assert opening.open_round("proj-a/a-round", description="a round", actor="planner",
+    assert opening.open_round("proj-a/a-round", description="a round", by="planner",
                               inherits=["S2"]).inherits == ("S2",)
 
 
 def test_a_standing_ruling_that_was_taken_back_is_not_inherited(rounds):
     standing()
-    ruling.rule("proj-a", actor="planner", record="comms:1234568", item="revoke:S1")
+    ruling.rule("proj-a", by="planner", record="comms:1234568", item="revoke:S1")
 
     assert [why.partition(";")[0] for why in refused(rounds, "S1", "S2")] == [
         "S1 was taken back, by S2, so no round starts from it",

@@ -71,7 +71,7 @@ def fake(module_fake):
 
 
 @pytest.fixture(autouse=True)
-def own_folder(ui_shell):
+def own_dir(ui_shell):
     """Home opens on a folder of the test's own, so it fills nothing from another test's launch."""
     return kit.fresh_place(ui_shell)
 

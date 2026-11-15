@@ -188,8 +188,8 @@ def test_cache_s_timer_asks_by_the_request_stamp_alone():
     if found.api.asking({}) is None:
         pytest.skip("a process's environment can't be read on this system")
     assert cachetimers.KEEP_WARM in found.api.asking({"MOXI_LAUNCHER_REQUEST": "r-1"})
-    for environ in ({"MOXI_LAUNCHER_KEEP_WARM": "on"}, {"MOXI_LAUNCHER_REQUEST": ""}, {}):
-        assert cachetimers.KEEP_WARM not in found.api.asking(environ)
+    for env in ({"MOXI_LAUNCHER_KEEP_WARM": "on"}, {"MOXI_LAUNCHER_REQUEST": ""}, {}):
+        assert cachetimers.KEEP_WARM not in found.api.asking(env)
 
 
 def test_the_job_takes_the_keep_warm_kind_and_runs_the_ask(monkeypatch, capsys):

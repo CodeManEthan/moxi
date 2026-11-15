@@ -1,6 +1,6 @@
 """usage's interfaces 1 and 2, the module other Moxi modules import (`moxi_usage.api`).
 
-Interface 2 is interface 1 plus four things, each marked below: `report`'s `folder`
+Interface 2 is interface 1 plus four things, each marked below: `report`'s `work_dir`
 filter, the `projects` kind by folder, `saving` on a `terms` total, and `opened` on a
 limits row. The names are the same under both; a caller that reads one of the four loads
 usage with `interface=2`, so an older usage refuses it and does not answer without them.
@@ -62,7 +62,7 @@ Reports (`moxi_usage.reports`):
   cost from the token index, `kind` one of `KINDS` (`daily`, `monthly`, `sessions`,
   `models`, `projects`, `session`, `terms`, `requests`), as a `Report`. With `fresh` the
   index's pass runs first. `tz` is the zone days are cut in, local time when None.
-  Under interface 2, `folder` is a folder's whole path and keeps the files whose `cwd`
+  Under interface 2, `work_dir` is a folder's whole path and keeps the files whose `cwd`
   it is, whatever project key they carry, and the `projects` kind with `by="folder"`
   groups by `cwd` alone.
   Cost is worked out when the report runs; tokens the table cannot price are counted in

@@ -423,7 +423,7 @@ def test_asking_names_the_subscriptions_the_process_meets(tmp_path, exe):
             raw_sub(exe, name="needs-v", at=0, requires_env={"V": "*"}),
             raw_sub(exe, name="needs-w", at=0, requires_env={"W": "on"})]
     environs = Environs({7: {"V": "x", "W": "off"}})
-    t, _, _ = make_timer(tmp_path, subs, environ=environs)
+    t, _, _ = make_timer(tmp_path, subs, env=environs)
     t.reload()
     assert t.asking(A, 7) == ("needs-v", "plain")
     # a process whose environment can't be read meets only the plain one
@@ -433,29 +433,29 @@ def test_asking_names_the_subscriptions_the_process_meets(tmp_path, exe):
 def test_asking_is_none_before_the_first_reload(tmp_path, exe):
     environs = Environs({7: {"V": "x"}})
     t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, requires_env={"V": "*"})],
-                         environ=environs)
+                         env=environs)
     assert t.asking(A, 7) is None
     assert environs.reads == []
     t.tick({}, T0)
     assert t.asking(A, 7) == ("r",)
 
 
-def test_asking_reads_no_environment_without_a_subscription_that_needs_one(tmp_path, exe):
+def test_asking_reads_no_env_without_a_subscription_that_needs_one(tmp_path, exe):
     environs = Environs({7: {"V": "x"}})
-    t, _, _ = make_timer(tmp_path, [], environ=environs)
+    t, _, _ = make_timer(tmp_path, [], env=environs)
     t.reload()
     assert t.asking(A, 7) == ()
-    t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="plain", at=0)], environ=environs)
+    t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="plain", at=0)], env=environs)
     t.reload()
     assert t.asking(A, 7) == ("plain",)
     t.tick({A: record(pid=7)}, T0 + TTL)
     assert environs.reads == []
 
 
-def test_the_environment_is_read_once_over_several_ticks(tmp_path, exe):
+def test_the_env_is_read_once_over_several_ticks(tmp_path, exe):
     environs = Environs({7: {"V": "on"}})
     t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, every=10,
-                                            requires_env={"V": "on"})], environ=environs)
+                                            requires_env={"V": "on"})], env=environs)
     live = {A: record(pid=7)}
     t.reload()
     for n in range(4):
@@ -464,10 +464,10 @@ def test_the_environment_is_read_once_over_several_ticks(tmp_path, exe):
     assert environs.reads == [7]
 
 
-def test_an_environment_that_cannot_be_read_is_read_again_once_a_tick(tmp_path, exe):
+def test_an_env_that_cannot_be_read_is_read_again_once_a_tick(tmp_path, exe):
     environs = Environs()
     t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, requires_env={"V": "on"})],
-                         environ=environs)
+                         env=environs)
     live = {A: record(pid=7)}
     t.reload()
     for n in range(3):
@@ -480,10 +480,10 @@ def test_an_environment_that_cannot_be_read_is_read_again_once_a_tick(tmp_path, 
     assert environs.reads == [7, 7, 7, 7]
 
 
-def test_a_session_that_leaves_the_live_list_has_its_environment_forgotten(tmp_path, exe):
+def test_a_session_that_leaves_the_live_list_has_its_env_forgotten(tmp_path, exe):
     environs = Environs({7: {"V": "on"}, 9: {"V": "on"}})
     t, _, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0, requires_env={"V": "on"})],
-                         environ=environs)
+                         env=environs)
     t.reload()
     t.asking(A, 7)
     t.tick({A: record(pid=7)}, T0)
@@ -500,7 +500,7 @@ def test_a_session_that_leaves_the_live_list_has_its_environment_forgotten(tmp_p
 def test_a_changed_set_of_subscriptions_changes_the_answer_at_the_next_tick(tmp_path, exe):
     environs = Environs({7: {"V": "on"}})
     subs = [raw_sub(exe, name="r", at=0)]
-    t = Timer(modules=lambda: list(subs), environ=environs, spawn=Spawner(),
+    t = Timer(modules=lambda: list(subs), process_env=environs, spawn=Spawner(),
               log_file=tmp_path / "timer.jsonl")
     t.tick({A: record(pid=7)}, T0)
     assert t.asking(A, 7) == ("r",)

@@ -448,12 +448,12 @@ def _watcher_line(now: float | None = None) -> str:
     return words if lead is None else f"{lead}; {words}"
 
 
-def _records_words(found: list[dict], directory, now: float, *, stopped: bool | None) -> str:
+def _records_words(found: list[dict], records_dir, now: float, *, stopped: bool | None) -> str:
     """How the records stand. `stopped` is whether the watcher stopped, by its reading,
     which the line has led with; None with no reading, when every judged record standing
     still is what says it stopped."""
     newest = max(r["seen_at"] for r in found)
-    words = f"{len(found)} clock record(s) under {directory}, newest seen {now - newest:.0f}s ago"
+    words = f"{len(found)} clock record(s) under {records_dir}, newest seen {now - newest:.0f}s ago"
     judged = [(r, records.thresholds(r)) for r in found]
     older = sum(1 for _, t in judged if t is None)
     stale = sum(1 for r, t in judged if t is not None and now - r["seen_at"] > t[1])

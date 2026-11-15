@@ -640,7 +640,7 @@ def _mark_thread(args, out) -> int:
                           "letters, digits and . _ -")
     done = brake.decide(args.target, args.id[len(brake.PREFIX):],
                         brake.CLOSE if args.close else brake.ACCEPT_RISK,
-                        record=args.record, actor=_actor(args))
+                        record=args.record, by=_actor(args))
     one = done.decision
     already = (f"   (recorded already, {one.at} by {one.actor}: nothing was written)"
                if done.found else "")
@@ -659,7 +659,7 @@ def _mark_after(args, out) -> int:
         raise BadArgument("--record is a pointer to the operator's word, and a wait "
                           "added to a stage is anyone's and carries none",
                           "leave --record out")
-    marked = stages.wait(args.target, args.id, args.after, actor=_actor(args))
+    marked = stages.wait(args.target, args.id, args.after, by=_actor(args))
     print(f"{marked.stage.id}   after: {', '.join(marked.stage.after)}   added: "
           f"{', '.join(marked.added)}", file=out)
     _warn_of(marked.failed, args.prog, args.verb)
@@ -676,7 +676,7 @@ def _mark_flow(args, out) -> int:
     if args.record is not None:
         raise BadArgument("--record is a pointer to the operator's word, and a step "
                           "up is the lead's and carries none", "leave --record out")
-    stepped = stepping.step_up(args.target, args.flow, actor=_actor(args))
+    stepped = stepping.step_up(args.target, args.flow, by=_actor(args))
     steps = ", ".join(str(step.get("step")) for step in stepped.steps) or "no steps"
     print(f"{stepped.name}   flow {stepped.flow} ({steps})   was: {stepped.was}",
           file=out)
@@ -729,7 +729,7 @@ def _declare_fold(verbs) -> None:
 def _fold(args, out) -> int:
     from . import freezing, tracing
 
-    frozen = freezing.freeze(args.round, actor=_actor(args),
+    frozen = freezing.freeze(args.round, by=_actor(args),
                              records_only=args.records_only, record=args.record)
     print(f"froze the design of {frozen.name} as v{frozen.version}", file=out)
     print(f"file: {frozen.file}", file=out)
@@ -805,7 +805,7 @@ def _declare_verdict(verbs) -> None:
 def _verdict(args, out) -> int:
     from . import verdicts, versions
 
-    done = verdicts.record(args.round, args.report, actor=_actor(args))
+    done = verdicts.record(args.round, args.report, by=_actor(args))
     one = done.verdict
     print(f"recorded for {done.name}: {one.verdict} for v{one.design} of its design, "
           f"{one.pass_} pass by {one.by}, model {one.model}", file=out)

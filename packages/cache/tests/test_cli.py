@@ -279,7 +279,7 @@ def _clock(t: float) -> str:
     return time.strftime("%H:%M:%S", time.localtime(t))
 
 
-def _directory() -> str:
+def _records_dir() -> str:
     from moxi_cache import records
 
     return str(records.record_dir())
@@ -294,7 +294,7 @@ def test_listed_and_fresh_with_no_record_says_no_live_session():
 def test_listed_and_fresh_with_records_says_how_the_records_stand():
     _record(NOW - 2)
     _reading(NOW - 2, NOW - 2)
-    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_directory()}, newest "
+    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_records_dir()}, newest "
                                       "seen 2s ago")
 
 
@@ -304,7 +304,7 @@ def test_listed_and_fresh_over_records_that_stand_still_does_not_say_stopped():
     _record(NOW - 600)
     _reading(NOW - 2, NOW - 2)
     line = cli._watcher_line(NOW)
-    assert line == (f"1 clock record(s) under {_directory()}, newest seen 600s ago: 1 of "
+    assert line == (f"1 clock record(s) under {_records_dir()}, newest seen 600s ago: 1 of "
                     "them not rewritten within their own stale_after, so their segment "
                     "shows dim")
 
@@ -313,11 +313,11 @@ def test_not_reading_since_the_last_listing():
     _reading(NOW - 2, NOW - 600)
     assert cli._watcher_line(NOW) == (
         f"the watcher is running but has not listed Claude's sessions since "
-        f"{_clock(NOW - 600)}; its log says why; no clock records under {_directory()}")
+        f"{_clock(NOW - 600)}; its log says why; no clock records under {_records_dir()}")
     _record(NOW - 600)
     assert cli._watcher_line(NOW) == (
         f"the watcher is running but has not listed Claude's sessions since "
-        f"{_clock(NOW - 600)}; its log says why; 1 clock record(s) under {_directory()}, "
+        f"{_clock(NOW - 600)}; its log says why; 1 clock record(s) under {_records_dir()}, "
         "newest seen 600s ago: 1 of them not rewritten within their own stale_after, so "
         "their segment shows dim")
 
@@ -334,7 +334,7 @@ def test_not_reading_and_never_listed():
     _reading(NOW - 2, None)
     assert cli._watcher_line(NOW) == (
         "the watcher is running but has never listed Claude's sessions; its log says why; "
-        f"no clock records under {_directory()}")
+        f"no clock records under {_records_dir()}")
     _record(NOW - 600, warn_before=None, stale_after=None)
     assert cli._watcher_line(NOW).startswith(
         "the watcher is running but has never listed Claude's sessions; its log says why; "
@@ -344,11 +344,11 @@ def test_not_reading_and_never_listed():
 def test_stopped_at_its_last_tick():
     _reading(NOW - 600, NOW - 600)
     assert cli._watcher_line(NOW) == (f"the watcher stopped at {_clock(NOW - 600)}; no "
-                                      f"clock records under {_directory()}")
+                                      f"clock records under {_records_dir()}")
     _record(NOW - 600)
     assert cli._watcher_line(NOW) == (
         f"the watcher stopped at {_clock(NOW - 600)}; 1 clock record(s) under "
-        f"{_directory()}, newest seen 600s ago: their segment shows dim and no timer runs")
+        f"{_records_dir()}, newest seen 600s ago: their segment shows dim and no timer runs")
 
 
 def test_stopped_at_the_newest_record_when_that_is_newer_than_its_tick():
@@ -367,7 +367,7 @@ def test_stopped_on_another_day_names_the_date():
 
 
 def test_no_reading_and_no_record_says_no_watcher_is_running():
-    assert cli._watcher_line(NOW) == (f"no clock records under {_directory()}: no watcher "
+    assert cli._watcher_line(NOW) == (f"no clock records under {_records_dir()}: no watcher "
                                       "is running, so there is no status line segment and "
                                       "no timer")
 
@@ -380,15 +380,15 @@ def test_with_no_reading_the_line_is_unchanged(reading):
         records.reading_path().parent.mkdir(parents=True, exist_ok=True)
         records.reading_path().write_text('{"v": 1, "pid": 7, "tick_at"')
     _record(NOW - 2)
-    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_directory()}, newest "
+    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_records_dir()}, newest "
                                       "seen 2s ago")
     _record(NOW - 600)
-    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_directory()}, newest "
+    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_records_dir()}, newest "
                                       "seen 600s ago: the watcher has stopped, so the "
                                       "segment shows dim and no timer runs")
     _record(NOW - 600, SID_B, warn_before=None, stale_after=None)
     assert cli._watcher_line(NOW) == (
-        f"2 clock record(s) under {_directory()}, newest seen 600s ago: the watcher has "
+        f"2 clock record(s) under {_records_dir()}, newest seen 600s ago: the watcher has "
         "stopped, so the segment shows dim and no timer runs; 1 lack warn_before or "
         "stale_after (an older watcher wrote them), so their segment shows nothing until "
         "the watcher rewrites them")

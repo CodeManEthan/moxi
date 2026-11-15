@@ -222,8 +222,8 @@ def names(call: Any) -> dict[str, Any]:
         found = [(record["harness"], record["session"]) for record in api.clock_records()]
         asked = [key for key in found if key[0] in SESSION_HARNESSES]
         facts, unlisted = _facts(asked)
-    except Exception as err:
-        _log_once(err, "naming the sessions with a clock record failed", "names")
+    except Exception as exc:
+        _log_once(exc, "naming the sessions with a clock record failed", "names")
         return {"state": "error", "today": today, "home": home, "sessions": []}
     out = []
     for harness, session in found:
@@ -251,8 +251,8 @@ def session(call: Any) -> dict[str, Any]:
         if harness not in SESSION_HARNESSES:
             return {"model": None}
         opened = sessions.session_opened(harness=harness, session=wanted)
-    except Exception as err:
-        _log_once(err, "reading the model of a session with a clock record failed",
+    except Exception as exc:
+        _log_once(exc, "reading the model of a session with a clock record failed",
                   "session")
         return {"model": None}
     model = opened.get("model") if isinstance(opened, dict) else None
