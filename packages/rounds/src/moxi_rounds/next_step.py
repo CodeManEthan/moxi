@@ -1,9 +1,11 @@
 """What is done next in a round: the step it is at, who does it, at which tier, what
 they read, the command that completes it and what it waits for.
 
-`read(name)` reads the round's log and its project's and writes nothing, the index
-included. Nothing here decides a step's state or which pass is asked for: the state is
-what `steps` gives, and the pass what `brake` gives. This module only says them.
+`read(name)` reads the round's log and its project's, and git for each open build (its
+state, its tip and its worktree, for the steps a build's state decides), and writes
+nothing, the index included. Nothing here decides a step's state or which pass is
+asked for: the state is what `steps` gives, and the pass what `brake` gives. This
+module only says them.
 
 What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 (`as_json`); the lines are made from the dict and hold nothing it lacks.
@@ -45,8 +47,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import (brake, closing, commission_block, flows, model_tiers, report_block,
-               showing, stages, steps, tracing, versions)
+from . import (brake, checking, closing, commission_block, flows, model_tiers,
+               report_block, showing, stages, steps, tracing, versions)
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -150,9 +152,15 @@ def _commission(found: showing.Shown, step: steps.Step) -> dict:
 
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
 #: and `then`, and any key of its own.
+def _check(found: showing.Shown, step: steps.Step) -> dict:
+    return {"reads": _named(step),
+            "then": [f"moxi rounds check {found.name} {step.stage}, or moxi rounds check "
+                     "in the build's worktree"]}
+
+
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
     steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket,
-    steps.COMMISSION: _commission}
+    steps.COMMISSION: _commission, steps.CHECK: _check}
 
 
 def _waits(step: steps.Step) -> list[dict]:
@@ -185,11 +193,11 @@ def _group(found: showing.Shown, step: steps.Step, models) -> dict:
     return group
 
 
-def _groups(found: showing.Shown, models) -> list[dict]:
+def _groups(found: showing.Shown, models, seen) -> list[dict]:
     every = steps.of(found.state, name=found.name, closed=found.closed,
-                     register=found.register)
+                     register=found.register, seen=seen)
     at = steps.current(found.state, name=found.name, closed=found.closed,
-                       register=found.register)
+                       register=found.register, seen=seen)
     if at is None:
         return []
     groups = [_group(found, at, models)]
@@ -286,7 +294,9 @@ def read(name: str, *, settings=None) -> dict:
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
     return {**said, "status": found.state.status, "flow": found.state.flow,
-            "groups": _groups(found, settings["models"]),
+            "groups": _groups(found, settings["models"],
+                              checking.seen_of(found.state, found.name,
+                                               settings=settings)),
             "close": (None if found.state.status != states.OPEN
                       else {"waits": list(closing.waits(found.state, closed=found.closed))}),
             "warnings": _warnings(found)}

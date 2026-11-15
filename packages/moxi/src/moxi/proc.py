@@ -1,8 +1,9 @@
 """Starting and watching other processes the same way on Linux, macOS and Windows.
 
 - `run` runs a command to its end with a deadline. Its stdin is closed or fed (secrets
-  travel on stdin, never in argv or the environment), and on timeout the whole tree it
-  started is killed, not only the first process.
+  travel on stdin, never in argv or the environment), its output is captured, left alone
+  or written to a file, and on timeout the whole tree it started is killed, not only the
+  first process.
 - `spawn` starts a long-lived child that cannot outlive its parent: it holds a lifeline,
   a pipe the parent keeps open, and the child ends when the parent goes. With
   `detached=True` it starts a child that is meant to outlive it, logging to a file.
@@ -59,12 +60,17 @@ Argv = Sequence[str | os.PathLike]
 
 def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         env: Mapping[str, str] | None = None, cwd: str | os.PathLike | None = None,
-        capture: bool = True) -> subprocess.CompletedProcess:
+        capture: bool = True,
+        output: str | os.PathLike | None = None) -> subprocess.CompletedProcess:
     """Run `argv` to its end, or kill everything it started once `timeout_s` seconds pass.
 
     stdin is closed (`/dev/null`), or a pipe fed `stdin_data` and then closed. With `capture`
     stdout and stderr are collected; without it they are this process's own. Output is
-    `str` when `stdin_data` is a `str` and `bytes` otherwise. `env` is the child's whole
+    `str` when `stdin_data` is a `str` and `bytes` otherwise. With `output`, a file path,
+    stdout and stderr both go straight to that file instead, whatever `capture` says, so
+    nothing of a long run's output is held in memory: the file is created 0600 with its
+    folder, or appended to when it is there, and the result's stdout and stderr are None,
+    as is what a timeout carries. `env` is the child's whole
     environment, used as given (None: this process's), less `MOXI_LIFELINE_FD`: the child
     holds no lifeline, so it must not see a value meant for this process, whether it came
     from this process's environment or from `env`. The start mark, `MOXI_STARTED_BY`, is
@@ -86,10 +92,16 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         options["start_new_session"] = True
-    proc = subprocess.Popen(
-        _argv(argv), stdin=subprocess.DEVNULL if stdin_data is None else subprocess.PIPE,
-        stdout=pipe, stderr=pipe, env=_lifeline_env(env, None), cwd=cwd, text=text,
-        encoding="utf-8" if text else None, **options)
+    out_fd = None if output is None else _output_file(output)
+    try:
+        proc = subprocess.Popen(
+            _argv(argv), stdin=subprocess.DEVNULL if stdin_data is None else subprocess.PIPE,
+            stdout=pipe if out_fd is None else out_fd,
+            stderr=pipe if out_fd is None else out_fd, env=_lifeline_env(env, None),
+            cwd=cwd, text=text, encoding="utf-8" if text else None, **options)
+    finally:
+        if out_fd is not None:
+            os.close(out_fd)  # the child holds its own copy
     job = None
     try:
         if _WINDOWS:
@@ -111,6 +123,19 @@ def run(argv: Argv, *, timeout_s: float, stdin_data: bytes | str | None = None,
         if job is not None:
             job.close()
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def _output_file(output: str | os.PathLike) -> int:
+    """Open `output` for a child's stdout and stderr: appended to, created 0600 with its
+    folder when it is not there."""
+    from pathlib import Path
+
+    from . import files
+
+    path = Path(output)
+    files._make_dirs(path.parent)
+    return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0),
+                   0o600)
 
 
 def _end_tree(proc: subprocess.Popen, job) -> tuple:
@@ -432,17 +457,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 
 
 def _spawn_detached(argv: Argv, *, env, cwd, output) -> int:
-    if output is None:
-        out = os.open(os.devnull, os.O_WRONLY)
-    else:
-        from pathlib import Path
-
-        from . import files
-
-        path = Path(output)
-        files._make_dirs(path.parent)
-        out = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
-                      | getattr(os, "O_BINARY", 0), 0o600)
+    out = os.open(os.devnull, os.O_WRONLY) if output is None else _output_file(output)
     try:
         common = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=out,
                       env=_lifeline_env(env, None), cwd=cwd)

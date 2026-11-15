@@ -339,6 +339,8 @@ def _builds(shown_as: dict) -> list[str]:
         said = [f"commissioned: {one['at']}"]
         if one["record"] is not None:
             said.append(f"go: {one['record']}")
+        if one.get("check") is not None:
+            said.append(showing.check_line(one["check"]))
         for line in said:
             lines += _item(line, indent="  ")
     return lines

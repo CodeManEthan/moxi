@@ -1,7 +1,8 @@
 """Reads of a repo's git, as the build states ask them.
 
 `Git(root)` runs plain git in the repo at `root` and answers one question per method:
-the top of the work tree `root` is in, which branch is checked out at the root, whether a name is one git takes for a branch,
+the top of the work tree `root` is in, which branch is checked out at the root, whether
+its work tree holds anything not committed, whether a name is one git takes for a branch,
 which commit a branch is, which of some commits git still has, a commit's tree,
 parents and commit date, whether one commit is an ancestor of another, the merge bases
 of two, the one commit of several that has the others as ancestors, the merge that
@@ -99,6 +100,14 @@ class Git:
         if code != 0 or not ref.startswith("refs/heads/"):
             return None
         return ref[len("refs/heads/"):]
+
+    def has_changes(self) -> bool:
+        """Whether the work tree at the root holds anything not committed: a change to a
+        tracked file, staged or not, or a file git neither tracks nor ignores. git takes
+        no optional lock for it, so the read leaves the repo's index as it was."""
+        _, out = self._run("--no-optional-locks", "status", "--porcelain",
+                           "--untracked-files=all")
+        return bool(out.strip())
 
     def is_branch_name(self, name: str) -> bool:
         """Whether git takes `name` as the name of a branch."""

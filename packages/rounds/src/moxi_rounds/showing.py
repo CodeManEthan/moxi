@@ -25,9 +25,9 @@ says so.
 
 A project is not shown: its rounds are listed.
 
-Its builds are shown each with what its commission recorded and, while it is open,
-its state as read from git now (`open_builds`): whether it is idle, the builds it
-shares commits with, or what kept it from being read.
+Its builds are shown each with what its commission recorded, the newest run of its
+repo's check, and, while it is open, its state as read from git now (`open_builds`):
+whether it is idle, the builds it shares commits with, or what kept it from being read.
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
 its key, what it reads from a `Shown`, and how that reads as lines. What a round is
@@ -44,8 +44,8 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (builds, closing, folders, index, log, open_builds, questions, shown, skips,
-               steps, tracing, versions)
+from . import (builds, checking, closing, folders, index, log, open_builds, questions,
+               shown, skips, steps, tracing, versions)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -353,7 +353,8 @@ def _builds(found: Shown) -> list:
                **{key: event.get(key) for key in ("builder", "record", "worktree",
                                                   "scratch", "host", "build", "at")},
                "ended": one.ended, "state": one.ended, "by": None, "why": None,
-               "head": None, "idle": False, "shares": [], "problem": None}
+               "head": None, "idle": False, "shares": [], "problem": None,
+               "check": _check_run(found.state, one)}
         now = read.get(one.stage) if one.ended is None else None
         if now is not None and now.build.n == one.n:
             data = now.data()
@@ -364,6 +365,33 @@ def _builds(found: Shown) -> list:
                               "fix": "moxi projects list"}
         listed.append(row)
     return listed
+
+
+def _check_run(state: states.State, build: builds.Build) -> dict | None:
+    """The newest run of the repo's check recorded for `build`, as data: its commit,
+    exit code, duration, output file and when it was recorded; None with no run."""
+    found = None
+    for event in state.history:
+        if (event["n"] > build.n and event["type"] == checking.RAN
+                and event.get("stage") == build.stage
+                and event.get("step") == checking.CHECK):
+            found = event
+        if (event["n"] > build.n and event.get("stage") == build.stage
+                and event["type"] == "build.commissioned"):
+            break
+    if found is None:
+        return None
+    return {key: found.get(key) for key in ("commit", "exit_code", "duration_s", "output",
+                                            "at")}
+
+
+def check_line(run: dict) -> str:
+    """The newest check run of a build in words: `check passed at 81c7f5b` or `check
+    failed (exit 1) at 81c7f5b`."""
+    code = run["exit_code"]
+    how = ("passed" if code == 0 else "ended at its time limit" if code is None
+           else f"failed (exit {code})")
+    return f"check {how} at {str(run['commit'])[:7]}"
 
 
 def build_line(one: dict) -> str:
@@ -389,6 +417,8 @@ def _build_lines(listed: list) -> list[str]:
         lines.append(f"  {build_line(one)}")
         lines += [f"    {key}: {one[key]}" for key in ("worktree", "scratch")
                   if one[key] is not None]
+        if one.get("check") is not None:
+            lines.append(f"    {check_line(one['check'])}, output {one['check']['output']}")
         if one["record"] is not None:
             lines.append(f"    go: {one['record']}")
     return lines

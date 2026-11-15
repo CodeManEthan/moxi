@@ -2,6 +2,9 @@
 
 ## 0.1.8 (unreleased)
 
+- `moxi.proc.run` takes `output`, a file path: the child's stdout and stderr both go
+  straight to that file, created 0600 or appended to, so a long run's output is not held
+  in memory.
 - The catalogue gains `rounds` (`moxi-rounds`), so `moxi install rounds` and `moxi
   modules --available` know it by name. Its version is 3.
 

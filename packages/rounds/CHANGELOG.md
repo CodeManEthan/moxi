@@ -53,6 +53,13 @@ does not yet build.
   Such a flow builds one stage in a repo. A repo's branch has one open build across
   every round. A stage whose build was dropped is commissioned again under its id.
   `next` points a plan of five or more builds at child rounds.
+- `check` runs the repo's declared check for a build at its tip, in its clean worktree,
+  with no shell, stdin closed and no `GIT_` variable, its output in the build's scratch
+  folder and its process tree ended at its time limit, and records the run with its
+  commit, merge-base, argv, exit code and duration. A run whose tip moved or whose
+  worktree changed meanwhile records nothing. A check counts only at the tip it ran at
+  and with the command the repo declares now; `show` and the round note give each
+  build's newest run.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

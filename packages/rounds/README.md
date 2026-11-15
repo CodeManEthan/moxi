@@ -35,7 +35,6 @@ and its register of standing rulings, and the files generated from them. Its ver
 
 It does not yet do the rest of a round:
 
-- builds, their worktrees and their checks;
 - verifying a build and finishing it, which puts it where it goes;
 - decisions a build records for the operator to ratify;
 - the retrospective, and the numbers of a round that ended;
@@ -87,6 +86,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
+| `moxi rounds check [ROUND B<n>] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, rulings not yet shown |
@@ -549,11 +549,17 @@ round, so a later edit of the flow does not change a round already open until `m
 moves no folder: rounds looks in the new place, and the rounds stay where they were until
 you move them.
 
-The file also takes `worktree_dir`, `defaults.ratify`, `defaults.check_on`,
-`defaults.dormant_days`, `defaults.slice_minutes` and
-`defaults.sitting_at`, and in a project's table `into`,
-`check`, `finish`, `shared_paths`, `keep_branch`, `lock_ref` and `brief`. They are
-checked when the file is read, and nothing in this version acts on them.
+The file also takes `worktree_dir`, where `commission` puts a build's worktree, and in
+a project's table `into`, the branch its builds land on, `brief`, lines added to every
+commission block for a build in it, and `check`, `{ command = "...", timeout_s = N }`,
+the command `moxi rounds check` runs at a build's tip. The command is split as a shell
+would split it and run with no shell; its words may hold `{round}`, `{stage}`,
+`{repo}`, `{root}`, `{branch}`, `{tip}` and `{into}`, filled in for the build. With no
+`timeout_s` the run has no time limit. It also takes `defaults.ratify`,
+`defaults.check_on`, `defaults.dormant_days`, `defaults.slice_minutes` and
+`defaults.sitting_at`, and in a project's table `finish`, `shared_paths`,
+`keep_branch` and `lock_ref`. They are checked when the file is read, and nothing in
+this version acts on them.
 
 `models` maps each tier a step names to a model per harness. The order the tiers are
 written in is their order, strongest first. `next` prints beside a tier every

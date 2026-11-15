@@ -130,7 +130,8 @@ TYPES = _types(
               ("stage", "repo", "branch", "base", "target", "worktree", "scratch",
                "builder", "record", "host", "build")),
     # A command ran for a build: the step it ran as, the commit, that commit's merge-base
-    # with the target, the argv, and how it went.
+    # with the target, the argv, and how it went: its exit code (None for a run ended at
+    # its time limit), its duration and the file its output went to.
     EventType("check.ran",
               ("stage", "step", "commit", "merge_base", "argv", "exit_code", "duration_s",
                "output")),

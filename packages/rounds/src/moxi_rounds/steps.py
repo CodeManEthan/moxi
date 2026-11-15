@@ -53,13 +53,21 @@ other, so its row says when the stage reads as skipped.
   flow has a design step and for no question that would hold the stage
   (`held_unbuilt`).
 
+- `check` of a stage: done once the newest run of the repo's check passed at the
+  build's tip, with the argv the check gives now (`checking.passes`), and once the
+  build is finished. Until then it waits for the build to have work and for its
+  worktree to be clean. It is read from what `Asked.seen` says of the stage's build;
+  where that is not given the step waits on a read of git. A stage whose repo declares
+  no check has no `check` step, where `Asked.seen` says so.
+
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
 their rows are not built, so a round whose flow has no questions step still shows the hold, on
 the stage it stops.
 
 Nothing here reads a file, the config or git: a round's state, with its project's
-for the standing rulings, is the whole input.
+for the standing rulings, and what the caller read of each open build (`Seen`), is the
+whole input.
 Whether `design.md` still has the bytes that were frozen is not a step's state; a verb
 that needs the design as it was verified asks `versions.unchanged` beside this.
 """
@@ -70,7 +78,8 @@ import dataclasses
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
-from . import brake, flows, holds, questions, skips, stages, tracing, versions
+from . import (brake, checking, flows, holds, questions, skips, stages, tracing,
+               versions)
 from . import state as states
 from .errors import Unmet
 
@@ -101,17 +110,35 @@ _UNLISTED = ((QUESTIONS, _AFTER, VERIFIES), ("commission", _BEFORE, "build"),
 
 
 @dataclass(frozen=True)
+class Seen:
+    """What the caller read of a stage's open build now, from git and the settings:
+    `state`, the build's state as git reads it; `tip`, its branch's tip; `clean`,
+    whether its worktree is on this machine with the build's branch checked out and
+    nothing uncommitted; `check`, the argv the repo's check gives now at the tip, None
+    when the repo declares no check; `problem`, what kept the build from being read,
+    in which case nothing else is known."""
+
+    state: str | None = None
+    tip: str | None = None
+    clean: bool = False
+    check: tuple[str, ...] | None = None
+    problem: Unmet | None = None
+
+
+@dataclass(frozen=True)
 class Asked:
     """What a row is asked about: `name`, the round's name, for the commands it
     prints; `stage`, for a step of one stage; `closed`, which answers whether a round,
     by name, is closed, for a question parked until one is (`questions.is_closed` when
     None); `register`, the state of the project's log, for the standing rulings a
-    stage's trace rows owe (with None, only the round's own rulings are read)."""
+    stage's trace rows owe (with None, only the round's own rulings are read);
+    `seen`, what was read of each stage's open build, by stage (None: nothing was)."""
 
     name: str = "ROUND"
     stage: str | None = None
     closed: Callable[[str], bool] | None = None
     register: states.State | None = None
+    seen: Mapping[str, Seen] | None = None
 
 
 @dataclass(frozen=True)
@@ -259,10 +286,41 @@ def _declaring(state: states.State, about: Asked) -> Step:
     return Step(COMMISSION, WAITING if waits else READY, waits=tuple(waits))
 
 
+CHECK = checking.CHECK
+
+
+def _check(state: states.State, about: Asked) -> Step:
+    stage, name = about.stage, about.name
+    built = None if stage is None else stages.build_of(state, stage)
+    if built is None:
+        return Step(CHECK, NOT_DUE, stage=stage)
+    if built == stages.FINISHED:
+        return Step(CHECK, DONE, stage=stage)
+    seen = (about.seen or {}).get(stage)
+    if seen is None:
+        return Step(CHECK, WAITING, stage=stage, waits=(Unmet(
+            f"whether {stage}'s check passed at its tip is read from git, which was "
+            "not read here", f"moxi rounds next {name}"),))
+    if seen.problem is not None:
+        return Step(CHECK, WAITING, stage=stage, waits=(seen.problem,))
+    if seen.tip is not None and seen.check is not None and checking.passes(
+            state, stage, CHECK, tip=seen.tip, argv=seen.check):
+        return Step(CHECK, DONE, stage=stage)
+    waits = []
+    if seen.state not in checking.WITH_WORK:
+        waits.append(Unmet(f"{stage} has no work to check: it reads {seen.state}",
+                           "commit the build's work on its branch"))
+    if not seen.clean:
+        waits.append(Unmet(f"the worktree of {stage} is not clean on its branch here",
+                           "commit or put away what is not committed, in the build's "
+                           "worktree on the machine that made it"))
+    return Step(CHECK, WAITING if waits else READY, stage=stage, waits=tuple(waits))
+
+
 #: The function that says each step's state. A step with no row reads `NOT_BUILT`,
 #: and a skipped step is read before its row is asked.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
-                        COMMISSION: _commission}
+                        COMMISSION: _commission, CHECK: _check}
 
 
 # -- a hold on a stage -------------------------------------------------------------------
@@ -341,34 +399,50 @@ def _read(state: states.State, step: str, entry: Mapping | None, about: Asked) -
     return Step(step, NOT_BUILT, stage=about.stage, waits=waits, entry=entry)
 
 
+def _has(step: str, stage: str | None, seen: Mapping[str, Seen] | None) -> bool:
+    """Whether the stage has the step: a stage whose repo, as read, declares no check
+    has no `check` step."""
+    if step != CHECK or stage is None or seen is None or stage not in seen:
+        return True
+    found = seen[stage]
+    return found.problem is not None or found.check is not None
+
+
 def _each(state: states.State, name: str, closed: Callable[[str], bool] | None,
-          register: states.State | None) -> Iterator[Step]:
+          register: states.State | None,
+          seen: Mapping[str, Seen] | None) -> Iterator[Step]:
     planned = [stage.id for stage in stages.in_plan(state)]
     for step, entry in order(state.steps):
         of_stages = planned if _is_of_a_stage(step) and planned else [None]
         for stage in of_stages:
-            yield _read(state, step, entry, Asked(name, stage, closed, register))
+            if _has(step, stage, seen):
+                yield _read(state, step, entry, Asked(name, stage, closed, register, seen))
 
 
 def of(state: states.State, *, name: str = "ROUND",
        closed: Callable[[str], bool] | None = None,
-       register: states.State | None = None) -> tuple[Step, ...]:
+       register: states.State | None = None,
+       seen: Mapping[str, Seen] | None = None) -> tuple[Step, ...]:
     """Every step of the round `state` is of, in order, each with its state. `name`
     is the round's name, for the commands a wait prints, `closed` answers whether
-    a round, by name, is closed (`questions.is_closed` when left out), and `register`
-    is the state of the project's log (see `Asked`)."""
-    return tuple(_each(state, name, closed, register))
+    a round, by name, is closed (`questions.is_closed` when left out), `register`
+    is the state of the project's log and `seen` what was read of each open build
+    (see `Asked`)."""
+    return tuple(_each(state, name, closed, register, seen))
 
 
 def one(state: states.State, step: str, stage: str | None = None, *,
         name: str = "ROUND", closed: Callable[[str], bool] | None = None,
-        register: states.State | None = None) -> Step | None:
+        register: states.State | None = None,
+        seen: Mapping[str, Seen] | None = None) -> Step | None:
     """The step `step` of the round, for the stage `stage` when it is a step of one
-    stage; None when the round's flow has no such step. The questions step asked of
-    a stage reads the questions that hold that stage."""
+    stage; None when the round's flow has no such step, or the stage has none. The
+    questions step asked of a stage reads the questions that hold that stage."""
+    if not _has(step, stage, seen):
+        return None
     for found, entry in order(state.steps):
         if found == step:
-            return _read(state, step, entry, Asked(name, stage, closed, register))
+            return _read(state, step, entry, Asked(name, stage, closed, register, seen))
     return None
 
 
@@ -382,12 +456,13 @@ def is_settled(state: states.State, step: str, stage: str | None = None, *,
 
 def current(state: states.State, *, name: str = "ROUND",
             closed: Callable[[str], bool] | None = None,
-            register: states.State | None = None) -> Step | None:
+            register: states.State | None = None,
+            seen: Mapping[str, Seen] | None = None) -> Step | None:
     """The step the round is at: the first, in order, that is neither done nor
     skipped. None when every step is, and for a round that has ended."""
     if state.status != states.OPEN:
         return None
-    return next((step for step in _each(state, name, closed, register)
+    return next((step for step in _each(state, name, closed, register, seen)
                  if not step.settled), None)
 
 
@@ -428,6 +503,7 @@ def said(step: Mapping | None) -> str:
 
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
-           "SETTLED", "HELD", "COMMISSION", "Asked", "Step", "Row", "ROWS", "answer",
+           "SETTLED", "HELD", "COMMISSION", "CHECK", "Seen", "Asked", "Step", "Row",
+           "ROWS", "answer",
            "held_by", "held_unbuilt", "order", "of", "one", "is_settled", "current", "at",
            "said"]

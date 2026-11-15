@@ -7,6 +7,7 @@
     moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME
                            [--slice ID=TEXT --minutes N]... [--record PTR] [--existing]
                            [--as NAME]
+    moxi rounds check [ROUND STAGE] [--timeout-s N] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND TEXT --build B<n> [--blocks LIST|none] [--option K=TEXT]...
@@ -105,6 +106,16 @@ skips and the repo's `brief` lines. Then it tells the lead which of those ruling
 operator has not been shown, with the `mark --shown` line, and which standing rulings
 name the repo in their scope and are cited by no row. `next` prints, with a stage whose
 build is open, each ruling recorded since its block that reaches the stage.
+`check` runs the repo's declared check for a build at its tip and records the run: in
+the build's worktree, which must be clean with the build's branch checked out, on a
+build that has work, with no shell, stdin closed, no `GIT_` variable, its output in
+`check-<n>.log` in the build's scratch folder, and its whole process tree ended at the
+check's `timeout_s` (or `--timeout-s`). The run is recorded with its commit, that
+commit's merge-base with the target, the argv as it ran, its exit code and its
+duration; when the tip moved or the worktree changed while it ran, nothing is
+recorded. Run with no round in a build's worktree, it checks that build. A check
+counts for a gate only at the tip being finished, with the command the repo declares
+then.
 `mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no
@@ -168,6 +179,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import shlex
 import sys
 from collections.abc import Callable, Sequence
 
@@ -938,6 +950,52 @@ def _commission(args, out) -> int:
     return codes.OK
 
 
+# -- check -------------------------------------------------------------------------------
+
+def _declare_check(verbs) -> None:
+    said = ("Run the repo's declared check for a build at its tip, in the build's "
+            "worktree, and record the run: its commit, that commit's merge-base with "
+            "the target, the argv, its exit code and duration. Its output goes to "
+            "check-<n>.log in the build's scratch folder. Nothing is recorded when the "
+            "tip or the worktree changed while it ran.")
+    parser = verbs.add_parser("check", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND", nargs="?",
+                        help="the round, <project>/<slug>; left out in a build's "
+                             "worktree, the round of the open build on the branch "
+                             "checked out there")
+    parser.add_argument("stage", metavar="STAGE", nargs="?",
+                        help="the stage whose build is checked, B<n>; given with ROUND")
+    parser.add_argument("--timeout-s", metavar="N", type=float, dest="timeout_s",
+                        help="end the run's whole process tree after N seconds, in place "
+                             "of the check's own timeout_s")
+    _writes(parser)
+
+
+def _check(args, out) -> int:
+    from . import checking
+
+    name, stage = args.round, args.stage
+    if name is None:
+        from . import by_branch
+
+        found = by_branch.find(os.getcwd(), verb="check")
+        name, stage = found.round, found.stage
+    elif stage is None:
+        raise BadArgument(f"{name} is named with no stage, and a check is of one build",
+                          f"moxi rounds check {name} B<n>, or moxi rounds check in the "
+                          "build's worktree")
+    ran = checking.check(name, stage, actor=_actor(args), timeout_s=args.timeout_s)
+    code = ran.exit_code
+    how = ("passed" if ran.passed else "was ended at its time limit" if code is None
+           else f"failed: exit {code}")
+    print(f"check {ran.name} {ran.stage} at {ran.commit[:12]}: {how}, in "
+          f"{ran.duration_s:g} s", file=out)
+    print(f"ran: {shlex.join(ran.argv)}", file=out)
+    print(f"output: {ran.output}", file=out)
+    _warn_of(ran.failed, args.prog, args.verb)
+    return codes.OK if ran.passed else codes.ERROR
+
+
 # -- drop --------------------------------------------------------------------------------
 
 def _declare_drop(verbs) -> None:
@@ -1125,7 +1183,7 @@ def _list_questions(args, out) -> int:
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
 _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict,
-                                  _declare_commission, _declare_ask,
+                                  _declare_commission, _declare_check, _declare_ask,
                                   _declare_rule,
                                   _declare_mark, _declare_drop, _declare_next,
                                   _declare_show,
@@ -1133,7 +1191,8 @@ _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
 _VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict,
-                               "commission": _commission, "ask": _ask, "rule": _rule,
+                               "commission": _commission, "check": _check,
+                               "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "next": _next,
                                "show": _show,
                                "list": _list}

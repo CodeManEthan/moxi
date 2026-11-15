@@ -322,7 +322,6 @@ def test_a_skip_taken_back_leaves_the_step_as_it_was(folder):
 @pytest.mark.parametrize("item, name, stage_id", [
     ("skip:retro", "retro", None),
     ("skip:ratify", "ratify", None),
-    ("skip:check:B1", "check", "B1"),
     ("skip:verify-build:B1", "verify-build", "B1"),
 ])
 def test_a_skip_of_a_step_whose_row_is_not_built_is_read_all_the_same(
@@ -434,8 +433,7 @@ def test_a_flow_with_no_questions_step_shows_the_hold_on_the_stage_it_stops(open
 
 # -- a step with no row ------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["build", "check", "verify-build", "finish", "ratify",
-                                  "retro"])
+@pytest.mark.parametrize("name", ["build", "verify-build", "finish", "ratify", "retro"])
 def test_a_step_with_no_row_is_not_built_and_never_read_as_done(folder, name):
     fold(folder, stage("B1"))
     found = step(folder, name, "B1" if name not in ("ratify", "retro") else None)
