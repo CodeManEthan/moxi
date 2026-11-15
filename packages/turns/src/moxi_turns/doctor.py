@@ -10,9 +10,9 @@ and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, the placed 
 has no doctor command of its own.
 
 The guard rows read the list as an endpoint would, in the doctor's own process: `guards`
-names each guard on, what turned it on and where it runs on each harness; `guard <id>`
-is `off` for an available guard nobody turned on, `fail` for one on the list that does
-not load, whose judge does not import or whose `match` does not compile, and for a
+names each guard on, its step, what turned it on and where it runs on each harness;
+`guard <id>` is `off` for an available guard nobody turned on, `fail` for one on the list
+that does not load, whose judge does not import or whose `match` does not compile, and for a
 switch that fails the core's check, listed or not, and `warn` for one on the list whose
 module is not installed, whose import took over `IMPORT_WARN_MS`, or (the removal guard)
 when the installed Claude Code is newer than the one its rules were checked against;
@@ -212,7 +212,8 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
 
     if loaded.on:
         yield Row("guards", True, "; ".join(
-            f"{o.id} (on by {' and '.join(_BY.get(b, b) for b in o.by)}): runs "
+            f"{o.id} ({o.guard.step} step, on by "
+            f"{' and '.join(_BY.get(b, b) for b in o.by)}): runs "
             f"{', '.join(places.get(o.id) or ['nowhere'])}" for o in loaded.on))
     else:
         yield Row("guards", True, "no guard is on")

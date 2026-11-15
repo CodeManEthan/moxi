@@ -146,6 +146,20 @@ def test_a_codex_alias_is_refused_naming_the_canonical_name(alias, canonical):
     assert Guard("g", {"claude": (alias,), "codex": (canonical,)}, deny="no").problems() == []
 
 
+def test_a_guards_step_is_call_or_ask():
+    assert Guard("g", {"claude": ("Bash",)}, deny="no").step == "call"
+    assert Guard("g", {"claude": ("Bash",)}, deny="no", step="ask").problems() == []
+    problems = Guard("g", {"claude": ("Bash",)}, deny="no", step="later").problems()
+    assert problems == ["step 'later' must be \"call\" or \"ask\""]
+
+
+@pytest.mark.parametrize("harness", ["codex", "opencode"])
+def test_an_ask_step_guard_naming_codex_or_opencode_is_refused(harness):
+    g = Guard("g", {"claude": ("Bash",), harness: ("shell",)}, deny="no", step="ask")
+    assert g.problems() == [f"turns has no ask step on {harness}"]
+    assert Guard("g", {harness: ("shell",)}, deny="no").problems() == []
+
+
 def test_the_alias_list_is_codexs_and_names_its_version():
     assert guards.CODEX_ALIASES == {"Agent": "spawn_agent", "Write": "apply_patch",
                                     "Edit": "apply_patch"}

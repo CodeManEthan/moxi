@@ -16,7 +16,7 @@
 // endpoint's half, moxi_turns.claude_leg, states it in full; the runner's part:
 //
 // Endpoint to runner: one JSON object per line on the child's stdout, by `op`:
-//   hello    {op, leg: 3, mod_sock, stop_wait_ms, listen_wait_ms, endpoint_version, pid,
+//   hello    {op, leg: 4, mod_sock, stop_wait_ms, listen_wait_ms, endpoint_version, pid,
 //            stop_after_clear, guards, after_tool_wait_ms, floors}
 //            the first line. Before it the runner sends nothing, and it sends nothing to an
 //            endpoint whose leg it does not speak. `stop_after_clear` false: after a clear
@@ -62,7 +62,9 @@
 //                gives it, {id, type, description, status, parentId?, teammateId?}; the
 //                endpoint maps the states (entries null: unreadable)
 //   /ask/guard   {call: {tool, tool_use_id, input, agentId, cwd?, prompts?}, guards: [id]}
-//                -> {deny?, lines, broken}   a call judge entries cover (the guards, below)
+//                -> {deny?, lines, broken}   a call judge entries cover (the guards, below);
+//                at a permission ask {call: {tool, input, agentId, cwd, permission_mode,
+//                transcript_path, prompts?}, guards: [id], step: 'ask'} -> {deny?}
 //   /ask/after-tool {call: {tool, tool_use_id, agentId, is_error}, rows: [id]}
 //                -> {context: string | null}   after a call ran (after-tool, below)
 //   /report/usage {usage}                                   -> {}  outside the queue (below)
@@ -143,7 +145,10 @@
 // its own process, and only a call a judge entry covers leaves it. An entry is
 //   {id, calls: [pattern], who: any|main|agents, match: {field: regex} | null,
 //    match_flags: ""|"i", judge, deny, wants: ["prompts"]?, on_error: allow|deny,
-//    deadline_ms}
+//    deadline_ms, step: call|ask}
+// A `call` entry is matched at each tool call (`tool.call`), an `ask` entry at each
+// permission ask (`classic.PermissionRequest`, which fires only when Claude Code would put
+// the call to a person), and never the other way.
 // An entry covers a call when a pattern matches the whole tool name (`*` any run of
 // characters, every other character only itself), `who` takes the loop (an absent or empty
 // `agentId` is the main loop), and every `match` regex finds its input field, which must be
@@ -172,6 +177,18 @@
 // catch makes no trip, since it gets 1 s: it refuses "turns could not check this call"
 // when `next` was not called and a covering entry declared `on_error` deny, else it
 // passes the call on.
+//
+// The ask step: at `classic.PermissionRequest` the runner matches the `ask` entries
+// against the hook input's `tool_name`, `tool_input` and `agent_id`, the same way. Nothing
+// covering: `next(e)` at once, no trip, and Claude Code asks the person. A covering
+// data-only entry: the answer `{decision: {behavior: 'deny', message: <its deny>}}`.
+// Else one POST /ask/guard with `step: 'ask'` and a call of `{tool, input, agentId, cwd,
+// permission_mode, transcript_path}` from the hook input, bounded as at a tool call; a
+// `deny` in the answer becomes the deny decision, and anything else passes the ask on. A
+// trip that fails or misses its bound denies with the break text when a named entry
+// declared `on_error` deny, else passes the ask on. The runner never approves an ask. The
+// catch refuses as the tool call's does. The hook-time event is `ask`; its trip is timed
+// as `guard`.
 //
 // The prompt list: the prompts of the main turn now running, sent on an ask only when a
 // named entry `wants` prompts. A prompt counts in a main turn only when the runner can tie
@@ -234,7 +251,7 @@ const QUEUE_MAX = 1000
 const BUSY_AGENT = new Set(['pending', 'running', 'waiting'])
 const GATE_DROP = /^moxi-turns-gate: .*\(([a-z-]+)\)$/
 const NONCE_LINE = 'moxi-turns-window: '
-const LEG = 3
+const LEG = 4
 const PLUGIN = 'moxi-turns'
 /** A guard's bound when its entry names none. */
 const GUARD_DEADLINE_MS = 500
@@ -274,6 +291,8 @@ export type Guard = {
   wantsPrompts: boolean
   onError: 'allow' | 'deny'
   deadlineMs: number
+  /** `call`: matched at each tool call; `ask`: at each permission ask. */
+  step: 'call' | 'ask'
   /** Why the entry can't be matched here (a `match` regex that does not compile), or null. */
   bad: string | null
 }
@@ -969,6 +988,7 @@ export function parseGuard(v: unknown): Guard | null {
     wantsPrompts: Array.isArray(d.wants) && d.wants.includes('prompts'),
     onError: d.on_error === 'deny' ? 'deny' : 'allow',
     deadlineMs: num(d.deadline_ms, GUARD_DEADLINE_MS),
+    step: d.step === 'ask' ? 'ask' : 'call',
     bad,
   }
 }
@@ -1009,10 +1029,11 @@ export type Decision = {
 
 const isMain = (agentId: unknown): boolean => agentId === undefined || agentId === null || agentId === ''
 
-export function decide(table: readonly Guard[], tool: string, agentId: unknown, input: Json): Decision {
+export function decide(table: readonly Guard[], tool: string, agentId: unknown, input: Json, step: 'call' | 'ask' = 'call'): Decision {
   const d: Decision = { covering: [], deny: null, ask: [], broken: [] }
   const main = isMain(agentId)
   for (const g of table) {
+    if (g.step !== step) continue
     if (!g.calls.some(r => r.test(tool))) continue
     if ((g.who === 'main' && !main) || (g.who === 'agents' && main)) continue
     if (g.bad !== null) {
@@ -1041,7 +1062,23 @@ export function catchRefuses(table: readonly Guard[], e: Json): boolean {
     const d = decide(table, String(e.tool), e.agentId, inputOf(e))
     return [...d.covering, ...d.broken].some(g => g.onError === 'deny')
   } catch {
-    return table.some(g => g.onError === 'deny')
+    return table.some(g => g.step === 'call' && g.onError === 'deny')
+  }
+}
+
+/** A permission ask's tool input: the hook input's `tool_input` when it is an object. */
+export function askInput(e: Json): Json {
+  const v = e.tool_input
+  return v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : {}
+}
+
+/** Would the ask hook's catch refuse this ask? As `catchRefuses`, by the `ask` entries. */
+export function catchRefusesAsk(table: readonly Guard[], e: Json): boolean {
+  try {
+    const d = decide(table, String(e.tool_name), e.agent_id, askInput(e), 'ask')
+    return [...d.covering, ...d.broken].some(g => g.onError === 'deny')
+  } catch {
+    return table.some(g => g.step === 'ask' && g.onError === 'deny')
   }
 }
 
@@ -1059,10 +1096,11 @@ async function callCwd($: Dollar): Promise<string | undefined> {
 
 /** One /ask/guard trip, bounded by `boundMs` on the plugin's own timer. The call's `cwd` is
  *  read first, inside the bound; it is left out when the read fails. */
-async function guardTrip($: Dollar, body: { call: Json; guards: string[] }, boundMs: number): Promise<Trip> {
+async function guardTrip($: Dollar, body: { call: Json; guards: string[]; step?: 'ask' }, boundMs: number): Promise<Trip> {
   if (hello === undefined || ended) return { why: "turns' endpoint is not running" }
   const sock = hello.sock
-  const sent = callCwd($).then(cwd => {
+  const given = typeof body.call.cwd === 'string' && body.call.cwd !== ''
+  const sent = (given ? Promise.resolve(undefined) : callCwd($)).then(cwd => {
     if (cwd !== undefined) body.call.cwd = cwd
     return post($, sock, '/ask/guard', body)
   }).then(
@@ -1101,6 +1139,35 @@ async function judge($: Dollar, w: Watch, e: Json, d: Decision): Promise<{ deny:
   const deny = trip.answer.deny
   if (typeof deny === 'string' && deny !== '') return { deny }
   return { lines: [...texts(trip.answer.lines), ...texts(trip.answer.broken), ...late] }
+}
+
+/** What the ask-step guards say of a permission ask: the deny message, or null to leave
+ *  the ask to Claude Code. Nothing here approves an ask. */
+async function judgeAsk($: Dollar, w: Watch, e: Json, d: Decision): Promise<string | null> {
+  if (d.deny !== null) return d.deny.deny !== '' ? d.deny.deny : `guard ${d.deny.id} refused this call`
+  for (const g of d.broken) if (g.onError === 'deny') return breakDeny(g.id, g.bad ?? 'its match does not compile here')
+  if (d.ask.length === 0) return null
+  const boundMs = Math.max(...d.ask.map(g => g.deadlineMs)) + MARGIN_MS
+  const call: Json = {
+    tool: e.tool_name,
+    input: askInput(e),
+    agentId: isMain(e.agent_id) ? null : e.agent_id,
+    permission_mode: typeof e.permission_mode === 'string' ? e.permission_mode : null,
+    transcript_path: typeof e.transcript_path === 'string' && e.transcript_path !== '' ? e.transcript_path : null,
+  }
+  if (typeof e.cwd === 'string' && e.cwd !== '') call.cwd = e.cwd
+  if (d.ask.some(g => g.wantsPrompts)) call.prompts = turnPrompts.map(p => ({ origin: p.origin, text: p.text }))
+  const t0 = performance.now()
+  const trip = await guardTrip($, { call, guards: d.ask.map(g => g.id), step: 'ask' }, boundMs)
+  const ms = performance.now() - t0
+  w.away += ms
+  sample($, 'guard', ms)
+  if ('why' in trip) {
+    const denies = d.ask.find(g => g.onError === 'deny')
+    return denies !== undefined ? breakDeny(denies.id, trip.why) : null
+  }
+  const deny = trip.answer.deny
+  return typeof deny === 'string' && deny !== '' ? deny : null
 }
 
 /** The tool's result with `lines` added to what the model reads after it; a refusal as is. */
@@ -1396,6 +1463,27 @@ export const register: Register = on => {
     const own = next.origin.plugin === PLUGIN || (e.tool === 'TaskStop' && stopping.has(String((e as Json).task_id)))
     if (!own && catchRefuses(guards, e as Json)) return { deny: CANNOT_CHECK }
     if (!own) tasksMarked = true
+    return next(e)
+  })
+
+  // The ask step: a permission ask Claude Code would put to a person, matched against the
+  // `ask` entries. A guard here can refuse the ask and never approve it.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const hook = watch()
+    try {
+      const ev = e as unknown as Json
+      const d = headless === true || guards.length === 0 ? null : decide(guards, String(ev.tool_name), ev.agent_id, askInput(ev), 'ask')
+      if (d === null || (d.covering.length === 0 && d.broken.length === 0)) return behind(hook, performance.now(), await next(e))
+      const message = await judgeAsk($, hook, ev, d)
+      if (message !== null) return { decision: { behavior: 'deny', message } }
+      return behind(hook, performance.now(), await next(e))
+    } finally {
+      timeHook($, 'ask', hook)
+    }
+  }).catch(($, e, next) => {
+    // A grace of 1 s: decide at once, with no trip.
+    if (next.called) return next(e)
+    if (catchRefusesAsk(guards, e as unknown as Json)) return { decision: { behavior: 'deny', message: CANNOT_CHECK } }
     return next(e)
   })
 

@@ -78,6 +78,11 @@ Other modules ship guards too (sessions' `sessions.transcript-read`, usage's
 `usage.ceiling`), and a guard can also be a file of your own. `guards.run` lists the
 guards that run beyond the switches: guard ids or paths to guard files.
 
+A guard runs at the call step, before a tool call runs, unless it says `step = "ask"`:
+then it runs when Claude Code is about to ask you to approve a call, and it can refuse
+that ask (Claude Code denies the call and the agent reads why) but never approve one.
+Only Claude Code has an ask step.
+
 ## Settings
 
 `moxi config turns` shows every key and its value; `moxi config set turns <key> <value>`

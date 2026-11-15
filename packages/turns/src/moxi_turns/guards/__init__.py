@@ -9,6 +9,18 @@ The judge is `fn(call: ToolCall) -> None | Allow | Deny`: None or `Allow()` lets
 run, `Allow(line)` lets it run and adds one line to what the model reads after the tool,
 and `Deny(reason)` refuses it with `reason`.
 
+A guard runs at one of two steps (`step`). The call step, the default, is before a tool
+call runs. The ask step is the moment the harness puts a call to the person for approval
+(Claude Code's permission request): matching is the same, `ToolCall.permission_mode`
+carries the session's permission mode, and `Deny(reason)` refuses the ask, so the harness
+denies the call and the model reads `reason`. None leaves the ask to the harness, which
+asks the person. A guard at the ask step approves nothing: an `Allow` there reads as None.
+A data-only guard at the ask step refuses every ask it covers. Breaks follow the call
+step's rule: `on_error = "allow"` leaves the ask to the harness, `deny` refuses it. Only
+Claude has an ask step: Codex runs under turns with approval policy `never`, so it asks no
+one, and opencode has no such event. The loader refuses an ask-step guard that names a
+Codex or opencode pattern.
+
 Guards come from two places:
 
 - a module's entry in the group `moxi.turns.guards`, named by the module, whose target is
@@ -77,6 +89,11 @@ WANTS = ("prompts",)
 ON_ERROR = ("allow", "deny")
 #: The `match_flags` a guard may give: none, or case-blind.
 MATCH_FLAGS = ("", "i")
+#: When a guard runs: `call`, before a tool call runs; `ask`, when the harness puts a call
+#: to the person for approval.
+STEPS = ("call", "ask")
+#: The harnesses with an ask step.
+ASK_HARNESSES = ("claude",)
 #: A judge's bound when its guard names none, in milliseconds.
 DEADLINE_MS = 500
 #: `guards.max_wait_ms`'s default.
@@ -119,8 +136,11 @@ class ToolCall:
     meant to follow a shell `cd`); where the harness gives none, or a relative one, the
     launch directory. A listener event's `cwd` is always the launch directory.
     `record_path` is the file the harness writes the session's records to, None where it
-    has none. `env` is the endpoint's environment, which is the launch's. `prompts` holds
-    the current main turn's prompts when the guard `wants` them, else nothing.
+    has none; at the ask step, the record path the ask carries. `env` is the endpoint's
+    environment, which is the launch's. `prompts` holds the current main turn's prompts
+    when the guard `wants` them, else nothing. `permission_mode` is the session's
+    permission mode as an ask carries it (`bypassPermissions`, `plan`, ...), None at the
+    call step.
     """
 
     harness: str
@@ -133,6 +153,7 @@ class ToolCall:
     record_path: str | None = None
     env: Mapping[str, str] = field(default_factory=dict, repr=False)
     prompts: tuple[Prompt, ...] = ()
+    permission_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +201,9 @@ class Guard:
     switch: str | None = None
     #: One line for the doctor and the install text.
     doc: str = ""
+    #: `call` (before a tool call runs) or `ask` (when the harness puts a call to the person
+    #: for approval). At the ask step a guard can refuse the ask and never approve it.
+    step: str = "call"
 
     def problems(self, source: str = "module") -> list[str]:
         """What is wrong with this guard, in plain words; empty when nothing is.
@@ -251,6 +275,12 @@ def _problems(g: Guard, source: str) -> list[str]:
                        "(a dotted key such as guards.removal)")
     if not isinstance(g.doc, str) or "\n" in g.doc:
         out.append("doc must be one line")
+    if g.step not in STEPS:
+        out.append(f"step {g.step!r} must be \"call\" or \"ask\"")
+    elif g.step == "ask" and isinstance(g.calls, Mapping):
+        for harness in HARNESSES:
+            if harness not in ASK_HARNESSES and g.calls.get(harness):
+                out.append(f"turns has no ask step on {harness}")
     return out
 
 

@@ -332,10 +332,10 @@ def test_a_guard_on_names_its_source_and_where_it_runs(turns_env, registry, guar
     write_config(turns_env, "[guards]\nrun = ['mod.both', 'mod.claude-only']\n")
     rows = guard_rows()
     detail = rows["guards"].detail
-    assert "mod.both (on by guards.run): runs claude in the runner, codex behind the hook" \
-        in detail
-    assert "mod.claude-only (on by guards.run): runs claude in the runner" in detail
-    assert "mod.by-switch (on by its switch)" in detail
+    assert ("mod.both (call step, on by guards.run): runs claude in the runner, codex "
+            "behind the hook") in detail
+    assert "mod.claude-only (call step, on by guards.run): runs claude in the runner" in detail
+    assert "mod.by-switch (call step, on by its switch)" in detail
     assert rows["guard mod.claude-only: codex"].state == "ok"
     assert "covers no call on codex" in rows["guard mod.claude-only: codex"].detail
     assert "guard mod.both: codex" not in rows and "guard mod.both: claude" not in rows
@@ -410,7 +410,7 @@ def test_the_removal_guard_warns_on_a_newer_claude_code(turns_env, registry, mon
         argv, 0, installed + "\n", ""))
     write_config(turns_env, "[guards]\nremoval = true\n")
     rows = guard_rows()
-    assert "turns.removal (on by its switch): runs claude in the runner" \
+    assert "turns.removal (call step, on by its switch): runs claude in the runner" \
         in rows["guards"].detail
     row = rows.get("guard turns.removal")
     if warned:
