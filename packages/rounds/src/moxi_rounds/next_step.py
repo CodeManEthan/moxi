@@ -427,14 +427,13 @@ def read(name: str, *, settings=None) -> dict:
         return {**said, "unreadable": {"file": str(error.file), "line": error.line,
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
+    seen = checking.seen_of(found.state, found.name, settings=settings)
     return {**said, "status": found.state.status, "flow": found.state.flow,
-            "groups": _groups(found, settings["models"],
-                              checking.seen_of(found.state, found.name,
-                                               settings=settings)),
+            "groups": _groups(found, settings["models"], seen),
             "close": (None if found.state.status != states.OPEN
                       else {"waits": list(closing.waits(
                           found.state, on_closed=found.on_closed,
-                          ratify=closing.ratify_of(settings, found.name)))}),
+                          ratify=closing.ratify_of(settings, found.name), seen=seen))}),
             "warnings": _warnings(found)}
 
 

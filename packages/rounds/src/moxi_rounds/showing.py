@@ -756,9 +756,9 @@ def _head(found: Shown) -> dict:
                                        "fix": error.fix}}
     state = found.state
     settings = own.load() if found.settings is None else found.settings
+    seen = checking.seen_of(state, found.name, settings=settings)
     at = steps.current(state, name=found.name, on_closed=found.on_closed,
-                       register=found.register,
-                       seen=checking.seen_of(state, found.name, settings=settings))
+                       register=found.register, seen=seen)
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "inherits": list(state.inherits),
@@ -767,7 +767,7 @@ def _head(found: Shown) -> dict:
             "close": (None if state.status != states.OPEN
                       else {"waits": list(closing.waits(
                           state, on_closed=found.on_closed,
-                          ratify=closing.ratify_of(settings, found.name)))}),
+                          ratify=closing.ratify_of(settings, found.name), seen=seen))}),
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
             "trace": tracing.shown(state, found.register),

@@ -510,6 +510,20 @@ def test_next_reaches_finish_once_its_gates_hold(ready):
         "finish", "B1", steps.READY)
 
 
+def test_the_close_line_reads_the_steps_as_the_step_line_does(opened, capsys):
+    opened()
+
+    assert main(["show", ROUND]) == 0
+
+    out = capsys.readouterr().out
+    assert "step: check of B1, ready" in out
+    (close,) = [line for line in out.splitlines() if line.startswith("close waits for:")]
+    assert "step check of B1, ready" in close
+    assert "step build of B1" not in close
+    said = next_step.read(ROUND)
+    assert said["close"]["waits"][0] == "step check of B1, ready"
+
+
 def test_verdict_prints_each_unmet_gate_with_its_number(opened, capsys):
     path, tree = opened()
     report = path.parent / "build-report.md"
