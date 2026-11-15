@@ -134,7 +134,11 @@ scanned whole. For each commit sent:
   `author.name` and `author.email`). A contributor's commit keeps its trailers, and is
   still scanned like any other.
 
-Each tag pushed has every tag object of its chain read the same way: tagger and message.
+Each tag pushed has every tag object of its chain read the same way: tagger and message,
+through the message piece's sets and rules. A tag message gets neither the
+`repo/commit-rules` rules nor the leftover-key check, so a `Round:` trailer or a refused
+tag pattern in an annotated tag you write by hand goes public; `moxi publishing tag`
+writes a release tag's message from the CHANGELOG itself.
 
 With `word-required` set to `true`, a push needs `MOXI_PUBLISHING_PUSH_WORD`, matching
 `push.word_pattern` in full: where the push was approved. It is a record, not a proof; any
