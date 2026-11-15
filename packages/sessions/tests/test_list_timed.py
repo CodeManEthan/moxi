@@ -8,6 +8,7 @@ Each test prints what it measured, so `pytest -m slow -s` shows the numbers.
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import time
 from pathlib import Path
@@ -32,21 +33,44 @@ def sid(n: int) -> str:
     return f"0190b000-0000-7000-8000-{n:012x}"
 
 
+def _midnight(day: dt.date) -> float:
+    """The time local midnight starts `day`, on a day of any length."""
+    return dt.datetime.combine(day, dt.time()).timestamp()
+
+
+def late_times(now: float, count: int) -> list[float]:
+    """`count` change times, newest first, that cover exactly the seven local dates X,
+    X-1 ... X-6, X being the local date of `now - 3600` (the newest time outside
+    `recent`): the dates the list shows. Each date's share lies inside that date, after
+    its local midnight and before the next, and before `now - 3600` on X."""
+    newest = now - 3600
+    last = dt.datetime.fromtimestamp(newest).date()
+    times = []
+    for k in range(7):
+        day = last - dt.timedelta(days=k)
+        start = _midnight(day)
+        end = min(_midnight(day + dt.timedelta(days=1)), newest)
+        share = count * (k + 1) // 7 - count * k // 7
+        times += [end - (j + 0.5) * (end - start) / share for j in range(share)]
+    return times
+
+
 def seed_root(home: Path, now: float, *, sessions: int = SESSIONS, late: int = LATE
               ) -> dict[str, Path]:
     """`sessions` small Claude Code sessions under `home`, across `WORK_DIRS` folders:
     `late` of them changed in the last seven days (ten in the last hour, the rest over
-    the six days before it and so on seven calendar days at most, every second one
-    started by a program), the others spread over the 400 days before those. Codex's
-    and OpenCode's roots are there and empty. Returns the three roots."""
+    the seven local dates the list shows, from `late_times`, every second one started by
+    a program), the others spread over the 400 days before those. Codex's and
+    OpenCode's roots are there and empty. Returns the three roots."""
     projects = home / "claude-home" / "projects"
     (home / "codex-home" / "sessions").mkdir(parents=True)
     OpenCodeDb(home / "data" / "opencode").write()
+    dated = late_times(now, late - 10)
     for n in range(sessions):
         if n < 10:
             at, program = now - 60 * (n + 1), False
         elif n < late:
-            at, program = now - 3600 - (n - 10) * 6 * DAY / (late - 10), n % 2 == 0
+            at, program = dated[n - 10], n % 2 == 0
         else:
             at, program = now - 8 * DAY - (n - late) * 400 * DAY / (sessions - late), False
         work_dir = f"proj-{n % WORK_DIRS}"
