@@ -60,7 +60,11 @@ recording that landing again would give the build two landings no head tells apa
 
 **A push** is `git push <remote>` of the target, at the landing a merge action before
 it recorded, or with no merge action before it, of the build's branch at `T`; both by
-commit id, so nothing the gates did not read is pushed. It runs in the repo's root.
+commit id, so nothing the gates did not read is pushed. It runs in the repo's root. A
+push of the target that git refuses passes when the remote's target already holds the
+landing (another finish, or the user, pushed it and more): pushing a ref that is already
+there changes nothing, so a rerun after a failed push does not fail only because the
+target moved on. Nothing is forced, so the remote's target never moves back.
 
 **A command** runs its argv, placeholders filled as for a check, with no shell, in the
 build's worktree, its output going to the caller's terminal, for at most its
@@ -458,22 +462,68 @@ def _found(status: builds.Status, root: Path, tip: str, *, action_id: str, name:
 def _push(root: Path, build: builds.Build, tip: str, action: Mapping, *,
           landing: str | None) -> Action:
     """Push the target at `landing` when a merge action came before, else the build's
-    branch at `tip`."""
+    branch at `tip`. A push of the target git refuses passes when the remote's target
+    already holds the landing: it is there or moved on past it, and the push would have
+    changed nothing. git never moves the remote's target back, since nothing is forced."""
+    remote = str(action["remote"])
     ref = (f"{landing}:refs/heads/{build.target}" if landing is not None
            else f"{tip}:refs/heads/{build.branch}")
-    argv = ["git", "-C", str(root), "push", str(action["remote"]), ref]
+    done = _remote_git(root, "push", remote, ref)
+    if done.code == 0 or landing is None:
+        return Action(action["id"], own.PUSH, OK if done.code == 0 else FAILED,
+                      output=done.said)
+    there = _remote_holds(root, remote, build.target, landing)
+    if there is None:
+        return Action(action["id"], own.PUSH, FAILED, output=done.said)
+    return Action(action["id"], own.PUSH, OK,
+                  output=f"{remote}'s {build.target} is at {there[:12]}, which holds "
+                         f"{landing[:12]} already: nothing was pushed")
+
+
+@dataclass(frozen=True)
+class _Said:
+    code: int
+    said: str
+
+
+def _remote_git(root: Path, *args: str) -> _Said:
+    """Run a git command that reaches a remote, in the repo's root, for at most
+    `PUSH_TIMEOUT_S`: its exit code, 1 for a git that gave no answer or could not run,
+    and what it printed."""
+    argv = ["git", "-C", str(root), *args]
     try:
         done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.git_env(),
                         stdin_data="")
     except subprocess.TimeoutExpired:
-        return Action(action["id"], own.PUSH, FAILED,
-                      output=f"the push gave no answer in {PUSH_TIMEOUT_S:g} seconds")
+        return _Said(1, f"git {args[0]} gave no answer in {PUSH_TIMEOUT_S:g} seconds")
     except OSError as exc:
-        return Action(action["id"], own.PUSH, FAILED, output=f"git could not run: {exc}")
+        return _Said(1, f"git could not run: {exc}")
     said = "\n".join(part.strip() for part in (done.stdout or "", done.stderr or "")
                      if part.strip())
-    return Action(action["id"], own.PUSH, OK if done.returncode == 0 else FAILED,
-                  output=said)
+    return _Said(done.returncode, said)
+
+
+def _remote_holds(root: Path, remote: str, target: str, landing: str) -> str | None:
+    """The commit `remote`'s branch `target` is at when it holds `landing` (is it, or
+    has it as an ancestor); None when it does not, or can't be read. A head this repo
+    lacks is fetched with no ref changed, so its history can be read."""
+    ref = f"refs/heads/{target}"
+    listed = _remote_git(root, "ls-remote", remote, ref)
+    heads = [line.split()[0] for line in listed.said.splitlines()
+             if listed.code == 0 and line.split()[1:] == [ref]]
+    if len(heads) != 1 or not gitreads.is_id(heads[0]):
+        return None
+    head = heads[0]
+    git = Git(root)
+    try:
+        if not git.present([head]):
+            _remote_git(root, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head",
+                        remote, ref)
+            if not git.present([head]):
+                return None
+        return head if git.is_ancestor(landing, head) else None
+    except GitError:
+        return None
 
 
 def _command(state: states.State, name: str, build: builds.Build, root: Path, tip: str,

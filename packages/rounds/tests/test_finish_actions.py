@@ -148,6 +148,91 @@ def test_a_push_git_refuses_is_recorded_failed(ready, repo, configure):
     assert ended(path) is None
 
 
+def _remote_away(repo):
+    """Take the remote away, so a push to it fails; gives a function that brings it
+    back."""
+    remote = repo.root.parent / "remote.git"
+    away = remote.with_name("remote-away.git")
+    remote.rename(away)
+    return lambda: away.rename(remote)
+
+
+def _push_on_from_a_clone(repo, tmp_path, name: str) -> str:
+    """Clone the repo, commit `name` on its main, push that main to the remote, and give
+    the commit: the remote's main moves on past what the repo's main holds, to a commit
+    the repo has never seen."""
+    other = tmp_path / f"clone-{name}"
+    type(repo)(tmp_path).git("clone", "-q", str(repo.root), str(other))
+    clone = type(repo)(other)
+    pushed = clone.commit(name)
+    clone.git("push", "-q", str(repo.root.parent / "remote.git"), "main:main")
+    return pushed
+
+
+def test_a_push_rerun_passes_when_the_remote_target_moved_on_past_the_landing(
+        ready, repo, configure, tmp_path):
+    path, _tree = ready
+    configure('{ do = "merge" }', '{ do = "push", remote = "origin" }')
+    repo.git("push", "-q", "origin", "main")
+    back = _remote_away(repo)
+    with pytest.raises(finishing.ActionFailed):
+        finishing.finish(ROUND, "B1", by="coder")
+    back()
+    landing = repo.rev("main")
+    later = _push_on_from_a_clone(repo, tmp_path, "later.txt")
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    push = done.actions[-1]
+    assert (push.kind, push.state, push.ran) == ("push", "ok", True)
+    assert "nothing was pushed" in push.output and landing[:12] in push.output
+    assert remote_rev(repo, "main") == later
+    assert actions_of(path) == [("merge", "ok"), ("push", "failed"), ("push", "ok")]
+    assert ended(path) == builds.FINISHED
+
+
+def test_a_push_after_a_hand_merge_passes_when_the_remote_target_moved_on(
+        ready, repo, configure, tmp_path):
+    path, tree = ready
+    configure('{ do = "merge" }', '{ do = "push", remote = "origin" }')
+    landing = repo.merge(tree.rev())
+    repo.git("push", "-q", "origin", "main")
+    later = _push_on_from_a_clone(repo, tmp_path, "later.txt")
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    assert [(one.kind, one.state) for one in done.actions] == [("merge", "found"),
+                                                               ("push", "ok")]
+    assert done.actions[0].landing == landing
+    assert remote_rev(repo, "main") == later
+    assert ended(path) == builds.FINISHED
+
+
+def test_a_push_never_moves_the_remote_target_off_a_line_that_lacks_the_landing(
+        ready, repo, configure, tmp_path):
+    path, _tree = ready
+    configure('{ do = "merge" }', '{ do = "push", remote = "origin" }')
+    repo.git("push", "-q", "origin", "main")
+    back = _remote_away(repo)
+    with pytest.raises(finishing.ActionFailed):
+        finishing.finish(ROUND, "B1", by="coder")
+    back()
+    # Another line moves the remote's main on from the base the landing merged onto.
+    other = tmp_path / "clone-parted"
+    type(repo)(tmp_path).git("clone", "-q", "--branch", "main",
+                             str(repo.root.parent / "remote.git"), str(other))
+    parted = type(repo)(other).commit("parted.txt")
+    type(repo)(other).git("push", "-q", "origin", "main")
+
+    with pytest.raises(finishing.ActionFailed) as failed:
+        finishing.finish(ROUND, "B1", by="coder")
+
+    assert failed.value.id == "push" and "rejected" in failed.value.output
+    assert remote_rev(repo, "main") == parted
+    assert actions_of(path) == [("merge", "ok"), ("push", "failed"), ("push", "failed")]
+    assert ended(path) is None
+
+
 # -- a command ------------------------------------------------------------------------------
 
 def test_a_command_runs_in_the_worktree_with_its_placeholders_after_its_start_is_recorded(
