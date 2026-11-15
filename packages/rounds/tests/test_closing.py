@@ -47,7 +47,7 @@ def opened(tmp_path, add_project, write_config, capsys):
 
     def open_on(flow: str = "paper"):
         write_config(FLOWS)
-        opening.open_round(ROUND, description="a placeholder round", actor="planner",
+        opening.open_round(ROUND, description="a placeholder round", by="planner",
                            flow=flow)
         capsys.readouterr()
         return tmp_path / "notes" / "rounds" / "a-round"
@@ -55,8 +55,8 @@ def opened(tmp_path, add_project, write_config, capsys):
     return open_on
 
 
-@pytest.fixture
-def folder(opened):
+@pytest.fixture(name="round_dir")
+def round_dir_fixture(opened):
     return opened()
 
 
@@ -76,48 +76,48 @@ def stage(id_) -> str:
 _folds = iter(range(1, 1000))
 
 
-def fold(folder, *entries):
+def fold(round_dir, *entries):
     text = (f"# A design\n\nDraft {next(_folds)}.\n\n```toml rounds\n"
             + "\n\n".join(entries) + "\n```\n")
-    (folder / "design.md").write_text(text, encoding="utf-8")
-    return freezing.freeze(ROUND, actor="scout")
+    (round_dir / "design.md").write_text(text, encoding="utf-8")
+    return freezing.freeze(ROUND, by="scout")
 
 
 _reports = iter(range(1, 1000))
 
 
-def verdict(folder, word="publishable", *, design=1):
+def verdict(round_dir, word="publishable", *, design=1):
     count = next(_reports)
     keys = ['kind = "design"', f'verdict = "{word}"', 'pass = "full"',
             'by = "critic"', 'model = "a-model"', f"design = {design}"]
-    path = folder / f"report-{count}.md"
+    path = round_dir / f"report-{count}.md"
     path.write_text(f"# A report\n\nPass {count}.\n\n```toml rounds\n"
                     + "\n".join(keys) + "\n```\n", encoding="utf-8")
-    return verdicts.record(ROUND, path, actor="critic")
+    return verdicts.record(ROUND, path, by="critic")
 
 
 def rule(item=None, **more):
-    return ruling.rule(ROUND, item=item, record=PTR, actor="planner", **more)
+    return ruling.rule(ROUND, item=item, record=PTR, by="planner", **more)
 
 
-def events(folder) -> list[dict]:
-    return log.read(log.round_log(folder))
+def events(round_dir) -> list[dict]:
+    return log.read(log.round_log(round_dir))
 
 
-def types(folder) -> list[str]:
-    return [event["type"] for event in events(folder)]
+def types(round_dir) -> list[str]:
+    return [event["type"] for event in events(round_dir)]
 
 
-def folded(folder):
-    return state.fold(events(folder))
+def folded(round_dir):
+    return state.fold(events(round_dir))
 
 
-def status(folder) -> str:
-    return folded(folder).status
+def status(round_dir) -> str:
+    return folded(round_dir).status
 
 
-def waits(folder) -> tuple[str, ...]:
-    return closing.waits(folded(folder))
+def waits(round_dir) -> tuple[str, ...]:
+    return closing.waits(folded(round_dir))
 
 
 def run(capsys, *argv) -> str:
@@ -128,22 +128,22 @@ def run(capsys, *argv) -> str:
 # -- the write that closes a round -------------------------------------------------------
 
 def test_a_round_that_builds_nothing_closes_on_the_verdict_that_verifies_its_design(
-        folder):
-    fold(folder)
-    assert status(folder) == "open"
-    assert waits(folder) == ("step verify-design, ready",)
+        round_dir):
+    fold(round_dir)
+    assert status(round_dir) == "open"
+    assert waits(round_dir) == ("step verify-design, ready",)
 
-    verdict(folder)
+    verdict(round_dir)
 
-    assert types(folder)[-2:] == ["verdict.recorded", "round.closed"]
-    assert status(folder) == "closed"
+    assert types(round_dir)[-2:] == ["verdict.recorded", "round.closed"]
+    assert status(round_dir) == "closed"
 
 
 def test_the_closing_event_is_the_verb_s_own_and_holds_the_round_s_numbers(folder):
     fold(folder)
     verdict(folder)
 
-    recorded, closed = events(folder)[-2:]
+    recorded, closed = events(round_dir)[-2:]
 
     assert closed == {"v": 1, "n": recorded["n"] + 1, "at": closed["at"],
                       "actor": "critic", "type": "round.closed",
@@ -152,67 +152,67 @@ def test_the_closing_event_is_the_verb_s_own_and_holds_the_round_s_numbers(folde
     assert closed["numbers"]["design_passes"] == 1 and closed["numbers"]["folds"] == 1
 
 
-def test_a_verdict_that_sends_the_design_back_closes_nothing(folder):
-    fold(folder)
-    verdict(folder, "fold-first")
+def test_a_verdict_that_sends_the_design_back_closes_nothing(round_dir):
+    fold(round_dir)
+    verdict(round_dir, "fold-first")
 
-    assert status(folder) == "open"
-    assert "round.closed" not in types(folder)
+    assert status(round_dir) == "open"
+    assert "round.closed" not in types(round_dir)
 
 
 def test_a_round_with_a_question_open_closes_on_the_ruling_that_answers_the_last_one(
-        folder):
-    fold(folder, question("Q1", blocks='"none"'), question("Q2", blocks='"none"'))
-    verdict(folder)
-    assert waits(folder) == ("question Q1, open", "question Q2, open")
+        round_dir):
+    fold(round_dir, question("Q1", blocks='"none"'), question("Q2", blocks='"none"'))
+    verdict(round_dir)
+    assert waits(round_dir) == ("question Q1, open", "question Q2, open")
 
     rule("Q1", text="They do.")
-    assert status(folder) == "open"
+    assert status(round_dir) == "open"
     rule("Q2", text="They do not.")
 
-    assert types(folder)[-2:] == ["ruling.recorded", "round.closed"]
-    assert status(folder) == "closed"
+    assert types(round_dir)[-2:] == ["ruling.recorded", "round.closed"]
+    assert status(round_dir) == "closed"
 
 
-def test_a_parked_question_keeps_a_round_open_until_it_is_ruled(folder):
-    fold(folder, question("Q1", blocks='"none"'))
-    verdict(folder)
+def test_a_parked_question_keeps_a_round_open_until_it_is_ruled(round_dir):
+    fold(round_dir, question("Q1", blocks='"none"'))
+    verdict(round_dir)
     rule("park:Q1", until="round:proj-a/another")
 
-    assert waits(folder) == ("question Q1, parked",)
-    assert status(folder) == "open"
+    assert waits(round_dir) == ("question Q1, parked",)
+    assert status(round_dir) == "open"
 
     rule("Q1", text="They do.")
-    assert status(folder) == "closed"
+    assert status(round_dir) == "closed"
 
 
-def test_a_question_asked_after_the_design_is_what_the_close_waits_for(folder):
-    fold(folder)
-    asked = asking.ask(ROUND, ASKED, origin="comms:11", blocks="none", actor="scout").id
-    verdict(folder)
+def test_a_question_asked_after_the_design_is_what_the_close_waits_for(round_dir):
+    fold(round_dir)
+    asked = asking.ask(ROUND, ASKED, origin="comms:11", blocks="none", by="scout").id
+    verdict(round_dir)
 
-    assert waits(folder) == (f"question {asked}, open",)
+    assert waits(round_dir) == (f"question {asked}, open",)
     rule(f"withdraw:{asked}")
-    assert status(folder) == "closed"
+    assert status(round_dir) == "closed"
 
 
 def test_a_skip_of_the_design_s_verification_closes_a_round_whose_design_is_frozen(
-        folder):
-    fold(folder)
+        round_dir):
+    fold(round_dir)
 
     rule("skip:verify-design")
 
-    assert types(folder)[-2:] == ["ruling.recorded", "round.closed"]
-    assert status(folder) == "closed"
+    assert types(round_dir)[-2:] == ["ruling.recorded", "round.closed"]
+    assert status(round_dir) == "closed"
 
 
-def test_a_skip_recorded_before_the_design_closes_on_the_freezing(folder):
+def test_a_skip_recorded_before_the_design_closes_on_the_freezing(round_dir):
     rule("skip:verify-design")
-    assert waits(folder) == ("step design, ready",)
+    assert waits(round_dir) == ("step design, ready",)
 
-    fold(folder)
+    fold(round_dir)
 
-    assert types(folder)[-2:] == ["design.frozen", "round.closed"]
+    assert types(round_dir)[-2:] == ["design.frozen", "round.closed"]
 
 
 def test_a_round_whose_flow_ends_in_a_retro_closes_on_the_skip_of_it(opened):
@@ -223,23 +223,23 @@ def test_a_round_whose_flow_ends_in_a_retro_closes_on_the_skip_of_it(opened):
 
     rule("skip:retro")
 
-    assert types(folder)[-2:] == ["ruling.recorded", "round.closed"]
-    assert status(folder) == "closed"
+    assert types(round_dir)[-2:] == ["ruling.recorded", "round.closed"]
+    assert status(round_dir) == "closed"
 
 
 def test_a_retro_skipped_before_the_design_closes_on_the_freezing(opened):
-    folder = opened("review")
+    round_dir = opened("review")
     rule("skip:retro")
-    assert waits(folder) == ("step design, ready",)
+    assert waits(round_dir) == ("step design, ready",)
 
-    fold(folder)
+    fold(round_dir)
 
-    assert types(folder)[-2:] == ["design.frozen", "round.closed"]
+    assert types(round_dir)[-2:] == ["design.frozen", "round.closed"]
 
 
 def test_a_skipped_retro_reads_the_same_in_every_place_that_shows_it(opened, capsys):
-    folder = opened("review")
-    fold(folder, question("Q1", blocks='"none"'))
+    round_dir = opened("review")
+    fold(round_dir, question("Q1", blocks='"none"'))
     before = run(capsys, "show", ROUND)
     # Not due while the question holds the close.
     assert "step: retro, not-due\n" in before
@@ -258,13 +258,13 @@ def test_a_skipped_retro_reads_the_same_in_every_place_that_shows_it(opened, cap
         f"round {ROUND}   flow review   step none: every step of the flow is done or "
         "skipped",
         "close waits for: question Q1, open"]
-    assert waits(folder) == ("question Q1, open",)
-    assert api.round(ROUND)["step"] is None
+    assert waits(round_dir) == ("question Q1, open",)
+    assert api.round_data(ROUND)["step"] is None
 
 
 def test_a_skip_of_the_retro_taken_back_keeps_the_round_open_again(opened, capsys):
-    folder = opened("review")
-    fold(folder, question("Q1", blocks='"none"'))
+    round_dir = opened("review")
+    fold(round_dir, question("Q1", blocks='"none"'))
     rule("skip:retro")
 
     rule("revoke:C1")
@@ -272,27 +272,27 @@ def test_a_skip_of_the_retro_taken_back_keeps_the_round_open_again(opened, capsy
     assert waits(folder) == ("step retro, not-due", "question Q1, open")
     assert "step: retro, not-due\n" in run(capsys, "show", ROUND)
     rule("Q1", text="They do.")
-    assert status(folder) == "open"
+    assert status(round_dir) == "open"
 
 
 def test_a_flow_that_is_a_design_alone_closes_on_its_freezing(opened):
-    folder = opened("sketch")
-    assert status(folder) == "open"
+    round_dir = opened("sketch")
+    assert status(round_dir) == "open"
 
-    fold(folder)
+    fold(round_dir)
 
-    assert status(folder) == "closed"
+    assert status(round_dir) == "closed"
 
 
-def test_a_stage_in_the_plan_keeps_a_round_that_builds_nothing_open(folder):
-    fold(folder, stage("B1"))
-    verdict(folder)
-    assert waits(folder) == ("stage B1, not finished",)
-    assert status(folder) == "open"
+def test_a_stage_in_the_plan_keeps_a_round_that_builds_nothing_open(round_dir):
+    fold(round_dir, stage("B1"))
+    verdict(round_dir)
+    assert waits(round_dir) == ("stage B1, not finished",)
+    assert status(round_dir) == "open"
 
     rule("unstage:B1")
 
-    assert status(folder) == "closed"
+    assert status(round_dir) == "closed"
 
 
 # -- a flow that builds ------------------------------------------------------------------
@@ -397,36 +397,36 @@ def test_a_round_with_a_retro_step_waits_for_it_after_its_build(opened):
 CLOSED_LINE = f"closed {ROUND}: nothing is left for its close to wait for"
 
 
-def report(folder, word="publishable"):
-    path = folder / "a-report.md"
+def report(round_dir, word="publishable"):
+    path = round_dir / "a-report.md"
     path.write_text('# A report\n\n```toml rounds\nkind = "design"\n'
                     f'verdict = "{word}"\npass = "full"\nby = "critic"\n'
                     'model = "a-model"\ndesign = 1\n```\n', encoding="utf-8")
     return str(path)
 
 
-def test_the_verdict_that_closes_a_round_says_so_in_its_last_line(folder, capsys):
-    fold(folder)
+def test_the_verdict_that_closes_a_round_says_so_in_its_last_line(round_dir, capsys):
+    fold(round_dir)
 
-    printed = run(capsys, "verdict", ROUND, report(folder)).splitlines()
+    printed = run(capsys, "verdict", ROUND, report(round_dir)).splitlines()
 
     assert printed[-1] == CLOSED_LINE
     assert printed.count(CLOSED_LINE) == 1
 
 
-def test_a_verdict_that_closes_nothing_does_not_say_closed(folder, capsys):
-    fold(folder)
+def test_a_verdict_that_closes_nothing_does_not_say_closed(round_dir, capsys):
+    fold(round_dir)
 
-    printed = run(capsys, "verdict", ROUND, report(folder, "fold-first"))
+    printed = run(capsys, "verdict", ROUND, report(round_dir, "fold-first"))
 
     assert CLOSED_LINE not in printed.splitlines()
-    assert status(folder) == "open"
+    assert status(round_dir) == "open"
 
 
 def test_the_ruling_that_answers_the_last_question_says_it_closed_the_round(
         opened, capsys):
-    folder = opened("sketch")
-    (folder / "design.md").write_text(
+    round_dir = opened("sketch")
+    (round_dir / "design.md").write_text(
         "# A design\n\n```toml rounds\n" + question("Q1", blocks='"none"')
         + "\n```\n", encoding="utf-8")
     assert CLOSED_LINE not in run(capsys, "fold", ROUND).splitlines()
@@ -435,15 +435,15 @@ def test_the_ruling_that_answers_the_last_question_says_it_closed_the_round(
 
 
 def test_the_freezing_that_closes_a_round_says_so(opened, capsys):
-    folder = opened("sketch")
-    (folder / "design.md").write_text("# A design\n\n```toml rounds\n```\n",
+    round_dir = opened("sketch")
+    (round_dir / "design.md").write_text("# A design\n\n```toml rounds\n```\n",
                                       encoding="utf-8")
 
     assert run(capsys, "fold", ROUND).splitlines()[-1] == CLOSED_LINE
 
 
-def test_the_skip_that_closes_a_round_says_so(folder, capsys):
-    fold(folder)
+def test_the_skip_that_closes_a_round_says_so(round_dir, capsys):
+    fold(round_dir)
 
     assert run(capsys, "rule", ROUND, "skip:verify-design", "--record",
                PTR).splitlines()[-1] == CLOSED_LINE
@@ -463,8 +463,8 @@ def test_a_round_opened_on_a_flow_with_no_steps_is_said_to_be_closed_by_open(
     assert status(tmp_path / "notes" / "rounds" / "a-round") == "closed"
 
 
-def test_a_write_to_a_round_already_closed_does_not_say_closed_again(folder, capsys):
-    fold(folder)
+def test_a_write_to_a_round_already_closed_does_not_say_closed_again(round_dir, capsys):
+    fold(round_dir)
     rule("skip:verify-design")
 
     printed = run(capsys, "rule", ROUND, "revoke:C1", "--record", PTR)
@@ -472,19 +472,19 @@ def test_a_write_to_a_round_already_closed_does_not_say_closed_again(folder, cap
     assert CLOSED_LINE not in printed.splitlines()
 
 
-def test_a_verb_that_is_refused_says_nothing_of_a_close(folder, capsys):
-    fold(folder)
-    verdict(folder)
+def test_a_verb_that_is_refused_says_nothing_of_a_close(round_dir, capsys):
+    fold(round_dir)
+    verdict(round_dir)
 
     assert main(["ask", ROUND, ASKED, "--from", PTR]) != 0
 
     assert "closed proj-a/a-round:" not in capsys.readouterr().out
 
 
-def test_only_the_writes_made_while_watching_are_collected(folder):
+def test_only_the_writes_made_while_watching_are_collected(round_dir):
     from moxi_rounds import write
 
-    fold(folder)
+    fold(round_dir)
     with write.watching() as writes:
         rule("skip:verify-design")
     rule("revoke:C1")
@@ -495,8 +495,8 @@ def test_only_the_writes_made_while_watching_are_collected(folder):
 # -- a close that stopped short ----------------------------------------------------------
 
 def test_a_close_that_failed_is_reported_and_made_by_the_next_write(
-        folder, monkeypatch, capsys):
-    fold(folder)
+        round_dir, monkeypatch, capsys):
+    fold(round_dir)
     with monkeypatch.context() as patched:
         def fails(_state, **_given):
             raise OSError("no room")
@@ -504,85 +504,85 @@ def test_a_close_that_failed_is_reported_and_made_by_the_next_write(
         made = rule("skip:verify-design")
 
     assert [str(error) for _what, error in made.failed] == ["no room"]
-    assert types(folder)[-1] == "ruling.recorded" and status(folder) == "open"
+    assert types(round_dir)[-1] == "ruling.recorded" and status(round_dir) == "open"
     assert ("close waits for: nothing; the next write to the round closes it\n"
             in run(capsys, "show", ROUND))
 
     run(capsys, "mark", ROUND, made.id, "--shown", "--record", SHOWN)
 
-    assert types(folder)[-3:] == ["ruling.recorded", "ruling.shown", "round.closed"]
-    assert status(folder) == "closed"
+    assert types(round_dir)[-3:] == ["ruling.recorded", "ruling.shown", "round.closed"]
+    assert status(round_dir) == "closed"
 
 
 def test_a_verb_stopped_before_the_close_leaves_it_to_the_next_write(
-        folder, monkeypatch, capsys):
-    fold(folder)
+        round_dir, monkeypatch, capsys):
+    fold(round_dir)
     with monkeypatch.context() as patched:
         def stops(_state, **_given):
             raise KeyboardInterrupt
         patched.setattr(closing, "entry", stops)
         with pytest.raises(KeyboardInterrupt):
             rule("skip:verify-design")
-    assert types(folder)[-1] == "ruling.recorded" and status(folder) == "open"
+    assert types(round_dir)[-1] == "ruling.recorded" and status(round_dir) == "open"
 
     run(capsys, "mark", ROUND, "C1", "--shown", "--record", SHOWN)
 
-    assert types(folder)[-1] == "round.closed"
+    assert types(round_dir)[-1] == "round.closed"
 
 
 def test_a_write_that_appends_nothing_still_makes_a_close_that_stopped_short(
-        folder, monkeypatch, capsys):
-    fold(folder)
+        round_dir, monkeypatch, capsys):
+    fold(round_dir)
     with monkeypatch.context() as patched:
         def fails(_state, **_given):
             raise OSError("no room")
         patched.setattr(closing, "entry", fails)
         rule("skip:verify-design")
         run(capsys, "mark", ROUND, "C1", "--shown", "--record", SHOWN)
-    assert types(folder)[-1] == "ruling.shown" and status(folder) == "open"
-    before = len(events(folder))
+    assert types(round_dir)[-1] == "ruling.shown" and status(round_dir) == "open"
+    before = len(events(round_dir))
 
     # The ruling is marked as shown already, so this verb has nothing of its own to
     # record.
     printed = run(capsys, "mark", ROUND, "C1", "--shown", "--record", SHOWN)
 
-    assert types(folder)[before:] == ["round.closed"]
+    assert types(round_dir)[before:] == ["round.closed"]
     assert printed.splitlines()[-1] == CLOSED_LINE
 
 
 def test_every_step_of_the_flow_keeps_a_round_open_not_only_the_design_s(
         opened, capsys):
-    folder = opened("studied")
-    fold(folder)
+    round_dir = opened("studied")
+    fold(round_dir)
 
-    verdict(folder)
+    verdict(round_dir)
 
     assert types(folder)[-1] == "verdict.recorded" and status(folder) == "open"
     assert waits(folder) == ("step retro, ready",)
     rule("skip:retro")
-    assert status(folder) == "closed"
+    assert status(round_dir) == "closed"
 
 
 # -- a closed round ----------------------------------------------------------------------
 
 @pytest.fixture
-def closed(folder):
-    fold(folder)
+def closed(round_dir):
+    fold(round_dir)
     rule("skip:verify-design")
-    assert status(folder) == "closed"
-    return folder
+    assert status(round_dir) == "closed"
+    return round_dir
 
 
 def test_a_closed_round_takes_no_new_work(closed):
     with pytest.raises(Refused) as refused:
-        asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+        asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
     assert "was closed and stays as it ended" in str(refused.value)
     with pytest.raises(Refused):
         fold(closed)
     with pytest.raises(Refused):
         rule(text="A new ruling.")
     with pytest.raises(Refused):
-        dropping.drop(ROUND, by="operator", record=PTR, actor="planner")
+        dropping.drop(ROUND, by="operator", record=PTR, run_by="planner")
 
 
 def test_a_write_to_a_closed_round_does_not_close_it_again(closed, capsys):
@@ -593,17 +593,17 @@ def test_a_write_to_a_closed_round_does_not_close_it_again(closed, capsys):
     assert status(closed) == "closed"
 
 
-def test_a_dropped_round_is_not_closed_by_a_later_write(folder, monkeypatch, capsys):
-    fold(folder)
+def test_a_dropped_round_is_not_closed_by_a_later_write(round_dir, monkeypatch, capsys):
+    fold(round_dir)
     with monkeypatch.context() as patched:
         patched.setattr(closing, "entry", lambda _state, **_given: None)
         rule("skip:verify-design")
-        dropping.drop(ROUND, by="operator", record=PTR, actor="planner")
+        dropping.drop(ROUND, by="operator", record=PTR, run_by="planner")
 
     run(capsys, "mark", ROUND, "C1", "--shown", "--record", SHOWN)
 
-    assert "round.closed" not in types(folder)
-    assert status(folder) == "dropped"
+    assert "round.closed" not in types(round_dir)
+    assert status(round_dir) == "dropped"
 
 
 def test_a_closed_round_is_shown_as_closed_with_when(closed, capsys):
@@ -656,21 +656,21 @@ def test_a_closed_round_s_note_and_its_export_say_so(closed, capsys):
 
 # -- what an open round says of its close ------------------------------------------------
 
-def test_an_open_round_is_shown_with_what_its_close_waits_for(folder, capsys):
-    fold(folder, question("Q1", blocks='"none"'), stage("B1"))
+def test_an_open_round_is_shown_with_what_its_close_waits_for(round_dir, capsys):
+    fold(round_dir, question("Q1", blocks='"none"'), stage("B1"))
 
     said = "step verify-design, ready; stage B1, not finished; question Q1, open"
     assert f"close waits for: {said}\n" in run(capsys, "show", ROUND)
     assert json.loads(run(capsys, "show", ROUND, "--json"))["close"] == {
         "waits": said.split("; ")}
-    assert api.round(ROUND)["close"] == {"waits": said.split("; ")}
-    note = (folder / "round-note.md").read_text(encoding="utf-8")
+    assert api.round_data(ROUND)["close"] == {"waits": said.split("; ")}
+    note = (round_dir / "round-note.md").read_text(encoding="utf-8")
     assert f"- close waits for: {said}\n" in note
 
 
-def test_a_round_at_no_step_is_told_what_keeps_it_open(folder, capsys):
-    fold(folder, question("Q1", blocks='"none"'))
-    verdict(folder)
+def test_a_round_at_no_step_is_told_what_keeps_it_open(round_dir, capsys):
+    fold(round_dir, question("Q1", blocks='"none"'))
+    verdict(round_dir)
     rule("park:Q1", until="round:proj-a/another")
 
     assert run(capsys, "next", ROUND).splitlines()[:2] == [
@@ -683,10 +683,10 @@ def test_a_round_at_no_step_is_told_what_keeps_it_open(folder, capsys):
 
 def test_a_parked_question_whose_wait_is_over_has_one_state_in_what_show_prints(
         opened, capsys):
-    folder = opened("sketch")
+    round_dir = opened("sketch")
     opening.open_round("proj-a/another", description="a placeholder round",
-                       actor="planner", flow="empty")
-    fold(folder, question("Q1", blocks='"none"'))
+                       by="planner", flow="empty")
+    fold(round_dir, question("Q1", blocks='"none"'))
     rule("park:Q1", until="round:proj-a/another")
 
     shown = run(capsys, "show", ROUND)
@@ -698,29 +698,29 @@ def test_a_parked_question_whose_wait_is_over_has_one_state_in_what_show_prints(
     assert [one["state"] for one in as_data["questions"]] == ["open"]
     assert json.loads(run(capsys, "next", ROUND, "--json"))["close"] == {
         "waits": ["question Q1, open"]}
-    assert api.round(ROUND)["close"] == {"waits": ["question Q1, open"]}
+    assert api.round_data(ROUND)["close"] == {"waits": ["question Q1, open"]}
     # Whether the round closes reads its own log alone, and is the same either way.
-    assert waits(folder) == ("question Q1, parked",)
-    assert status(folder) == "open"
+    assert waits(round_dir) == ("question Q1, parked",)
+    assert status(round_dir) == "open"
 
 
 def test_a_question_parked_until_a_round_still_open_is_named_as_parked(opened, capsys):
-    folder = opened("sketch")
+    round_dir = opened("sketch")
     opening.open_round("proj-a/another", description="a placeholder round",
-                       actor="planner", flow="paper")
-    fold(folder, question("Q1", blocks='"none"'))
+                       by="planner", flow="paper")
+    fold(round_dir, question("Q1", blocks='"none"'))
     rule("park:Q1", until="round:proj-a/another")
 
     assert "close waits for: question Q1, parked\n" in run(capsys, "show", ROUND)
 
 
 def test_the_questions_the_close_waits_for_are_the_ones_the_hold_rule_gives(
-        folder, monkeypatch):
-    fold(folder, question("Q1", blocks='"none"'), question("Q2"), question("Q3"))
-    verdict(folder)
+        round_dir, monkeypatch):
+    fold(round_dir, question("Q1", blocks='"none"'), question("Q2"), question("Q3"))
+    verdict(round_dir)
     rule("park:Q2", until="round:proj-a/another")
     rule("withdraw:Q3")
-    found = folded(folder)
+    found = folded(round_dir)
     assert closing.waits(found) == tuple(
         f"question {one.id}, {one.state}" for one in holds.on_close(found))
     assert closing.waits(found) == ("question Q1, open", "question Q2, parked")
@@ -730,10 +730,10 @@ def test_the_questions_the_close_waits_for_are_the_ones_the_hold_rule_gives(
     assert closing.waits(found) == () and closing.is_due(found)
 
 
-def test_what_a_close_waits_for_is_read_from_the_state_alone(folder):
-    fold(folder, question("Q1", blocks='"none"'))
-    found = folded(folder)
-    (folder / "design.md").unlink()
+def test_what_a_close_waits_for_is_read_from_the_state_alone(round_dir):
+    fold(round_dir, question("Q1", blocks='"none"'))
+    found = folded(round_dir)
+    (round_dir / "design.md").unlink()
 
     assert closing.waits(found) == ("step verify-design, ready", "question Q1, open")
     assert not closing.is_due(found) and closing.entry(found) is None

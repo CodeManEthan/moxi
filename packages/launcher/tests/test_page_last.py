@@ -478,7 +478,7 @@ def _log() -> list[store.LaunchRow]:
 
 # --- whose launch -----------------------------------------------------------------------------
 
-def test_the_last_launch_is_the_seats_else_the_projects_else_the_folders(world):
+def test_the_last_launch_is_the_seats_else_the_projects_else_the_dirs(world):
     root = str(world.root)
     launch({"seat": "planner", "values": {"model": "sonnet"}}, "planner")
     launch({"seat": "coder", "values": {"sandbox": "danger-full-access"},
@@ -571,7 +571,7 @@ def test_recents_list_only_launches_this_user_made_afresh_that_ran(world, monkey
         assert said["request"] is None and said["shows"] is None
 
 
-def test_recents_are_the_seats_else_the_projects_else_the_folders(world):
+def test_recents_are_the_seats_else_the_projects_else_the_dirs(world):
     root = str(world.root)
     launch({"seat": "planner", "values": {"model": "sonnet"}}, "planner")
     launch({"seat": "coder", "values": {"sandbox": "danger-full-access"},

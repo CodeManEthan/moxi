@@ -37,26 +37,26 @@ def rounds(tmp_path, add_project, capsys, monkeypatch):
     add_project("proj-a", notes_root=tmp_path / "notes-a")
     add_project("proj-b", notes_root=tmp_path / "notes-b")
     for name in (A, B, C):
-        opening.open_round(name, description="a placeholder round", actor="planner",
+        opening.open_round(name, description="a placeholder round", by="planner",
                            flow="fix", at=T1)
-    folder = tmp_path / "notes-a" / "rounds"
+    rounds_dir = tmp_path / "notes-a" / "rounds"
     for stage in ("B1", "B2"):
-        log.append(log.round_log(folder / "a-round"), "stage.declared",
+        log.append(log.round_log(rounds_dir / "a-round"), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     capsys.readouterr()
     real = log.stamp
     monkeypatch.setattr(log, "stamp", lambda when_s=None: NOW if when_s is None
                         else real(when_s))
-    return folder
+    return rounds_dir
 
 
-def ask(target=A, text=SAID, *, at=T1, actor="scout", origin="comms:11", **more):
-    return asking.ask(target, text, actor=actor, origin=origin, at=at, **more)
+def ask(target=A, text=SAID, *, at=T1, by="scout", origin="comms:11", **more):
+    return asking.ask(target, text, by=by, origin=origin, at=at, **more)
 
 
 def rule(target=A, *, at=T5, record="comms:12", **more):
-    return ruling.rule(target, record=record, actor="planner", at=at, **more)
+    return ruling.rule(target, record=record, by="planner", at=at, **more)
 
 
 def printed(capsys, *argv):
@@ -69,16 +69,16 @@ def data(capsys, *argv):
     return json.loads(printed(capsys, *argv, "--json"))
 
 
-def logs(*folders):
+def logs(*root_dirs):
     """Every log under the folders, with its bytes and the time it was last written."""
     return {str(path): (path.read_bytes(), path.stat().st_mtime_ns)
-            for folder in folders for path in sorted(folder.rglob("*.jsonl"))}
+            for root_dir in root_dirs for path in sorted(root_dir.rglob("*.jsonl"))}
 
 
 def spoil(rounds, slug="a-round"):
     """Make a round's log one that can't be read."""
-    with log.round_log(rounds / slug).open("ab") as file:
-        file.write(b"not an event\n")
+    with log.round_log(rounds / slug).open("ab") as fh:
+        fh.write(b"not an event\n")
 
 
 # -- the rounds --------------------------------------------------------------------------
@@ -145,7 +145,7 @@ def test_a_project_named_keeps_the_rounds_to_its_own(rounds, capsys):
 def test_a_ruling_shown_or_read_back_is_not_counted(rounds, capsys):
     rule(text=RULED, at=T2)
     rule(text=RULED, at=T3)
-    shown.mark(A, "C1", record="comms:20", actor="planner")
+    shown.mark(A, "C1", record="comms:20", by="planner")
     assert data(capsys)["rounds"][0]["counts"]["not_shown"] == 1
 
     rule("proj-a", item=f"readback={T3}", record="comms:90", at=T6)
@@ -159,7 +159,7 @@ def test_a_parked_question_whose_wait_is_over_is_counted_as_open(rounds, capsys)
         "open": 0, "parked": 1, "not_shown": 1}
 
     log.append(log.round_log(rounds / "a-round"), "finish.done",
-               {"stage": "B2", "tip": "1" * 40}, actor="pilot")
+               {"stage": "B2", "tip": "1" * 40}, by="pilot")
     assert data(capsys)["rounds"][0]["counts"] == {
         "open": 1, "parked": 0, "not_shown": 1}
 
@@ -179,7 +179,7 @@ def numbers_of(rounds, slug):
 def test_a_dropped_round_is_listed_only_among_the_ended_with_how_and_when(
         rounds, capsys):
     rule(B, text=RULED)
-    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T6)
+    dropping.drop(B, by="operator", record="comms:30", run_by="planner", at=T6)
 
     assert [one["name"] for one in data(capsys)["rounds"]] == [A, C]
     assert B not in printed(capsys) and B not in printed(capsys, "proj-a")
@@ -195,7 +195,7 @@ def test_a_dropped_round_is_listed_only_among_the_ended_with_how_and_when(
 
 
 def test_a_dropped_round_is_listed_the_same_with_no_index(rounds, capsys):
-    dropping.drop(B, by="lead", record="comms:30", actor="planner", at=T6)
+    dropping.drop(B, by="lead", record="comms:30", run_by="planner", at=T6)
     paths.index_file().unlink()
 
     assert listing.rounds(ended=True).rounds[0].ended == {
@@ -208,7 +208,7 @@ def test_nothing_of_a_dropped_round_waits_on_the_operator(rounds, capsys):
     # after the drop, which reopens nothing.
     ask(B)
     rule(B, item="Q1", text="They do.", at=T3)
-    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T4)
+    dropping.drop(B, by="operator", record="comms:30", run_by="planner", at=T4)
     rule(B, item="revoke:C1", at=T5)
     ask(A, OTHER)
 
@@ -278,8 +278,8 @@ def test_a_project_whose_own_log_cant_be_read_is_named_and_its_counts_not_known(
         rounds, capsys):
     ask()
     rule("proj-a", text=RULED, at=T2)
-    with log.project_log(rounds).open("ab") as file:
-        file.write(b"not an event\n")
+    with log.project_log(rounds).open("ab") as fh:
+        fh.write(b"not an event\n")
 
     out = printed(capsys)
     assert out.splitlines()[0] == (
@@ -294,7 +294,7 @@ def test_a_project_whose_own_log_cant_be_read_is_named_and_its_counts_not_known(
     assert str(log.project_log(rounds)) in reason
 
 
-def test_a_project_with_no_rounds_folder_is_named_and_the_rest_listed(
+def test_a_project_with_no_rounds_dir_is_named_and_the_rest_listed(
         rounds, add_project, without_notes, capsys):
     add_project("box-1")
     capsys.readouterr()
@@ -313,10 +313,10 @@ def waiting_setup():
     one on a project's list, a parked one, and three rulings."""
     ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
     ask(text=OTHER, at=T2, blocks="B2")
-    ask("proj-a", text=THIRD, at=T3, actor="critic")
+    ask("proj-a", text=THIRD, at=T3, by="critic")
     rule(item="park:Q2", until="B2", at=T4)
     rule(text=RULED, at=T5)
-    ask(C, at=T2, actor="helper", origin="https://example.test/q")
+    ask(C, at=T2, by="helper", origin="https://example.test/q")
     rule("proj-b", text=RULED, at=T3, record="https://example.test/said")
 
 
@@ -475,7 +475,7 @@ def test_a_question_ruled_or_a_ruling_shown_waits_no_longer(rounds, capsys):
     assert [row["id"] for row in data(capsys, "--waiting")["not_shown"][0]["rows"]] == [
         "C1"]
 
-    shown.mark(A, "C1", record="comms:20", actor="planner")
+    shown.mark(A, "C1", record="comms:20", by="planner")
     assert data(capsys, "--waiting")["not_shown"] == []
 
 
@@ -484,7 +484,7 @@ def test_a_question_moved_to_the_projects_list_waits_with_where_it_came_from(
     from moxi_rounds import moving
 
     ask()
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
 
     [found] = data(capsys, "proj-a", "--waiting")["open"]
     assert (found["holder"], found["id"], found["moved_from"]) == (
@@ -531,7 +531,7 @@ def test_a_listing_brings_the_index_up_to_logs_written_elsewhere(rounds, capsys)
     ask()
     log.append(log.round_log(rounds / "a-round"), "question.asked",
                {"id": "Q2", "text": OTHER, "from": "comms:13", "blocks": "all",
-                "state": "open", "asked_by": "helper", "asked_at": T2}, actor="helper")
+                "state": "open", "asked_by": "helper", "asked_at": T2}, by="helper")
     assert index.disagreements([_home("proj-a"), _home("proj-b")]) != []
 
     assert data(capsys)["rounds"][0]["counts"]["open"] == 2

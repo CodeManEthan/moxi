@@ -141,7 +141,7 @@ def test_with_executables_from_clashes_when_modules_declare_moxi(uv):
     assert "Executable already exists: moxi" in done.stderr
 
 
-def test_a_plain_environment_loses_moxi_with_a_module(uv):
+def test_a_plain_env_loses_moxi_with_a_module(uv):
     venv = uv.tmp / "venv"
     uv("venv", str(venv))
     python = str(venv / "bin" / "python")

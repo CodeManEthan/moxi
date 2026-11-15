@@ -342,7 +342,7 @@ def test_a_project_that_is_not_a_table_is_refused():
 
 # -- a relative rounds folder ------------------------------------------------------------
 
-def test_a_relative_dir_is_refused_for_a_project_with_no_notes_folder(
+def test_a_relative_dir_is_refused_for_a_project_with_no_notes_dir(
         add_project, without_notes):
     add_project("proj-a")
     error = refusal(project('dir = "designs"'))
@@ -353,34 +353,34 @@ def test_a_relative_dir_is_refused_for_a_project_with_no_notes_folder(
     assert "moxi projects set proj-a --notes-root" in error.fix
 
 
-def test_a_relative_dir_is_accepted_when_the_projects_record_names_a_notes_folder(
+def test_a_relative_dir_is_accepted_when_the_projects_record_names_a_notes_dir(
         add_project, without_notes, tmp_path):
     add_project("proj-a", notes_root=tmp_path / "notes" / "proj-a")
-    assert settings.has_notes_folder("proj-a") is True
+    assert settings.has_notes_dir("proj-a") is True
     assert settings.check_text(project('dir = "designs"')) is None
 
 
-def test_a_relative_dir_is_accepted_when_notes_gives_the_project_a_folder(add_project):
+def test_a_relative_dir_is_accepted_when_notes_gives_the_project_a_dir(add_project):
     add_project("proj-a")
-    assert settings.has_notes_folder("proj-a") is True
+    assert settings.has_notes_dir("proj-a") is True
     assert settings.check_text(project('dir = "designs"')) is None
 
 
-def test_an_absolute_dir_is_accepted_for_a_project_with_no_notes_folder(
+def test_an_absolute_dir_is_accepted_for_a_project_with_no_notes_dir(
         add_project, without_notes, tmp_path):
     add_project("proj-a")
-    assert settings.has_notes_folder("proj-a") is False
+    assert settings.has_notes_dir("proj-a") is False
     assert settings.check_text(project(f'dir = "{tmp_path / "rounds"}"')) is None
     assert settings.check_text(project('dir = "~/rounds"')) is None
 
 
 def test_a_relative_dir_is_not_judged_for_a_project_the_list_does_not_hold(
         without_notes):
-    assert settings.has_notes_folder("proj-a") is None
+    assert settings.has_notes_dir("proj-a") is None
     assert settings.check_text(project('dir = "designs"')) is None
 
 
-def test_two_tables_whose_dirs_reach_one_folder_are_refused(tmp_path):
+def test_two_tables_whose_dirs_reach_one_dir_are_refused(tmp_path):
     (tmp_path / "rounds").mkdir()
     (tmp_path / "link").symlink_to(tmp_path / "rounds")
     error = refusal(f'[projects.proj-a]\ndir = "{tmp_path / "rounds"}"\n\n'
@@ -391,7 +391,7 @@ def test_two_tables_whose_dirs_reach_one_folder_are_refused(tmp_path):
     assert "proj-a" in error.fix and "proj-b" in error.fix
 
 
-def test_two_relative_dirs_in_one_notes_folder_are_refused(
+def test_two_relative_dirs_in_one_notes_dir_are_refused(
         add_project, without_notes, tmp_path):
     add_project("proj-a", notes_root=tmp_path / "notes")
     add_project("proj-b", notes_root=tmp_path / "notes")
@@ -400,7 +400,7 @@ def test_two_relative_dirs_in_one_notes_folder_are_refused(
     assert error.key == "projects.proj-b.dir"
 
 
-def test_two_tables_with_a_folder_each_pass_the_check(tmp_path):
+def test_two_tables_with_a_dir_each_pass_the_check(tmp_path):
     assert settings.check_text(f'[projects.proj-a]\ndir = "{tmp_path / "one"}"\n\n'
                                f'[projects.proj-b]\ndir = "{tmp_path / "two"}"\n'
                                ) is None

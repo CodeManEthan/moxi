@@ -69,7 +69,7 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
     return listing.rounds(project, ended=status == _CLOSED, refresh=False).data()
 
 
-def round(name: str) -> dict:
+def round_data(name: str) -> dict:
     """The round `name`, `<project>/<slug>`: its head (`name`, `project`, `slug`,
     `folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,
     `step`, `close`, `skips`, `stages`, `versions`, `standing`, `trace`, `threads`,

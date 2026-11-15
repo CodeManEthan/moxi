@@ -186,14 +186,14 @@ def asked(state: states.State, *, name: str = "ROUND") -> Asked | None:
                  tier=tier, version=current.n, since=since)
 
 
-def files(folder: Path | str, found: Asked | None) -> tuple[Path, Path] | None:
+def files(round_dir: Path | str, found: Asked | None) -> tuple[Path, Path] | None:
     """The two frozen files a re-check compares, in the folder of the round: the
     newest version a pass read and the current one. None when `found` asks for no
     re-check, or for one that has nothing to read yet."""
     if (found is None or found.pass_ != RECHECK or found.since is None
             or found.version is None):
         return None
-    return versions.file(folder, found.since), versions.file(folder, found.version)
+    return versions.file(round_dir, found.since), versions.file(round_dir, found.version)
 
 
 # -- a change of records only ------------------------------------------------------------
@@ -215,7 +215,7 @@ def settled(state: states.State) -> frozenset[str]:
                      if one.state in (questions.RULED, questions.WITHDRAWN))
 
 
-def differences(before: dict, now: dict, *, settled=()) -> list[str]:
+def differences(before: dict, current: dict, *, settled=()) -> list[str]:
     """Where what the gates read differs between two versions' declarations, each as
     a line: a question or a stage that only one of them has, a question that holds up
     other stages, a stage that builds elsewhere or waits for other stages. A
@@ -225,7 +225,7 @@ def differences(before: dict, now: dict, *, settled=()) -> list[str]:
     question still asked that is gone is a difference, as is any stage."""
     found = []
     for kind, what in ((states.QUESTION, "question"), (states.STAGE, "stage")):
-        was, new = _by_id(before, kind), _by_id(now, kind)
+        was, new = _by_id(before, kind), _by_id(current, kind)
         found += [f"the {what} {one} is new" for one in new if one not in was]
         found += [f"the {what} {one} is gone" for one in was if one not in new
                   and not (kind == states.QUESTION and one in settled)]
@@ -270,14 +270,14 @@ class Decided:
     found: bool = False
 
 
-def decide(name: str, thread: str, decision: str, *, record: str | None, actor: str,
+def decide(name: str, thread: str, decision: str, *, record: str | None, by: str,
            settings=None, wait_s: float = write.WAIT_S, at: str | None = None) -> Decided:
     """Record the lead's decision on the thread `thread` of the verification of the
     design of the round `name`, `<project>/<slug>`: `CLOSE` or `ACCEPT_RISK`. The
     design then stands at `lead-decision` for its current version.
 
     - `record`: the pointer to where the lead wrote why.
-    - `actor`: who records it, the event's actor.
+    - `by`: who records it, the event's actor.
 
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject`,
     `NoFolder` or `NoRound` for a round that can't be found, and `Refused` when the
@@ -347,7 +347,7 @@ def decide(name: str, thread: str, decision: str, *, record: str | None, actor: 
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a decision on a thread"),
                    has_a_pointer, was_sent_back_twice, was_frozen_since],
             event=decided, wait_s=wait_s, at=at)

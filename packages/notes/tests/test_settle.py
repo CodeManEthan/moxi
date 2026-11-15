@@ -42,7 +42,7 @@ def committed_once(w):
     """A first commit at time 0 by a pass that is not a settler's."""
     def proc():
         edit(w, "first")
-        yield from run_pass(w, 0, False)
+        yield from run_pass(w, 0, settle_pass=False)
     w.spawn(proc())
 
 
@@ -85,7 +85,7 @@ def hooked_settler(w, at_t, **hooks) -> Hooked:
     return ops
 
 
-def newcomer(w, expect_lock=False):
+def newcomer(w, *, expect_lock=False):
     """A process with a commit duty: its edit, its raise, its lock try, all at once."""
     ops = Ops(w, "newcomer")
     ops.pid = w.spawn(iter(()))
@@ -110,7 +110,7 @@ def test_a_counter_below_one_read_or_a_new_generation_is_an_open_request():
     assert steps.is_open((None, 0), ("g", 1))
 
 
-def test_a_holder_goes_round_again_when_the_runtime_folder_is_cleared_under_it():
+def test_a_holder_goes_round_again_when_the_runtime_dir_is_cleared_under_it():
     w = world()
     committed_once(w)
     at(w, 30, lambda w: edit(w, "a"))
@@ -198,7 +198,8 @@ def test_a_third_process_that_takes_the_lock_first_covers_that_request():
 
     def third(w):
         ops = newcomer(w, expect_lock=True)
-        first = steps.Pass("throttled", w.now, w.now, True, interval=w.I, backoff=w.K)
+        first = steps.Pass("throttled", w.now, w.now, held_lock=True,
+                           interval=w.I, backoff=w.K)
         ops.pid = w.spawn(steps._hold(ops, first, ops.raised, []))
         taken.append(ops)
 
@@ -269,14 +270,16 @@ def test_a_busy_push_retry_runs_again_a_minute_after_it_started():
 
 def test_two_unpushed_commits_keep_two_due_times():
     dues: list[float] = []
-    steps._discharge(dues, steps.Pass("committed", 0, 0, True, unpushed=True, backoff=K))
-    steps._discharge(dues, steps.Pass("committed", 100, 100, True, unpushed=True, backoff=K))
+    steps._discharge(dues, steps.Pass("committed", 0, 0, held_lock=True,
+                                      unpushed=True, backoff=K))
+    steps._discharge(dues, steps.Pass("committed", 100, 100, held_lock=True,
+                                      unpushed=True, backoff=K))
     assert dues == [K, K + 100]
-    steps._discharge(dues, steps.Pass("throttled", 200, 250, True))
+    steps._discharge(dues, steps.Pass("throttled", 200, 250, held_lock=True))
     assert dues == [K, K + 100]  # a pass that ended before both clears neither
-    steps._discharge(dues, steps.Pass("busy", K, K + 10, False))
+    steps._discharge(dues, steps.Pass("busy", K, K + 10, held_lock=False))
     assert dues == [K, K + 100]  # a pass that held no lock clears nothing
-    steps._discharge(dues, steps.Pass("throttled", K, K + 10, True))
+    steps._discharge(dues, steps.Pass("throttled", K, K + 10, held_lock=True))
     assert dues == [K + 100]  # the earlier is cleared, never the later
 
 

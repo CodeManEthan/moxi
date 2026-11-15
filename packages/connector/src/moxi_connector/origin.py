@@ -149,8 +149,8 @@ def parse(text: str) -> Origin:
     try:
         parts = urlsplit(text)
         port = parts.port
-    except ValueError as e:
-        raise BadOrigin(f"{text!r} is not a URL: {e}") from None
+    except ValueError as exc:
+        raise BadOrigin(f"{text!r} is not a URL: {exc}") from None
     if parts.scheme.lower() != "https":
         raise BadOrigin(f"{text!r} is not https://")
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
@@ -201,8 +201,8 @@ def tunnel_address():
         return None
     try:
         return found.api.address(*TARGET)
-    except Exception as e:  # noqa: BLE001 - an unreadable record is no address
-        log.warning("tunnel's record couldn't be read: %s", e)
+    except Exception as exc:  # noqa: BLE001 - an unreadable record is no address
+        log.warning("tunnel's record couldn't be read: %s", exc)
         return None
 
 
@@ -213,8 +213,8 @@ def read(public_url: str, tunnel: Callable[[], object] = tunnel_address) -> Orig
     if public_url and public_url.strip():
         try:
             return parse(public_url)
-        except BadOrigin as e:
-            log.warning("public_url is not served: %s", e)
+        except BadOrigin as exc:
+            log.warning("public_url is not served: %s", exc)
             return None
     return from_address(tunnel())
 

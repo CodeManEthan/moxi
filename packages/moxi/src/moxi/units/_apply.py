@@ -89,13 +89,13 @@ def apply_held(changes: Sequence[UnitChange], *, replace: bool = False,
             done[id(change)] = Applied(change, change.cause == "editable", (change.reason,))
         elif change.action == "skip":
             say(change.reason)
-            done[id(change)] = Applied(change, True, (change.reason,))
+            done[id(change)] = Applied(change, ok=True, lines=(change.reason,))
         elif change.action == "keep" and not restart:
-            done[id(change)] = Applied(change, True)
+            done[id(change)] = Applied(change, ok=True)
         elif change.action in ("add", "change") and _held(change, recorded):
             line = _held_line(change, sharers(change, changes))
             say(line)
-            done[id(change)] = Applied(change, True, (line,))
+            done[id(change)] = Applied(change, ok=True, lines=(line,))
         elif change.action in ("add", "change", "remove", "keep"):
             act.append(change)
         else:
@@ -106,9 +106,9 @@ def apply_held(changes: Sequence[UnitChange], *, replace: bool = False,
             for change in act:
                 line = f"{change.unit}: no supervisor on this system; nothing was written"
                 say(line)
-                done[id(change)] = Applied(change, False, (line,))
+                done[id(change)] = Applied(change, ok=False, lines=(line,))
         else:
-            io = _io(impl, runner, say, replace)
+            io = _io(impl, runner, say, replace=replace)
             impl.apply(act, restart=restart, io=io)
             for change in act:
                 done[id(change)] = io.result(change)
@@ -130,7 +130,7 @@ def remove(module: str, *, runner=None, say: Callable[[str], object] = print
                    for ref in impl.marked(module)]
         out: list[Applied] = []
         if changes:
-            io = _io(impl, runner, say, False)
+            io = _io(impl, runner, say, replace=False)
             impl.apply(changes, restart=False, io=io)
             out = [io.result(change) for change in changes]
         for acted in impl.unwrap_all(module, fence(impl, runner)):
@@ -147,10 +147,10 @@ def fence(impl, runner=None) -> Fence:
     return Fence(impl.supervisor, runner or getattr(impl, "runner", None))
 
 
-def _io(impl, runner, say, replace: bool) -> ApplyIO:
+def _io(impl, runner, say, *, replace: bool) -> ApplyIO:
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     io = ApplyIO(fence(impl, runner), say=say, replace=replace,
-                 displaced=lambda path: _displaced(stamp, path))
+                 on_displaced=lambda path: _displaced(stamp, path))
     io.encoding = impl.encoding
     return io
 

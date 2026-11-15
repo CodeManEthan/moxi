@@ -268,9 +268,9 @@ def read_rows(state_dir: str | os.PathLike, *, days: int = 1,
     """The rows of today's file and the `days - 1` days before it, oldest first. A line
     that isn't a JSON object is skipped."""
     when = _utc(time.time() if now is None else now).date()
-    folder = audit_dir(state_dir)
+    audit_files_dir = audit_dir(state_dir)
     for back in range(max(days, 1) - 1, -1, -1):
-        path = folder / f"{(when - _dt.timedelta(days=back)).isoformat()}.jsonl"
+        path = audit_files_dir / f"{(when - _dt.timedelta(days=back)).isoformat()}.jsonl"
         try:
             handle = path.open("rb")
         except OSError:

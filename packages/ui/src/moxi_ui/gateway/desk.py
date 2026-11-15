@@ -69,8 +69,8 @@ async def pair(call: Any) -> dict[str, Any]:
         raise Refused(gateway.moved)
     try:
         url = await asyncio.to_thread(pairing.mint, gateway.runtime_dir, gateway.address)
-    except pairing.NoAddress as err:
-        raise Refused(str(err)) from None
+    except pairing.NoAddress as exc:
+        raise Refused(str(exc)) from None
     return {"url": url}
 
 

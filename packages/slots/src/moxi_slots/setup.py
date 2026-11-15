@@ -104,7 +104,7 @@ def setup() -> int:
               f"then run `{REINSTALL}` again")
         return codes.REFUSED
     if path != value:
-        config.set(MODULE, "tmux", path, by=SETUP_BY)
+        config.set_value(MODULE, "tmux", path, by=SETUP_BY)
     print(f"{MODULE}: tmux is {path} ({found.text}, {how})")
     return codes.OK
 

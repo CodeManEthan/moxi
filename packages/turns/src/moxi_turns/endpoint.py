@@ -29,7 +29,7 @@ Codex or OpenCode host). This module is its harness-free core; an adapter
 turns decides nothing about content or timing: it delivers what it is handed, when it is
 handed it, under the preconditions the caller names.
 
-`open()` opens the endpoint; `stop()` (or the adapter's `gone()`) ends it. The core's
+`open()` opens the endpoint; `stop()` (or the adapter's `on_gone()`) ends it. The core's
 caller-side methods (`session`, `facts`, `agents`, `deliver`, `steer`, `wait`, `command`)
 take plain values, so a test can drive the core without the wire.
 
@@ -49,7 +49,7 @@ The rule: no handler on the loop waits on the harness or on a blocking write.
   adapter's `submit`, `append` and `command` one at a time, in the order the endpoint
   recorded them, so hand-offs reach the harness in that order. It skips a hand-off whose
   delivery or command settled while it waited, and passes a skipped steer to the
-  adapter's `expired`. A hand-off may block the worker (a line write the runner does not
+  adapter's `on_expired`. A hand-off may block the worker (a line write the runner does not
   read, a request the harness is slow to answer); callers still see every delivery and
   command settle, by `PENDING_TTL_S` at the latest, and each one queued behind it
   settles the same way, so nothing reaches the harness after its caller was told `lost`
@@ -418,7 +418,7 @@ class Endpoint:
                 server = await ipc.serve(self.address, handler,
                                          hello=ipc.Hello(protocol.VERSIONS,
                                                          self.capabilities),
-                                         on_close=handler.closed)
+                                         on_close=handler.on_closed)
             except BaseException as exc:
                 ready.set_exception(exc)
                 return
@@ -563,8 +563,8 @@ class Endpoint:
         data = json.dumps(hello, indent=1, sort_keys=True) + "\n"
         tmp = self.dir / protocol.HELLO_TMP
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(data)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(data)
         os.replace(tmp, self.hello_path)
 
     def _remove_files(self) -> None:
@@ -615,7 +615,7 @@ class Endpoint:
         # The floors are read beside the listeners' asks, and any change is handed over
         # before this returns, so it reaches the harness before the ready's context.
         refresh = None
-        if self.floors.any:
+        if self.floors.has_floor:
             refresh = threading.Thread(target=self.floors.refresh, args=(event,),
                                        name="turns-floors", daemon=True)
             refresh.start()
@@ -847,7 +847,7 @@ class Endpoint:
             self._pump()
         return reason
 
-    def refused(self, delivery_id: str, reason: str) -> None:
+    def on_refused(self, delivery_id: str, reason: str) -> None:
         """The adapter refused a delivery it was handed (a failed check where it took
         effect, a steer the harness had no turn for, a harness that would not take the
         text). The text never ran. A reason the contract does not name for a delivery
@@ -865,7 +865,7 @@ class Endpoint:
             self._refuse(d, reason)
         self._pump()
 
-    def steered(self, delivery_id: str) -> None:
+    def on_steered(self, delivery_id: str) -> None:
         """The harness took a steer into the running turn (Claude: `$.session.append`
         resolved without a deny; Codex: `turn/steer` answered). The delivery reads
         `Started` on the turn it was recorded against, the turn lists it, and watchers get
@@ -957,7 +957,7 @@ class Endpoint:
         with `stop_shells` the stop's report. A `clear` or `exit` settles `ran` here. A
         compaction settles at the later of this and its Ready, since the session, not the
         call's return, confirms it; without `stop_shells` its Ready alone settles it. With
-        `stop_shells`, `shells` None reads as a list turns cannot vouch for."""
+        `stop_shells`, `include_shells` None reads as a list turns cannot vouch for."""
         with self._lock:
             c = self._commands.get(request_id)
             if c is None or c.result is not None:
@@ -968,7 +968,7 @@ class Endpoint:
                 c.shells = shells if shells is not None else _unvouched()
             self._settle_if_ran(c)
 
-    def gone(self, reason: str = "the session ended") -> None:
+    def on_gone(self, reason: str = "the session ended") -> None:
         """The session ended."""
         self.stop(reason)
 
@@ -1019,12 +1019,12 @@ class Endpoint:
         """The session's subagents as the harness records them, within the harness's live
         bound; past it, or unreadable, the list is not complete, which counts as busy."""
         agents = self._agents_read.wait(self.harness.live_wait_s)
-        return agents if agents is not None else Agents((), False, time.time())
+        return agents if agents is not None else Agents((), complete=False, at=time.time())
 
     async def agents_async(self) -> Agents:
         """`agents` on the loop, never blocking it."""
         agents = await self._agents_read.wait_async(self.harness.live_wait_s)
-        return agents if agents is not None else Agents((), False, time.time())
+        return agents if agents is not None else Agents((), complete=False, at=time.time())
 
     def _agents_now(self) -> Agents:
         """The adapter's list, read from the harness on this call. One that fails, or
@@ -1034,10 +1034,10 @@ class Endpoint:
             agents = self.harness.agents()
         except Exception as exc:  # noqa: BLE001 - an unreadable list is unknown
             log.warning("reading the subagents failed: %s", exc)
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         if not isinstance(agents, Agents):
             log.warning("the adapter's subagent list is not a list: %r", agents)
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         return agents
 
     def watch(self, conn, first: Reading, live: Live | None) -> Facts | None:
@@ -1213,7 +1213,7 @@ class Endpoint:
                 reason = self._idle_refusal(first, second, if_turn_number)
                 if reason is None and (live is None or live.draft):
                     reason = "draft"         # an unreadable box holds
-                if reason is None and _busy(live, shells=not stop_shells):
+                if reason is None and _busy(live, include_shells=not stop_shells):
                     reason = "busy-agents"   # an unreadable list counts as busy
                 if reason is None:
                     reason = self._command_slot_refusal()
@@ -1322,7 +1322,7 @@ class Endpoint:
 
     def _handoff(self, d: Handed, call: Callable[[Delivery], None]) -> Callable[[], None]:
         """The worker's job for delivery `d`: hand it to the adapter unless it settled
-        while it waited. A skipped steer goes to the adapter's `expired`, so it lets go of
+        while it waited. A skipped steer goes to the adapter's `on_expired`, so it lets go of
         it (on Codex, a held `turn/completed`)."""
 
         def run() -> None:
@@ -1338,7 +1338,7 @@ class Endpoint:
                 call(d.spec)
             except Exception as exc:  # noqa: BLE001
                 log.warning("the adapter could not take delivery %s: %s", d.id, exc)
-                self.refused(d.id, "unsupported")
+                self.on_refused(d.id, "unsupported")
 
         return run
 
@@ -1367,7 +1367,7 @@ class Endpoint:
     def _tell_expired(self, delivery_ids: list[str]) -> None:
         for delivery_id in delivery_ids:
             try:
-                self.harness.expired(delivery_id)
+                self.harness.on_expired(delivery_id)
             except Exception:  # noqa: BLE001 - the delivery has settled either way
                 log.exception("the adapter failed at the expiry of %s", delivery_id)
 
@@ -1379,7 +1379,7 @@ class Endpoint:
         """Settle every delivery or command the adapter has held unsettled past
         `pending_ttl_s` (the submit in flight, each steer not yet confirmed, the command),
         and free its slot. A late word from the adapter about it is ignored, and its
-        `entering` answers `expired`. The adapter's `expired` runs on a thread of its own:
+        `entering` answers `on_expired`. The adapter's `on_expired` runs on a thread of its own:
         an adapter stuck in a hand-off never holds up this sweep."""
         ttl = self.pending_ttl_s
         freed: list[str] = []
@@ -1606,16 +1606,16 @@ class Endpoint:
             log.warning("rewriting %s failed: %s", self.hello_path, exc)
 
 
-def _busy(live: Live | None, *, shells: bool = True) -> bool:
+def _busy(live: Live | None, *, include_shells: bool = True) -> bool:
     """A subagent pending, running or waiting, or a list that could not be read: unknown
-    counts as busy, never as 0. With `shells` False the background shells the adapter
+    counts as busy, never as 0. With `include_shells` False the background shells the adapter
     counts among `agents` are left out, as a command with `stop_shells` reads it."""
-    return live is None or live.busy(shells=shells)
+    return live is None or live.busy(include_shells=include_shells)
 
 
 def _unvouched() -> Shells:
     """A shell stop turns cannot vouch for: nothing named, the unnamed entry left."""
-    return Shells((), (LeftShell(None, SHELL_UNLISTED),), False)
+    return Shells((), (LeftShell(None, SHELL_UNLISTED),), complete=False)
 
 
 def _moved(reading: Reading, version_seen: int | None) -> str | None:

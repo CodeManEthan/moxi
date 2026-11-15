@@ -436,12 +436,12 @@ class _Read:
     plans: dict = field(default_factory=dict)
 
 
-def freeze(name: str, *, actor: str, records_only: bool = False,
+def freeze(name: str, *, by: str, records_only: bool = False,
            record: str | None = None, settings=None, wait_s: float = write.WAIT_S,
            at: str | None = None) -> Frozen:
     """Freeze the design of the round `name`, `<project>/<slug>`, as its next version.
 
-    - `actor`: who freezes it, the event's actor, and who asked each question the
+    - `by`: who freezes it, the event's actor, and who asked each question the
       block adds.
     - `records_only`: the lead says this version changes records only, so no pass is
       asked for over it; `record` is then the pointer to the record of the change,
@@ -471,8 +471,8 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
-    folder = home.round_folder(slug)
-    design = folder / versions.DESIGN_FILE
+    round_dir = home.round_dir(slug)
+    design = round_dir / versions.DESIGN_FILE
     again = f"moxi rounds fold {name}"
     as_records = f"{again} --records-only --record PTR"
 
@@ -481,8 +481,8 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
             return _Read()
         try:
             return _Read(block=design_block.read(design))
-        except BadBlock as error:
-            return _Read(error=error)
+        except BadBlock as exc:
+            return _Read(error=exc)
 
     def planned(view) -> Plan:
         # One plan for one reading of the log: the gates, the act and the event all
@@ -535,7 +535,7 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
         if found.problems:
             raise BadBlock(block.file, design_block.WHAT, found.problems)
         number = len(view.state.versions) + 1
-        target = versions.file(folder, number)
+        target = versions.file(round_dir, number)
         try:
             data = design.read_bytes()
             if hashlib.sha256(data).hexdigest() != block.sha256:
@@ -547,8 +547,8 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
                     hashlib.sha256(target.read_bytes()).hexdigest() == block.sha256):
                 target.parent.mkdir(exist_ok=True)
                 files.atomic_write(target, data, mode=0o644)
-        except OSError as error:
-            raise RoundsError(f"the design can't be frozen as {target}: {error}",
+        except OSError as exc:
+            raise RoundsError(f"the design can't be frozen as {target}: {exc}",
                               f"make the round's folder one that can be written to, "
                               f"then: {again}") from None
         return number, target
@@ -572,7 +572,7 @@ def freeze(name: str, *, actor: str, records_only: bool = False,
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a new version of its design"),
                    has_a_design_step, has_a_design, has_a_pointer,
                    changes_records_only],

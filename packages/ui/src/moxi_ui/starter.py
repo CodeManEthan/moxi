@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi import files, proc
+from moxi.log import LOG_FILE_ENV
 from moxi.names import is_module_name
 from moxi.paths import python
 from moxi_ui.loopback.api import (
@@ -107,10 +108,6 @@ LOCK_HELD = 75
 SERVERS_FILE = "servers.json"
 SERVERS_FORMAT = 1
 
-#: The variable that names the shell's log file. A child must not inherit it: its stderr
-#: reaches the shell's log through the shell, and two processes never roll one file.
-LOG_FILE_VARIABLE = "MOXI_LOG_FILE"
-
 _READY = re.compile(rb"\Aready ([0-9a-f]{32})\n\Z")
 _log = logging.getLogger("moxi.ui.starter")
 
@@ -124,11 +121,11 @@ class StartFailed(Exception):
     child's stderr.
     """
 
-    def __init__(self, module: str, reason: str, *, exit: int | None, log: str):
+    def __init__(self, module: str, reason: str, *, exit_code: int | None, log: str):
         super().__init__(f"{module}: {reason}")
         self.module = module
         self.reason = reason
-        self.exit = exit
+        self.exit = exit_code
         self.log = log
 
     def body(self) -> dict[str, Any]:
@@ -178,9 +175,9 @@ class Use:
     its client reconnects to the next server.
     """
 
-    def __init__(self, server: Server, *, stream: bool, close: Callable[[], Any] | None):
+    def __init__(self, server: Server, *, streaming: bool, close: Callable[[], Any] | None):
         self.server = server
-        self.stream = stream
+        self.stream = streaming
         self._close = close
         self._ended = False
 
@@ -193,7 +190,7 @@ class Use:
     def end(self) -> None:
         if not self._ended:
             self._ended = True
-            self.server._ended(self)
+            self.server._on_ended(self)
 
     def cut(self) -> None:
         if self._close is not None and not self._ended:
@@ -245,16 +242,16 @@ class Server:
             raise ServerGone(f"{self.module}'s server {self.info.server_id} is "
                              f"{'gone' if self.gone else 'draining'}")
 
-    def use(self, *, stream: bool = False, close: Callable[[], Any] | None = None) -> Use:
-        """Count one open request (or, with `stream`, a stream) on this server until the
+    def use(self, *, streaming: bool = False, close: Callable[[], Any] | None = None) -> Use:
+        """Count one open request (or, with `streaming`, a stream) on this server until the
         returned `Use` ends. `close` is called if the server drains while it is open."""
         self._check()
-        use = Use(self, stream=stream, close=close)
+        use = Use(self, streaming=streaming, close=close)
         self._uses.add(use)
         self._quiet.clear()
         return use
 
-    def _ended(self, use: Use) -> None:
+    def _on_ended(self, use: Use) -> None:
         self._uses.discard(use)
         if not self._uses:
             self._quiet.set()
@@ -368,9 +365,9 @@ class Child:
 
     def _watch(self) -> None:
         code = self.popen.wait()
-        self._post(self._exited, code)
+        self._post(self._on_exited, code)
 
-    def _exited(self, code: int) -> None:
+    def _on_exited(self, code: int) -> None:
         self.code = code
         _resolve(self.exited, code)
         self._on_exit(self, code)
@@ -477,8 +474,8 @@ def read_servers(path: str | os.PathLike) -> dict[str, dict[str, Any]]:
     """The per-module records of a `servers.json`, as written; an empty mapping for a
     file that is missing or doesn't read. Never raises."""
     try:
-        with open(path, "rb") as stream:
-            data = json.loads(stream.read(1024 * 1024))
+        with open(path, "rb") as fh:
+            data = json.loads(fh.read(1024 * 1024))
         modules = data.get("modules") if data.get("format") == SERVERS_FORMAT else None
         if not isinstance(modules, dict):
             return {}
@@ -628,7 +625,7 @@ class Starter:
                     server = await self._one_start(retry=False)
                 if server is None:  # pragma: no cover - a last try raises instead
                     raise AssertionError("not reached")
-                self._started(server)
+                self._on_started(server)
                 generation = self._pool.generation
                 if (generation == begun or self.wanted in (None, server.info.version)
                         or self._drained_for == generation):
@@ -643,8 +640,8 @@ class Starter:
                 drain = self.drain()
                 if drain is not None:
                     await asyncio.shield(drain)
-        except StartFailed as failure:
-            self._failed(failure)
+        except StartFailed as start_exc:
+            self._on_failed(start_exc)
             raise
         finally:
             self._starting = None
@@ -698,8 +695,8 @@ class Starter:
             popen = self._pool.spawn(argv, lifeline="stdin", stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, cwd=str(self._pool.cwd),
                                      env=self._pool.child_env())
-        except OSError as err:
-            raise self._failure_of(f"the page server could not be started: {err}",
+        except OSError as exc:
+            raise self._failure_of(f"the page server could not be started: {exc}",
                                    None) from None
         child = Child(self.module, popen, loop, self._on_exit)
         # Kept: every child still running, and the newest, for its stderr's tail.
@@ -749,8 +746,8 @@ class Starter:
                 try:
                     reader, writer = await open_connection(
                         info, timeout=max(min(HELD_PROOF_WAIT, deadline - loop.time()), 0.5))
-                except (NotOurServer, OSError, TimeoutError) as err:
-                    reason = f"another server holds the lock and fails its proof ({err})"
+                except (NotOurServer, OSError, TimeoutError) as exc:
+                    reason = f"another server holds the lock and fails its proof ({exc})"
                 else:
                     handoff = Conn(reader, writer, time.monotonic())
                     server = Server(self.module, info, mine, started=self._pool.clock(),
@@ -767,14 +764,14 @@ class Starter:
         if retry:
             _log.info("%s: %s; starting once more", self.module, reason)
             return None
-        raise StartFailed(self.module, reason, exit=LOCK_HELD, log=self._pool.log)
+        raise StartFailed(self.module, reason, exit_code=LOCK_HELD, log=self._pool.log)
 
     def _failure_of(self, reason: str, code: int | None, *, killed: bool = False) -> StartFailed:
         # A child the starter killed reports no exit code of its own.
-        return StartFailed(self.module, reason, exit=None if killed else code,
+        return StartFailed(self.module, reason, exit_code=None if killed else code,
                            log=self._pool.log)
 
-    def _started(self, server: Server) -> None:
+    def _on_started(self, server: Server) -> None:
         self._server = server
         self._failure = None
         self.record.failed_in_row = 0
@@ -782,7 +779,7 @@ class Starter:
         _log.info("%s's page server %s is up (version %s, %s)", self.module,
                   server.info.server_id, server.info.version, server.info.transport)
 
-    def _failed(self, failure: StartFailed) -> None:
+    def _on_failed(self, failure: StartFailed) -> None:
         self._failure = failure
         self._failed_until = self._pool.clock() + self._pool.failed_for
         self.record.failed_starts += 1
@@ -897,7 +894,7 @@ class Starters:
 
     def child_env(self) -> dict[str, str]:
         """The shell's environment without the variable that names its log file."""
-        return {key: value for key, value in os.environ.items() if key != LOG_FILE_VARIABLE}
+        return {key: value for key, value in os.environ.items() if key != LOG_FILE_ENV}
 
     def get(self, module: str) -> Starter:
         """`module`'s starter, made on first use."""
@@ -967,7 +964,7 @@ class Starters:
         call only."""
         rows = self.rows()
 
-        async def sampled(row: dict[str, Any]) -> None:
+        async def on_sampled(row: dict[str, Any]) -> None:
             starter = self._starters.get(row["module"])
             server = starter.server if starter is not None else None
             row["sample"] = None
@@ -977,7 +974,7 @@ class Starters:
             row["sample"] = await self.sample(server.info.pid)
             row["open"] = await self._offload(_health_open, server.info)
 
-        await asyncio.gather(*(sampled(row) for row in rows))
+        await asyncio.gather(*(on_sampled(row) for row in rows))
         return {"servers": rows}
 
     async def sample(self, pid: int) -> dict[str, Any] | None:
@@ -1075,8 +1072,8 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
                 found.errors.update(one.errors)
             return found
         return Exports(errors={m: f"the export command ran past {timeout:g} s" for m in modules})
-    except OSError as err:
-        return Exports(errors={m: f"the export command could not run: {err}" for m in modules})
+    except OSError as exc:
+        return Exports(errors={m: f"the export command could not run: {exc}" for m in modules})
     try:
         data = json.loads(done.stdout)
         if not isinstance(data, dict):
@@ -1095,8 +1092,8 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
             export = entry.get("export")
             try:
                 Table().mount(f"/m/{module}", export)
-            except (ValueError, TypeError) as err:
-                found.errors[module] = f"its export is refused: {err}"
+            except (ValueError, TypeError) as exc:
+                found.errors[module] = f"its export is refused: {exc}"
             else:
                 found.mounts[module] = export
     return found

@@ -295,7 +295,7 @@ def private_line():
     return line("*", "private-names/*", "text:x") + "\n"
 
 
-def test_the_private_file_may_lie_in_a_git_directory_or_the_config_directory(
+def test_the_private_file_may_lie_in_a_git_dir_or_the_config_dir(
         tmp_path, config_dir):
     in_git = tmp_path / "repo" / ".git" / "secrets-allow-private"
     in_git.parent.mkdir(parents=True)
@@ -334,7 +334,7 @@ def test_the_private_file_elsewhere_is_refused(tmp_path, config_dir):
     assert len(Allowlist.read(tmp_path / "missing", None)) == 0
 
 
-def test_a_git_directory_reached_through_a_link_is_still_a_git_directory(tmp_path):
+def test_a_git_dir_reached_through_a_link_is_still_a_git_dir(tmp_path):
     real = tmp_path / "real" / ".git"
     real.mkdir(parents=True)
     (real / "allow").write_text(private_line(), encoding="utf-8")

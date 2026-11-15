@@ -233,7 +233,7 @@ def test_the_rare_marks_are_not_swallowed_by_a_catch_up_header():
 
 # ------------------------------------------------------------------- the digest header
 
-def test_a_live_single_message_STILL_GETS_ITS_COUNT():
+def test_a_live_single_message_still_gets_its_count():
     """The frame line under a single message does not say HOW MANY messages are in the
     turn, and that is the number a reader needs to know how many framed messages to
     expect -- without it, a body forging a second frame would have nothing to contradict
@@ -261,7 +261,7 @@ def test_one_backlog_message_still_gets_the_catch_up_envelope():
         "== comms catch-up: 1 message(s) (15h ago) =="
 
 
-def test_a_backlog_batch_is_aged_by_its_OLDEST_message():
+def test_a_backlog_batch_is_aged_by_its_oldest_message():
     batch = [payload(message_id="1", backlog=True, timestamp=stamp(-20 * HOUR)),
              payload(message_id="2", backlog=True, timestamp=stamp(-1 * HOUR))]
     assert digest_header(batch, clock=at(0)) == \
@@ -337,7 +337,7 @@ def test_the_note_stands_alone_when_the_age_is_unknowable():
         "== comms catch-up: 1 message(s) (attribution is unverified in replay) ==")
 
 
-def test_the_header_note_SUPPRESSES_the_per_frame_marks_inside_that_digest():
+def test_the_header_note_suppresses_the_per_frame_marks_inside_that_digest():
     batch = [unverified(message_id="1", text="one"),
              unverified(message_id="2", text="two")]
     digest = render_digest(batch, clock=at(0))
@@ -363,7 +363,7 @@ def test_the_other_deviation_marks_still_render_inside_a_catch_up():
     assert "unverified" not in digest.split("==\n", 1)[1], "the header said it"
 
 
-def test_a_backlog_batch_of_MIXED_verification_gets_NO_note_and_keeps_its_marks():
+def test_a_backlog_batch_of_mixed_verification_gets_no_note_and_keeps_its_marks():
     """The note is a blanket, and this batch is not uniform: one frame the daemon proved
     (binding history) beside two it could not. A note here would blame replay for the
     proven frame, and the suppression under it would render proven and unproven
@@ -404,7 +404,7 @@ def test_a_live_digest_keeps_its_per_frame_marks_and_gets_no_note():
     assert "[comms] from planner@proj-a · msg 2" in digest
 
 
-def test_a_live_frame_in_a_mixed_batch_KEEPS_its_own_unverified_mark():
+def test_a_live_frame_in_a_mixed_batch_keeps_its_own_unverified_mark():
     """Mixed batches are real (registration replay races live routing). The batch is a
     catch-up and the header still says so -- but the note is about REPLAY, so it can only
     silence the replayed frames. The live arrival's `(unverified)` is news about a sender
@@ -418,7 +418,7 @@ def test_a_live_frame_in_a_mixed_batch_KEEPS_its_own_unverified_mark():
     assert "[comms] from planner@proj-a (unverified) · msg 2" in digest, "not the live one"
 
 
-def test_a_VERIFIED_backlog_beside_an_unverified_live_arrival_gets_no_note():
+def test_a_verified_backlog_beside_an_unverified_live_arrival_gets_no_note():
     """The header must not blame replay for something replay did not do. Every replayed
     frame here was proven; the only unverified sender is the live one, and it says so on
     its own line."""
@@ -559,7 +559,7 @@ def test_a_notice_is_safe_at_column_zero_because_bodies_cannot_reach_it():
     assert "  [comms] older mail was omitted" in lines, "the body's copy, indented"
 
 
-def test_the_body_treatment_IS_the_card_treatment_and_never_a_second_copy():
+def test_the_body_treatment_is_the_card_treatment_and_never_a_second_copy():
     """Identity, not resemblance: the two surfaces had drifted once already (cards got the fix, message bodies
     did not), and one module both import is what stops that happening twice."""
     from moxi_comms import cards, envelope

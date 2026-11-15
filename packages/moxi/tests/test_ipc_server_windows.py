@@ -27,8 +27,8 @@ from moxi.ipc import _server, _sweep, _users
 WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows named pipes")
 
 
-def req(id, method, params=None) -> bytes:
-    obj = {"jsonrpc": "2.0", "id": id, "method": method}
+def req(request_id, method, params=None) -> bytes:
+    obj = {"jsonrpc": "2.0", "id": request_id, "method": method}
     if params is not None:
         obj["params"] = params
     return json.dumps(obj).encode() + b"\n"
@@ -71,7 +71,7 @@ def fake_windows(monkeypatch):
 
 # -- the lock's place and the sweep (any system) ---------------------------------------------
 
-def test_a_pipes_lock_is_its_name_in_the_modules_runtime_directory(fake_windows, runtime):
+def test_a_pipes_lock_is_its_name_in_the_modules_runtime_dir(fake_windows, runtime):
     address = ipc.address("demo", "a-b")
     assert address == r"\\.\pipe\moxi-demo-a-b-0123abcd"
     assert _sweep.lock_path(address) == str(runtime / "demo" / "a-b.lock")
@@ -384,16 +384,16 @@ def connect_fails(address) -> int:
 
 
 @WINDOWS
-def test_serve_on_a_pipe_answers_and_keeps_its_lock_in_a_private_directory(pipe_serving,
+def test_serve_on_a_pipe_answers_and_keeps_its_lock_in_a_private_dir(pipe_serving,
                                                                            runtime):
     srv = pipe_serving(echo)
     raw = PipeRaw(srv.address)
     raw.send(req(1, "go"))
     assert raw.json()["result"] == {"method": "go", "params": None}
-    directory = runtime / "demo"
+    socket_dir = runtime / "demo"
     assert os.path.exists(_sweep.lock_path(srv.address))
-    assert os.path.dirname(_sweep.lock_path(srv.address)) == str(directory)
-    assert _win._only_user(directory, _win._token_sid(_win._TOKEN_USER))
+    assert os.path.dirname(_sweep.lock_path(srv.address)) == str(socket_dir)
+    assert _win._only_user(socket_dir, _win._token_sid(_win._TOKEN_USER))
     assert ipc.sweep(srv.address) == "live"
 
 
@@ -786,10 +786,10 @@ def access_list(handle: int) -> tuple[bool, list[tuple[int, int, str]]]:
     from ctypes import wintypes as w
 
     api = _win._bind()
-    PP = ctypes.POINTER(ctypes.c_void_p)
+    void_pointer_pointer = ctypes.POINTER(ctypes.c_void_p)
     get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityInfo
     get.restype = w.DWORD
-    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, PP, PP, PP, PP, PP]
+    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer]
     dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
     code = get(handle, _win._SE_FILE_OBJECT, _win._DACL_SECURITY_INFORMATION, None, None,
                ctypes.byref(dacl), None, ctypes.byref(descriptor))
@@ -836,10 +836,10 @@ def owner_of(handle: int) -> str:
     from ctypes import wintypes as w
 
     api = _win._bind()
-    PP = ctypes.POINTER(ctypes.c_void_p)
+    void_pointer_pointer = ctypes.POINTER(ctypes.c_void_p)
     get = ctypes.WinDLL("advapi32", use_last_error=True).GetSecurityInfo
     get.restype = w.DWORD
-    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, PP, PP, PP, PP, PP]
+    get.argtypes = [w.HANDLE, ctypes.c_int, w.DWORD, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer]
     owner, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
     code = get(handle, _win._SE_FILE_OBJECT, _win._OWNER_SECURITY_INFORMATION,
                ctypes.byref(owner), None, None, None, ctypes.byref(descriptor))
@@ -906,7 +906,7 @@ def admitting_the_network(name: str) -> int:
     descriptor = _win._descriptor(_pipe.access_list())
     try:
         attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
-                                             descriptor, False)
+                                             descriptor, False)  # noqa: FBT003 -- Win32 fields are positional
         handle = _pipe._bind_create()(
             name, _pipe._PIPE_ACCESS_DUPLEX | _pipe._FILE_FLAG_OVERLAPPED
             | _pipe._FILE_FLAG_FIRST_PIPE_INSTANCE, 0, 1, 8192, 8192, 0,

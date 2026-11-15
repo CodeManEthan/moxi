@@ -161,7 +161,7 @@ def test_the_store_checks_hold_whatever_writes_to_it(sql):
 
 def test_the_row_writes_set_their_column_and_the_change_stamp():
     add(**written())
-    row = store.write(lambda conn: store.set_enabled(conn, "web", True, by="page"))
+    row = store.write(lambda conn: store.set_enabled(conn, "web", enabled=True, by="page"))
     assert row.enabled and row.changed_by == "page"
     row = store.write(lambda conn: store.set_stopped(conn, "web", "2026-10-30T10:00:00Z",
                                                      by="moxi services"))
@@ -177,7 +177,7 @@ def test_the_row_writes_set_their_column_and_the_change_stamp():
 
 def test_a_row_write_on_no_such_row_is_refused():
     add(**written())
-    for write in (lambda c: store.set_enabled(c, "nope", True, by="x"),
+    for write in (lambda c: store.set_enabled(c, "nope", enabled=True, by="x"),
                   lambda c: store.set_removing(c, "nope", by="x"),
                   lambda c: store.set_stopped(c, "nope", None, by="x")):
         with pytest.raises(Refused):
@@ -188,7 +188,7 @@ def test_a_write_that_raises_rolls_back():
     add(**written())
 
     def half(conn):
-        store.set_enabled(conn, "web", True, by="x")
+        store.set_enabled(conn, "web", enabled=True, by="x")
         raise RuntimeError("stop")
 
     with pytest.raises(RuntimeError):
@@ -252,9 +252,9 @@ def test_a_store_at_version_zero_reads_as_no_rows_unless_strict(store_path):
 def test_a_store_held_locked_past_the_wait_is_busy(store_path, monkeypatch):
     add(**written())
     monkeypatch.setattr(store, "TIMEOUT", 0.05)
-    holder = sqlite3.connect(store_path, isolation_level=None)
-    holder.execute("PRAGMA locking_mode = EXCLUSIVE")
-    holder.execute("BEGIN EXCLUSIVE")
+    conn = sqlite3.connect(store_path, isolation_level=None)
+    conn.execute("PRAGMA locking_mode = EXCLUSIVE")
+    conn.execute("BEGIN EXCLUSIVE")
     try:
         with pytest.raises(Busy) as caught:
             store.read_rows()
@@ -262,8 +262,8 @@ def test_a_store_held_locked_past_the_wait_is_busy(store_path, monkeypatch):
         with pytest.raises(Busy):
             add(**written("other"))
     finally:
-        holder.execute("ROLLBACK")
-        holder.close()
+        conn.execute("ROLLBACK")
+        conn.close()
 
 
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,

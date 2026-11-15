@@ -84,7 +84,7 @@ def test_a_configured_root_that_is_missing_warns(home, own_config, tmp_path):
     assert "opencode.database names" in rows["opencode"].detail
 
 
-def test_a_root_that_is_not_a_directory_warns(home):
+def test_a_root_that_is_not_a_dir_warns(home):
     (home / ".claude").mkdir()
     (home / ".claude" / "projects").write_text("")
     row = doctor.check("claude")

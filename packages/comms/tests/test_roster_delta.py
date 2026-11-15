@@ -227,7 +227,7 @@ def test_failed_advance_emits_nothing(rig, tmp_path, capsys):
 
 # ----------------------------------------------------------------------- atomicity
 
-def test_state_writes_are_temp_plus_rename_in_the_same_directory(tmp_path,
+def test_state_writes_are_temp_plus_rename_in_the_same_dir(tmp_path,
                                                                  monkeypatch):
     renames = []
     real = os.replace

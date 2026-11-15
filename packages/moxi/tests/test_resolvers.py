@@ -125,11 +125,11 @@ def platform(request, monkeypatch, tmp_path):
 def place_world(values: Mapping[str, str], row: str, base: Path) -> None:
     """A program `tool` on the mapping's PATH, and a core settings file where the mapping
     places it, holding a harness row named `row`."""
-    for folder in filter(None, (values.get("PATH") or "").split(os.pathsep)):
-        Path(folder).mkdir(parents=True, exist_ok=True)
+    for path_dir in filter(None, (values.get("PATH") or "").split(os.pathsep)):
+        Path(path_dir).mkdir(parents=True, exist_ok=True)
         for name in ("tool", "tool.EXE"):
-            (Path(folder) / name).write_text("#!/bin/sh\n")
-            (Path(folder) / name).chmod(0o755)
+            (Path(path_dir) / name).write_text("#!/bin/sh\n")
+            (Path(path_dir) / name).chmod(0o755)
     try:
         config = paths.core().config_file(values)
     except LookupError:

@@ -57,22 +57,22 @@ def _targets(address: Any, kind: str, endpoint: str | int) -> bool:
     return form == "http" and address.target == endpoint
 
 
-def decide(*, on: bool, kind: str, endpoint: str | int, address: Any,
+def decide(*, enabled: bool, kind: str, endpoint: str | int, address: Any,
            refused: bool) -> Mount:
-    """The mount for a gateway that is `on` (or not), with the resolved `kind`, its own
+    """The mount for a gateway that is `enabled` (or not), with the resolved `kind`, its own
     `endpoint` (the socket path, or the TCP port), the last good `address` read and whether
     the last read was `refused`."""
-    if not on:
-        return Mount(False, "off")
+    if not enabled:
+        return Mount(mounted=False, reason="off")
     if refused:
-        return Mount(False, "record")
+        return Mount(mounted=False, reason="record")
     if address is None or not _targets(address, kind, endpoint):
-        return Mount(False, "target")
+        return Mount(mounted=False, reason="target")
     if kind != "unix":
-        return Mount(False, "tcp")
+        return Mount(mounted=False, reason="tcp")
     if getattr(address, "retired", False):
-        return Mount(False, "origin")
-    return Mount(True, None)
+        return Mount(mounted=False, reason="origin")
+    return Mount(mounted=True, reason=None)
 
 
 def write_acts(runtime_dir: str | os.PathLike, mount: Mount, *, pid: int | None = None,

@@ -121,7 +121,7 @@ def _named(step: steps.Step) -> list[str]:
 
 def _design(found: showing.Shown, step: steps.Step) -> dict:
     return {"reads": _named(step),
-            "write": f"{versions.DESIGN_FILE} in {found.folder}",
+            "write": f"{versions.DESIGN_FILE} in {found.round_dir}",
             "then": [f"moxi rounds fold {found.name}"]}
 
 
@@ -131,15 +131,15 @@ def _verify_design(found: showing.Shown, step: steps.Step) -> dict:
             "since": asked.since, "instead": list(asked.instead), "tier": asked.tier}
     if asked.pass_ is None or asked.instead:
         return said
-    pair = brake.files(found.folder, asked)
+    pair = brake.files(found.round_dir, asked)
     if pair is None:
-        reads = [str(versions.file(found.folder, asked.version))]
+        reads = [str(versions.file(found.round_dir, asked.version))]
     else:
         said["files"] = [str(one) for one in pair]
         reads = [f"the diff from {pair[0]} to {pair[1]}, and the sections that "
                  "depend on it"]
     return {**said, "reads": reads + _named(step),
-            "write": (f"a report in {found.folder} with the block from: moxi rounds "
+            "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.DESIGN}"),
             "then": [f"moxi rounds verdict {found.name} <your report>"]}
 
@@ -311,7 +311,7 @@ def _warnings(found: showing.Shown) -> list[dict]:
     fold = f"moxi rounds fold {name}"
     warnings = []
     if versions.current(state) is not None:
-        moved = versions.unchanged(state, found.folder, name)
+        moved = versions.unchanged(state, found.round_dir, name)
         if moved is not None:
             warnings.append(_warning(DESIGN_MOVED, moved.reason, moved.fix))
     read = versions.design_verdicts(state)
@@ -391,7 +391,7 @@ def read(name: str, *, settings=None) -> dict:
                           "lists the project's")
     settings = own.load() if settings is None else settings
     found = showing.show(name, settings=settings, refresh=False)
-    said = {"round": found.name, "folder": str(found.folder), "notice": found.notice}
+    said = {"round": found.name, "folder": str(found.round_dir), "notice": found.notice}
     if found.unreadable is not None:
         error = found.unreadable
         return {**said, "unreadable": {"file": str(error.file), "line": error.line,

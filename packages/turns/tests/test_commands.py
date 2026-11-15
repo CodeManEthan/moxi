@@ -17,7 +17,7 @@ from moxi_turns.results import LeftShell, Shells
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="no pipe server yet")
 
-UNVOUCHED = Shells((), (LeftShell(None, "unlisted"),), False)
+UNVOUCHED = Shells((), (LeftShell(None, "unlisted"),), complete=False)
 
 
 def granted(make_endpoint, fake=None, names="clear,exit,compact"):
@@ -108,7 +108,7 @@ def test_stop_shells_runs_once_and_ran_carries_the_report(make_endpoint, name):
     fake.live_agents = fake.shells = 2              # only shells live: they leave the check
     assert s.command(name, stop_shells=False) == turns.Refused("busy-agents")
     r = s.command(name, stop_shells=True)
-    assert isinstance(r, turns.Ran) and r.shells == Shells(("sh1",), (), True)
+    assert isinstance(r, turns.Ran) and r.shells == Shells(("sh1",), (), complete=True)
     assert (r.new_session_id is not None) == (name == "clear")
     assert [c.stop_shells for c in fake.commands] == [True]
     assert s.command(name, stop_shells=True) == turns.Refused("rate")   # one count
@@ -142,7 +142,7 @@ def test_a_compaction_with_stop_shells_settles_at_the_later_of_ready_and_the_rep
     assert out == []
     ep.ready("compact", "s-1")
     t.join(3)
-    assert out == [turns.Ran(None, Shells(("sh1",), (), True))]
+    assert out == [turns.Ran(None, Shells(("sh1",), (), complete=True))]
 
 
 def test_a_stop_that_never_reports_reads_ran_unvouched_not_expired(make_endpoint,

@@ -97,8 +97,8 @@ def write(qualified: str, thread_id: str, **extra) -> str:
     os.chmod(target.parent, 0o700)
     fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{qualified}.")
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(record, f)
+        with os.fdopen(fd, "w") as fh:
+            json.dump(record, fh)
         os.chmod(tmp, 0o600)
         os.replace(tmp, target)
     except BaseException:

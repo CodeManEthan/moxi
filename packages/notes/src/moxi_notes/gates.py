@@ -132,7 +132,7 @@ def _base(ctx) -> str:
     if head:
         return head
     return os.fsdecode(blobs.run(ctx.git, "hash-object", "-t", "tree", "--stdin",
-                                 input=b"")).strip()
+                                 stdin_data=b"")).strip()
 
 
 def _staged(ctx, base: str):
@@ -202,7 +202,7 @@ def _unstage_args(paths) -> tuple[tuple[str, ...], bytes]:
     return ("reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"), data
 
 
-def _index_git(ctx, *args, input=None):
+def _index_git(ctx, *args, stdin_data=None):
     """git in the git hook's own index, every pathspec read literally."""
     from moxi_repo.api import git
 
@@ -210,7 +210,7 @@ def _index_git(ctx, *args, input=None):
 
     return blobs.run(lambda *a, **kw: git(ctx.root, *a, clean_env=False,
                                           extra_env=pathspecs_off(), **kw),
-                     *args, input=input)
+                     *args, stdin_data=stdin_data)
 
 
 def _leave_out(ctx, base, entries, found, problem):
@@ -232,7 +232,7 @@ def _leave_out(ctx, base, entries, found, problem):
                               f"fix: remove the secret or {ALLOWANCE}, then commit again")
     args, data = _unstage_args(reset)
     try:
-        _index_git(ctx, *args, input=data)
+        _index_git(ctx, *args, stdin_data=data)
         after = blobs.parse_raw(_index_git(ctx, "diff-index", "--cached", "--raw", "-z",
                                            "--no-renames", base))
     except blobs.GitError as exc:
@@ -304,9 +304,9 @@ def pre_push(ctx):
             listing = ("\n".join(commits) + "\n").encode("ascii")
             entries = blobs.parse_raw(blobs.run(
                 ctx.git, "diff-tree", "--stdin", "-r", "-z", "--raw", "-m", "--root",
-                "--no-renames", input=listing))
+                "--no-renames", stdin_data=listing))
             people = blobs.run(ctx.git, "log", "--no-walk=unsorted", "--stdin", "-z",
-                               "--format=%an <%ae>%x00%cn <%ce>", input=listing)
+                               "--format=%an <%ae>%x00%cn <%ce>", stdin_data=listing)
         except blobs.GitError as exc:
             raise _Refusal(f"the commits to push could not be read: {exc}") from None
         pairs = list(dict.fromkeys((e.path, e.blob) for e in entries if e.blob))

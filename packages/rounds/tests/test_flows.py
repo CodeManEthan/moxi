@@ -79,7 +79,7 @@ def test_no_built_in_flow_lists_a_step_every_flow_has_unlisted():
 
 def test_the_built_in_flows_pass_the_check_written_as_config():
     written = {name: {"steps": flow} for name, flow in flows.BUILT_IN.items()}
-    config.set("rounds", "flows", written, by="test")
+    config.set_value("rounds", "flows", written, by="test")
     assert flows.read(settings.load()) == flows.BUILT_IN
 
 
@@ -291,10 +291,10 @@ def test_moxi_config_set_refuses_a_bad_flow_and_changes_nothing(write_config):
     path = write_config(built(REPORT_STEP))
     before = path.read_text()
     with pytest.raises(config.ConfigError) as caught:
-        config.set("rounds", "flows", {"mine": {"steps": [{"step": "build"}]}}, by="test")
+        config.set_value("rounds", "flows", {"mine": {"steps": [{"step": "build"}]}}, by="test")
     assert caught.value.key == "flows.mine.steps"
     assert caught.value.file == str(path)
     assert path.read_text() == before
     with pytest.raises(config.ConfigError):
-        config.set("rounds", "tiers", ["fix", "nowhere"], by="test")
+        config.set_value("rounds", "tiers", ["fix", "nowhere"], by="test")
     assert path.read_text() == before

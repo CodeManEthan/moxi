@@ -147,10 +147,10 @@ class Jobs:
     def _ended(work: Callable[[], Any]) -> dict[str, Any]:
         try:
             outcome = work()
-        except Exception as err:  # noqa: BLE001 - the job's record says so, never the thread
-            log.error("a page job raised (%s)", type(err).__name__, exc_info=err)
+        except Exception as exc:  # noqa: BLE001 - the job's record says so, never the thread
+            log.error("a page job raised (%s)", type(exc).__name__, exc_info=exc)
             return {"state": "failed", "code": moxi.exit.ERROR,
-                    "lines": (RAISED.format(type(err).__name__),), "fix": None}
+                    "lines": (RAISED.format(type(exc).__name__),), "fix": None}
         return {"state": state_of(outcome.code), "code": outcome.code,
                 "lines": (*outcome.said, *outcome.lines), "fix": outcome.fix}
 

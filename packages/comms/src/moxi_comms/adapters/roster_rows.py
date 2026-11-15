@@ -121,8 +121,8 @@ def parse_directors(where: str, section: dict) -> list:
                           "entry per director, no transitivity")
     try:
         return directors_mod.declare(declared)
-    except directors_mod.BadDirector as e:
-        raise ConfigError(f"{where}: {e}") from e
+    except directors_mod.BadDirector as exc:
+        raise ConfigError(f"{where}: {exc}") from exc
 
 
 def stamped_env(agent, base=None) -> dict:

@@ -143,7 +143,7 @@ def test_readiness_after_the_cli_default_is_complete(tmp_path):
     assert found.provisioned
 
 
-def test_a_directory_without_the_operator_credential_is_unfinished(tmp_path):
+def test_a_dir_without_the_operator_credential_is_unfinished(tmp_path):
     """A first start that died after the directory committed and before the operator's
     credential was minted: the directory alone is not enough."""
     record, store = _local(tmp_path)
@@ -186,7 +186,7 @@ def _daemon(record, store, **kw):
                   first_start=provision.first_start(store), **kw)
 
 
-def test_a_daemon_on_an_empty_directory_provisions_before_it_serves(tmp_path):
+def test_a_daemon_on_an_empty_dir_provisions_before_it_serves(tmp_path):
     record, store = _local(tmp_path)
     daemon = _daemon(record, store)
     try:
@@ -210,7 +210,7 @@ def test_a_daemon_on_an_empty_directory_provisions_before_it_serves(tmp_path):
         record.close()
 
 
-def test_a_complete_directory_is_left_alone(tmp_path):
+def test_a_complete_dir_is_left_alone(tmp_path):
     record, store = _local(tmp_path)
     provision.provision(record, comms_db(), store=store)
     before = sorted(p.stat().st_mtime_ns for p in tokens_dir().rglob("*") if p.is_file())

@@ -244,13 +244,13 @@ def every_row() -> tuple[list, list[tuple[str, str]]]:
     return [*user, *found], problems
 
 
-def gather(*, health: bool = False) -> dict[str, Any]:
-    """The `rows` topic's value and `/api/rows`' answer. With `health`, every running
+def gather(*, check_health: bool = False) -> dict[str, Any]:
+    """The `rows` topic's value and `/api/rows`' answer. With `check_health`, every running
     daemon's check runs and its result is kept for the reads after. Never raises."""
     try:
         found, problems = every_row()
-        if health:
-            seen = verdict.views(found, health=True, status_seconds=STATUS_SECONDS,
+        if check_health:
+            seen = verdict.views(found, check_health=True, status_seconds=STATUS_SECONDS,
                                  health_seconds=state.HEALTH_SECONDS,
                                  health_at_once=HEALTH_AT_ONCE)
             _remember(seen)
@@ -260,9 +260,9 @@ def gather(*, health: bool = False) -> dict[str, Any]:
         listed = [row_value(v) for v in seen]
     except ServicesError as exc:
         return {"state": "error", "detail": _text(exc), "rows": [], "problems": []}
-    except Exception as err:  # noqa: BLE001 - the page says so, never a 500
-        _log_once(err, "listing the rows failed")
-        return {"state": "error", "detail": _unexpected(err), "rows": [], "problems": []}
+    except Exception as unexpected_exc:  # noqa: BLE001 - the page says so, never a 500
+        _log_once(unexpected_exc, "listing the rows failed")
+        return {"state": "error", "detail": _unexpected(unexpected_exc), "rows": [], "problems": []}
     return {"state": "up", "detail": None, "rows": listed,
             "problems": [{"module": m, "reason": r} for m, r in problems]}
 
@@ -297,12 +297,12 @@ def projects(call: Any) -> dict[str, Any]:
                                           "services --with projects` adds it"}
     try:
         listed = found.api.list_projects()
-    except Exception as err:  # noqa: BLE001 - the picker says why, it never fails
-        if type(err).__name__ == "Busy":
+    except Exception as exc:  # noqa: BLE001 - the picker says why, it never fails
+        if type(exc).__name__ == "Busy":
             return {"projects": [], "reason": "projects is busy; try again"}
-        _log_once(err, "services' page couldn't list the projects")
+        _log_once(exc, "services' page couldn't list the projects")
         return {"projects": [], "reason": f"projects couldn't be listed "
-                                          f"({type(err).__name__})"}
+                                          f"({type(exc).__name__})"}
     return {"projects": [{"key": str(p.key), "root": str(p.root)} for p in listed],
             "reason": None}
 
@@ -332,8 +332,8 @@ def _canonical(ident: str) -> str:
 
 
 def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
-               timer: bool | None = None) -> Any:
-    """A confirmed act on one row, queued: `timer` True for an act only a timer takes,
+               is_timer: bool | None = None) -> Any:
+    """A confirmed act on one row, queued: `is_timer` True for an act only a timer takes,
     False for one a timer takes through `/api/run`, None for either."""
     job, ident = call.key, call.body["id"]
     held = JOBS.get(job)
@@ -345,9 +345,9 @@ def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
         found = acts.resolve(ident)
     except ServicesError as exc:
         raise _answer(exc) from None
-    if timer is False and found.kind == "timer":
+    if is_timer is False and found.kind == "timer":
         raise lb.Refused(TIMER_RUNS)
-    if timer is True and found.kind != "timer":
+    if is_timer is True and found.kind != "timer":
         raise lb.Refused(DAEMON_STARTS)
     record, _ = JOBS.submit(job, act, found.id, lambda: run(found.id))
     if record.act != act or record.id != found.id:
@@ -357,7 +357,7 @@ def _confirmed(call: Any, act: str, run: Callable[[str], acts.Outcome], *,
 
 def start(call: Any) -> Any:
     """`POST /api/start`, confirmed: `moxi services start ID`, a daemon."""
-    return _confirmed(call, "start", lambda i: acts.start(i, by=BY), timer=False)
+    return _confirmed(call, "start", lambda i: acts.start(i, by=BY), is_timer=False)
 
 
 def stop(call: Any) -> Any:
@@ -367,14 +367,14 @@ def stop(call: Any) -> Any:
 
 def restart(call: Any) -> Any:
     """`POST /api/restart`, confirmed: `moxi services restart ID`, a daemon."""
-    return _confirmed(call, "restart", lambda i: acts.restart(i, by=BY), timer=False)
+    return _confirmed(call, "restart", lambda i: acts.restart(i, by=BY), is_timer=False)
 
 
 def run(call: Any) -> Any:
     """`POST /api/run`, confirmed: a timer's run now, its `start`; with `restart`, a run
     in progress ended first."""
     act = acts.restart if call.body.get("restart") else acts.start
-    return _confirmed(call, "run", lambda i: act(i, by=BY), timer=True)
+    return _confirmed(call, "run", lambda i: act(i, by=BY), is_timer=True)
 
 
 def enable(call: Any) -> Any:
@@ -434,7 +434,7 @@ def add(call: Any) -> Any:
         fields.update(form="written", argv=argv)
 
         def work() -> acts.Outcome:
-            return acts.add_written(name, argv, timer=timer, every=fields["every"],
+            return acts.add_written(name, argv, is_timer=timer, every=fields["every"],
                                     at=fields["at"], days=fields["days"],
                                     cwd=fields["cwd"], enable=bool(body.get("enable")),
                                     resolve_argv=False, by=BY, **common)
@@ -442,7 +442,7 @@ def add(call: Any) -> Any:
         fields.update(form="adopted", unit=unit)
 
         def work() -> acts.Outcome:
-            return acts.add_adopted(name, unit, enable=body.get("enable"), timer=timer,
+            return acts.add_adopted(name, unit, enable=body.get("enable"), is_timer=timer,
                                     by=BY, **common)
     try:
         rows.check_fields(fields)
@@ -482,8 +482,8 @@ class _Feed:
         while True:
             try:
                 self.tick()
-            except Exception as err:  # noqa: BLE001 - the poller outlives every failure
-                _log_once(err, "the rows poller's tick failed")
+            except Exception as exc:  # noqa: BLE001 - the poller outlives every failure
+                _log_once(exc, "the rows poller's tick failed")
             await asyncio.sleep(PERIOD)
 
     def tick(self) -> bool:
@@ -493,23 +493,23 @@ class _Feed:
             self.skipped += 1
             return False
         now = time.monotonic()
-        health = self._health_at is None or now - self._health_at >= HEALTH_PERIOD
-        if health:
+        check_health = self._health_at is None or now - self._health_at >= HEALTH_PERIOD
+        if check_health:
             self._health_at = now
-        self.thread = threading.Thread(target=self._gather, args=(health,), daemon=True,
+        self.thread = threading.Thread(target=self._gather, kwargs={"check_health": check_health}, daemon=True,
                                        name="services rows gather")
         self.thread.start()
         return True
 
-    def _gather(self, health: bool) -> None:
+    def _gather(self, *, check_health: bool) -> None:
         try:
-            value = gather(health=health)
+            value = gather(check_health=check_health)
             digest = _digest(value)
             if digest != self._last:
                 self.topics.publish(TOPIC, value)
                 self._last = digest
-        except Exception as err:  # noqa: BLE001 - the next tick gathers again
-            _log_once(err, "the rows poller's gather failed")
+        except Exception as exc:  # noqa: BLE001 - the next tick gathers again
+            _log_once(exc, "the rows poller's gather failed")
 
 
 _current: _Feed | None = None

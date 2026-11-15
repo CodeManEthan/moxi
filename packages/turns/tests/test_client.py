@@ -423,7 +423,7 @@ def test_a_live_version_1_endpoint_raises_version_error_and_a_dead_one_is_skippe
     assert turns.sessions() == []
 
 
-def test_a_v2_endpoint_beside_a_v1_directory_is_found(make_endpoint):
+def test_a_v2_endpoint_beside_a_v1_dir_is_found(make_endpoint):
     v1 = client.runtime_dir() / "claude-gone"
     v1.mkdir(parents=True)
     (v1 / "hello.json").write_text(json.dumps({"session_id": "s-1", "pid": 1}))
@@ -449,9 +449,9 @@ def test_an_endpoint_of_another_version_names_both_ranges(turns_env):
     thread.start()
     loop, server = ready.result(5)
     try:
-        directory = protocol.v2_root(client.runtime_dir()) / "fake-v3"
-        directory.mkdir(parents=True)
-        (directory / "hello.json").write_text(json.dumps(
+        endpoint_dir = protocol.v2_root(client.runtime_dir()) / "fake-v3"
+        endpoint_dir.mkdir(parents=True)
+        (endpoint_dir / "hello.json").write_text(json.dumps(
             {"address": address, "protocol": 3, "session_id": "s-3", "pid": 1}))
         with pytest.raises(turns.VersionError) as caught:
             turns.find(session_id="s-3")
@@ -504,10 +504,10 @@ def mute(monkeypatch):
 
 
 def _hello(name: str, body: dict) -> Path:
-    directory = protocol.v2_root(client.runtime_dir()) / name
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / protocol.HELLO).write_text(json.dumps(body))
-    return directory
+    endpoint_dir = protocol.v2_root(client.runtime_dir()) / name
+    endpoint_dir.mkdir(parents=True, exist_ok=True)
+    (endpoint_dir / protocol.HELLO).write_text(json.dumps(body))
+    return endpoint_dir
 
 
 @contextlib.contextmanager
@@ -620,13 +620,13 @@ def test_a_probe_that_raises_raises_the_first_in_order_and_closes_what_was_found
     probe = client._probe
     found = []
 
-    def failing(directory, hello):
-        if directory == first:
+    def failing(endpoint_dir, hello):
+        if endpoint_dir == first:
             time.sleep(0.2)                             # ends after the second's failure
             raise RuntimeError("first")
-        if directory == second:
+        if endpoint_dir == second:
             raise RuntimeError("second")
-        session = probe(directory, hello)
+        session = probe(endpoint_dir, hello)
         found.append(session)
         return session
 

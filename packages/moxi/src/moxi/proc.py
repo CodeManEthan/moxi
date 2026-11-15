@@ -536,15 +536,15 @@ def status(pid: int) -> int | None:
     """
     if isinstance(pid, int) and not isinstance(pid, bool):
         with _detached_guard:
-            for at, (kept, code) in enumerate(_codes):
+            for position, (kept, code) in enumerate(_codes):
                 if kept == pid:
-                    del _codes[at]
+                    del _codes[position]
                     return code
-            for at, child in enumerate(_detached):
+            for position, child in enumerate(_detached):
                 if child.pid == pid:
                     code = child.poll()
                     if code is not None:
-                        del _detached[at]
+                        del _detached[position]
                     return code
     raise LookupError(f"process {pid!r} is not a detached child of this process whose "
                       f"status is still unread")
@@ -758,7 +758,7 @@ def process_env(pid: int) -> dict[str, str] | None:
     if not _a_pid(pid) or _WINDOWS:
         return None
     try:
-        return _environ(pid)
+        return _env(pid)
     except OSError:
         return None
 
@@ -785,13 +785,13 @@ def _a_pid(pid) -> bool:
     return not isinstance(pid, bool) and isinstance(pid, int) and pid > 0
 
 
-def _environ(pid: int) -> dict[str, str]:
+def _env(pid: int) -> dict[str, str]:
     """`process_env`'s read on every system, Windows through psutil, raising instead of
     answering None: `ProcessLookupError` when there is no such process (gone, or ended
     and not yet reaped), `PermissionError` when the system refuses it, any other `OSError`
     for a read that failed."""
     if sys.platform.startswith("linux"):
-        return _linux_read_environ(pid, "/proc")
+        return _linux_read_env(pid, "/proc")
     if sys.platform == "darwin":
         return _pairs(_procargs2_parts(_mac_procargs(pid))[1])
     if _WINDOWS:
@@ -800,7 +800,7 @@ def _environ(pid: int) -> dict[str, str]:
 
 
 def _cmdline(pid: int) -> list[str]:
-    """`cmdline`'s read, raising as `_environ` does."""
+    """`cmdline`'s read, raising as `_env` does."""
     if sys.platform.startswith("linux"):
         return _linux_cmdline(pid, "/proc")
     if sys.platform == "darwin":
@@ -810,14 +810,14 @@ def _cmdline(pid: int) -> list[str]:
     raise OSError(f"no reader of another process's command line on {sys.platform}")
 
 
-def _linux_environ(pid: int, root: str = "/proc") -> dict[str, str] | None:
+def _linux_env(pid: int, root: str = "/proc") -> dict[str, str] | None:
     try:
-        return _linux_read_environ(pid, root)
+        return _linux_read_env(pid, root)
     except OSError:
         return None
 
 
-def _linux_read_environ(pid: int, root: str) -> dict[str, str]:
+def _linux_read_env(pid: int, root: str) -> dict[str, str]:
     raw = _linux_file(pid, root, "environ")
     # A zombie reads as an empty environment; it has ended, so it is gone.
     if not raw and _linux_ended(pid, root):
@@ -840,15 +840,15 @@ def _linux_cmdline(pid: int, root: str = "/proc") -> list[str]:
 
 def _linux_file(pid: int, root: str, name: str) -> bytes:
     try:
-        with open(os.path.join(root, str(pid), name), "rb") as f:
-            return f.read()
+        with open(os.path.join(root, str(pid), name), "rb") as fh:
+            return fh.read()
     except FileNotFoundError:
         raise ProcessLookupError(f"process {pid} is gone") from None
     except ProcessLookupError:
         raise
-    except OSError as error:
+    except OSError as exc:
         # A read of a process that ended while it was open fails with ESRCH.
-        if error.errno == _ESRCH:
+        if exc.errno == _ESRCH:
             raise ProcessLookupError(f"process {pid} is gone") from None
         raise
 
@@ -859,8 +859,8 @@ _ESRCH = 3
 def _linux_ended(pid: int, root: str) -> bool:
     """Whether `pid` has ended (a zombie, or gone) by its `stat` file's state."""
     try:
-        with open(os.path.join(root, str(pid), "stat"), "rb") as f:
-            stat = f.read()
+        with open(os.path.join(root, str(pid), "stat"), "rb") as fh:
+            stat = fh.read()
     except OSError:
         return True
     # The state follows the command name, which is in parentheses and may hold any byte.
@@ -869,7 +869,7 @@ def _linux_ended(pid: int, root: str) -> bool:
 
 
 def _psutil_read(pid: int, what: str):
-    """psutil's `Process(pid).<what>()`, its errors as `_environ` raises them."""
+    """psutil's `Process(pid).<what>()`, its errors as `_env` raises them."""
     import psutil
 
     try:
@@ -878,20 +878,20 @@ def _psutil_read(pid: int, what: str):
         raise ProcessLookupError(f"process {pid} is gone") from None
     except psutil.AccessDenied:
         raise PermissionError(f"the system refuses reading process {pid}") from None
-    except psutil.Error as error:
-        raise OSError(f"process {pid} can't be read: {error}") from None
+    except psutil.Error as exc:
+        raise OSError(f"process {pid} can't be read: {exc}") from None
 
 
 def _mac_procargs(pid: int) -> bytes:
-    """The kernel's `KERN_PROCARGS2` answer for `pid`, raising as `_environ` does."""
+    """The kernel's `KERN_PROCARGS2` answer for `pid`, raising as `_env` does."""
     import ctypes
     import ctypes.util
 
     try:
         libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
         sysctl = libc.sysctl
-    except (OSError, AttributeError) as error:
-        raise OSError(f"sysctl can't be called: {error}") from None
+    except (OSError, AttributeError) as exc:
+        raise OSError(f"sysctl can't be called: {exc}") from None
     sysctl.argtypes = (ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
                        ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t)
     sysctl.restype = ctypes.c_int
@@ -925,7 +925,7 @@ def _exists(pid: int) -> bool:
     return True
 
 
-def _mac_environ(pid: int) -> dict[str, str] | None:
+def _mac_env(pid: int) -> dict[str, str] | None:
     try:
         return _pairs(_procargs2_parts(_mac_procargs(pid))[1])
     except OSError:
@@ -965,33 +965,33 @@ def _procargs2_parts(raw: bytes) -> tuple[list[str], list[bytes]]:
     argc = int.from_bytes(raw[:width], sys.byteorder, signed=True)
     if argc < 0:
         raise short
-    at = raw.find(b"\0", width)
-    if at < 0:
+    position = raw.find(b"\0", width)
+    if position < 0:
         raise short
     # The path is padded with NULs to a pointer-size boundary from its start; only that
     # padding is skipped, so an empty argv[0] after it is still read as an argument. Fewer
     # NULs than that rule asks for means another layout: then every NUL is padding.
     nuls = 0
-    while at + nuls < len(raw) and raw[at + nuls] == 0:
+    while position + nuls < len(raw) and raw[position + nuls] == 0:
         nuls += 1
-    padded = width + _round_up(at + 1 - width, _POINTER)
-    at = padded if at + nuls >= padded else at + nuls
+    padded = width + _round_up(position + 1 - width, _POINTER)
+    position = padded if position + nuls >= padded else position + nuls
     args = []
     for _ in range(argc):
-        end = raw.find(b"\0", at)
+        end = raw.find(b"\0", position)
         if end < 0:
             raise short
-        args.append(raw[at:end].decode("utf-8", "replace"))
-        at = end + 1
+        args.append(raw[position:end].decode("utf-8", "replace"))
+        position = end + 1
     entries = []
-    while at < len(raw):
-        end = raw.find(b"\0", at)
+    while position < len(raw):
+        end = raw.find(b"\0", position)
         if end < 0:
             end = len(raw)
-        if end == at:
+        if end == position:
             break  # the empty string that ends the environment
-        entries.append(raw[at:end])
-        at = end + 1
+        entries.append(raw[position:end])
+        position = end + 1
     return args, entries
 
 
@@ -1032,8 +1032,8 @@ def parent(pid: int) -> int | None:
 
 def _linux_parent(pid: int, root: str = "/proc") -> int | None:
     try:
-        with open(os.path.join(root, str(pid), "stat"), "rb") as f:
-            stat = f.read()
+        with open(os.path.join(root, str(pid), "stat"), "rb") as fh:
+            stat = fh.read()
     except OSError:
         return None
     # The command name is in parentheses and may hold spaces and parentheses, so the
@@ -1081,8 +1081,8 @@ def _kinfo_parent(raw: bytes, pid: int) -> int | None:
     if len(raw) != _KINFO_PROC_SIZE:
         return None
 
-    def field(at: int) -> int:
-        return int.from_bytes(raw[at:at + 4], sys.byteorder, signed=True)
+    def field(position: int) -> int:
+        return int.from_bytes(raw[position:position + 4], sys.byteorder, signed=True)
 
     if field(_KINFO_PID_AT) != pid:
         return None

@@ -63,7 +63,7 @@ def test_a_path_at_or_under_a_root_finds_it(tmp_path):
     assert key_for(tmp_path) is None
 
 
-def test_a_relative_path_is_taken_from_the_working_directory(tmp_path, monkeypatch):
+def test_a_relative_path_is_taken_from_the_working_dir(tmp_path, monkeypatch):
     root = tmp_path / "proj"
     (root / "src").mkdir(parents=True)
     register(("proj", root))
@@ -144,7 +144,7 @@ def test_a_symlinked_root_that_now_points_elsewhere_is_not_matched_by_its_old_ta
 
 
 @POSIX
-def test_two_roots_naming_one_directory_tie_to_the_lower_key(tmp_path):
+def test_two_roots_naming_one_dir_tie_to_the_lower_key(tmp_path):
     real = tmp_path / "real"
     (real / "src").mkdir(parents=True)
     alias = tmp_path / "alias"

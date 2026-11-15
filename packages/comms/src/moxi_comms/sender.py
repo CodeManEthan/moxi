@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 
 from . import constants, directory, secrets, tokens
+from .constants import GLOBAL_ENV, NAME_ENV, OPERATOR_ENV, SCOPE_ENV
 from .record import RateLimited
 from .provision import NAMES
 from .scoping import GLOBAL, qualify
@@ -27,10 +28,8 @@ log = logging.getLogger("comms.send")
 
 #: The operator lane's trigger. A stamp the wrapper never passes to a
 #: session: it is typed in the operator's own terminal and nowhere else.
-OPERATOR_VAR = "MOXI_COMMS_OPERATOR"
-
 #: The stamps that say a session is CLAIMED. Either one beside the trigger is a refusal.
-CLAIM_VARS = ("MOXI_COMMS_NAME",)
+CLAIM_VARS = (NAME_ENV,)
 
 
 class SendFailed(Exception):
@@ -91,17 +90,17 @@ def operator_from_env(env) -> str | None:
     A CLAIMED session is never the operator. `MOXI_COMMS_NAME` beside the trigger raises
     `OperatorRefused`, with the variable in the log and in `detail`.
     """
-    user_id = (env.get(OPERATOR_VAR) or "").strip()
+    user_id = (env.get(OPERATOR_ENV) or "").strip()
     if not user_id:
         return None
     claimed = [var for var in CLAIM_VARS if env.get(var)]
     if claimed:
         log.warning("%s is set beside %s; a claimed session is never the operator and the "
                     "verb refuses rather than pick one of them",
-                    OPERATOR_VAR, ", ".join(claimed))
+                    OPERATOR_ENV, ", ".join(claimed))
         raise OperatorRefused(
             "this process carries the operator's stamp and an agent's claim at once",
-            detail=f"{OPERATOR_VAR} is set beside {', '.join(claimed)}")
+            detail=f"{OPERATOR_ENV} is set beside {', '.join(claimed)}")
     return user_id
 
 
@@ -152,13 +151,13 @@ def _bounded(send, *, as_: str, attempts: int, sleep):
             log.info("posted message_id=%s channel=%s as=%s attempt=%d",
                      msg.id, msg.channel_id, as_, attempt)
             return msg
-        except RateLimited as e:
-            last = e
+        except RateLimited as exc:
+            last = exc
             log.warning("429 on attempt %d/%d; retry_after=%ss", attempt, attempts,
-                        e.retry_after)
+                        exc.retry_after)
             if attempt >= attempts:
                 break
-            sleep(min(e.retry_after, constants.RETRY_MAX_SLEEP))
+            sleep(min(exc.retry_after, constants.RETRY_MAX_SLEEP))
     raise SendFailed(
         f"SEND FAILED: rate limited on all {attempts} attempts "
         f"(last Retry-After {getattr(last, 'retry_after', '?')}s). The message was NOT "
@@ -178,10 +177,10 @@ def sender_from_env(env, project: str) -> SenderIdentity | None:
     name means no identity. Identity comes from the claim-stamped environment, and a
     process with no claim is refused at the verb.
     """
-    name = env.get("MOXI_COMMS_NAME")
+    name = env.get(NAME_ENV)
     if not name:
         return None
     # A stamp with no `MOXI_COMMS_SCOPE` is the global identity: `project` is the session's
     # project, never its scope.
-    scope = GLOBAL if env.get("MOXI_COMMS_GLOBAL") else (env.get("MOXI_COMMS_SCOPE") or GLOBAL)
+    scope = GLOBAL if env.get(GLOBAL_ENV) else (env.get(SCOPE_ENV) or GLOBAL)
     return SenderIdentity.for_agent(name, scope)

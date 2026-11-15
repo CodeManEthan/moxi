@@ -72,13 +72,13 @@ class Retention:
     archived: int | None = None
 
 
-def _home(environ: Mapping[str, str]) -> str:
-    return environ.get("HOME") or str(Path.home())
+def _home(env: Mapping[str, str]) -> str:
+    return env.get("HOME") or str(Path.home())
 
 
-def _under(variable: str, default: str, environ: Mapping[str, str]) -> Path:
-    home = _home(environ)
-    value = environ.get(variable)
+def _under(variable: str, default: str, env: Mapping[str, str]) -> Path:
+    home = _home(env)
+    value = env.get(variable)
     if not value:
         return Path(home) / default
     if value == "~" or value.startswith("~/"):
@@ -86,15 +86,15 @@ def _under(variable: str, default: str, environ: Mapping[str, str]) -> Path:
     return Path(value)
 
 
-def claude_settings(environ: Mapping[str, str] | None = None) -> Path:
+def claude_settings(env: Mapping[str, str] | None = None) -> Path:
     """Claude Code's user settings file: `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`."""
-    environ = os.environ if environ is None else environ
-    return _under("CLAUDE_CONFIG_DIR", ".claude", environ) / "settings.json"
+    env = os.environ if env is None else env
+    return _under("CLAUDE_CONFIG_DIR", ".claude", env) / "settings.json"
 
 
-def codex_home(environ: Mapping[str, str] | None = None) -> Path:
+def codex_home(env: Mapping[str, str] | None = None) -> Path:
     """Codex's home: `${CODEX_HOME:-~/.codex}`."""
-    return _under("CODEX_HOME", ".codex", os.environ if environ is None else environ)
+    return _under("CODEX_HOME", ".codex", os.environ if env is None else env)
 
 
 def _why(exc: Exception) -> str:
@@ -115,8 +115,8 @@ def _read(path: Path, parse) -> tuple[Any, str | None]:
         return None, f"cannot be parsed: {exc}"
 
 
-def _claude(environ: Mapping[str, str]) -> Retention:
-    path = claude_settings(environ)
+def _claude(env: Mapping[str, str]) -> Retention:
+    path = claude_settings(env)
     data, reason = _read(path, lambda b: json.loads(b.decode("utf-8")))
     if reason is None and data is not None and not isinstance(data, dict):
         reason = "does not hold a JSON object"
@@ -125,39 +125,39 @@ def _claude(environ: Mapping[str, str]) -> Retention:
     raise_it = (f"To keep transcripts longer, raise {CLAUDE_KEY} in {file}; "
                 "sessions changes no harness setting.")
     if reason is not None:
-        return Retention(CLAUDE, file, CLAUDE_KEY, None, f"{file} {reason}", True, (
+        return Retention(CLAUDE, file, CLAUDE_KEY, None, f"{file} {reason}", warn=True, lines=(
             f"Claude Code: {file} {reason}, so its {CLAUDE_KEY} is not known ({default}).",
-            raise_it), f"Claude Code: {file} {reason}")
+            raise_it), brief=f"Claude Code: {file} {reason}")
     value = data.get(CLAUDE_KEY) if isinstance(data, dict) else None
     if value is None:
         unset = (f"{CLAUDE_KEY} is not set in {file}" if data is not None else
                  f"{file} doesn't exist, so {CLAUDE_KEY} is not set")
-        return Retention(CLAUDE, file, CLAUDE_KEY, None, None, False, (
+        return Retention(CLAUDE, file, CLAUDE_KEY, None, None, warn=False, lines=(
             f"Claude Code: {unset}: {CLAUDE_DEFAULT_DAYS} days. "
             f"Claude Code deletes transcripts older than that.", raise_it),
-            f"Claude Code: {CLAUDE_KEY} not set, {CLAUDE_DEFAULT_DAYS} days")
+            brief=f"Claude Code: {CLAUDE_KEY} not set, {CLAUDE_DEFAULT_DAYS} days")
     if isinstance(value, bool) or not isinstance(value, int):
-        return Retention(CLAUDE, file, CLAUDE_KEY, value, None, True, (
+        return Retention(CLAUDE, file, CLAUDE_KEY, value, None, warn=True, lines=(
             f"Claude Code: {CLAUDE_KEY} is {json.dumps(value)} in {file}, which is not a "
             "whole number of days.", raise_it),
-            f"Claude Code: {CLAUDE_KEY} is {json.dumps(value)}, not a whole number")
+            brief=f"Claude Code: {CLAUDE_KEY} is {json.dumps(value)}, not a whole number")
     if value < 1:
-        return Retention(CLAUDE, file, CLAUDE_KEY, value, None, True, (
+        return Retention(CLAUDE, file, CLAUDE_KEY, value, None, warn=True, lines=(
             f"Claude Code: {CLAUDE_KEY} is {value} in {file}, which is below one day, so how "
             "long Claude Code keeps transcripts is not known.", raise_it),
-            f"Claude Code: {CLAUDE_KEY} is {value}, below one day")
-    return Retention(CLAUDE, file, CLAUDE_KEY, value, None, False, (
+            brief=f"Claude Code: {CLAUDE_KEY} is {value}, below one day")
+    return Retention(CLAUDE, file, CLAUDE_KEY, value, None, warn=False, lines=(
         f"Claude Code: {CLAUDE_KEY} is {value} in {file}. Claude Code deletes transcripts "
         f"older than {value} days.", raise_it),
-        f"Claude Code: {CLAUDE_KEY} {value} days")
+        brief=f"Claude Code: {CLAUDE_KEY} {value} days")
 
 
-def _count_rollouts(folder: Path) -> int | None:
-    if not folder.is_dir():
-        return 0 if not folder.exists() else None
+def _count_rollouts(rollouts_dir: Path) -> int | None:
+    if not rollouts_dir.is_dir():
+        return 0 if not rollouts_dir.exists() else None
     count = 0
     try:
-        for _, _, names in os.walk(folder, onerror=_raise):
+        for _, _, names in os.walk(rollouts_dir, onerror=_raise):
             count += sum(1 for name in names if name.startswith("rollout-"))
     except OSError:
         return None
@@ -168,8 +168,8 @@ def _raise(exc: OSError) -> None:
     raise exc
 
 
-def _codex(environ: Mapping[str, str]) -> Retention:
-    home = codex_home(environ)
+def _codex(env: Mapping[str, str]) -> Retention:
+    home = codex_home(env)
     path = home / "config.toml"
     file = str(path)
     archive = home / CODEX_ARCHIVE
@@ -182,33 +182,36 @@ def _codex(environ: Mapping[str, str]) -> Retention:
     no_age = "Codex: no setting deletes rollouts by age."
     data, reason = _read(path, lambda b: tomllib.loads(b.decode("utf-8")))
     if reason is not None:
-        return Retention(CODEX, file, CODEX_KEY, None, f"{file} {reason}", True, (
+        return Retention(CODEX, file, CODEX_KEY, None, f"{file} {reason}", warn=True, lines=(
             no_age, f"Codex: {file} {reason}, so whether it compresses rollouts is not known.",
-            archive_line), f"Codex: {file} {reason}", str(archive), archived)
+            archive_line), brief=f"Codex: {file} {reason}", archive=str(archive),
+            archived=archived)
     features = data.get("features") if isinstance(data, dict) else None
     value = features.get(CODEX_KEY.split(".", 1)[1]) if isinstance(features, dict) else None
     if value is True:
-        return Retention(CODEX, file, CODEX_KEY, True, None, True, (
+        return Retention(CODEX, file, CODEX_KEY, value=True, reason=None, warn=True, lines=(
             no_age,
             f"Codex: {CODEX_KEY} is on in {file}: Codex compresses rollouts to .jsonl.zst, "
             "which sessions finds but can't read.", archive_line),
-            "Codex: compression on, new rollouts can't be read", str(archive), archived)
+            brief="Codex: compression on, new rollouts can't be read", archive=str(archive),
+            archived=archived)
     if value is not None and not isinstance(value, bool):
-        return Retention(CODEX, file, CODEX_KEY, value, None, True, (
+        return Retention(CODEX, file, CODEX_KEY, value, None, warn=True, lines=(
             no_age, f"Codex: {CODEX_KEY} is {value!r} in {file}, which is not true or "
             "false.", archive_line),
-            f"Codex: {CODEX_KEY} is {value!r}, not true or false", str(archive), archived)
+            brief=f"Codex: {CODEX_KEY} is {value!r}, not true or false", archive=str(archive),
+            archived=archived)
     said = "off" if value is False else "not set (off)"
-    return Retention(CODEX, file, CODEX_KEY, value, None, False, (
+    return Retention(CODEX, file, CODEX_KEY, value, None, warn=False, lines=(
         no_age, f"Codex: {CODEX_KEY} is {said} in {file}.", archive_line),
-        f"Codex: no age limit, compression {said}, archive {held.removeprefix('it ')}",
-        str(archive), archived)
+        brief=f"Codex: no age limit, compression {said}, archive {held.removeprefix('it ')}",
+        archive=str(archive), archived=archived)
 
 
 def _opencode() -> Retention:
-    return Retention(OPENCODE, None, None, None, None, False,
-                     ("OpenCode: sessions reads no retention setting for it.",),
-                     "OpenCode: no setting read")
+    return Retention(OPENCODE, None, None, None, None, warn=False,
+                     lines=("OpenCode: sessions reads no retention setting for it.",),
+                     brief="OpenCode: no setting read")
 
 
 def retention(env: Mapping[str, str] | None = None) -> tuple[Retention, ...]:
@@ -219,10 +222,10 @@ def retention(env: Mapping[str, str] | None = None) -> tuple[Retention, ...]:
     return (_claude(env), _codex(env), _opencode())
 
 
-def lines(environ: Mapping[str, str] | None = None) -> list[str]:
+def lines(env: Mapping[str, str] | None = None) -> list[str]:
     """`HEAD`, then every harness's lines: what a setup prints."""
     out = [HEAD]
-    for item in retention(environ):
+    for item in retention(env):
         out.extend(item.lines)
     return out
 

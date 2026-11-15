@@ -150,6 +150,7 @@ from moxi import exit as moxi_exit
 from . import (api, attribution, cache, cards, claimfile, claimhold, config,
                directory, glossary, machine_line, policy, sending)
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout, VersionMismatch
+from .constants import BACKEND_ENV
 from .store import books
 from .record import RecordError
 from .provision import NAMES
@@ -196,7 +197,7 @@ def cmd_reply(args, ctx: Context) -> int:
     return _render(ctx, sending.run(ctx, args))
 
 
-def cmd_delete(args, ctx: Context) -> int:
+def cmd_remove(args, ctx: Context) -> int:
     """`moxi comms remove`: withdraw one of your messages from every recipient that
     hasn't had it yet. One line per recipient; exit `OK` when it was withdrawn from
     anyone, `REFUSED` when from no one, `TEMPFAIL` with the daemon down."""
@@ -231,9 +232,9 @@ def cmd_agents(args, ctx: Context) -> int:
         return _agents_json(ctx)
     try:
         client = ctx.daemon()
-    except DaemonOffline as e:
-        ctx.say(f"{e}\nNothing is addressable while the daemon is down.")
-        return _offline(e)
+    except DaemonOffline as exc:
+        ctx.say(f"{exc}\nNothing is addressable while the daemon is down.")
+        return _offline(exc)
     try:
         info = client.call("agents")
     finally:
@@ -253,12 +254,12 @@ def _agents_json(ctx: Context) -> int:
 
     try:
         rows = api.roster_rows(timeout_s=_deadline(ctx))
-    except DaemonOffline as e:
-        return fail(_offline(e), "offline", str(e))
-    except DaemonTimeout as e:
-        return fail(moxi_exit.ERROR, "timeout", str(e))
-    except DaemonError as e:
-        return fail(moxi_exit.ERROR, "failed", str(e))
+    except DaemonOffline as exc:
+        return fail(_offline(exc), "offline", str(exc))
+    except DaemonTimeout as exc:
+        return fail(moxi_exit.ERROR, "timeout", str(exc))
+    except DaemonError as exc:
+        return fail(moxi_exit.ERROR, "failed", str(exc))
     ctx.say(json.dumps({"ok": True, "rows": [dataclasses.asdict(row) for row in rows]}))
     return moxi_exit.OK
 
@@ -445,8 +446,8 @@ def cmd_explain(args, ctx: Context) -> int:
     identity = args.identity
     try:
         client = ctx.daemon()
-    except DaemonOffline as e:
-        ctx.say(str(e))
+    except DaemonOffline as exc:
+        ctx.say(str(exc))
         ctx.say("\n".join(_wrap(
             "The binding, the adapter kind and the last delivery are daemon memory, so "
             "with the daemon down there is nothing to read them out of. The cursor is in "
@@ -463,15 +464,15 @@ def cmd_explain(args, ctx: Context) -> int:
                 ctx.say("\n".join(_wrap(CASE_REASONS[dropped], 74, "  ")))
                 ctx.say("")
         ctx.say(_render_cursor(books.explain_cursor(books.read_cursor(qualified))))
-        return _offline(e)
+        return _offline(exc)
     try:
         try:
             qualified = client.call("resolve", {"name": identity})["qualified"]
-        except DaemonError as e:
+        except DaemonError as exc:
             # The daemon refuses a retired identity (an agent-N whose binding ended, or
             # an `x@S` retired in the directory) by name, and that refusal is already the
             # whole answer to "why did my message not land". Print it as it came.
-            ctx.say(_refused_tag(identity, e))
+            ctx.say(_refused_tag(identity, exc))
             return moxi_exit.REFUSED
         info = client.call("explain", {"identity": qualified,
                                        "message_id": args.message_id})
@@ -515,12 +516,12 @@ def cmd_owner(args, ctx: Context) -> int:
         return fail(moxi_exit.USAGE, "refused", "a session id is required")
     try:
         got = api.owner(sid, timeout_s=_deadline(ctx))
-    except DaemonOffline as e:
-        return fail(_offline(e), "offline", str(e))
-    except DaemonTimeout as e:
-        return fail(moxi_exit.ERROR, "timeout", str(e))
-    except DaemonError as e:
-        return fail(moxi_exit.ERROR, "failed", str(e))
+    except DaemonOffline as exc:
+        return fail(_offline(exc), "offline", str(exc))
+    except DaemonTimeout as exc:
+        return fail(moxi_exit.ERROR, "timeout", str(exc))
+    except DaemonError as exc:
+        return fail(moxi_exit.ERROR, "failed", str(exc))
     out = {"ok": True, "session_id": got.session_id, "owner": got.identity,
            "adapter": got.adapter, "awaiting": list(got.awaiting)}
     if args.json:
@@ -612,15 +613,15 @@ def cmd_cache(args, ctx: Context) -> int:
         return moxi_exit.REFUSED
     try:
         client = ctx.daemon()
-    except DaemonOffline as e:
-        ctx.say(f"{e}\nWhich session sits behind a name is daemon memory; with the daemon "
+    except DaemonOffline as exc:
+        ctx.say(f"{exc}\nWhich session sits behind a name is daemon memory; with the daemon "
                 "down, only a raw session id can be read.")
         ids = [a for a in args.targets if cache.SESSION_ID_RE.match(a)]
         if not ids:
-            return _offline(e)
+            return _offline(exc)
         for i in ids:
             ctx.say(cache.spoken_line(cache.kind_of(cache.target_for_session_id(i))))
-        return _offline(e)
+        return _offline(exc)
     targets = []
     refused = False         # a name resolution refused (retired): exit 3
     try:
@@ -636,8 +637,8 @@ def cmd_cache(args, ctx: Context) -> int:
                 continue
             try:
                 qualified = client.call("resolve", {"name": arg})["qualified"]
-            except DaemonError as e:
-                targets.append(cache.target_for_name(arg, error=str(e)))
+            except DaemonError as exc:
+                targets.append(cache.target_for_name(arg, error=str(exc)))
                 refused = True
                 continue
             targets.append(cache.session_target(client, qualified))
@@ -663,8 +664,8 @@ def _binary_version(path: str) -> str:
     try:
         proc = subprocess.run([path, "--version"], capture_output=True, text=True,
                               timeout=DOCTOR_VERSION_TIMEOUT, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as e:
-        return f"version not read ({e})"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"version not read ({exc})"
     first = (proc.stdout or proc.stderr or "").strip().splitlines()
     return first[0] if first else f"version not read (exit {proc.returncode})"
 
@@ -678,8 +679,8 @@ def _device_label() -> str:
     where = moxi_paths.core().state_dir() / moxi_paths.DEVICE_ID
     try:
         label = LAYOUT.device(create=False)
-    except OSError as e:
-        return f"ERROR: {where} cannot be read ({e.strerror or e})"
+    except OSError as exc:
+        return f"ERROR: {where} cannot be read ({exc.strerror or exc})"
     return f"none set yet (no id in {where})" if label is None else label
 
 
@@ -703,7 +704,7 @@ def cmd_doctor(args, ctx: Context) -> int:
     for name in DOCTOR_DIRS:
         row(f"  {name.upper()}", str(getattr(LAYOUT, f"{name}_dir")()))
 
-    configured = bool(ctx.env.get("MOXI_COMMS_BACKEND"))
+    configured = bool(ctx.env.get(BACKEND_ENV))
     try:
         cfg = config.load(env=ctx.env)
         configured = configured or cfg.source != "defaults"
@@ -715,14 +716,14 @@ def cmd_doctor(args, ctx: Context) -> int:
             + ("" if tuple(cfg.credentials.chain) != tuple(secrets.default_chain())
                else " (the default)"))
         required = cfg.cache.required
-    except (config.ConfigError, RecordError) as e:
-        row("config", f"ERROR: {e}")
+    except (config.ConfigError, RecordError) as exc:
+        row("config", f"ERROR: {exc}")
         required = False
 
     # The cache module, which the cold-send hold reads through (an optional module).
     found = cache.module()
     row("cache", cache.describe_module(found))
-    refusal = cache.required_refusal(required, found)
+    refusal = cache.required_refusal(required=required, found=found)
     if refusal:
         row("", "[cache] required is true, so the daemon refuses to start")
 
@@ -737,8 +738,8 @@ def cmd_doctor(args, ctx: Context) -> int:
         # The hello is the whole question: the daemon answers, and speaks this wire.
         DaemonClient(socket_path, timeout=2.0).connect().close()
         daemon_up, detail = True, f"answers at {socket_path}"
-    except (DaemonOffline, DaemonError, OSError) as e:
-        daemon_up, detail = False, f"not answering at {socket_path} ({e})"
+    except (DaemonOffline, DaemonError, OSError) as exc:
+        daemon_up, detail = False, f"not answering at {socket_path} ({exc})"
     row("daemon", detail)
     if daemon_up:
         for line in _waiting_rows(socket_path):
@@ -770,16 +771,16 @@ def cmd_migrate(args, ctx: Context) -> int:
         else:
             lines = []
             open_write(env=ctx.env, report=lines.extend).close()
-    except StoreRefused as e:
-        ctx.say(f"refused: {e}")
-        return e.exit_code
-    except LockTimeout as e:
-        ctx.say(f"another comms process holds the store's lock ({e}); nothing was "
+    except StoreRefused as exc:
+        ctx.say(f"refused: {exc}")
+        return exc.exit_code
+    except LockTimeout as exc:
+        ctx.say(f"another comms process holds the store's lock ({exc}); nothing was "
                 "moved. Try again in a moment")
         return moxi_exit.TEMPFAIL
-    except StoreError as e:
-        ctx.say(f"refused: {e}")
-        return getattr(e, "exit_code", moxi_exit.ERROR)
+    except StoreError as exc:
+        ctx.say(f"refused: {exc}")
+        return getattr(exc, "exit_code", moxi_exit.ERROR)
     for line in lines:
         ctx.say(line)
     return moxi_exit.OK
@@ -799,13 +800,13 @@ def cmd_reserved(args, ctx: Context) -> int:
     except KeyError:
         ctx.say(f"{args.name} isn't reserved for a module; nothing was changed")
         return moxi_exit.REFUSED
-    except LockTimeout as e:
-        ctx.say(f"another comms process holds the reserved names' lock ({e}); nothing "
+    except LockTimeout as exc:
+        ctx.say(f"another comms process holds the reserved names' lock ({exc}); nothing "
                 "was changed. Try again in a moment")
         return moxi_exit.TEMPFAIL
-    except (StoreError, secrets.SecretError, config.ConfigError) as e:
-        ctx.say(f"refused: {e}")
-        return getattr(e, "exit_code", moxi_exit.ERROR)
+    except (StoreError, secrets.SecretError, config.ConfigError) as exc:
+        ctx.say(f"refused: {exc}")
+        return getattr(exc, "exit_code", moxi_exit.ERROR)
     for line in result.lines:
         ctx.say(line)
     return moxi_exit.OK if not result.failed else moxi_exit.ERROR
@@ -817,8 +818,8 @@ def _store_rows(env) -> list[str]:
 
     try:
         found = upgrade_0_2.doctor_rows(env)
-    except Exception as e:                                     # noqa: BLE001
-        return [f"NOT OK  could not be checked: {type(e).__name__}: {e}"]
+    except Exception as exc:                                     # noqa: BLE001
+        return [f"NOT OK  could not be checked: {type(exc).__name__}: {exc}"]
     return [f"{'ok' if r.state == 'ok' else 'NOT OK'}  {r.detail}"
             + (f" (fix: {r.fix})" if r.fix else "") for r in found]
 
@@ -833,8 +834,8 @@ def _waiting_rows(socket_path) -> list[str]:
             bindings = client.call("agents").get("bindings") or []
         finally:
             client.close()
-    except (DaemonOffline, DaemonError, OSError) as e:
-        return [f"could not be read ({e})"]
+    except (DaemonOffline, DaemonError, OSError) as exc:
+        return [f"could not be read ({exc})"]
     now = time.time()
     lines = []
     for b in bindings:
@@ -1072,7 +1073,7 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     dl.add_argument("message_id")
     dl.add_argument("--json", action="store_true",
                     help="print the outcome and each recipient's state as one JSON object")
-    dl.set_defaults(func=cmd_delete)
+    dl.set_defaults(func=cmd_remove)
 
     a = sub.add_parser("agents", help="who you can message")
     shown = a.add_mutually_exclusive_group()
@@ -1179,9 +1180,9 @@ def main(argv=None, ctx: Context | None = None, *, prog: str = PROG) -> int:
     ctx = ctx or Context(backend=getattr(args, "backend", None))
     try:
         return args.func(args, ctx)
-    except config.ConfigError as e:
+    except config.ConfigError as exc:
         # A config file that does not load refuses the verb, naming the key and the fix.
-        ctx.say(str(e))
+        ctx.say(str(exc))
         return moxi_exit.REFUSED
 
 

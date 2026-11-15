@@ -59,16 +59,16 @@ Result = relaunch.Result
 
 
 def exit_session(session_id: str, *, dry_run: bool = False,
-                 environ: Mapping[str, str] | None = None, turns: Any | None = None,
+                 caller_env: Mapping[str, str] | None = None, turns: Any | None = None,
                  slots_api: Any = LOOK, settings: Mapping[str, Any] | None = None,
                  conn: sqlite3.Connection | None = None,
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], float] = time.time,
                  sleep: Callable[[float], None] = time.sleep) -> Result:
-    """Exit the launched session `session_id`. Raises a refusal (logged as `refused` once
+    """Exit the launched session `session_id`. Raises a refusal (logged as `exc` once
     the launch is found); returns the verdict otherwise. A dry run takes the checks and
     the quiet read and writes nothing."""
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     current = settings if settings is not None else relaunch._settings()
     with relaunch._store(conn) as c:
         row = store.resolve(c, session_id)
@@ -77,27 +77,27 @@ def exit_session(session_id: str, *, dry_run: bool = False,
         try:
             api = _slots(slots_api)
             found = target.find(session_id, conn=c, turns=turns, slots_api=api)
-        except (catalog.Refused, store.RunOpen) as refused:
-            _refused(c, row, refused, dry_run)
+        except (catalog.Refused, store.RunOpen) as exc:
+            _on_refused(c, row, exc, dry_run=dry_run)
             raise
         try:
-            return _exit(c, found, api, env, current, dry_run, clock, wall, sleep)
-        except (catalog.Refused, store.RunOpen) as refused:
-            _refused(c, found.row, refused, dry_run)
+            return _exit(c, found, api, env, current, dry_run=dry_run, clock=clock, wall=wall, sleep=sleep)
+        except (catalog.Refused, store.RunOpen) as exc:
+            _on_refused(c, found.row, exc, dry_run=dry_run)
             raise
         finally:
             found.close()
 
 
 def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping[str, str],
-          current: Mapping[str, Any], dry_run: bool, clock, wall, sleep) -> Result:
+          current: Mapping[str, Any], *, dry_run: bool, clock, wall, sleep) -> Result:
     row, sid = found.row, found.session_id
     if not found.live or found.session is None:
         raise Refused("not-live", f"session {sid} is not live", "nothing to exit")
     try:
         offers = "exit" in found.session.capabilities
-    except Exception as error:
-        raise target.TurnsFailed(error) from error
+    except Exception as exc:
+        raise target.TurnsFailed(exc) from exc
     if not offers:
         raise Refused("no-exit", f"the {row.harness} session does not offer exit through "
                                  "turns", "exit it in its own terminal")
@@ -119,7 +119,7 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
                       data={**data, "outcome": "dry-run"})
     run = store.insert_run(
         conn, kind="exit", mode="verb", request_id=row.request_id, session_id=sid,
-        actor=first.actor(env), state="acting", slot=row.slot, pane_id=row.pane_id,
+        by=first.actor(env), state="acting", slot=row.slot, pane_id=row.pane_id,
         job=own_job(), gone=lambda j: job.gone(j, slots_api=api))
     ran = ExitRun(conn, run, found, in_slot=in_slot, slots_api=api, settings=current,
                   clock=clock, wall=wall, sleep=sleep)
@@ -164,12 +164,12 @@ class ExitRun(job.RelaunchJob):
             self.steps()
         except job.Ended:
             pass
-        except BaseException as error:  # a run never stays open on a fault or a Ctrl-C
+        except BaseException as exc:  # a run never stays open on a fault or a Ctrl-C
             try:
-                self.end("error", type(error).__name__, job._words(error))
+                self.end("error", type(exc).__name__, job._words(exc))
             except job.Ended:
                 pass
-            if not isinstance(error, Exception):
+            if not isinstance(exc, Exception):
                 self._log()
                 raise
         self._log()
@@ -219,8 +219,8 @@ def own_job() -> str:
     return f"proc:{me.pid}@{me.started:.6f}"
 
 
-def _refused(conn: sqlite3.Connection, row: store.LaunchRow, refused: BaseException,
-             dry_run: bool) -> None:
+def _on_refused(conn: sqlite3.Connection, row: store.LaunchRow, refused: BaseException,
+             *, dry_run: bool) -> None:
     """Log a refusal met once the launch was found, with no run."""
     if dry_run:
         return

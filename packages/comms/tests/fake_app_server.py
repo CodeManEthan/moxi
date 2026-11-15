@@ -195,8 +195,8 @@ class FakeAppServer:
                                                    "message": "Not initialized"}})
         try:
             result = self._handle_request(conn, method, params)
-        except _Error as e:
-            return conn.send({"id": rid, "error": {"code": e.code, "message": e.message}})
+        except _Error as exc:
+            return conn.send({"id": rid, "error": {"code": exc.code, "message": exc.message}})
         conn.send({"id": rid, "result": result})
 
     def _handle_request(self, conn: _Conn, method: str, params: dict) -> dict:
@@ -322,8 +322,8 @@ class FakeAppServer:
             data = {tid: {k: v for k, v in t.items() if k != "loaded"}
                     for tid, t in self.threads.items()}
         tmp = f"{self.store}.tmp"
-        with open(tmp, "w") as f:
-            json.dump(data, f)
+        with open(tmp, "w") as fh:
+            json.dump(data, fh)
         os.replace(tmp, self.store)
 
     def load_store(self) -> None:
@@ -331,8 +331,8 @@ class FakeAppServer:
             return
         import os
         if os.path.exists(self.store):
-            with open(self.store) as f:
-                data = json.load(f)
+            with open(self.store) as fh:
+                data = json.load(fh)
             for thread in data.values():
                 thread["loaded"] = None
                 for turn in thread["turns"]:

@@ -52,31 +52,31 @@ def module_row(kind="daemon", switch=None, name="sync"):
 
 def test_a_row_of_another_system_is_off(monkeypatch):
     row = user(platform="darwin" if sys.platform != "darwin" else "linux")
-    found = judge(row, None, True)
+    found = judge(row, None, is_enabled=True)
     assert (found.state, found.reason) == ("off", f"added on {row.platform}")
 
 
 def test_no_supervisor_is_off():
     row = user()
-    assert judge(row, None, True, supervisor=False).reason == "no supervisor"
+    assert judge(row, None, is_enabled=True, supervisor=False).reason == "no supervisor"
     nobackend = st(state="nobackend", backend=None, enabled=None)
-    assert judge(row, nobackend, True).state == "off"
+    assert judge(row, nobackend, is_enabled=True).state == "off"
 
 
 def test_being_removed_is_warn_with_remove_as_the_fix():
     row = user(removing=True)
-    found = judge(row, st(), True)
+    found = judge(row, st(), is_enabled=True)
     assert (found.state, found.reason, found.fix) == (
         "warn", "remove not finished", "moxi services remove web")
 
 
 def test_a_module_unit_switched_off_is_off():
-    found = judge(module_row(switch="sync.enabled"), st(state="inactive"), False)
+    found = judge(module_row(switch="sync.enabled"), st(state="inactive"), is_enabled=False)
     assert found.state == "off" and "sync.enabled" in found.reason
 
 
 def test_an_unreadable_switch_is_unknown_shown_as_warn():
-    found = judge(module_row(switch="sync.enabled"), st(), None)
+    found = judge(module_row(switch="sync.enabled"), st(), is_enabled=None)
     assert (found.state, found.unknown) == ("warn", True)
     assert found.reason.startswith("unknown: its switch sync.enabled")
 
@@ -85,13 +85,13 @@ def test_an_unreadable_switch_is_unknown_shown_as_warn():
 def test_a_failed_supervisor_read_is_unknown_on_every_backend(backend):
     row = user()
     found = judge(row, st(state="unknown", backend=backend, enabled=None,
-                          detail="the read failed"), True)
+                          detail="the read failed"), is_enabled=True)
     assert (found.state, found.unknown, found.reason) == (
         "warn", True, "unknown: the read failed")
 
 
 def test_a_row_the_read_did_not_cover_is_unknown_with_why():
-    found = judge(user(), None, True, unread="the supervisor did not answer in 3 s")
+    found = judge(user(), None, is_enabled=True, unread="the supervisor did not answer in 3 s")
     assert found.reason == "unknown: the supervisor did not answer in 3 s"
     assert found.state == "warn"
 
@@ -99,22 +99,22 @@ def test_a_row_the_read_did_not_cover_is_unknown_with_why():
 # --- missing ----------------------------------------------------------------------------
 
 def test_missing_written_on_fails_and_off_warns():
-    on = judge(user(enabled=True), st(state="missing", enabled=None), True)
+    on = judge(user(enabled=True), st(state="missing", enabled=None), is_enabled=True)
     assert (on.state, on.fix) == ("fail", "moxi services enable web")
-    off = judge(user(name="api"), st(state="missing", enabled=None), False)
+    off = judge(user(name="api"), st(state="missing", enabled=None), is_enabled=False)
     assert (off.state, off.fix) == ("warn", "moxi services disable api")
 
 
 def test_missing_adopted_is_fixed_by_remove():
     row = user(form="adopted", kind="daemon", unit="site.service", name="site",
                enabled=True)
-    found = judge(row, st(state="missing", enabled=None, module=None), True)
+    found = judge(row, st(state="missing", enabled=None, module=None), is_enabled=True)
     assert found.state == "fail" and found.fix == "moxi services remove site"
     assert "site.service is missing" in found.reason
 
 
 def test_missing_module_unit_is_fixed_by_install():
-    found = judge(module_row(), st(state="missing", enabled=None), True)
+    found = judge(module_row(), st(state="missing", enabled=None), is_enabled=True)
     assert (found.state, found.fix) == ("fail", "moxi install notes")
 
 
@@ -123,10 +123,10 @@ def test_missing_module_unit_is_fixed_by_install():
 @pytest.mark.skipif(sys.platform != "linux", reason="adopted timers are wrapped on Linux")
 def test_a_wrapped_timer_whose_drop_in_is_gone_warns():
     row = user(form="adopted", name="backup")
-    found = judge(row, st("timer", wrapped=None, module=None), True)
+    found = judge(row, st("timer", wrapped=None, module=None), is_enabled=True)
     assert found.state == "warn" and found.reason.startswith("not wrapped")
     assert found.fix == "moxi services enable backup"
-    assert judge(row, st("timer", wrapped=None, module=None), False).fix == \
+    assert judge(row, st("timer", wrapped=None, module=None), is_enabled=False).fix == \
         "moxi services disable backup"
 
 
@@ -134,53 +134,53 @@ def test_a_wrapped_timer_whose_drop_in_is_gone_warns():
 def test_a_wrapped_timer_off_is_off_while_its_gate_holds_the_runs():
     row = user(form="adopted", name="backup")
     wrap = Wrapped("services", "adopted.backup", "backup")
-    found = judge(row, st("timer", wrapped=wrap, module=None), False)
+    found = judge(row, st("timer", wrapped=wrap, module=None), is_enabled=False)
     assert found.state == "off"
 
 
 # --- daemons ----------------------------------------------------------------------------
 
 def test_a_daemon_on_and_running_is_ok():
-    assert judge(user(enabled=True), st(), True).state == "ok"
+    assert judge(user(enabled=True), st(), is_enabled=True).state == "ok"
 
 
 def test_a_daemon_on_that_wont_start_at_login_warns():
-    found = judge(user(enabled=True), st(enabled=False), True)
+    found = judge(user(enabled=True), st(enabled=False), is_enabled=True)
     assert (found.state, found.reason) == ("warn", "won't start at login")
 
 
 def test_a_daemon_on_whose_login_start_cant_be_read_is_unknown():
-    found = judge(user(enabled=True), st(enabled=None), True)
+    found = judge(user(enabled=True), st(enabled=None), is_enabled=True)
     assert found.state == "warn" and found.unknown
 
 
 def test_a_daemon_on_not_running_with_no_stop_fails():
-    found = judge(user(enabled=True), st(state="inactive"), True)
+    found = judge(user(enabled=True), st(state="inactive"), is_enabled=True)
     assert (found.state, found.reason, found.fix) == (
         "fail", "not running", "moxi services start web")
 
 
 def test_a_failed_daemon_says_the_cores_result():
-    found = judge(user(enabled=True), st(state="failed", detail="failed (exit-code)"), True)
+    found = judge(user(enabled=True), st(state="failed", detail="failed (exit-code)"), is_enabled=True)
     assert found.state == "fail" and found.reason == "not running (failed: failed (exit-code))"
 
 
 def test_a_stop_by_hand_warns():
     row = user(enabled=True, stopped="2030-01-01T00:00:00Z")
-    found = judge(row, st(state="inactive"), True, booted=BOOTED)
+    found = judge(row, st(state="inactive"), is_enabled=True, booted=BOOTED)
     assert (found.state, found.reason) == ("warn",
                                            "stopped by hand at 2030-01-01T00:00:00Z")
 
 
 def test_a_stop_from_before_the_last_boot_is_ignored():
     row = user(enabled=True, stopped="2020-01-01T00:00:00Z")
-    found = judge(row, st(state="inactive"), True, booted=BOOTED)
+    found = judge(row, st(state="inactive"), is_enabled=True, booted=BOOTED)
     assert (found.state, found.reason) == ("fail", "not running")
 
 
 def test_a_module_daemon_stopped_by_hand_fails_with_start_as_the_fix():
     # A module daemon's stop is not stored, so nothing tells it from a crash.
-    found = judge(module_row(), st(state="inactive", module="notes", name="sync"), True)
+    found = judge(module_row(), st(state="inactive", module="notes", name="sync"), is_enabled=True)
     assert (found.state, found.reason, found.fix) == (
         "fail", "not running", "moxi services start notes/sync")
 
@@ -188,7 +188,7 @@ def test_a_module_daemon_stopped_by_hand_fails_with_start_as_the_fix():
 def test_a_module_daemon_idle_under_its_socket_is_ok():
     socket = st("socket", enabled=True, module="notes", name="sync")
     found = judge(module_row(), st(state="inactive", enabled=None, module="notes",
-                                   name="sync"), True, socket=socket)
+                                   name="sync"), is_enabled=True, socket=socket)
     assert (found.state, found.reason) == ("ok", "idle, socket listening")
 
 
@@ -198,26 +198,26 @@ def test_a_module_daemon_idle_under_its_socket_is_ok():
     ("inactive", False, "off", "off"),
 ])
 def test_a_daemon_off(state, enabled, want, reason):
-    found = judge(user(), st(state=state, enabled=enabled), False)
+    found = judge(user(), st(state=state, enabled=enabled), is_enabled=False)
     assert (found.state, found.reason) == (want, reason)
     if want == "warn":
         assert found.fix == "moxi services disable web"
 
 
 def test_a_daemon_off_whose_login_start_cant_be_read_is_unknown():
-    assert judge(user(), st(state="inactive", enabled=None), False).unknown
+    assert judge(user(), st(state="inactive", enabled=None), is_enabled=False).unknown
 
 
 # --- health -----------------------------------------------------------------------------
 
 def test_a_failing_health_check_makes_a_running_daemon_fail():
-    found = judge(user(enabled=True), st(), True, health=("fail", "connection refused"))
+    found = judge(user(enabled=True), st(), is_enabled=True, health=("fail", "connection refused"))
     assert (found.state, found.reason, found.fix) == (
         "fail", "health check failed: connection refused", "the log")
 
 
 def test_a_passing_health_check_leaves_the_verdict():
-    assert judge(user(enabled=True), st(), True, health=("ok", "ok")).state == "ok"
+    assert judge(user(enabled=True), st(), is_enabled=True, health=("ok", "ok")).state == "ok"
 
 
 # --- timers, per backend ----------------------------------------------------------------
@@ -246,20 +246,20 @@ def timer_row(**fields):
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_an_idle_timer_between_runs_is_ok_on_every_backend(backend):
     # Armed and idle: launchd and Task Scheduler have no process either, and that is fine.
-    found = judge(timer_row(enabled=True), st("timer", backend=backend, last=gate()), True)
+    found = judge(timer_row(enabled=True), st("timer", backend=backend, last=gate()), is_enabled=True)
     assert (found.state, found.reason) == ("ok", "armed")
     found = judge(timer_row(name="job2", enabled=True),
-                  st("timer", backend=backend, last=SUPERVISOR_OK[backend]), True)
+                  st("timer", backend=backend, last=SUPERVISOR_OK[backend]), is_enabled=True)
     assert found.state == "ok"
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_a_non_zero_last_result_warns_on_every_backend(backend):
     row = timer_row(enabled=True)
-    found = judge(row, st("timer", backend=backend, last=gate(code=2)), True)
+    found = judge(row, st("timer", backend=backend, last=gate(code=2)), is_enabled=True)
     assert found.state == "warn" and found.reason.startswith("last run failed (exit 2")
     assert found.fix == "the log"
-    found = judge(row, st("timer", backend=backend, last=SUPERVISOR_FAILED[backend]), True)
+    found = judge(row, st("timer", backend=backend, last=SUPERVISOR_FAILED[backend]), is_enabled=True)
     assert found.state == "warn" and found.reason.startswith("last run failed")
 
 
@@ -267,53 +267,53 @@ def test_task_schedulers_own_status_codes_are_not_failures():
     row = timer_row(enabled=True)
     for code in (0x41303, 0x41301, 0x41300):
         last = {"supervisor": {"last_run": None, "last_result": code}}
-        assert judge(row, st("timer", backend="schtasks", last=last), True).state == "ok"
+        assert judge(row, st("timer", backend="schtasks", last=last), is_enabled=True).state == "ok"
 
 
 def test_a_gate_skip_off_is_not_a_failure():
-    found = judge(timer_row(enabled=True), st("timer", last=gate("off", 0)), True)
+    found = judge(timer_row(enabled=True), st("timer", last=gate("off", 0)), is_enabled=True)
     assert found.state == "ok"
 
 
 @pytest.mark.parametrize("result, code", [("unreadable", 3), ("not-started", 127)])
 def test_a_gate_that_could_not_run_the_command_warns(result, code):
-    found = judge(timer_row(enabled=True), st("timer", last=gate(result, code)), True)
+    found = judge(timer_row(enabled=True), st("timer", last=gate(result, code)), is_enabled=True)
     assert found.state == "warn"
 
 
 def test_a_timer_on_with_no_run_yet_is_ok():
-    found = judge(timer_row(enabled=True), st("timer", last=None), True)
+    found = judge(timer_row(enabled=True), st("timer", last=None), is_enabled=True)
     assert (found.state, found.reason) == ("ok", "armed, no run yet")
 
 
 def test_a_timer_on_whose_schedule_is_not_armed_fails():
     found = judge(timer_row(enabled=True), st("timer", state="inactive", enabled=False),
-                  True)
+                  is_enabled=True)
     assert (found.state, found.reason, found.fix) == (
         "fail", "schedule not armed", "moxi services enable job")
     found = judge(module_row("timer", "snapshot.enabled", "snapshot"),
-                  st("timer", state="inactive", enabled=False), True)
+                  st("timer", state="inactive", enabled=False), is_enabled=True)
     assert found.fix == "moxi install notes"
 
 
 def test_a_timer_is_never_judged_by_process_state():
     # Idle (no process) and armed is ok whatever the state word says.
     found = judge(timer_row(enabled=True), st("timer", state="inactive", enabled=True),
-                  True)
+                  is_enabled=True)
     assert found.state == "ok"
 
 
 def test_a_timer_whose_armed_state_cant_be_read_is_unknown():
-    assert judge(timer_row(enabled=True), st("timer", enabled=None), True).unknown
+    assert judge(timer_row(enabled=True), st("timer", enabled=None), is_enabled=True).unknown
 
 
 def test_a_timer_off():
     row = timer_row()
-    assert judge(row, st("timer", enabled=False), False).state == "off"
-    armed = judge(row, st("timer", enabled=True), False)
+    assert judge(row, st("timer", enabled=False), is_enabled=False).state == "off"
+    armed = judge(row, st("timer", enabled=True), is_enabled=False)
     assert (armed.state, armed.reason) == ("warn", "schedule armed, flag off")
     module = judge(module_row("timer", "snapshot.enabled", "snapshot"),
-                   st("timer", enabled=True), False)
+                   st("timer", enabled=True), is_enabled=False)
     assert module.state == "off"
 
 
@@ -324,8 +324,8 @@ def test_views_judge_every_row_from_one_read(fake):
 
     user(enabled=True)
     timer_row(enabled=True)
-    fake.written["web"] = Unit("daemon", True, active=True)
-    fake.written["job"] = Unit("timer", True, last=gate(code=1))
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
+    fake.written["job"] = Unit("timer", enabled=True, last=gate(code=1))
     found = verdict.views(store.read_rows())
     assert {v.row.id: v.verdict.state for v in found} == {
         "services/job": "warn", "services/web": "ok"}
@@ -340,7 +340,7 @@ def test_views_past_the_status_limit_are_unknown_and_run_no_health(fake, monkeyp
     monkeypatch.setattr(fake, "status", lambda *a, **k: gate_.wait(5) and [])
     ran = []
     monkeypatch.setattr(verdict, "healths", lambda *a, **k: ran.append(1) or {})
-    found = verdict.views(store.read_rows(), health=True, status_seconds=0.2)
+    found = verdict.views(store.read_rows(), check_health=True, status_seconds=0.2)
     gate_.set()
     assert found[0].verdict.reason == "unknown: the supervisor did not answer in 0.2 s"
     assert ran == []
@@ -465,7 +465,7 @@ def task(state="active", detail="Running", *, enabled=True, code=0x41301):
 def test_an_adopted_windows_daemon_is_judged_by_whether_its_task_runs(read, flag,
                                                                       verdict_, reason):
     row = user(form="adopted", name="agent", kind="daemon", unit=AGENT, enabled=flag)
-    found = judge(row, read, flag)
+    found = judge(row, read, is_enabled=flag)
     assert (found.state, found.reason) == (verdict_, reason)
 
 
@@ -473,14 +473,14 @@ def test_an_adopted_windows_daemon_stopped_by_hand_warns():
     row = user(form="adopted", name="agent", kind="daemon", unit=AGENT,
                stopped="2026-11-07T09:00:00Z")
     found = judge(row, task("inactive", "Ready, last result 0x00041306", code=0x41306),
-                  True)
+                  is_enabled=True)
     assert (found.state, found.reason) == ("warn", "stopped by hand at "
                                                    "2026-11-07T09:00:00Z")
 
 
 def test_a_timer_whose_last_result_is_task_scheduler_queued_is_ok():
     last = {"supervisor": {"last_run": None, "last_result": 0x41325}}
-    found = judge(timer_row(enabled=True), st("timer", backend="schtasks", last=last), True)
+    found = judge(timer_row(enabled=True), st("timer", backend="schtasks", last=last), is_enabled=True)
     assert found.state == "ok"
 
 
@@ -490,7 +490,7 @@ def windows_timer(code, name="agent"):
     read = UnitState(None, AGENT, "timer", "schtasks", "active", detail="Ready",
                      enabled=True, last={"supervisor": {"last_run": "2026-11-07T09:30:00",
                                                         "last_result": code}})
-    return judge(row, read, True)
+    return judge(row, read, is_enabled=True)
 
 
 def test_a_windows_task_adopted_as_a_timer_keeps_its_timer_verdict(on_windows):
@@ -506,9 +506,9 @@ def test_a_windows_task_adopted_as_a_timer_keeps_its_timer_verdict(on_windows):
 
 def test_only_an_adopted_windows_timer_says_how_it_is_judged():
     found = judge(timer_row(enabled=True),
-                  st("timer", backend="schtasks", last=SUPERVISOR_FAILED["schtasks"]), True)
+                  st("timer", backend="schtasks", last=SUPERVISOR_FAILED["schtasks"]), is_enabled=True)
     assert found.state == "warn" and "judged as a timer" not in found.reason
     row = user(form="adopted", name="nightly", kind="timer", enabled=True)
     found = judge(row, st("timer", backend="systemd", last=SUPERVISOR_FAILED["systemd"]),
-                  True)
+                  is_enabled=True)
     assert found.state == "warn" and "judged as a timer" not in found.reason

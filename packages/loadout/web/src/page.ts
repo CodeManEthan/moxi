@@ -30,7 +30,7 @@ import {
 } from "./feed.ts";
 import type { Global, Job, Listing, Projects, Row, Status } from "./feed.ts";
 import {
-  addChoices, canReplace, cellLine, choiceScope, globalOffSheet, globalView, installAct,
+  addChoices, canReplace, cellLine, choiceScope, globalRemoveSheet, globalView, installAct,
   installChoices, itemAct, itemsView, jobPathOf, jobRefusal, jobView, KINDS, parseKept, readState,
   replaceAct, startedOf, stateTone,
 } from "./views.ts";
@@ -469,11 +469,12 @@ export class LoadoutPage extends LitElement {
         <div class="bar">
           ${view.modes.map((mode) => html`<button data-action="mode" data-mode=${mode.mode} ?disabled=${busy}
             @click=${() => void this.#act(mode.act, `Set the global mode to ${mode.mode}`)}>${mode.label}</button>`)}
-          ${view.canTurnOff ? html`<button data-action="global-off" ?disabled=${busy}
-            @click=${() => void this.#confirmed({ path: "api/global-off", body: {}, sheet: globalOffSheet(value) }, "Turn the global file off")}>Turn off…</button>` : nothing}
+          ${view.canTurnOff ? html`<button data-action="global-remove" ?disabled=${busy}
+            @click=${() => void this.#confirmed({ path: "api/global-remove", body: {}, sheet: globalRemoveSheet(value) }, "Turn the global file off")}>Turn off…</button>` : nothing}
         </div>
         ${view.files.length ? html`<ul data-part="files">${view.files.map((file) => html`<li class="item" data-file=${file.file}>
           <code>${file.file}</code>
+          ${file.parts.length ? html`<p data-line="parts">${file.harness} reads ${file.parts.map((part, i) => html`${i ? " and " : ""}<code>${part}</code>`)}${file.parts.length === 1 ? ", no part" : ""}</p>` : nothing}
           <p class="dim">${file.changes ? "The next install changes it." : "The next install leaves it as it is."}${file.state ? ` State: ${file.state}.` : ""}</p>
           ${file.diff ? html`<details><summary>${file.placed ? "Why" : "Diff"}</summary><pre>${file.diff}</pre></details>` : nothing}
         </li>`)}</ul>` : html`<p class="dim">No global file is touched in this mode.</p>`}` : nothing}

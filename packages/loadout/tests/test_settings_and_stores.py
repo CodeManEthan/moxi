@@ -20,19 +20,19 @@ def write_config(text: str):
     return path
 
 
-def test_the_defaults_put_the_folder_in_loadouts_data_directory():
+def test_the_defaults_put_the_loadout_dir_in_loadouts_data_dir():
     machine = settings.read()
     assert not machine.chosen
     assert machine.source == Layout("loadout").data_dir() / "source"
     assert machine.backups_keep == 10
-    assert machine.project_folders == {
+    assert machine.project_dirs == {
         "claude": {"skills": ".claude/skills", "agents": ".claude/agents"},
         "codex": {"skills": ".agents/skills", "agents": ".codex/agents"},
         "opencode": {"skills": ".opencode/skills", "agents": ".opencode/agents"},
     }
 
 
-def test_a_configured_folder_is_read_with_its_home_expanded():
+def test_a_configured_loadout_dir_is_read_with_its_home_expanded():
     write_config('source = "~/my-loadout"\n')
     machine = settings.read()
     assert machine.chosen and machine.source == type(machine.source)(
@@ -41,13 +41,13 @@ def test_a_configured_folder_is_read_with_its_home_expanded():
     assert stores.manifest_path() == machine.source / "loadout.toml"
 
 
-def test_project_folders_change_only_what_the_file_names():
+def test_project_dirs_change_only_what_the_file_names():
     write_config('[project_folders.codex]\nagents = "codex/agents"\n'
                  '[project_folders.other]\nskills = "other/skills"\n')
-    folders = settings.read().project_folders
-    assert folders["codex"] == {"skills": ".agents/skills", "agents": "codex/agents"}
-    assert folders["claude"] == settings.default_folders()["claude"]
-    assert folders["other"] == {"skills": "other/skills"}
+    project_dirs = settings.read().project_dirs
+    assert project_dirs["codex"] == {"skills": ".agents/skills", "agents": "codex/agents"}
+    assert project_dirs["claude"] == settings.default_dirs()["claude"]
+    assert project_dirs["other"] == {"skills": "other/skills"}
 
 
 @pytest.mark.parametrize("text, part", [
@@ -73,9 +73,9 @@ def test_the_config_check_refuses_what_the_schema_cannot_say(text, part):
 
 def test_config_set_runs_the_modules_check():
     with pytest.raises(ConfigError) as caught:
-        config.set("loadout", "backups.keep", 0, by="test")
+        config.set_value("loadout", "backups.keep", 0, by="test")
     assert "keep at least 1" in str(caught.value)
-    config.set("loadout", "backups.keep", 3, by="test")
+    config.set_value("loadout", "backups.keep", 3, by="test")
     assert settings.read().backups_keep == 3
 
 
@@ -102,7 +102,7 @@ def test_the_core_reads_the_announcement():
     assert "projects" in found.optional
 
 
-def test_each_lock_path_makes_its_private_folder_first():
+def test_each_lock_path_makes_its_private_dir_first():
     state = Layout("loadout").state_dir()
     assert not state.exists()
     assert stores.manifest_lock() == state / "manifest.lock"

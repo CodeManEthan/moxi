@@ -172,7 +172,7 @@ FILE_NOTE = ("agent files are copied, since this account can't make symlinks; "
              "turn on Developer Mode to link them")
 #: The same note for a held item's folder, which can't be a junction (a junction is
 #: always absolute, so it would break when the project tree moves).
-FOLDER_NOTE = ("a project's own skills are copied, since this account can't make "
+DIR_NOTE = ("a project's own skills are copied, since this account can't make "
                "symlinks; turn on Developer Mode to link them")
 
 #: Whether `auto` links a folder as a junction on Windows. Off until Claude Code and Codex
@@ -273,7 +273,7 @@ class Harness:
     skills: Path | None
     agents: Path | None
 
-    def folder(self, kind: str) -> Path | None:
+    def harness_dir(self, kind: str) -> Path | None:
         return self.skills if kind == "skill" else self.agents
 
 
@@ -327,17 +327,17 @@ def harness_dirs(env=None, *, settings=None) -> dict[str, Path]:
 def _table(settings, env) -> tuple[dict[str, Harness], list[str]]:
     """The harness rows as `harness_dirs` resolves them (not made absolute), and one line per
     row skipped."""
-    environ = os.environ if env is None else env
+    effective_env = os.environ if env is None else env
     rows: dict[str, Harness] = {}
     lines: list[str] = []
     for number, row in enumerate(settings["harnesses"], 1):
-        problem = _row_problem(row, rows, environ)
+        problem = _row_problem(row, rows, effective_env)
         if problem:
             lines.append(f"harnesses row {number} is skipped: {problem}")
             continue
         name = row["name"]
-        rows[name] = Harness(name, _folder(name, "skills", row.get("skills", ""), environ),
-                             _folder(name, "agents", row.get("agents", ""), environ))
+        rows[name] = Harness(name, _harness_dir(name, "skills", row.get("skills", ""), effective_env),
+                             _harness_dir(name, "agents", row.get("agents", ""), effective_env))
     return rows, lines
 
 
@@ -358,10 +358,10 @@ def chosen(settings=None) -> tuple[list[str], list[str]]:
     return names, lines
 
 
-def _row_problem(row, seen: dict, environ=None) -> str | None:
+def _row_problem(row, seen: dict, env=None) -> str | None:
     from .paths import _expanduser
 
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     if not isinstance(row, dict):
         return "it is not a table"
     name = row.get("name")
@@ -373,28 +373,28 @@ def _row_problem(row, seen: dict, environ=None) -> str | None:
         value = row.get(kind, "")
         if not isinstance(value, str):
             return f"{name}'s {kind} folder is not a string"
-        if value and not os.path.isabs(_expanduser(value, environ)):
+        if value and not os.path.isabs(_expanduser(value, env)):
             return f"{name}'s {kind} folder {value!r} is not an absolute path"
     return None
 
 
-def _folder(name: str, kind: str, value: str, environ=None) -> Path | None:
+def _harness_dir(name: str, kind: str, value: str, env=None) -> Path | None:
     """A row's folder of `kind`, or the built-in one, from `environ` alone; not made
     absolute (`harness_dirs`)."""
     from .paths import _expanduser
 
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     if value:
-        return Path(_expanduser(value, environ))
+        return Path(_expanduser(value, env))
     if name == "claude":
-        base = environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
-        return Path(_expanduser(base, environ)) / kind
+        base = env.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
+        return Path(_expanduser(base, env)) / kind
     if name == "codex":
         if kind == "skills":
             base = os.path.join("~", ".agents")
         else:
-            base = environ.get("CODEX_HOME") or os.path.join("~", ".codex")
-        return Path(_expanduser(base, environ)) / kind
+            base = env.get("CODEX_HOME") or os.path.join("~", ".codex")
+        return Path(_expanduser(base, env)) / kind
     return None
 
 
@@ -522,10 +522,10 @@ class _Planner:
             if self.skipped:
                 why += " (some rows are skipped: moxi config moxi shows the table)"
             return None, "harness", why
-        folder = row.folder(item.kind)
-        if folder is None:
+        target_dir = row.harness_dir(item.kind)
+        if target_dir is None:
             return None, "harness", f"harness {item.harness} has no {item.kind}s folder"
-        return target_key(folder / item.name), None, ""
+        return target_key(target_dir / item.name), None, ""
 
     def step(self, item: Item) -> Step:
         key, cause, why = self.target(item)
@@ -576,7 +576,7 @@ class _Planner:
         if _is_link(key):
             return self._link(item, key, source, entry, form, note)
         if os.path.isdir(key):
-            return self._folder_copy(item, key, source, entry, form, note)
+            return self._dir_copy(item, key, source, entry, form, note)
         return self._file_copy(item, key, source, entry, form, note)
 
     @staticmethod
@@ -596,12 +596,12 @@ class _Planner:
             return "copy", None
         if not _WINDOWS:
             return "link", None
-        folder = os.path.isdir(source)
+        is_dir = os.path.isdir(source)
         if item.held:
             if _symlink_allowed(os.path.dirname(key)):
                 return "link", None
-            return "copy", (FOLDER_NOTE if folder else FILE_NOTE)
-        if folder:
+            return "copy", (DIR_NOTE if is_dir else FILE_NOTE)
+        if is_dir:
             if self.setting == "link" or _AUTO_JUNCTION:
                 return "junction", None
             return "copy", None
@@ -644,7 +644,7 @@ class _Planner:
                               form=form, note=note)
         return self._step(item, key, "keep", None, f"{item.name} is current", form=form)
 
-    def _folder_copy(self, item, key, source, entry, form, note) -> Step:
+    def _dir_copy(self, item, key, source, entry, form, note) -> Step:
         mark = _read_mark(key)
         if mark is None or mark.get("owner") != self.owner:
             return self._occupant(item, key, form, "a folder the placer did not mark")
@@ -682,15 +682,15 @@ class _Planner:
         None when git did not answer in time."""
         import time
 
-        folder, base = os.path.split(key)
-        if folder not in self.git:
+        parent_dir, base = os.path.split(key)
+        if parent_dir not in self.git:
             if self.git_left is None:
-                self.git[folder] = _git_files(folder)
+                self.git[parent_dir] = _git_files(parent_dir)
             else:
                 start = time.monotonic()
-                self.git[folder] = _git_files(folder, self.git_left)
+                self.git[parent_dir] = _git_files(parent_dir, self.git_left)
                 self.git_left = max(0.0, self.git_left - (time.monotonic() - start))
-        files = self.git[folder]
+        files = self.git[parent_dir]
         if files is _NO_ANSWER:
             return None
         if not files:
@@ -725,8 +725,8 @@ def _entry_item(key: str, entry: dict) -> Item:
                 dest=Path(key), held=bool(entry.get("held")))
 
 
-def _git_files(folder: str, seconds: float | None = None) -> frozenset | None | object:
-    """The paths git tracks under `folder`, relative to it, or None outside a work tree
+def _git_files(repo_dir: str, seconds: float | None = None) -> frozenset | None | object:
+    """The paths git tracks under `harness_dir`, relative to it, or None outside a work tree
     or without git, or `_NO_ANSWER` when git did not answer in time. `seconds` is how long
     both git calls may take together; None gives each 10 seconds."""
     import shutil
@@ -735,7 +735,7 @@ def _git_files(folder: str, seconds: float | None = None) -> frozenset | None | 
 
     from . import proc
 
-    if not os.path.isdir(folder) or shutil.which("git") is None:
+    if not os.path.isdir(repo_dir) or shutil.which("git") is None:
         return None
     env = {k: v for k, v in os.environ.items()
            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
@@ -745,7 +745,7 @@ def _git_files(folder: str, seconds: float | None = None) -> frozenset | None | 
         timeout = _GIT_SECONDS if end is None else min(_GIT_SECONDS, end - time.monotonic())
         if timeout <= 0:
             raise subprocess.TimeoutExpired(argv, 0)
-        return proc.run(["git", "-C", folder, *argv], timeout_s=timeout, env=env)
+        return proc.run(["git", "-C", repo_dir, *argv], timeout_s=timeout, env=env)
 
     try:
         inside = git("rev-parse", "--is-inside-work-tree")
@@ -793,17 +793,17 @@ def _link_text(item: Item, source: str, key: str) -> str:
     return source
 
 
-def _symlink_allowed(folder: str) -> bool:
-    """Whether this account can make a symlink in `folder` (or its nearest existing
+def _symlink_allowed(link_dir: str) -> bool:
+    """Whether this account can make a symlink in `harness_dir` (or its nearest existing
     parent): makes `.moxi-probe-<hex>` and removes it."""
     import secrets
 
-    while folder and not os.path.isdir(folder):
-        parent = os.path.dirname(folder)
-        if parent == folder:
+    while link_dir and not os.path.isdir(link_dir):
+        parent = os.path.dirname(link_dir)
+        if parent == link_dir:
             return False
-        folder = parent
-    probe = os.path.join(folder, f".moxi-probe-{secrets.token_hex(4)}")
+        link_dir = parent
+    probe = os.path.join(link_dir, f".moxi-probe-{secrets.token_hex(4)}")
     try:
         os.symlink(probe + "-target", probe)
     except OSError:
@@ -815,10 +815,10 @@ def _symlink_allowed(folder: str) -> bool:
     return True
 
 
-def _read_mark(folder: str) -> dict | None:
+def _read_mark(marked_dir: str) -> dict | None:
     try:
-        with open(os.path.join(folder, MARK), "rb") as handle:
-            mark = json.loads(handle.read())
+        with open(os.path.join(marked_dir, MARK), "rb") as fh:
+            mark = json.loads(fh.read())
     except FileNotFoundError:
         return None
     except (ValueError, IsADirectoryError, NotADirectoryError):
@@ -852,9 +852,9 @@ def _hash(path: str, *, skip_mark: bool = False, volatile: Sequence[str] = ()) -
 
 
 def _feed(digest, path: str) -> None:
-    with open(path, "rb") as handle:
+    with open(path, "rb") as fh:
         size = 0
-        while chunk := handle.read(_BLOCK):
+        while chunk := fh.read(_BLOCK):
             digest.update(chunk)
             size += len(chunk)
     digest.update(b"\0" + str(size).encode() + b"\0")
@@ -863,8 +863,8 @@ def _feed(digest, path: str) -> None:
 def _entries(root: str) -> list[tuple[str, str, str]]:
     out: list[tuple[str, str, str]] = []
 
-    def walk(folder: str, prefix: str) -> None:
-        with os.scandir(folder) as found:
+    def walk(current_dir: str, prefix: str) -> None:
+        with os.scandir(current_dir) as found:
             for entry in found:
                 rel = prefix + entry.name
                 if entry.is_symlink() or _is_junction(entry.path):
@@ -937,7 +937,7 @@ def from_package(found, source: str | os.PathLike) -> bool:
         return False
     top = package.split(".")[0]
     source = os.path.abspath(os.fspath(source))
-    here = _package_folder(top)
+    here = _package_dir(top)
     if here is not None:
         for path in {source, os.path.realpath(source)}:
             if _inside(path, here) or _inside(path, os.path.realpath(here)):
@@ -947,16 +947,16 @@ def from_package(found, source: str | os.PathLike) -> bool:
                for i in range(1, len(parts)))
 
 
-def _package_folder(top: str) -> str | None:
+def _package_dir(top: str) -> str | None:
     """The folder top-level package `top` is installed in, or None (not importable, or not
     a folder on disk)."""
     import importlib.resources
 
     try:
-        folder = importlib.resources.files(top)
+        package_dir = importlib.resources.files(top)
     except (ImportError, TypeError, ValueError):
         return None
-    return os.path.abspath(folder) if isinstance(folder, Path) else None
+    return os.path.abspath(package_dir) if isinstance(package_dir, Path) else None
 
 
 def _core_lock():
@@ -997,7 +997,7 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
                 notes.append(step.note)
                 say(step.note)
             try:
-                placed = _apply_one(step, ledger, replace, stamp, say)
+                placed = _apply_one(step, ledger, replace=replace, stamp=stamp, say=say)
             except OSError as exc:
                 say(f"{step.item.name} for {step.item.harness}: could not "
                     f"{step.action} {step.target}: {exc}")
@@ -1012,7 +1012,7 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
     return done
 
 
-def _apply_one(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Placed | None:
+def _apply_one(step: Step, ledger: dict, *, replace: bool, stamp: str, say) -> Placed | None:
     """One step. A step that places a target this owner handed over first checks the
     hand-over: while any other owner places the target the step is skipped, and once
     the target is placed the lapsed `handed` entry is dropped."""
@@ -1026,13 +1026,13 @@ def _apply_one(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Plac
             to = handed[key].get("to", "another owner")
             say(f"{step.item.name} was handed to {to}; skipped")
             return None
-    placed = _apply_step(step, ledger, replace, stamp, say)
+    placed = _apply_step(step, ledger, replace=replace, stamp=stamp, say=say)
     if placed is not None:
         ledger.get(step.owner, {}).get("handed", {}).pop(key, None)
     return placed
 
 
-def _apply_step(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Placed | None:
+def _apply_step(step: Step, ledger: dict, *, replace: bool, stamp: str, say) -> Placed | None:
     item, key, owner = step.item, step.target, step.owner
     if step.action == "refuse":
         if not (replace and step.cause in _OCCUPANTS and step.occupant is not None):
@@ -1085,9 +1085,9 @@ def _place(step: Step, ledger: dict) -> Placed:
     os.makedirs(parent, exist_ok=True)
     if os.path.lexists(key):
         raise FileExistsError(f"{key} appeared after the plan")
-    folder = os.path.isdir(source)
+    is_dir = os.path.isdir(source)
     if step.form == "link":
-        os.symlink(_link_text(item, source, key), key, target_is_directory=folder)
+        os.symlink(_link_text(item, source, key), key, target_is_directory=is_dir)
         entry = _entry(step)
     elif step.form == "junction":
         import _winapi
@@ -1118,8 +1118,8 @@ def _copy(item: Item, source: str, key: str, owner: str) -> None:
                 mark["held"] = True
             if item.volatile:
                 mark["volatile"] = list(item.volatile)
-            with open(os.path.join(tmp, MARK), "x", encoding="utf-8") as handle:
-                handle.write(json.dumps(mark, indent=1, sort_keys=True) + "\n")
+            with open(os.path.join(tmp, MARK), "x", encoding="utf-8") as fh:
+                fh.write(json.dumps(mark, indent=1, sort_keys=True) + "\n")
         else:
             shutil.copy2(source, tmp)
         if os.path.lexists(key):
@@ -1138,9 +1138,9 @@ def _own_writable(root: str) -> None:
     changes. Links are left as they are."""
     import stat
 
-    for folder, dirs, files in os.walk(root):
+    for current_dir, dirs, files in os.walk(root):
         for name in [None, *files]:
-            path = folder if name is None else os.path.join(folder, name)
+            path = current_dir if name is None else os.path.join(current_dir, name)
             if os.path.islink(path):
                 continue
             mode = os.stat(path).st_mode
@@ -1366,6 +1366,6 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
 
 
 __all__ = ["FORMS", "SETTINGS", "KINDS", "ACTIONS", "CAUSES", "STATES", "MARK", "LEDGER",
-           "IN_PLACE", "HELD_IN_PLACE", "FILE_NOTE", "FOLDER_NOTE", "Item", "Step", "Placed", "Harness",
+           "IN_PLACE", "HELD_IN_PLACE", "FILE_NOTE", "DIR_NOTE", "Item", "Step", "Placed", "Harness",
            "harnesses", "chosen", "target_key", "from_package", "plan", "apply", "status",
            "remove", "adopt"]

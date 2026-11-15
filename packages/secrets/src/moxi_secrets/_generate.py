@@ -157,7 +157,7 @@ def _fold(items) -> tuple[tuple[int, int], ...]:
     return tuple((lo, hi) for lo, hi in out)
 
 
-def _char(cp: int, in_class: bool) -> str:
+def _char(cp: int, *, in_class: bool) -> str:
     """One character, escaped where Python's `re` could read it as syntax."""
     c = chr(cp)
     if c.isascii() and c.isalnum():
@@ -174,7 +174,7 @@ def _char(cp: int, in_class: bool) -> str:
 
 
 def _ranges(items) -> str:
-    return "".join(_char(lo, True) if lo == hi else f"{_char(lo, True)}-{_char(hi, True)}"
+    return "".join(_char(lo, in_class=True) if lo == hi else f"{_char(lo, in_class=True)}-{_char(hi, in_class=True)}"
                    for lo, hi in items)
 
 
@@ -182,7 +182,7 @@ class _Frame:
     """One open group: its flags now, and the scoped flag groups opened inside it, which
     close at each `|` and `)` and reopen after each `|`."""
 
-    def __init__(self, multiline: bool, fold: bool = False):
+    def __init__(self, *, multiline: bool, fold: bool = False):
         self.multiline = multiline
         self.fold = fold
         self.wraps: list[str] = []
@@ -236,9 +236,9 @@ class _Translator:
 
     def _literal(self, cp: int) -> str:
         if not self.stack[-1].fold:
-            return _char(cp, False)
+            return _char(cp, in_class=False)
         items = _fold(((cp, cp),))
-        return _char(cp, False) if items == ((cp, cp),) else f"[{_ranges(items)}]"
+        return _char(cp, in_class=False) if items == ((cp, cp),) else f"[{_ranges(items)}]"
 
     # groups and flags
 
@@ -252,7 +252,7 @@ class _Translator:
             if not on and not off:
                 if end == ":":                      # (?:  a plain group
                     self.out.append("(?:")
-                    self.stack.append(_Frame(frame.multiline, frame.fold))
+                    self.stack.append(_Frame(multiline=frame.multiline, fold=frame.fold))
                     self.i = m.end()
                     return
                 raise Unsupported("an empty flag group")
@@ -264,7 +264,7 @@ class _Translator:
             self.i = m.end()
             if end == ":":                          # (?flags:...)  a scoped group
                 self.out.append(f"(?{flags}:")
-                self.stack.append(_Frame(multiline, fold))
+                self.stack.append(_Frame(multiline=multiline, fold=fold))
                 return
             # (?flags): holds to the end of the enclosing group.
             if not flags:
@@ -280,13 +280,13 @@ class _Translator:
         m = _NAMED.match(p, self.i)
         if m:
             self.out.append(f"(?P<{m.group(1)}>")
-            self.stack.append(_Frame(frame.multiline, frame.fold))
+            self.stack.append(_Frame(multiline=frame.multiline, fold=frame.fold))
             self.i = m.end()
             return
         if p.startswith("(?", self.i):
             raise Unsupported(f"the group {p[self.i:self.i + 4]!r}")
         self.out.append("(")
-        self.stack.append(_Frame(frame.multiline, frame.fold))
+        self.stack.append(_Frame(multiline=frame.multiline, fold=frame.fold))
         self.i += 1
 
     def _close(self) -> None:

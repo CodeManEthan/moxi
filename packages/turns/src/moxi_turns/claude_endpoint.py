@@ -297,7 +297,7 @@ class ClaudeHarness(Harness):
             self._pending.append(delivery)
         self._hand_next()
 
-    def expired(self, delivery_id: str) -> None:
+    def on_expired(self, delivery_id: str) -> None:
         """The core expired the delivery (`PENDING_TTL_S`): its window closes now, admitted
         or not, so it holds no turn and no later submit (the liveness bound, above)."""
         with self._lock:
@@ -378,7 +378,7 @@ class ClaudeHarness(Harness):
                 # drop, `dropped`.
                 refused_by_gate = w.delivery in self._gate_refused
                 if not refused_by_gate:
-                    ep.refused(w.delivery, reason if reason in leg.GATE_CODES
+                    ep.on_refused(w.delivery, reason if reason in leg.GATE_CODES
                                else "dropped")
                 log.info("submit %s dropped%s: %s", w.delivery,
                          " by the gate" if refused_by_gate else "", reason)
@@ -447,11 +447,11 @@ class ClaudeHarness(Harness):
         elif kind == leg.R_APPEND_DONE:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
-                ep.steered(delivery)
+                ep.on_steered(delivery)
         elif kind == leg.R_APPEND_FAILED:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
-                ep.refused(delivery, "idle")
+                ep.on_refused(delivery, "idle")
         elif kind == leg.R_COMMAND_DONE:
             self._command_done(body)
 
@@ -495,8 +495,9 @@ class ClaudeHarness(Harness):
         raise leg.BadRequest(f"unknown context event {event!r}")
 
     def _guard(self, body: dict[str, Any]) -> dict[str, Any]:
-        """`/ask/guard`: judge one tool call by the guards the runner names. Holds this
-        request's thread until the largest named deadline at most."""
+        """`/ask/guard`: judge one tool call, or at `step` `ask` one permission ask, by the
+        guards the runner names. Holds this request's thread until the largest named
+        deadline at most."""
         call, ids = body.get("call"), body.get("guards")
         if not isinstance(call, dict) or not isinstance(call.get("tool"), str) \
                 or not call["tool"]:
@@ -506,12 +507,20 @@ class ClaudeHarness(Harness):
         given = call.get("input")
         if given is not None and not isinstance(given, dict):
             raise leg.BadRequest('"input" must be an object')
+        step = body.get("step", "call")
+        if step not in ("call", "ask"):
+            raise leg.BadRequest('"step" must be "call" or "ask"')
         ep = self.endpoint
+        record_path = self.record_path
+        mode = None
+        if step == "ask":
+            record_path = _opt_str(call, "transcript_path") or record_path
+            mode = _opt_str(call, "permission_mode")
         tc = ToolCall(self.name, ep.ledger.session_id, _opt_str(call, "agentId"),
                       call["tool"], _opt_str(call, "tool_use_id"), dict(given or {}),
-                      self._call_cwd(call), self.record_path, ep.env,
-                      prompts_of(call.get("prompts")))
-        return self.guards.ask(tc, ids).to_leg()
+                      self._call_cwd(call), record_path, ep.env,
+                      prompts_of(call.get("prompts")), mode)
+        return self.guards.ask(tc, ids, step).to_leg()
 
     def _call_cwd(self, call: dict[str, Any]) -> str:
         """The directory a call runs in: the ask's `cwd` when it is an absolute path, else
@@ -565,7 +574,7 @@ class ClaudeHarness(Harness):
                 elif spec.refuse_agents and _busy_agents(body.get("agents")):
                     reason = "busy-agents"
                 if reason is not None:
-                    ep.refused(w.delivery, reason)
+                    ep.on_refused(w.delivery, reason)
             if reason is not None:
                 self._gate_refused.add(w.delivery)
                 log.info("entry of %s refused: %s", w.delivery, reason)
@@ -687,7 +696,7 @@ def _shells(value: Any) -> Shells:
             entries.append(LeftShell(e.get("id"), e["why"]))
     except ValueError as exc:
         log.warning("the runner's shell report cannot be read (%s): %r", exc, value)
-        return Shells((), (unnamed,), False)
+        return Shells((), (unnamed,), complete=False)
     if not complete and unnamed not in entries:
         entries.append(unnamed)
     return Shells(tuple(stopped), tuple(entries), complete)
@@ -706,7 +715,7 @@ def agents_from_runner(entries: Any, at: float) -> Agents:
     could not read; an entry with no id makes the list not complete, never shorter. A
     status turns does not know reads `unknown`, with no notice to call final."""
     if not isinstance(entries, list):
-        return Agents((), False, at)
+        return Agents((), complete=False, at=at)
     out: list[Agent] = []
     complete = True
     for raw in entries:

@@ -17,7 +17,7 @@ def inbox():
 
 
 @pytest.mark.parametrize("slug", ["a", "0", "one-off", "a1-b2", "x" * 63, "9-"])
-def test_a_good_slug_names_a_folder_under_the_inbox(slug):
+def test_a_good_slug_names_a_dir_under_the_inbox(slug):
     assert api.inbox_dir(slug) == inbox() / slug
 
 
@@ -35,7 +35,7 @@ def test_the_inbox_follows_the_prefix():
     assert api.inbox_dir("one-off") == home() / "notes" / "team" / "inbox" / "one-off"
 
 
-def test_make_inbox_makes_a_plain_folder_and_keeps_an_existing_one():
+def test_make_inbox_makes_a_plain_dir_and_keeps_an_existing_one():
     made = api.make_inbox("one-off")
     assert made == inbox() / "one-off" and made.is_dir()
     assert not (made / ".git").exists()
@@ -66,7 +66,7 @@ def test_inbox_list_names_each_one_off_by_slug(tmp_path):
     assert found[0].as_dict()["path"] == str(inbox() / "alpha")
 
 
-def test_rename_moves_the_folder():
+def test_rename_moves_the_dir():
     made = api.make_inbox("one-off")
     (made / "plan.md").write_text("p\n")
     moved = api.rename_inbox("one-off", "two-off")

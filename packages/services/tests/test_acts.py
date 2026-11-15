@@ -28,8 +28,8 @@ def key_on(name: str) -> bool:
     return state.key_on(name)
 
 
-def put_key(name: str, on: bool) -> None:
-    moxi.config.set("services", state.key(name), on, by="test")
+def put_key(name: str, *, enabled: bool) -> None:
+    moxi.config.set_value("services", state.key(name), enabled, by="test")
 
 
 def other_system(monkeypatch, platform: str = "darwin") -> None:
@@ -77,7 +77,7 @@ def test_add_written_from_the_page_needs_an_absolute_argv0(fake):
 
 
 def test_add_written_timer_takes_its_schedule(fake):
-    out = acts.add_written("nightly", [PY], timer=True, at=["03:00"], days=["mon"],
+    out = acts.add_written("nightly", [PY], is_timer=True, at=["03:00"], days=["mon"],
                            enable=True)
     assert out.code == 0, out
     row = store.get("nightly")
@@ -86,7 +86,7 @@ def test_add_written_timer_takes_its_schedule(fake):
 
 
 def test_add_written_timer_without_a_schedule_is_usage(fake):
-    assert acts.add_written("nightly", [PY], timer=True).code == 2
+    assert acts.add_written("nightly", [PY], is_timer=True).code == 2
 
 
 def test_add_written_refuses_a_taken_name(fake):
@@ -206,7 +206,7 @@ def test_enable_written_fails_when_the_reread_does_not_match(fake):
 def _applied_without_effect(changes):
     from moxi.units import Applied
 
-    return [Applied(c, True, ()) for c in changes]
+    return [Applied(c, ok=True, lines=()) for c in changes]
 
 
 def test_enable_reports_an_unknown_read_without_failing(fake):
@@ -261,7 +261,7 @@ def test_a_failed_act_exits_1_with_the_supervisors_line(fake):
 
 
 def test_a_timers_run_now_is_judged_by_the_act_alone(fake):
-    acts.add_written("nightly", [PY], timer=True, every="1h", enable=True)
+    acts.add_written("nightly", [PY], is_timer=True, every="1h", enable=True)
     fake.drift = True
     calls = len([c for c in fake.calls if c[0] == "status"])
     out = acts.start("nightly")
@@ -271,7 +271,7 @@ def test_a_timers_run_now_is_judged_by_the_act_alone(fake):
 
 
 def test_stop_of_a_timer_records_nothing(fake):
-    acts.add_written("nightly", [PY], timer=True, every="1h")
+    acts.add_written("nightly", [PY], is_timer=True, every="1h")
     assert acts.stop("nightly").code == 0
     assert store.get("nightly").stopped is None
 
@@ -343,7 +343,7 @@ def test_remove_finishes_with_a_unit_deleted_by_hand(fake):
 @LINUX
 @pytest.mark.parametrize("on", [False, True])
 def test_remove_finishes_with_a_wrapped_timer_deleted_by_hand(fake, on):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=on)
     del fake.foreign["backup.timer"]
     fake.calls.clear()
@@ -392,7 +392,7 @@ def test_remove_keeps_the_row_when_plan_raises(fake):
 # --- add, adopted -----------------------------------------------------------------------
 
 def test_adopt_without_enable_or_disable_says_what_the_supervisor_reads(fake, store_path):
-    fake.foreign["backup.timer"] = Unit("timer", True,
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True,
                                         last={"supervisor": {"result": "success",
                                                              "status": "0"}})
     out = acts.add_adopted("backup", "backup.timer", enable=None)
@@ -415,14 +415,14 @@ def test_adopt_without_enable_or_disable_says_what_the_supervisor_reads(fake, st
 ])
 def test_adopt_says_the_last_run_as_the_verdict_reads_it(fake, supervisor, ref, last, said):
     fake.supervisor = supervisor
-    fake.foreign[ref] = Unit("timer", True, last=last)
-    out = acts.add_adopted("backup", ref, enable=None, timer=supervisor == "schtasks")
+    fake.foreign[ref] = Unit("timer", enabled=True, last=last)
+    out = acts.add_adopted("backup", ref, enable=None, is_timer=supervisor == "schtasks")
     how = "adopt it as a timer" if supervisor == "schtasks" else "adopt it with"
     assert out.code == 2 and out.lines[0].startswith(f"{ref}: {said}; {how}")
 
 
 def test_adopt_a_daemon_makes_the_unit_match_the_flag(fake):
-    fake.foreign["web.service"] = Unit("daemon", False)
+    fake.foreign["web.service"] = Unit("daemon", enabled=False)
     out = acts.add_adopted("web", "web.service", enable=True)
     assert out.code == 0, out
     row = store.get("web")
@@ -434,7 +434,7 @@ def test_adopt_a_daemon_makes_the_unit_match_the_flag(fake):
 
 
 def test_adopt_with_disable_turns_it_off(fake):
-    fake.foreign["web.service"] = Unit("daemon", True, active=True)
+    fake.foreign["web.service"] = Unit("daemon", enabled=True, active=True)
     out = acts.add_adopted("web", "web.service", enable=False)
     assert out.code == 0, out
     assert not fake.foreign["web.service"].active and store.get("web").enabled is False
@@ -457,18 +457,18 @@ def test_adopt_refuses_moxis_own_namespace(fake):
 
 
 def test_adopt_refuses_a_unit_another_row_holds(fake):
-    fake.foreign["web.service"] = Unit("daemon", True, active=True)
+    fake.foreign["web.service"] = Unit("daemon", enabled=True, active=True)
     add(**adopted("site", kind="daemon", unit="web.service"))
     out = acts.add_adopted("web", "web.service", enable=True)
     assert out.code == 3 and "already adopted as services/site" in out.lines[0]
 
 
 def test_adopt_checks_again_under_the_lock_for_a_row_holding_its_unit(fake, monkeypatch):
-    fake.foreign["web.service"] = Unit("daemon", True, active=True)
+    fake.foreign["web.service"] = Unit("daemon", enabled=True, active=True)
     checked = acts._adoptable
 
-    def race(*args):
-        checked(*args)
+    def race(*args, **kwargs):
+        checked(*args, **kwargs)
         # Another add of the same unit writes its row between the first check and the
         # lock.
         add(**adopted("site", kind="daemon", unit="web.service"))
@@ -482,7 +482,7 @@ def test_adopt_checks_again_under_the_lock_for_a_row_holding_its_unit(fake, monk
 def test_adopt_refuses_a_timer_another_module_wrapped(fake):
     from moxi.units import Wrapped
 
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     fake.wrapped["backup.timer"] = Wrapped("other", "backups.on", "backup")
     out = acts.add_adopted("backup", "backup.timer", enable=True)
     assert out.code == 3 and "already wrapped by other" in out.lines[0]
@@ -493,7 +493,7 @@ def test_adopt_on_launchd_needs_the_agents_plist(fake, tmp_path, monkeypatch):
 
     fake.supervisor = "launchd"
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    fake.foreign["com.example.web"] = Unit("daemon", True, active=True)
+    fake.foreign["com.example.web"] = Unit("daemon", enabled=True, active=True)
     out = acts.add_adopted("web", "com.example.web", enable=True)
     assert out.code == 3 and "LaunchAgents" in out.lines[0]
     plist(tmp_path, "com.example.web")
@@ -506,8 +506,8 @@ def test_adopt_on_task_scheduler_is_a_daemon_unless_timer(fake, timer):
     ref = "\\Vendor\\agent"
     kind = "timer" if timer else "daemon"
     fake.supervisor = "schtasks"
-    fake.foreign[ref] = Unit(kind, False)
-    out = acts.add_adopted("agent", ref, enable=True, timer=timer)
+    fake.foreign[ref] = Unit(kind, enabled=False)
+    out = acts.add_adopted("agent", ref, enable=True, is_timer=timer)
     assert out.code == 0, out
     assert store.get("agent").kind == kind
     assert f"services/agent adopts {ref} as a {kind}, on" in out.lines
@@ -522,7 +522,7 @@ def test_adopt_on_task_scheduler_without_enable_names_the_daemon_kind(fake, stor
                                                                        active, said):
     ref = "\\Vendor\\agent"
     fake.supervisor = "schtasks"
-    fake.foreign[ref] = Unit("daemon", True, active=active)
+    fake.foreign[ref] = Unit("daemon", enabled=True, active=active)
     out = acts.add_adopted("agent", ref, enable=None)
     assert out.code == 2 and not store_path.exists()
     assert out.lines == (
@@ -534,8 +534,8 @@ def test_adopt_on_task_scheduler_without_enable_names_the_daemon_kind(fake, stor
 def test_adopt_on_task_scheduler_with_timer_names_the_timer_kind(fake):
     ref = "\\Backups\\nightly"
     fake.supervisor = "schtasks"
-    fake.foreign[ref] = Unit("timer", True)
-    out = acts.add_adopted("nightly", ref, enable=None, timer=True)
+    fake.foreign[ref] = Unit("timer", enabled=True)
+    out = acts.add_adopted("nightly", ref, enable=None, is_timer=True)
     assert out.code == 2
     assert out.lines == (f"{ref}: schedule armed, no run known; adopt it as a timer "
                          "(judged by its schedule and last run) with --enable to keep it "
@@ -543,7 +543,7 @@ def test_adopt_on_task_scheduler_with_timer_names_the_timer_kind(fake):
 
 
 def test_the_closing_line_of_an_adopt_names_the_kind_everywhere(fake):
-    fake.foreign["web.service"] = Unit("daemon", False)
+    fake.foreign["web.service"] = Unit("daemon", enabled=False)
     out = acts.add_adopted("web", "web.service", enable=True)
     assert "services/web adopts web.service as a daemon, on" in out.lines
 
@@ -552,7 +552,7 @@ def test_the_closing_line_of_an_adopt_names_the_kind_everywhere(fake):
 def test_the_acts_on_an_adopted_windows_daemon_pass_its_kind(fake, act):
     ref = "\\Vendor\\agent"
     fake.supervisor = "schtasks"
-    fake.foreign[ref] = Unit("daemon", True, active=act in ("stop", "disable"))
+    fake.foreign[ref] = Unit("daemon", enabled=True, active=act in ("stop", "disable"))
     add(**adopted("agent", kind="daemon", unit=ref))
     fake.kinds.clear()
     out = getattr(acts, act)("agent")
@@ -564,7 +564,7 @@ def test_the_acts_on_an_adopted_windows_daemon_pass_its_kind(fake, act):
 def test_remove_of_an_adopted_windows_daemon_makes_no_act(fake):
     ref = "\\Vendor\\agent"
     fake.supervisor = "schtasks"
-    fake.foreign[ref] = Unit("daemon", True, active=True)
+    fake.foreign[ref] = Unit("daemon", enabled=True, active=True)
     add(**adopted("agent", kind="daemon", unit=ref))
     out = acts.remove("agent")
     assert out.code == 0, out
@@ -573,7 +573,7 @@ def test_remove_of_an_adopted_windows_daemon_makes_no_act(fake):
 
 
 def test_adopt_keeps_its_row_when_the_act_fails(fake):
-    fake.foreign["web.service"] = Unit("daemon", False)
+    fake.foreign["web.service"] = Unit("daemon", enabled=False)
     fake.fail.add(("enable", "web.service"))
     out = acts.add_adopted("web", "web.service", enable=True)
     assert out.code == 1 and store.get("web") is not None
@@ -584,7 +584,7 @@ def test_adopt_keeps_its_row_when_the_act_fails(fake):
 
 @LINUX
 def test_adopt_a_linux_timer_wraps_it_and_sets_its_key(fake):
-    fake.foreign["backup.timer"] = Unit("timer", False)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=False)
     out = acts.add_adopted("backup", "backup.timer", enable=True)
     assert out.code == 0, out
     assert ("wrap", "backup.timer", "services", "adopted.backup", "backup") in fake.calls
@@ -600,7 +600,7 @@ def test_adopt_a_linux_timer_wraps_it_and_sets_its_key(fake):
 
 @LINUX
 def test_adopt_a_linux_timer_disabled_leaves_its_schedule_armed(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     out = acts.add_adopted("backup", "backup.timer", enable=False)
     assert out.code == 0, out
     assert key_on("backup") is False
@@ -609,7 +609,7 @@ def test_adopt_a_linux_timer_disabled_leaves_its_schedule_armed(fake):
 
 @LINUX
 def test_a_wrap_refusal_deletes_the_row(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     fake.wrap_refuses = "backup.service has 2 ExecStart lines; not wrapped"
     out = acts.add_adopted("backup", "backup.timer", enable=True)
     assert out.code == 3 and store.get("backup") is None
@@ -618,7 +618,7 @@ def test_a_wrap_refusal_deletes_the_row(fake):
 
 @LINUX
 def test_a_wrap_failure_takes_its_drop_in_away_and_deletes_the_row(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     fake.wrap_fails = True
     out = acts.add_adopted("backup", "backup.timer", enable=True)
     assert out.code == 1 and store.get("backup") is None
@@ -629,7 +629,7 @@ def test_a_wrap_failure_takes_its_drop_in_away_and_deletes_the_row(fake):
 def test_adopt_refuses_a_timer_services_already_wrapped_for_another_row(fake):
     from moxi.units import Wrapped
 
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     fake.wrapped["backup.timer"] = Wrapped("services", "adopted.old", "old")
     out = acts.add_adopted("backup", "backup.timer", enable=True)
     assert out.code == 3 and "services/old" in out.lines[0]
@@ -641,8 +641,8 @@ def test_adopt_refuses_a_timer_services_already_wrapped_for_another_row(fake):
 
 def backup_with_its_service(fake) -> None:
     """A foreign timer and the service its Triggers names, under different names."""
-    fake.foreign["backup.timer"] = Unit("timer", True, triggers="backup-run.service")
-    fake.foreign["backup-run.service"] = Unit("daemon", False)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True, triggers="backup-run.service")
+    fake.foreign["backup-run.service"] = Unit("daemon", enabled=False)
 
 
 @LINUX
@@ -674,8 +674,8 @@ def test_adopt_refuses_a_timer_whose_service_another_row_adopted(fake):
 
 @LINUX
 def test_adopt_refuses_a_timer_naming_no_unit_whose_own_service_another_row_adopted(fake):
-    fake.foreign["nightly.timer"] = Unit("timer", True)
-    fake.foreign["nightly.service"] = Unit("daemon", False)
+    fake.foreign["nightly.timer"] = Unit("timer", enabled=True)
+    fake.foreign["nightly.service"] = Unit("daemon", enabled=False)
     assert acts.add_adopted("job", "nightly.service", enable=False).code == 0
     out = acts.add_adopted("nightly", "nightly.timer", enable=True)
     assert out.code == 3 and "triggers nightly.service" in out.lines[0]
@@ -684,7 +684,7 @@ def test_adopt_refuses_a_timer_naming_no_unit_whose_own_service_another_row_adop
 @LINUX
 def test_adopt_refuses_a_second_timer_on_a_service_another_rows_timer_triggers(fake):
     backup_with_its_service(fake)
-    fake.foreign["extra.timer"] = Unit("timer", True, triggers="backup-run.service")
+    fake.foreign["extra.timer"] = Unit("timer", enabled=True, triggers="backup-run.service")
     assert acts.add_adopted("backup", "backup.timer", enable=True).code == 0
     out = acts.add_adopted("extra", "extra.timer", enable=True)
     assert out.code == 3, out
@@ -695,7 +695,7 @@ def test_adopt_refuses_a_second_timer_on_a_service_another_rows_timer_triggers(f
 
 @LINUX
 def test_adopt_refuses_a_timer_that_triggers_a_unit_in_moxis_own_namespace(fake):
-    fake.foreign["web.timer"] = Unit("timer", True, triggers="moxi-services-web.service")
+    fake.foreign["web.timer"] = Unit("timer", enabled=True, triggers="moxi-services-web.service")
     out = acts.add_adopted("web", "web.timer", enable=True)
     assert out.code == 3 and "moxi's own namespace" in out.lines[0]
     assert store.get("web") is None and fake.wrapped == {}
@@ -706,8 +706,8 @@ def test_adopt_checks_triggers_again_under_the_lock(fake, monkeypatch):
     backup_with_its_service(fake)
     checked = acts._adoptable
 
-    def race(*args):
-        checked(*args)
+    def race(*args, **kwargs):
+        checked(*args, **kwargs)
         # Another add of the timer that triggers it writes its row between the first
         # check and the lock.
         add(**adopted("backup"))
@@ -726,8 +726,8 @@ def test_adopt_checks_a_timers_service_again_under_the_lock(fake, monkeypatch):
     backup_with_its_service(fake)
     checked = acts._adoptable
 
-    def race(*args):
-        checked(*args)
+    def race(*args, **kwargs):
+        checked(*args, **kwargs)
         add(**adopted("run", kind="daemon", unit="backup-run.service"))
 
     monkeypatch.setattr(acts, "_adoptable", race)
@@ -746,11 +746,11 @@ def test_adopt_off_systemd_compares_the_ref_alone(fake, tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     for label in ("backup.timer", "backup.service"):
         plist(tmp_path, label)
-    fake.foreign["backup.timer"] = Unit("timer", True, triggers="backup.service")
-    fake.foreign["backup.service"] = Unit("daemon", True, active=True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True, triggers="backup.service")
+    fake.foreign["backup.service"] = Unit("daemon", enabled=True, active=True)
     assert all(s.triggers is None for s in fake.status(
         [], foreign=["backup.timer", "backup.service"]))
-    out = acts.add_adopted("backup", "backup.timer", timer=True, enable=True)
+    out = acts.add_adopted("backup", "backup.timer", is_timer=True, enable=True)
     assert out.code == 0, out
     out = acts.add_adopted("run", "backup.service", enable=True)
     assert out.code == 0, out
@@ -758,7 +758,7 @@ def test_adopt_off_systemd_compares_the_ref_alone(fake, tmp_path, monkeypatch):
 
 @LINUX
 def test_enable_a_wrapped_timer_wraps_it_again_when_its_drop_in_is_gone(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=False)
     fake.wrapped.clear()
     fake.foreign["backup.timer"].enabled = False
@@ -772,7 +772,7 @@ def test_enable_a_wrapped_timer_wraps_it_again_when_its_drop_in_is_gone(fake):
 
 @LINUX
 def test_disable_a_wrapped_timer_sets_its_key_off_and_leaves_its_schedule(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=True)
     out = acts.disable("backup")
     assert out.code == 0, out
@@ -781,7 +781,7 @@ def test_disable_a_wrapped_timer_sets_its_key_off_and_leaves_its_schedule(fake):
 
 @LINUX
 def test_a_wrapped_timers_run_now_with_its_key_off_says_so(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=False)
     out = acts.start("backup")
     assert out.code == 0
@@ -791,7 +791,7 @@ def test_a_wrapped_timers_run_now_with_its_key_off_says_so(fake):
 
 @LINUX
 def test_remove_a_wrapped_timer_with_its_key_off_disables_it_first(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=False)
     fake.calls.clear()
     out = acts.remove("backup")
@@ -805,7 +805,7 @@ def test_remove_a_wrapped_timer_with_its_key_off_disables_it_first(fake):
 
 @LINUX
 def test_remove_a_wrapped_timer_with_its_key_on_leaves_its_schedule(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=True)
     fake.calls.clear()
     assert acts.remove("backup").code == 0
@@ -815,7 +815,7 @@ def test_remove_a_wrapped_timer_with_its_key_on_leaves_its_schedule(fake):
 
 @LINUX
 def test_remove_a_wrapped_timer_whose_config_cant_be_read_fails_and_retries(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=False)
     config = moxi.paths.Layout("services").config_file()
     good = config.read_text()
@@ -830,7 +830,7 @@ def test_remove_a_wrapped_timer_whose_config_cant_be_read_fails_and_retries(fake
 
 @LINUX
 def test_remove_keeps_a_wrapped_row_while_its_drop_in_stays(fake):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=True)
     fake.unwrap_fails = True
     out = acts.remove("backup")
@@ -841,7 +841,7 @@ def test_remove_keeps_a_wrapped_row_while_its_drop_in_stays(fake):
 
 @LINUX
 def test_remove_a_wrapped_row_on_another_system_unsets_its_key(fake, monkeypatch):
-    fake.foreign["backup.timer"] = Unit("timer", True)
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
     acts.add_adopted("backup", "backup.timer", enable=True)
     fake.calls.clear()
     other_system(monkeypatch)
@@ -853,7 +853,7 @@ def test_remove_a_wrapped_row_on_another_system_unsets_its_key(fake, monkeypatch
 
 
 def test_remove_an_adopted_daemon_leaves_its_unit(fake):
-    fake.foreign["web.service"] = Unit("daemon", True, active=True)
+    fake.foreign["web.service"] = Unit("daemon", enabled=True, active=True)
     acts.add_adopted("web", "web.service", enable=True)
     fake.calls.clear()
     out = acts.remove("web")
@@ -862,7 +862,7 @@ def test_remove_an_adopted_daemon_leaves_its_unit(fake):
 
 
 def test_stop_an_adopted_daemon_is_recorded_under_the_lock(fake):
-    fake.foreign["web.service"] = Unit("daemon", True, active=True)
+    fake.foreign["web.service"] = Unit("daemon", enabled=True, active=True)
     acts.add_adopted("web", "web.service", enable=True)
     fake.locked.clear()
     assert acts.stop("web").code == 0
@@ -884,7 +884,7 @@ def test_switch_an_adopted_daemon_under_the_lock(fake, act):
 
 
 def test_enable_an_adopted_daemon_clears_a_recorded_stop(fake):
-    fake.foreign["web.service"] = Unit("daemon", True, active=True)
+    fake.foreign["web.service"] = Unit("daemon", enabled=True, active=True)
     acts.add_adopted("web", "web.service", enable=True)
     acts.stop("web")
     out = acts.enable("web")
@@ -905,15 +905,15 @@ TIMERS = {"snapshot": {"command": "moxi-notes-snapshot", "every": "5m",
 @pytest.fixture
 def notes(site, fake, monkeypatch):
     site.module("notes", NOTES)
-    fake.modules[("notes", "sync")] = Unit("daemon", True, active=True)
-    fake.modules[("notes", "snapshot")] = Unit("timer", True)
+    fake.modules[("notes", "sync")] = Unit("daemon", enabled=True, active=True)
+    fake.modules[("notes", "snapshot")] = Unit("timer", enabled=True)
     sets = []
 
     def config_set(module, key, value, *, by):
         sets.append((module, key, value, by))
         return []
 
-    monkeypatch.setattr(moxi.config, "set", config_set)
+    monkeypatch.setattr(moxi.config, "set_value", config_set)
     return sets
 
 
@@ -948,7 +948,7 @@ def test_module_row_switch_refused_by_config_exits_3(fake, notes, monkeypatch):
         raise moxi.config.ConfigError("config.toml", key, "the file is malformed",
                                       "fix the file")
 
-    monkeypatch.setattr(moxi.config, "set", refuse)
+    monkeypatch.setattr(moxi.config, "set_value", refuse)
     out = acts.enable("notes/snapshot")
     assert out.code == 3 and "the file is malformed" in out.lines[0]
 
@@ -957,8 +957,8 @@ def test_module_daemon_switch_failure_exits_1(fake, notes, monkeypatch):
     from moxi.units import Applied, UnitChange
 
     change = UnitChange("notes", "sync", "daemon", "add", None, (), None, "add")
-    monkeypatch.setattr(moxi.config, "set",
-                        lambda *a, **k: [Applied(change, False, ("Job failed",))])
+    monkeypatch.setattr(moxi.config, "set_value",
+                        lambda *a, **k: [Applied(change, ok=False, lines=("Job failed",))])
     out = acts.enable("notes/snapshot")
     # The core printed the unit's lines as it applied them; they are kept apart, so a
     # verb does not print them twice.

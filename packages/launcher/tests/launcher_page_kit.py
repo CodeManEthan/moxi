@@ -73,13 +73,13 @@ class Harness:
 
 
 @contextmanager
-def first_on_path(directory: Path) -> Iterator[None]:
+def first_on_path(bin_dir: Path) -> Iterator[None]:
     """`directory` first on this process's `PATH` for the block, undone after it. A test
     shell started in it copies that `PATH` and hands it to its page servers and their
     jobs. Used from a module-scoped fixture, so nothing of it outlives the module on its
     worker."""
     with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("PATH", str(directory), prepend=os.pathsep)
+        patch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
         yield
 
 
@@ -97,10 +97,10 @@ def launch_log(shell: Any) -> Iterator[Any]:
 
 
 def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = False,
-         session_id: str | None = None, cwd: str = "/work/page", actor: str = "ann",
+         session_id: str | None = None, cwd: str = "/work/page", by: str = "ann",
          config_dir: str | os.PathLike | None = None, claimed: bool = False,
          values: dict | None = None) -> str:
-    """A Claude launch's row made by `actor`, started; its process this test's own when
+    """A Claude launch's row made by `by`, started; its process this test's own when
     `live`, else one that has ended. With `config_dir` the row records it as the
     session's `CLAUDE_CONFIG_DIR`, where `transcript` writes. With `claimed` its claim
     names this test's own process as the turns endpoint, so `target.find` passes for a
@@ -114,7 +114,7 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
     values = {"harness": "claude", "target": target, "cwd": cwd, "model": "opus",
               **({"slot": slot} if slot else {}), **(values or {})}
     with launch_log(shell) as conn:
-        store.insert(conn, request_id=request_id, actor=actor, harness="claude",
+        store.insert(conn, request_id=request_id, by=by, harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},
                      posture="operator", session_id=sid, slot=slot, base_env=base_env)
         # A start time no running process has, so an ended launch's process reads ended.
@@ -162,7 +162,7 @@ def failed_run(shell: Any, request_id: str, *, word: str = "relaunch-failed",
     with launch_log(shell) as conn:
         row = store.get(conn, request_id)
         run = store.insert_run(conn, kind="relaunch", mode="director", request_id=request_id,
-                               session_id=row.session_id, actor="launcher", state="acting",
+                               session_id=row.session_id, by="launcher", state="acting",
                                job=f"proc:{me.pid}@{me.started:.6f}")
         store.end_run(conn, run.run_id, "relaunch-failed", word=word, detail=detail)
     return run.run_id
@@ -297,8 +297,8 @@ TMUX_FLOOR = (3, 2)
 _SLOTS_SETUP = """
 import sys
 from moxi import config, paths
-config.set("slots", "tmux", sys.argv[1], by="launcher browser test")
-config.set("slots", "tmux_conf", sys.argv[2], by="launcher browser test")
+config.set_value("slots", "tmux", sys.argv[1], by="launcher browser test")
+config.set_value("slots", "tmux_conf", sys.argv[2], by="launcher browser test")
 print(paths.socket_path("slots", "tmux"))
 """
 
@@ -325,9 +325,9 @@ def own_slots(shell: Any) -> Iterator[str]:
                             timeout=30).stdout.strip()
     assert socket.startswith(env["MOXI_HOME"]) or "/moxi-" in socket, socket
     log_path = shell.home / "slots-server.log"
-    with open(log_path, "wb") as log:
+    with open(log_path, "wb") as fh:
         server = subprocess.Popen([str(paths.script("moxi-slots-server"))], env=env,
-                                  stdin=subprocess.DEVNULL, stdout=log,
+                                  stdin=subprocess.DEVNULL, stdout=fh,
                                   stderr=subprocess.STDOUT, start_new_session=True)
     try:
         wait_for(lambda: subprocess.run([tmux, "-S", socket, "display-message", "-p",
@@ -372,7 +372,7 @@ def place(shell: Any, request_id: str, *, cwd: str, at: str,
     the line above Home's box offers."""
     who = actor(shell)
     with launch_log(shell) as conn:
-        store.insert(conn, request_id=request_id, actor=who, harness="codex",
+        store.insert(conn, request_id=request_id, by=who, harness="codex",
                      target="terminal", cwd=cwd, project_key=project_key, values={},
                      argv=["codex"], env={}, posture="operator", at=at)
 
@@ -388,11 +388,11 @@ def fresh_place(shell: Any) -> Path:
     """A folder under the shell's home that no launch has run in, seeded as the newest
     place, so Home opens there and fills nothing from a launch an earlier test made."""
     number = next(_fresh)
-    folder = Path(shell.env["HOME"]) / "work" / f"fresh-{number}"
-    folder.mkdir(parents=True, exist_ok=True)
+    place_dir = Path(shell.env["HOME"]) / "work" / f"fresh-{number}"
+    place_dir.mkdir(parents=True, exist_ok=True)
     at = f"2099-01-01T{number // 3600:02d}:{number // 60 % 60:02d}:{number % 60:02d}.000000Z"
-    place(shell, f"fresh-place-{number}", cwd=str(folder), at=at)
-    return folder
+    place(shell, f"fresh-place-{number}", cwd=str(place_dir), at=at)
+    return place_dir
 
 
 def newest_launch(shell: Any) -> Any:

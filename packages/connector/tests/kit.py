@@ -159,7 +159,7 @@ class Admit:
 
         return Mount(routes={"/state": state}, guard=guard)
 
-    async def stopping(self, switch_on: bool) -> None:
+    async def stopping(self, *, switch_on: bool) -> None:
         self.stopped.append(switch_on)
 
 
@@ -238,8 +238,8 @@ class Running:
                                  poll=3600)
             try:
                 loop.run_until_complete(self.daemon.start())
-            except BaseException as e:  # noqa: BLE001 - handed to the test
-                failed.append(e)
+            except BaseException as exc:  # noqa: BLE001 - handed to the test
+                failed.append(exc)
                 ready.set()
                 return
             ready.set()

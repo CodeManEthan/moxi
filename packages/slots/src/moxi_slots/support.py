@@ -66,14 +66,14 @@ def supported() -> Support:
     """
     kind = system()
     if not system_ok(kind):
-        return Support(False, f"{WHERE}, not {label(kind)}; {WITHOUT}")
+        return Support(ok=False, why=f"{WHERE}, not {label(kind)}; {WITHOUT}")
     from .settings import NotSetUp, tmux_path
 
     try:
         tmux_path()
     except NotSetUp as exc:
-        return Support(False, str(exc))
-    return Support(True)
+        return Support(ok=False, why=str(exc))
+    return Support(ok=True)
 
 
 def unsupported_words(kind: str | None = None) -> str:

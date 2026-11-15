@@ -79,9 +79,9 @@ def later(path, seconds: int = 1) -> None:
 
 def rewrite(path, data: bytes) -> None:
     """Write the file again in place: the same inode, other bytes."""
-    with open(path, "r+b") as handle:
-        handle.write(data)
-        handle.truncate()
+    with open(path, "r+b") as fh:
+        fh.write(data)
+        fh.truncate()
     later(path)
 
 
@@ -131,9 +131,9 @@ def test_a_typed_message_more_than_the_backward_reads_limit_from_the_end_is_foun
     t.user("typed long ago", origin="human")
     path = t.write()
     blank = b" " * (1024 * 1024 - 1) + b"\n"
-    with open(path, "ab") as handle:
+    with open(path, "ab") as fh:
         for _ in range(BACK_LIMIT // len(blank) + 1):
-            handle.write(blank)
+            fh.write(blank)
     size = path.stat().st_size
     assert size > BACK_LIMIT
 
@@ -226,21 +226,21 @@ def test_a_last_line_with_no_newline_is_not_read_until_it_is_complete(roots, cat
 
     t.user("typed, and still being written", origin="human")
     line = t.lines[-1].encode()
-    with open(t.path, "ab") as handle:
-        handle.write(line[:40])                      # the line's first bytes
+    with open(t.path, "ab") as fh:
+        fh.write(line[:40])                      # the line's first bytes
     later(t.path)
     assert prompt(cat).text == "the first prompt"
     assert kept_of(cat, t).offset == complete
 
-    with open(t.path, "ab") as handle:
-        handle.write(line[40:])                      # whole JSON, no newline yet
+    with open(t.path, "ab") as fh:
+        fh.write(line[40:])                      # whole JSON, no newline yet
     later(t.path)
     assert prompt(cat).text == "the first prompt"
     assert kept_of(cat, t).offset == complete
     assert cat.prompt_bytes == complete              # nothing past the last newline
 
-    with open(t.path, "ab") as handle:
-        handle.write(b"\n")
+    with open(t.path, "ab") as fh:
+        fh.write(b"\n")
     later(t.path)
     assert prompt(cat).text == "typed, and still being written"
     assert kept_of(cat, t).offset == complete + len(line) + 1
@@ -256,8 +256,8 @@ def test_a_whole_read_stops_at_the_last_newline_too(roots, cat):
     assert whole(cat).text == "complete"
     assert prompt(cat).text == "complete"
 
-    with open(t.path, "ab") as handle:
-        handle.write(b"\n")
+    with open(t.path, "ab") as fh:
+        fh.write(b"\n")
     later(t.path)
     assert prompt(cat).text == "no newline yet"
 
@@ -282,8 +282,8 @@ def test_a_file_that_shrank_is_read_whole(roots, cat):
     assert prompt(cat).text == "the second prompt"
 
     cut = data.rindex(b"\n", 0, len(data) - 1) + 1   # without its last line
-    with open(t.path, "r+b") as handle:
-        handle.truncate(cut)
+    with open(t.path, "r+b") as fh:
+        fh.truncate(cut)
     later(t.path)
 
     assert prompt(cat).text == "the first prompt"
@@ -332,8 +332,8 @@ def test_a_same_length_change_inside_the_window_is_read_whole(roots, cat):
 
     at = data.rindex(b"Reply 11.")
     rewrite(t.path, data[:at] + b"Other 11." + data[at + 9:])
-    with open(t.path, "ab") as handle:
-        handle.write(b"\n")
+    with open(t.path, "ab") as fh:
+        fh.write(b"\n")
     later(t.path)
 
     assert prompt(cat).text == "the first prompt"
@@ -458,8 +458,8 @@ def test_the_two_changes_the_kept_read_does_not_see(roots, cat):
     assert data.index(b"the first prompt") < len(data) - WINDOW
 
     # Written again with the same device, inode, size and mtime: not read.
-    with open(path, "r+b") as handle:
-        handle.write(changed)
+    with open(path, "r+b") as fh:
+        fh.write(changed)
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
     assert cat.details(entry_of(cat)).prompt.text == "the first prompt"
     assert whole(cat).text == "THE FIRST PROMPT"
@@ -524,7 +524,7 @@ def test_a_read_that_ends_before_the_files_size_fails_and_moves_nothing(roots, c
         read_prompt(entry.listed, kept)
     with pytest.raises(Unreadable):
         read_prompt(entry.listed)
-    assert cat._prompt(entry, None) is None
+    assert cat._prompt(entry, program=None) is None
     assert kept_of(cat, t) is kept
 
     monkeypatch.setattr(catalog_module.os, "fstat", real)
@@ -641,25 +641,25 @@ def test_the_kept_prompt_is_the_whole_reads_through_a_long_run_of_changes(roots,
                          "replace", "nothing", "empty"])
         size = path.stat().st_size
         if op == "grow" or (op == "partial" and partial):
-            with open(path, "ab") as handle:         # a line being written is ended first
-                handle.write(partial + lines(rng.randrange(1, 12)))
+            with open(path, "ab") as fh:         # a line being written is ended first
+                fh.write(partial + lines(rng.randrange(1, 12)))
             partial = b""
         elif op == "partial":
             line = lines(1)
             cut = rng.randrange(1, len(line))        # whole JSON when only "\n" is cut
-            with open(path, "ab") as handle:
-                handle.write(line[:cut])
+            with open(path, "ab") as fh:
+                fh.write(line[:cut])
             partial = line[cut:]
         elif op == "shrink" and size:
-            with open(path, "r+b") as handle:
-                handle.truncate(rng.randrange(0, size))
+            with open(path, "r+b") as fh:
+                fh.truncate(rng.randrange(0, size))
             partial = b""
         elif op == "rewrite":
             # The whole file, in place, ending shorter or longer. (Writing over its
             # first bytes alone is the change the read does not see, tested above.)
-            with open(path, "r+b") as handle:
-                handle.write(lines(rng.randrange(1, 40)))
-                handle.truncate()
+            with open(path, "r+b") as fh:
+                fh.write(lines(rng.randrange(1, 40)))
+                fh.truncate()
             partial = b""
         elif op == "replace":
             spare = path.with_suffix(".new")
@@ -860,8 +860,8 @@ def test_a_typed_record_becomes_the_prompt_however_it_is_written(roots, monkeypa
     path = t.write()
     cat = Catalog(roots, reuse_s=0)
     assert prompt(cat).text == "typed first"
-    with open(path, "ab") as handle:
-        handle.write(raw + b"\n")
+    with open(path, "ab") as fh:
+        fh.write(raw + b"\n")
     later(path)
     fresh = Catalog(roots, reuse_s=0)
     found = prompt(fresh)

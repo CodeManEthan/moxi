@@ -250,11 +250,11 @@ class RegisterDrop:
                         drop.fired.set()
                 try:
                     resp = super().bind(**kw)
-                except BaseException as e:
+                except BaseException as exc:
                     # Not answered (under load a fresh connection can be closed before
                     # its register goes out): that is the before-the-answer case, which
                     # the arm retries. The drop stays armed for the register that is.
-                    drop.unanswered.append(repr(e))
+                    drop.unanswered.append(repr(exc))
                     drop.point = point
                     raise
                 try:

@@ -69,7 +69,7 @@ _REMOTE_VERBS = frozenset({"update", "prune", "show", "set-head"})
 _VALUED = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"})
 
 
-def environment(*, clean_env: bool = True, author: tuple[str, str] | None = None,
+def git_env(*, clean_env: bool = True, author: tuple[str, str] | None = None,
                 extra: dict[str, str] | None = None,
                 batch_ssh: bool = True) -> dict[str, str]:
     """The environment `git()` gives git. `GIT_SSH_COMMAND` is set to `BATCH_SSH` only
@@ -106,9 +106,9 @@ def git(root: str | os.PathLike, *args: str, timeout_s: float = DEFAULT_TIMEOUT,
     from moxi import proc
 
     data = stdin_data.encode("utf-8") if isinstance(stdin_data, str) else stdin_data
-    batch = not _users_ssh(root, args, clean_env, timeout_s)
+    batch = not _users_ssh(root, args, clean_env=clean_env, timeout=timeout_s)
     done = proc.run(["git", "-C", os.fspath(Path(root)), *args], timeout_s=timeout_s,
-                    stdin_data=data, env=environment(clean_env=clean_env, author=author,
+                    stdin_data=data, env=git_env(clean_env=clean_env, author=author,
                                                 extra=extra_env, batch_ssh=batch))
     out = done.stdout or b""
     return subprocess.CompletedProcess(
@@ -127,7 +127,7 @@ def _split(args) -> tuple[list[str], str | None, list[str]]:
     return args[:i], args[i], args[i + 1:]
 
 
-def _users_ssh(root, args, clean_env: bool, timeout: float) -> bool:
+def _users_ssh(root, args, *, clean_env: bool, timeout: float) -> bool:
     """True when the command can reach a remote and the user set their own ssh in git's
     config: a `-c core.sshCommand=...` in `args`, or the repo's `core.sshCommand`. The
     environment's own variables are `environment()`'s to see."""
@@ -148,7 +148,7 @@ def _users_ssh(root, args, clean_env: bool, timeout: float) -> bool:
     try:
         done = proc.run(["git", "-C", os.fspath(Path(root)), *lead, "config", "--get",
                          "core.sshCommand"], timeout_s=timeout,
-                        env=environment(clean_env=clean_env))
+                        env=git_env(clean_env=clean_env))
     except (OSError, subprocess.TimeoutExpired):
         return False
     return done.returncode == 0 and bool((done.stdout or b"").strip())
@@ -272,6 +272,6 @@ def changes(root: str | os.PathLike, *, staged: bool = True,
     return parse_raw(done.stdout)
 
 
-__all__ = ["git", "changes", "Change", "literal_pathspec", "environment", "local_env_vars",
+__all__ = ["git", "changes", "Change", "literal_pathspec", "git_env", "local_env_vars",
            "PATHSPEC_VARS", "MAX_PATHS", "MAX_PATH_BYTES", "paths_problem", "GitFailed",
            "parse_raw", "empty_tree", "head_commit"]

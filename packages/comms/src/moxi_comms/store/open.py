@@ -164,8 +164,8 @@ def open_write(target=None, *, env=None, timeout: float = 5.0,
         if found:
             try:
                 state = state_of(target)
-            except sqlite3.Error as e:
-                raise StoreRefused(target, f"can't be read ({e}); nothing was written") \
+            except sqlite3.Error as exc:
+                raise StoreRefused(target, f"can't be read ({exc}); nothing was written") \
                     from None
             if state == ABSENT:
                 report(_move_0_2(found, target, env))

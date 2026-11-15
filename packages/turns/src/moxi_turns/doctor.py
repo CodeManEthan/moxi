@@ -10,12 +10,12 @@ and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, the placed 
 has no doctor command of its own.
 
 The guard rows read the list as an endpoint would, in the doctor's own process: `guards`
-names each guard on, what turned it on and where it runs on each harness; `guard <id>`
-is `off` for an available guard nobody turned on, `fail` for one on the list that does
-not load, whose judge does not import or whose `match` does not compile, and for a
+names each guard on, its step, what turned it on and where it runs on each harness;
+`guard <id>` is `off` for an available guard nobody turned on, `fail` for one on the list
+that does not load, whose judge does not import or whose `match` does not compile, and for a
 switch that fails the core's check, listed or not, and `warn` for one on the list whose
 module is not installed, whose import took over `IMPORT_WARN_MS`, or (the removal guard)
-when the installed Claude Code is newer than the one its rules were checked against;
+when the installed Claude Code is newer than the one its rule was checked against;
 `guard <id>: <harness>` says, as information, that a guard on covers no call there or
 that the harness has no pre-tool point. A guard's breaks are records the core shows.
 The doctor adds readings and denies nothing.
@@ -54,7 +54,7 @@ GUARD_PLACES = {"claude": "in the runner", "codex": "behind the hook"}
 IMPORT_WARN_MS = 10.0
 
 
-def Row(name: str, ok: bool, detail: str, fix: str | None = None) -> moxi_doctor.Row:  # noqa: N802
+def Row(name: str, *, ok: bool, detail: str, fix: str | None = None) -> moxi_doctor.Row:  # noqa: N802 -- the adapter row protocol uses this constructor name
     """An adapter's row in its old spelling: `ok` or not, read as `ok` or `fail`."""
     return moxi_doctor.Row(MODULE, name, "ok" if ok else "fail", detail, fix)
 
@@ -76,14 +76,14 @@ def check() -> Iterator[moxi_doctor.Row]:
         try:
             yield from getattr(importlib.import_module(module_name), attr)()
         except Exception as exc:  # noqa: BLE001 - a doctor reports, it does not raise
-            yield Row(target, False, f"could not be checked: {type(exc).__name__}: {exc}")
+            yield Row(target, ok=False, detail=f"could not be checked: {type(exc).__name__}: {exc}")
 
 
 def _config():
     try:
         settings = config.load()
     except ConfigError as exc:
-        return None, Row("config", False, str(exc))
+        return None, Row("config", ok=False, detail=str(exc))
     allow = list(settings["commands.allow"])
     detail = (f"{settings.file}: {config.STOP_WAIT} {settings[config.STOP_WAIT]}, "
               f"listen.wait_ms {settings['listen.wait_ms']}, "
@@ -96,7 +96,7 @@ def _config():
             f"{detail}; commands.allow names {', '.join(unknown)}, which are not session "
             "commands and grant nothing",
             "moxi config set turns commands.allow with only clear, exit and compact")
-    return settings, Row("config", True, detail)
+    return settings, Row("config", ok=True, detail=detail)
 
 
 def _start_list(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
@@ -105,7 +105,7 @@ def _start_list(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
     plan = listeners.plan(registry, present=modules.present)
     asked = ", ".join(e.entry for e in plan.entries) or "nothing"
     skipped = "; ".join(f"{entry}: {why}" for entry, why in plan.skipped)
-    yield Row("start list", True, f"asks {asked}" + (f"; skipped {skipped}" if skipped
+    yield Row("start list", ok=True, detail=f"asks {asked}" + (f"; skipped {skipped}" if skipped
                                                       else ""))
     for module in plan.off_list:
         yield moxi_doctor.Row(MODULE, f"start list: {module}", "warn",
@@ -116,6 +116,10 @@ def _start_list(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
             yield moxi_doctor.Row(MODULE, f"start list: {entry}", "warn",
                                   f"this file entry adds nothing: {why}",
                                   "correct the path in start.order, or remove it")
+        elif listeners.is_run_entry(entry):
+            yield moxi_doctor.Row(MODULE, f"start list: {entry}", "warn",
+                                  f"this run entry adds nothing: {why}",
+                                  "correct the path in start.order, or remove it")
 
 
 def _listener_rows(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
@@ -123,10 +127,10 @@ def _listener_rows(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
     for listener in registry.listeners:
         modules.setdefault(listener.module, set()).update(listener.events)
     for name, events in sorted(modules.items()):
-        yield Row(f"listener {name}", True, "registered for " + ", ".join(
+        yield Row(f"listener {name}", ok=True, detail="registered for " + ", ".join(
             e for e in listeners.EVENTS if e in events))
     for b in registry.broken:
-        yield Row(f"listener {b.module}", False, b.reason)
+        yield Row(f"listener {b.module}", ok=False, detail=b.reason)
     for listener in registry.listeners:
         # A floor is read only for a row naming `after-tool`.
         if listener.floor is None or listeners.AFTER_TOOL not in listener.events:
@@ -134,8 +138,8 @@ def _listener_rows(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
         try:
             listener.floor_function()
         except Exception as exc:  # noqa: BLE001 - a doctor reports, it does not raise
-            yield Row(f"listener {listener.module}", False,
-                      f"the floor {listener.floor} of its row {listener.target} does not "
+            yield Row(f"listener {listener.module}", ok=False,
+                      detail=f"the floor {listener.floor} of its row {listener.target} does not "
                       f"import: {type(exc).__name__}: {exc}; the row reads floor 0, "
                       "so it is asked after every call")
     for n in registry.notices:
@@ -146,7 +150,7 @@ def _guard_rows(settings) -> list[moxi_doctor.Row]:
     try:
         return list(_guards(settings))
     except Exception as exc:  # noqa: BLE001 - a doctor reports, it does not raise
-        return [Row("guards", False, f"could not be checked: {type(exc).__name__}: {exc}")]
+        return [Row("guards", ok=False, detail=f"could not be checked: {type(exc).__name__}: {exc}")]
 
 
 def _guards(settings) -> Iterator[moxi_doctor.Row]:
@@ -207,15 +211,16 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
             if newer:
                 warns.setdefault(o.id, []).append(
                     f"the installed Claude Code is {newer}, newer than "
-                    f"{removal.CHECKED_CLAUDE}, which its rules were checked against; "
+                    f"{removal.CHECKED_CLAUDE}, which its rule was checked against; "
                     "Claude Code's own removal handling may have moved")
 
     if loaded.on:
-        yield Row("guards", True, "; ".join(
-            f"{o.id} (on by {' and '.join(_BY.get(b, b) for b in o.by)}): runs "
+        yield Row("guards", ok=True, detail="; ".join(
+            f"{o.id} ({o.guard.step} step, on by "
+            f"{' and '.join(_BY.get(b, b) for b in o.by)}): runs "
             f"{', '.join(places.get(o.id) or ['nowhere'])}" for o in loaded.on))
     else:
-        yield Row("guards", True, "no guard is on")
+        yield Row("guards", ok=True, detail="no guard is on")
     for f in loaded.off:
         if f.id in fails:
             continue
@@ -291,12 +296,12 @@ def _additions_rows() -> list[moxi_doctor.Row]:
     try:
         return additions.rows()
     except Exception as exc:  # noqa: BLE001 - a doctor reports, it does not raise
-        return [Row("additions", False, f"could not be checked: {type(exc).__name__}: {exc}")]
+        return [Row("additions", ok=False, detail=f"could not be checked: {type(exc).__name__}: {exc}")]
 
 
 def _endpoint_rows() -> Iterator[moxi_doctor.Row]:
     live = client.sessions()
-    yield Row("endpoints", True, f"{len(live)} live under {client.runtime_dir()}")
+    yield Row("endpoints", ok=True, detail=f"{len(live)} live under {client.runtime_dir()}")
     for s in live:
         info = s.info
         mod = f", mod {info['mod_version']}" if info.get("mod_version") else ""
@@ -308,9 +313,9 @@ def _endpoint_rows() -> Iterator[moxi_doctor.Row]:
             detail += f"; {trouble}"
         yield moxi_doctor.Row(MODULE, f"endpoint {s.harness} pid {s.pid}",
                               "warn" if trouble else "ok", detail)
-    for directory in protocol.v1_directories(client.runtime_dir()):
+    for endpoint_dir in protocol.v1_endpoint_dirs(client.runtime_dir()):
         yield moxi_doctor.Row(
-            MODULE, f"endpoints: v1 {directory}", "warn",
+            MODULE, f"endpoints: v1 {endpoint_dir}", "warn",
             "an endpoint directory of turns 0.1, which this turns neither reads nor "
             "removes",
             "reload that session's plugins or restart it; once no turns 0.1 session "
@@ -343,7 +348,7 @@ def _codex_limits_row() -> moxi_doctor.Row:
         for s in live:
             s.close()
     if not hosts:
-        return Row("codex limits", True, "no live Codex session")
+        return Row("codex limits", ok=True, detail="no live Codex session")
     if newest is None:
         detail = f"no reading yet on {hosts} live Codex host{'s' if hosts > 1 else ''}"
     else:
@@ -352,7 +357,7 @@ def _codex_limits_row() -> moxi_doctor.Row:
         detail = f"last reading {when} ({kind or 'read'}), Codex host pid {pid}"
     if unread:
         detail += f"; {unread} host{'s' if unread > 1 else ''} did not answer"
-    return Row("codex limits", True, detail)
+    return Row("codex limits", ok=True, detail=detail)
 
 
 def _hook_rows() -> list[moxi_doctor.Row]:

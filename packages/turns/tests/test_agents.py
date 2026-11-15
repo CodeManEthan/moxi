@@ -39,8 +39,8 @@ def connect():
         client.close()
 
 
-def entry(id, state="running", final=False, kind="subagent", **rest):
-    return Agent(id, kind, state, final, **rest)
+def entry(agent_id, state="running", *, final=False, kind="subagent", **rest):
+    return Agent(agent_id, kind, state, final, **rest)
 
 
 def test_agents_reads_the_harness_record_and_facts_count_it(make_endpoint):
@@ -71,8 +71,8 @@ def test_the_agents_answer_carries_its_kind_on_the_wire(make_endpoint, connect):
     assert answer["entries"] == [{"id": "a1", "kind": "subagent", "state": "running",
                                   "final": False, "description": None,
                                   "parent_id": "p"}]
-    assert from_wire(answer) == Agents((entry("a1", parent_id="p"),), True,
-                                                     answer["at"])
+    assert from_wire(answer) == Agents((entry("a1", parent_id="p"),), complete=True,
+                                                     at=answer["at"])
 
 
 @pytest.mark.parametrize("how", ["incomplete", "raises", "not-a-list"])

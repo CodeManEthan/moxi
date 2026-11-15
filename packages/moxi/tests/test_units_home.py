@@ -133,7 +133,7 @@ def test_a_set_home_gives_the_tagged_name_on_every_backend(tmp_path, monkeypatch
     assert SystemdBackend(tmp_path).own(f"moxi-{tag}-comms-daemon.service")
 
 
-def test_two_spellings_of_one_folder_give_one_tag_and_one_value(tmp_path, monkeypatch):
+def test_two_spellings_of_one_dir_give_one_tag_and_one_value(tmp_path, monkeypatch):
     need_symlinks()
     real = tmp_path / "homes" / "real"
     real.mkdir(parents=True)
@@ -172,7 +172,7 @@ def test_units_ids_is_empty_for_a_supervisor_with_no_writer(monkeypatch):
 
 # -- the home a unit runs with ------------------------------------------------------------------
 
-def test_environment_is_quoted_by_its_own_rules():
+def test_env_is_quoted_by_its_own_rules():
     """`$` is no variable to systemd here, so it stays one `$`; `%` is a specifier and is
     doubled; `\\` and `"` are escaped inside the quotes."""
     path = '/home/a b/100%/$HOME/x"y\\z'
@@ -188,8 +188,8 @@ def test_a_tagged_homes_systemd_services_carry_the_home(tmp_path, monkeypatch):
     home = '/srv/100%/$x'
     line = 'Environment="MOXI_HOME=/srv/100%%/$x"'
     env = (("MOXI_HOME", home),)
-    [daemon] = SystemdBackend(tmp_path).render(spec(environment=env))
-    [timer] = SystemdBackend(tmp_path).render(spec("timer", name="nightly", environment=env))
+    [daemon] = SystemdBackend(tmp_path).render(spec(env=env))
+    [timer] = SystemdBackend(tmp_path).render(spec("timer", name="nightly", env=env))
     for path, text in (*daemon.files, timer.files[0]):
         lines = text.splitlines()
         assert lines.index(line) > lines.index("[Service]"), path
@@ -220,7 +220,7 @@ def test_a_tagged_homes_launchd_plist_carries_the_home(tmp_path, monkeypatch):
     backend = LaunchdBackend(agents=tmp_path / "agents", uid=501, gate="/opt/moxi")
     home = units.unit_env("comms")["MOXI_HOME"]
     for kind in ("daemon", "timer"):
-        [group] = backend.render(spec(kind, environment=(("MOXI_HOME", home),)))
+        [group] = backend.render(spec(kind, env=(("MOXI_HOME", home),)))
         [(path, text)] = group.files
         body = plistlib.loads(text.encode())
         assert path.name == f"moxi.{tag}.comms.daemon.plist"
@@ -247,7 +247,7 @@ def test_a_tagged_homes_task_gives_its_gate_the_home(tasks, tmp_path, monkeypatc
     home = units.unit_env("comms")["MOXI_HOME"]
     ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
     for kind in ("daemon", "timer"):
-        [group] = tasks.render(spec(kind, environment=(("MOXI_HOME", home),)))
+        [group] = tasks.render(spec(kind, env=(("MOXI_HOME", home),)))
         [(_path, text)] = group.files
         root = ET.fromstring(text.encode("utf-16"))
         args = root.find("t:Actions/t:Exec/t:Arguments", ns).text
@@ -256,7 +256,7 @@ def test_a_tagged_homes_task_gives_its_gate_the_home(tasks, tmp_path, monkeypatc
     assert "--home" not in group.files[0][1]
 
 
-def test_a_tagged_homes_running_task_is_read_from_its_tag_folder(tasks, tmp_path,
+def test_a_tagged_homes_running_task_is_read_from_its_tag_dir(tasks, tmp_path,
                                                                  monkeypatch):
     monkeypatch.setenv("MOXI_HOME", str(tmp_path / "h"))
     path = SchtasksBackend.runtime_file("demo", "relay")
@@ -270,7 +270,7 @@ def test_a_tagged_homes_running_task_is_read_from_its_tag_folder(tasks, tmp_path
 
 # -- two homes in one unit directory -----------------------------------------------------------
 
-def test_marked_keeps_two_homes_apart_in_one_unit_directory(w):
+def test_marked_keeps_two_homes_apart_in_one_unit_dir(w):
     w.module(DAEMONS=DAEMON)
     w.apply()
     w.home(w.tmp / "h")

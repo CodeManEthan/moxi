@@ -25,7 +25,7 @@ WITHOUT_UI = textwrap.dedent("""\
     from moxi_launcher import store
 
     def launched(conn, request_id, at, pid=None, started=None):
-        store.insert(conn, request_id=request_id, actor="alice", harness="claude",
+        store.insert(conn, request_id=request_id, by="alice", harness="claude",
                      target="terminal", cwd="/work", values={"model": "opus"},
                      argv=["claude"], env={}, posture="operator",
                      session_id=f"session-{request_id}", slot=None, at=at)

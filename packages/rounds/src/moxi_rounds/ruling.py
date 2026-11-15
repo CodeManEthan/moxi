@@ -1,6 +1,6 @@
 """Recording a ruling: what the operator decided, in a sentence, with where he said it.
 
-`rule("<project>/<slug>", text=..., record=..., actor=...)` appends one `ruling.recorded`
+`rule("<project>/<slug>", text=..., record=..., by=...)` appends one `ruling.recorded`
 event through the write path and returns the ruling as recorded.
 
 **Where it goes.** A round's ruling is `C<n>` in the round's log. A standing ruling, one
@@ -190,7 +190,7 @@ class Ruled:
         return rules[len(shown.READBACK):] if rules.startswith(shown.READBACK) else None
 
 
-def rule(target: str, *, actor: str, record: str | None = None, text: str | None = None,
+def rule(target: str, *, by: str, record: str | None = None, text: str | None = None,
          reason: str | None = None, standing: bool = False, scope: str | None = None,
          stages: str | None = None, item: str | None = None,
          until: str | None = None, chose: str | None = None,
@@ -199,7 +199,7 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
     """Record one ruling on `target`, a round `<project>/<slug>` or a project's key, and
     return it as recorded.
 
-    - `actor`: who records it, the event's actor.
+    - `by`: who records it, the event's actor.
     - `record`: the pointer to where the operator said it.
     - `text`: the sentence. A plain ruling needs one.
     - `reason`: why, in short.
@@ -348,7 +348,7 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
                            log=write.PROJECT if standing else write.ROUND)
 
     try:
-        written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
+        written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
                                gates=[has_a_pointer, *gates], event=recorded,
                                with_project=standing, wait_s=wait_s, at=at)
     except NoLog:

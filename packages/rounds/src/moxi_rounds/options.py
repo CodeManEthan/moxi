@@ -2,7 +2,7 @@
 
 A question may be asked bare, or with options, and options may be added to one on
 record. `fill("<project>/<slug>", "Q1", options=["a=...", "b=..."], retire=["c"],
-actor=...)` appends one `question.changed` event through the write path and returns the
+by=...)` appends one `question.changed` event through the write path and returns the
 question as the log then has it. Anyone may: options are no act of the operator's and
 carry no pointer.
 
@@ -122,7 +122,7 @@ class Filled:
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
-def fill(target: str, question_id: str, *, actor: str, options: Sequence[str] = (),
+def fill(target: str, question_id: str, *, by: str, options: Sequence[str] = (),
          retire: Sequence[str] = (), settings=None, wait_s: float = write.WAIT_S,
          at: str | None = None) -> Filled:
     """Add options to the question `question_id` of `target`, a round `<project>/<slug>`
@@ -131,7 +131,7 @@ def fill(target: str, question_id: str, *, actor: str, options: Sequence[str] = 
     - `options`: the options to add, each `K=TEXT`. One the question already offers,
       under the same key with the same line, is accepted and not written again.
     - `retire`: the keys to take out.
-    - `actor`: who does it, the event's actor.
+    - `by`: who does it, the event's actor.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for the lock; `at`: the event's time.
@@ -247,7 +247,7 @@ def fill(target: str, question_id: str, *, actor: str, options: Sequence[str] = 
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a change to a question's options"),
                    exists, still_asked, keys_keep_their_text, retires_what_is_offered,
                    keeps_two_to_four],

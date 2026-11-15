@@ -115,13 +115,13 @@ def fetch(method: str, url: str, headers: dict[str, str], body: bytes | None) ->
     opener = urllib.request.build_opener(_NoRedirect)
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        with opener.open(req, timeout=STEP_WAIT) as answer:
+        with opener.open(req, timeout=STEP_WAIT) as answer:  # noqa: MX3 -- HTTP response, not an open file
             return Reply(answer.status, {k.lower(): v for k, v in answer.headers.items()},
                          answer.read(64 * 1024))
-    except urllib.error.HTTPError as e:
-        return Reply(e.code, {k.lower(): v for k, v in e.headers.items()}, e.read(64 * 1024))
-    except urllib.error.URLError as e:
-        raise OSError(str(e.reason)) from None
+    except urllib.error.HTTPError as exc:
+        return Reply(exc.code, {k.lower(): v for k, v in exc.headers.items()}, exc.read(64 * 1024))
+    except urllib.error.URLError as exc:
+        raise OSError(str(exc.reason)) from None
 
 
 @dataclass
@@ -142,57 +142,59 @@ def run(origin, *, ask: Callable[[str, object], object], fetch: Fetch = fetch,
     answer = ask("probe_expect", None)
     nonce = answer.get("nonce") if isinstance(answer, dict) else None
     if not isinstance(nonce, str):
-        return [Step("register", False, "the connector didn't give a probe nonce")]
-    steps.append(Step("register", True, "the connector registered a probe nonce"))
+        return [Step("register", passed=False, text="the connector didn't give a probe nonce")]
+    steps.append(Step("register", passed=True, text="the connector registered a probe nonce"))
 
     url = origin.resource_metadata_url
     try:
         got = fetch("GET", url, {"User-Agent": USER_AGENT, "X-Moxi-Probe": nonce}, None)
-    except OSError as e:
-        steps.append(Step("reach", False, f"GET {url} didn't connect: {e}"))
+    except OSError as exc:
+        steps.append(Step("reach", passed=False, text=f"GET {url} didn't connect: {exc}"))
         return steps
     seen = ask("probe_seen", {"nonce": nonce})
     seen = isinstance(seen, dict) and seen.get("seen") is True
     resource = _resource(got.body)
     if got.status == 200 and resource == origin.resource and seen:
-        steps.append(Step("reach", True,
-                          f"GET {url} as {USER_AGENT} reached this connector and answered "
-                          "its metadata: the edge lets Claude's user agent through"))
+        steps.append(Step("reach", passed=True,
+                          text=f"GET {url} as {USER_AGENT} reached this connector and answered "
+                               "its metadata: the edge lets Claude's user agent through"))
     elif not seen:
-        steps.append(Step("reach", False,
-                          f"GET {url} answered {got.status}, but the request never reached "
-                          f"this connector: something on the way answered it (an edge page, "
-                          f"a bot rule, another server on the port)"))
+        steps.append(Step("reach", passed=False,
+                          text=f"GET {url} answered {got.status}, but the request never reached "
+                               f"this connector: something on the way answered it (an edge page, "
+                               f"a bot rule, another server on the port)"))
     elif got.status != 200:
-        steps.append(Step("reach", False, f"GET {url} reached this connector and answered "
-                                          f"{got.status}, not 200"))
+        steps.append(Step("reach", passed=False,
+                          text=f"GET {url} reached this connector and answered "
+                               f"{got.status}, not 200"))
     else:
-        steps.append(Step("reach", False, f"GET {url} reached this connector, but its "
-                                          f"metadata names the resource {resource!r}, not "
-                                          f"{origin.resource!r}"))
+        steps.append(Step("reach", passed=False,
+                          text=f"GET {url} reached this connector, but its metadata names "
+                               f"the resource {resource!r}, not {origin.resource!r}"))
 
     mcp = origin.resource
     try:
         got = fetch("POST", mcp, {"User-Agent": USER_AGENT, "Content-Type": "application/json",
                                   "Accept": "application/json, text/event-stream"},
                     b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
-    except OSError as e:
-        steps.append(Step("unsigned", False, f"POST {mcp} didn't connect: {e}"))
+    except OSError as exc:
+        steps.append(Step("unsigned", passed=False, text=f"POST {mcp} didn't connect: {exc}"))
     else:
         challenge = got.headers.get("www-authenticate", "")
         if got.status == 401 and "resource_metadata=" in challenge:
-            steps.append(Step("unsigned", True, f"POST {mcp} without a token answered 401 "
-                                                 "pointing at the metadata, as Claude needs"))
+            steps.append(Step("unsigned", passed=True,
+                              text=f"POST {mcp} without a token answered 401 pointing at "
+                                   "the metadata, as Claude needs"))
         else:
-            steps.append(Step("unsigned", False,
-                              f"POST {mcp} without a token answered {got.status}"
-                              + ("" if got.status != 401 else " with no resource_metadata")
-                              + ", not 401 with resource_metadata"))
+            steps.append(Step("unsigned", passed=False,
+                              text=f"POST {mcp} without a token answered {got.status}"
+                                   + ("" if got.status != 401 else " with no resource_metadata")
+                                   + ", not 401 with resource_metadata"))
     if provider == "tailscale":
-        steps.append(Step("note", True,
-                          "A request from this machine to its own ts.net name may stay on "
-                          "the tailnet and not cross Funnel; the real test is a phone off "
-                          "the tailnet."))
+        steps.append(Step("note", passed=True,
+                          text="A request from this machine to its own ts.net name may stay "
+                               "on the tailnet and not cross Funnel; the real test is a phone "
+                               "off the tailnet."))
     return steps
 
 

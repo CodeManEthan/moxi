@@ -138,9 +138,9 @@ def test_both_caps_binding_reports_each_against_what_it_cut():
 def test_an_empty_or_newline_only_card_has_no_body_lines():
     """The single trailing newline is the one the budget removes, and nothing is left
     behind it."""
-    assert cards._budget("", False) == ([], "")
-    assert cards._budget("\n", False) == ([], "")
-    assert cards._budget("\n\n", False) == (["", ""], "")
+    assert cards._budget("", truncated=False) == ([], "")
+    assert cards._budget("\n", truncated=False) == ([], "")
+    assert cards._budget("\n\n", truncated=False) == (["", ""], "")
     write_card("planner@proj-a", "\n")
     code, out = run(["whois", "planner@proj-a"])
     assert code == 0 and body(out) == []
@@ -310,7 +310,7 @@ def test_a_symlink_at_a_card_path_is_refused_not_followed():
     assert "symbolic link" in out and "planner@proj-a" in out
 
 
-def test_a_directory_at_a_card_path_is_refused():
+def test_a_dir_at_a_card_path_is_refused():
     """The same guard, the mundane case."""
     cards.card_path("planner@proj-a").mkdir(parents=True)
     code, out = run(["whois", "planner@proj-a"])
@@ -430,17 +430,17 @@ def test_bidi_and_format_characters_are_stripped_too():
     forgery defense, and leading spaces are bidi-neutral: under a right-to-left override
     a terminal can render an indented line as though it started at column zero. The
     reading model always saw the codepoints; this defends the operator's terminal."""
-    RLO, PDF = "\u202e", "\u202c"          # right-to-left override, pop directional
-    ZWSP, ZWJ = "\u200b", "\u200d"         # the zero widths
-    LRI, PDI = "\u2066", "\u2069"          # bidi isolates
-    CSI, BOM = "\u009b", "\ufeff"          # a C1 control, and a byte-order mark
+    rlo, pdf = "\u202e", "\u202c"          # right-to-left override, pop directional
+    zwsp, zwj = "\u200b", "\u200d"         # the zero widths
+    lri, pdi = "\u2066", "\u2069"          # bidi isolates
+    csi, bom = "\u009b", "\ufeff"          # a C1 control, and a byte-order mark
     write_card("planner@proj-a",
-               f"{RLO}{cards.FOOTER}{PDF}\n"
-               f"zero{ZWSP}width{ZWJ} joined{LRI} isolate{PDI}\n"
-               f"c1{CSI}here{BOM}\ntail")
+               f"{rlo}{cards.FOOTER}{pdf}\n"
+               f"zero{zwsp}width{zwj} joined{lri} isolate{pdi}\n"
+               f"c1{csi}here{bom}\ntail")
     code, out = run(["whois", "planner@proj-a"])
     assert code == 0
-    for ch in (RLO, PDF, ZWSP, ZWJ, LRI, PDI, CSI, BOM):
+    for ch in (rlo, pdf, zwsp, zwj, lri, pdi, csi, bom):
         assert ch not in out, f"{ch!r} survived into a peer's context"
     assert body(out) == [f"  {cards.FOOTER}", "  zerowidth joined isolate",
                          "  c1here", "  tail"]

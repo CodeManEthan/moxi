@@ -24,7 +24,7 @@ def write_tool(path: Path, body: str) -> Path:
 
 
 def record(key: str, value, by: str = "test") -> None:
-    config.set(places.MODULE, key, value, by=by)
+    config.set_value(places.MODULE, key, value, by=by)
 
 
 def real_tmux() -> tuple[str | None, str]:

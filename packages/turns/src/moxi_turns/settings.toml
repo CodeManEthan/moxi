@@ -34,7 +34,7 @@ read = "start"
 type = "list"
 items = "str"
 default = ["launcher", "comms", "notes"]
-doc = "What adds start context, in order: module names and file paths; setting it replaces the whole list."
+doc = "What adds start context, in order: module names, file paths and run entries (run:<path>, a program whose output is added); setting it replaces the whole list."
 read = "start"
 
 [start.limit_chars]
@@ -57,7 +57,7 @@ read = "use"
 [guards.removal]
 type = "bool"
 default = false
-doc = "Run the removal guard: refuse shell removals Claude Code would stop for approval."
+doc = "Run the removal guard: refuse a shell command with a cd, an rm and a *, which Claude Code would stop for approval."
 read = "use"
 
 [guards.no_nested_agents]
@@ -89,6 +89,13 @@ type = "list"
 items = "str"
 default = ["composer"]
 doc = "The prompt origins question mode counts as the person's own (composer is a prompt typed at this terminal)."
+read = "use"
+
+[question_mode.prose_words]
+type = "list"
+items = "str"
+default = ["prose"]
+doc = "Words that ask for prose: a prompt holding one gets no question-mode reminder."
 read = "use"
 
 # Keys an earlier turns read, kept declared so a file that still sets one is told what to

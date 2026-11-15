@@ -249,7 +249,7 @@ def _socket_state(state="active", epoch=EPOCH, backend="systemd"):
             UnitState("ui", "shell", "socket", backend, state, epoch=epoch)]
 
 
-def _inherited(fd_names=(V4, V6), inherited=True):
+def _inherited(fd_names=(V4, V6), *, inherited=True):
     return listen.Listeners((), 8460, frozenset({"127.0.0.1"}), inherited=inherited,
                             fd_names=tuple(fd_names))
 
@@ -296,7 +296,7 @@ def _serving(shell):
 
 @pytest.mark.parametrize("epoch", [None, "e1"])
 def test_a_shell_on_inherited_sockets_exits_idle_when_it_loses_no_session(epoch):
-    shell = _held(True, epoch)
+    shell = _held(inherited=True, epoch=epoch)
     if epoch is not None:
         shell.sessions.store.mint()  # on disk under its epoch, so exiting loses nothing
     thread = _serving(shell)
@@ -326,7 +326,7 @@ def test_no_idle_exit_on_its_own_listener_or_with_a_session_only_in_memory(inher
 
 def test_an_open_request_or_a_page_server_holds_the_idle_exit(monkeypatch):
     now = [100.0]
-    shell = _held(True, idle_s=10)
+    shell = _held(inherited=True, idle_s=10)
     shell.activity = serve.Activity(clock=lambda: now[0])
     assert not shell.idle()
     now[0] += 10

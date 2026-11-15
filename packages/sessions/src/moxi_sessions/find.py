@@ -293,15 +293,15 @@ class _Walk:
     def rel(self, path: str | Path) -> str:
         return Path(path).relative_to(self.root).as_posix()
 
-    def entries(self, directory: Path) -> list[os.DirEntry]:
+    def entries(self, target_dir: Path) -> list[os.DirEntry]:
         """`directory`'s entries by name, or none when it cannot be listed (noted)."""
         try:
-            with os.scandir(directory) as it:
+            with os.scandir(target_dir) as it:
                 return sorted(it, key=lambda e: e.name)
         except FileNotFoundError:
             return []
         except OSError as exc:
-            self.unreadable.append((self.rel(directory), exc.strerror or str(exc)))
+            self.unreadable.append((self.rel(target_dir), exc.strerror or str(exc)))
             return []
 
     def stat(self, entry: os.DirEntry) -> os.stat_result | None:
@@ -322,8 +322,8 @@ class _Walk:
         """`read(source, handle, size)` over the file, or None when it cannot be opened
         (noted)."""
         try:
-            with open(source.path, "rb") as handle:
-                return read(source, handle, size)
+            with open(source.path, "rb") as fh:
+                return read(source, fh, size)
         except FileNotFoundError:
             return None
         except OSError as exc:
@@ -352,9 +352,9 @@ def _listed(source: Source, kind: str, walk: _Walk, st: os.stat_result, *,
                   header=header, **more)
 
 
-def _claude_agents(walk: _Walk, directory: Path, session_id: str,
-                   workflow_id: str | None, heads: bool) -> Iterator[Listed]:
-    for entry in walk.entries(directory):
+def _claude_agents(walk: _Walk, agents_dir: Path, session_id: str,
+                   workflow_id: str | None, *, heads: bool) -> Iterator[Listed]:
+    for entry in walk.entries(agents_dir):
         matched = AGENT_FILE.match(entry.name)
         if not matched or not _is_file(entry):
             continue
@@ -367,7 +367,7 @@ def _claude_agents(walk: _Walk, directory: Path, session_id: str,
                       workflow_id=workflow_id)
 
 
-def _claude_sources(root: Path, walk: _Walk, heads: bool) -> list[Listed]:
+def _claude_sources(root: Path, walk: _Walk, *, heads: bool) -> list[Listed]:
     out: list[Listed] = []
     for project in walk.entries(root):
         if not _is_dir(project):
@@ -387,15 +387,15 @@ def _claude_sources(root: Path, walk: _Walk, heads: bool) -> list[Listed]:
             if not (SESSION_DIR.match(entry.name) and _is_dir(entry)):
                 continue
             subagents = Path(entry.path) / "subagents"
-            out.extend(_claude_agents(walk, subagents, entry.name, None, heads))
+            out.extend(_claude_agents(walk, subagents, entry.name, None, heads=heads))
             for run in walk.entries(subagents / "workflows"):
                 if WORKFLOW_DIR.match(run.name) and _is_dir(run):
                     out.extend(_claude_agents(walk, Path(run.path), entry.name, run.name,
-                                              heads))
+                                              heads=heads))
     return out
 
 
-def _codex_sources(root: Path, walk: _Walk, heads: bool,
+def _codex_sources(root: Path, walk: _Walk, *, heads: bool,
                    imports: codex.Imports) -> list[Listed]:
     out: list[Listed] = []
 
@@ -434,7 +434,7 @@ def _opencode_sources(database: Path, modified_since: float | None) -> Listing:
         with Snapshot(database) as snap:
             rows = snap.sessions()
     except Unreadable as exc:
-        return Listing(OPENCODE, str(database), False, exc.reason)
+        return Listing(OPENCODE, str(database), ok=False, reason=exc.reason)
     entries = []
     for row in rows:
         if (modified_since is not None
@@ -444,7 +444,7 @@ def _opencode_sources(database: Path, modified_since: float | None) -> Listing:
                         row.id if row.parent_id is not None else None)
         entries.append(Listed(source=source, kind="session",
                               header=opencode_header(source, row)))
-    return Listing(OPENCODE, str(database), True, entries=tuple(entries))
+    return Listing(OPENCODE, str(database), ok=True, entries=tuple(entries))
 
 
 def sources(harness: str, *, root: str | Path | None = None,
@@ -475,16 +475,16 @@ def sources(harness: str, *, root: str | Path | None = None,
     what = "projects root" if harness == CLAUDE else "sessions root"
     why = _root_unlistable(path, what)
     if why is not None:
-        return Listing(harness, str(path), False, why)
+        return Listing(harness, str(path), ok=False, reason=why)
     walk = _Walk(path, modified_since)
     imports = None
     if harness == CLAUDE:
-        entries = _claude_sources(path, walk, heads)
+        entries = _claude_sources(path, walk, heads=heads)
     else:
         imports = codex.read_imports(codex.imports_path(path))
-        entries = _codex_sources(path, walk, heads, imports)
+        entries = _codex_sources(path, walk, heads=heads, imports=imports)
     entries.sort(key=lambda e: e.rel_path)
-    return Listing(harness, str(path), True, entries=tuple(entries),
+    return Listing(harness, str(path), ok=True, entries=tuple(entries),
                    unreadable=tuple(walk.unreadable), imports=imports)
 
 
@@ -574,25 +574,25 @@ def _claude_subagents(source: Source) -> SubagentListing:
     if source.agent_id is not None:
         # A subagent's own file sits in its session's `subagents/` (or a workflow's
         # directory under it): its children are listed beside it, by parent.
-        directory = parent.parent
-        if WORKFLOW_DIR.match(directory.name):
-            directory = directory.parent.parent
-        session_dir = directory.parent
+        subagents_dir = parent.parent
+        if WORKFLOW_DIR.match(subagents_dir.name):
+            subagents_dir = subagents_dir.parent.parent
+        session_dir = subagents_dir.parent
     else:
         session_dir = parent.with_suffix("")
-        directory = session_dir / "subagents"
+        subagents_dir = session_dir / "subagents"
     try:
         os.stat(parent)
     except OSError as exc:
         return SubagentListing(source, UNREADABLE,
                                f"the transcript cannot be read: {exc.strerror or exc}")
     try:
-        top = sorted(os.scandir(directory), key=lambda e: e.name)
+        top = sorted(os.scandir(subagents_dir), key=lambda e: e.name)
     except (FileNotFoundError, NotADirectoryError):
         return SubagentListing(source, NONE)
     except OSError as exc:
         return SubagentListing(source, UNREADABLE,
-                               f"{directory} cannot be listed: {exc.strerror or exc}")
+                               f"{subagents_dir} cannot be listed: {exc.strerror or exc}")
     session_id = source.session_id or session_dir.name
     walk = _Walk(session_dir, None)
     found: list[Listed] = []
@@ -603,9 +603,9 @@ def _claude_subagents(source: Source) -> SubagentListing:
             if st is not None:
                 found.append(_listed(Source(CLAUDE, entry.path, session_id,
                                             matched.group(1)), "subagent", walk, st))
-    for run in walk.entries(directory / "workflows"):
+    for run in walk.entries(subagents_dir / "workflows"):
         if WORKFLOW_DIR.match(run.name) and _is_dir(run):
-            found.extend(_claude_agents(walk, Path(run.path), session_id, run.name, False))
+            found.extend(_claude_agents(walk, Path(run.path), session_id, run.name, heads=False))
     entries = []
     for item in found:
         labels = sidecar_labels(item.source.path)
@@ -666,8 +666,8 @@ def _codex_child(child: codex.Spawned, root: Path | None,
     link: Any = UNKNOWN
     if not hit.compressed:
         try:
-            with open(hit.source.path, "rb") as handle:
-                meta = codex_head(handle, size).meta
+            with open(hit.source.path, "rb") as fh:
+                meta = codex_head(fh, size).meta
         except OSError:
             meta = None
         if meta is not None:

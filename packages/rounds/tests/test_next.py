@@ -56,7 +56,7 @@ def opened(tmp_path, add_project, write_config, capsys):
 
     def open_on(flow: str = "full", config: str = ""):
         write_config(FLOWS + config)
-        opening.open_round(ROUND, description="a placeholder round", actor="planner",
+        opening.open_round(ROUND, description="a placeholder round", by="planner",
                            flow=flow)
         capsys.readouterr()
         return tmp_path / "notes" / "rounds" / "a-round"
@@ -64,8 +64,8 @@ def opened(tmp_path, add_project, write_config, capsys):
     return open_on
 
 
-@pytest.fixture
-def folder(opened):
+@pytest.fixture(name="round_dir")
+def round_dir_fixture(opened):
     return opened()
 
 
@@ -90,37 +90,37 @@ def row(id_) -> str:
 _drafts = iter(range(1, 1000))
 
 
-def design(folder, *entries) -> None:
+def design(round_dir, *entries) -> None:
     text = (f"# A design\n\nDraft {next(_drafts)}.\n\n```toml rounds\n"
             + "\n\n".join(entries) + "\n```\n")
-    (folder / "design.md").write_text(text, encoding="utf-8")
+    (round_dir / "design.md").write_text(text, encoding="utf-8")
 
 
-def fold(folder, *entries):
-    design(folder, *entries)
-    return freezing.freeze(ROUND, actor="scout")
+def fold(round_dir, *entries):
+    design(round_dir, *entries)
+    return freezing.freeze(ROUND, by="scout")
 
 
 _reports = iter(range(1, 1000))
 
 
-def report(folder, word="fold-first", *, version=1, pass_="full",
+def report(round_dir, word="fold-first", *, version=1, pass_="full",
            model="a-model") -> Path:
     count = next(_reports)
     keys = ['kind = "design"', f'verdict = "{word}"', f'pass = "{pass_}"',
             'by = "critic"', f'model = "{model}"', f"design = {version}"]
-    path = folder / f"report-{count}.md"
+    path = round_dir / f"report-{count}.md"
     path.write_text(f"# A report\n\nPass {count}.\n\n```toml rounds\n"
                     + "\n".join(keys) + "\n```\n", encoding="utf-8")
     return path
 
 
-def verdict(folder, word="fold-first", **how):
-    return verdicts.record(ROUND, report(folder, word, **how), actor="critic")
+def verdict(round_dir, word="fold-first", **how):
+    return verdicts.record(ROUND, report(round_dir, word, **how), by="critic")
 
 
 def rule(item=None, text=SAID, **more) -> str:
-    return ruling.rule(ROUND, item=item, record=PTR, actor="planner", text=text,
+    return ruling.rule(ROUND, item=item, record=PTR, by="planner", text=text,
                        **more).id
 
 
@@ -152,15 +152,15 @@ def do(capsys, command: str, **filled) -> str:
     return run(capsys, *argv[2:])
 
 
-def at(folder):
-    found = steps.current(_folded(folder), name=ROUND)
+def at(round_dir):
+    found = steps.current(_folded(round_dir), name=ROUND)
     return None if found is None else (found.step, found.stage, found.state)
 
 
-def _folded(folder):
+def _folded(round_dir):
     from moxi_rounds import state
 
-    return state.fold(log.read(log.round_log(folder)))
+    return state.fold(log.read(log.round_log(round_dir)))
 
 
 def files_under(*roots) -> dict:
@@ -172,30 +172,30 @@ def files_under(*roots) -> dict:
 
 # -- a round's design, step by step ------------------------------------------------------
 
-def test_the_design_step_names_who_writes_it_the_file_and_the_command(folder, capsys):
+def test_the_design_step_names_who_writes_it_the_file_and_the_command(round_dir, capsys):
     printed = lines(capsys)
 
     assert printed == [
         f"round {ROUND}   flow full   step design   by lead, tier second",
         "reads: nothing named",
-        f"write: design.md in {folder}",
+        f"write: design.md in {round_dir}",
         f"then:  moxi rounds fold {ROUND}",
         "waits: nothing"]
 
 
 def test_each_command_printed_completes_its_step_through_a_round_s_design(
-        folder, capsys):
-    design(folder, question("Q1"), stage("B1"))
+        round_dir, capsys):
+    design(round_dir, question("Q1"), stage("B1"))
     do(capsys, said(lines(capsys), "then:")[0])
-    assert at(folder) == ("verify-design", None, "ready")
+    assert at(round_dir) == ("verify-design", None, "ready")
 
-    first = folder / "versions" / "design-v1.md"
+    first = round_dir / "versions" / "design-v1.md"
     printed = lines(capsys)
     assert printed == [
         f"round {ROUND}   flow full   step verify-design   by checker, tier second",
         "pass:  full of v1: no full pass over the design is recorded",
         f"reads: {first}",
-        f"write: a report in {folder} with the block from: moxi rounds next --schema "
+        f"write: a report in {round_dir} with the block from: moxi rounds next --schema "
         "design",
         f"then:  moxi rounds verdict {ROUND} <your report>",
         "waits: nothing",
@@ -207,7 +207,7 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
         f"waits: Q1 holds B1: {ASKED}",
         f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR"]
     do(capsys, said(printed, "then:")[0],
-       **{"<your report>": str(report(folder, "fold-first"))})
+       **{"<your report>": str(report(round_dir, "fold-first"))})
 
     printed = lines(capsys)
     assert printed[:4] == [
@@ -216,22 +216,22 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
         "re-check reads what changed",
         f"do:    moxi rounds fold {ROUND}",
         ""]
-    design(folder, question("Q1"), stage("B1"))
+    design(round_dir, question("Q1"), stage("B1"))
     do(capsys, said(printed, "do:")[0])
 
-    second = folder / "versions" / "design-v2.md"
+    second = round_dir / "versions" / "design-v2.md"
     printed = lines(capsys)
     assert printed[:6] == [
         f"round {ROUND}   flow full   step verify-design   by checker, tier third",
         "pass:  re-check of v2: the design changed since v1, the last version a pass "
         "read",
         f"reads: the diff from {first} to {second}, and the sections that depend on it",
-        f"write: a report in {folder} with the block from: moxi rounds next --schema "
+        f"write: a report in {round_dir} with the block from: moxi rounds next --schema "
         "design",
         f"then:  moxi rounds verdict {ROUND} <your report>",
         "waits: nothing"]
     do(capsys, said(printed, "then:")[0], **{"<your report>": str(report(
-        folder, "publishable", version=2, pass_="re-check"))})
+        round_dir, "publishable", version=2, pass_="re-check"))})
 
     printed = lines(capsys)
     assert printed[:5] == [
@@ -250,18 +250,18 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
 
 
 def test_a_design_that_builds_nothing_ends_at_no_step(opened, capsys):
-    folder = opened("paper")
-    design(folder)
+    round_dir = opened("paper")
+    design(round_dir)
     do(capsys, said(lines(capsys), "then:")[0])
     do(capsys, said(lines(capsys), "then:")[0],
-       **{"<your report>": str(report(folder, "publishable"))})
+       **{"<your report>": str(report(round_dir, "publishable"))})
 
     assert lines(capsys) == [f"round {ROUND}   flow paper   step none: the round is closed"]
 
 
-def test_a_question_that_offers_options_is_answered_by_choosing_one(folder, capsys):
-    fold(folder, question("Q1", options='{ a = "yes", b = "no" }'), question("Q2"))
-    verdict(folder, "publishable")
+def test_a_question_that_offers_options_is_answered_by_choosing_one(round_dir, capsys):
+    fold(round_dir, question("Q1", options='{ a = "yes", b = "no" }'), question("Q2"))
+    verdict(round_dir, "publishable")
 
     printed = lines(capsys)
 
@@ -271,25 +271,25 @@ def test_a_question_that_offers_options_is_answered_by_choosing_one(folder, caps
         f"moxi rounds rule {ROUND} Q2 --text TEXT --record PTR"]
     do(capsys, said(printed, "then:")[0], K="a", PTR=PTR)
     do(capsys, said(printed, "then:")[1], TEXT=SAID, PTR=PTR)
-    assert at(folder) != ("docket", None, "ready")
+    assert at(round_dir) != ("docket", None, "ready")
 
 
 def test_what_a_step_s_entry_says_to_read_is_printed(opened, capsys):
-    folder = opened("read-first")
+    round_dir = opened("read-first")
 
     assert said(lines(capsys), "reads:") == ["the notes of the last round; the survey"]
 
-    fold(folder)
+    fold(round_dir)
     assert said(lines(capsys), "reads:") == [
-        f"{folder / 'versions' / 'design-v1.md'}; the rulings"]
+        f"{round_dir / 'versions' / 'design-v1.md'}; the rulings"]
 
 
 def test_after_two_verdicts_that_sent_the_design_back_no_pass_is_asked_for(
-        folder, capsys):
-    fold(folder)
-    verdict(folder)
-    fold(folder)
-    verdict(folder, version=2, pass_="re-check")
+        round_dir, capsys):
+    fold(round_dir)
+    verdict(round_dir)
+    fold(round_dir)
+    verdict(round_dir, version=2, pass_="re-check")
 
     printed = lines(capsys)
 
@@ -304,18 +304,18 @@ def test_after_two_verdicts_that_sent_the_design_back_no_pass_is_asked_for(
         f"do:    moxi rounds fold {ROUND}",
         f"do:    {mark}"]
 
-    fold(folder)
+    fold(round_dir)
     printed = lines(capsys)
     assert said(printed, "do:") == [mark]
     do(capsys, said(printed, "do:")[0].split(", or ")[0], NAME="a-thread", PTR=PTR)
-    assert at(folder)[0] != "verify-design"
+    assert at(round_dir)[0] != "verify-design"
 
 
 def test_a_version_whose_trace_rows_fail_is_waited_for_with_the_pass_named(
         opened, capsys):
-    folder = opened(config=TRACED)
+    round_dir = opened(config=TRACED)
     rule()
-    fold(folder)
+    fold(round_dir)
 
     printed = lines(capsys)
 
@@ -327,8 +327,8 @@ def test_a_version_whose_trace_rows_fail_is_waited_for_with_the_pass_named(
 
 
 def test_a_flow_with_no_questions_step_prints_the_hold_on_each_stage(opened, capsys):
-    folder = opened("small")
-    fold(folder, question("Q1", blocks='["B2"]'), stage("B1"),
+    round_dir = opened("small")
+    fold(round_dir, question("Q1", blocks='["B2"]'), stage("B1"),
          stage("B2", repo="proj-b"))
 
     printed = lines(capsys)
@@ -346,8 +346,8 @@ def test_a_flow_with_no_questions_step_prints_the_hold_on_each_stage(opened, cap
 
 
 def test_the_command_printed_for_a_hold_on_a_stage_lifts_it_when_run(opened, capsys):
-    folder = opened("small")
-    fold(folder, question("Q1", blocks='["B1"]', options='{ a = "yes", b = "no" }'),
+    round_dir = opened("small")
+    fold(round_dir, question("Q1", blocks='["B1"]', options='{ a = "yes", b = "no" }'),
          question("Q2", blocks='["B1"]'), stage("B1"))
 
     printed = [line.strip() for line in lines(capsys)]
@@ -360,24 +360,24 @@ def test_the_command_printed_for_a_hold_on_a_stage_lifts_it_when_run(opened, cap
     do(capsys, said(printed, "fix:")[0], K="a", PTR=PTR)
     do(capsys, said(printed, "fix:")[1], TEXT=SAID, PTR=PTR)
     assert said(lines(capsys), "waits:") in ([], ["nothing"])
-    assert steps.held_by(_folded(folder), "B1") == ()
+    assert steps.held_by(_folded(round_dir), "B1") == ()
 
 
-def test_a_round_that_ended_is_at_no_step(folder, capsys):
-    dropping.drop(ROUND, by="operator", record=PTR, actor="planner")
+def test_a_round_that_ended_is_at_no_step(round_dir, capsys):
+    dropping.drop(ROUND, by="operator", record=PTR, run_by="planner")
     capsys.readouterr()
 
     assert lines(capsys) == [
         f"round {ROUND}   flow full   step none: the round is dropped"]
 
 
-def test_a_round_that_cant_be_read_is_printed_as_unreadable(folder, capsys):
-    with log.round_log(folder).open("ab") as written:
-        written.write(b"not an event\n")
+def test_a_round_that_cant_be_read_is_printed_as_unreadable(round_dir, capsys):
+    with log.round_log(round_dir).open("ab") as written_fh:
+        written_fh.write(b"not an event\n")
 
     printed = lines(capsys)
 
-    assert printed[:2] == [f"round {ROUND}   unreadable", f"folder: {folder}"]
+    assert printed[:2] == [f"round {ROUND}   unreadable", f"folder: {round_dir}"]
     found = json.loads(run(capsys, "next", ROUND, "--json"))
     assert set(found) == {"round", "folder", "notice", "unreadable"}
     assert found["unreadable"]["line"] == 2
@@ -390,9 +390,9 @@ def group(capsys) -> dict:
 
 
 def test_a_step_that_waits_for_what_is_done_in_place_of_a_pass_does_not_say_nothing(
-        folder, capsys):
-    fold(folder)
-    verdict(folder)
+        round_dir, capsys):
+    fold(round_dir)
+    verdict(round_dir)
 
     printed = lines(capsys)
 
@@ -405,10 +405,10 @@ def test_a_step_that_waits_for_what_is_done_in_place_of_a_pass_does_not_say_noth
 
 
 def test_a_step_that_waits_says_each_thing_the_lines_before_did_not(opened, capsys):
-    folder = opened(config=TRACED)
+    round_dir = opened(config=TRACED)
     rule()
-    fold(folder)
-    verdict(folder)
+    fold(round_dir)
+    verdict(round_dir)
 
     printed = lines(capsys)
 
@@ -432,9 +432,9 @@ def test_a_step_that_is_not_built_says_only_the_holds_on_its_stage(opened, capsy
 
 @pytest.mark.parametrize("state", ["ready", "done", "not-due"])
 def test_a_built_step_that_does_not_wait_says_it_waits_for_nothing(
-        folder, capsys, monkeypatch, state):
-    fold(folder, stage("B1"))
-    verdict(folder, "publishable")
+        round_dir, capsys, monkeypatch, state):
+    fold(round_dir, stage("B1"))
+    verdict(round_dir, "publishable")
     monkeypatch.setitem(steps.ROWS, "commission", lambda _state, about: steps.Step(
         "commission", state, stage=about.stage))
     # Past a done step, the next is printed: one that is not built says no waits.
@@ -444,9 +444,9 @@ def test_a_built_step_that_does_not_wait_says_it_waits_for_nothing(
 
 
 def test_a_built_step_that_waits_never_says_it_waits_for_nothing(
-        folder, capsys, monkeypatch):
-    fold(folder, stage("B1"))
-    verdict(folder, "publishable")
+        round_dir, capsys, monkeypatch):
+    fold(round_dir, stage("B1"))
+    verdict(round_dir, "publishable")
     monkeypatch.setitem(steps.ROWS, "commission", lambda _state, about: steps.Step(
         "commission", steps.WAITING, stage=about.stage))
 
@@ -454,10 +454,10 @@ def test_a_built_step_that_waits_never_says_it_waits_for_nothing(
 
 
 def test_a_text_sent_back_and_frozen_again_unchanged_is_told_to_change_it_first(
-        folder, capsys):
-    fold(folder)
-    verdict(folder)
-    freezing.freeze(ROUND, actor="scout")
+        round_dir, capsys):
+    fold(round_dir)
+    verdict(round_dir)
+    freezing.freeze(ROUND, by="scout")
 
     printed = lines(capsys)
 
@@ -466,7 +466,7 @@ def test_a_text_sent_back_and_frozen_again_unchanged_is_told_to_change_it_first(
         "since: a re-check reads what changed",
         "do:    change design.md to answer what the pass found",
         f"do:    moxi rounds fold {ROUND}"]
-    design(folder)
+    design(round_dir)
     do(capsys, said(printed, "do:")[1])
     assert said(lines(capsys), "pass:")[0].startswith("re-check of v3: the design changed")
 
@@ -474,24 +474,24 @@ def test_a_text_sent_back_and_frozen_again_unchanged_is_told_to_change_it_first(
 # -- the data ----------------------------------------------------------------------------
 
 def test_the_data_holds_each_group_and_each_warning(opened, capsys):
-    folder = opened(config=ONE_HARNESS)
-    fold(folder, stage("B1"))
-    verdict(folder)
-    fold(folder, stage("B1"))
+    round_dir = opened(config=ONE_HARNESS)
+    fold(round_dir, stage("B1"))
+    verdict(round_dir)
+    fold(round_dir, stage("B1"))
     made = rule()
 
     found = json.loads(run(capsys, "next", ROUND, "--json"))
 
-    first, second = (str(folder / "versions" / f"design-v{n}.md") for n in (1, 2))
+    first, second = (str(round_dir / "versions" / f"design-v{n}.md") for n in (1, 2))
     assert found == {
-        "round": ROUND, "folder": str(folder), "notice": None, "status": "open",
+        "round": ROUND, "folder": str(round_dir), "notice": None, "status": "open",
         "flow": "full",
         "groups": [
             {"step": "verify-design", "stage": None, "state": "ready", "built": True,
              "by": "checker", "tier": "third", "model": "model-three",
              "reads": [f"the diff from {first} to {second}, and the sections that "
                        "depend on it"],
-             "write": f"a report in {folder} with the block from: moxi rounds next "
+             "write": f"a report in {round_dir} with the block from: moxi rounds next "
                       "--schema design",
              "then": [f"moxi rounds verdict {ROUND} <your report>"],
              "questions": [], "waits": [], "pass": "re-check",
@@ -539,12 +539,12 @@ def test_a_tier_the_setting_does_not_name_is_printed_alone(opened, capsys):
 
 
 def test_the_tier_of_each_pass_is_printed_with_its_models(opened, capsys):
-    folder = opened(config=TWO_HARNESSES)
-    fold(folder, stage("B1"))
+    round_dir = opened(config=TWO_HARNESSES)
+    fold(round_dir, stage("B1"))
     assert lines(capsys)[0].endswith(
         "by checker, tier second (claude: model-two, codex: model-b)")
-    verdict(folder)
-    fold(folder, stage("B1"))
+    verdict(round_dir)
+    fold(round_dir, stage("B1"))
 
     # A re-check is held to the step's other tier, and its models are the ones named.
     assert lines(capsys)[0].endswith(
@@ -582,38 +582,38 @@ def warned(capsys, what: str) -> list[dict]:
     return [one for one in found["warnings"] if one["what"] == what]
 
 
-def test_a_design_edited_since_it_was_frozen_is_warned_of(folder, capsys):
-    fold(folder)
+def test_a_design_edited_since_it_was_frozen_is_warned_of(round_dir, capsys):
+    fold(round_dir)
     assert warned(capsys, "design-changed") == []
 
-    design(folder)
+    design(round_dir)
 
     assert said(lines(capsys), "warning:") == ["design.md changed since v1 was frozen"]
     assert warned(capsys, "design-changed")[0]["fix"] == f"moxi rounds fold {ROUND}"
 
 
-def test_a_design_never_frozen_is_not_warned_of(folder, capsys):
-    design(folder)
+def test_a_design_never_frozen_is_not_warned_of(round_dir, capsys):
+    design(round_dir)
 
     assert warned(capsys, "design-changed") == []
 
 
 def test_a_newest_report_by_a_model_below_its_tier_is_warned_of(opened, capsys):
-    folder = opened(config=TWO_HARNESSES)
-    fold(folder)
-    verdict(folder, model="model-c")
+    round_dir = opened(config=TWO_HARNESSES)
+    fold(round_dir)
+    verdict(round_dir, model="model-c")
 
     assert [one["text"] for one in warned(capsys, "model-below-tier")] == [
         "the newest report of the design, of v1, says model-c wrote it, a model "
         "below the tier its pass is held to"]
 
-    fold(folder)
-    verdict(folder, "publishable", version=2, pass_="re-check", model="model-c")
+    fold(round_dir)
+    verdict(round_dir, "publishable", version=2, pass_="re-check", model="model-c")
     assert warned(capsys, "model-below-tier") == []
 
 
 def test_a_ruling_not_yet_shown_is_warned_of_until_the_printed_mark_is_run(
-        folder, capsys):
+        round_dir, capsys):
     first, second = rule(), rule(text="Times are shown in UTC.")
 
     printed = lines(capsys)
@@ -625,9 +625,9 @@ def test_a_ruling_not_yet_shown_is_warned_of_until_the_printed_mark_is_run(
     assert warned(capsys, "not-shown") == []
 
 
-def test_a_row_gone_stale_is_warned_of_and_waits_for_nothing(folder, capsys):
+def test_a_row_gone_stale_is_warned_of_and_waits_for_nothing(round_dir, capsys):
     first = rule()
-    fold(folder, row(first))
+    fold(round_dir, row(first))
     second = rule(text="Times are shown in UTC.", supersedes=first)
 
     found = warned(capsys, "stale-row")
@@ -639,8 +639,8 @@ def test_a_row_gone_stale_is_warned_of_and_waits_for_nothing(folder, capsys):
 
 
 def test_a_ruling_no_row_cites_is_warned_of_for_each_stage_it_holds(opened, capsys):
-    folder = opened(config=TRACED)
-    fold(folder, stage("B1"), stage("B2", repo="proj-b"))
+    round_dir = opened(config=TRACED)
+    fold(round_dir, stage("B1"), stage("B2", repo="proj-b"))
     made = rule(stages="B2")
 
     assert warned(capsys, "holds-stage") == [{
@@ -652,15 +652,15 @@ def test_a_ruling_no_row_cites_is_warned_of_for_each_stage_it_holds(opened, caps
 
 def test_a_stage_with_a_build_is_not_warned_of_for_a_ruling_no_row_cites(
         opened, capsys):
-    folder = opened(config=TRACED)
-    fold(folder, stage("B1"), stage("B2", repo="proj-b"))
+    round_dir = opened(config=TRACED)
+    fold(round_dir, stage("B1"), stage("B2", repo="proj-b"))
     made = rule()
     assert [one["text"].split(" until ")[0] for one in warned(capsys, "holds-stage")] \
         == [f"{made} holds B1", f"{made} holds B2"]
 
     # A build is handed the rulings as they stand, so its stage is held no longer.
-    log.append(log.round_log(folder), "build.commissioned",
-               {"stage": "B1", "repo": "proj-a", "branch": "branch-b1"}, actor="coder")
+    log.append(log.round_log(round_dir), "build.commissioned",
+               {"stage": "B1", "repo": "proj-a", "branch": "branch-b1"}, by="coder")
 
     assert [one["text"].split(" until ")[0] for one in warned(capsys, "holds-stage")] \
         == [f"{made} holds B2"]
@@ -669,9 +669,9 @@ def test_a_stage_with_a_build_is_not_warned_of_for_a_ruling_no_row_cites(
 # -- a later step ------------------------------------------------------------------------
 
 def test_a_step_given_a_row_and_its_lines_is_printed_like_the_others(
-        folder, capsys, monkeypatch):
-    fold(folder, stage("B1"))
-    verdict(folder, "publishable")
+        round_dir, capsys, monkeypatch):
+    fold(round_dir, stage("B1"))
+    verdict(round_dir, "publishable")
     monkeypatch.setitem(steps.ROWS, "commission", lambda _state, about: steps.Step(
         "commission", steps.READY, stage=about.stage))
     monkeypatch.setitem(next_step.LINES, "commission", lambda found, step: {
@@ -686,12 +686,12 @@ def test_a_step_given_a_row_and_its_lines_is_printed_like_the_others(
 # -- nothing is written ------------------------------------------------------------------
 
 def test_no_file_changes_whatever_is_printed(opened, tmp_path, capsys):
-    folder = opened(config=TRACED + ONE_HARNESS)
+    round_dir = opened(config=TRACED + ONE_HARNESS)
     first = rule()
-    fold(folder, question("Q1"), stage("B1"), row(first))
-    verdict(folder)
+    fold(round_dir, question("Q1"), stage("B1"), row(first))
+    verdict(round_dir)
     rule(text="Times are shown in UTC.", supersedes=first)
-    design(folder, stage("B1"))
+    design(round_dir, stage("B1"))
     roots = (tmp_path, Path.home(), os.environ["MOXI_ROUNDS_HOME"],
              os.environ["MOXI_PROJECTS_HOME"])
     before = files_under(*roots)
@@ -739,7 +739,7 @@ def test_with_no_round_outside_a_build_s_worktree_it_names_the_round_to_give(
     assert "moxi rounds next <project>/<slug>" in err
 
 
-def test_a_project_s_key_is_bad_arguments_and_names_the_listing(folder, capsys):
+def test_a_project_s_key_is_bad_arguments_and_names_the_listing(round_dir, capsys):
     assert main(["next", "proj-a"]) == 2
 
     assert "moxi rounds list proj-a" in capsys.readouterr().err

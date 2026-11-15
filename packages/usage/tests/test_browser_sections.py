@@ -55,7 +55,7 @@ for n, spec in enumerate(json.loads(sys.argv[1])):
                            project=cwd.replace("/", "-"), cwd=cwd, start=now - 3600 * (n + 1))
     for m in range(spec["requests"]):
         t.user("Fix the failing test.")
-        t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),
+        t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000 + m * 500),
                     request_id=f"req_{spec['session'][-2:]}{m}", model=spec["model"])
     t.write()
 """
@@ -153,7 +153,7 @@ def test_projects_closed_names_the_dearest_three_and_its_count_opens_it(page):
     expect(rows_of(section)).to_have_count(0)
 
 
-def test_files_with_no_project_are_one_row_and_the_sentence_names_their_folder(page):
+def test_files_with_no_project_are_one_row_and_the_sentence_names_their_dir(page):
     panel = open_page(page, "projects")
     section = section_of(panel, "projects")
     loose = section.locator('[data-row="no-project"]')
@@ -168,7 +168,7 @@ def test_files_with_no_project_are_one_row_and_the_sentence_names_their_folder(p
     expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
 
 
-def test_with_hundreds_of_folders_of_no_project_the_sentence_names_three_and_more_opens_the_table(page):
+def test_with_hundreds_of_dirs_of_no_project_the_sentence_names_three_and_more_opens_the_table(page):
     def many(route):
         answer = route.fetch()
         body = answer.json()
@@ -207,7 +207,7 @@ def test_a_project_row_sets_the_project_filter_and_opens_sessions(page):
     expect(rows_of(section).locator(".n.d")).to_have_text(["100%"])
 
 
-def test_the_projects_table_has_every_row_with_its_folder_and_figures(page):
+def test_the_projects_table_has_every_row_with_its_dir_and_figures(page):
     panel = open_page(page, "projects")
     section = section_of(panel, "projects")
     toggle = section.locator("[data-part=table-toggle]")
@@ -368,7 +368,7 @@ def test_an_open_menu_keeps_its_element_and_focus_when_the_day_turns_over(page):
 
 # --- without projects ----------------------------------------------------------------------
 
-def test_without_projects_folders_are_written_whole_with_no_row_for_no_project(small, ui_contexts):
+def test_without_projects_dirs_are_written_whole_with_no_row_for_no_project(small, ui_contexts):
     page = ui_contexts(small).pages[0]
     panel = open_page(page)
     expect(section_of(panel, "projects")).to_have_count(0)
@@ -395,7 +395,7 @@ def test_without_projects_folders_are_written_whole_with_no_row_for_no_project(s
     expect(panel.locator("section[data-group=sessions] moxi-ui-row")).to_have_count(1)
 
 
-def test_the_folders_table_has_no_project_column(small, ui_contexts):
+def test_the_dirs_table_has_no_project_column(small, ui_contexts):
     page = ui_contexts(small).pages[0]
     panel = open_page(page, "folders")
     section = section_of(panel, "folders")

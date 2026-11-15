@@ -100,8 +100,8 @@ CLAUDE_EXIT_DIALOG = Screen(
 
 #: The folder trust warning. It draws the marker on "No, exit" above the option, so
 #: answering it takes one Down, then Enter.
-CLAUDE_TRUST_FOLDER = Screen(
-    name="CLAUDE_TRUST_FOLDER",
+CLAUDE_TRUST_DIR = Screen(
+    name="CLAUDE_TRUST_DIR",
     phrases=("Accessing workspace:", "Enter to confirm"),
     option="Yes, I trust this folder", move=True, then=GONE)
 
@@ -112,7 +112,7 @@ CLAUDE_DEV_CHANNELS = Screen(
     option="I am using this for local development", move=True, then=GONE)
 
 #: Every screen slots ships.
-SCREENS = (CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_FOLDER, CLAUDE_DEV_CHANNELS)
+SCREENS = (CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS)
 
 
 def plain(text: str) -> str:
@@ -216,12 +216,13 @@ def match(screen: Screen, text: str, width: int, *, in_mode: bool = False) -> Ma
     """Hold `screen` against a capture `text` of a pane `width` columns wide."""
     found = region(text, width)
     if found is None:
-        return Match(screen, False, False, "no full-width rule on screen", ())
+        return Match(screen, present=False, full=False,
+                     why="no full-width rule on screen", rows=())
     missing = _in_order(screen.phrases, "\n".join(found))
     if missing is not None:
-        return Match(screen, False, False,
-                     f"{missing!r} is not below the last full-width rule, after the "
-                     "phrases before it", found)
+        return Match(screen, present=False, full=False,
+                     why=f"{missing!r} is not below the last full-width rule, after the "
+                         "phrases before it", rows=found)
     marks = [i for i, row in enumerate(found) if marked(row, screen.marker)]
     options = [i for i, row in enumerate(found)
                if bare(row, screen.marker) == screen.option]
@@ -236,7 +237,8 @@ def match(screen: Screen, text: str, width: int, *, in_mode: bool = False) -> Ma
         why = f"{len(marks)} rows are marked with {screen.marker!r}, not one"
     elif screen.items is not None:
         why = _items_why(screen, found)
-    return Match(screen, True, not why, why, found, mark, option)
+    return Match(screen, present=True, full=not why, why=why, rows=found,
+                 marked=mark, option=option)
 
 
 def find(screens: Sequence[Screen], text: str, width: int, *,
@@ -250,5 +252,5 @@ def find(screens: Sequence[Screen], text: str, width: int, *,
 
 
 __all__ = ["MARKER", "RULE", "ENDED", "GONE", "Items", "Screen", "CLAUDE_EXIT_DIALOG",
-           "CLAUDE_TRUST_FOLDER", "CLAUDE_DEV_CHANNELS", "SCREENS", "plain", "rows",
+           "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "SCREENS", "plain", "rows",
            "is_rule", "region", "bare", "marked", "Match", "match", "find"]

@@ -16,7 +16,7 @@ A round's log starts with the event that opened the round. `read_round` and
 first event is another, or that holds no event at all: such a file says a round is
 there and nothing of what it is, so it is not read as a round with nothing in it.
 
-`append(path, name, fields, actor=...)` writes one event with the next `n`. The file is
+`append(path, name, fields, by=...)` writes one event with the next `n`. The file is
 only ever appended to, as one file of any size. The caller holds the log's lock: two
 appends that both read the log before either writes would give one `n` twice.
 """
@@ -45,14 +45,14 @@ NOT_OPENED_FIX = ("restore this file whole from git or a backup; or, when no rou
                   "to be opened in")
 
 
-def round_log(folder: Path) -> Path:
-    """The log of the round whose folder is `folder`."""
-    return Path(folder) / ROUND_LOG
+def round_log(round_dir: Path) -> Path:
+    """The log of the round whose folder is `round_dir`."""
+    return Path(round_dir) / ROUND_LOG
 
 
-def project_log(folder: Path) -> Path:
-    """The log of the project whose rounds folder is `folder`."""
-    return Path(folder) / PROJECT_LOG
+def project_log(rounds_dir: Path) -> Path:
+    """The log of the project whose rounds folder is `rounds_dir`."""
+    return Path(rounds_dir) / PROJECT_LOG
 
 
 def exists(path: Path) -> bool:
@@ -150,7 +150,7 @@ def _whole(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def append(path: Path, name: str, fields: Mapping[str, object], *, actor: str,
+def append(path: Path, name: str, fields: Mapping[str, object], *, by: str,
            at: str | None = None) -> dict:
     """Append one event of type `name` to the log `path` and return it as written.
 
@@ -162,14 +162,14 @@ def append(path: Path, name: str, fields: Mapping[str, object], *, actor: str,
     """
     path = Path(path)
     events.check(name, fields)
-    if not actor:
+    if not by:
         raise ValueError("an event names who ran the verb")
     try:
         last = len(read(path))
     except NoLog:
         last = 0
     event = {"v": events.VERSION, "n": last + 1, "at": stamp() if at is None else at,
-             "actor": actor, "type": name, **fields}
+             "actor": by, "type": name, **fields}
     # No size limit: the helper then never moves the file aside, so a log stays one file.
     files.append_record(path, event, max_bytes=None, durable=True)
     return event

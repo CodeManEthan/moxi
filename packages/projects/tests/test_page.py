@@ -142,13 +142,13 @@ def refuse_remove(project):
 '''
 
 
-def fake_git(directory, body: str) -> str:
+def fake_git(bin_dir, body: str) -> str:
     """A `git` script holding `body`. Returns PATH with its directory first."""
-    directory.mkdir(parents=True, exist_ok=True)
-    script = directory / "git"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / "git"
     script.write_text("#!/bin/sh\n" + body + "\n")
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    return os.pathsep.join([str(directory), "/usr/bin", "/bin"])
+    return os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"])
 
 
 def _set_user_version(path, version: int) -> None:
@@ -329,13 +329,13 @@ def test_an_unreadable_store_is_refused(store_path):
 
 def test_a_store_locked_past_the_wait_is_409(golden_copy, store_path, monkeypatch):
     monkeypatch.setattr(store, "TIMEOUT", 0.05)
-    holder = sqlite3.connect(store_path, isolation_level=None)
+    holder_conn = sqlite3.connect(store_path, isolation_level=None)
     try:
-        holder.execute("BEGIN IMMEDIATE")
+        holder_conn.execute("BEGIN IMMEDIATE")
         status, body = post("/api/agents-add", {"key": "gamma", "name": "scout"})
     finally:
-        holder.execute("ROLLBACK")
-        holder.close()
+        holder_conn.execute("ROLLBACK")
+        holder_conn.close()
     assert status == 409 and "try again" in body["conflict"]
 
 
@@ -616,15 +616,15 @@ def test_an_unreadable_store_is_answered_at_once_and_left_as_it_was(store_path):
 def test_a_store_locked_past_the_wait_is_409_and_keeps_nothing(golden_copy, store_path,
                                                                monkeypatch):
     monkeypatch.setattr(store, "TIMEOUT", 0.05)
-    holder = sqlite3.connect(store_path, isolation_level=None)
+    holder_conn = sqlite3.connect(store_path, isolation_level=None)
     try:
-        holder.execute("BEGIN IMMEDIATE")
+        holder_conn.execute("BEGIN IMMEDIATE")
         removed = post("/api/remove", {"key": "gamma"}, key=KEY)
         # A refusal about the project whose own write is locked out is the lock's answer.
         held = post("/api/remove", {"key": "alpha"}, key=OTHER_KEY)
     finally:
-        holder.execute("ROLLBACK")
-        holder.close()
+        holder_conn.execute("ROLLBACK")
+        holder_conn.close()
     assert removed[0] == 409 and held[0] == 409
     assert api.get("gamma") and _status_rows(store_path) == []
 
@@ -824,7 +824,7 @@ def services_moved(site, monkeypatch, terminal_record) -> str:
 
 
 @pytest.mark.parametrize("route, body, consults", WRITES, ids=WRITE_IDS)
-def test_a_contributions_folder_that_differs_refuses_the_routes_that_consult_it(
+def test_a_contributions_dir_that_differs_refuses_the_routes_that_consult_it(
         golden_copy, store_path, services_moved, route, body, consults):
     sent = body(golden_copy)
     if not consults:
@@ -874,7 +874,7 @@ def test_reads_go_on_and_where_carries_the_line_as_a_note(golden_copy, terminal_
     assert read("/api/project", "key=gamma")["project"]["key"] == "gamma"
 
 
-def test_where_notes_a_contributions_folder_that_differs(golden_copy, services_moved):
+def test_where_notes_a_contributions_dir_that_differs(golden_copy, services_moved):
     assert services_moved in read("/api/where")["note"]
 
 

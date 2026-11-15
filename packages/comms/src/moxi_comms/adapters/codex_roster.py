@@ -58,6 +58,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..constants import MOCK_BACKEND_ENV
 from ..config import ConfigError
 from ..paths import codex_threads_dir
 from . import roster_rows
@@ -123,10 +124,10 @@ class CodexAgent:
                 roots.append(added)
         return roots
 
-    def launch_options(self, added_root=None, *, network: bool = True) -> dict:
+    def launch_options(self, added_root=None, *, allow_network: bool = True) -> dict:
         """The roster-owned options for every `thread/start` and `thread/resume`.
 
-        `network` is the launch's network access for a row that names none (on, unless
+        `allow_network` is the launch's network access for a row that names none (on, unless
         the launch carries comms' tools); the row's own value wins over it.
 
         The first resume that loads a thread into an app-server process fixes the
@@ -156,7 +157,7 @@ class CodexAgent:
             config["sandbox_workspace_write"] = {
                 "writable_roots": self.effective_writable_roots(added_root),
                 # The one switch that lets the agent's shell reach the daemon socket.
-                "network_access": (network if self.network_access is None
+                "network_access": (allow_network if self.network_access is None
                                    else bool(self.network_access)),
             }
         params["config"] = config
@@ -196,8 +197,8 @@ def record_write_root(env=None, cwd=None) -> tuple:
     env = os.environ if env is None else env
     try:
         backend = backend_name(None, env=env)
-    except (RecordError, ConfigError) as e:
-        return None, f"comms' config could not be read ({e})"
+    except (RecordError, ConfigError) as exc:
+        return None, f"comms' config could not be read ({exc})"
 
     def absolute(value) -> Path:
         path = Path(os.path.expanduser(str(value)))
@@ -208,12 +209,12 @@ def record_write_root(env=None, cwd=None) -> tuple:
     if backend == LOCAL:
         try:
             record = config_mod.load(env=env).local.record
-        except ConfigError as e:
-            return None, f"comms' config could not be read ({e})"
+        except ConfigError as exc:
+            return None, f"comms' config could not be read ({exc})"
         source = absolute(record) if record else comms_db()
         return source.parent, f"the local backend's record ({source})"
     if backend == MOCK:
-        store = env.get("MOXI_COMMS_MOCK_BACKEND")
+        store = env.get(MOCK_BACKEND_ENV)
         if not store:
             return None, "the mock backend names no store (MOXI_COMMS_MOCK_BACKEND is unset)"
         source = absolute(store)

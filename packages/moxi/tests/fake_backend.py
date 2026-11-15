@@ -222,7 +222,7 @@ class FakeBackend:
         stem = self._stem(spec.module, spec.name)
         head = [f"{MARK}{spec.unit}"] + ([DISABLED] if not spec.enabled else [])
         head.append(f"description = Moxi {spec.module}: {spec.doc}")
-        env = [f"env = {name}={value}" for name, value in spec.environment]
+        env = [f"env = {name}={value}" for name, value in spec.env]
         if spec.kind == "daemon":
             body = head + env + [f"run = {' '.join(spec.command)}", f"stop = {spec.stop}"]
             if spec.cwd:
@@ -600,7 +600,7 @@ class FakeBackend:
         from moxi import files
 
         def no(line: str) -> Acted:
-            return Acted(None, ref, "wrap", False, (line,))
+            return Acted(None, ref, "wrap", ok=False, lines=(line,))
 
         ran = fence.run("show", "--property=Version")
         if not ran.ok:
@@ -672,7 +672,8 @@ class FakeBackend:
                 _unlink(path)
                 ran = fence.run("daemon-reload")
                 return Acted(None, ref, "unwrap", ran.ok, () if ran.ok else (ran.failure(),))
-        return Acted(None, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
+        return Acted(None, ref, "unwrap", ok=True,
+                     lines=(f"{ref} is not wrapped by {module}",))
 
     def unwrap_all(self, module: str, fence: Fence) -> list[Acted]:
         out = []
@@ -682,11 +683,12 @@ class FakeBackend:
                 continue
             ref = lines[1].partition("timer = ")[2].partition(",")[0]
             _unlink(path)
-            out.append(Acted(None, ref, "unwrap", True))
+            out.append(Acted(None, ref, "unwrap", ok=True))
         if out:
             ran = fence.run("daemon-reload")
             if not ran.ok:
-                out = [Acted(None, a.name, "unwrap", False, (ran.failure(),)) for a in out]
+                out = [Acted(None, a.name, "unwrap", ok=False,
+                             lines=(ran.failure(),)) for a in out]
         return out
 
 

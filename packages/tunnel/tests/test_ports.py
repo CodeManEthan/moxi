@@ -97,7 +97,7 @@ def test_foreign_config_is_refused_unless_replace_takes_it_over():
     assert choose("own-devices", target=8461, foreign={8461: "x"},
                   replace=True) == ports.Choice(8461, replace=True)
     assert choose("own-devices", target=8461, foreign={8461: "x"}) == ports.Choice(8462)
-    assert choose("public", foreign={443: "x"}, replace=True) == ports.Choice(443, True)
+    assert choose("public", foreign={443: "x"}, replace=True) == ports.Choice(443, replace=True)
     assert choose("public", foreign={443: "x"}, replace=False) == ports.Choice(8443)
     assert choose("own-devices", port=9000, replace=True) == ports.Choice(9000)
 

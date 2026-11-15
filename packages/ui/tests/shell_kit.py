@@ -118,7 +118,8 @@ class Harness:
                  page=None, names=("127.0.0.1", "localhost")):
         self.store = open_store(state_dir, epoch)
         self.tickets = Tickets(state_dir / "tickets")
-        self.sessions = Sessions(self.store, self.tickets, owner=owner or OwnerCheck(False),
+        self.sessions = Sessions(self.store, self.tickets,
+                                 owner=owner or OwnerCheck(enabled=False),
                                  token=lambda: TOKEN)
         self.proxy = Recorder("proxy")
         self.push = Recorder("push")

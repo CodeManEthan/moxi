@@ -68,7 +68,7 @@ class Authenticator:
                             -3: numbers.y.to_bytes(32, "big")})
 
     @staticmethod
-    def _flags(uv: bool, attested: bool = False) -> bytes:
+    def _flags(*, uv: bool, attested: bool = False) -> bytes:
         return bytes([0x01 | (0x04 if uv else 0) | (0x40 if attested else 0)])
 
     def create(self, options: dict, *, origin: str = ORIGIN, rp_id: str | None = None,
@@ -79,7 +79,7 @@ class Authenticator:
         self.user_id = unb64(options["user"]["id"])
         client = json.dumps({"type": "webauthn.create", "challenge": options["challenge"],
                              "origin": origin, "crossOrigin": False}).encode()
-        auth = (hashlib.sha256(rp_id.encode()).digest() + self._flags(uv, attested=True)
+        auth = (hashlib.sha256(rp_id.encode()).digest() + self._flags(uv=uv, attested=True)
                 + self.count.to_bytes(4, "big") + bytes(16)
                 + len(self.credential_id).to_bytes(2, "big") + self.credential_id
                 + self._cose())
@@ -102,7 +102,7 @@ class Authenticator:
         client = json.dumps({"type": "webauthn.get",
                              "challenge": challenge or options["challenge"],
                              "origin": origin, "crossOrigin": False}).encode()
-        auth = (hashlib.sha256(rp_id.encode()).digest() + self._flags(uv)
+        auth = (hashlib.sha256(rp_id.encode()).digest() + self._flags(uv=uv)
                 + count.to_bytes(4, "big"))
         signature = self.key.sign(auth + hashlib.sha256(client).digest(),
                                   ec.ECDSA(hashes.SHA256()))

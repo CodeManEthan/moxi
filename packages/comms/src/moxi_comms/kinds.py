@@ -122,7 +122,7 @@ class Registry:
 
 
 def _built_in() -> list:
-    return [Kind(name, d["cache"], d.get("harness"), None, True)
+    return [Kind(name, d["cache"], d.get("harness"), None, built_in=True)
             for name, d in BUILT_IN.items()]
 
 

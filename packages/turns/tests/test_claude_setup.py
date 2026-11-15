@@ -81,7 +81,7 @@ def _put_back(saved: list[tuple[Path, int]]) -> None:
         path.chmod(mode)
 
 
-def test_no_test_sees_the_package_folder(claude_root):
+def test_no_test_sees_the_package_dir(claude_root):
     from moxi.paths import Layout
 
     package = Path(claude_setup.__file__).resolve().parent / "claude"
@@ -97,7 +97,7 @@ def test_the_volatile_paths_are_each_plugins_loader_files_and_endpoint_json(clau
         "moxi-turns-gate/.claude-plugin/types")
 
 
-def test_endpoint_json_names_this_environment_script(placed):
+def test_endpoint_json_names_this_env_script(placed):
     from moxi_turns.endpoint import package_version
 
     path = claude_setup.write_endpoint_file()
@@ -117,7 +117,7 @@ def test_the_config_key_wins_and_must_be_absolute(turns_env, placed):
         claude_setup.write_endpoint_file()
 
 
-def test_claude_plugin_dirs_returns_both_folders_and_writes_nothing(turns_env, claude_root):
+def test_claude_plugin_dirs_returns_both_dirs_and_writes_nothing(turns_env, claude_root):
     before = sorted(claude_root.rglob("*"))
     runner, gate = claude_setup.claude_plugin_dirs()
     assert (runner, gate) == ((claude_root / "moxi-turns").resolve(),
@@ -155,7 +155,7 @@ def test_a_failed_write_leaves_no_temp_file(placed, monkeypatch):
     assert _temps(placed) == []
 
 
-def test_a_read_only_runner_folder_is_a_setup_error(placed):
+def test_a_read_only_runner_dir_is_a_setup_error(placed):
     runner = placed / "moxi-turns"
     runner.chmod(0o555)
     try:
@@ -229,7 +229,7 @@ def test_setup_refuses_a_marketplace_of_the_same_name_elsewhere(turns_env, claud
     assert not [line for line in _log(fake_claude) if "remove" in line]
 
 
-def test_setup_moves_a_marketplace_added_from_a_package_folder(turns_env, claude_root,
+def test_setup_moves_a_marketplace_added_from_a_package_dir(turns_env, claude_root,
                                                                fake_claude, capsys):
     old = "/opt/env/lib/python3.12/site-packages/moxi_turns/claude"
     (fake_claude / "markets.json").write_text(json.dumps(
@@ -244,6 +244,33 @@ def test_setup_moves_a_marketplace_added_from_a_package_folder(turns_env, claude
                      "plugin install moxi-turns-gate@moxi-turns"]
     assert f"turns: moved the marketplace moxi-turns from {old} to {placed}" \
         in capsys.readouterr().out
+
+
+def test_setup_updates_a_plugin_installed_at_another_version(turns_env, claude_root,
+                                                             fake_claude, capsys):
+    assert claude_setup.setup() == 0
+    placed = claude_setup.placed_root()
+    (fake_claude / "markets.json").write_text(json.dumps(
+        [{"name": "moxi-turns", "source": "directory", "path": str(placed)}]))
+    # The runner's cache is behind the placed manifest (0.1.0 in the test marketplace);
+    # the gate's is current, and an entry with no version is left as it is.
+    (fake_claude / "plugins.json").write_text(json.dumps(
+        [{"id": "moxi-turns@moxi-turns", "scope": "user", "version": "0.0.9"},
+         {"id": "moxi-turns-gate@moxi-turns", "scope": "user", "version": "0.1.0"}]))
+    (fake_claude / "log").unlink()
+    capsys.readouterr()
+    assert claude_setup.setup() == 0
+    calls = [line for line in _log(fake_claude) if "--json" not in line]
+    assert calls == ["plugin update moxi-turns@moxi-turns --scope user"]
+    out = capsys.readouterr().out
+    assert "turns: updated moxi-turns@moxi-turns from 0.0.9 to 0.1.0" in out
+    assert "turns: moxi-turns-gate@moxi-turns is already installed" in out
+    (fake_claude / "plugins.json").write_text(json.dumps(
+        [{"id": "moxi-turns@moxi-turns", "scope": "user"},
+         {"id": "moxi-turns-gate@moxi-turns", "scope": "user", "version": "0.1.0"}]))
+    (fake_claude / "log").unlink()
+    assert claude_setup.setup() == 0
+    assert [line for line in _log(fake_claude) if "--json" not in line] == []
 
 
 SKIPPED_LINE = ("turns: Claude Code not found; skipped its plugin. Run moxi install turns "
@@ -323,7 +350,7 @@ def test_launch_uses_the_current_copy_and_falls_back_to_the_package(placed, clau
     assert claude_setup.claude_plugin_dirs() == package
 
 
-def test_a_launch_through_launch_additions_names_the_placed_folders(placed):
+def test_a_launch_through_launch_additions_names_the_placed_dirs(placed):
     claude_setup.write_endpoint_file()
     adds = turns.launch_additions("claude", cwd=placed.parent, env={})
     assert str((placed / "moxi-turns").resolve()) in adds.argv
@@ -522,6 +549,47 @@ def test_the_placed_copy_row_compares_versions(placed, fake_claude):
     row = rows["claude placed copy"]
     assert row.state == "warn" and "0.0.1" in row.detail and row.fix == "moxi install turns"
     assert str(placed) not in rows["claude plugin moxi-turns"].detail
+
+
+def _cached_runner(tmp_path, fake_claude, leg_line):
+    """A user-scope runner in Claude Code's cache whose source has `leg_line`."""
+    cache = tmp_path / "cache" / "moxi-turns" / "moxi-turns" / "0.1.0"
+    (cache / "hooks").mkdir(parents=True, exist_ok=True)
+    (cache / "hooks" / "register.ts").write_text(f"const MOD_VERSION = '0.1.0'\n{leg_line}\n")
+    (fake_claude / "plugins.json").write_text(json.dumps(
+        [{"id": "moxi-turns@moxi-turns", "scope": "user", "version": "0.1.0",
+          "installPath": str(cache)}]))
+    return cache
+
+
+def test_the_installed_runner_row_compares_the_cached_leg_with_the_endpoints(
+        turns_env, claude_root, fake_claude, tmp_path):
+    from moxi_turns.claude_leg import LEG
+
+    cache = _cached_runner(tmp_path, fake_claude, f"const LEG = {LEG}")
+    row = _rows()["claude installed runner"]
+    assert row.state == "ok" and str(cache) in row.detail and f"leg {LEG}" in row.detail
+    cache = _cached_runner(tmp_path, fake_claude, f"const LEG = {LEG - 1}")
+    row = _rows()["claude installed runner"]
+    assert row.state == "fail" and row.fix == "moxi install turns"
+    assert f"speaks leg {LEG - 1}, the endpoint leg {LEG}" in row.detail
+    _cached_runner(tmp_path, fake_claude, "// no leg here")
+    row = _rows()["claude installed runner"]
+    assert row.state == "warn" and "names no leg" in row.detail
+    (fake_claude / "plugins.json").write_text(json.dumps(
+        [{"id": "moxi-turns@moxi-turns", "scope": "user"}]))
+    row = _rows()["claude installed runner"]
+    assert row.state == "warn" and "names no folder" in row.detail
+
+
+@pytest.mark.parametrize("listed", ["[]", "not json", "project"])
+def test_no_installed_runner_row_without_a_user_scope_install(turns_env, claude_root,
+                                                              fake_claude, listed):
+    if listed == "project":
+        _install_runner_at(fake_claude, "project")
+    else:
+        (fake_claude / "plugins.json").write_text(listed)
+    assert "claude installed runner" not in _rows()
 
 
 def test_check_carries_the_claude_rows(turns_env, fake_claude):

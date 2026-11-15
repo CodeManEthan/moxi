@@ -39,14 +39,14 @@ def no_turns(monkeypatch):
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, request_id="r1", harness="claude", target_name="slot", session_id=SID,
              slot="3", identity=None, live=False, pid=None, at=None, values=None):
-    store.insert(conn, request_id=request_id, actor="ann", harness=harness,
+    store.insert(conn, request_id=request_id, by="ann", harness=harness,
                  target=target_name, cwd="/work", values=values or {"model": "opus"},
                  argv=[harness], env={}, posture="operator",
                  session_id=session_id if harness == "claude" else None,
@@ -149,7 +149,7 @@ def go(conn, which=SID, *, turns=None, slots_api=None, **kw):
     launch = Launch()
     result = resume.resume(which, conn=conn, turns=turns, launch=launch,
                            slots_api=slots_api if slots_api is not None else Slots(
-                               {"3": FREE}), environ={first.COMMS_NAME: "ann"}, **kw)
+                               {"3": FREE}), caller_env={first.comms_name_env(): "ann"}, **kw)
     return result, launch
 
 
@@ -180,7 +180,7 @@ def test_the_list_is_one_entry_per_launch_newest_first(conn):
 
 def test_an_entry_names_its_launchs_project_and_actor(conn):
     launched(conn, request_id="r1")
-    store.insert(conn, request_id="r2", actor="alice", harness="claude", target="slot",
+    store.insert(conn, request_id="r2", by="alice", harness="claude", target="slot",
                  cwd="/src/proj-a", values={}, argv=["claude"], env={}, posture="operator",
                  session_id=SID2, slot="2", project_key="proj-a")
     entries = {e["request_id"]: e for e in resume.sessions(conn=conn, turns=None).data[
@@ -309,7 +309,7 @@ def test_a_codex_launch_with_a_comms_name_and_no_comms_is_resumable(conn, monkey
 
 def test_a_launch_resumed_since_points_at_the_launch_that_holds_its_id(conn):
     launched(conn, request_id="r1", at="2026-10-30T10:00:00.000000+00:00")
-    store.insert(conn, request_id="r2", actor="ann", harness="claude", target="slot",
+    store.insert(conn, request_id="r2", by="ann", harness="claude", target="slot",
                  cwd="/work", values={}, argv=["claude"], env={}, posture="operator",
                  session_id=SID, slot="3", resume_of="r1",
                  at="2026-10-31T10:00:00.000000+00:00")
@@ -384,7 +384,7 @@ def test_a_codex_resume_with_a_comms_name_continues_its_thread(conn, monkeypatch
         return Launch()(request, env=env, warn=warn)
 
     result = resume.resume(THREAD, conn=conn, turns=None, slots_api=None, launch=launch,
-                           request_id="r2", environ={first.COMMS_NAME: "ann"})
+                           request_id="r2", caller_env={first.comms_name_env(): "ann"})
     assert result.exit_code == 0 and result.data["resume_of"] == "r1"
     assert result.data["session_id"] == THREAD
     [got] = composed
@@ -430,7 +430,7 @@ def test_an_unread_liveness_is_refused_with_exit_1(conn):
 def open_relaunch(conn, *, job=None, at=None):
     mine = me()
     return store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                            session_id=SID, actor="ann",
+                            session_id=SID, by="ann",
                             job=job or f"proc:{mine.pid}@{mine.started:.6f}", at=at)
 
 
@@ -610,19 +610,19 @@ def no_exec(monkeypatch):
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
-    directory = tmp_path / "fake-slots"
-    directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
     monkeypatch.syspath_prepend(str(TESTS))
     fake.reset()
-    script = directory / "script.json"
+    script = slots_dir / "script.json"
 
     def plan(**keys):
         now = json.loads(script.read_text()) if script.exists() else {}
         script.write_text(json.dumps({**now, **keys}))
 
-    return SimpleNamespace(plan=plan, calls=lambda name=None: fake.calls(directory, name))
+    return SimpleNamespace(plan=plan, calls=lambda name=None: fake.calls(slots_dir, name))
 
 
 def first_launch(work: Path, **typed) -> None:
@@ -749,8 +749,8 @@ def test_two_resumes_of_one_session_at_once_launch_it_once(work, harness, no_exe
     def one(rid):
         try:
             outcomes[rid] = resume.resume(SID, request_id=rid, turns=None, slots_api=None)
-        except Exception as error:  # noqa: BLE001  (the refusal is the outcome)
-            outcomes[rid] = error
+        except Exception as exc:  # noqa: BLE001  (the refusal is the outcome)
+            outcomes[rid] = exc
         finally:
             if wrote and wrote[0] != rid:
                 other_done.set()

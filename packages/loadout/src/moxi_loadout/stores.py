@@ -113,8 +113,8 @@ def harness_lock(path: str | os.PathLike) -> Path:
 
     whole = os.path.abspath(os.path.expanduser(os.fspath(path)))
     digest = hashlib.sha256(whole.encode("utf-8", "surrogatepass")).hexdigest()[:16]
-    folder = private_dir(state_dir(create=True) / LOCKS)
-    return folder / f"{os.path.basename(whole) or 'file'}-{digest}.lock"
+    lock_dir = private_dir(state_dir(create=True) / LOCKS)
+    return lock_dir / f"{os.path.basename(whole) or 'file'}-{digest}.lock"
 
 
 __all__ = ["MODULE", "MANIFEST", "data_dir", "state_dir", "default_source", "source_dir",

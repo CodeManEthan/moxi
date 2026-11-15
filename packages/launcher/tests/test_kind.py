@@ -34,15 +34,15 @@ class Event:
 
     def __init__(self, event, harness, session_id, request_id, source="startup"):
         self.event, self.harness, self.session_id = event, harness, session_id
-        self.env = {listeners.REQUEST: request_id}
+        self.env = {listeners.REQUEST_ENV: request_id}
         self.source, self.reason = source, None
 
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 @pytest.fixture
@@ -59,9 +59,9 @@ def launch(conn, request_id="r1", *, harness="claude", session_id=CLAUDE_ID, val
     """A launch's row as `api.launch` writes it; `values` adds to its place rows."""
     placed = {"cwd": "/work", "scratch": False, "project": project_key or "",
               "mode": "interactive" if harness == "claude" else "host", **(values or {})}
-    return store.insert(conn, request_id=request_id, actor="someone", harness=harness,
+    return store.insert(conn, request_id=request_id, by="someone", harness=harness,
                         target="slot", cwd="/work", values=placed, argv=[harness],
-                        env={listeners.REQUEST: request_id}, posture="operator",
+                        env={listeners.REQUEST_ENV: request_id}, posture="operator",
                         session_id=session_id if harness == "claude" else None,
                         preset_kind=preset_kind,
                         preset_name=None if preset_kind is None else "a-preset",
@@ -212,18 +212,18 @@ def test_a_log_held_past_the_wait_raises_busy_and_writes_nothing():
     """A version 1 log needs its schema step, which waits for the write lock."""
     path = store.path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    raw = sqlite3.connect(path, isolation_level=None)
-    raw.execute("PRAGMA journal_mode = WAL")
-    raw.executescript(V1_DUMP.read_text())
-    raw.execute("BEGIN IMMEDIATE")
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.executescript(V1_DUMP.read_text())
+    conn.execute("BEGIN IMMEDIATE")
     try:
         with pytest.raises(api.Busy) as raised:
             api.launch_kind(CLAUDE_ID, timeout_s=0.05)
         assert raised.value.exit_code == 75
     finally:
-        raw.execute("ROLLBACK")
-    assert raw.execute("PRAGMA user_version").fetchone()[0] == 1
-    raw.close()
+        conn.execute("ROLLBACK")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    conn.close()
 
 
 def test_a_log_a_newer_launcher_wrote_is_refused_not_read(conn):

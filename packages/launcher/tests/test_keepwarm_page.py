@@ -117,21 +117,21 @@ def test_step_one_a_launch_that_does_not_keep_warm(case):
 
 def test_step_two_an_armed_recycle_run_on_the_launch(case):
     store.insert_run(case.conn, kind="clear", mode="expiry", request_id="r1",
-                     session_id=SID, actor="launcher", state="armed", job=f"proc:{me()}")
+                     session_id=SID, by="launcher", state="armed", job=f"proc:{me()}")
     assert case.would() is False
     assert words(case.asked()) == (None, "run-open")
 
 
 def test_step_two_an_open_keep_warm_run(case):
     store.insert_run(case.conn, kind="keep-warm", mode="ask", request_id="r1",
-                     session_id=SID, actor="launcher", state="acting", job=f"proc:{me()}")
+                     session_id=SID, by="launcher", state="acting", job=f"proc:{me()}")
     assert case.would() is False
     assert words(case.asked()) == (None, "run-open")
 
 
 def test_step_two_a_run_past_its_grace_whose_process_is_gone_passes(case):
     store.insert_run(case.conn, kind="clear", mode="expiry", request_id="r1",
-                     session_id=SID, actor="launcher", state="armed",
+                     session_id=SID, by="launcher", state="armed",
                      job="proc:999999999@1.0", at="2020-01-01T00:00:00.000000Z")
     assert case.would() is True
     assert words(case.asked()) == ("nudged", "subagents")
@@ -148,7 +148,7 @@ def test_step_two_a_slots_job_past_its_grace_reads_open_and_slots_is_not_asked(
 
     monkeypatch.setattr(slots, "api", lambda: Raising())
     store.insert_run(case.conn, kind="relaunch", mode="verb", request_id="r1",
-                     session_id=SID, actor="launcher", state="armed",
+                     session_id=SID, by="launcher", state="armed",
                      job="slots:relaunch-1", at="2020-01-01T00:00:00.000000Z")
     assert case.would() is False
     assert asked == []
@@ -233,7 +233,7 @@ def test_step_eight_a_box_that_could_not_be_read_is_not_passed(case):
 
 def ended(conn, outcome, *, updated_at, number=None, word=None):
     run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                           session_id=SID, actor="launcher", state="acting",
+                           session_id=SID, by="launcher", state="acting",
                            job=f"proc:{me()}", turn_number=number)
     store.end_run(conn, run.run_id, outcome, word=word or outcome,
                   **({"turn_number": number + 1} if number is not None else {}))
@@ -471,7 +471,7 @@ def test_an_hour_lifetime_is_coverable_until_age_3110_seconds(off):
     assert off.reading(pressed=True).step == 4
 
 
-def test_where_a_session_s_environment_can_t_be_read_asks_is_empty_and_not_coverable(off):
+def test_where_a_session_s_env_can_t_be_read_asks_is_empty_and_not_coverable(off):
     off.records[0]["asks"] = []
     assert off.reading(pressed=True).step == 3
 
@@ -502,7 +502,7 @@ def test_a_draft_or_a_box_not_read_gives_neither_covered_nor_coverable(off, draf
 
 def test_a_run_open_on_the_launch_gives_neither_covered_nor_coverable(off):
     store.insert_run(off.conn, kind="clear", mode="expiry", request_id="r1",
-                     session_id=SID, actor="launcher", state="armed", job=f"proc:{me()}")
+                     session_id=SID, by="launcher", state="armed", job=f"proc:{me()}")
     assert off.reading(pressed=True).step == 2
     press(off)
     assert off.would() is False and off.reading().step == 2

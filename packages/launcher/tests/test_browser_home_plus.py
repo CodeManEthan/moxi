@@ -59,14 +59,14 @@ def fake(module_fake):
     return module_fake
 
 
-@pytest.fixture
-def folder(shell):
+@pytest.fixture(name="work_dir")
+def work_dir_fixture(shell):
     """Home opens on a folder of the test's own, which no launch has run in."""
     return kit.fresh_place(shell)
 
 
 @pytest.fixture
-def context(shell, fake, folder, ui_contexts):
+def context(shell, fake, work_dir, ui_contexts):
     return ui_contexts(shell)
 
 
@@ -94,10 +94,10 @@ def started(fake, count: int) -> dict:
     return fake.starts()[count - 1]
 
 
-def test_continue_the_last_session_is_not_offered_for_another_actors_session(page, shell, folder):
+def test_continue_the_last_session_is_not_offered_for_another_actors_session(page, shell, work_dir):
     other = "planner"
     assert other != kit.actor(shell)
-    kit.seed(shell, "worker-in-folder", target="slot", cwd=str(folder), actor=other)
+    kit.seed(shell, "worker-in-folder", target="slot", cwd=str(work_dir), by=other)
     piece = kit.open_home(page)
     plus = piece.get_by_role("button", name="More ways to start")
     expect(plus).to_have_text("+")
@@ -107,10 +107,10 @@ def test_continue_the_last_session_is_not_offered_for_another_actors_session(pag
     expect(entry(menu, "Continue the last session")).to_have_count(0)
 
 
-def test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box(page, shell, fake, folder):
-    sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(folder), actor=kit.actor(shell))
+def test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box(page, shell, fake, work_dir):
+    sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), by=kit.actor(shell))
     # A newer session of another actor in the same folder is passed over.
-    kit.seed(shell, "worker-after-him", target="slot", cwd=str(folder), actor="planner")
+    kit.seed(shell, "worker-after-him", target="slot", cwd=str(work_dir), by="planner")
     piece = kit.open_home(page)
     piece.locator("textarea").fill("a draft that stays")
     menu = plus_menu(page, piece)
@@ -126,14 +126,14 @@ def test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box(p
     expect(piece.locator('.said [data-line="started"]')).to_have_text(re.compile(r"^Resumed in slot 3 · "),
                                                                     timeout=20_000)
     start = started(fake, before + 1)
-    assert start["slot"] == 3 and start["cwd"] == str(folder), start
+    assert start["slot"] == 3 and start["cwd"] == str(work_dir), start
     assert "--resume" in start["argv"] and sid in start["argv"], start["argv"]
     expect(piece.locator("textarea")).to_have_value("a draft that stays")
     expect(piece.locator(".go")).to_be_enabled()
 
 
-def test_a_brief_from_a_file_turns_the_box_off_and_launches_with_that_file(page, folder):
-    brief = folder / "first-turn.md"
+def test_a_brief_from_a_file_turns_the_box_off_and_launches_with_that_file(page, work_dir):
+    brief = work_dir / "first-turn.md"
     brief.write_text("Read the notes and start.\n", encoding="utf-8")
     piece = kit.open_home(page)
     piece.locator(".more").click()
@@ -160,12 +160,12 @@ def test_a_brief_from_a_file_turns_the_box_off_and_launches_with_that_file(page,
     expect(piece.locator("textarea")).to_have_value("text the file stands in for")
 
 
-def test_clear_takes_the_brief_file_off_and_the_box_is_back(page, folder):
+def test_clear_takes_the_brief_file_off_and_the_box_is_back(page, work_dir):
     piece = kit.open_home(page)
     menu = plus_menu(page, piece)
     entry(menu, "Brief from a file").click()
     field = menu.get_by_role("textbox", name="Path to a file holding the brief")
-    field.fill(str(folder / "notes.md"))
+    field.fill(str(work_dir / "notes.md"))
     field.press("Enter")
     expect(piece.locator("textarea")).to_be_disabled()
     piece.get_by_role("button", name="Clear the brief file").click()

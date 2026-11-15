@@ -726,10 +726,10 @@ def listing() -> list[Displaced]:
     return out
 
 
-def _sync_dir(directory: Path) -> None:
+def _sync_dir(target_dir: Path) -> None:
     if sys.platform == "win32":
         return
-    fd = os.open(directory, os.O_RDONLY)
+    fd = os.open(target_dir, os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:

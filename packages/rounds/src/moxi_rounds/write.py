@@ -1,6 +1,6 @@
 """The write path: the one way a verb changes a round or a project.
 
-`record(where, actor=..., event=..., gates=..., act=...)` runs the same steps for every
+`record(where, by=..., event=..., gates=..., act=...)` runs the same steps for every
 writing verb:
 
 1. take the lock, then read the round's log, the project's log and the verb's own facts;
@@ -89,21 +89,21 @@ def project_lock(project: str, env=None) -> Path:
 @dataclass(frozen=True)
 class Where:
     """What a verb writes to: the round `<project>/<slug>`, or with no `slug` the project
-    alone. `folder` is the project's rounds folder."""
+    alone. `rounds_dir` is the project's rounds folder."""
 
     project: str
-    folder: Path
+    rounds_dir: Path
     slug: str | None = None
 
     @property
     def round_log(self) -> Path | None:
         """The round's log, or None for a project alone."""
-        return None if self.slug is None else log.round_log(Path(self.folder) / self.slug)
+        return None if self.slug is None else log.round_log(Path(self.rounds_dir) / self.slug)
 
     @property
     def project_log(self) -> Path:
         """The project's log."""
-        return log.project_log(self.folder)
+        return log.project_log(self.rounds_dir)
 
 
 @dataclass(frozen=True)
@@ -178,7 +178,7 @@ def _render(written: Written) -> None:
     rendering.on_append(written)
 
 
-def _close(where: Where, round_events: Sequence[dict], *, actor: str,
+def _close(where: Where, round_events: Sequence[dict], *, by: str,
            at: str | None) -> dict | None:
     """Close the round whose log now holds `round_events`, when its close waits for
     nothing more, and return the closing event; None when the round stays as it is,
@@ -212,7 +212,7 @@ def _close(where: Where, round_events: Sequence[dict], *, actor: str,
 ON_APPEND: tuple[Callable[[Written], None], ...] = (index.on_append, _render)
 
 
-def record(where: Where, *, actor: str,
+def record(where: Where, *, by: str,
            event: Callable[[View, object], Entry | Iterable[Entry] | None],
            gates: Sequence[Gate] = (),
            act: Callable[[View], object] | None = None,
@@ -252,7 +252,7 @@ def record(where: Where, *, actor: str,
 
     def append(view: View, result: object) -> Written:
         entries = _entries(event(view, result), where, with_project=with_project)
-        return _append(view, entries, result, actor=actor, at=at, callbacks=callbacks)
+        return _append(view, entries, result, by=by, at=at, callbacks=callbacks)
 
     with hold():
         view = _read(where, facts, opens=opens)
@@ -294,8 +294,8 @@ def _lock(path: Path, wait_s: float) -> Iterator[None]:
     held = files.lock(path, timeout_s=wait_s)
     try:
         held.__enter__()
-    except files.LockTimeout as stop:
-        raise Locked(path, stop.holder, wait_s) from None
+    except files.LockTimeout as exc:
+        raise Locked(path, exc.holder, wait_s) from None
     try:
         yield
     finally:
@@ -369,7 +369,7 @@ def _entries(found: Entry | Iterable[Entry] | None, where: Where, *,
     return entries
 
 
-def _append(view: View, entries: list[Entry], result: object, *, actor: str,
+def _append(view: View, entries: list[Entry], result: object, *, by: str,
             at: str | None, callbacks: Sequence[Callable[[Written], None]]) -> Written:
     where = view.where
     appended = []
@@ -383,9 +383,9 @@ def _append(view: View, entries: list[Entry], result: object, *, actor: str,
     failed = []
     closed = None
     try:
-        closed = _close(where, after[ROUND], actor=actor, at=at)
-    except Exception as error:  # the verb's events are on disk; the next write closes
-        failed.append((_close, error))
+        closed = _close(where, after[ROUND], by=by, at=at)
+    except Exception as exc:  # the verb's events are on disk; the next write closes
+        failed.append((_close, exc))
     if closed is not None:
         after[ROUND].append(closed)
     done = Written(where=where, view=view, events=tuple(appended),
@@ -394,8 +394,8 @@ def _append(view: View, entries: list[Entry], result: object, *, actor: str,
     for callback in callbacks:
         try:
             callback(done)
-        except Exception as error:  # the events are on disk; nothing here undoes them
-            failed.append((callback, error))
+        except Exception as exc:  # the events are on disk; nothing here undoes them
+            failed.append((callback, exc))
     done = dataclasses.replace(done, failed=tuple(failed)) if failed else done
     watched = _WATCHED.get()
     if watched is not None:

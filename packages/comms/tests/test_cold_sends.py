@@ -187,7 +187,7 @@ def test_a_clear_changes_the_id_everywhere(rig):
     assert rig.daemon.bindings[REVIEWER_Q].session_id == SESS_OTHER
 
 
-def test_the_shim_starts_from_its_spawn_environment(rig, monkeypatch):
+def test_the_shim_starts_from_its_spawn_env(rig, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESS_OTHER)
     reviewer = rig.shim(**REVIEWER, session_id=None)
     assert reviewer.session_id == SESS_OTHER
@@ -196,7 +196,7 @@ def test_the_shim_starts_from_its_spawn_environment(rig, monkeypatch):
 
 def test_the_session_query_answers_bound_and_unbound(rig):
     reviewer_with_session(rig)
-    with _client() as c:
+    with _Client() as c:
         bound = c.call("session", {"identity": REVIEWER_Q})
         unbound = c.call("session", {"identity": "nobody@proj-a"})
     assert bound["bound"] is True and bound["adapter"] == "claude-shim"
@@ -207,7 +207,7 @@ def test_the_session_query_answers_bound_and_unbound(rig):
     assert unbound["cache_kind"] is None
 
 
-class _client:
+class _Client:
     def __enter__(self):
         self.c = DaemonClient(daemon_socket()).connect()
         return self.c
@@ -237,7 +237,7 @@ def test_warm_cold_and_a_raw_id_with_no_transcript():
     warm, cold, none = cache.cache_states([cache.target_for_session_id(i) for i in
                                            (SESS_REVIEWER, SESS_OTHER, SESS_ARCHIVIST)])
     assert warm.kind == "warm"
-    assert 595 <= warm.age_seconds <= 660
+    assert 595 <= warm.age_s <= 660
     assert cold.kind == "cold"
     # no transcript, and a raw id carries no evidence of no request
     assert none.kind == "unknown" and "no transcript for session" in none.reason
@@ -279,7 +279,7 @@ def test_a_subagents_newer_work_does_not_warm_the_main_clock(tmp_path, monkeypat
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     state = cache.cache_state(SESS_OTHER)
     assert state.kind == "cold", state
-    assert state.age_seconds > HOUR
+    assert state.age_s > HOUR
 
 
 # ============================================================== (d) the hold

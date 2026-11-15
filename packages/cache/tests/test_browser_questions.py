@@ -302,8 +302,8 @@ def on_both(installs, ui_contexts, moment):
             try:
                 seen[name] = walk(page, shell)
                 expect(page.locator(PANEL).get_by_text(LEFT_OUT)).to_have_count(0)
-            except AssertionError as failed:
-                failed.add_note(f"on the {name} install")
+            except AssertionError as exc:
+                exc.add_note(f"on the {name} install")
                 raise
         assert seen["small"] == seen["full"]
         for step in seen["full"]:
@@ -528,12 +528,12 @@ def test_the_readings_say_how_far_they_can_be_trusted(on_both, moment, clipboard
         panel = open_page(page, moment)
         foot = panel.locator('[data-part="foot"]')
         watcher = panel.locator('section[data-part="watcher"]')
-        expect(foot.locator('[data-line="reading"]')).to_have_text(re.compile(rf"^Last reading {hhmm(moment - 1)}$"))
+        expect(foot.locator('[data-line="reading"]')).to_have_text(re.compile(rf"^Last reading (?:yesterday |tomorrow )?{hhmm(moment - 1)}$"))
         expect(watcher).to_have_count(0)
         # `Last reading` follows the topic: the watcher lists again, and the foot says when.
         lay(shell, moment, record(NAMED, now=moment, age=600), reading={"tick": -90, "listed": -90})
         expect(foot.locator('[data-line="reading"]')).to_have_text(
-            re.compile(rf"^Last reading {hhmm(moment + 90)}$"), timeout=10_000)
+            re.compile(rf"^Last reading (?:yesterday |tomorrow )?{hhmm(moment + 90)}$"), timeout=10_000)
         steps.append(shown(page))
 
         # One record that stood still is its opened row's `Read` line, and no Watcher row.
@@ -555,7 +555,7 @@ def test_the_readings_say_how_far_they_can_be_trusted(on_both, moment, clipboard
         # A watcher that runs but has not listed Claude's sessions since a time.
         lay(shell, moment, record(NAMED, now=moment, age=600, seen=120), reading={"tick": 1, "listed": 120})
         expect(watcher.locator('[data-line="watcher"]')).to_have_text(
-            re.compile(rf"^Not reading since {hhmm(moment - 120)}$"), timeout=10_000)
+            re.compile(rf"^Not reading since (?:yesterday |tomorrow )?{hhmm(moment - 120)}$"), timeout=10_000)
         expect(watcher).to_contain_text("It is running but could not list Claude's sessions; its log says why.")
         expect(watcher.get_by_role("button")).to_have_count(0)
         expect(foot).to_have_text(re.compile(r"^\s*Cache settings\s*$"))
@@ -565,7 +565,7 @@ def test_the_readings_say_how_far_they_can_be_trusted(on_both, moment, clipboard
         # One that stopped: when, and the command that starts it again, to copy.
         lay(shell, moment, record(NAMED, now=moment, age=600, seen=120), reading={"tick": 120, "listed": 120})
         expect(watcher.locator('[data-line="watcher"]')).to_have_text(
-            re.compile(rf"^Stopped at {hhmm(moment - 120)}$"), timeout=10_000)
+            re.compile(rf"^Stopped at (?:yesterday |tomorrow )?{hhmm(moment - 120)}$"), timeout=10_000)
         expect(watcher.locator("code")).to_have_text([WATCH])
         expect(row(panel, NAMED)).to_have_attribute("fact", re.compile(r"^warm until "))
         steps.append(shown(page))
@@ -595,7 +595,7 @@ def test_the_readings_say_how_far_they_can_be_trusted(on_both, moment, clipboard
         expect(panel.get_by_text("1 with no cache reading")).to_be_visible(timeout=10_000)
         expect(panel.get_by_text(EMPTY)).to_have_count(0)
         expect(panel.get_by_text(CACHE_LINE)).to_have_count(0)
-        expect(foot.locator('[data-line="reading"]')).to_have_text(re.compile(rf"^Last reading {hhmm(moment - 1)}$"))
+        expect(foot.locator('[data-line="reading"]')).to_have_text(re.compile(rf"^Last reading (?:yesterday |tomorrow )?{hhmm(moment - 1)}$"))
         steps.append(shown(page))
         return steps
 
@@ -610,7 +610,7 @@ def test_both_links_land(on_both, moment):
         # The page is drawn, its row named and its foot read, before it is taken down.
         named_by_rule(panel, named_as(shell, NAMED))
         expect(panel.locator('[data-part="foot"] [data-line="reading"]')).to_have_text(
-            re.compile(rf"^Last reading {hhmm(moment - 1)}$"))
+            re.compile(rf"^Last reading (?:yesterday |tomorrow )?{hhmm(moment - 1)}$"))
         steps.append(shown(page))
         opened(panel, NAMED).get_by_role("link", name="Sessions").click()
         expect(page).to_have_url(re.compile(rf"/m/sessions/claude/{NAMED}$"))

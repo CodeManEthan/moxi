@@ -107,12 +107,12 @@ def _step(summary: index.Summary, project: Project,
     if kept is None:
         return None
 
-    def closed(name: str) -> bool:
+    def on_closed(name: str) -> bool:
         return questions.is_closed(name, project.settings)
 
     if kept.get("git") or any(closed(name) for name in kept.get("until", ())):
         try:
-            folded = states.fold(log.read_round(log.round_log(summary.folder)))
+            folded = states.fold(log.read_round(log.round_log(summary.log_dir)))
         except RoundsError:
             return None
         read = {one.build.stage: one for one in opened().builds
@@ -134,7 +134,7 @@ class Round:
 
     name: str
     project: str
-    folder: str
+    round_dir: str
     status: str | None = None
     flow: str | None = None
     #: The step it is at, as `{"step", "stage", "state"}`: the first of its flow that
@@ -152,9 +152,9 @@ class Round:
 
     def data(self) -> dict:
         if self.unreadable is not None:
-            return {"name": self.name, "project": self.project, "folder": self.folder,
+            return {"name": self.name, "project": self.project, "folder": self.round_dir,
                     "unreadable": _error(self.unreadable)}
-        return {"name": self.name, "project": self.project, "folder": self.folder,
+        return {"name": self.name, "project": self.project, "folder": self.round_dir,
                 "status": self.status, "flow": self.flow,
                 "step": None if self.step is None else dict(self.step),
                 "counts": dict(self.counts),
@@ -166,7 +166,7 @@ class Round:
 class Rounds:
     """The rounds listing: `project` is the one it was kept to, or None; `ended` says
     it lists the rounds that are open no longer. `unreadable` holds a line for each
-    project whose own log can't be read, and `no_folder` one for each project whose
+    project whose own log can't be read, and `unplaced` one for each project whose
     rounds folder can't be worked out, whose rounds are therefore not listed."""
 
     computed: str
@@ -174,12 +174,12 @@ class Rounds:
     ended: bool
     rounds: tuple[Round, ...]
     unreadable: tuple[str, ...] = ()
-    no_folder: tuple[str, ...] = ()
+    unplaced: tuple[str, ...] = ()
 
     def data(self) -> dict:
         return {"computed": self.computed, "project": self.project,
                 "ended": self.ended, "rounds": [one.data() for one in self.rounds],
-                "unreadable": list(self.unreadable), "no_folder": list(self.no_folder)}
+                "unreadable": list(self.unreadable), "no_folder": list(self.unplaced)}
 
 
 def rounds(project: str | None = None, *, ended: bool = False, settings=None,
@@ -207,11 +207,11 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
     for one in found:
         for summary in one.rounds:
             if summary.unreadable is not None:
-                listed.append(Round(summary.name, summary.project, str(summary.folder),
+                listed.append(Round(summary.name, summary.project, str(summary.log_dir),
                                     unreadable=summary.unreadable))
             elif (summary.status not in (states.OPEN, None)) == ended:
                 listed.append(Round(
-                    summary.name, summary.project, str(summary.folder),
+                    summary.name, summary.project, str(summary.log_dir),
                     status=summary.status, flow=summary.flow, ended=summary.ended,
                     step=_step(summary, one, opened),
                     standing=next((item.body.get("standing")
@@ -222,7 +222,7 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
                   ended=ended, rounds=tuple(listed),
                   unreadable=tuple(one.unreadable.reason for one in found
                                    if one.unreadable is not None),
-                  no_folder=no_folder)
+                  unplaced=unplaced)
 
 
 def rounds_as_text(listing: Rounds) -> str:
@@ -249,7 +249,7 @@ def rounds_as_text(listing: Rounds) -> str:
         kind = "has ended" if listing.ended else "is open"
         where = "" if listing.project is None else f" of {listing.project}"
         lines.append(f"no round{where} {kind}")
-    lines += _trouble(listing.unreadable, listing.no_folder)
+    lines += _trouble(listing.unreadable, listing.unplaced)
     return "\n".join(lines) + "\n"
 
 
@@ -425,20 +425,20 @@ class Waiting:
     """What waits on the operator: `found` holds the rows of each kind of `WAITING`,
     under the kind's key; `project` is the one the listing was kept to, or None.
     `unreadable` holds a line for each log that can't be read, whose rows are not
-    here, and `no_folder` one for each project whose rounds folder can't be worked
+    here, and `unplaced` one for each project whose rounds folder can't be worked
     out."""
 
     computed: str
     project: str | None
     found: tuple[tuple[str, tuple], ...]
     unreadable: tuple[str, ...] = ()
-    no_folder: tuple[str, ...] = ()
+    unplaced: tuple[str, ...] = ()
 
     def data(self) -> dict:
         kinds = {kind.key: kind for kind in WAITING}
         return {"computed": self.computed, "project": self.project,
                 **{key: kinds[key].data(rows) for key, rows in self.found},
-                "unreadable": list(self.unreadable), "no_folder": list(self.no_folder)}
+                "unreadable": list(self.unreadable), "no_folder": list(self.unplaced)}
 
 
 def waiting(project: str | None = None, *, settings=None,
@@ -452,7 +452,7 @@ def waiting(project: str | None = None, *, settings=None,
     Raises `Refused` when `project` names a round, and `UnknownProject` or `NoFolder`
     for a project with no rounds folder."""
     now = log.stamp() if now is None else now
-    found, no_folder = _projects(project, settings, now, refresh=refresh)
+    found, unplaced = _projects(project, settings, now, refresh=refresh)
     readable = [one for one in found if one.unreadable is None]
     looked = open_builds.read(settings=settings, now=now)
     readable = [dataclasses.replace(one, builds=tuple(
@@ -468,7 +468,7 @@ def waiting(project: str | None = None, *, settings=None,
         found=tuple((kind.key, tuple(row for one in readable for row in kind.rows(one)))
                     for kind in WAITING),
         # One line for a log, whichever reading could not read it.
-        unreadable=tuple(dict.fromkeys(unreadable)), no_folder=no_folder)
+        unreadable=tuple(dict.fromkeys(unreadable)), unplaced=unplaced)
 
 
 def waiting_as_text(listing: Waiting) -> str:
@@ -479,7 +479,7 @@ def waiting_as_text(listing: Waiting) -> str:
     for key, rows in listing.found:
         lines += ["", f"{kinds[key].title}:"]
         lines += kinds[key].lines(rows, listing.computed) if rows else ["  none"]
-    trouble = _trouble(listing.unreadable, listing.no_folder)
+    trouble = _trouble(listing.unreadable, listing.unplaced)
     return "\n".join([*lines, *([""] if trouble else []), *trouble]) + "\n"
 
 
@@ -613,23 +613,23 @@ def _homes(project: str | None, settings, *,
 
 
 def _project(home: folders.Home, settings, now: str) -> Project:
-    found = tuple(index.rounds(home.project, home.folder))
+    found = tuple(index.rounds(home.project, home.rounds_dir))
     try:
         return Project(home, found, export.waiting(home, settings=settings),
                        shown.unshown(home.project, settings=settings, now=now),
                        settings=settings)
-    except Unreadable as error:
-        return Project(home, found, unreadable=error, settings=settings)
+    except Unreadable as exc:
+        return Project(home, found, unreadable=exc, settings=settings)
 
 
-def _trouble(unreadable: Sequence[str], no_folder: Sequence[str]) -> list[str]:
+def _trouble(unreadable: Sequence[str], unplaced: Sequence[str]) -> list[str]:
     lines = []
     if unreadable:
         lines += ["logs that can't be read, whose records are not listed:",
                   *(f"  {reason}" for reason in unreadable)]
-    if no_folder:
+    if unplaced:
         lines += ["projects whose rounds folder can't be worked out:",
-                  *(f"  {reason}" for reason in no_folder)]
+                  *(f"  {reason}" for reason in unplaced)]
     return lines
 
 

@@ -2,9 +2,9 @@
 
 A question lives in one log. Two calls carry one to the other log of the same project:
 
-- `adopt("<project>/<slug>", "P3", actor=...)` brings a question of the project's list
+- `adopt("<project>/<slug>", "P3", by=...)` brings a question of the project's list
   into the round, as a new `Q<n>`.
-- `move("<project>", "<project>/<slug>:Q2", actor=...)` puts a round's question on the
+- `move("<project>", "<project>/<slug>:Q2", by=...)` puts a round's question on the
   project's list, as a new `P<n>`.
 
 **What is carried.** The sentence, where it came from, who asked it and when, the
@@ -85,13 +85,13 @@ class Arrival:
     entry: write.Entry | None
 
 
-def adopt(target: str, question_id: str, *, actor: str, blocks: str | None = None,
+def adopt(target: str, question_id: str, *, by: str, blocks: str | None = None,
           record: str | None = None, settings=None, wait_s: float = write.WAIT_S,
           at: str | None = None) -> Moved:
     """Bring the question `question_id` of the project's list into the round `target`,
     `<project>/<slug>`, and return it as the round has it.
 
-    - `actor`: who does it, the events' actor. The question keeps its own asker.
+    - `by`: who does it, the events' actor. The question keeps its own asker.
     - `blocks`: the stages it holds up in the round, `B2,B3` or `all`; every stage when
       left out.
     - `record`: the operator's pointer for the list, which a list needs when the
@@ -174,7 +174,7 @@ def adopt(target: str, question_id: str, *, actor: str, blocks: str | None = Non
             f"{again} --blocks {had}")
 
     return _carry(
-        home, slug, question_id, into_round=True, record=record, actor=actor,
+        home, slug, question_id, into_round=True, record=record, by=by,
         gates=[ending.takes_new_work(name, "a question"), exists,
                _still_asked(found, question_id, listing),
                names_stages_of_the_round, a_list_that_narrows_is_his,
@@ -182,12 +182,12 @@ def adopt(target: str, question_id: str, *, actor: str, blocks: str | None = Non
         blocks=wanted, settings=settings, wait_s=wait_s, at=at)
 
 
-def move(target: str, source: str, *, actor: str, record: str | None = None,
+def move(target: str, source: str, *, by: str, record: str | None = None,
          settings=None, wait_s: float = write.WAIT_S, at: str | None = None) -> Moved:
     """Put the question `source`, `<project>/<slug>:Q<n>`, on the list of the project
     `target`, which is the round's own, and return it as the list has it.
 
-    - `actor`: who does it, the events' actor. The question keeps its own asker.
+    - `by`: who does it, the events' actor. The question keeps its own asker.
     - `record`: the operator's pointer. Without one the move is accepted only when it
       ends nothing the question holds up, now or later: the question is parked, it
       holds up a list of stages, and each of them is finished or out of the plan.
@@ -230,7 +230,7 @@ def move(target: str, source: str, *, actor: str, record: str | None = None,
             return None
         return Unmet(f"{name} has no question {question_id}", show)
 
-    def closed(other):
+    def on_closed(other):
         return questions.is_closed(other, settings)
 
     def is_his_or_ends_nothing(view):
@@ -239,7 +239,7 @@ def move(target: str, source: str, *, actor: str, record: str | None = None,
         question = found(view)
         if question is None or question.state not in (questions.OPEN, questions.PARKED):
             return None
-        short = _ends_something(question, view.state, closed)
+        short = _ends_something(question, view.state, on_closed)
         if not short:
             return None
         return Unmet(
@@ -250,21 +250,21 @@ def move(target: str, source: str, *, actor: str, record: str | None = None,
             f"token: {pointers.SHAPES}", again)
 
     return _carry(
-        home, slug, question_id, into_round=False, record=record, actor=actor,
+        home, slug, question_id, into_round=False, record=record, by=by,
         gates=[ending.takes_new_work(name, "a move of one of its questions"), exists,
                _still_asked(found, question_id, show), is_his_or_ends_nothing],
         blocks=questions.NONE, settings=settings, wait_s=wait_s, at=at)
 
 
 def arrivals(round_state: state.State, project_state: state.State, name: str, *,
-             closed: Callable[[str], bool] | None = None) -> tuple[Arrival, ...]:
+             on_closed: Callable[[str], bool] | None = None) -> tuple[Arrival, ...]:
     """What puts every open and parked question of a round on its project's list, for
     a verb that ends the round and writes both logs itself: one `Arrival` for each, in
     the order asked.
 
     - `round_state`, `project_state`: the two logs' states, as read under both locks.
     - `name`: the round's name, `<project>/<slug>`, under the project's stored key.
-    - `closed`: answers whether a round, by name, is closed, for a question parked
+    - `on_closed`: answers whether a round, by name, is closed, for a question parked
       until another round closes; `questions.is_closed` when left out.
 
     A question the list already holds, by the record it names, gets no entry and
@@ -283,7 +283,7 @@ def arrivals(round_state: state.State, project_state: state.State, name: str, *,
             continue
         fields = _arrival(question, round_state, new_id=f"P{taken}", source=source,
                           blocks=questions.NONE, held_up=question.blocks,
-                          closed=closed)
+                          on_closed=on_closed)
         found.append(Arrival(question=question.id, became=f"P{taken}",
                              entry=write.Entry("question.asked", fields,
                                                log=write.PROJECT)))
@@ -309,11 +309,11 @@ def _still_asked(found, question_id: str, listing: str) -> write.Gate:
 
 
 def _ends_something(question: state.Question, held: state.State,
-                    closed: Callable[[str], bool]) -> list[str]:
+                    on_closed: Callable[[str], bool]) -> list[str]:
     """Why a move of a round's question would end something it holds up, now or later:
     each condition it falls short of, in words; none when the move ends nothing."""
     short = []
-    if questions.current(question, held, closed=closed) != questions.PARKED:
+    if questions.current(question, held, on_closed=on_closed) != questions.PARKED:
         short.append(f"{question.id} is open" if question.state == questions.OPEN else
                      f"{question.id} reads as open, since what it was parked until "
                      "has come")
@@ -341,11 +341,11 @@ def _arrived(held: state.State, source: str) -> state.Question | None:
 
 def _arrival(question: state.Question, held: state.State, *, new_id: str, source: str,
              blocks: questions.Blocks, held_up: questions.Blocks | None = None,
-             closed: Callable[[str], bool] | None = None) -> dict[str, object]:
+             on_closed: Callable[[str], bool] | None = None) -> dict[str, object]:
     """The fields of the `question.asked` that brings `question`, of the log whose
     state is `held`, into another log as `new_id`, from the record `source`. `blocks`
     is what it holds up there, and `held_up` what it held up in the round it leaves."""
-    now = questions.current(question, held, closed=closed)
+    now = questions.current(question, held, on_closed=on_closed)
     fields: dict[str, object] = {
         "id": new_id, "text": question.text, "from": question.origin,
         "blocks": questions.stored(blocks), "state": now, "asked_by": question.by,
@@ -369,7 +369,7 @@ def _arrival(question: state.Question, held: state.State, *, new_id: str, source
 
 
 def _carry(home: folders.Home, slug: str, question_id: str, *, into_round: bool,
-           record: str | None, actor: str, gates, blocks: questions.Blocks, settings,
+           record: str | None, by: str, gates, blocks: questions.Blocks, settings,
            wait_s: float, at: str | None) -> Moved:
     """Write a move: the arrival in one log, unless it is there, then the leaving in
     the other."""
@@ -392,7 +392,7 @@ def _carry(home: folders.Home, slug: str, question_id: str, *, into_round: bool,
             fields = _arrival(
                 question, leaves, new_id=new_id, source=source, blocks=blocks,
                 held_up=None if into_round else question.blocks,
-                closed=lambda other: questions.is_closed(other, settings))
+                on_closed=lambda other: questions.is_closed(other, settings))
             # The arrival goes first: stopped after it, the question is asked in both
             # logs and nothing it held up was let go.
             entries.append(write.Entry("question.asked", fields, log=there))
@@ -414,8 +414,8 @@ def _carry(home: folders.Home, slug: str, question_id: str, *, into_round: bool,
         return entries
 
     try:
-        written = write.record(write.Where(home.project, home.folder, slug),
-                               actor=actor, gates=gates, event=moved, with_project=True,
+        written = write.record(write.Where(home.project, home.rounds_dir, slug),
+                               by=by, gates=gates, event=moved, with_project=True,
                                wait_s=wait_s, at=at)
     except NoLog:
         # Only a round's log can be missing here: a project's reads as empty.

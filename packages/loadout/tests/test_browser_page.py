@@ -79,38 +79,38 @@ def typed(shell) -> None:
     terminal.write(shell.env, path=paths.terminal_record(shell.env))
 
 
-def skill(folder: Path, name: str) -> None:
-    (folder / "skills" / name).mkdir(parents=True, exist_ok=True)
-    (folder / "skills" / name / "SKILL.md").write_text(
+def skill(loadout_dir: Path, name: str) -> None:
+    (loadout_dir / "skills" / name).mkdir(parents=True, exist_ok=True)
+    (loadout_dir / "skills" / name / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: A skill.\n---\nDo the thing.\n", encoding="utf-8")
 
 
-def make_folder(shell) -> Path:
+def make_loadout_dir(shell) -> Path:
     """The configured loadout folder under the shell's home: three skills and a global
     file, with only `tidy-notes` in the manifest. Nothing is installed."""
-    folder = Path(shell.env["HOME"]) / "my-loadout"
+    loadout_dir = Path(shell.env["HOME"]) / "my-loadout"
     for name in ("tidy-notes", "review-diff", "fresh-skill"):
-        skill(folder, name)
-    (folder / "global.md").write_text("Be brief.\n", encoding="utf-8")
-    (folder / "loadout.toml").write_text(BASE, encoding="utf-8")
-    moxi(shell, "config", "set", "loadout", "source", str(folder))
-    return folder
+        skill(loadout_dir, name)
+    (loadout_dir / "global.md").write_text("Be brief.\n", encoding="utf-8")
+    (loadout_dir / "loadout.toml").write_text(BASE, encoding="utf-8")
+    moxi(shell, "config", "set", "loadout", "source", str(loadout_dir))
+    return loadout_dir
 
 
-@pytest.fixture(scope="module")
-def folder(ui_shell) -> Path:
+@pytest.fixture(scope="module", name="loadout_dir")
+def loadout_dir_fixture(ui_shell) -> Path:
     """The loadout folder, with the user's terminal recorded as having the shell's own
     environment, which the page's jobs compare with."""
     typed(ui_shell)
-    return make_folder(ui_shell)
+    return make_loadout_dir(ui_shell)
 
 
 @pytest.fixture
-def installed(folder, ui_shell) -> Path:
+def installed(loadout_dir, ui_shell) -> Path:
     """The folder with only `tidy-notes` listed and installed from a terminal."""
-    (folder / "loadout.toml").write_text(BASE, encoding="utf-8")
+    (loadout_dir / "loadout.toml").write_text(BASE, encoding="utf-8")
     moxi(ui_shell, "loadout", "install")
-    return folder
+    return loadout_dir
 
 
 def status(shell) -> dict:
@@ -227,7 +227,7 @@ def test_add_places_an_item_and_remove_takes_it_away(installed, ui_shell, ui_pag
 def test_a_page_install_is_refused_while_no_terminal_is_recorded(
         ui_shells, ui_shell_options, ui_contexts):
     shell = ui_shells(**ui_shell_options)
-    make_folder(shell)
+    make_loadout_dir(shell)
     page = ui_contexts(shell).pages[0]
     panel = open_panel(page)
     panel.get_by_role("button", name="Install").click()
@@ -267,10 +267,10 @@ def test_a_page_install_whose_path_has_no_git_is_refused_where_the_terminal_refu
     (project / "README").write_text("A project.\n", encoding="utf-8")
     git("add", "-A")
     git("commit", "-qm", "first")
-    folder = make_folder(terminal)
+    loadout_dir = make_loadout_dir(terminal)
     manifest = (BASE + f'[project."{project}"]\nskills = ["review-diff"]\n'
                 '[skill.review-diff]\nharnesses = ["claude"]\n')
-    (folder / "loadout.toml").write_text(manifest, encoding="utf-8")
+    (loadout_dir / "loadout.toml").write_text(manifest, encoding="utf-8")
     target = project / ".claude" / "skills" / "review-diff"
     typed(terminal)
     done = moxi(terminal, "loadout", "install", check=False)
@@ -284,7 +284,7 @@ def test_a_page_install_whose_path_has_no_git_is_refused_where_the_terminal_refu
         "git isn't on PATH here, but the last run in a terminal found it")
     assert not os.path.lexists(target)
     assert git("status", "--porcelain", "--untracked-files=all") == ""
-    assert (folder / "loadout.toml").read_text(encoding="utf-8") == manifest
+    assert (loadout_dir / "loadout.toml").read_text(encoding="utf-8") == manifest
 
 
 def test_replace_goes_through_the_sheet_and_cancel_sends_nothing(installed, ui_shell, ui_page):
@@ -353,8 +353,8 @@ def test_replace_over_a_copy_the_projects_git_tracks_says_git_will_show_it_delet
     git("add", "-A")
     git("commit", "-qm", "a skill")
     typed(shell)
-    folder = make_folder(shell)
-    (folder / "loadout.toml").write_text(
+    loadout_dir = make_loadout_dir(shell)
+    (loadout_dir / "loadout.toml").write_text(
         BASE + f'[project."{project}"]\nskills = ["review-diff"]\n'
         '[skill.review-diff]\nharnesses = ["codex"]\n', encoding="utf-8")
     assert moxi(shell, "loadout", "install", check=False).returncode == 3
@@ -393,7 +393,7 @@ def test_turn_off_goes_through_the_sheet_with_a_new_key_each_time(
         ui_shells, ui_shell_options, ui_contexts):
     shell = ui_shells(**ui_shell_options)
     typed(shell)
-    folder = make_folder(shell)
+    loadout_dir = make_loadout_dir(shell)
     claude_md = Path(shell.env["HOME"]) / ".claude" / "CLAUDE.md"
     claude_md.parent.mkdir(parents=True, exist_ok=True)
     claude_md.write_text(OWN_TEXT, encoding="utf-8")
@@ -402,14 +402,21 @@ def test_turn_off_goes_through_the_sheet_with_a_new_key_each_time(
     panel = open_panel(page)
     glob = panel.locator('section[data-part="global"]')
     expect(glob).to_have_attribute("data-chosen", "false")
-    posts = posts_to(page, "api/global-off")
+    posts = posts_to(page, "api/global-remove")
+    (loadout_dir / "global.claude.md").write_text("Claude only.\n", encoding="utf-8")
 
     for _ in range(2):
         glob.get_by_role("button", name="Managed").click()
         job_done(panel)
         expect(glob).to_have_attribute("data-mode", "managed")
         expect(glob.locator(f'li[data-file="{claude_md}"]')).to_have_count(1)
-        assert f"@{folder / 'global.md'}" in claude_md.read_text()
+        # Each harness file lists the parts it reads: Claude's its own, Codex's none.
+        expect(glob.locator(f'li[data-file="{claude_md}"] [data-line="parts"]')).to_have_text(
+            f"claude reads {loadout_dir / 'global.md'} and {loadout_dir / 'global.claude.md'}")
+        codex_md = Path(shell.env["HOME"]) / ".codex" / "AGENTS.md"
+        expect(glob.locator(f'li[data-file="{codex_md}"] [data-line="parts"]')).to_have_text(
+            f"codex reads {loadout_dir / 'global.md'}, no part")
+        assert f"@{loadout_dir / 'global.md'}" in claude_md.read_text()
         written_under_home(shell)
 
         glob.get_by_role("button", name="Turn off…").click()
@@ -445,12 +452,12 @@ def controls(panel) -> dict:
     return found
 
 
-def every_control(panel, enabled: bool) -> None:
+def every_control(panel, *, enabled: bool) -> None:
     found = controls(panel)
     # Install, Remove, a switch, Add with its fields, both mode buttons, Turn off and
     # Replace are all on the panel.
     for name in ("install:", "remove:", "add:", "Kind:", "Name:", "Section:",
-                 "Sections to install:", "mode:managed", "mode:if-absent", "global-off:",
+                 "Sections to install:", "mode:managed", "mode:if-absent", "global-remove:",
                  "replace:"):
         assert name in found, (name, sorted(found))
     assert any(name.startswith("Turn ") for name in found), sorted(found)

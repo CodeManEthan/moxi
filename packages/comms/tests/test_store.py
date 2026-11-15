@@ -166,7 +166,7 @@ def test_a_send_shaped_write_lands_whole_or_not_at_all():
     """The message, the counter and one queue row per recipient share one transaction."""
     conn = store.open_write()
 
-    def send(fail: bool):
+    def send(*, fail: bool):
         with transaction(conn):
             conn.execute("UPDATE meta SET value = value + 1 WHERE key = 'next_id'")
             mid = int(conn.execute("SELECT value FROM meta WHERE key = 'next_id'"
@@ -195,7 +195,7 @@ def test_a_send_shaped_write_lands_whole_or_not_at_all():
         conn.close()
 
 
-def test_the_record_and_the_directory_share_one_store(tmp_path):
+def test_the_record_and_the_dir_share_one_store(tmp_path):
     record = LocalRecord(poll_interval=0.02)
     try:
         made = provision.provision(record, paths.comms_db())
@@ -294,13 +294,13 @@ def test_a_marked_store_with_no_0_2_files_left_opens():
     assert store.state_of(store.path()) == store.MARKED
 
 
-def test_a_cursor_folder_with_no_store_beside_it_is_comms_0_2s():
+def test_a_cursor_dir_with_no_store_beside_it_is_comms_0_2s():
     (paths.cursors_dir() / "local").mkdir(parents=True)
     assert store.zero_two_files() == [paths.cursors_dir()]
 
 
 @pytest.mark.parametrize("marked", [False, True], ids=["fresh-store", "marked-store"])
-def test_a_cursor_folder_an_earlier_build_left_beside_a_store_is_left_alone(marked):
+def test_a_cursor_dir_an_earlier_build_left_beside_a_store_is_left_alone(marked):
     """An earlier build's adapters wrote cursor files after its store was made. No move
     fingerprinted the folder, so it isn't comms 0.2's: the gate opens the store, reads
     and renames nothing."""
@@ -308,13 +308,13 @@ def test_a_cursor_folder_an_earlier_build_left_beside_a_store_is_left_alone(mark
         mark(store.path())
     else:
         store.open_write().close()
-    folder = paths.cursors_dir() / "local"
-    folder.mkdir(parents=True)
-    (folder / "reviewer@proj-a.json").write_text('{"cursor": "1"}')
+    cursor_dir = paths.cursors_dir() / "local"
+    cursor_dir.mkdir(parents=True)
+    (cursor_dir / "reviewer@proj-a.json").write_text('{"cursor": "1"}')
     assert store.zero_two_files() == []
     store.open_write().close()
     store.open_read().close()
-    assert (folder / "reviewer@proj-a.json").exists()
+    assert (cursor_dir / "reviewer@proj-a.json").exists()
     assert not (paths.cursors_dir().parent / "cursors.0.2-moved").exists()
 
 
@@ -331,8 +331,8 @@ def test_threads_of_one_process_queue_for_the_gate():
     def opener():
         try:
             conns.append(store.open_write())
-        except BaseException as e:        # noqa: BLE001 - the test reports it
-            errors.append(e)
+        except BaseException as exc:        # noqa: BLE001 - the test reports it
+            errors.append(exc)
 
     threads = [threading.Thread(target=opener) for _ in range(8)]
     for t in threads:

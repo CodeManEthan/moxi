@@ -45,10 +45,10 @@ LIMITS = {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 12,
           "accountId": "acct-fake", "planType": "pro"}
 
 
-def install(folder: Path) -> Path:
+def install(bin_dir: Path) -> Path:
     """Write an executable `codex` into `folder` that runs this stub."""
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / "codex"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    path = bin_dir / "codex"
     path.write_text(f"#!{sys.executable}\n"
                     "import sys\n"
                     f"sys.path.insert(0, {str(HERE)!r})\n"
@@ -64,8 +64,8 @@ def records() -> Path | None:
 
 
 def event(kind: str, **fields) -> None:
-    folder = records()
-    if folder is None:
+    records_dir = records()
+    if records_dir is None:
         return
     try:
         stdin_tty = os.isatty(0)
@@ -74,20 +74,20 @@ def event(kind: str, **fields) -> None:
     line = {"event": kind, "pid": os.getpid(), "ppid": os.getppid(),
             "pgid": os.getpgrp(), "sid": os.getsid(0), "stdin_tty": stdin_tty,
             "t": time.time(), **fields}
-    with open(folder / "events.jsonl", "a") as f:
-        f.write(json.dumps(line) + "\n")
+    with open(records_dir / "events.jsonl", "a") as fh:
+        fh.write(json.dumps(line) + "\n")
 
 
-def events(folder: Path, kind: str | None = None) -> list[dict]:
-    path = folder / "events.jsonl"
+def events(records_dir: Path, kind: str | None = None) -> list[dict]:
+    path = records_dir / "events.jsonl"
     if not path.exists():
         return []
     found = [json.loads(line) for line in path.read_text().splitlines() if line]
     return [e for e in found if kind is None or e["event"] == kind]
 
 
-def calls(folder: Path) -> list[dict]:
-    path = folder / "calls.jsonl"
+def calls(records_dir: Path) -> list[dict]:
+    path = records_dir / "calls.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line]
@@ -152,10 +152,10 @@ class AppServer:
                 if rid is None:
                     continue
                 method, params = message.get("method"), message.get("params") or {}
-                folder = records()
-                if folder is not None:
-                    with open(folder / "calls.jsonl", "a") as f:
-                        f.write(json.dumps({"pid": os.getpid(), "method": method,
+                records_dir = records()
+                if records_dir is not None:
+                    with open(records_dir / "calls.jsonl", "a") as fh:
+                        fh.write(json.dumps({"pid": os.getpid(), "method": method,
                                             "params": params}) + "\n")
                 try:
                     frame = {"id": rid, "result": self.answer(method, params)}

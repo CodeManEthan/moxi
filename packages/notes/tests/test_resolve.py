@@ -43,7 +43,7 @@ def test_an_empty_override_is_no_override():
     assert notes_dir(alpha, override="").dir == notes() / "code" / "alpha"
 
 
-def test_the_environment_never_stands_in_for_the_override(monkeypatch):
+def test_the_env_never_stands_in_for_the_override(monkeypatch):
     alpha = repo(home() / "code" / "alpha")
     monkeypatch.setenv("MOXI_NOTES_DIR", str(home() / "elsewhere"))
     assert notes_dir(alpha).dir == notes() / "code" / "alpha"
@@ -52,7 +52,7 @@ def test_the_environment_never_stands_in_for_the_override(monkeypatch):
 
 # --- rule 2: projects -------------------------------------------------------------------
 
-def test_a_project_with_a_notes_root_answers_with_it_from_any_folder_inside():
+def test_a_project_with_a_notes_root_answers_with_it_from_any_dir_inside():
     alpha = repo(home() / "code" / "alpha")
     (alpha / "src").mkdir()
     kept = home() / "notes" / "alpha-notes"
@@ -112,7 +112,7 @@ def test_projects_that_will_not_load_go_on_with_a_warning(monkeypatch):
 
 # --- rules 3 and 4 ----------------------------------------------------------------------
 
-def test_an_excluded_folder_gets_none_with_its_tilde_expanded():
+def test_an_excluded_dir_gets_none_with_its_tilde_expanded():
     configure(exclude=["~/personal"])
     private = repo(home() / "personal" / "diary")
     found = notes_dir(private)
@@ -120,7 +120,7 @@ def test_an_excluded_folder_gets_none_with_its_tilde_expanded():
     assert notes_dir(home() / "personal").dir is None
 
 
-def test_an_excluded_project_root_gets_no_computed_folder():
+def test_an_excluded_project_root_gets_no_computed_dir():
     configure(exclude=["~/code/alpha/vendor"])
     alpha = repo(home() / "code" / "alpha")
     (alpha / "vendor").mkdir()
@@ -128,7 +128,7 @@ def test_an_excluded_project_root_gets_no_computed_folder():
     assert notes_dir(alpha).dir == notes() / "code" / "alpha"
 
 
-def test_a_folder_inside_the_notes_is_its_own_notes_directory():
+def test_a_dir_inside_the_notes_is_its_own_notes_dir():
     repo(notes())
     inside = notes() / "team" / "topics" / "gardening"
     inside.mkdir(parents=True)
@@ -155,13 +155,13 @@ def test_a_git_repo_maps_below_home_and_every_subfolder_shares_it():
             assert (found.dir, found.rule) == (notes() / "code" / "alpha", "computed")
 
 
-def test_the_prefix_puts_the_computed_folders_under_it():
+def test_the_prefix_puts_the_computed_dirs_under_it():
     configure(prefix="team")
     alpha = repo(home() / "code" / "alpha")
     assert notes_dir(alpha).dir == notes() / "team" / "code" / "alpha"
 
 
-def test_a_folder_in_no_repo_is_its_own_anchor():
+def test_a_dir_in_no_repo_is_its_own_anchor():
     loose = home() / "scratch" / "idea"
     loose.mkdir(parents=True)
     assert notes_dir(loose).dir == notes() / "scratch" / "idea"
@@ -190,7 +190,7 @@ def test_a_submodule_is_its_own_top():
             assert notes_dir(where).dir == notes() / "code" / "alpha" / "vendor" / "beta"
 
 
-def test_a_symlinked_repo_spelling_gives_the_repos_own_folder():
+def test_a_symlinked_repo_spelling_gives_the_repos_own_dir():
     alpha = repo(home() / "code" / "alpha")
     (alpha / "src").mkdir()
     (home() / "alpha-link").symlink_to(alpha)
@@ -198,7 +198,7 @@ def test_a_symlinked_repo_spelling_gives_the_repos_own_folder():
         assert notes_dir(home() / "alpha-link" / "src").dir == notes() / "code" / "alpha"
 
 
-def test_a_git_file_that_leads_nowhere_leaves_its_folder_the_top():
+def test_a_git_file_that_leads_nowhere_leaves_its_dir_the_top():
     alpha = home() / "code" / "alpha"
     (alpha / "src").mkdir(parents=True)
     (alpha / ".git").write_text("gitdir: ../gone/.git/worktrees/alpha\n", encoding="utf-8")
@@ -230,12 +230,12 @@ def test_a_symlinked_notes_root_is_still_inside(tmp_path):
     assert notes_dir(home() / "notes" / "plans").rule == "inside"
 
 
-def test_home_itself_gets_no_notes_directory():
+def test_home_itself_gets_no_notes_dir():
     found = notes_dir(home())
     assert (found.dir, found.rule) == (None, "none")
 
 
-def test_home_as_a_git_repo_still_gets_none_and_its_folders_map_to_home():
+def test_home_as_a_git_repo_still_gets_none_and_its_dirs_map_to_home():
     repo(home())
     assert notes_dir(home()).dir is None
     (home() / "code").mkdir()
@@ -248,14 +248,14 @@ def test_a_path_off_home_gets_none(tmp_path):
     assert (found.dir, found.rule) == (None, "none")
 
 
-@pytest.mark.parametrize("folder", ["topics", "inbox"])
-def test_an_answer_under_topics_or_inbox_is_refused(folder):
-    clash = repo(home() / folder / "gardening")
+@pytest.mark.parametrize("reserved_dir", ["topics", "inbox"])
+def test_an_answer_under_topics_or_inbox_is_refused(reserved_dir):
+    clash = repo(home() / reserved_dir / "gardening")
     found = notes_dir(clash)
     assert (found.dir, found.rule) == (None, "reserved")
 
 
-def test_the_reserved_folders_follow_the_prefix():
+def test_the_reserved_dirs_follow_the_prefix():
     configure(prefix="team")
     # base is notes/team, so ~/topics/gardening would claim notes/team/topics/gardening
     assert notes_dir(repo(home() / "topics" / "gardening")).rule == "reserved"
@@ -279,7 +279,7 @@ def test_the_top_needs_no_git_on_the_path(monkeypatch):
     assert notes_dir(alpha / "src").dir == notes() / "code" / "alpha"
 
 
-def test_the_resolver_never_creates_a_folder():
+def test_the_resolver_never_creates_a_dir():
     alpha = repo(home() / "code" / "alpha")
     notes_dir(alpha)
     assert not notes().exists()
@@ -317,7 +317,7 @@ def test_below_is_none_for_a_path_not_under_the_root(flavour, path, root):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows compares paths without case")
-def test_on_windows_another_case_gives_the_same_folder():
+def test_on_windows_another_case_gives_the_same_dir():
     alpha = repo(home() / "code" / "alpha")
     upper = Path(str(alpha).upper())
     assert notes_dir(upper).dir is not None

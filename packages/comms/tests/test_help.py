@@ -127,7 +127,7 @@ def test_the_verb_makes_no_socket_call(monkeypatch):
     assert run(["help", "nonsense"])[0] == 2
 
 
-def test_help_needs_no_claim_and_no_environment():
+def test_help_needs_no_claim_and_no_env():
     """Every other verb refuses a process with no claim. This one answers: the reader
     who most needs the vocabulary is often the one whose environment is wrong."""
     code, out = run(["help", "standing"])

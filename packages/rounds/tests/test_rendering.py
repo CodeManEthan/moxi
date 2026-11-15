@@ -40,7 +40,7 @@ def rounds(tmp_path, add_project, capsys):
     `b-round` opened in it at `T1`."""
     add_project("proj-a", notes_root=tmp_path / "notes")
     for name in (A, B):
-        opening.open_round(name, description="a placeholder round", actor="planner",
+        opening.open_round(name, description="a placeholder round", by="planner",
                            flow="fix", at=T1)
     capsys.readouterr()
     return tmp_path / "notes" / "rounds"
@@ -52,12 +52,12 @@ OPENED_CLOSE = f"step commission, ready; {_REST}"
 HELD_CLOSE = f"step commission, waiting; {_REST}; question Q2, parked; question Q3, open"
 
 
-def ask(target=A, text=SAID, *, at=T2, actor="scout", origin="comms:11", **more):
-    return asking.ask(target, text, actor=actor, origin=origin, at=at, **more)
+def ask(target=A, text=SAID, *, at=T2, by="scout", origin="comms:11", **more):
+    return asking.ask(target, text, by=by, origin=origin, at=at, **more)
 
 
 def rule(target=A, *, at, record="comms:12", **more):
-    return ruling.rule(target, record=record, actor="planner", at=at, **more)
+    return ruling.rule(target, record=record, by="planner", at=at, **more)
 
 
 def note(rounds, slug="a-round"):
@@ -149,14 +149,14 @@ No repair.
 
 def test_a_note_lists_the_questions_by_state_the_rulings_and_the_history(rounds):
     ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
-    ask(text=OTHER, actor="helper", origin="https://example.com/thread/4", at=T3)
+    ask(text=OTHER, by="helper", origin="https://example.com/thread/4", at=T3)
     ask(text=THIRD, at=T3)
     rule(item="Q1", chose="a", text=ANSWER, at=T4)
     rule(text=RULED, reason="it is only a display", at=T5)
     rule(item="park:Q2", record="comms:13", at=T5)
     rule(text="Usage is shown in the status line.", supersedes="C2", record="comms:14",
          at=T6)
-    shown.mark(A, "C1", actor="planner", record="comms:21", at=T7)
+    shown.mark(A, "C1", by="planner", record="comms:21", at=T7)
     rule("proj-a", item=f"readback={T5}", record="comms:30", at=T8)
     rule(item="revoke:C4", record="comms:31", at=T9)
 
@@ -332,13 +332,13 @@ def test_the_date_of_a_note_is_that_of_the_rounds_newest_event(rounds):
 
 def test_a_description_that_is_not_plain_text_is_quoted_in_the_header(rounds):
     opening.open_round("proj-a/c-round", description='it says: "go" # now',
-                       actor="planner", flow="fix", at=T1)
+                       by="planner", flow="fix", at=T1)
     lines = note(rounds, "c-round").read_text(encoding="utf-8").splitlines()
     assert lines[5] == r'description: "it says: \"go\" # now"'
     assert 'it says: "go" # now' in lines
 
 
-def test_a_note_names_no_folder_of_the_machine_it_was_written_on(rounds, tmp_path):
+def test_a_note_names_no_dir_of_the_machine_it_was_written_on(rounds, tmp_path):
     ask()
     ask("proj-a", text=OTHER)
     rule("proj-a", text=LASTING, at=T3)
@@ -362,7 +362,7 @@ def test_the_register_is_the_rulings_of_substance_with_the_replaced_ones_marked(
     rule("proj-a", item="P1", text=ANSWER, record="comms:14", at=T5)
     rule("proj-a", text=RULED, record="comms:15", at=T6)
     rule("proj-a", item="revoke:S4", record="comms:16", at=T7)
-    shown.mark("proj-a", "S2", actor="planner", record="comms:21", at=T8)
+    shown.mark("proj-a", "S2", by="planner", record="comms:21", at=T8)
     rule("proj-a", item=f"readback={T5}", record="comms:30", at=T9)
 
     assert (rounds / "rulings.md").read_text(encoding="utf-8") == f"""\
@@ -449,7 +449,7 @@ def test_a_register_with_no_ruling_of_substance_says_so(rounds):
 def test_the_projects_questions_are_listed_by_state_with_who_asked_and_when(rounds):
     ask("proj-a", text=SAID, options=["a=prose yes, parsed rows no",
                                      "b=both follow the settings"])
-    ask("proj-a", text=OTHER, actor="helper", origin="https://example.com/thread/4",
+    ask("proj-a", text=OTHER, by="helper", origin="https://example.com/thread/4",
         at=T3)
     ask("proj-a", text=THIRD, at=T3)
     rule("proj-a", item="P1", chose="b", at=T4)
@@ -515,8 +515,8 @@ def test_every_write_to_a_round_writes_its_note_again(rounds):
         lambda: ask(text=OTHER, at=T3),
         lambda: rule(item="Q1", text=ANSWER, at=T4),
         lambda: rule(item="park:Q2", at=T5),
-        lambda: marking.reopen(A, "Q2", actor="helper", at=T6),
-        lambda: shown.mark(A, "C1", actor="planner", record="comms:21", at=T7),
+        lambda: marking.reopen(A, "Q2", by="helper", at=T6),
+        lambda: shown.mark(A, "C1", by="planner", record="comms:21", at=T7),
         lambda: rule(text=RULED, at=T8),
     ]
     seen = [note(rounds).read_bytes()]
@@ -534,7 +534,7 @@ def test_every_write_to_a_projects_log_writes_its_two_files_again(rounds):
         lambda: rule("proj-a", text=LASTING, at=T3),
         lambda: rule(text=NEWER, standing=True, supersedes="S1", at=T4),
         lambda: rule("proj-a", item="P1", text=ANSWER, at=T5),
-        lambda: shown.mark("proj-a", "S2", actor="planner", record="comms:21", at=T6),
+        lambda: shown.mark("proj-a", "S2", by="planner", record="comms:21", at=T6),
     ]
     seen = []
     for one in writes:
@@ -565,13 +565,13 @@ def test_a_write_to_one_log_leaves_the_files_of_the_others_as_they_were(rounds):
 
 def read_back(time, *, at=LATER):
     return ruling.rule("proj-a", item=f"readback={time}", record="comms:90",
-                       actor="planner", at=at)
+                       by="planner", at=at)
 
 
 def test_a_read_back_writes_again_the_note_of_every_round_open_or_ended(rounds):
     rule(text=RULED, at=T3)
     rule(B, text=LASTING, at=T4)
-    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T5)
+    dropping.drop(B, by="operator", record="comms:30", run_by="planner", at=T5)
     for slug in ("a-round", "b-round"):
         assert "  - not shown\n" in note(rounds, slug).read_text(encoding="utf-8")
 
@@ -598,7 +598,7 @@ def test_a_read_back_leaves_a_note_saying_not_shown_only_of_a_later_ruling(round
     assert text.count("  - not shown\n") == 1
 
 
-def test_a_read_back_writes_into_no_folder_that_holds_no_log(rounds):
+def test_a_read_back_writes_into_no_dir_that_holds_no_log(rounds):
     rule(text=RULED, at=T3)
     theirs = rounds / "c-round" / "round-note.md"
     theirs.parent.mkdir()
@@ -617,8 +617,8 @@ def test_a_read_back_writes_into_no_folder_that_holds_no_log(rounds):
 
 def test_a_read_back_passes_over_a_round_whose_log_cant_be_read(rounds):
     rule(text=RULED, at=T3)
-    with log.round_log(rounds / "b-round").open("ab") as file:
-        file.write(b"not an event\n")
+    with log.round_log(rounds / "b-round").open("ab") as fh:
+        fh.write(b"not an event\n")
     before = stamps(note(rounds, "b-round"), log.round_log(rounds / "b-round"))
 
     assert not read_back(T3).failed
@@ -702,7 +702,7 @@ def test_a_hand_edit_is_gone_after_the_next_write(rounds):
         assert "my own line" not in text
 
 
-def test_someones_own_file_in_the_folder_is_left_as_it_is(rounds):
+def test_someones_own_file_in_the_dir_is_left_as_it_is(rounds):
     own = (rounds / "a-round" / "notes-on-it.md", rounds / "a-round" / "design.md",
            rounds / "thoughts.md")
     for path in own:
@@ -722,7 +722,7 @@ def test_someones_own_file_in_the_folder_is_left_as_it_is(rounds):
         "thoughts.md"]
 
 
-def test_a_folder_with_no_log_is_never_written_into(rounds):
+def test_a_dir_with_no_log_is_never_written_into(rounds):
     theirs = rounds / "c-round" / "round-note.md"
     theirs.parent.mkdir()
     theirs.write_bytes(b"kept by another tool\n")
@@ -758,13 +758,13 @@ def test_the_same_logs_give_the_same_bytes(rounds):
     for path in paths:
         path.unlink()
     home = write.Where("proj-a", rounds, "a-round")
-    write.record(home, actor="helper", event=lambda view, result: None)
-    write.record(write.Where("proj-a", rounds), actor="helper",
+    write.record(home, by="helper", event=lambda view, result: None)
+    write.record(write.Where("proj-a", rounds), by="helper",
                  event=lambda view, result: None)
     assert [path.read_bytes() for path in paths] == first
 
 
-def test_the_same_events_in_another_folder_give_the_same_note(rounds, tmp_path):
+def test_the_same_events_in_another_dir_give_the_same_note(rounds, tmp_path):
     ask()
     rule(text=RULED, at=T3)
     events = log.read(log.round_log(rounds / "a-round"))
@@ -774,7 +774,7 @@ def test_the_same_events_in_another_folder_give_the_same_note(rounds, tmp_path):
         log.append(log.round_log(elsewhere), event["type"],
                    {key: value for key, value in event.items()
                     if key not in ("v", "n", "at", "actor", "type")},
-                   actor=event["actor"], at=event["at"])
+                   by=event["actor"], at=event["at"])
     again = log.read(log.round_log(elsewhere))
 
     assert rendering.note("proj-a", "a-round", again).encode() == \

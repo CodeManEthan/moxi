@@ -148,9 +148,9 @@ def test_a_typing_slip_is_caught_before_any_request(ui_page):
     ratio.fill("half")
     ratio.press("Tab")
     expect(_msg(form, "ratio")).to_have_class(re.compile(r"\berror\b"))
-    folder = form.locator("input[data-control=folder]")
-    folder.fill("not/absolute")
-    folder.press("Tab")
+    path_control = form.locator("input[data-control=folder]")
+    path_control.fill("not/absolute")
+    path_control.press("Tab")
     expect(_msg(form, "folder")).to_have_class(re.compile(r"\berror\b"))
     ui_page.evaluate("1")  # hand over any request events before counting them
     assert writes == []

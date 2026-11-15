@@ -28,7 +28,7 @@ Whether the round closes reads its own log alone: a question parked until anothe
 round closes keeps this one open whether or not that round has closed. How such a
 question is named in a line is another matter, since it reads as open once that round
 has closed: whoever prints the lines beside its own reading of the questions passes
-`closed`, the answer it read them with, so one question has one state in what it
+`on_closed`, the answer it read them with, so one question has one state in what it
 prints.
 
 A finished build reads as done in every step of its stage without a read of git, so
@@ -101,7 +101,7 @@ def _nothing_open(state: states.State, closed: Closed, ratify: str) -> Iterator[
         if build.ended is None and not decisions.finished(state, build):
             yield f"build of {build.stage}, open"
     for question in holds.on_close(state):
-        reads = questions.current(question, state, closed=closed)
+        reads = questions.current(question, state, on_closed=on_closed)
         yield f"question {question.id}, {reads}"
     for wait in waiting_items.open_of(state):
         yield f"waiting item {wait.key}, open"
@@ -155,7 +155,7 @@ def waits(state: states.State, *, closed: Closed | None = None,
     """What the close of the round `state` is of waits for, a line each; empty when
     nothing is, which is when the round closes. It reads the state alone.
 
-    `closed` answers whether another round, by name, is closed, for how a question
+    `on_closed` answers whether another round, by name, is closed, for how a question
     parked until one is reads in its line; left out, no round reads as closed and
     such a question is named as parked. The lines are as many either way. `ratify`
     is the project's `ratify` setting (`ratify_of`), `majors` when left out."""

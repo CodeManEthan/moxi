@@ -420,7 +420,7 @@ def unmeetable(state: states.State, block: design_block.DesignBlock,
     return problems
 
 
-def wait(target: str, stage_id: str, after: str, *, actor: str, settings=None,
+def wait(target: str, stage_id: str, after: str, *, by: str, settings=None,
          wait_s: float = write.WAIT_S, at: str | None = None) -> Waiting:
     """Make the stage `stage_id` of the round `target` wait for the stages `after`,
     `B1,B3`, beside the ones it waits for already. Anyone may: it only adds.
@@ -478,7 +478,7 @@ def wait(target: str, stage_id: str, after: str, *, actor: str, settings=None,
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a mark"), are_stages_of_the_round,
                    can_still_be_met, adds_something],
             event=changed, wait_s=wait_s, at=at)

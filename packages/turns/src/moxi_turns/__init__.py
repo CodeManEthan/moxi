@@ -16,7 +16,7 @@ out of the harness. This package is turns' whole public API, the announcement's
     f = s.facts()    # Facts(session_id, turn_number, turn_open, turn, agents, draft, at,
                      #       stale, ready); turn: OpenTurn | None
     a = s.agents()   # Agents(entries, complete, at)
-    e = s.environ(names)   # {name: value | None}: the session's own environment, read
+    e = s.env(names)   # {name: value | None}: the session's own environment, read
                            # from its endpoint (capability environ; at most 64 names)
 
     d = s.deliver(text, *, only_if_idle=False, if_turn_number=None, refuse_draft=False,
@@ -94,6 +94,7 @@ _WHERE = {
                      "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES", "COMMANDS"),
                     "results"),
     **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny"), "guards"),
+    "COMMANDS_ENV": "config",
 }
 
 __all__ = [
@@ -105,7 +106,7 @@ __all__ = [
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
     "CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES",
-    "COMMANDS", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
+    "COMMANDS", "COMMANDS_ENV", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
 ]
 
 

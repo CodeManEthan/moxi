@@ -11,7 +11,7 @@ The owner is read for `_lock`, `_stop`, `socket_path` and `_on_push`, and writte
 `replaying`, `identity`, `tier`, `offline` and its claim holder (`claims`).
 
 **The tool token.** A session launched with comms' tools carries its token in
-`MOXI_COMMS_MCP_TOKEN`. The adapter reads it once (`ToolToken.from_environ`), keeps its
+`MOXI_COMMS_MCP_TOKEN`. The adapter reads it once (`ToolToken.from_env`), keeps its
 hash and drops the value. After every bind that took hold, the first and each rebind,
 the hash is registered on the connection that holds the binding (`mcp_token`), so the
 daemon maps the token to this binding again after a dropped connection or a daemon
@@ -60,14 +60,14 @@ class ToolToken:
         return f"ToolToken(refused={self.refused!r}, served={self.served!r})"
 
     @classmethod
-    def from_environ(cls, environ=None) -> "ToolToken | None":
+    def from_env(cls, source_env=None) -> "ToolToken | None":
         """The token of a launch whose environment carries comms' entry (the stamped
         token and URL, both non-empty), or None. The value is taken out of `environ`
         (the process's own by default): only its hash stays."""
         from ..mcp import tokens
         from ..mcp.additions import TOKEN_ENV, carries
 
-        env = os.environ if environ is None else environ
+        env = os.environ if source_env is None else source_env
         if not carries(env):
             return None
         return cls(tokens.digest(env.pop(TOKEN_ENV)))
@@ -84,22 +84,22 @@ class ToolToken:
         for attempt in range(1, self.TRIES + 1):
             try:
                 answer = client.mcp_token(self.hash)
-            except DaemonError as e:
-                if e.code in (wire.MCP_TOKEN_TAKEN, wire.MCP_TOKEN_REVOKED):
-                    self.refused = wire.CODE_NAMES[e.code]
+            except DaemonError as exc:
+                if exc.code in (wire.MCP_TOKEN_TAKEN, wire.MCP_TOKEN_REVOKED):
+                    self.refused = wire.CODE_NAMES[exc.code]
                     log.warning("comms' tools are off for this session: the daemon "
                                 "refused its token (%s: %s); a relaunch gets a new one",
-                                self.refused, e)
+                                self.refused, exc)
                     return None
-                if e.try_again and attempt < self.TRIES:
+                if exc.try_again and attempt < self.TRIES:
                     time.sleep(self.PAUSE)
                     continue
                 log.warning("this session's tool token was not registered (%s); the "
-                            "next bind registers it", e)
+                            "next bind registers it", exc)
                 return None
-            except DaemonOffline as e:
+            except DaemonOffline as exc:
                 log.info("this session's tool token was not registered (%s); the next "
-                         "bind registers it", e)
+                         "bind registers it", exc)
                 return None
             self.served = bool((answer or {}).get("served"))
             return self.served
@@ -209,7 +209,7 @@ def register_and_install(owner, *, client_type, on_close, register, install, led
     if token is not None:
         served = token.register(client)
         if served is not None and registered is not None:
-            registered(served)
+            registered(served=served)
     return resp
 
 

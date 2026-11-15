@@ -37,12 +37,12 @@ def run(*argv, description="a placeholder round"):
     return main(["open", *argv, *said])
 
 
-def folded(folder):
-    return state.fold(log.read(log.round_log(folder)))
+def folded(round_dir):
+    return state.fold(log.read(log.round_log(round_dir)))
 
 
-def files_under(folder):
-    return sorted(str(path.relative_to(folder)) for path in folder.rglob("*"))
+def files_under(root_dir):
+    return sorted(str(path.relative_to(root_dir)) for path in root_dir.rglob("*"))
 
 
 # -- what an opening leaves --------------------------------------------------------------
@@ -77,7 +77,7 @@ def test_an_opened_round_is_in_the_index(rounds):
     assert run("proj-a/a-round", "--flow", "fix") == 0
 
     found = index.read("proj-a", rounds, "a-round")
-    assert (found.status, found.flow, found.folder) == ("open", "fix", rounds / "a-round")
+    assert (found.status, found.flow, found.log_dir) == ("open", "fix", rounds / "a-round")
     assert paths.index_file().is_file()
 
 
@@ -97,7 +97,7 @@ def test_a_round_is_opened_under_the_projects_key_as_the_projects_list_stores_it
     assert not write.round_lock("PROJ-A", "a-round").exists()
 
 
-def test_a_round_opens_in_a_folder_that_is_already_there(rounds):
+def test_a_round_opens_in_a_dir_that_is_already_there(rounds):
     (rounds / "a-round").mkdir(parents=True)
     (rounds / "a-round" / "design.md").write_text("a draft\n", encoding="utf-8")
 
@@ -222,7 +222,7 @@ def test_a_go_pointer_of_any_known_shape_is_kept(rounds, pointer):
 
 @pytest.mark.parametrize("pointer", ["he said go", "comms:twelve",
                                      "http://example.com/pages/7"])
-def test_a_go_pointer_of_no_known_shape_is_refused_and_no_folder_is_made(
+def test_a_go_pointer_of_no_known_shape_is_refused_and_no_dir_is_made(
         rounds, capsys, pointer):
     assert run("proj-a/a-round", "--record", pointer) == 3
 
@@ -235,7 +235,7 @@ def test_a_go_pointer_of_no_known_shape_is_refused_and_no_folder_is_made(
 
 # -- what is refused ---------------------------------------------------------------------
 
-def test_a_folder_that_already_holds_a_log_is_refused_and_left_as_it_was(rounds, capsys):
+def test_a_dir_that_already_holds_a_log_is_refused_and_left_as_it_was(rounds, capsys):
     assert run("proj-a/a-round", "--flow", "fix", description="the first") == 0
     before = log.round_log(rounds / "a-round").read_bytes()
     capsys.readouterr()
@@ -264,7 +264,7 @@ def test_an_empty_log_file_counts_as_a_log(rounds):
 FOREIGN = b"---\ntype: round-note\n---\n\nkept by another tool\n"
 
 
-def test_a_folder_with_another_tools_note_and_no_log_is_refused_and_the_note_kept(
+def test_a_dir_with_another_tools_note_and_no_log_is_refused_and_the_note_kept(
         rounds, capsys):
     theirs = rounds / "a-round" / "round-note.md"
     theirs.parent.mkdir(parents=True)
@@ -300,7 +300,7 @@ def test_another_tools_round_is_no_round_to_any_reading_command(rounds, capsys):
     assert files_under(rounds / "a-round") == ["round-note.md"]
 
 
-def test_a_folder_with_a_note_and_a_log_is_refused_as_a_round_already_there(
+def test_a_dir_with_a_note_and_a_log_is_refused_as_a_round_already_there(
         rounds, capsys):
     assert run("proj-a/a-round", "--flow", "fix") == 0
     capsys.readouterr()
@@ -312,7 +312,7 @@ def test_a_folder_with_a_note_and_a_log_is_refused_as_a_round_already_there(
     assert "another tool" not in err
 
 
-def test_a_folder_that_is_there_and_empty_is_opened_into(rounds):
+def test_a_dir_that_is_there_and_empty_is_opened_into(rounds):
     (rounds / "a-round").mkdir(parents=True)
 
     assert run("proj-a/a-round", "--flow", "fix") == 0
@@ -330,7 +330,7 @@ def test_a_project_the_projects_list_does_not_hold_is_refused(rounds, capsys):
     assert not rounds.exists() and not paths.locks_dir().exists()
 
 
-def test_a_rounds_folder_that_cant_be_worked_out_is_refused(
+def test_a_rounds_dir_that_cant_be_worked_out_is_refused(
         tmp_path, add_project, without_notes, capsys):
     add_project("proj-a")
     capsys.readouterr()
@@ -344,7 +344,7 @@ def test_a_rounds_folder_that_cant_be_worked_out_is_refused(
     assert not list(tmp_path.rglob("round.jsonl"))
 
 
-def test_a_flow_the_config_does_not_have_is_refused_and_no_folder_is_made(rounds, capsys):
+def test_a_flow_the_config_does_not_have_is_refused_and_no_dir_is_made(rounds, capsys):
     assert run("proj-a/a-round", "--flow", "heavy") == 3
 
     out, err = capsys.readouterr()
@@ -370,11 +370,11 @@ def test_a_projects_flow_setting_that_names_no_flow_is_refused(
 
 
 def test_a_refusal_names_everything_that_stopped_it(rounds):
-    opening.open_round("proj-a/a-round", description="the first", actor="planner")
+    opening.open_round("proj-a/a-round", description="the first", by="planner")
     before = log.round_log(rounds / "a-round").read_bytes()
 
     with pytest.raises(Refused) as caught:
-        opening.open_round("proj-a/a-round", description="the second", actor="planner",
+        opening.open_round("proj-a/a-round", description="the second", by="planner",
                            flow="heavy")
 
     assert len(caught.value.unmet) == 2 and caught.value.exit_code == 3
@@ -390,7 +390,7 @@ def test_a_name_that_is_no_rounds_name_is_a_usage_error(rounds, capsys, name):
     assert out == "" and "is not a round's name" in err and "<project>/<slug>" in err
     assert not rounds.exists()
     with pytest.raises(BadName):
-        opening.open_round(name, description="a round", actor="planner")
+        opening.open_round(name, description="a round", by="planner")
 
 
 def test_an_opening_with_no_description_is_a_usage_error(rounds, capsys):
@@ -401,7 +401,7 @@ def test_an_opening_with_no_description_is_a_usage_error(rounds, capsys):
     assert "--description TEXT" in capsys.readouterr().err
     assert not rounds.exists()
     with pytest.raises(BadArgument):
-        opening.open_round("proj-a/a-round", description="", actor="planner")
+        opening.open_round("proj-a/a-round", description="", by="planner")
 
 
 def test_open_takes_no_parent(rounds, capsys):
@@ -415,7 +415,7 @@ def test_open_takes_no_parent(rounds, capsys):
 
 def standing(text="Times are shown in the reader's zone.", **more):
     """Record a standing ruling of `proj-a` and return its id."""
-    return ruling.rule("proj-a", actor="planner", record="comms:1234567", text=text,
+    return ruling.rule("proj-a", by="planner", record="comms:1234567", text=text,
                        **more).id
 
 
@@ -443,7 +443,7 @@ def test_a_standing_ruling_named_twice_is_kept_once(rounds):
     standing()
 
     opened = opening.open_round("proj-a/a-round", description="a round",
-                                actor="planner", inherits=["S1", "S1"])
+                                by="planner", inherits=["S1", "S1"])
 
     assert opened.inherits == ("S1",) and opened.event["inherits"] == ["S1"]
 
@@ -452,7 +452,7 @@ def refused(rounds, *inherits) -> list[str]:
     """Open `a-round` from `inherits`, which is refused: the reasons, with nothing
     left behind."""
     with pytest.raises(Refused) as stop:
-        opening.open_round("proj-a/a-round", description="a round", actor="planner",
+        opening.open_round("proj-a/a-round", description="a round", by="planner",
                            inherits=inherits)
     assert not (rounds / "a-round").exists()
     assert all(one.fix == "moxi rounds open proj-a/a-round --description TEXT "
@@ -473,13 +473,13 @@ def test_a_standing_ruling_that_was_replaced_is_not_inherited(rounds):
 
     assert [why.partition(";")[0] for why in refused(rounds, "S1")] == [
         "S1 was replaced by S2, which is the ruling that stands in its place"]
-    assert opening.open_round("proj-a/a-round", description="a round", actor="planner",
+    assert opening.open_round("proj-a/a-round", description="a round", by="planner",
                               inherits=["S2"]).inherits == ("S2",)
 
 
 def test_a_standing_ruling_that_was_taken_back_is_not_inherited(rounds):
     standing()
-    ruling.rule("proj-a", actor="planner", record="comms:1234568", item="revoke:S1")
+    ruling.rule("proj-a", by="planner", record="comms:1234568", item="revoke:S1")
 
     assert [why.partition(";")[0] for why in refused(rounds, "S1", "S2")] == [
         "S1 was taken back, by S2, so no round starts from it",
@@ -537,7 +537,7 @@ def test_a_config_that_cant_be_read_is_a_bad_setting(rounds, write_config, capsy
     assert not rounds.exists()
 
 
-def test_a_round_folder_that_cant_be_made_is_an_error_and_nothing_is_recorded(
+def test_a_round_dir_that_cant_be_made_is_an_error_and_nothing_is_recorded(
         rounds, capsys):
     rounds.mkdir(parents=True)
     (rounds / "a-round").write_text("not a folder\n", encoding="utf-8")

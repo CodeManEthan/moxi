@@ -183,8 +183,8 @@ class Store:
                 data = parse(self.path.read_bytes()) if stamp != (0, 0, 0) else empty()
             except FileNotFoundError:
                 data = empty()
-            except (OSError, ValueError) as e:
-                log.error("the grants file can't be read, so every token is refused: %s", e)
+            except (OSError, ValueError) as exc:
+                log.error("the grants file can't be read, so every token is refused: %s", exc)
                 data = empty()
             self._index(data)
             self._data, self._stamp = data, stamp

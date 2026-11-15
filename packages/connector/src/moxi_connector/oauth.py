@@ -258,12 +258,12 @@ class OAuth:
         self._later(self._tidy_and_note, origin)
         return mount
 
-    async def stopping(self, switch_on: bool) -> None:
+    async def stopping(self, *, switch_on: bool) -> None:
         """At the process's stop: write pending last-use times; with the switch off,
         revoke every grant, so none stays valid behind a port nothing holds.
 
         The stop writes only the time. Whether a grant's current pair has been used is
-        written at its first use (`used`), and a use seen before a rotation was of the
+        written at its first use (`on_used`), and a use seen before a rotation was of the
         pair the rotation retired, so writing it as the new pair's would take the grace
         from a retry of the lost refresh answer after a restart."""
         for task in list(self._tasks):
@@ -317,7 +317,7 @@ class OAuth:
 
     # -- last use ------------------------------------------------------------------------
 
-    async def used(self, gid: str, grant: Mapping[str, Any]) -> None:
+    async def on_used(self, gid: str, grant: Mapping[str, Any]) -> None:
         """Note a grant's use: written at once the first time its current pair is used
         (the grace rule reads it), else at most once a minute."""
         now = self.clock()
@@ -620,7 +620,7 @@ class Provider:
                 or now >= grant["access_expires"]
                 or grants.is_stale(grant, self.under.origin.resource)):
             return None
-        await self.oauth.used(gid, grant)
+        await self.oauth.on_used(gid, grant)
         return Access(token="", client_id=grant["client"], scopes=[SCOPE],
                       resource=grant["resource"], grant_id=gid, label=grant.get("label"))
 

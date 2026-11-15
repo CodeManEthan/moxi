@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import os
 
-#: The variable the launcher sets for one launch, read from the session's environment.
-OVERRIDE = "MOXI_NOTES_DIR"
+from .api import NOTES_DIR_ENV
+
 #: The start line's words before the path.
 LINE = "Notes directory: "
 #: A `turn` within this many seconds of the last fired one starts no pass.
@@ -33,7 +33,7 @@ FIRED = "fired"
 SCRIPT = "moxi-notes-snapshot"
 
 
-def _folder(value) -> str | None:
+def _session_dir(value) -> str | None:
     if not isinstance(value, str) or not value or "\0" in value:
         return None
     if not os.path.isabs(value) or not os.path.isdir(value):
@@ -45,7 +45,7 @@ def session_path(event) -> str:
     """The session's folder: `event.cwd`, then `PWD` from its environment, then this
     process's working directory."""
     env = getattr(event, "env", None) or {}
-    return (_folder(getattr(event, "cwd", None)) or _folder(env.get("PWD"))
+    return (_session_dir(getattr(event, "cwd", None)) or _session_dir(env.get("PWD"))
             or os.getcwd())
 
 
@@ -54,7 +54,7 @@ def start(event) -> str | None:
     from .resolve import notes_dir
 
     env = getattr(event, "env", None) or {}
-    found = notes_dir(session_path(event), override=env.get(OVERRIDE) or None)
+    found = notes_dir(session_path(event), override=env.get(NOTES_DIR_ENV) or None)
     if found.dir is None:
         return None
     line = f"{LINE}{found.dir}"
@@ -97,4 +97,4 @@ def _spawn(root) -> int:
                            output=os.devnull, cwd=str(root))
 
 
-__all__ = ["OVERRIDE", "LINE", "DEBOUNCE", "session_path", "start", "fire"]
+__all__ = ["NOTES_DIR_ENV", "LINE", "DEBOUNCE", "session_path", "start", "fire"]

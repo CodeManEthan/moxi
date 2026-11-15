@@ -88,8 +88,8 @@ def test_the_page_keeps_the_contract(shell, make_endpoint, ui_page, ui_component
 
 def test_a_seeded_session_shows_its_facts_agents_and_trouble(shell, make_endpoint, ui_page):
     fake = harness(draft=True, trouble="the host is loading the thread", agents_complete=False,
-                   entries=[Agent("a1", "subagent", "running", False, MARKUP),
-                            Agent("sh1", "shell", "done", True, None, "a1")])
+                   entries=[Agent("a1", "subagent", "running", final=False, description=MARKUP),
+                            Agent("sh1", "shell", "done", final=True, description=None, parent_id="a1")])
     ep, _ = make_endpoint(fake, session_id=SID)
     panel = open_panel(ui_page)
     found = row(panel, ep.dir.name)
@@ -152,7 +152,7 @@ def test_a_failed_read_shows_the_failure_line(shell, ui_page, status):
 
 def test_the_page_fits_a_phone(shell, make_endpoint, ui_page, ui_width_check):
     long = "a-very-long-description-with-no-spaces-" * 6
-    fake = harness(trouble="t" * 200, entries=[Agent("a" * 80, "subagent", "running", False, long)])
+    fake = harness(trouble="t" * 200, entries=[Agent("a" * 80, "subagent", "running", final=False, description=long)])
     fake.cwd = "/srv/" + "deep/" * 40 + "project"
     ep, _ = make_endpoint(fake, session_id="b" * 120)
     make_endpoint(harness(), session_id=SID)

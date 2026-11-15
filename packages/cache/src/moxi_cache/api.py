@@ -72,9 +72,9 @@ def read(harness, session_id, *, now=None, projects_root=None, turned=True,
                      projects_root=projects_root, turned=turned, cache_source=cache_source,
                      new_session=new_session, agent_model=agent_model, bound_at=bound_at,
                      store=store)
-    except Exception as e:                                         # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 -- any read failure becomes an unknown result
         return unknown(_clock.READ_FAILED,
-                       f"the cache read failed ({type(e).__name__}: {e})")
+                       f"the cache read failed ({type(exc).__name__}: {exc})")
 
 
 def _read(harness, session_id, *, now, projects_root, turned, cache_source, new_session,
@@ -88,8 +88,8 @@ def _read(harness, session_id, *, now, projects_root, turned, cache_source, new_
         else:
             try:
                 table = _table.load_table()
-            except _table.TableError as e:
-                return unknown(_clock.TABLE_NOT_LOADED, f"{_table.NOT_LOADED} ({e})")
+            except _table.TableError as exc:
+                return unknown(_clock.TABLE_NOT_LOADED, f"{_table.NOT_LOADED} ({exc})")
             drift = store.view(table)
             judged = store.judged(session_id) if session_id else None
         result = codex.read(session_id, cache_source=cache_source, turned=turned,
@@ -126,11 +126,11 @@ def clock_records() -> list[dict]:
     return sorted(found, key=lambda record: record["session"])
 
 
-def asking(environ) -> tuple[str, ...] | None:
+def asking(env) -> tuple[str, ...] | None:
     """What a watcher started now would write as `asks` for a process whose environment is
-    `environ`: the sorted names of the subscriptions the timer's own check (`timer.load`)
+    `env`: the sorted names of the subscriptions the timer's own check (`timer.load`)
     accepts at the inputs as they are now, the installed modules' and cache's config's as
-    `moxi cache timers` reads them, whose `requires_env` `environ` meets (`timer.env_met`).
+    `moxi cache timers` reads them, whose `requires_env` `env` meets (`timer.env_met`).
     None where `timer.env_checkable()` is false. It starts no process and writes no file.
     """
     from . import timer as _timer
@@ -140,7 +140,7 @@ def asking(environ) -> tuple[str, ...] | None:
         return None
     entries, _ = _config_entries()
     loaded = _timer.load(entries)
-    return tuple(sorted(s.name for s in loaded.subscriptions if _timer.env_met(s, environ)))
+    return tuple(sorted(s.name for s in loaded.subscriptions if _timer.env_met(s, env)))
 
 
 def __getattr__(name):

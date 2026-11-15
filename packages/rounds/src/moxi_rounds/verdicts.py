@@ -216,7 +216,7 @@ def path(report: Path, folder: Path) -> str:
     it, so the record reads the same wherever the folder is, else the whole path."""
     whole = Path(os.path.abspath(report))
     try:
-        return whole.relative_to(Path(os.path.abspath(folder))).as_posix()
+        return whole.relative_to(Path(os.path.abspath(round_dir))).as_posix()
     except ValueError:
         return str(whole)
 
@@ -479,7 +479,7 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
     """Record the verdict of the report file `report` on the round `name`,
     `<project>/<slug>`.
 
-    - `actor`: who records it, the event's actor.
+    - `by`: who records it, the event's actor.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `wait_s`: how long to wait for the round's lock; `at`: the event's time.
@@ -497,15 +497,15 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
-    folder = home.round_folder(slug)
+    round_dir = home.round_dir(slug)
     report = Path(report)
     shown = f"moxi rounds show {name}"
 
     def read(where) -> _Read:
         try:
             return _Read(block=report_block.read(report))
-        except BadBlock as error:
-            return _Read(error=error)
+        except BadBlock as exc:
+            return _Read(error=exc)
 
     def recorded(view, result):
         if view.facts.error is not None:
@@ -561,7 +561,7 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a report's verdict")],
             event=recorded, facts=read, wait_s=wait_s, at=at)
     except NoLog:
