@@ -16,7 +16,11 @@
 // An opened row (`opened-model.ts`) speaks for one address, the lead or the one pressed: the
 // addresses it can speak for, `Cache`, the address's queue in full (`Held`, `Waiting`,
 // `Unread`, each message cut at four lines with `Show all`), `Waits on` with `Thread`,
-// `Directs`, `Directed by`, and `Details` folded at its foot.
+// `Directs`, `Directed by`, the send box (`box-model.ts`), and `Details` folded at its foot.
+// The box checks how a message would go as it opens and when its posture or `Deliver`
+// changes, sends once, and offers `Take back` on each of his messages the books can still
+// take back; after either act the mail state and the queue are read again. A box set to
+// answer a message quotes it, and the row's `Message` act clears that.
 //
 // It reads `/api/roster`, then follows the topic `roster`. It reads `/api/mail-state`, and
 // the opened address's `/api/queue` with it, when it opens, when the roster's waiting mail
@@ -31,7 +35,11 @@ import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 import { addressWrite, NOTHING_OPEN, parseAddress, sameAddress, threadAddress } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { parseMailState, parsePageRoster } from "./agents-model.ts";
-import type { Act, MailState, PageRoster } from "./agents-model.ts";
+import type { Act, MailState, Owed, PageRoster } from "./agents-model.ts";
+import {
+  CHECK_AGAIN, DELIVER, FROM, OPERATOR, REPLY_WANTED, SEND, SendBox, TAKE_BACK, TEXT_MAX_CHARS,
+} from "./box-model.ts";
+import type { Choice } from "./box-model.ts";
 import { Feed, parseRoster } from "./feed.ts";
 import {
   ACT_WORDS, CLOSE, COPIED, COPIED_MS, COPY, DOWN_LABEL, frameModel, LAUNCH_FROM_HOME, READING_AFTER_MS, SETTINGS_LINK,
@@ -42,6 +50,7 @@ import { parseQueue } from "./messages-model.ts";
 import type { Queue } from "./messages-model.ts";
 import { COPY_ID, DETAILS, HELP, openedAgent, SHOW_ALL, THREAD_LINK } from "./opened-model.ts";
 import type { Line } from "./opened-model.ts";
+import type { Said } from "./words.ts";
 import { newestDay, whenWords } from "./words.ts";
 
 const TAG = "moxi-comms-page";
@@ -94,6 +103,40 @@ const STYLES = css`
   .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 92px; }
   .det .foot button, .det .r button { font-size: 13px; line-height: 18px; }
   .det .help { padding: 3px 0 0 92px; color: var(--moxi-text-dim); }
+
+  /* The send box: the text, then one line of controls with Send at its right, the only
+     piece in the accent; the line under it says how the message would go or went. */
+  .send { position: relative; border: 1px solid var(--moxi-border-strong); border-radius: 10px; padding: 10px 12px 9px;
+          margin-top: 10px; font-size: 14px; line-height: 20px; }
+  .send textarea { display: block; width: 100%; min-height: 40px; resize: vertical; border: 0; outline: 0; padding: 0;
+                   margin: 0; background: none; color: var(--moxi-text); font: 14px/20px var(--moxi-font-sans); }
+  .send textarea::placeholder { color: var(--moxi-text-dim); opacity: 1; }
+  .send .quote { padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--moxi-border); font-size: 13px;
+                 line-height: 18px; }
+  .send .quote .ql { color: var(--moxi-text-dim); }
+  .send .ctl { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 14px;
+               margin-top: 8px; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
+  .send .ctl .k { margin-right: 7px; }
+  .send .ctl .sep { margin: 0 10px; }
+  .send .ctl .pick { color: var(--moxi-text); }
+  .send .ctl .v { margin-left: 5px; color: var(--moxi-text-dim); }
+  .send .ctl .is { color: var(--moxi-text); }
+  .send .go { flex: none; padding: 8px 16px; border-radius: 7px; background: var(--moxi-accent); color: var(--moxi-on-accent);
+              font: 600 13px/1 var(--moxi-font-sans); }
+  .send .go.off { background: none; color: var(--moxi-text-dim); box-shadow: inset 0 0 0 1px var(--moxi-border);
+                  cursor: default; }
+  .menu { position: absolute; z-index: 2; left: 0; bottom: calc(100% + 6px); width: min(430px, 100%); padding: 6px 0;
+          background: var(--moxi-bg-raised); border: 1px solid var(--moxi-border); border-radius: 10px;
+          color: var(--moxi-text); font-size: 14px; line-height: 20px; }
+  .menu button { display: grid; grid-template-columns: 20px minmax(0, 1fr); width: 100%; padding: 5px 14px; }
+  .menu button:hover { background: var(--moxi-bg-hover); }
+  .menu .d { display: block; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
+  .dry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; padding: 8px 2px 0;
+         align-items: baseline; }
+  .dry .k, .dry .d { color: var(--moxi-text-dim); }
+  .dry b { font-weight: 600; }
+  .dry button { padding-left: 18px; color: var(--moxi-text); }
+  .dry .t { min-width: 0; overflow-wrap: anywhere; }
 
   .quietline { font-size: 22px; line-height: 32px; text-align: center; letter-spacing: -0.005em; padding: 150px 0 14px; }
   .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; }
@@ -151,6 +194,14 @@ export class CommsPage extends LitElement {
   #at: Address = NOTHING_OPEN;
   #placed: Placed | null = null;
   #openedAt = 0;
+  /** The opened row's send box, the message the frame set it to answer, and which of its
+   * menus is open. */
+  #box: SendBox | null = null;
+  #boxReplyId: string | null = null;
+  #drawnReply: Owed | null = null;
+  #menu: "posture" | "deliver" | null = null;
+  /** The box takes the focus once it is drawn: the row was opened by `Message` or `Reply`. */
+  #focusBox = false;
   /** Which copy act reads `Copied`. */
   #copied: string | null = null;
   #stop: (() => void) | null = null;
@@ -198,6 +249,8 @@ export class CommsPage extends LitElement {
     this.#feed?.close();
     this.#mail?.close();
     this.#queue?.close();
+    this.#box?.close();
+    this.#box = null;
     this.#feed = this.#mail = this.#queue = null;
     this.#queueFor = null;
     this.#stop?.();
@@ -214,6 +267,9 @@ export class CommsPage extends LitElement {
       // A new placement opens what its route names, written as the page writes it.
       const named = parseAddress(this.route);
       this.#placed = null;
+      // A new placement opens with an empty box.
+      this.#box?.close();
+      this.#box = null;
       this.#setAt(named);
     }
   }
@@ -260,6 +316,7 @@ export class CommsPage extends LitElement {
   }
 
   #act(act: Act): void {
+    this.#focusBox = act.kind === "reply" || act.kind === "message";
     if (act.kind === "reply") this.open({ piece: "reply", message_id: act.message_id });
     else if (act.kind === "message") this.open({ piece: "agent", qualified: act.to });
   }
@@ -307,6 +364,7 @@ export class CommsPage extends LitElement {
   render() {
     const frame = this.frame();
     this.#drawnTo = frame?.rows.find((item) => item.open)?.to ?? null;
+    this.#drawnReply = frame?.opened.kind === "agent" ? frame.opened.reply : null;
     if (frame === null || frame.state === "gone") return nothing;
     if (frame.state === "loading") {
       return html`${frame.reading !== null ? html`<p class="waiting" data-line="reading" role="status">${frame.reading}</p>`
@@ -357,8 +415,10 @@ export class CommsPage extends LitElement {
         ?lead-heavy=${row.line.heavy} lead-more=${ifDefined(row.line.more ?? undefined)}
         note=${ifDefined(item.note ?? undefined)} ?open=${item.open} @moxi-row-toggle=${toggle}>
       ${stale ? nothing : item.open
-        ? html`<button type="button" slot="acts" class="do" data-action="close" aria-expanded="true" @click=${toggle}>${
-          CLOSE}</button>`
+        ? html`${this.#drawnReply !== null && item.to !== null ? html`<button type="button" slot="acts" class="do"
+          data-action="message" @click=${() => this.#act({ kind: "message", to: item.to as string })}>${ACT_WORDS.message
+          }</button>` : nothing}<button type="button" slot="acts" class="do" data-action="close" aria-expanded="true"
+          @click=${toggle}>${CLOSE}</button>`
         : row.acts.filter((act) => act.kind !== "keep-warm").map((act) => html`<button type="button" slot="acts" class="do"
           data-action=${act.kind} @click=${() => this.#act(act)}>${ACT_WORDS[act.kind]}</button>`)}
       ${item.open && item.to !== null ? this.opened(item, item.to) : nothing}
@@ -397,6 +457,7 @@ export class CommsPage extends LitElement {
           }}>${SHOW_ALL}</button>` : nothing}</span>${this.queueAct(one, to)}</div>`))}
       ${view.more !== null ? html`<p class="note" data-line="more">${view.more}</p>` : nothing}
       ${view.queueNote !== null ? html`<p class="note" data-line="queue-note">${view.queueNote}</p>` : nothing}
+      ${this.#box?.to === to ? this.#said(this.#box.view({ when: this.#when }).taken, "taken") : nothing}
       ${view.after.map((line) => this.#line(line))}
       ${this.box(item, to)}
       <div class="foot"><button type="button" class="d" data-action="details" aria-expanded=${this.#details ? "true" : "false"}
@@ -408,14 +469,83 @@ export class CommsPage extends LitElement {
     </div>`;
   }
 
-  /** The act at the right of one queued message. */
-  protected queueAct(_item: { message_id: string; takeable: boolean }, _to: string): unknown {
-    return html`<span></span>`;
+  /** The act at the right of one queued message: `Take back` on his own while the books can
+   * still take it back. */
+  protected queueAct(item: { message_id: string; takeable: boolean }, to: string): unknown {
+    const box = this.#box;
+    if (!item.takeable || box === null || box.to !== to) return html`<span></span>`;
+    return html`<button type="button" class="x" data-action="take-back" ?disabled=${box.taking.has(item.message_id)}
+      @click=${() => void box.takeBack(item.message_id)}>${TAKE_BACK}</button>`;
   }
 
-  /** The send box of an opened row. */
-  protected box(_item: FrameRow, _to: string): unknown {
-    return nothing;
+  #when = (at: number): string => whenWords(at, this.#today);
+
+  /** The send box of an opened row, written to `to`, and the line under it. */
+  protected box(_item: FrameRow, to: string): unknown {
+    const box = this.#box;
+    if (box === null || box.to !== to) return nothing;
+    const queue = this.#queueFor === to ? this.#queue?.value ?? null : null;
+    const view = box.view({ when: this.#when, queue });
+    const quote = view.quote;
+    const quoteId = `quote:${box.reply?.message_id ?? ""}`;
+    const deliver = view.deliver;
+    return html`<div class="send" data-part="box" data-to=${to}>
+        ${quote !== null ? html`<div class="quote" data-line="quote"><p class="ql">${quote.lead}</p><p
+          class=${this.#whole.has(quoteId) ? "msg" : "msg cut"} data-message=${quoteId}>${quote.text}</p>${
+          this.#cut.has(quoteId) && !this.#whole.has(quoteId) ? html`<button type="button" class="d" data-action="show-all"
+            @click=${() => { this.#whole.add(quoteId); this.requestUpdate(); }}>${SHOW_ALL}</button>` : nothing}</div>`
+          : nothing}
+        <textarea data-field="text" aria-label=${view.placeholder} placeholder=${view.placeholder}
+          maxlength=${TEXT_MAX_CHARS} .value=${box.text} ?readonly=${view.sending}
+          @input=${(event: Event) => box.setText((event.target as HTMLTextAreaElement).value)}></textarea>
+        <div class="ctl"><span class="cl"><span class="k">${FROM}</span><span class="is" data-line="from">${OPERATOR}</span><span
+          class="sep">·</span><span class="k">${REPLY_WANTED}</span>${this.#pick("posture", view.posture.word,
+            view.posture.menu, (value) => box.setPosture(value))}${deliver !== null ? html`<span class="sep">·</span><span
+          class="k">${DELIVER}</span>${deliver.menu !== null ? this.#pick("deliver", deliver.word, deliver.menu,
+            (value) => box.setHeld(value)) : html`<span class="is" data-line="deliver">${deliver.word}</span>`}` : nothing}</span>
+          <button type="button" class=${view.ready ? "go" : "go off"} data-action="send" ?disabled=${!view.ready}
+            @click=${() => void box.send(queue)}>${SEND}</button></div>
+      </div>
+      ${this.#said(view.line, "dry", () => void box.check())}`;
+  }
+
+  /** A control of the box that opens a menu: its word and `▾`, and the menu while open. */
+  #pick<V>(which: "posture" | "deliver", word: string, menu: Choice<V>[], set: (value: V) => void) {
+    const open = this.#menu === which;
+    const close = (): void => { this.#menu = null; this.requestUpdate(); };
+    return html`<button type="button" class="pick" data-action=${which} aria-haspopup="menu"
+        aria-expanded=${open ? "true" : "false"} @click=${() => { this.#menu = open ? null : which; this.requestUpdate(); }}
+        >${word}<span class="v" aria-hidden="true">▾</span></button>${open ? html`<div class="menu" role="menu"
+        data-menu=${which} @keydown=${(event: KeyboardEvent) => { if (event.key === "Escape") close(); }}>${
+        menu.map((choice) => html`<button type="button" role="menuitemradio" aria-checked=${choice.current ? "true" : "false"}
+          data-choice=${String(choice.value)} @click=${() => { this.#menu = null; set(choice.value); this.requestUpdate(); }}
+          ><span aria-hidden="true">${choice.current ? "✓" : ""}</span><span>${choice.label}${choice.says !== null
+            ? html`<span class="d">${choice.says}</span>` : nothing}</span></button>`)}</div>` : nothing}`;
+  }
+
+  /** One act's line: its key, the heavy lead, the words in the text colour, the dim part, and
+   * `Check again` when it follows. */
+  #said(said: Said | null, key: string, again?: () => void) {
+    if (said === null) return nothing;
+    return html`<div class="dry" data-line=${key} role="status"><span class="k">${said.key ?? ""}</span><span class="t">${
+      said.heavy !== null ? html`<b>${said.heavy}</b> ` : nothing}${said.text}${said.dim !== null
+      ? html` <span class="d">${said.dim}</span>` : nothing}</span>${said.again && again !== undefined
+      ? html`<button type="button" data-action="check-again" @click=${again}>${CHECK_AGAIN}</button>`
+      : html`<span></span>`}</div>`;
+  }
+
+  /** After Send or `Take back` answered: the mail and the queue are read again. A reply that
+   * was sent leaves the box answering nothing, and the address says the row alone. */
+  #acted(box: SendBox): void {
+    if (this.#box !== box) return;
+    const placed = this.#placed;
+    if (box.reply === null && placed !== null && placed.opened.kind === "agent" && placed.opened.reply !== null) {
+      this.#placed = { opened: { ...placed.opened, reply: null }, line: null };
+      this.#boxReplyId = null;
+      this.#setAt({ piece: "agent", qualified: box.to });
+    }
+    this.#readMail();
+    this.requestUpdate();
   }
 
   #line(line: Line) {
@@ -444,6 +574,32 @@ export class CommsPage extends LitElement {
         : new Feed<Queue>(() => api("comms", `api/queue?name=${encodeURIComponent(to)}`), parseQueue,
                           () => this.requestUpdate(), { clocked: false });
       void this.#queue?.refresh();
+    }
+    if ((this.#box?.to ?? null) !== to) {
+      this.#box?.close();
+      this.#menu = null;
+      const reply = this.#drawnReply;
+      this.#boxReplyId = reply?.message_id ?? null;
+      if (to === null) this.#box = null;
+      else {
+        const box: SendBox = new SendBox(to, reply, {
+          post: (path, body) => api("comms", path, body), onChange: () => this.requestUpdate(),
+          onActed: () => this.#acted(box), now: () => this.#feed?.now() ?? Date.now() / 1000, cache: installed("cache"),
+        });
+        this.#box = box;
+        void box.check();
+      }
+    } else if (this.#box !== null && (this.#drawnReply?.message_id ?? null) !== this.#boxReplyId) {
+      this.#boxReplyId = this.#drawnReply?.message_id ?? null;
+      this.#box.answer(this.#drawnReply);
+    }
+    if (this.#focusBox && this.#box !== null) {
+      const area = this.renderRoot.querySelector<HTMLTextAreaElement>(
+        `[data-part="box"][data-to="${CSS.escape(this.#box.to)}"] textarea`);
+      if (area !== null) {
+        this.#focusBox = false;
+        area.focus();
+      }
     }
     let grew = false;
     for (const node of this.renderRoot.querySelectorAll<HTMLElement>(".msg.cut")) {
