@@ -151,7 +151,23 @@ def test_check_2_wants_the_version_dated_as_the_first_heading(repo, remote, fake
     git(repo, "commit", "-q", "-m", "Undated")
     git(repo, "push", "-q", "origin", "main")
     fake.green(head(repo))
-    failed(run_gate(repo, fake, "proj-a-v0.1.0"), 2, "first version heading")
+    verdict = run_gate(repo, fake, "proj-a-v0.1.0")
+    failed(verdict, 2, "first version heading")
+    failed(verdict, 2, "(moxi publishing bump writes it)")
+
+
+def test_check_2_says_to_date_by_hand_a_changelog_bump_can_not_date(repo, remote, fake):
+    release_files(repo, a_heading="## 0.1.0 (unreleased)")
+    path = repo / "packages" / "a" / "CHANGELOG.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("## Unreleased\n\n", ""),
+                    encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "Undated")
+    git(repo, "push", "-q", "origin", "main")
+    fake.green(head(repo))
+    failed(run_gate(repo, fake, "proj-a-v0.1.0"), 2,
+           "must be ## 0.1.0 (YYYY-MM-DD), dated (date it by hand: "
+           "packages/a/CHANGELOG.md has no ## Unreleased heading")
 
 
 def test_check_3_wants_main_and_its_check_green(released_repo, fake):

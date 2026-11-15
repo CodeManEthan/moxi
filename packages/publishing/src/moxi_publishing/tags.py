@@ -607,13 +607,21 @@ def _changelog(*, git, ws, member, version, **_):
     data = read_file(git, ws.commit, path)
     if data is None:
         return False, f"{path} is missing"
-    heading = first_version_heading(data.decode("utf-8", "replace"))
+    from moxi_publishing.release import UNRELEASED
+
+    text = data.decode("utf-8", "replace")
+    heading = first_version_heading(text)
     want = f"## {version} (YYYY-MM-DD)"
     if heading is None:
         return False, f"{path} has no version heading; head the release {want}"
     if not same_version(heading.version, version) or heading.date is None:
+        # bump dates only a `## Unreleased` heading, so another shape is dated by hand.
+        how = ("moxi publishing bump writes it" if any(
+            line.rstrip() == UNRELEASED for line in text.splitlines())
+            else f"date it by hand: {path} has no {UNRELEASED} heading for "
+                 "moxi publishing bump to date")
         return False, (f"{path}'s first version heading is {heading.line.strip()!r}; it "
-                       f"must be {want}, dated (moxi publishing bump writes it)")
+                       f"must be {want}, dated ({how})")
     return True, f"{path} is headed {heading.line.strip()}"
 
 
