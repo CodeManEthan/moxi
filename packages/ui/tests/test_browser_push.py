@@ -220,7 +220,7 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
     shell.kill("fixture")
     # One failed start is no warning of its own: the row says not running, why, and when
     # it tries again. Its tone is the warning of the crash a moment before.
-    expect(row).to_contain_text("The last start failed", timeout=10_000)
+    expect(row).to_contain_text("The last start failed")
     expect(row.locator(".state")).to_have_text("not running")
     expect(row).to_have_class("warn")
     expect(row).to_contain_text("The next request after 10 s tries again.")
@@ -284,7 +284,7 @@ def test_three_failed_starts_in_a_row_turn_the_servers_row_to_fail(ui_shells, fi
             return shell.server("fixture")["failed_in_row"] >= n
 
         wait_for(failed_again, 5, interval=0.1, what=f"failed start {n}")
-    expect(row).to_contain_text("the last 3 starts failed", timeout=5_000)
+    expect(row).to_contain_text("the last 3 starts failed")
     expect(row).to_have_class("fail")
     expect(row).to_contain_text("log: ")
 

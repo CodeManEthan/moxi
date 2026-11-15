@@ -34,9 +34,6 @@ pytestmark = [pytest.mark.browser,
 HELP = "An identity is a name only one session can hold at a time."
 OFFLINE = "The comms daemon isn't answering. moxi doctor comms says why."
 FAILED = "Can't reach the comms panel's server."
-#: How long a change on the daemon may take to reach an open roster: the poller's period,
-#: and the gather and the push after it.
-PUSH_MS = 12_000
 
 #: Places a roster in a host of its own in the shell's panel, and keeps every
 #: `data-state` it shows in `window.rosterStates` ("none" while it draws nothing).
@@ -196,7 +193,7 @@ def test_a_new_binding_and_a_wait_reach_the_open_roster_by_push(shell, rig, ui_c
     bound(rig, P)
     indexed(rig, send(rig, P, "do it", "--posture", "once", who=REVIEWER).id)
     expect(row(roster, R).locator('[data-field="awaiting"]')).to_have_text(
-        "waiting on planner", timeout=PUSH_MS)
+        "waiting on planner")
     expect(rows(roster)).to_have_count(5)
     expect(row(roster, P)).to_have_attribute("data-live", "true")
     assert len(reads) == 1, reads
@@ -213,7 +210,7 @@ def test_a_row_whose_session_changes_gets_a_chip_for_the_new_one(shell, rig, ui_
     expect(chip(roster, R, old)).to_have_attribute("data-shows", "warm")
     # A /clear: the same binding, now for a new session.
     shim_drive.ready(reviewer, "clear", new)
-    expect(chip(roster, R, new)).to_have_attribute("data-shows", "cold", timeout=PUSH_MS)
+    expect(chip(roster, R, new)).to_have_attribute("data-shows", "cold")
     expect(row(roster, R).locator("moxi-cache-chip")).to_have_count(1)
     expect(roster.locator(f'moxi-cache-chip[session="{old}"]')).to_have_count(0)
 
@@ -226,13 +223,13 @@ def test_the_daemon_stopped_shows_the_offline_line_and_the_rows_return(shell, ri
     page, roster = open_panel(ui_contexts)
     expect(rows(roster)).to_have_count(4)
     rig.daemon.stop()
-    expect(roster).to_have_attribute("data-state", "offline", timeout=PUSH_MS)
+    expect(roster).to_have_attribute("data-state", "offline")
     expect(roster.locator('p[data-line="offline"]')).to_have_text(OFFLINE)
     expect(rows(roster)).to_have_count(0)
     rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     # The shim binds its name again; the rows come back with it.
-    expect(roster).to_have_attribute("data-state", "up", timeout=PUSH_MS + 5_000)
-    expect(rows(roster)).to_have_count(4, timeout=PUSH_MS)
+    expect(roster).to_have_attribute("data-state", "up")
+    expect(rows(roster)).to_have_count(4)
     expect(row(roster, R)).to_have_attribute("data-live", "true")
     expect(roster.locator("p[data-line]")).to_have_count(0)
 
@@ -301,7 +298,7 @@ def test_a_failed_read_keeps_the_rows_and_reads_again_on_a_topic_event_or_a_show
     # A new binding is the next topic event, which reads the route again.
     rig.shim(**PLANNER)
     bound(rig, P)
-    expect(roster).to_have_attribute("data-state", "up", timeout=PUSH_MS)
+    expect(roster).to_have_attribute("data-state", "up")
     expect(rows(roster)).to_have_count(5)
     expect(roster.locator("p[data-line]")).to_have_count(0)
     page.route("**" + roster_kit.ROSTER,
@@ -348,7 +345,7 @@ def test_four_503s_in_a_row_show_the_failure_line(shell, ui_contexts):
     began = time.monotonic()
     roster = place_roster(page)
     # Three reads again, 1 s apart, stay loading; the fourth 503 is the failure.
-    expect(roster).to_have_attribute("data-state", "failed", timeout=10_000)
+    expect(roster).to_have_attribute("data-state", "failed")
     assert time.monotonic() - began >= 2.9
     expect(roster.locator('p[data-line="failed"]')).to_have_attribute(
         "title", "comms' page server answered 503")
