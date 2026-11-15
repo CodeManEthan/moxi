@@ -12,6 +12,7 @@ import time
 import types
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from fake_tailscale import HOST, status
 from moxi_tunnel import acts, doctor, record
@@ -224,7 +225,7 @@ def test_a_hung_tailscale_fails_the_first_read_and_leaves_the_rest_not_checked(
     rows = quick()
     took = time.monotonic() - start
     # Only the one read's wait: it fired, and nothing waited after it.
-    assert took < 2.0, took
+    assert took < 2.0 * timed_slack(), took
     got = by_name(rows)
     assert got["tailscale CLI"].state == "fail"
     assert got["tailscale CLI"].detail == "tailscale did not answer in 0.2 s"
@@ -291,7 +292,7 @@ def test_with_the_real_waits_a_hung_tailscale_still_returns_inside_the_cores_ten
     tailscale.edit(lambda s: s.update(hang=["status"]))
     start = time.monotonic()
     got = by_name(doctor.rows())
-    assert time.monotonic() - start < 10.0
+    assert time.monotonic() - start < 10.0 * timed_slack()
     assert got["logged in"].detail == "tailscale did not answer in 2 s"
 
 

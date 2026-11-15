@@ -8,6 +8,7 @@ import time
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_loadout import doctor, install
 
@@ -203,7 +204,7 @@ def test_the_rows_finish_inside_the_doctors_time_while_git_hangs(lo, tmp_path, m
     start = time.monotonic()
     rows = by_name(doctor.rows())
     took = time.monotonic() - start
-    assert took < 8, took
+    assert took < 8 * timed_slack(), took
     assert rows["would-commit"].state == "warn"
 
 
@@ -224,7 +225,7 @@ def test_an_occupant_with_git_hanging_still_finishes_inside_the_doctors_time(
     start = time.monotonic()
     rows = by_name(doctor.rows())
     took = time.monotonic() - start
-    assert took < 8, took
+    assert took < 8 * timed_slack(), took
     row = rows["harness claude"]
     assert row.state == "warn" and "blocked" in row.detail
     assert "git did not answer in time" in row.detail

@@ -818,12 +818,21 @@ class ClaudeShim:
 
     def _on_close(self) -> None:
         with self._lock:
+            # A connection's reader marks it closed before it runs this, so an installed
+            # client that is still connected is not the one closing: this is a declined
+            # register's connection closing after a newer binding was installed, and that
+            # binding stays online. The claim is told under this lock too, as the install
+            # tells it `bound`, so a close that comes first cannot mark it offline after
+            # the install.
+            if self._client is not None and self._client.connected:
+                return
             was_online = not self.offline
             self.offline = True
             released = self.claims.state == claimfile.STANDBY
+            if not released:
+                self.claims.went_offline()
         if released:
             return                   # standby: the name went elsewhere; nothing to say
-        self.claims.went_offline()
         if was_online and not self._stop.is_set():
             # A close this shim made itself (`stop()`) is no outage.
             self._report("offline", OFFLINE_MESSAGE)
@@ -1242,8 +1251,13 @@ class ClaudeShim:
         return [p for p in batch if str(p["message_id"]) in kept], opened.get("digest")
 
     def _flush(self) -> str | None:
+        """The queue as one digest, opened with the daemon and injected. Nothing goes
+        while the shim is offline: at a reconnect the daemon hands waiting mail as soon
+        as it answers `bind`, before the new client is installed, and a digest opened on
+        the old, closed client would be dropped. `offline` turns False under this lock
+        right after the install, so a flush that gets past it opens on the new client."""
         with self._lock:
-            if not self.queue:
+            if self.offline or not self.queue:
                 return None
             batch = sorted(self.queue, key=lambda p: int(p["message_id"]))
             self.queue = []
@@ -1291,11 +1305,14 @@ class ClaudeShim:
         """Interrupt mail into the running turn: one digest of the queued messages whose
         sender asked to interrupt, and only those, rendered with `[interrupt]` on their
         frame lines and handed with `steer`. The rest of the queue waits for the
-        boundary. Returns the digest text, or None when nothing went.
+        boundary. Returns the digest text, or None when nothing went. Like `_flush`, it
+        holds while the shim is offline, and the next tick after a reconnect sends it.
 
         It arms no stall timer: a steer starts no turn, so no turn start would answer
         it. The digest settles on its own (`settle_steered`)."""
         with self._lock:
+            if self.offline:
+                return None
             batch = [p for p in self.queue if p.get("interrupt")]
             if not batch:
                 return None

@@ -253,7 +253,7 @@ def test_the_changed_line_sits_above_the_recents(page):
 
 
 def test_where_the_default_is_the_terminal_a_click_copies_the_recents_command(context, fake, shell):
-    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    kit.ready_copying(context)
     page = context.pages[0]
     fake.script(supported={"ok": False, "why": "tmux is not on PATH"})
     piece = kit.open_home(page)
@@ -266,7 +266,7 @@ def test_where_the_default_is_the_terminal_a_click_copies_the_recents_command(co
     body = run_again(page, piece)
     assert body["values"]["target"] == "terminal" and "slot" in body["leave_out"], body
     expect(piece.locator('.said [data-line="copied"]')).to_have_text(COPIED)
-    command = page.evaluate("navigator.clipboard.readText()")
+    command = kit.copied(page)
     assert command.startswith("moxi launcher run ") and brief in command, command
     assert len(fake.starts()) == before
 

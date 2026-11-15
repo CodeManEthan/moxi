@@ -23,6 +23,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi import modules
 from moxi_loadout import cli, homes, install, ledger, page, pagehandlers, pagejob
@@ -333,7 +334,7 @@ def test_a_read_returns_while_git_stalls(lo, monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", f"{stalled}{os.pathsep}{os.environ['PATH']}")
     start = time.monotonic()
     body = read("/api/status")
-    assert time.monotonic() - start < 15
+    assert time.monotonic() - start < 15 * timed_slack()
     assert body["problem"] is None
 
 

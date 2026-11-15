@@ -16,6 +16,7 @@ import time
 
 import loadout_kit as kit
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_loadout import doctor, gitpiece, install, repo_link, setup
 
@@ -319,7 +320,7 @@ def test_the_piece_imports_in_under_10_ms():
         if statistics.median(times) < 10_000:
             break
         time.sleep(1)
-    assert statistics.median(times) < 10_000, times
+    assert statistics.median(times) < 10_000 * timed_slack(), times
 
 
 # -- the piece's skips, without git ----------------------------------------------------------

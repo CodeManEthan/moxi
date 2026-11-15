@@ -69,8 +69,10 @@ def test_only_new_state_of_opencodes_own_written_during_the_run_is_removed(check
 
 def test_it_refuses_while_another_opencode_runs(check, tmp_path, capsys):
     fake = tmp_path / "opencode"
-    shutil.copy(shutil.which("sleep"), fake)
-    proc = subprocess.Popen([str(fake), "30"], stdin=subprocess.DEVNULL)
+    # A shell ignores the name it runs under, and `read` is a builtin, so the stand-in
+    # waits on its stdin with no child until the kill.
+    shutil.copy("/bin/sh", fake)
+    proc = subprocess.Popen([str(fake), "-c", "read _"], stdin=subprocess.PIPE)
     try:
         time_limit = time.monotonic() + 5
         while time.monotonic() < time_limit and not any(
@@ -82,6 +84,7 @@ def test_it_refuses_while_another_opencode_runs(check, tmp_path, capsys):
     finally:
         proc.kill()
         proc.wait()
+        proc.stdin.close()
 
 
 def test_an_opencode_that_starts_during_the_check_means_nothing_is_removed(

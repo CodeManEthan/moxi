@@ -272,7 +272,9 @@ def test_the_foot_says_when_the_sessions_were_read_and_the_files_by_harness(seed
         re.compile(rf"^Sessions read {WHEN} · 2 files: Claude 2$"))
     expect(foot.get_by_role("button", name="Read new sessions")).to_be_visible()
     # The foot closes the page: the filter line, the chart and the sections sit between
-    # Cost and it.
+    # Cost and it. The chart and the sections are drawn once their reads answer, which
+    # may be after the foot's.
+    expect(panel.locator("[data-part=below]")).to_have_count(1)
     order = panel.evaluate("""el => [...el.shadowRoot.children].map((node) =>
         node.dataset && node.dataset.part || node.localName)""")
     assert order[-4:] == ["top", "filters", "below", "foot"], order

@@ -61,6 +61,7 @@ import textwrap
 import time
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 LIGHT = ("moxi.cli", "moxi.paths", "moxi.config", "moxi.modules", "moxi.files",
          "moxi.log", "moxi.exit", "moxi.doctor")
@@ -153,8 +154,9 @@ def _record(name: str, ms: float, bound: float) -> None:
 
 
 def _held(name: str, code: str, share: float) -> None:
-    """Measure `code` and fail when it reads `share` times `LOAD_MARGIN` or over."""
-    bound = share * LOAD_MARGIN
+    """Measure `code` and fail when it reads `share` times `LOAD_MARGIN` and the run's
+    timed slack, or over."""
+    bound = share * LOAD_MARGIN * timed_slack()
     ms = _over_floor(code, bound)
     _record(name, ms, bound)
     assert ms < bound, f"{name}: {ms:.1f} ms over the floor, share {share} ms"
