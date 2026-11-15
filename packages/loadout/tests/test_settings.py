@@ -1,0 +1,34 @@
+"""loadout's settings schema with its page fields, as `moxi config loadout show --json`
+prints it."""
+
+from __future__ import annotations
+
+import json
+
+from moxi import cli
+from moxi.config import Schema
+
+
+def show_json(capsys) -> dict:
+    capsys.readouterr()
+    assert cli.main(["config", "loadout", "show", "--json"]) == 0
+    return {key["name"]: key for key in json.loads(capsys.readouterr().out)}
+
+
+def test_the_schema_passes_the_cores_check_with_its_page_fields():
+    Schema.from_resource("moxi_loadout", "settings.toml")
+
+
+def test_show_json_gives_every_key_a_label(capsys):
+    keys = show_json(capsys)
+    assert {name: key["label"] for name, key in keys.items()} == {
+        "source": "Loadout folder", "reinstall_on_commit": "Reinstall on a commit",
+        "backups.keep": "Keep backups of each harness file",
+        "project_folders": "Project folders"}
+    assert keys["source"]["line"] == (
+        "Holds loadout.toml. Not set: the folder in loadout's data directory.")
+    assert {name: key["unit"] for name, key in keys.items() if key["unit"]} == {
+        "backups.keep": "backups"}
+    for key in keys.values():
+        assert key["common"] is False and key["group"] is None and key["hurts"] is None
+        assert key["choices"] is None and key["elsewhere"] is None
