@@ -304,13 +304,15 @@ export class ProjectsPage extends LitElement {
   #told: string | null = null;
 
   // The list's choices: the find field, the kind filter, the `Earlier` fold shown, and the
-  // keys in the order last drawn, so the open row keeps its place.
+  // keys in the order last drawn, so the open row keeps its place, with whether that draw
+  // was by key while the first order was held.
   #typed = "";
   #kind: string | null = null;
   #earlierShown = false;
   /** `Show` was pressed under the folders that are not projects. */
   #foldersShown = false;
   #order: string[] = [];
+  #orderWasHeld = true;
 
   // The facts: the shell's module list as last heard (undefined before it is), the hidden
   // host, the components placed and being placed by module, each component's element name
@@ -718,6 +720,10 @@ export class ProjectsPage extends LitElement {
     const reports = this.#reports.reports();
     const placed = this.#modules === undefined ? null : this.#facts.size + this.#placing.size;
     const held = this.#first.held(placed, this.#reports.reported, Date.now());
+    // The open row keeps the place it was drawn at, but not a place by key from before the
+    // first order: a row opened by its address takes its place in that order when it applies.
+    const previous = this.#orderWasHeld ? [] : this.#order;
+    this.#orderWasHeld = held;
     const open = state.acts ? this.#open : null;
     const now = Date.now() / 1000;
     const folders = listing === null ? null : folderGroup(reports, {
@@ -733,7 +739,7 @@ export class ProjectsPage extends LitElement {
           <button type="button" class="x" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button></div>
           ${folders !== null ? html`<div class="grps">${this.#foldersPart(folders, true)}</div>` : nothing}` : nothing
         : this.#rows(listing, listView(listing.projects, { home: listing.home, reports, open, now },
-                                       { find: this.#typed, kind: this.#kind, held, previous: this.#order }), folders,
+                                       { find: this.#typed, kind: this.#kind, held, previous }), folders,
                      state.acts)}
       ${this.#unknown !== null && state.acts ? html`<p class="foot" data-line="unknown">${noSuchProject(this.#unknown)}</p>`
         : nothing}

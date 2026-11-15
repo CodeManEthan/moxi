@@ -253,7 +253,8 @@ export interface ListAsk {
   kind: string | null;
   /** The first order is still held. */
   held: boolean;
-  /** The keys in the order last drawn, so the open row keeps its place. */
+  /** The keys in the order last drawn, so the open row keeps its place; none while that
+   * draw was by key with the first order held, so the open row takes its own place. */
   previous: readonly string[];
 }
 

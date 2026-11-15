@@ -206,6 +206,17 @@ def test_the_fixtures_times_order_the_list_with_bad_news_first(fixture_shell, fi
         expect(line_two(item)).to_be_visible()
 
 
+@pytest.mark.parametrize("route", ["open/kestrel-web", "edit/kestrel-web", "remove/harbor-infra"])
+def test_a_row_opened_by_its_address_takes_its_place_once_the_first_order_applies(
+        fixture_shell, fixture_page, route):
+    kit.say(fixture_shell, kit.full_report(fixture_shell))
+    fixture_page.goto(f"/m/projects/{route}")
+    panel = fixture_page.locator("#moxi-panel > moxi-projects-page")
+    expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
+    expect(row(panel, route.split("/")[1])).to_have_attribute("open", "")
+    expect_order(panel, BY_ACTIVITY)
+
+
 def test_a_failed_read_draws_the_list_without_the_fixtures_parts(fixture_shell, fixture_page):
     kit.say(fixture_shell, kit.full_report(fixture_shell))
     panel = open_list(fixture_page)
