@@ -16,7 +16,17 @@ value, its source, and a mark saying when a change applies. A value travels as t
 command line spells it (`true`, `8460`, the plain string, or one TOML value for a list or
 table), since a route's answer is cut to one declared type per field; the form sends the
 same spelling back. A switch table carries one toggle per entry, each named
-`<table key>.<entry>`.
+`<table key>.<entry>`. Each key also carries its page fields as `show --json` gives them
+(`label`, `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal`,
+`elsewhere`), its value as JSON text (`json`), and `changed`: true when the value is not
+the default (a switch table: when any entry is on).
+
+The read answers `listed`, the core and every present module with settings, from the
+module snapshot alone. A section adds `file`, the module's config file with the home
+folder written `~`, and `count`, its drawn keys: every key but one whose `needs` module is
+absent, one edited on another page (`elsewhere`), and ui's `gateway.*` keys, which the
+page counts itself while it shows the phone's group. A `module` the listing doesn't hold
+is answered with no section, and no command runs for it.
 
 A write that `moxi config` refuses (exit 2 or 3) is a 422 with the command's text and fix;
 a settings file that stays locked (exit 75) is a 409. Exit 1 means the value was written
@@ -46,7 +56,7 @@ from typing import Any
 
 from moxi import proc
 from moxi.names import HARNESS, is_module_name
-from moxi.paths import python
+from moxi.paths import Layout, core, home, python
 from moxi_ui.loopback.api import Conflict, Field, Out, Refused, Route
 
 __all__ = [
@@ -61,6 +71,9 @@ __all__ = [
     "change",
     "change_argv",
     "descriptor",
+    "file_of",
+    "is_changed",
+    "is_drawn",
     "is_locked",
     "locked_entries",
     "logins_of",
@@ -91,6 +104,9 @@ MARK_LOGIN_DARWIN = "from the next login"
 MARK_LOGIN_WINDOWS = ("the shell starts at every logon on Windows; this switch doesn't change "
                       "that")
 
+#: ui's keys the page draws in its phone's group, not among the module's rows.
+PHONE_KEYS = "gateway."
+
 _HERE = "moxi_ui.settings"
 _BARE_KEY = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
@@ -118,14 +134,25 @@ KEY_SHAPE = Out("table", items={
     "needs_absent": Out("bool"), "switch_table": Out("bool"),
     "entries": Out("list", nullable=True, items=_ENTRY),
     "declarations": _STRING, "reason": _STRING, "locked": Out("bool"),
+    "label": _STRING, "line": _STRING, "common": Out("bool"), "group": _STRING,
+    "unit": _STRING,
+    "choices": Out("list", nullable=True, items=Out("table", items={
+        "value": Out("string"), "words": Out("string")})),
+    "pick": Out("bool"),
+    "hurts": Out("table", nullable=True, items={
+        "when": Out("string"), "says": Out("string"), "confirm": Out("string"),
+        "stays": Out("bool")}),
+    "terminal": Out("table", nullable=True, items={"on": Out("string"), "off": Out("string")}),
+    "elsewhere": _STRING, "json": Out("string"), "changed": Out("bool"),
 })
 
 SECTION_SHAPE = Out("table", items={
     "module": Out("string"), "keys": Out("list", items=KEY_SHAPE), "error": _STRING,
-    "fix": _STRING, "readonly": Out("bool"),
+    "fix": _STRING, "readonly": Out("bool"), "file": _STRING, "count": Out("int"),
 })
 
-SETTINGS_SHAPE = {"sections": Out("list", items=SECTION_SHAPE), "error": _STRING}
+SETTINGS_SHAPE = {"sections": Out("list", items=SECTION_SHAPE), "listed": _STRINGS,
+                  "error": _STRING}
 
 CHANGE_SHAPE = {"ok": Out("bool"), "lines": _STRINGS, "warning": _STRING, "fix": _STRING}
 
@@ -283,25 +310,100 @@ def _entries(module: str, table: str, items: Any,
     return entries
 
 
+def _page_fields(item: Mapping[str, Any]) -> dict[str, Any]:
+    """The key's page fields from `show --json`, each in its declared shape; a field an
+    older core doesn't print, or one of the wrong shape, reads as absent."""
+    choices = item.get("choices")
+    rows = None
+    if isinstance(choices, list):
+        rows = [{"value": row["value"], "words": row["words"]} for row in choices
+                if isinstance(row, Mapping) and isinstance(row.get("value"), str)
+                and isinstance(row.get("words"), str)]
+    hurts, terminal = item.get("hurts"), item.get("terminal")
+    if not (isinstance(hurts, Mapping) and all(isinstance(hurts.get(part), str)
+                                               for part in ("when", "says", "confirm"))):
+        hurts = None
+    else:
+        hurts = {"when": hurts["when"], "says": hurts["says"], "confirm": hurts["confirm"],
+                 "stays": hurts.get("stays") is True}
+    if not (isinstance(terminal, Mapping) and isinstance(terminal.get("on"), str)
+            and isinstance(terminal.get("off"), str)):
+        terminal = None
+    else:
+        terminal = {"on": terminal["on"], "off": terminal["off"]}
+    return {
+        "label": _text(item.get("label")), "line": _text(item.get("line")),
+        "common": item.get("common") is True, "group": _text(item.get("group")),
+        "unit": _text(item.get("unit")), "choices": rows, "pick": item.get("pick") is True,
+        "hurts": hurts, "terminal": terminal, "elsewhere": _text(item.get("elsewhere")),
+    }
+
+
+def _json_text(value: Any) -> str:
+    """`value` as JSON text; a float JSON can't hold (nan, inf) as `null`."""
+    try:
+        return json.dumps(value, ensure_ascii=False, allow_nan=False)
+    except ValueError:
+        return "null"
+
+
+def _path_default(default: Any, env: Mapping[str, str] | None) -> Any:
+    """A `path` key's default as its value reads: none when empty, a leading `~` expanded
+    to the home folder `env` places."""
+    if not isinstance(default, str) or default == "":
+        return None
+    if default == "~" or default.startswith("~/"):
+        try:
+            return str(home(env)) + default[1:]
+        except LookupError:
+            return default
+    return default
+
+
+def is_changed(item: Mapping[str, Any], *, env: Mapping[str, str] | None = None) -> bool:
+    """Whether the key `show --json` printed as `item` holds a value other than its
+    default. A switch table is changed when any entry is on, since a missing entry reads
+    off."""
+    if item.get("switch_table") is True:
+        entries = item.get("entries")
+        return isinstance(entries, list) and any(
+            isinstance(entry, Mapping) and entry.get("value") is True for entry in entries)
+    default = item.get("default")
+    if item.get("type") == "path":
+        default = _path_default(default, env)
+    return item.get("value") != default
+
+
+def is_drawn(module: str, key: Mapping[str, Any]) -> bool:
+    """Whether the page draws descriptor `key` among `module`'s rows: not when it needs an
+    absent module, not when another page edits it, and not ui's `gateway.*` keys, which
+    the phone's group draws."""
+    if key.get("needs_absent") or key.get("elsewhere"):
+        return False
+    return not (module == "ui" and str(key.get("name")).startswith(PHONE_KEYS))
+
+
 def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] = (),
                present: Iterable[str] | None = None, platform: str | None = None,
                logins: Mapping[str, str | None] | None = None,
-               locked: Iterable[str] = ()) -> dict[str, Any]:
+               locked: Iterable[str] = (),
+               env: Mapping[str, str] | None = None) -> dict[str, Any]:
     """One key of `moxi config <module> show --json` as the view's field descriptor.
 
     `switches` are the keys the module's daemons name as their `switch`; `logins` those
     they name in a login-switch `start`, with what starts the daemon now; `present` the
     modules installed and present (None: not known, so no key is marked as needing an
-    absent one); `locked` the entries the shell's pages may not change."""
+    absent one); `locked` the entries the shell's pages may not change; `env` the
+    environment `moxi config` ran in, whose home a `path` key's `~` default reads."""
     platform = platform or sys.platform
     locked = frozenset(locked)
     name = str(item.get("name"))
     type_ = str(item.get("type"))
     source = item.get("source") if isinstance(item.get("source"), str) else "default"
-    env, needs = _text(item.get("env")), _text(item.get("needs"))
+    variable, needs = _text(item.get("env")), _text(item.get("needs"))
     note = None
-    if source == "env" and env:
-        note = f"set by {env} in the shell's environment, which wins over the file"
+    if source == "env" and variable:
+        note = f"set by {variable} in the shell's environment, which wins over the file"
     needs_absent = bool(needs and present is not None and needs not in set(present))
     if needs_absent:
         note = f"works only with the {needs} module, which is not installed"
@@ -312,7 +414,7 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
         "doc": item.get("doc") if isinstance(item.get("doc"), str) else "",
         "values": _strings(item.get("values")),
         "read": item.get("read") if isinstance(item.get("read"), str) else "start",
-        "env": env, "needs": needs, "items": _text(item.get("items")),
+        "env": variable, "needs": needs, "items": _text(item.get("items")),
         "value": spell(item.get("value"), type_),
         "value_items": _strings(item.get("value")) if type_ == "list" else None,
         "source": source,
@@ -325,6 +427,9 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
         "declarations": None,
         "reason": None,
         "locked": is_locked(module, name, locked),
+        **_page_fields(item),
+        "json": _json_text(item.get("value")),
+        "changed": is_changed(item, env=env),
     }
     if switch_table and item.get("declarations") == "unavailable":
         out["declarations"] = "unavailable"
@@ -373,10 +478,27 @@ def _stderr_text(data: bytes | str | None) -> str:
     return text.removeprefix("moxi: ") if text else ""
 
 
+def file_of(module: str, env: Mapping[str, str] | None = None) -> str | None:
+    """`module`'s config file as `env` places it, with the home folder written `~`; None
+    for a name that is not a module's."""
+    if not _valid_module(module):
+        return None
+    layout = core() if module == HARNESS else Layout(module)
+    path = str(layout.config_file(env))
+    try:
+        root = str(home(env)).rstrip("/\\")
+    except LookupError:
+        return path
+    if root and path.startswith(root) and path[len(root):len(root) + 1] in ("/", "\\"):
+        return "~" + path[len(root):]
+    return path
+
+
 def _section(module: str, *, keys: Sequence[dict[str, Any]] = (), error: str | None = None,
-             fix: str | None = None) -> dict[str, Any]:
+             fix: str | None = None, env: Mapping[str, str] | None = None) -> dict[str, Any]:
     return {"module": module, "keys": list(keys), "error": error, "fix": fix,
-            "readonly": error is not None}
+            "readonly": error is not None, "file": file_of(module, env),
+            "count": sum(1 for key in keys if is_drawn(module, key))}
 
 
 def _valid_module(module: str) -> bool:
@@ -396,29 +518,29 @@ def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
     try:
         done = run(show_argv(module), timeout_s=CONFIG_TIMEOUT, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
-        return _section(module, error=f"moxi config {module} show ran past "
-                                      f"{CONFIG_TIMEOUT:g} s")
+        return _section(module, env=env, error=f"moxi config {module} show ran past "
+                                               f"{CONFIG_TIMEOUT:g} s")
     except OSError as exc:
-        return _section(module, error=f"moxi config could not run: {exc}")
+        return _section(module, env=env, error=f"moxi config could not run: {exc}")
     try:
         data = json.loads(done.stdout)
     except (ValueError, TypeError):
         data = None
     if isinstance(data, Mapping) and isinstance(data.get("error"), str):
         # The file won't parse: the section is read-only and says why.
-        return _section(module, error=data["error"], fix=_text(data.get("fix")))
+        return _section(module, env=env, error=data["error"], fix=_text(data.get("fix")))
     if not isinstance(data, list):
         text = _stderr_text(done.stderr) or f"moxi config {module} show exited " \
                                              f"{done.returncode} with no answer"
-        return _section(module, error=text)
+        return _section(module, env=env, error=text)
     listing = listing or {}
     own = listing.get(module) or {}
     present = ([name for name, entry in listing.items() if entry.get("state") == "present"]
                if listing else None)
     keys = [descriptor(module, item, switches=switches_of(own), present=present,
-                       platform=platform, logins=logins_of(own), locked=locked)
+                       platform=platform, logins=logins_of(own), locked=locked, env=env)
             for item in data if isinstance(item, Mapping) and isinstance(item.get("name"), str)]
-    return _section(module, keys=keys)
+    return _section(module, keys=keys, env=env)
 
 
 def change(module: str, key: str, *, value: str | None = None, add: str | None = None,
@@ -490,16 +612,18 @@ async def _listing(shell: Any) -> tuple[list[dict[str, Any]], str | None]:
 
 
 async def read(call: Any) -> dict[str, Any]:
-    """`GET /api/settings`: every section, or the one `module` names."""
+    """`GET /api/settings`: the listed modules and every section, or the one `module`
+    names when it is listed; an unlisted `module` gets no section and runs nothing."""
     from moxi import aio
 
     from .page import current
 
     shell = current()
-    listed, error = await _listing(shell)
-    by_name = {entry["name"]: entry for entry in listed}
+    listing, error = await _listing(shell)
+    by_name = {entry["name"]: entry for entry in listing}
+    listed = section_modules(listing)
     module = call.query.get("module")
-    modules = [module] if module is not None else section_modules(listed)
+    modules = listed if module is None else [name for name in listed if name == module]
     cwd, env = str(shell.layout.runtime_dir()), shell.starters.child_env()
     locked = _locked_now()
     gate = asyncio.Semaphore(READS_AT_ONCE)
@@ -510,7 +634,7 @@ async def read(call: Any) -> dict[str, Any]:
                                                           listing=by_name, locked=locked))
 
     sections = await asyncio.gather(*(one(name) for name in modules))
-    return {"sections": list(sections), "error": error}
+    return {"sections": list(sections), "listed": listed, "error": error}
 
 
 def _change(call: Any, *, unset: bool) -> dict[str, Any]:
