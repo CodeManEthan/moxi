@@ -99,7 +99,8 @@ STEPS = ("""
         repo TEXT NOT NULL,
         target TEXT NOT NULL,
         landing TEXT NOT NULL,
-        target_before TEXT,
+        target_before TEXT NOT NULL,
+        tip TEXT NOT NULL,
         PRIMARY KEY (project, slug, position)
     );
     CREATE INDEX landings_by_target ON landings (repo, target);
@@ -518,7 +519,8 @@ def _stored(conn, project: str, slug: str) -> _Stored | None:
                       conn.execute("SELECT kind, id, body FROM items WHERE project = ? "
                                    "AND slug = ? ORDER BY position", (project, slug)))
         landed = tuple(builds.Landing(*found) for found in conn.execute(
-            "SELECT stage, build, n, repo, target, landing, target_before FROM landings "
+            "SELECT stage, build, n, repo, target, landing, target_before, tip "
+            "FROM landings "
             "WHERE project = ? AND slug = ? ORDER BY position", (project, slug)))
     except (sqlite3.Error, ValueError):
         return None
@@ -572,9 +574,9 @@ def _put(conn, row: _Row, folder: Path, *, seen_at: str, changed_since: str | No
          for position, item in enumerate(row.items)])
     conn.executemany(
         "INSERT INTO landings (project, slug, position, stage, build, n, repo, target, "
-        "landing, target_before) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "landing, target_before, tip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [(row.project, row.slug, position, one.stage, one.build, one.n, one.repo,
-          one.target, one.landing, one.target_before)
+          one.target, one.landing, one.target_before, one.tip)
          for position, one in enumerate(row.landings)])
 
 

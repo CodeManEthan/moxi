@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from moxi_rounds import builds, log, state
-from moxi_rounds.builds import BUILDING, DROPPED, EMPTY, FINISHED, GONE, UNCLEAR
+from moxi_rounds.builds import BUILDING, DROPPED, EMPTY, FINISHED, GONE, MERGED, UNCLEAR
 from moxi_rounds.gitreads import Git
 
 
@@ -30,6 +30,11 @@ class Round:
         self.add("check.ran", stage=stage, step="check", commit=commit,
                  merge_base=merge_base, argv=["true"], exit_code=0, duration_s=1.0)
 
+    def land(self, landing, *, before, tip, stage="B1", state_="ok") -> None:
+        """Record a finish's merge for the build of `stage`."""
+        self.add("finish.action", stage=stage, tip=tip, id="merge", kind="merge",
+                 state=state_, landing=landing, target_before=before)
+
     def build(self, stage="B1") -> builds.Build:
         return builds.current(state.fold(log.read(self.path)), stage)
 
@@ -41,6 +46,12 @@ def a_round(tmp_path) -> Round:
 
 def read(a_round, git_repo, stage="B1", **more) -> builds.Status:
     return builds.read(a_round.build(stage), Git(git_repo.root), **more)
+
+
+def another(landing: str, *, before: str, tip: str, target="main") -> builds.Landing:
+    """A landing on record for a build of another round."""
+    return builds.Landing(stage="B9", build=7, n=9, repo="proj-a", target=target,
+                          landing=landing, target_before=before, tip=tip)
 
 
 # -- the records of a build ------------------------------------------------------------------
@@ -84,11 +95,13 @@ def test_a_merge_made_or_found_by_a_finish_is_a_landing_of_its_build(a_round):
     a_round.add("finish.action", stage="B1", tip="b" * 40, id="push", kind="push",
                 state="ok", landing="5" * 40)
     a_round.add("finish.action", stage="B1", tip="b" * 40, id="merge", kind="merge",
-                state="ok", landing="not a commit")
+                state="ok", landing="not a commit", target_before="a" * 40)
+    a_round.add("finish.action", stage="B1", tip="b" * 40, id="merge", kind="merge",
+                state="ok", landing="6" * 40)
     landed = a_round.build().landings
-    assert [(one.landing, one.target_before, one.repo, one.target, one.build)
-            for one in landed] == [("3" * 40, "a" * 40, "proj-a", "release", 2),
-                                   ("4" * 40, "a" * 40, "proj-a", "release", 2)]
+    assert [(one.landing, one.target_before, one.tip, one.repo, one.target, one.build)
+            for one in landed] == [("3" * 40, "a" * 40, "b" * 40, "proj-a", "release", 2),
+                                   ("4" * 40, "a" * 40, "b" * 40, "proj-a", "release", 2)]
     assert builds.landings(state.fold(log.read(a_round.path))) == landed
 
 
@@ -137,13 +150,14 @@ def test_a_branch_with_work_the_target_lacks_reads_building(a_round, git_repo):
     assert (status.state, status.head, status.merge_base) == (BUILDING, tip, base)
 
 
-def test_a_branch_with_no_commit_of_its_own_is_on_the_target(a_round, git_repo):
+def test_a_branch_with_no_commit_of_its_own_reads_empty_at_its_base(a_round, git_repo):
     a_round.commission(base=git_repo.rev("main"))
     git_repo.switch("work", new_from="main")
     git_repo.switch("main")
     git_repo.commit("target-only.txt")
     status = read(a_round, git_repo)
-    assert (status.state, status.by) == (None, builds.ON_TARGET)
+    assert (status.state, status.by, status.own_commits) == (EMPTY, builds.NOTHING_OWN,
+                                                             False)
 
 
 def test_a_commit_and_its_revert_read_empty_with_commits_of_its_own(a_round, git_repo):
@@ -180,7 +194,7 @@ def test_a_branch_and_a_target_with_slashes_in_their_names_are_read(a_round, git
     assert read(a_round, git_repo).state == BUILDING
 
 
-def test_a_branch_fast_forwarded_onto_the_target_is_left_to_the_landing_rules(
+def test_the_target_fast_forwarded_onto_a_branch_with_no_reading_reads_unclear(
         a_round, git_repo):
     a_round.commission(base=git_repo.rev("main"))
     git_repo.switch("work", new_from="main")
@@ -188,7 +202,7 @@ def test_a_branch_fast_forwarded_onto_the_target_is_left_to_the_landing_rules(
     git_repo.switch("main")
     git_repo.git("merge", "-q", "--ff-only", "work")
     status = read(a_round, git_repo)
-    assert (status.state, status.by, status.head) == (None, builds.ON_TARGET, tip)
+    assert (status.state, status.by, status.head) == (UNCLEAR, builds.FAST_FORWARD, tip)
 
 
 def test_a_missing_target_branch_is_refused_by_name(a_round, git_repo):
@@ -249,21 +263,21 @@ def test_a_hand_merged_deleted_branch_is_read_at_what_was_merged(a_round, git_re
     git_repo.merge("work")
     git_repo.git("branch", "-D", "work")
     status = read(a_round, git_repo)
-    assert (status.state, status.by, status.head) == (None, builds.ON_TARGET, merged)
+    assert (status.state, status.by, status.head) == (MERGED, builds.HAND_MERGE, merged)
 
 
-def test_a_head_brought_in_by_a_landing_stays_the_recorded_one(a_round, git_repo):
+def test_a_head_brought_in_by_another_build_s_landing_stays_the_recorded_one(a_round, git_repo):
     base = git_repo.rev("main")
     a_round.commission(base=base)
     git_repo.switch("work", new_from="main")
     checked = git_repo.commit("feature.txt")
     a_round.check(checked, base)
-    git_repo.commit("after-the-check.txt")
+    tip = git_repo.commit("after-the-check.txt")
     git_repo.switch("main")
     landing = git_repo.merge("work")
     git_repo.git("branch", "-D", "work")
-    status = read(a_round, git_repo, landings={landing})
-    assert (status.state, status.head) == (None, checked)
+    status = read(a_round, git_repo, landings=[another(landing, before=base, tip=tip)])
+    assert (status.state, status.by, status.head) == (EMPTY, builds.NOTHING_OWN, checked)
 
 
 def test_an_octopus_merge_whose_two_other_parents_hold_the_head_reads_unclear(
@@ -379,4 +393,239 @@ def test_a_deleted_branch_fast_forwarded_onto_the_target_is_read_at_its_recorded
     git_repo.commit("later.txt")
     git_repo.git("branch", "-D", "work")
     status = read(a_round, git_repo)
-    assert (status.state, status.by, status.head) == (None, builds.ON_TARGET, checked)
+    assert (status.state, status.by, status.head, status.target_before) == (
+        MERGED, builds.FAST_FORWARD, checked, base)
+
+
+# -- on the target ------------------------------------------------------------------------------
+
+def work_on(git_repo, name="feature.txt", branch="work") -> str:
+    """Cut `branch` from main, commit `name` on it, and give its tip."""
+    git_repo.switch(branch, new_from="main")
+    return git_repo.commit(name)
+
+
+def test_a_build_its_own_finish_merged_reads_merged_with_the_target_before_it(
+        a_round, git_repo):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    tip = work_on(git_repo)
+    git_repo.switch("main")
+    git_repo.commit("target-only.txt")
+    before = git_repo.rev()
+    landing = git_repo.merge("work")
+    a_round.land(landing, before=before, tip=tip)
+    git_repo.commit("later.txt")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by, status.target_before) == (
+        MERGED, builds.OWN_LANDING, before)
+
+
+@pytest.mark.parametrize("newer_first", [False, True])
+def test_of_two_landings_the_one_the_head_landed_under_is_read(a_round, git_repo,
+                                                               newer_first):
+    a_round.commission(base=git_repo.rev("main"))
+    first_tip = work_on(git_repo)
+    git_repo.switch("main")
+    first_before = git_repo.rev()
+    first = (git_repo.merge("work"), first_before, first_tip)
+    git_repo.switch("work")
+    second_tip = git_repo.commit("more.txt")
+    git_repo.switch("main")
+    git_repo.commit("target-only.txt")
+    second_before = git_repo.rev()
+    second = (git_repo.merge("work"), second_before, second_tip)
+    for landing, before, tip in ((second, first) if newer_first else (first, second)):
+        a_round.land(landing, before=before, tip=tip)
+    status = read(a_round, git_repo)
+    assert (status.state, status.by, status.target_before) == (
+        MERGED, builds.OWN_LANDING, second_before)
+
+
+def test_a_head_under_none_of_two_landings_reads_unclear(a_round, git_repo):
+    a_round.commission(base=git_repo.rev("main"))
+    tip = work_on(git_repo)
+    git_repo.switch("main")
+    before = git_repo.rev()
+    landing = git_repo.merge("work")
+    a_round.land(landing, before=before, tip=tip)
+    a_round.land(landing, before=before, tip=tip, state_="found")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by) == (UNCLEAR, builds.NO_LANDING)
+
+
+def test_a_branch_moved_onto_a_finished_build_s_tip_reads_empty(a_round, git_repo):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    other_tip = work_on(git_repo, branch="other")
+    git_repo.git("branch", "-f", "work", other_tip)
+    git_repo.switch("main")
+    landing = git_repo.merge("other")
+    status = read(a_round, git_repo,
+                  landings=[another(landing, before=base, tip=other_tip)])
+    assert (status.state, status.by) == (EMPTY, builds.NOTHING_OWN)
+
+
+@pytest.mark.parametrize("fast_forward", [False, True])
+def test_an_empty_branch_fast_forwarded_onto_other_builds_landings_reads_empty(
+        a_round, git_repo, fast_forward):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    git_repo.git("branch", "work", "main")
+    other_tip = work_on(git_repo, branch="other")
+    git_repo.switch("main")
+    if fast_forward:
+        git_repo.git("merge", "-q", "--ff-only", "other")
+        landing = other_tip
+    else:
+        landing = git_repo.merge("other")
+    git_repo.git("branch", "-f", "work", "main")
+    status = read(a_round, git_repo,
+                  landings=[another(landing, before=base, tip=other_tip)])
+    assert (status.state, status.by) == (EMPTY, builds.NOTHING_OWN)
+
+
+def test_an_empty_branch_fast_forwarded_onto_a_direct_commit_too_reads_unclear(
+        a_round, git_repo):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    git_repo.git("branch", "work", "main")
+    other_tip = work_on(git_repo, branch="other")
+    git_repo.switch("main")
+    landing = git_repo.merge("other")
+    git_repo.commit("straight-on-the-target.txt")
+    git_repo.git("branch", "-f", "work", "main")
+    status = read(a_round, git_repo,
+                  landings=[another(landing, before=base, tip=other_tip)])
+    assert (status.state, status.by) == (UNCLEAR, builds.FAST_FORWARD)
+
+
+def test_a_reading_that_landed_under_another_build_s_landing_credits_nothing(
+        a_round, git_repo):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    other_tip = work_on(git_repo, branch="other")
+    git_repo.git("branch", "-f", "work", other_tip)
+    a_round.check(other_tip, base)
+    git_repo.switch("main")
+    git_repo.git("merge", "-q", "--ff-only", "other")
+    git_repo.commit("straight-on-the-target.txt")
+    git_repo.git("branch", "-f", "work", "main")
+    status = read(a_round, git_repo,
+                  landings=[another(other_tip, before=base, tip=other_tip)])
+    assert (status.state, status.by) == (UNCLEAR, builds.FAST_FORWARD)
+
+
+def test_the_target_fast_forwarded_onto_a_checked_branch_reads_merged_at_the_newest_x(
+        a_round, git_repo):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    first = work_on(git_repo)
+    a_round.check(first, base)
+    git_repo.switch("main")
+    moved = git_repo.commit("target-only.txt")
+    git_repo.switch("work")
+    git_repo.merge("main")
+    a_round.check(git_repo.rev(), moved)
+    git_repo.switch("main")
+    git_repo.git("merge", "-q", "--ff-only", "work")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by, status.target_before) == (
+        MERGED, builds.FAST_FORWARD, moved)
+
+
+def test_a_hand_merge_that_changed_the_target_reads_merged_at_its_first_parent(
+        a_round, git_repo):
+    a_round.commission(base=git_repo.rev("main"))
+    work_on(git_repo)
+    git_repo.switch("main")
+    before = git_repo.commit("target-only.txt")
+    merge = git_repo.merge("work")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by, status.target_before, status.hand_merge) == (
+        MERGED, builds.HAND_MERGE, before, merge)
+
+
+def test_a_hand_merge_reverted_later_still_reads_merged(a_round, git_repo):
+    a_round.commission(base=git_repo.rev("main"))
+    work_on(git_repo)
+    git_repo.switch("main")
+    git_repo.merge("work")
+    git_repo.git("revert", "--no-edit", "-m", "1", "HEAD")
+    assert read(a_round, git_repo).state == MERGED
+
+
+def test_a_hand_merge_with_ours_reads_unclear(a_round, git_repo):
+    a_round.commission(base=git_repo.rev("main"))
+    work_on(git_repo)
+    git_repo.switch("main")
+    git_repo.merge("work", "-s", "ours")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by) == (UNCLEAR, builds.HAND_MERGE)
+
+
+def test_a_hand_merge_of_a_branch_that_changed_nothing_reads_empty(a_round, git_repo):
+    a_round.commission(base=git_repo.rev("main"))
+    work_on(git_repo)
+    git_repo.git("revert", "--no-edit", "HEAD")
+    git_repo.switch("main")
+    git_repo.commit("target-only.txt")
+    git_repo.merge("work")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by) == (EMPTY, builds.HAND_MERGE)
+
+
+def test_a_criss_cross_at_a_hand_merge_reads_unclear(a_round, git_repo):
+    a_round.commission(base=git_repo.rev("main"))
+    work_on(git_repo)
+    git_repo.switch("main")
+    git_repo.commit("target-side.txt")
+    git_repo.switch("side", new_from="main")
+    git_repo.merge("work")
+    git_repo.switch("work")
+    git_repo.merge("main")
+    git_repo.switch("main")
+    git_repo.git("merge", "-q", "--ff-only", "side")
+    git_repo.merge("work")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by) == (UNCLEAR, builds.NO_ANSWER)
+
+
+def test_an_octopus_merge_of_a_live_branch_whose_two_other_parents_hold_it_reads_unclear(
+        a_round, git_repo):
+    a_round.commission(base=git_repo.rev("main"))
+    work_on(git_repo)
+    for name in ("one", "two"):
+        git_repo.switch(name, new_from="work")
+        git_repo.commit(f"{name}.txt")
+    git_repo.switch("main")
+    git_repo.git("merge", "-q", "--no-ff", "--no-edit", "one", "two")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by) == (UNCLEAR, builds.NO_ANSWER)
+
+
+def test_a_build_on_a_rewritten_target_reads_unclear(a_round, git_repo):
+    git_repo.commit("dropped-later.txt")
+    a_round.commission(base=git_repo.rev("main"))
+    git_repo.git("reset", "-q", "--hard", "HEAD~1")
+    git_repo.commit("rewritten.txt")
+    git_repo.git("branch", "work", "main")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by) == (UNCLEAR, builds.NO_ANSWER)
+
+
+def test_a_branch_name_used_again_after_a_finish_is_a_new_build(a_round, git_repo):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    tip = work_on(git_repo)
+    git_repo.switch("main")
+    landing = git_repo.merge("work")
+    a_round.land(landing, before=base, tip=tip)
+    a_round.add("finish.done", stage="B1", tip=tip)
+    git_repo.git("branch", "-D", "work")
+    a_round.commission("B2", base=landing)
+    git_repo.git("branch", "work", "main")
+    every = builds.landings(state.fold(log.read(a_round.path)))
+    assert read(a_round, git_repo).state == FINISHED
+    status = read(a_round, git_repo, "B2", landings=every)
+    assert (status.state, status.by) == (EMPTY, builds.NOTHING_OWN)

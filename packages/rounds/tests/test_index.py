@@ -504,7 +504,7 @@ def test_a_finish_s_merge_is_kept_with_its_build_s_repo_and_target(home):
     merged(at)
     [row] = rows()["landings"]
     assert row == ("proj-a", "a-round", 0, "B1", 2, 3, "proj-a", "main", "c" * 40,
-                   "a" * 40)
+                   "a" * 40, "b" * 40)
     [landing] = index.read("proj-a", home.folder, "a-round").landings
     assert (landing.stage, landing.landing, landing.target_before) == (
         "B1", "c" * 40, "a" * 40)

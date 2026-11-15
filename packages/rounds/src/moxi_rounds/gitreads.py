@@ -1,11 +1,11 @@
 """Reads of a repo's git, as the build states ask them.
 
 `Git(root)` runs plain git in the repo at `root` and answers one question per method:
-which commit a branch or a name is, which of some commits git still has, a commit's tree
-and parents, whether one commit is an ancestor of another, the merge bases of two, the
-one commit of several that has the others as ancestors, the merge that brought a commit
-onto a branch's first-parent line, and whether a range holds a commit that is not a
-merge. It writes nothing.
+which commit a branch is, which of some commits git still has, a commit's tree and
+parents, whether one commit is an ancestor of another, the merge bases of two, the one
+commit of several that has the others as ancestors, the merge that brought a commit onto
+a branch's first-parent line, the commits of a range, and whether a range holds a
+commit that is not a merge. It writes nothing.
 
 git runs with the caller's environment less every `GIT_` variable, so a variable meant
 for another repo or another git never steers what is read here.
@@ -147,6 +147,12 @@ class Git:
         if oldest is None:
             return None
         return None if self.parents(oldest)[:1] == (commit,) else oldest
+
+    def between(self, start: str, end: str, *, first_parent: bool = False) -> list[str]:
+        """The commits reachable from `end` and not from `start`, newest first; with
+        `first_parent`, only those on the first-parent line from `end`."""
+        return self._lines("rev-list", *(["--first-parent"] if first_parent else []),
+                           f"{start}..{end}")
 
     def holds_non_merge(self, start: str, end: str) -> bool:
         """Whether a commit that is not a merge is reachable from `end` and not from
