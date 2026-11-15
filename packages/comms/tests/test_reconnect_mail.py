@@ -17,6 +17,12 @@ Codex has a second path. While a turn runs, its interrupt mail goes into the tur
 `steer`, and that holds while the adapter is offline too. Mail the daemon releases at a
 bind is marked held and never steers, so the steer's window is live interrupt mail that
 arrives after the bind's answer and before the install; its test sends it then.
+
+A register that replaces a live connection (`reregister`) closes the old one, and a
+register declined after its connect closes the connection it opened. Either connection's
+close handler runs on its own reader thread, which can be after a newer connection is
+installed. That close leaves the installed binding online; each test holds the handler
+until the install and then sends mail.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from moxi_comms.adapters.codex import CodexAdapter
 from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.adapters.opencode import OpenCodeAdapter
 from moxi_comms.adapters.opencode_roster import OpenCodeAgent
+from moxi_comms.client import DaemonOffline
 from fake_opencode import FakeOpenCode
 from fake_turns import FakeSession, fake_find
 
@@ -259,3 +266,106 @@ def test_interrupt_mail_in_a_reconnect_s_gap_is_steered_once_after_the_install(
         "steered on the installed connection, not before it"
     assert not wait_until(lambda: len(carried()) > 1, timeout=0.5), \
         f"delivered once, not {len(carried())} times"
+
+
+def test_mail_after_a_reregister_is_delivered_when_the_old_close_lands_late(rig, port):
+    """A bound adapter registers again. The close handler of the connection it replaced
+    runs on that connection's reader thread, and here it is held until the new
+    connection is installed. A close from a replaced connection leaves the installed
+    binding online, so mail sent afterwards is delivered."""
+    adapter, carried = port
+    replaced: list = []                        # the connection the register replaces
+    late = threading.Event()                   # set: hold the next close until the install
+    ran_late: list = []                        # whether the held close found it installed
+    handle_close = adapter._on_daemon_close
+
+    def installed() -> bool:
+        daemon = adapter._daemon
+        return daemon is not None and daemon is not replaced[0] and not adapter.offline
+
+    def on_daemon_close():
+        if late.is_set():
+            late.clear()
+            ran_late.append(wait_until(installed, LIVE_S))
+        handle_close()
+
+    adapter._on_daemon_close = on_daemon_close      # read by every connect after start
+    adapter.start()
+    qualified = adapter.agent.qualified
+    assert wait_until(lambda: not adapter.offline and not adapter.replaying, LIVE_S)
+
+    replaced.append(adapter._daemon)
+    late.set()
+    adapter.reregister()
+    assert wait_until(lambda: ran_late, LIVE_S), "the replaced connection's close ran"
+    assert ran_late == [True], "it ran after the new connection was installed"
+
+    code, out = rig.send(qualified, MARK, sender=dict(name="main", scope="proj-a"))
+    assert code == 0, out
+    assert wait_until(lambda: carried() >= 1, LIVE_S), \
+        "mail sent after the late close was delivered"
+
+
+class DeclineOnce:
+    """Declines the next register after its connect, once armed: the connection is
+    opened and the bind is never sent. `client` is the connection it declined."""
+
+    def __init__(self, monkeypatch):
+        self.armed = threading.Event()
+        self.client = None
+        original = binding.register_and_install
+
+        def register_and_install(owner, *, register, **kw):
+            def declining_register(client):
+                if self.armed.is_set():
+                    self.armed.clear()
+                    self.client = client
+                    raise DaemonOffline("comms offline: the test declined this register")
+                return register(client)
+
+            return original(owner, register=declining_register, **kw)
+
+        monkeypatch.setattr(binding, "register_and_install", register_and_install)
+
+
+def test_mail_is_delivered_when_a_declined_register_s_close_lands_after_a_bind(
+        rig, port, monkeypatch):
+    """A reconnecting adapter's first register is declined after its connect, and the
+    close handler of the connection it opened is held until the next register has
+    installed. That close leaves the installed binding online, so mail sent afterwards
+    is delivered."""
+    adapter, carried = port
+    decline = DeclineOnce(monkeypatch)
+    late = threading.Event()                   # set: hold the next close until the install
+    ran_late: list = []                        # whether the held close found it installed
+    handle_close = adapter._on_daemon_close
+
+    def installed() -> bool:
+        daemon = adapter._daemon
+        return (daemon is not None and decline.client is not None
+                and daemon is not decline.client and not adapter.offline)
+
+    def on_daemon_close():
+        if late.is_set():
+            late.clear()
+            ran_late.append(wait_until(installed, LIVE_S))
+        handle_close()
+
+    adapter._on_daemon_close = on_daemon_close      # read by every connect after start
+    adapter.start()
+    qualified = adapter.agent.qualified
+    assert wait_until(lambda: not adapter.offline and not adapter.replaying, LIVE_S)
+
+    rig.daemon.stop()
+    assert wait_until(lambda: adapter.offline, LIVE_S)
+    late.set()
+    decline.armed.set()
+    rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
+                                   start_trim_thread=False).start()
+    assert wait_until(lambda: ran_late, LIVE_S), "the declined connection's close ran"
+    assert ran_late == [True], "it ran after the next register installed"
+
+    code, out = rig.send(qualified, MARK, sender=dict(name="main", scope="proj-a"))
+    assert code == 0, out
+    assert wait_until(lambda: carried() >= 1, LIVE_S), \
+        "mail sent after the late close was delivered"
