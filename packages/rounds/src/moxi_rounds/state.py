@@ -316,6 +316,8 @@ class Verdict:
     kind: str | None
     pass_: str | None
     verdict: str | None
+    #: The step of the user's own it is for, for a step report.
+    step: str | None
     #: The version of the design it read, for a design report.
     design: int | None
     #: For a report of a build: the stage, the head the pass read, and the merge-base
@@ -779,7 +781,8 @@ def _verdict_recorded(state: State, event: dict) -> None:
             if isinstance(one, dict)]
     state.verdicts.append(Verdict(
         n=event.get("n"), kind=event.get("kind"), pass_=event.get("pass"),
-        verdict=event.get("verdict"), design=event.get("design"),
+        verdict=event.get("verdict"), step=event.get("step"),
+        design=event.get("design"),
         stage=event.get("stage"), head=event.get("head"),
         merge_base=event.get("merge_base"),
         model=event.get("model"), by=event.get("by"), report=event.get("report"),

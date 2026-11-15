@@ -205,6 +205,19 @@ def _command(found: showing.Shown, step: steps.Step) -> dict:
                      f"moxi rounds check --step {name} in the build's worktree"]}
 
 
+def _report(found: showing.Shown, step: steps.Step) -> dict:
+    """The lines of a report step of the user's own: the diff of the build's branch,
+    the report's block, with the step's name, and the verdict."""
+    build = builds.current(found.state, step.stage)
+    said = {"reads": _named(step),
+            "write": (f"a report in {found.folder} with the block from: moxi rounds "
+                      f"next --schema {report_block.STEP}, its step {step.step!r}"),
+            "then": [f"moxi rounds verdict {found.name} <your report>"]}
+    if build is not None and build.ended is None:
+        said["reads"] = [f"the diff {build.base[:7]}..{build.branch}", *said["reads"]]
+    return said
+
+
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
 #: and `then`, and any key of its own.
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
@@ -235,9 +248,9 @@ def _group(found: showing.Shown, step: steps.Step, models) -> dict:
     if step.owes:
         group["owes"] = list(step.owes)
     lines = LINES.get(step.step)
-    if (lines is None and step.entry is not None and flows.is_user_step(step.entry)
-            and step.entry.get("does") == flows.COMMAND):
-        lines = _command
+    if lines is None and step.entry is not None and flows.is_user_step(step.entry):
+        lines = {flows.COMMAND: _command, flows.REPORT: _report}.get(
+            step.entry.get("does"))
     if group["built"] and lines is not None:
         group.update(lines(found, step))
     group["model"] = model_of(models, group["tier"])

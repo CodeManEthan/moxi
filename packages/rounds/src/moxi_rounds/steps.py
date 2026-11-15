@@ -73,9 +73,9 @@ other, so its row says when the stage reads as skipped.
   waits for the build to have work, and `Step.owes` says why a re-check is owed, with
   the range to read. It is read from what `Asked.seen` says of the stage's build.
 
-**What git says.** The `build`, `check` and `verify-build` rows, and a command step's, read a stage's open build as the
-caller read it from git (`Asked.seen`, which `checking.seen_of` gives). Every reader
-of a step passes it. A caller that read nothing of git gets such a step as `WAITING`
+**What git says.** The `build`, `check` and `verify-build` rows, and a step's of the
+user's own, read a stage's open build as the caller read it from git (`Asked.seen`,
+which `checking.seen_of` gives). Every reader of a step passes it. A caller that read nothing of git gets such a step as `WAITING`
 on that read, with `Step.unread` set, and is to read git before it says the step: the
 index keeps the step the log alone gives, and marks it so (`at`).
 
@@ -86,6 +86,11 @@ index keeps the step the log alone gives, and marks it so (`at`).
   its worktree to be clean. A run of one step is never
   read for another. It is read from what `Asked.seen` says of the stage's build.
   (`command_row` gives its row; `row_of` finds it for a step the flow lists.)
+- a report step of the user's own, of a stage: done once its newest report for the
+  build is `publishable` and counts at the tip by `verify-build`'s rule, read on this
+  step's reports alone (`Seen.reported`), and once the build is finished. Until then
+  it waits for the build to have work, and `Step.owes` says why a report is owed.
+  (`report_row` gives its row.)
 
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
@@ -149,8 +154,10 @@ class Seen:
     `head`, the tip, or the build's head where its branch is gone; `since`, the commits
     from the head its newest build verdict read to `head`, None with no such verdict or
     when git does not hold that head; `drift`, the build's drift against that verdict
-    (`drift.Drift`), None with none; `problem`, what kept the build from being read, in
-    which case nothing else is known."""
+    (`drift.Drift`), None with none; `reported`, for each report step of the user's
+    own, its `(since, drift)` read the same way against that step's newest verdict;
+    `problem`, what kept the build from being read, in which case nothing else is
+    known."""
 
     state: str | None = None
     tip: str | None = None
@@ -161,6 +168,7 @@ class Seen:
     head: str | None = None
     since: tuple[str, ...] | None = None
     drift: object = None
+    reported: Mapping[str, tuple] | None = None
     problem: Unmet | None = None
 
 
@@ -433,6 +441,41 @@ def _before_a_run(stage: str, seen: Seen, what: str) -> tuple[Unmet, ...]:
     return tuple(waits)
 
 
+def report_row(step: str) -> Row:
+    """The row of the report step `step` of the user's own: done at the tip when its
+    own newest report is publishable and counts there by the rule the build's
+    verification counts by, read on this step's reports alone."""
+
+    def row(state: states.State, about: Asked) -> Step:
+        stage = about.stage
+        built = None if stage is None else stages.build_of(state, stage)
+        if built is None:
+            return Step(step, NOT_DUE, stage=stage)
+        if built == stages.FINISHED:
+            return Step(step, DONE, stage=stage)
+        seen = (about.seen or {}).get(stage)
+        if seen is None:
+            return _not_read(step, stage, f"whether {stage}'s report of {step} counts "
+                             "at its tip", about.name)
+        if seen.problem is not None:
+            return Step(step, WAITING, stage=stage, waits=(seen.problem,))
+        build = builds.current(state, stage)
+        since, moved = (seen.reported or {}).get(step, (None, None))
+        covered = () if moved is None else moved.covered
+        why = findings.why_not_counted(state, build, tip=seen.head, since=since,
+                                       covered=covered, step=step)
+        if why is None:
+            return Step(step, DONE, stage=stage)
+        waits = ()
+        if seen.state not in checking.WITH_WORK:
+            waits = (Unmet(f"{stage} has no work for {step} to read: it reads "
+                           f"{seen.state}", "commit the build's work on its branch"),)
+        return Step(step, WAITING if waits else READY, stage=stage, waits=waits,
+                    owes=(why,))
+
+    return row
+
+
 def command_row(step: str) -> Row:
     """The row of the command step `step` of the user's own."""
 
@@ -461,8 +504,8 @@ def command_row(step: str) -> Row:
 
 
 #: The function that says each step's state. A step with no row reads `NOT_BUILT`,
-#: and a skipped step is read before its row is asked. A command step of the user's
-#: own has no row here: `row_of` gives it its own.
+#: and a skipped step is read before its row is asked. A step of the user's own has
+#: no row here: `row_of` gives it its own.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
                         COMMISSION: _commission, BUILD: _build, CHECK: _check,
                         VERIFY_BUILD: _verify_build}
@@ -470,11 +513,13 @@ ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _d
 
 def row_of(step: str, entry: Mapping | None) -> Row | None:
     """The row of the step `step`, whose entry in the flow is `entry`: its row in
-    `ROWS`, the command row for a command step of the user's own, else None."""
+    `ROWS`, the command or the report row for a step of the user's own, else None."""
     row = ROWS.get(step)
-    if (row is None and entry is not None and flows.is_user_step(entry)
-            and entry.get("does") == flows.COMMAND):
-        return command_row(step)
+    if row is None and entry is not None and flows.is_user_step(entry):
+        if entry.get("does") == flows.COMMAND:
+            return command_row(step)
+        if entry.get("does") == flows.REPORT:
+            return report_row(step)
     return row
 
 
@@ -664,6 +709,6 @@ def said(step: Mapping | None) -> str:
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
            "SETTLED", "HELD", "COMMISSION", "BUILD", "CHECK", "Seen", "Asked", "Step", "Row",
-           "ROWS", "command_row", "row_of", "answer",
+           "ROWS", "report_row", "command_row", "row_of", "answer",
            "held_by", "held_unbuilt", "order", "of", "one", "is_settled", "current", "at",
            "said"]

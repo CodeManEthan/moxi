@@ -110,8 +110,12 @@ def marks_of(state: states.State, build: builds.Build) -> tuple[dict, ...]:
                  and str(event.get("id") or "").startswith(prefix))
 
 
-def _step_of(verdict: states.Verdict) -> str:
-    return VERIFY_BUILD if verdict.kind == report_block.BUILD else str(verdict.kind)
+def step_of(verdict: states.Verdict) -> str:
+    """The step a report of a build is for: `verify-build` for a report of the build
+    itself, the step's name for a report of a step of the user's own."""
+    if verdict.kind == report_block.BUILD:
+        return VERIFY_BUILD
+    return str(verdict.step if verdict.kind == report_block.STEP else verdict.kind)
 
 
 def of_build(state: states.State, build: builds.Build) -> tuple[Finding, ...]:
@@ -136,7 +140,7 @@ def of_build(state: states.State, build: builds.Build) -> tuple[Finding, ...]:
             found[id_] = Finding(
                 stage=build.stage, id=id_, severity=str(one.get("severity")),
                 state=str(one.get("state")), text=str(one.get("text")),
-                step=_step_of(what) if was is None else was.step,
+                step=step_of(what) if was is None else was.step,
                 raised=what.n if was is None else was.raised, set_by=what.n)
     return tuple(found.values())
 
@@ -148,21 +152,23 @@ def marked_commits(state: states.State, build: builds.Build) -> frozenset[str]:
 
 
 def why_not_counted(state: states.State, build: builds.Build, *, tip: str | None,
-                    since: tuple[str, ...] | None,
-                    covered: Iterable[str] = ()) -> str | None:
-    """Why the verification of `build` does not count at `tip`, or None when it does.
+                    since: tuple[str, ...] | None, covered: Iterable[str] = (),
+                    step: str = VERIFY_BUILD) -> str | None:
+    """Why the verification of `build` does not count at `tip`, or None when it does;
+    with `step` a report step of the user's own, why that step is not done there.
 
-    It counts when the newest verdict on a report of the build itself is `publishable`
-    and every commit from the head it read to `tip` (`since`, as git gave them) is one a
-    lead's mark of the build named or one of `covered`, the commits a merge of the
-    target into the branch brought that the drift rule accepts. `since` None means git
-    could not give them."""
-    listed = [one for one in verdicts_of(state, build) if one.kind == report_block.BUILD]
+    It counts when the newest verdict on a report of `step` for the build is
+    `publishable` and every commit from the head it read to `tip` (`since`, as git gave
+    them) is one a lead's mark of the build named or one of `covered`, the commits a
+    merge of the target into the branch brought that the drift rule accepts. Each step
+    is read on its own reports only. `since` None means git could not give them."""
+    listed = [one for one in verdicts_of(state, build) if step_of(one) == step]
+    of = build.stage if step == VERIFY_BUILD else f"the step {step} of {build.stage}"
     if not listed:
-        return f"no report of {build.stage} is recorded"
+        return f"no report of {of} is recorded"
     newest = listed[-1]
     if newest.verdict != report_block.PUBLISHABLE:
-        return (f"the newest report of {build.stage}, at {str(newest.head)[:7]}, is "
+        return (f"the newest report of {of}, at {str(newest.head)[:7]}, is "
                 f"{newest.verdict}: a re-check is owed")
     if tip is None:
         return f"{build.stage} has no tip to read"
@@ -202,4 +208,5 @@ def taken(state: states.State, stage: str) -> frozenset[str]:
 
 
 __all__ = ["VERIFY_BUILD", "FINISH", "MARKED", "Finding", "within", "verdicts_of",
-           "marks_of", "of_build", "of_stage", "marked_commits", "why_not_counted", "taken"]
+           "marks_of", "step_of", "of_build", "of_stage", "marked_commits",
+           "why_not_counted", "taken"]

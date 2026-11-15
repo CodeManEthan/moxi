@@ -414,10 +414,9 @@ def _build_verdict(state: states.State, build: builds.Build) -> dict | None:
     it read and that head's merge-base with the target, who wrote the report with
     which model, the report's file and digest, what is noted of it, and when it was
     recorded; None with none."""
-    listed = findings.verdicts_of(state, build)
-    if not listed:
+    one = drift.newest_verdict(state, build)
+    if one is None:
         return None
-    one = listed[-1]
     return {"n": one.n, "verdict": one.verdict, "pass": one.pass_, "head": one.head,
             "merge_base": one.merge_base, "by": one.by, "model": one.model,
             "report": one.report, "sha256": one.sha256, "flags": list(one.flags),

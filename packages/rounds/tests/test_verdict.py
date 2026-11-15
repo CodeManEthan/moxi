@@ -287,18 +287,18 @@ def test_a_copied_report_with_new_content_is_a_new_report(folder):
     assert len({one.sha256 for one in found}) == 3
 
 
-@pytest.mark.parametrize("kind", ["step", "retro"])
-def test_a_report_of_another_kind_is_refused_as_not_recorded_yet(folder, kind):
+def test_a_retrospective_is_refused_as_not_recorded_yet(folder):
     fold(folder, question("Q1"), stage("B1"))
-    path = other(folder, kind)
+    path = other(folder, "retro")
     before = raw(folder)
 
     with pytest.raises(Refused) as refused:
         record(path)
 
     [unmet] = refused.value.unmet
-    assert (f"is a {kind} report, and only a report of a design, of a build or of "
-            "a round's major decisions is recorded") in unmet.reason
+    assert ("is a retro report, and only a report of a design, of a build, of a step "
+            "of the user's own or of a round's major decisions is recorded"
+            ) in unmet.reason
     assert raw(folder) == before
 
 

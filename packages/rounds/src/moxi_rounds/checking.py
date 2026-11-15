@@ -52,7 +52,8 @@ from pathlib import Path
 
 from moxi import proc
 
-from . import builds, flows, folders, gitreads, open_builds, paths, places, write
+from . import (builds, findings, flows, folders, gitreads, open_builds, paths, places,
+               write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet
@@ -170,6 +171,13 @@ def step_entry(state: states.State, step: str) -> Mapping | None:
     return None
 
 
+def report_steps(state: states.State) -> tuple[str, ...]:
+    """The names of the report steps of the user's own in the round's recorded flow,
+    in the flow's order."""
+    return tuple(str(entry.get("step")) for entry in state.steps
+                 if flows.is_user_step(entry) and entry.get("does") == flows.REPORT)
+
+
 def commission_of(state: states.State, build: builds.Build) -> dict:
     """The `build.commissioned` event of `build`."""
     return next(event for event in state.history if event["n"] == build.n)
@@ -226,6 +234,9 @@ def seen_of(state: states.State, name: str, *, settings,
             head = tip if tip is not None else now.status.head
             since, moved = _since_verdict(state, build, now.status, Git(root),
                                           head=head, settings=settings)
+            reported = {step: _since_verdict(state, build, now.status, Git(root),
+                                             head=head, settings=settings, step=step)
+                        for step in report_steps(state)}
         except RoundsError as error:
             found[build.stage] = steps.Seen(problem=Unmet(
                 f"{build.stage} can't be read from git: {error.reason}",
@@ -238,22 +249,25 @@ def seen_of(state: states.State, name: str, *, settings,
             else tuple(argv or ()),
             values=None if tip is None else values(name, build, root=root, tip=tip),
             ci=_ci_now(settings, build, name=name, root=root, tip=tip),
-            head=head, since=since, drift=moved)
+            head=head, since=since, drift=moved, reported=reported)
     return found
 
 
 def _since_verdict(state: states.State, build: builds.Build, status: builds.Status,
-                   git: Git, *, head: str | None, settings):
+                   git: Git, *, head: str | None, settings,
+                   step: str = findings.VERIFY_BUILD):
     """The commits from the head the build's newest verdict read to `head`, None when
-    it has no verdict or git does not hold that head; and the build's drift (`drift`)."""
+    it has no verdict or git does not hold that head; and the build's drift (`drift`).
+    With `step` a report step of the user's own, the same against that step's newest
+    verdict: each step is read on its own reports."""
     from . import drift
 
-    verdict = drift.newest_verdict(state, build)
+    verdict = drift.newest_verdict(state, build, step)
     if verdict is None or head is None:
         return None, None
     since = (tuple(git.between(verdict.head, head))
              if verdict.head and git.present([verdict.head]) else None)
-    return since, drift.of_build(state, build, status, git, settings=settings)
+    return since, drift.of_build(state, build, status, git, settings=settings, step=step)
 
 
 def _ci_now(settings, build: builds.Build, *, name: str, root, tip: str | None):
@@ -725,5 +739,5 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
 
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "fill", "declared",
            "values", "argv_now", "runs", "newest", "why_not", "passes", "step_entry",
-           "commission_of",
+           "report_steps", "commission_of",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]

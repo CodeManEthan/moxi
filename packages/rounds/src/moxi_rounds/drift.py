@@ -47,7 +47,7 @@ import fnmatch
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from . import builds, findings, report_block
+from . import builds, findings
 from . import settings as own
 from . import state as states
 from .gitreads import Git
@@ -205,20 +205,22 @@ def _merges_target(git: Git, commit: str, target_before: str) -> bool:
                                     for one in parents)
 
 
-def newest_verdict(state: states.State, build: builds.Build) -> states.Verdict | None:
+def newest_verdict(state: states.State, build: builds.Build,
+                   step: str = findings.VERIFY_BUILD) -> states.Verdict | None:
     """The newest verdict on a report of `build` itself, not of a step of the user's
-    own; None when none is recorded."""
+    own; with `step` such a step, the newest on a report of that step. None when none
+    is recorded."""
     listed = [one for one in findings.verdicts_of(state, build)
-              if one.kind == report_block.BUILD]
+              if findings.step_of(one) == step]
     return listed[-1] if listed else None
 
 
 def of_build(state: states.State, build: builds.Build, status: builds.Status, git: Git,
-             *, settings) -> Drift | None:
+             *, settings, step: str = findings.VERIFY_BUILD) -> Drift | None:
     """The drift of `build` at the head its `status` reads now, against its newest
-    build verdict; None when it has no such verdict, or no head or no target before
-    it was read."""
-    verdict = newest_verdict(state, build)
+    build verdict, or with `step` its newest verdict of that step; None when it has no
+    such verdict, or no head or no target before it was read."""
+    verdict = newest_verdict(state, build, step)
     if (verdict is None or not verdict.head or status.head is None
             or status.target_before is None):
         return None

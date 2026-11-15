@@ -106,6 +106,10 @@ does not yet build.
   rules it, a later ruling replaces it and `revoke:` takes it back; a rejected one is a
   waiting item until its fix is marked done. Unruled majors show in `list --waiting` and
   a project's export; every decision shows in `show` and the round note.
+- `verdict` records a report of a report step of your own (`kind = "step"`): its
+  findings are the build's, kept with the step that raised them; a step's report lists
+  and sets only its own step's findings; the step is done once its own newest report
+  is `publishable` and counts at the tip.
 - A round's export has two views, both when `--view` is left out: `docket`, its open
   and parked questions, and `ratify`, the unruled decisions of its finished builds,
   which it names under `covers`, as the project's `ratify` setting picks them (`majors`,

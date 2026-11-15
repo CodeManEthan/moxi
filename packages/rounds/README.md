@@ -60,7 +60,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
 | `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
-| `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design or on a build, run by whoever wrote the report |
+| `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, on a build or on a build for a report step of your own, run by whoever wrote the report |
 | `moxi rounds ask ROUND TEXT --from PTR [--blocks B<n>[,...]\|none] [--option K=TEXT ...]` | put a question to the operator in a round, as `Q<n>`; it holds up every stage unless `--blocks` names the ones it holds up, or `none` |
 | `moxi rounds ask ROUND TEXT --build B<n> [--blocks B<n>[,...]\|none]` | put a question that came up in the open build of a stage: a builder tells you, and you ask it; it comes from that build at its branch's tip, and is listed as asked by you for the builder |
 | `moxi rounds ask PROJECT TEXT --from PTR [--option K=TEXT ...]` | put a question on the project's list, as `P<n>`, where it holds up nothing |
@@ -399,6 +399,16 @@ gets a re-check of its diff. The build's `verify-build` step is done once its ne
 report is `publishable` and every commit since the head it read is named by a mark or
 is a merge of the target that the drift rule below accepts. Otherwise `next` says a
 re-check is owed, with the range it reads, at the step's re-check tier.
+
+A report step of your own (`does = "report"` in the flow) takes a report of `kind =
+"step"` that names the step in `step`, and reads one build by the same rules of
+`stage`, `head` and author. Its findings are findings of the build, each kept with the
+step that raised it, and hold the finish like any other. A step's report lists every
+open finding its own step raised and none another report raised; the build's own
+report lists and sets every open finding, a step's included. The step is done once its
+newest report is `publishable` and counts at the tip by the rule above, read on that
+step's reports alone; a report of the build does not do a report step, nor a step's
+report the build's verification.
 
 Work that can't be done without the operator, such as a check on his phone, is a
 `[[wait]]` in the report. When the report is recorded each is an open waiting item of

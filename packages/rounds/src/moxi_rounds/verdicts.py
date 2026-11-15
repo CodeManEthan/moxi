@@ -7,9 +7,16 @@ design the pass read, the model and the author the report names, the report's fi
 and the SHA-256 of its bytes, every finding of its block, and what the verdict takes
 out of the record. The report's file is read and never written.
 
-A report of a design, of a build or of a round's major decisions is recorded here. A
-report of a step of the user's own or a retrospective is refused, since nothing here
-records one.
+A report of a design, of a build, of a step of the user's own or of a round's major
+decisions is recorded here. A retrospective is refused, since nothing here records one.
+
+**A step report** (`kind = "step"`) is for a report step of the user's own that the
+round's flow has, and reads one build as a report of the build does, by the same
+rules of head and author, and is recorded under its step's name. Its findings are
+findings of the build, each kept with the step that raised it. It lists every open
+finding its own step's reports raised and no finding any other report raised: it sets
+its own step's findings only. A report of the build lists and sets every open finding,
+a step's included.
 
 **A majors report** declares the decisions no build report will carry, each with its
 stage, and names in `stages` the builds it covers, so it can say a build has none. Each
@@ -70,7 +77,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import (brake, builds, checking, decisions, ending, findings, folders,
+from . import (brake, builds, checking, decisions, ending, findings, flows, folders,
                model_tiers,
                open_builds, questions, report_block, stages, stepping, versions, waits,
                write)
@@ -222,8 +229,9 @@ def _again(state: states.State, block: report_block.ReportBlock,
 
 def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str,
               settings, report: str) -> dict:
-    """The fields of the verdict on a report of a build, read from git now; refused
-    with every unmet rule when it can't be recorded."""
+    """The fields of the verdict on a report of a build, or of a step of the user's own
+    for a build, read from git now; refused with every unmet rule when it can't be
+    recorded."""
     shown = f"moxi rounds show {name}"
     stage = block.stage
     build = builds.current(state, stage)
@@ -233,6 +241,15 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
         raise Refused([Unmet(f"{stage} of {name} {how}, so there is no build for the "
                              "report to have read", shown)])
     unmet = []
+    # A report of a step of the user's own speaks for its own step: it lists the
+    # findings that step's reports raised, and only those.
+    step = block.step if block.kind == report_block.STEP else findings.VERIFY_BUILD
+    if step != findings.VERIFY_BUILD and step not in checking.report_steps(state):
+        flow = stepping.current(state).name
+        unmet.append(Unmet(
+            f"the report is for the step {step}, and the flow {flow} of {name} has no "
+            f'step {step} with does = "{flows.REPORT}": nothing would read its verdict',
+            f"give step the name of a report step of the flow ({shown})"))
     builder = checking.commission_of(state, build).get("builder")
     if block.by == builder:
         unmet.append(Unmet(
@@ -242,13 +259,20 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
     held = findings.of_build(state, build)
     listed = {one.id for one in block.findings}
     for one in held:
-        if one.open and one.id not in listed:
+        if one.open and one.id not in listed and (
+                step == findings.VERIFY_BUILD or one.step == step):
             unmet.append(Unmet(
                 f"the finding {one.key} is open on {stage}'s record and the report "
                 "does not list it: a report can't drop a finding by leaving it out",
                 f'list {one.id} with the state it has at the head the pass read: '
                 f'"{report_block.OPEN}", "{report_block.FIXED}" or '
                 f'"{report_block.NO_ACTION}"'))
+        elif one.id in listed and step != findings.VERIFY_BUILD and one.step != step:
+            unmet.append(Unmet(
+                f"the finding {one.key} was raised by a report of {one.step}, and this "
+                f"report of the step {step} lists it: a step's report sets only the "
+                "findings its own step raised", f"leave {one.id} out; a report of "
+                f"{one.step}, or the build's verification, sets its state"))
     own_ids = {one.id for one in held}
     used = findings.taken(state, stage) - own_ids
     for one in block.findings:
@@ -316,8 +340,11 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
         unmet.append(Unmet(error.reason, error.fix or shown))
     if unmet:
         raise Refused(unmet)
-    fields: dict[str, object] = {
-        "kind": block.kind, "pass": block.pass_, "verdict": block.verdict,
+    fields: dict[str, object] = {"kind": block.kind}
+    if step != findings.VERIFY_BUILD:
+        fields["step"] = step
+    fields |= {
+        "pass": block.pass_, "verdict": block.verdict,
         "stage": stage, "head": block.head, "merge_base": merge_base,
         "model": block.model, "by": block.by,
         "report": report, "sha256": block.sha256,
@@ -327,7 +354,7 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
         fields["waits"] = [{"id": one.id, "text": one.text} for one in block.waits]
     if block.decisions:
         fields["decisions"] = [_decision(one) for one in block.decisions]
-    noted = model_tiers.flags(settings["models"], state.steps, findings.VERIFY_BUILD,
+    noted = model_tiers.flags(settings["models"], state.steps, step,
                               pass_=block.pass_, model=block.model)
     if noted:
         fields["flags"] = noted
@@ -440,7 +467,7 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
             raise view.facts.error
         block = view.facts.block
         state = view.state
-        if block.kind == report_block.BUILD:
+        if block.kind in (report_block.BUILD, report_block.STEP):
             return write.Entry("verdict.recorded", _of_build(
                 state, block, name=name, settings=settings,
                 report=_path(report, folder)))
@@ -450,8 +477,8 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
         if block.kind != report_block.DESIGN:
             raise Refused([Unmet(
                 f"{report} is a {block.kind} report, and only a report of a design, "
-                "of a build or of a round's major decisions is recorded: nothing "
-                "records this one yet", shown)])
+                "of a build, of a step of the user's own or of a round's major "
+                "decisions is recorded: nothing records this one yet", shown)])
         unmet = []
         if not stepping.has_step(state, VERIFIES):
             flow = stepping.current(state).name
@@ -499,7 +526,7 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
     after = states.fold(written.round_events)
     one = after.verdicts[-1]
     held, finish, opened = (), (), ()
-    if one.kind == report_block.BUILD:
+    if one.kind in (report_block.BUILD, report_block.STEP):
         held = findings.of_stage(after, one.stage)
         finish = finish_waits(after, one.stage, name=name, settings=settings)
         opened = tuple(wait for wait in waits.of_round(after) if wait.raised == one.n)
