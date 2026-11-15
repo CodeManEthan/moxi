@@ -176,3 +176,54 @@ def test_with_no_author_every_committer_is_the_repos_own(repo):
     enabled(repo)
     git(repo, "config", "user.email", "alice@example.test")
     assert [s for s, _ in states(repo)] == ["ok"]
+
+
+def later_hook_row(repo):
+    return next(row for row in doctor.rows()
+                if row.name == f"repo {repo}" and "runs after the pieces" in row.detail)
+
+
+def apply_fix(repo, fix):
+    """Run the row's `enable` as a person pasting it would, through `flag.enable`."""
+    import shlex
+
+    words = shlex.split(fix[fix.index("moxi publishing enable"):])
+    assert words[3] == str(repo)
+    sets = [words[i + 1] for i, word in enumerate(words) if word == "--set"]
+    flag.enable(repo, sets=sets)
+    return sets
+
+
+@pytest.mark.parametrize("sets", [
+    (),                                                   # the seed
+    ("drop-trailer=Commit-Check",),                       # the checked trailer alone
+    ("drop-trailer=Commit-Check", "drop-trailer=X-Note",
+     "pass-trailer=Signed-off-by"),                       # another key, and a pass key
+])
+def test_the_later_hook_fix_clears_its_row_and_keeps_the_pass_keys(repo, names, sets):
+    later_hook(repo)
+    enabled(repo, *sets)
+    applied = apply_fix(repo, later_hook_row(repo).fix)
+    assert [s for s, _ in states(repo)] == ["ok"]
+    assert "pass-trailer=Commit-Check" in applied
+    if "pass-trailer=Signed-off-by" in sets:
+        assert "pass-trailer=Signed-off-by" in applied
+        assert "drop-trailer=X-Note" in applied
+
+
+def test_a_drop_list_left_empty_is_fixed_with_the_seeds_other_keys(repo, names):
+    later_hook(repo)
+    enabled(repo)
+    git(repo, "config", "--replace-all", "moxi-repo.piece.publishing/message.drop-trailer", "")
+    applied = apply_fix(repo, later_hook_row(repo).fix)
+    assert "drop-trailer=Claude-Session" in applied
+    assert [s for s, _ in states(repo)] == ["ok"]
+
+
+def test_with_no_other_key_anywhere_the_fix_says_to_name_one(repo, names):
+    later_hook(repo)
+    enabled(repo, "drop-trailer=Commit-Check")
+    write_config("publishing", '[defaults]\ndrop_trailers = ["Commit-Check"]\n')
+    fix = later_hook_row(repo).fix
+    assert fix.startswith("name a key other than Commit-Check on drop-trailer")
+    assert fix.endswith("--set pass-trailer=Commit-Check --set drop-trailer=KEY")

@@ -35,6 +35,7 @@ MODULE = "publishing"
 #: before that hook reads the message.
 CHECKED_TRAILER = "Commit-Check"
 DROP_KEY = "drop-trailer"
+PASS_KEY = "pass-trailer"
 #: The events of the three pieces.
 EVENTS = ("commit-msg", "pre-commit", "pre-push")
 
@@ -172,18 +173,48 @@ def _later_hook_rows(root: str, name: str, have: dict) -> Iterator[Row]:
     from moxi_publishing import flag
 
     later = (_status(root).get("events", {}).get("commit-msg") or {}).get("existing")
-    values = have[flag.MESSAGE]["settings"].get(DROP_KEY, [])
+    settings = have[flag.MESSAGE]["settings"]
+    values = settings.get(DROP_KEY, [])
     if later and drops_checked_trailer(values):
-        kept = [v for v in values if v.strip() and v.strip().casefold()
-                != CHECKED_TRAILER.casefold()]
-        sets = " ".join(f"--set {DROP_KEY}={v}" for v in kept) or f"--set {DROP_KEY}="
         yield Row(MODULE, name, "fail",
                   f"a commit-msg hook runs after the pieces ({later}), and {DROP_KEY} "
                   + (f"names {CHECKED_TRAILER}" if values and any(v.strip() for v in values)
                      else f"holds no value, which reads as the seed naming {CHECKED_TRAILER}")
                   + ", so that hook never sees the line if it checks it",
-                  f"moxi publishing enable {quote_arg(root)} {sets} --set "
-                  f"pass-trailer={CHECKED_TRAILER}")
+                  _later_hook_fix(root, values, settings.get(PASS_KEY, [])))
+
+
+def _others(values) -> list[str]:
+    """The keys of `values` but the checked trailer, empty ones left out."""
+    return [v.strip() for v in values if v.strip()
+            and v.strip().casefold() != CHECKED_TRAILER.casefold()]
+
+
+def _later_hook_fix(root: str, drop, passed) -> str:
+    """An `enable` that leaves a drop list the row passes: the repo's other drop keys, or
+    the seed's when it has none, since a list left empty reads as the seed again; and the
+    repo's pass keys with the checked trailer added, since `--set` replaces a whole list."""
+    from moxi.config import ConfigError
+    from moxi_repo.api import quote_arg
+
+    from moxi_publishing import settings as config
+
+    keep = _others(drop)
+    if not keep:
+        try:
+            keep = _others(config.load()[config.DROP_TRAILERS])
+        except ConfigError:  # an unreadable config only loses the suggestion
+            keep = []
+    passing = [v.strip() for v in passed if v.strip()]
+    if not any(v.casefold() == CHECKED_TRAILER.casefold() for v in passing):
+        passing.append(CHECKED_TRAILER)
+    sets = " ".join([f"--set {quote_arg(f'{DROP_KEY}={v}')}" for v in keep]
+                    + [f"--set {quote_arg(f'{PASS_KEY}={v}')}" for v in passing])
+    fix = f"moxi publishing enable {quote_arg(root)} {sets}"
+    if keep:
+        return fix
+    return (f"name a key other than {CHECKED_TRAILER} on {DROP_KEY}, since a list with "
+            f"none reads as the seed: {fix} --set {DROP_KEY}=KEY")
 
 
 def _identity_rows(root: str, name: str) -> Iterator[Row]:
