@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHANGED, Feed, parseAdded, parseKinds, parseOne, parseProjects, parseRemoveStatus, parseWhere,
+  CHANGED, Feed, parseAdded, parseKinds, parseListing, parseOne, parseProjects, parseRemoveStatus, parseWhere,
   parseWritten,
   PICKED, RETRIES, saidOf,
 } from "../src/feed.ts";
@@ -34,6 +34,20 @@ test("a project list, and anything not of its shape refused", () => {
   assert.equal(parseProjects({ projects: [{ ...PROJECT, associated: "helper" }] }), null);
   assert.equal(parseProjects([]), null);
   assert.equal(parseProjects(null), null);
+});
+
+test("the page's list: each project's exists, the home and notes_installed", () => {
+  const data = { projects: [{ ...PROJECT, exists: true }, { ...PROJECT, key: "b", exists: false },
+                            { ...PROJECT, key: "c", exists: null }],
+                 home: "/home/me", notes_installed: false };
+  assert.deepEqual(parseListing(data), data);
+  assert.deepEqual(parseListing({ projects: [], home: null, notes_installed: true }),
+                   { projects: [], home: null, notes_installed: true });
+  assert.equal(parseListing({ ...data, projects: [PROJECT] }), null, "a project with no exists");
+  assert.equal(parseListing({ ...data, projects: [{ ...PROJECT, exists: "yes" }] }), null);
+  assert.equal(parseListing({ projects: [], notes_installed: true }), null, "no home");
+  assert.equal(parseListing({ projects: [], home: null }), null, "no notes_installed");
+  assert.equal(parseListing({ projects: {}, home: null, notes_installed: true }), null);
 });
 
 test("one project, and an add's answer with its notes", () => {

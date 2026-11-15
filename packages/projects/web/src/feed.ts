@@ -25,6 +25,20 @@ export interface Projects {
   projects: Project[];
 }
 
+/** A project as the page's list gives it: whether its root is a directory now, null when
+ * the page server can't say in time. */
+export interface Listed extends Project {
+  exists: boolean | null;
+}
+
+/** `/api/projects` as the page reads it: every project, the page server's home folder (null
+ * when nothing places one) and whether notes is installed. */
+export interface Listing {
+  projects: Listed[];
+  home: string | null;
+  notes_installed: boolean;
+}
+
 /** `/api/project`: one project. */
 export interface One {
   project: Project;
@@ -158,6 +172,20 @@ const project = (value: Project): Project => ({
 export function parseProjects(data: unknown): Projects | null {
   if (!isObj(data) || !isListOf(data.projects, isProject)) return null;
   return { projects: data.projects.map(project) };
+}
+
+const isMaybeBool = (value: unknown): value is boolean | null => value === null || typeof value === "boolean";
+
+/** `/api/projects`' value with the page's fields, or null when it isn't one. */
+export function parseListing(data: unknown): Listing | null {
+  if (!isObj(data) || !Array.isArray(data.projects) || !isStrOrNull(data.home)
+      || typeof data.notes_installed !== "boolean") return null;
+  const projects: Listed[] = [];
+  for (const item of data.projects) {
+    if (!isObj(item) || !isProject(item) || !isMaybeBool(item.exists)) return null;
+    projects.push({ ...project(item), exists: item.exists });
+  }
+  return { projects, home: data.home, notes_installed: data.notes_installed };
 }
 
 /** `/api/project`'s value, or null when it isn't one. */
