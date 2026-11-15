@@ -18,6 +18,16 @@ def test_the_module_offers_interface_1_through_the_core():
     assert moxi.modules.available("projects")
 
 
+def test_the_module_offers_interface_2_with_for_paths():
+    from moxi_projects import module
+
+    assert module.INTERFACES == frozenset({1, 2})
+    moxi.modules.reset()
+    found = moxi.modules.load("projects", interface=2)
+    assert found.ok, found.reason
+    assert found.api.for_paths is api.for_paths
+
+
 def test_list_projects_answers_every_project_by_key(golden_copy):
     projects = api.list_projects()
     assert [p.key for p in projects] == ["alpha", "Beta", "delta.web", "gamma"]

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The read API offers interface 2: interface 1 and `for_paths(paths)`, which answers the
+  key of the project each path is in (or None) with one read of the store, by
+  `for_path`'s rules. A module that calls it loads projects with `interface=2`.
+
 ## 0.1.4 (2026-11-08)
 
 The first public release.

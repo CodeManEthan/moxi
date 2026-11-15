@@ -70,8 +70,11 @@ The list is one SQLite file, `projects.db`, in projects' data directory (`moxi p
 projects` names it), readable by you alone. The first write makes it; a read never
 writes. Other modules read it in process through projects' API, interface 1
 (`list_projects`, `get`, `for_path`, `kinds`), reached with
-`moxi.modules.load("projects", interface=1)`. `moxi install projects` again is the
-upgrade, and moves an older store to the current schema.
+`moxi.modules.load("projects", interface=1)`. Interface 2 is interface 1 and
+`for_paths`, which answers many paths' projects with one read of the store, each by
+`for_path`'s rules; a module that calls it loads projects with `interface=2`, so an older
+projects reads as absent. `moxi install projects` again is the upgrade, and moves an
+older store to the current schema.
 
 `moxi doctor projects` checks the store, each root (a missing one is a warning), two
 roots naming one directory, rows whose kind no installed module declares, and each
