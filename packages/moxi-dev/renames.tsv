@@ -9230,7 +9230,9 @@ rounds	packages/rounds/tests/test_credit.py	assert cli.main(["projects", "set", 
 rounds	packages/rounds/tests/test_credit.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
 rounds	packages/rounds/tests/test_datablock.py	@pytest.mark.parametrize(("bad", "says"), [	keep	bad	bad
 rounds	packages/rounds/tests/test_decisions.py	"chose": None, "record": None}	keep	record	record
+rounds	packages/rounds/tests/test_decisions.py	actor="coder")	use	actor=	by=
 rounds	packages/rounds/tests/test_decisions.py	actor="planner")	use	actor=	by=
+rounds	packages/rounds/tests/test_decisions.py	actor="reviewer")	use	actor=	by=
 rounds	packages/rounds/tests/test_decisions.py	assert (held.state, held.chose, held.ruling, held.record) == (	keep	record	record
 rounds	packages/rounds/tests/test_decisions.py	assert api.round(ROUND)["decisions"] == shown_as["decisions"]	use	api.round	api.round_data
 rounds	packages/rounds/tests/test_decisions.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
