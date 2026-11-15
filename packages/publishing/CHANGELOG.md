@@ -27,6 +27,11 @@ The first version.
   and the tag gate's seven checks, run by `moxi publishing tag`, the push piece (which now
   lets a release tag be created when it passes) and `moxi publishing ci gate`.
 - `moxi publishing tag`: the gate at main's tip, then the annotated release tag.
+- `[tool.moxi-publishing]` may keep a `ready` list; then every member must be on exactly
+  one of it and `not-ready`, and the gate counts one on neither or both as not ready.
+- `moxi publishing ci siblings`: the release test from a fresh venv, at the newest and
+  the lowest published siblings, with the site-packages check.
+- `moxi publishing workflows write`: the public scan and release workflow files.
 - `moxi publishing bump`: the next version, the dated CHANGELOG heading, the README
   links and `uv lock`, left unstaged.
 - `moxi publishing ci notes`: a tag's CHANGELOG section.

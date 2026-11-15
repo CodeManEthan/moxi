@@ -8,6 +8,8 @@
     moxi publishing tag PACKAGE [--at REV] [--remote NAME] [--path PATH]
     moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]
     moxi publishing ci notes TAG
+    moxi publishing ci siblings TAG --artifact DIR [--resolution highest|lowest-direct]
+    moxi publishing workflows write [PATH]
 
 PATH is a path inside the repo; with the projects module installed it may also be a
 project key. Exit codes: 0 done, 1 failed, 2 usage, 3 refused.
@@ -115,6 +117,32 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                          description="Print the CHANGELOG section of TAG's version, read "
                                      "at the tagged commit.")
     s.add_argument("tag", metavar="TAG")
+    s = steps.add_parser(
+        "siblings", help="test the built package against its published siblings",
+        description="Run the package's whole test suite from a fresh venv holding only "
+                    "its wheel from DIR, the extras whose sibling requirements a "
+                    "published version admits (the others are reported), the published "
+                    "siblings, and its dev group's test tools at uv.lock's versions; "
+                    "first at the newest published siblings it admits, then at the "
+                    "lowest set that resolves, reporting a floor the resolver raised. "
+                    "The run fails when the package imports from anywhere but the venv's "
+                    "site-packages. Exits 3 when a required sibling has no published "
+                    "version it admits.")
+    s.add_argument("tag", metavar="TAG")
+    s.add_argument("--artifact", metavar="DIR", required=True,
+                   help="the directory of the build's files")
+    s.add_argument("--resolution", choices=("highest", "lowest-direct"),
+                   help="run once, at this resolution only (default: both)")
+    p = verbs.add_parser("workflows", help="the workflow files of a public repo",
+                         description="The release and public scan workflow files.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    s = steps.add_parser(
+        "write", help="write the release and public scan workflow files",
+        description="Write .github/workflows/publishing.yml and release.yml into the "
+                    "repo at PATH from publishing's templates, replacing what is there.")
+    s.add_argument("path", metavar="PATH", nargs="?", default=".",
+                   help="a path inside the repo, or a project key (default: here)")
     return parser
 
 
@@ -126,9 +154,14 @@ def _release(args, prog: str) -> int:
             result = release.bump(args.path, args.packages, part=args.part)
         elif args.verb == "tag":
             result = release.tag(args.path, args.package, at=args.at, remote=args.remote)
+        elif args.verb == "workflows":
+            result = release.workflows_write(args.path)
         elif args.step == "gate":
             result = release.ci_gate(".", args.tag, github=args.github,
                                      artifact=args.artifact)
+        elif args.step == "siblings":
+            result = release.ci_siblings(".", args.tag, artifact=args.artifact,
+                                         resolution=args.resolution)
         else:
             result = release.ci_notes(".", args.tag)
     except flag.Failure as exc:
@@ -187,7 +220,7 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
     args = _parser(prog).parse_args(argv)
     if args.verb == "scan":
         return _scan(args, prog)
-    if args.verb in ("bump", "tag", "ci"):
+    if args.verb in ("bump", "tag", "ci", "workflows"):
         return _release(args, prog)
     try:
         if args.verb == "enable":

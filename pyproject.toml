@@ -57,8 +57,9 @@ moxi-publishing = { workspace = true }
 dev = ["moxi-dev"]
 
 # Release settings, read by moxi-publishing's tag gate at the tagged commit. A package on
-# not-ready is never released from a commit that lists it; it leaves the list by its own
-# commit once confirmed. A member added to the workspace goes on the list with it.
+# not-ready is never released from a commit that lists it; it moves to ready by its own
+# commit once confirmed. Every member is on exactly one of the two lists: a member added
+# to the workspace goes on not-ready with it, and moxi-dev check refuses one on neither.
 # check-workflow and check-job name the CI job whose success on a push to main the gate
 # wants at the tagged commit.
 [tool.moxi-publishing]
@@ -84,5 +85,6 @@ not-ready = [
     "moxi-rounds",
     "moxi-publishing",
 ]
+ready = []
 check-workflow = "ci.yml"
 check-job = "linux"

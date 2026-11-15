@@ -21,7 +21,11 @@ INTERNAL_ENV = {
                                       "api.github.com: a test's fake, or a GitHub "
                                       "Enterprise host",
     "MOXI_PUBLISHING_PYPI_URL": "where the tag gate reads the package index's JSON API, "
-                                "when not pypi.org: a test's fake, or a mirror",
+                                "when not pypi.org: a test's fake, or a mirror; the "
+                                "release test then installs from its simple index",
+    "MOXI_PUBLISHING_SITE_CHECK_NAMES": "set by the release test for its own pytest run: "
+                                        "the import names of the wheel under test, which "
+                                        "must import from the venv's site-packages",
 }
 SETTINGS = "settings.toml"
 # The schema can't tell a rule name from a typo, nor a pattern that won't compile.

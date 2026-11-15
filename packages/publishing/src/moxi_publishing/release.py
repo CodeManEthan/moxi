@@ -11,7 +11,8 @@ member places on a bumped package that the new version would no longer meet.
 package's annotated release tag only when every check passes; it pushes nothing. The
 `ci` steps are the release workflow's: `ci gate` runs the gate on a pushed tag, `ci
 notes` prints the release's CHANGELOG section, and `ci siblings` tests the built package
-against the sibling versions the package index has.
+against the sibling versions the package index has, from fresh venvs.
+`workflows write` writes the two workflow files the release and the public scan run on.
 """
 
 from __future__ import annotations
@@ -336,4 +337,396 @@ def ci_notes(path: str, name: str) -> Result:
     return Result(section.split("\n"))
 
 
-__all__ = ["REMOTE", "PARTS", "UNRELEASED", "Result", "next_version", "bump", "main_branch", "tag", "tag_message", "ci_gate", "ci_notes"]
+
+# -- ci siblings: the release test and the published-siblings check -------------------------
+
+#: The resolutions the release test installs at: the newest published siblings the package
+#: admits, then the lowest set that resolves.
+RESOLUTIONS = ("highest", "lowest-direct")
+#: How long installing into a fresh venv may take, and the suite's run.
+INSTALL_TIMEOUT_S = 900.0
+SUITE_TIMEOUT_S = 3600.0
+#: The name the site-packages check is loaded under in the release test's pytest run.
+SITE_CHECK = "moxi_publishing_site_check"
+#: The lockfile the test tools' versions are read from, at the repo's root.
+LOCK = "uv.lock"
+
+_INSTALLED = ("import json, importlib.metadata as m\n"
+              "print(json.dumps({d.metadata['Name']: [d.version, d.requires or []]\n"
+              "                  for d in m.distributions()}))\n")
+
+
+@dataclass
+class ReleaseTest:
+    """What the release test of one tag installs."""
+
+    dist: str
+    version: str
+    root: str                   # the work tree
+    member_path: str            # the package's directory, from the root
+    wheel: str                  # the wheel's path
+    imports: list[str]          # the wheel's top-level import names
+    siblings: list              # the requirements on members it installs, as Requirement
+    extras: list[str]           # the extras installed
+    tools: list[str]            # the test tools, pinned
+    lines: list[str] = field(default_factory=list)
+
+
+def wheel_imports(wheel: str) -> list[str]:
+    """The top-level packages and modules a wheel installs."""
+    import zipfile
+
+    found = set()
+    with zipfile.ZipFile(wheel) as archive:
+        for name in archive.namelist():
+            first, _, rest = name.partition("/")
+            if first.endswith((".dist-info", ".data")):
+                continue
+            if rest:
+                found.add(first)
+            elif first.endswith(".py"):
+                found.add(first[:-3])
+    return sorted(found)
+
+
+def _wheel(artifact: str, dist: str, version: str) -> str:
+    import os
+
+    from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+    from packaging.version import Version
+
+    try:
+        names = sorted(os.listdir(artifact))
+    except OSError as exc:
+        raise Failure(f"{artifact} can't be read: {exc}", 2) from None
+    found = []
+    for name in names:
+        if not name.endswith(".whl"):
+            continue
+        try:
+            wdist, wversion, _build, _tags = parse_wheel_filename(name)
+        except InvalidWheelFilename:
+            continue
+        if wdist == dist and wversion == Version(version):
+            found.append(name)
+    if len(found) != 1:
+        raise Failure(f"{artifact} holds {len(found)} wheel(s) of {dist} {version}; the "
+                      "release test wants one", 2)
+    return os.path.join(artifact, found[0])
+
+
+def locked_versions(data: bytes | None) -> dict[str, str]:
+    """{canonical name: version} of every package a `uv.lock` pins."""
+    import tomllib
+
+    from packaging.utils import canonicalize_name
+
+    if data is None:
+        return {}
+    try:
+        lock = tomllib.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise Failure(f"{LOCK} can't be read: {exc}", 1) from None
+    out: dict[str, str] = {}
+    for package in lock.get("package", []):
+        if isinstance(package, dict) and isinstance(package.get("name"), str) \
+                and isinstance(package.get("version"), str):
+            out.setdefault(canonicalize_name(package["name"]), package["version"])
+    return out
+
+
+def _test_tools(git, ws, member) -> list[str]:
+    """The package's own dev group less workspace members, each pinned to uv.lock."""
+    import tomllib
+
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    from moxi_publishing import tags
+
+    data = tags.read_file(git, ws.commit, member.file("pyproject.toml")) or b""
+    try:
+        groups = tomllib.loads(data.decode("utf-8")).get("dependency-groups", {})
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        groups = {}
+    entries = groups.get("dev", []) if isinstance(groups, dict) else []
+    locked = locked_versions(tags.read_file(git, ws.commit, LOCK))
+    tools, unpinned = [], []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, str):
+            continue  # an include-group table
+        try:
+            req = Requirement(entry)
+        except InvalidRequirement:
+            raise Failure(f"{member.file('pyproject.toml')}: dev requirement {entry!r} "
+                          "can't be read", 1) from None
+        name = canonicalize_name(req.name)
+        if name in ws.members:
+            continue
+        version = locked.get(name)
+        if version is None:
+            unpinned.append(name)
+            continue
+        extras = f"[{','.join(sorted(req.extras))}]" if req.extras else ""
+        marker = f"; {req.marker}" if req.marker else ""
+        tools.append(f"{req.name}{extras}=={version}{marker}")
+    if unpinned:
+        raise Failure(f"{', '.join(unpinned)}, in {member.file('pyproject.toml')}'s dev "
+                      f"group, {'is' if len(unpinned) == 1 else 'are'} not in {LOCK}", 1)
+    return tools
+
+
+def release_test(path: str, name: str, *, artifact: str, web=None) -> ReleaseTest | Result:
+    """What the release test of the pushed tag `name` installs, or a refusal: a required
+    sibling no published version admits. Raises `Failure`."""
+    from packaging.utils import canonicalize_name
+
+    from moxi_publishing import flag, tags
+
+    root = flag.work_tree(path)
+    git, obj = _pushed_tag(root, name)
+    commit, why = tags.peel(git, obj)
+    if commit is None:
+        raise Failure(f"{name}: {why}", 3)
+    try:
+        ws = tags.workspace(git, commit)
+    except tags.ReleaseError as exc:
+        raise Failure(f"the workspace at {commit[:12]} can't be read: {exc}", 1) from None
+    parsed = tags.parse_tag(name, ws.members)
+    if parsed is None:
+        raise Failure(f"{name} names no member and version at {commit[:12]}", 3)
+    dist, version = parsed
+    member = ws.members[dist]
+    wheel = _wheel(artifact, dist, version)
+    web = web if web is not None else tags.default_web()
+    lines, missing, siblings, extras = [], [], [], []
+    try:
+        for req in tags._member_requirements(ws, member.project.get("dependencies", [])):
+            if tags.admitted(req, web.published(canonicalize_name(req.name))):
+                siblings.append(req)
+            else:
+                missing.append(f"{canonicalize_name(req.name)}{req.specifier}")
+        groups = member.project.get("optional-dependencies", {})
+        for extra, reqs in sorted(groups.items()) if isinstance(groups, dict) else []:
+            wanted = tags._member_requirements(ws, reqs)
+            lacking = [f"{canonicalize_name(r.name)}{r.specifier}" for r in wanted
+                       if not tags.admitted(r, web.published(canonicalize_name(r.name)))]
+            if lacking:
+                lines.append(f"extra {extra}: left out, no published {', '.join(lacking)}")
+            else:
+                extras.append(extra)
+                siblings += wanted
+                lines.append(f"extra {extra}: installed")
+    except tags.ReleaseError as exc:
+        return Result([f"the index can't be read: {exc}"], 1)
+    if missing:
+        return Result(lines + [f"no published version admits {', '.join(missing)}, which "
+                               f"{dist} requires; release those first"], 3)
+    return ReleaseTest(dist, version, root, member.path, wheel, wheel_imports(wheel),
+                       siblings, extras, _test_tools(git, ws, member), lines)
+
+
+def _default_run(argv, *, cwd=None, env=None, capture=True, timeout_s):
+    from moxi import proc
+
+    return proc.run(argv, cwd=cwd, env=env, capture=capture, timeout_s=timeout_s)
+
+
+def floors_raised(siblings, published: dict, installed: dict) -> list[str]:
+    """A line for each sibling installed above the lowest published version its
+    requirement admits, naming the installed requirements that raised it.
+    `published` maps a sibling to its published versions, `installed` a distribution's
+    canonical name to (version, its requirements)."""
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+    from packaging.version import Version
+
+    from moxi_publishing import tags
+
+    lines = []
+    for req in siblings:
+        name = canonicalize_name(req.name)
+        admitted = tags.admitted(req, published.get(name, []))
+        got = installed.get(name)
+        if not admitted or got is None:
+            continue
+        lowest = min(admitted, key=Version)
+        if Version(got[0]) <= Version(lowest):
+            continue
+        raisers = []
+        for other, (other_version, requires) in sorted(installed.items()):
+            for text in requires:
+                try:
+                    need = Requirement(text)
+                except InvalidRequirement:
+                    continue
+                if canonicalize_name(need.name) == name and not need.specifier.contains(
+                        lowest, prereleases=True):
+                    raisers.append(f"{other} {other_version} ({need.name}{need.specifier})")
+        lines.append(f"floor raised: {name} {lowest} is the lowest published version "
+                     f"{req.specifier or 'any'} admits; {got[0]} was installed, raised by "
+                     + (", ".join(raisers) if raisers else "the resolver"))
+    return lines
+
+
+def _run_once(plan: ReleaseTest, resolution: str, *, uv: str, run, web) -> tuple[bool, list[str]]:
+    """Install the wheel into a fresh venv at `resolution` and run the suite there."""
+    import json
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    from packaging.utils import canonicalize_name
+
+    from moxi_publishing import site_check, tags
+
+    lines = []
+    where = tempfile.mkdtemp(prefix="moxi-release-")
+    try:
+        venv = os.path.join(where, "venv")
+        python = os.path.join(venv, "Scripts", "python.exe") if os.name == "nt" \
+            else os.path.join(venv, "bin", "python")
+        done = run([uv, "venv", "--quiet", "--python", sys.executable, venv],
+                   timeout_s=INSTALL_TIMEOUT_S)
+        if done.returncode != 0:
+            return False, [f"{resolution}: the venv can't be made: {_err(done)}"]
+        index = tags.index_from_environment()
+        wanted = [f"{plan.dist}[{','.join(plan.extras)}] @ {Path(plan.wheel).resolve().as_uri()}"
+                  if plan.extras else f"{plan.dist} @ {Path(plan.wheel).resolve().as_uri()}"]
+        # The siblings are named as well, so the lowest resolution reaches them: it lowers
+        # direct requirements only.
+        wanted += [str(req) for req in plan.siblings] + plan.tools
+        argv = [uv, "pip", "install", "--quiet", "--python", python,
+                "--resolution", resolution]
+        if index:
+            argv += ["--default-index", index.rstrip("/") + "/simple"]
+        done = run(argv + wanted, cwd=where, timeout_s=INSTALL_TIMEOUT_S)
+        if done.returncode != 0:
+            return False, [f"{resolution}: the install failed: {_err(done)}"]
+        done = run([python, "-I", "-c", _INSTALLED], cwd=where, timeout_s=INSTALL_TIMEOUT_S)
+        try:
+            installed = {canonicalize_name(k): (v[0], v[1]) for k, v in
+                         json.loads(done.stdout).items()}
+        except (ValueError, TypeError, AttributeError, IndexError):
+            return False, [f"{resolution}: the venv's packages can't be read: {_err(done)}"]
+        names = sorted({canonicalize_name(r.name) for r in plan.siblings})
+        lines.append(f"{resolution}: installed " + ", ".join(
+            f"{n} {installed[n][0]}" for n in names if n in installed)
+            if names else f"{resolution}: installed {plan.dist} {plan.version}, which "
+                          "requires no sibling")
+        if resolution == "lowest-direct":
+            published = {n: web.published(n) for n in names}
+            lines += floors_raised(plan.siblings, published, installed)
+        plugin = os.path.join(where, "plugin")
+        os.mkdir(plugin)
+        shutil.copyfile(site_check.__file__, os.path.join(plugin, SITE_CHECK + ".py"))
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "VIRTUAL_ENV")}
+        env.update({site_check.NAMES_ENV: ",".join(plan.imports), "PYTHONPATH": plugin,
+                    "PYTHONSAFEPATH": "1"})
+        try:
+            done = run([python, "-m", "pytest", "-p", SITE_CHECK, "-p", "no:cacheprovider"],
+                       cwd=os.path.join(plan.root, plan.member_path), env=env,
+                       capture=False, timeout_s=SUITE_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            return False, lines + [f"{resolution}: the suite ran past {SUITE_TIMEOUT_S:.0f} s"]
+        if done.returncode != 0:
+            return False, lines + [f"{resolution}: the suite failed (exit {done.returncode})"]
+        return True, lines + [f"{resolution}: the suite passed"]
+    except subprocess.TimeoutExpired:
+        return False, lines + [f"{resolution}: the install ran past {INSTALL_TIMEOUT_S:.0f} s"]
+    except tags.ReleaseError as exc:
+        return False, lines + [f"{resolution}: the index can't be read: {exc}"]
+    finally:
+        shutil.rmtree(where, ignore_errors=True)
+
+
+def _err(done) -> str:
+    text = done.stderr or b""
+    text = text.decode("utf-8", "replace") if isinstance(text, bytes) else text
+    return text.strip().split("\n")[-1] if text.strip() else f"exit {done.returncode}"
+
+
+def ci_siblings(path: str, name: str, *, artifact: str, resolution: str | None = None,
+                web=None, run=None) -> Result:
+    """`moxi publishing ci siblings TAG --artifact DIR`: the package's whole suite from a
+    fresh venv holding only its wheel, the extras whose siblings are published, the
+    published siblings and its test tools at uv.lock's versions; once at the newest
+    published siblings it admits and once at the lowest set that resolves, or only at
+    `resolution`. Raises `Failure`."""
+    import shutil
+
+    from moxi_publishing import tags
+
+    if resolution is not None and resolution not in RESOLUTIONS:
+        raise Failure(f"--resolution is one of {', '.join(RESOLUTIONS)}", 2)
+    web = web if web is not None else tags.default_web()
+    plan = release_test(path, name, artifact=artifact, web=web)
+    if isinstance(plan, Result):
+        return plan
+    uv = shutil.which("uv")
+    if uv is None:
+        raise Failure("uv is not on PATH; the release test installs with it", 1)
+    result = Result(list(plan.lines))
+    for each in (resolution,) if resolution else RESOLUTIONS:
+        passed, lines = _run_once(plan, each, uv=uv, run=run or _default_run, web=web)
+        result.lines += lines
+        if not passed:
+            result.code = 1
+    return result
+
+
+# -- the workflow files ---------------------------------------------------------------------
+
+#: The workflow files `workflows write` writes, from the package's templates.
+WORKFLOWS = ("publishing.yml", "release.yml")
+WORKFLOW_DIR = ".github/workflows"
+
+
+def template(name: str) -> bytes:
+    """The template of the workflow file `name`."""
+    from importlib.resources import files
+
+    return files("moxi_publishing").joinpath("templates", name).read_bytes()
+
+
+def workflows_write(path: str) -> Result:
+    """`moxi publishing workflows write PATH`: the two workflow files into the repo's
+    `.github/workflows/`, each replaced by its template. Raises `Failure`."""
+    import os
+
+    from moxi import files
+    from moxi_publishing import flag
+
+    root = flag.work_tree(path)
+    result = Result()
+    for name in WORKFLOWS:
+        target = os.path.join(root, *WORKFLOW_DIR.split("/"), name)
+        data = template(name)
+        try:
+            with open(target, "rb") as fh:
+                same = fh.read() == data
+        except FileNotFoundError:
+            same = None
+        except OSError as exc:
+            raise Failure(f"{target} can't be read: {exc}", 1) from None
+        if same:
+            result.lines.append(f"{WORKFLOW_DIR}/{name}: unchanged")
+            continue
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            files.atomic_write(target, data, mode=0o644)
+        except OSError as exc:
+            raise Failure(f"{target} can't be written: {exc}", 1) from None
+        result.lines.append(f"{WORKFLOW_DIR}/{name}: " + ("written" if same is None
+                                                         else "replaced"))
+    result.lines.append("commit them; the release workflow needs the pypi environment and "
+                        "a trusted publisher per package")
+    return result
+
+__all__ = ["REMOTE", "PARTS", "UNRELEASED", "RESOLUTIONS", "WORKFLOWS", "Result",
+           "ReleaseTest", "next_version", "bump", "main_branch", "tag", "tag_message",
+           "ci_gate", "ci_notes", "ci_siblings", "release_test", "floors_raised",
+           "wheel_imports", "locked_versions", "template", "workflows_write"]

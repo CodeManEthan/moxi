@@ -14,8 +14,13 @@ same values the local gate does:
 
     [tool.moxi-publishing]
     not-ready = ["moxi", "moxi-cache"]   # never released from a commit that lists them
+    ready = ["moxi-comms"]               # confirmed; optional, see below
     check-workflow = "ci.yml"            # the workflow file of the check job
     check-job = "linux"                  # the job that must pass on main at the commit
+
+When the table holds `ready`, every member must be on exactly one of the two lists, so a
+member added later is never ready by default: one on neither or on both counts as not
+ready, and `moxi-dev check` refuses it. Without `ready`, only `not-ready` counts.
 
 `gate` decides whether a tag may release. `moxi publishing tag`, the push piece and
 `moxi publishing ci gate` all call it; only where the main ref comes from differs. Its
@@ -26,7 +31,8 @@ seven checks, for a tag on commit C naming distribution D and version V:
 2. CHANGELOG: D's CHANGELOG at C has `## V (YYYY-MM-DD)` as its first version heading;
 3. main and green: C is on the first-parent line of the main ref, and GitHub has a
    successful run of `check-job` in `check-workflow`, from a push to the main branch, at C;
-4. ready: D is not on the not-ready list at C;
+4. ready: D is not on the not-ready list at C, and, where the table keeps a ready list,
+   D is on that list;
 5. siblings: each required dependency of D on another member admits at least one
    published version of it (an extra's are reported, not checked);
 6. new: the package index has no file of D at V; or, given the build's files, every file
@@ -56,6 +62,7 @@ SEPARATOR = "-v"
 #: The root `pyproject.toml`'s table of release settings, and its keys.
 TABLE = "moxi-publishing"
 NOT_READY = "not-ready"
+READY = "ready"
 CHECK_WORKFLOW = "check-workflow"
 CHECK_JOB = "check-job"
 #: Where GitHub's API and the package index are read; tests point these at a fake.
@@ -202,14 +209,35 @@ class Workspace:
     members: dict[str, Member]          # by distribution
     table: dict = field(default_factory=dict)
 
-    def not_ready(self) -> set[str]:
-        """The distributions on the not-ready list. Raises `ReleaseError`."""
+    def _listed(self, key: str) -> set[str] | None:
         from packaging.utils import canonicalize_name
 
-        listed = self.table.get(NOT_READY, [])
+        if key not in self.table:
+            return None
+        listed = self.table[key]
         if not isinstance(listed, list) or not all(isinstance(x, str) for x in listed):
-            raise ReleaseError(f"[tool.{TABLE}] {NOT_READY} is not a list of names")
+            raise ReleaseError(f"[tool.{TABLE}] {key} is not a list of names")
         return {canonicalize_name(x) for x in listed}
+
+    def not_ready(self) -> set[str]:
+        """The distributions on the not-ready list. Raises `ReleaseError`."""
+        return self._listed(NOT_READY) or set()
+
+    def unlisted(self) -> dict[str, str]:
+        """{distribution: what is wrong} for each member on neither or both of the
+        not-ready and ready lists. A repo that keeps no ready list names none, so there
+        only the not-ready list counts. Raises `ReleaseError`."""
+        ready = self._listed(READY)
+        if ready is None:
+            return {}
+        not_ready = self.not_ready()
+        found = {}
+        for dist in sorted(self.members):
+            if dist in ready and dist in not_ready:
+                found[dist] = f"on both [tool.{TABLE}] {NOT_READY} and {READY}"
+            elif dist not in ready and dist not in not_ready:
+                found[dist] = f"on neither [tool.{TABLE}] {NOT_READY} nor {READY}"
+        return found
 
     def setting(self, key: str) -> str | None:
         value = self.table.get(key)
@@ -340,6 +368,11 @@ def _workspace(read, dirs, commit: str, label: str) -> Workspace:
 
 
 # -- GitHub and the package index -----------------------------------------------------------
+
+def index_from_environment() -> str | None:
+    """The package index the environment names in place of pypi.org, or None."""
+    return os.environ.get(PYPI_ENV) or None
+
 
 class Web:
     """Reads JSON from GitHub's API and the package index's JSON API."""
@@ -616,6 +649,10 @@ def _main(*, git, ws, where, web, **_):
 
 
 def _ready(*, ws, member, **_):
+    wrong = ws.unlisted().get(member.dist)
+    if wrong is not None:
+        return False, (f"{member.dist} is {wrong} at {ws.commit[:12]}, so it counts as "
+                       f"not ready; put it on {NOT_READY} until it is confirmed")
     if member.dist in ws.not_ready():
         return False, (f"{member.dist} is on [tool.{TABLE}] {NOT_READY} at "
                        f"{ws.commit[:12]}; it leaves the list once confirmed")
@@ -747,7 +784,8 @@ def _catalogue(*, git, ws, member, where, web, **_):
 
 
 __all__ = ["CORE", "CATALOGUE", "CHANGELOG", "SEPARATOR", "TABLE", "NOT_READY",
-           "CHECK_WORKFLOW", "CHECK_JOB", "GITHUB_API_ENV", "PYPI_ENV", "READ_TIMEOUT_S",
+           "CHECK_WORKFLOW", "CHECK_JOB", "GITHUB_API_ENV", "PYPI_ENV", "READY",
+           "index_from_environment", "READ_TIMEOUT_S",
            "CHECKS", "ReleaseError", "normalised", "tag_name", "parse_tag", "Heading",
            "version_headings", "first_version_heading", "same_version",
            "changelog_section", "Member", "Workspace", "repo_git", "read_file",

@@ -210,6 +210,48 @@ def test_check_4_refuses_a_package_on_the_not_ready_list(repo, remote, fake):
     failed(run_gate(repo, fake, "proj-a-v0.1.0"), 4, "not-ready")
 
 
+def ready_lists(repo, fake, not_ready, ready):
+    """Commit the release workspace with both lists, push it and make its check green."""
+    release_files(repo, not_ready=not_ready)
+    with (repo / "pyproject.toml").open("a") as fh:
+        fh.write(f"ready = {ready!r}\n".replace("'", '"'))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "Lists")
+    git(repo, "push", "-q", "origin", "main")
+    fake.green(head(repo))
+    fake.publish("proj-a", "0.0.9")
+
+
+@pytest.mark.parametrize("not_ready, ready, says", [
+    ([], ["proj-a-extra"], "on neither [tool.moxi-publishing] not-ready nor ready"),
+    (["proj-a"], ["proj-a", "proj-a-extra"], "on both [tool.moxi-publishing] not-ready "
+                                             "and ready"),
+])
+def test_check_4_counts_a_member_missing_from_the_ready_list_as_not_ready(
+        repo, remote, fake, not_ready, ready, says):
+    ready_lists(repo, fake, not_ready, ready)
+    verdict = run_gate(repo, fake, "proj-a-v0.1.0")
+    failed(verdict, 4, says)
+    failed(verdict, 4, "put it on not-ready until it is confirmed")
+
+
+def test_check_4_passes_a_member_on_the_ready_list_only(repo, remote, fake):
+    ready_lists(repo, fake, ["proj-a-extra"], ["proj-a"])
+    verdict = run_gate(repo, fake, "proj-a-v0.1.0")
+    assert verdict.passed, verdict.lines()
+
+
+def test_unlisted_names_members_on_neither_or_both_and_nothing_without_ready(repo):
+    release_files(repo, not_ready=["proj-a"])
+    ws = tags.work_tree_workspace(str(repo))
+    assert ws.unlisted() == {}
+    with (repo / "pyproject.toml").open("a") as fh:
+        fh.write('ready = ["proj-a"]\n')
+    assert tags.work_tree_workspace(str(repo)).unlisted() == {
+        "proj-a": "on both [tool.moxi-publishing] not-ready and ready",
+        "proj-a-extra": "on neither [tool.moxi-publishing] not-ready nor ready"}
+
+
 def test_check_5_wants_a_published_sibling_the_requirement_admits(released_repo, fake):
     fake.index.clear()
     failed(run_gate(released_repo, fake, "proj-a-extra-v0.2.0"), 5, "proj-a>=0.0.9")

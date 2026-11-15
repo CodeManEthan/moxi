@@ -160,13 +160,18 @@ machine reads:
 ```toml
 [tool.moxi-publishing]
 not-ready = ["proj-a", "proj-b"]   # never released from a commit that lists them
+ready = ["proj-c"]                 # confirmed
 check-workflow = "ci.yml"          # the workflow of the check that must pass on main
 check-job = "linux"                # that check's job
 ```
 
-A package on `not-ready` is still built and tested; it leaves the list by its own commit
-once you have confirmed it. `check-workflow` and `check-job` have no default: without
-them nothing is released, and the gate names the missing key.
+A package on `not-ready` is still built and tested; it moves to `ready` by its own commit
+once you have confirmed it. `ready` is optional. When the table holds it, every member
+must be on exactly one of the two lists, so a package added to the workspace later is
+never ready until a commit says so: one on neither list or on both counts as not ready,
+and `moxi-dev check` refuses it. Without `ready`, only `not-ready` counts.
+`check-workflow` and `check-job` have no default: without them nothing is released, and
+the gate names the missing key.
 
 ### The tag gate
 
@@ -180,7 +185,7 @@ version V:
    heading;
 3. **main and green**: C is on the first-parent line of main, and GitHub has a
    successful run of `check-job` in `check-workflow` from a push to main at C;
-4. **ready**: D is not on `not-ready` at C;
+4. **ready**: D is not on `not-ready` at C, and is on `ready` where the table keeps it;
 5. **siblings**: each requirement D places on another member admits at least one
    published version of it (an extra's are reported, not checked);
 6. **new**: the index has no file of D at V; or, when the release workflow has built the
@@ -214,9 +219,45 @@ check passes, makes the annotated tag, whose message is the package's CHANGELOG 
 It pushes nothing: `git push origin <tag>` does, and the push piece runs the gate again.
 It prints each check, and exits 3 when the gate refuses.
 
-The release workflow's steps are `moxi publishing ci gate TAG [--github OWNER/REPO]
-[--artifact DIR]`, the gate with main read from `origin/<the default branch>`, and `moxi
-publishing ci notes TAG`, which prints the tag's CHANGELOG section.
+### The workflow files
+
+`moxi publishing workflows write [PATH]` writes two files into the repo's
+`.github/workflows/`, replacing what is there; commit them.
+
+- `publishing.yml`, the public scan, runs on every push to any branch and every tag:
+  `moxi publishing scan --ci` over the pushed commit's tree, the commits the push brings
+  (those not on the default branch, for a new ref) and a pushed tag. A hit fails the check
+  and blocks nothing.
+- `release.yml` runs on a pushed release tag, or on `gh workflow run release.yml --ref
+  <tag>`. Its jobs run in order, each needing the one before: the gate; the public scan of
+  the tagged tree; one build of the sdist and wheel, tested from a fresh install; the
+  published-siblings test of that build; the upload to the index, in the `pypi`
+  environment; and the GitHub Release, with the CHANGELOG section as its notes. The
+  file's opening comment says which re-run is for which failure.
+
+Each job holds `contents: read` only, but for `actions: read` where the gate runs,
+`id-token: write` for the upload and `contents: write` for the GitHub Release. The
+upload uses no stored token: it needs a trusted publisher on the index for each package
+(this repo, `release.yml`, environment `pypi`), and a `pypi` environment on GitHub whose
+required reviewer approves each upload.
+
+The steps the workflow runs:
+
+- `moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]`: the gate, with
+  main read from `origin/<the default branch>`. Without `--artifact` a version the index
+  already holds files of passes check 6, since the upload job runs the gate again with
+  the build's files.
+- `moxi publishing ci notes TAG`: the tag's CHANGELOG section.
+- `moxi publishing ci siblings TAG --artifact DIR [--resolution highest|lowest-direct]`:
+  the package's whole test suite from a fresh venv that holds only its wheel, its
+  published siblings, the extras whose sibling requirements a published version admits,
+  and the tools of its own `dev` dependency group at the versions `uv.lock` pins; never
+  another workspace member. It runs once with the newest published siblings each
+  requirement admits and once with the lowest set that resolves, or only at
+  `--resolution`, and reports a sibling the resolver had to raise above its floor, with
+  what raised it. An extra left out is reported, not failed; a required sibling with no
+  published version it admits refuses, naming it. Before any test runs, the run fails if
+  the package imports from anywhere but the venv's site-packages.
 
 ## Provenance rules
 
