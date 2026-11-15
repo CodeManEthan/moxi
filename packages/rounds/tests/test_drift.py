@@ -181,6 +181,8 @@ def test_a_commit_after_the_verdict_beside_a_merge_of_the_target_owes_a_recheck(
 
     assert (read.rule, read.owed, read.covered) == (drift.OWED, True, ())
     assert f"is no merge of the target ({fix[:12]})" in read.why
+    assert (f"target moved 1 commit under B1; 0 paths meet, merged into the branch: "
+            f"re-check owed: {read.why}\n") in showing.as_text(showing.show(ROUND))
 
 
 def test_a_merge_of_the_target_that_changes_a_shared_path_owes_a_recheck(built):
@@ -274,3 +276,39 @@ def test_a_build_with_no_verdict_shows_no_drift(built):
 
     assert row["drift"] is None
     assert "under B1" not in showing.as_text(showing.show(ROUND))
+
+
+
+def test_next_names_the_drift_pass_and_both_ranges_once_the_target_is_merged_in(built):
+    from moxi_rounds import next_step
+
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
+    repo.commit("README", "a placeholder repo, changed on main")
+    tree.git("merge", "-q", "--no-ff", "--no-commit", "-X", "ours", "main")
+    (tree.root / "README").write_text("both\n", encoding="utf-8")
+    tree.git("add", "README")
+    tree.git("commit", "-q", "--no-edit")
+    read = drift_now(round_dir, repo)
+
+    said = next_step.read(ROUND)
+    [group] = said["groups"]
+    text = next_step.as_text(said)
+
+    assert (group["step"], group["pass"], group["ranges"]) == (
+        "verify-build", "drift", read.ranges)
+    assert f"pass:  drift: {read.why}" in text
+    assert (f"reads: the target's change {read.ranges['target']}; the build's diff "
+            f"{read.ranges['build']}") in text
+
+
+def test_next_names_no_drift_pass_while_the_target_has_not_moved(built):
+    from moxi_rounds import next_step
+
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev())
+    tree.commit("fix.txt", "a fix after the verdict")
+
+    [group] = next_step.read(ROUND)["groups"]
+
+    assert group["step"] == "verify-build" and "pass" not in group

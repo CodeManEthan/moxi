@@ -22,7 +22,10 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
   read of CI and what each form of the gate still owes at the tip. In the
   `verify-build` group, `owes` says why the build's verification does not count at its
   tip, with the range a re-check reads, and once a report of the build is on record
-  the group's tier is the one a re-check is held to.
+  the group's tier is the one a re-check is held to. While the target's move owes the
+  build a re-check, the group of the step whose report owes it, the build's
+  verification or a report step of the user's own, names the re-check's `pass` and
+  `why`, and its `ranges`, the target's change and the build's diff, which it reads.
 - `changed`: in the group of a stage with an open build, each ruling recorded since
   the build's block was printed that reaches the stage (`commission_block.changed`),
   so a correction reaches a build already commissioned.
@@ -261,7 +264,32 @@ def _told(group: dict) -> dict | None:
     return {"reason": group["why"], "fix": "; ".join(group["instead"])}
 
 
-def _group(found: showing.Shown, step: steps.Step, models) -> dict:
+def _drift_pass(group: dict, step: steps.Step, seen) -> None:
+    """Make the re-check of a step whose newest report owes one for drift the drift
+    form: its pass, why, and both ranges it reads, the target's change and the build's
+    diff, whichever step's row asks for the re-check."""
+    if step.settled or step.stage is None:
+        return
+    now = (seen or {}).get(step.stage)
+    if now is None:
+        return
+    if step.step == steps.VERIFY_BUILD:
+        moved, pass_ = now.drift, report_block.DRIFT
+    else:
+        moved = ((now.reported or {}).get(step.step) or (None, None))[1]
+        pass_ = report_block.RECHECK
+    if moved is None or not getattr(moved, "owed", False):
+        return
+    ranges = moved.ranges
+    group.update({"pass": pass_, "why": moved.why or "the target moved under the build",
+                  "version": None, "instead": [], "ranges": ranges})
+    group["reads"] = [*(f"{side} {span}" for side, span in
+                        (("the target's change", ranges["target"]),
+                         ("the build's diff", ranges["build"])) if span),
+                      *group["reads"]]
+
+
+def _group(found: showing.Shown, step: steps.Step, models, seen=None) -> dict:
     entry = step.entry or {}
     group = {"step": step.step, "stage": step.stage, "state": step.state,
              "built": step.state != steps.NOT_BUILT,
@@ -276,6 +304,8 @@ def _group(found: showing.Shown, step: steps.Step, models) -> dict:
             step.entry.get("does"))
     if group["built"] and lines is not None:
         group.update(lines(found, step))
+        if step.step == steps.VERIFY_BUILD or lines is _report:
+            _drift_pass(group, step, seen)
     group["model"] = model_of(models, group["tier"])
     if (step.stage is not None
             and stages.build_of(found.state, step.stage) == stages.BUILDING):
@@ -291,12 +321,12 @@ def _groups(found: showing.Shown, models, seen) -> list[dict]:
                        register=found.register, seen=seen)
     if at is None:
         return []
-    groups = [_group(found, at, models)]
+    groups = [_group(found, at, models, seen)]
     for stage in stages.in_plan(found.state):
         first = next((step for step in every
                       if step.stage == stage.id and not step.settled), None)
         if first is not None and (first.step, first.stage) != (at.step, at.stage):
-            groups.append(_group(found, first, models))
+            groups.append(_group(found, first, models, seen))
     return groups
 
 

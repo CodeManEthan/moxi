@@ -231,7 +231,8 @@ def of_build(state: states.State, build: builds.Build, status: builds.Status, gi
 
 def line(stage: str, drift: dict) -> str:
     """A build's drift in words, from its data: `target moved 4 commits under B2; 0
-    paths meet` or `...; 2 paths meet: re-check owed`."""
+    paths meet` or `...; 2 paths meet: re-check owed`. A re-check owed with no path
+    meeting and no shared path changed says why."""
     if drift["rule"] == NOT_MOVED:
         return f"target has not moved under {stage}"
     if drift["moved"] is None or (drift["owed"] and drift["ranges"]["build"] is None):
@@ -245,7 +246,12 @@ def line(stage: str, drift: dict) -> str:
         text += f", {_plural(len(drift['shared']), 'shared path')} changed"
     if drift["merged_in"]:
         text += ", merged into the branch"
-    return text + (": re-check owed" if drift["owed"] else "")
+    if not drift["owed"]:
+        return text
+    # With no path meeting and no shared path changed, the counts don't say why.
+    if not meet and not drift["shared"] and drift["why"]:
+        return f"{text}: re-check owed: {drift['why']}"
+    return text + ": re-check owed"
 
 
 __all__ = ["LOCKFILES", "NOT_MOVED", "APART", "OWED", "MERGED_IN", "Drift",
