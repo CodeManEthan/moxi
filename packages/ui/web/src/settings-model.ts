@@ -360,7 +360,7 @@ export function controlOf(key: Setting): Control {
  * The dim lines under a row, in order: the key's `line` (with a label) or its doc
  * (without one); its mark as a sentence when it does not apply at once; who sets it
  * when the shell's environment does; why a switch table's entries can't all be listed;
- * and the lock.
+ * and the lock (a switch table's is on its locked entries alone).
  */
 export function linesOf(key: Setting): string[] {
   const out: string[] = [];
@@ -372,7 +372,9 @@ export function linesOf(key: Setting): string[] {
     out.push(`Set by ${key.env} in the shell's environment, which wins over the file.`);
   }
   if (key.switch_table === true && key.declarations === "unavailable" && words(key.reason)) out.push(key.reason as string);
-  if (key.locked === true) out.push(LOCKED);
+  // A switch table the read marks locked holds a locked entry: the entry says so, and
+  // the others stay open.
+  if (key.locked === true && key.switch_table !== true) out.push(LOCKED);
   return out;
 }
 
@@ -404,7 +406,7 @@ export function rowOf(key: Setting): Row {
     lines: linesOf(key),
     terminal: terminalLine(key),
     defaults: defaultsOf(key),
-    locked: key.locked === true,
+    locked: key.locked === true && key.switch_table !== true,
   };
 }
 
@@ -462,4 +464,55 @@ export function moreWords(more: readonly Setting[]): { text: string; changed: st
   const k = more.filter((key) => key.changed === true).length;
   return { text: `${more.length} ${more.length === 1 ? "setting" : "settings"}: ${what}`,
            changed: k > 0 ? `${k} changed` : null };
+}
+
+// --- the frame: the list, the pane's state and the read's failure -----------------------------
+
+/** One module in the list. */
+export interface ListEntry {
+  module: string;
+  /** How many of its drawn keys are changed, once its section is in; null at none or before. */
+  changed: number | null;
+  /** Its section came with an error: `can't be read` under its name. */
+  unreadable: boolean;
+}
+
+/** The list: every listed module in the list's order, each with its count once its section is in. */
+export function listEntries(listed: readonly string[], sections: ReadonlyMap<string, Section>,
+                            phone: boolean): ListEntry[] {
+  return moduleOrder(listed).map((module) => {
+    const section = sections.get(module);
+    const unreadable = section !== undefined && section.error !== null;
+    const n = section === undefined || unreadable ? 0 : changedCount(section, phone);
+    return { module, changed: n > 0 ? n : null, unreadable };
+  });
+}
+
+/** What the pane shows for the module shown: its section not in yet, one that can't be
+ * read, one with no drawn key, or its rows. */
+export type PaneState = "reading" | "unreadable" | "empty" | "rows";
+
+export function paneState(section: Section | undefined): PaneState {
+  if (section === undefined) return "reading";
+  if (section.error !== null) return "unreadable";
+  return paneKeys(section.module, section.keys).length === 0 ? "empty" : "rows";
+}
+
+export const NOTHING_HERE = "Nothing here can be changed on this page.";
+/** How long the pane stays blank before it says it is reading. */
+export const READING_AFTER_MS = 400;
+export const READING = "Reading…";
+
+/** The words for a read of the settings that got no answer it could use. */
+export function readFailed(status: number, data: unknown): string {
+  if (status === 0) return "No answer from the shell, so the settings could not be read.";
+  if (status === 403) return "This browser is signed out.";
+  const said = data !== null && typeof data === "object" ? data as Record<string, unknown> : {};
+  const text = said.refused ?? said.conflict ?? said.error;
+  return typeof text === "string" && text !== "" ? text : `The shell answered ${status} for the settings.`;
+}
+
+/** A section's error as the pane says it. */
+export function unreadableWords(section: Section): string {
+  return `${section.module}'s settings can't be read: ${section.error ?? ""}`;
 }

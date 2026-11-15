@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  LOCKED, blocksOf, changedCount, controlOf, countOf, defaultsOf, drawnKeys, joined, labelOf, linesOf, markLine,
-  moduleOrder, moreWords, paneKeys, rowOf, splitMore, terminalLine, totalChanged, valueWords,
+  LOCKED, NOTHING_HERE, blocksOf, changedCount, controlOf, countOf, defaultsOf, drawnKeys, joined, labelOf, linesOf,
+  listEntries, markLine, moduleOrder, moreWords, paneKeys, paneState, readFailed, rowOf, splitMore, terminalLine,
+  totalChanged, unreadableWords, valueWords,
 } from "../src/settings-model.ts";
 
 /** A key as `GET /api/settings` gives it: the value and default as JSON. */
@@ -139,6 +140,23 @@ test("a switch table is one switch per entry, each with its mark and lock", () =
     { key: "rows.sync", label: "sync", on: false, line: null, locked: true }] });
 });
 
+test("a switch table the read marks locked keeps its other entries open, with no Reset and no line of its own", () => {
+  const table = key("rows", "table", { spare: false }, {}, { switch_table: true, locked: true, source: "file",
+    changed: false, entries: [
+      { name: "backup", key: "rows.backup", value: false, source: "default", mark: "applies now", locked: true },
+      { name: "spare", key: "rows.spare", value: false, source: "file", mark: "applies now", locked: false }] });
+  const row = rowOf(table);
+  assert.equal(row.locked, false);
+  assert.ok(!row.lines.includes(LOCKED));
+  assert.deepEqual(row.control.toggles.map((t) => [t.key, t.locked]), [["rows.backup", true], ["rows.spare", false]]);
+  assert.deepEqual(defaultsOf({ ...table, json: JSON.stringify({ backup: true }), changed: true }),
+                   { words: "none", reset: false });
+  // A plain key the read marks locked is off, and says so.
+  const limit = rowOf(key("limit", "int", 7, 10, { locked: true, source: "file" }));
+  assert.equal(limit.locked, true);
+  assert.equal(limit.lines.at(-1), LOCKED);
+});
+
 test("a terminal key is its value as a word, no control, and the command for the other state", () => {
   const on = UI.find((k) => k.name === "gateway.enabled");
   assert.deepEqual(controlOf(on), { kind: "word", text: "on" });
@@ -261,4 +279,41 @@ test("sub-heads follow the order their groups first appear in", () => {
   assert.deepEqual(blocksOf(keys).map((block) => [block.group, names(block.keys)]),
                    [["Guards", ["a", "b"]], ["Sessions", ["c"]], [null, ["d"]]]);
   assert.deepEqual(blocksOf([]), []);
+});
+
+// --- the frame ----------------------------------------------------------------------------
+
+test("the list: each listed module in order, its count once its section is in, can't be read on an error", () => {
+  const sections = new Map([
+    ["ui", section("ui", UI)],
+    ["fixture", section("fixture", [key("limit", "int", 12, 10)])],
+    ["broken", section("broken", [], { error: "the file is not valid TOML", fix: "correct it" })],
+  ]);
+  assert.deepEqual(listEntries(["fixture", "ui", "broken", "moxi", "cache"], sections, false), [
+    { module: "moxi", changed: null, unreadable: false },
+    { module: "ui", changed: 1, unreadable: false },
+    { module: "broken", changed: null, unreadable: true },
+    { module: "cache", changed: null, unreadable: false },
+    { module: "fixture", changed: 1, unreadable: false },
+  ]);
+  // ui's phone keys count while the Phone group shows.
+  assert.equal(listEntries(["ui"], sections, true)[1].changed, 3);
+});
+
+test("the pane: reading before its section, can't be read on an error, nothing here with no drawn key, else rows", () => {
+  assert.equal(paneState(undefined), "reading");
+  const broken = section("broken", [], { error: "the file is not valid TOML", fix: "correct it" });
+  assert.equal(paneState(broken), "unreadable");
+  assert.equal(unreadableWords(broken), "broken's settings can't be read: the file is not valid TOML");
+  assert.equal(paneState(section("x", [key("p", "string", "", "", { needs: "nosuch", needs_absent: true })])), "empty");
+  assert.equal(paneState(section("ui", UI.filter((k) => k.name.startsWith("gateway.")))), "empty");
+  assert.equal(paneState(section("ui", UI)), "rows");
+  assert.equal(NOTHING_HERE, "Nothing here can be changed on this page.");
+});
+
+test("a read with no usable answer says why in today's words", () => {
+  assert.equal(readFailed(0, null), "No answer from the shell, so the settings could not be read.");
+  assert.equal(readFailed(403, { error: "signed out" }), "This browser is signed out.");
+  assert.equal(readFailed(500, { error: "the snapshot is broken" }), "the snapshot is broken");
+  assert.equal(readFailed(502, "bad gateway"), "The shell answered 502 for the settings.");
 });

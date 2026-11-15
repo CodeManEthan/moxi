@@ -381,12 +381,12 @@ def test_the_shells_own_views_carry_no_title_of_their_own(ui_page):
     ui_page.goto("/m/ui/modules")
     expect(_modules(ui_page).locator(".card[data-module=ui]")).to_be_visible()
     expect(_modules(ui_page).locator("h1")).to_have_count(0)
-    ui_page.goto("/m/ui/settings")
+    ui_page.goto("/m/ui/settings/ui")
     view = _modules(ui_page)
-    expect(view.locator("section.card[data-module=fixture]")).to_be_visible(timeout=10_000)
-    expect(view.locator("h1")).to_have_count(0)
-    # The two views still link to each other.
-    view.get_by_role("link", name="Modules").click()
+    expect(view.locator("moxi-ui-settings [data-part=foot]")).to_be_visible(timeout=10_000)
+    expect(view.locator("h1, h2")).to_have_count(0)
+    # ui's settings link to the modules view, and the modules view to the settings.
+    view.locator("moxi-ui-settings [data-part=foot]").get_by_role("link", name="Modules").click()
     expect(ui_page).to_have_url(re.compile(r"/m/ui/modules$"))
     _modules(ui_page).get_by_role("link", name="Settings").click()
     expect(ui_page).to_have_url(re.compile(r"/m/ui/settings$"))
@@ -475,8 +475,9 @@ def test_the_pages_run_under_the_policy_with_no_violation_or_error(ui_shell, ui_
     _pick(ui_page, "fixture")
     expect(ui_page.locator("moxi-fixture-page moxi-fixture-tag")).to_have_text("on the page")
     ui_page.locator("#moxi-settings").click()
-    expect(ui_page.locator("moxi-ui-page section.card[data-module=fixture] moxi-ui-form")
-           .locator("[data-control=limit]")).to_be_attached(timeout=10_000)
+    settings = ui_page.locator("moxi-ui-page moxi-ui-settings")
+    settings.locator("[data-part=list] a[data-list=fixture]").click(timeout=10_000)
+    expect(settings.locator("[data-control=limit]")).to_be_attached(timeout=10_000)
     assert ui_page.evaluate("document.documentElement.dataset.theme") == "system"
     assert ui_page.evaluate("document.documentElement.dataset.themeName") == "plain"
     assert seen == []
@@ -503,13 +504,12 @@ def test_at_360_px_nothing_scrolls_sideways_and_the_band_is_one_name_per_line(ui
     ui_width_check(ui_page, module="fixture")
     ui_width_check(ui_page, module="ui")
     ui_width_check(ui_page, module="ui", route="modules")
-    ui_width_check(ui_page, module="ui", route="settings")
-    form = ui_page.locator("moxi-ui-page section.card[data-module=fixture] moxi-ui-form")
-    # Every control type of the form is on that page, the TOML box among them.
+    ui_width_check(ui_page, module="ui", route="settings/fixture")
+    settings = ui_page.locator("moxi-ui-page moxi-ui-settings")
+    # Every control type of the fixture is on that page.
     for key in ("greeting", "limit", "ratio", "loud", "colour", "folder", "tags", "extra",
                 "rows.backup"):
-        expect(form.locator(f"[data-control='{key}']")).to_be_attached()
-    expect(form.locator("textarea[data-control=extra]")).to_be_visible()
+        expect(settings.locator(f"[data-control='{key}']")).to_be_visible()
 
 
 def test_twelve_names_wrap_onto_a_second_row_at_900_px_and_no_name_splits(ui_page):
