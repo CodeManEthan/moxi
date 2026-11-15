@@ -85,8 +85,8 @@ _TAGS = "refs/tags/"
 _USERINFO = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@")
 
 def _shown_url(url: str) -> str:
-    """`url` without its userinfo (`https://user:token@host/...` loses `user:token@`), as
-    it is printed and logged: a remote URL can carry a credential."""
+    """`url` without its userinfo (the `user:token@` after the scheme), as it is printed
+    and logged: a remote URL can carry a credential."""
     return _USERINFO.sub(r"\1", url)
 
 

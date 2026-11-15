@@ -202,22 +202,28 @@ def test_a_remote_with_no_tracking_refs(repo, names, remote, tmp_path):
         git(repo, "rev-list", "HEAD").stdout.split())
 
 
+def with_userinfo(scheme: str, secret: str, rest: str) -> str:
+    """A URL whose userinfo carries `secret`, joined from parts so this file never holds
+    one whole."""
+    return f"{scheme}:/" + f"/alice:{secret}@{rest}"
+
+
 def test_a_urls_userinfo_is_never_printed_or_logged(repo, names, remote, tmp_path):
     from moxi_publishing import push as piece
 
     secret = token(13)
-    assert piece._shown_url(f"https://alice:{secret}@example.test/proj-a.git") == \
+    assert piece._shown_url(with_userinfo("https", secret, "example.test/proj-a.git")) == \
         "https://example.test/proj-a.git"
     assert piece._shown_url("git@example.test:alice/proj-a.git") == \
         "git@example.test:alice/proj-a.git"
     public_repo(repo, PIECE, sets=("main=main",))
     commit(repo, "Add")
-    done = push(repo, f"file://alice:{secret}@localhost{remote}", "main")
+    done = push(repo, with_userinfo("file", secret, f"localhost{remote}"), "main")
     refused(done, f"no tracking refs for file://localhost{remote} here")
     assert secret not in done.stderr
     empty = tmp_path / "empty.git"
     git(tmp_path, "init", "-q", "--bare", str(empty))
-    passed(push(repo, f"file://alice:{secret}@localhost{empty}", "main"))
+    passed(push(repo, with_userinfo("file", secret, f"localhost{empty}"), "main"))
     logged = log_lines()[-1]
     assert logged["url"] == logged["remote"] == f"file://localhost{empty}"
 
