@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Every setting carries page fields, which `moxi config comms show --json` prints and
+  the settings page draws: a plain label, a line where the label can't carry it, and
+  the unit of each wait, age and replay limit. No setting is shown first and none is
+  grouped, so the page lists them all. comms needs moxi 0.1.9 or later.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
 - comms has a row on Home in the browser UI shell, the `mail` component
