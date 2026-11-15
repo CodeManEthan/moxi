@@ -631,6 +631,71 @@ def test_config_set_refusals_and_their_exits(demo, capsys, argv, code, words):
     assert got == code and words in err and out == ""
 
 
+def change_json(capsys, *argv):
+    """`moxi config <argv> --json`: its exit and the one object stdout holds."""
+    code, out, _ = run(capsys, "config", *argv, "--json")
+    assert out.endswith("\n") and out.count("\n") == 1
+    return code, json.loads(out)
+
+
+def test_config_set_json_prints_one_object_for_a_saved_value(demo, capsys):
+    assert change_json(capsys, "set", "demo", "local.retain_days", "7", "--by", "ui") == (
+        0, {"changed": True, "problem": None, "fix": None, "units": []})
+    assert read(demo)["local"]["retain_days"] == 7
+    assert change_json(capsys, "set", "demo", "tags", "--add", "x") == (
+        0, {"changed": True, "problem": None, "fix": None, "units": []})
+    assert change_json(capsys, "unset", "demo", "local.retain_days") == (
+        0, {"changed": True, "problem": None, "fix": None, "units": []})
+
+
+def test_config_unset_json_of_a_key_the_file_lacks_is_unchanged(demo, capsys):
+    assert change_json(capsys, "unset", "demo", "block") == (
+        0, {"changed": False, "problem": None, "fix": None, "units": []})
+    assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is True
+    assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is False
+
+
+@pytest.mark.parametrize("argv, code, problem, fix", [
+    (("set", "demo", "block", "maybe"), 2, "cannot be 'maybe', which is not a bool",
+     "give true or false (yes/no, on/off and 1/0 also do)"),
+    (("set", "demo", "local.retain_dayz", "1"), 2, "is not a setting of demo",
+     "did you mean 'local.retain_days'?"),
+    (("unset", "nothere", "x"), 3, "no distribution in this environment declares the Moxi "
+     "module 'nothere' (moxi-nothere is not installed)", "install it: moxi install nothere"),
+])
+def test_config_set_json_gives_a_refusals_problem_and_fix_apart(demo, capsys, argv, code,
+                                                                problem, fix):
+    got, out = change_json(capsys, *argv)
+    assert got == code
+    assert out["changed"] is False and out["fix"] == fix and out["units"] == []
+    assert out["problem"] == problem
+
+
+def test_config_set_json_gives_the_modules_own_refusal(checked, capsys):
+    code, out = change_json(capsys, "set", "demo", "name", "kept")
+    assert (code, out) == (2, {"changed": False, "problem": "is a name kept back",
+                               "fix": "pick another name", "units": []})
+    code, out = change_json(capsys, "set", "demo", "name", "boom")
+    assert (code, out["problem"]) == (2, "demo refuses the file: boom in the file")
+    assert not checked.exists()
+
+
+def test_config_set_json_on_a_locked_file_exits_75(demo, monkeypatch, capsys):
+    monkeypatch.setattr(config, "LOCK_TIMEOUT", 0.2)
+    lock = demo.with_name("config.toml.lock")
+    proc = subprocess.Popen([sys.executable, "-c", HOLDER, str(lock)],
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "held"
+        code, out = change_json(capsys, "set", "demo", "block", "true")
+    finally:
+        proc.kill()
+        proc.wait()
+    assert code == 75 and out["changed"] is False
+    assert out["problem"] == f"is locked by pid {proc.pid}"
+    assert out["fix"] == "try again once it is free"
+
+
 def test_config_show_says_who_last_set_each_key(demo, capsys):
     run(capsys, "config", "set", "demo", "block", "true", "--by", "ui")
     run(capsys, "config", "set", "demo", "rows.backup", "on")

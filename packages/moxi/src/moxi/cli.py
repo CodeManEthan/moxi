@@ -741,9 +741,9 @@ def _shortcut(argv: list[str]) -> int:
 
 _CONFIG_USAGE = """\
 usage: moxi config <module> [show [--json]|path|check|init]
-       moxi config set <module> <key> <value> [--by WHO]
-       moxi config set <module> <key> (--add VALUE | --remove VALUE) [--by WHO]
-       moxi config unset <module> <key> [--by WHO]
+       moxi config set <module> <key> <value> [--by WHO] [--json]
+       moxi config set <module> <key> (--add VALUE | --remove VALUE) [--by WHO] [--json]
+       moxi config unset <module> <key> [--by WHO] [--json]
 """
 
 
@@ -1009,6 +1009,9 @@ def _config_change(op: str, argv: list[str]) -> int:
                            help="remove one item from a list")
     parser.add_argument("--by", default="cli", metavar="WHO",
                         help="who makes the change, for the history (default: cli)")
+    parser.add_argument("--json", action="store_true",
+                        help="print one JSON object, {changed, problem, fix, units}, and "
+                             "nothing else on stdout; the exit code is the same")
     args = parser.parse_args(argv)
     if op == "set":
         given = [v is not None for v in (args.value, args.add, args.remove)]
@@ -1027,8 +1030,17 @@ def _config_change(op: str, argv: list[str]) -> int:
     try:
         changed = config._change(args.module, args.key, op, value, by=args.by, text=True)
     except config.ConfigError as exc:
-        _error(str(exc))
+        if args.json:
+            _change_json(changed=False, problem=exc.problem, fix=exc.fix, units=[])
+        else:
+            _error(str(exc))
         return exc.exit_code
+    if args.json:
+        units: list[str] = []
+        failed = op in ("set", "unset") and any(
+            not a.ok for a in config.apply_units(args.module, args.key, say=units.append))
+        _change_json(changed=changed, problem=None, fix=None, units=units)
+        return 1 if failed else 0
     if not changed and op == "unset":
         print(f"{args.module}: {args.key} is not set in the file; nothing changed")
     elif not changed:
@@ -1043,6 +1055,15 @@ def _config_change(op: str, argv: list[str]) -> int:
         if any(not a.ok for a in applied):
             return 1
     return 0
+
+
+def _change_json(*, changed: bool, problem, fix, units: list[str]) -> None:
+    """The one object `moxi config set --json` and `unset --json` print: whether the file
+    changed, the refusal's `problem` and `fix` (null when there was none), and the lines
+    applying the module's units said (`units`; empty when the key switches nothing)."""
+    import json
+
+    print(json.dumps({"changed": changed, "problem": problem, "fix": fix, "units": units}))
 
 
 def config_template(module: str, schema) -> str:
