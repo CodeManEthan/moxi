@@ -191,7 +191,10 @@ _GIT = {pagestat.DIR: True, pagestat.OTHER: True, pagestat.MISSING: False, None:
 def at_path(call: Any) -> dict[str, Any]:
     """`GET /api/folder?path=P`: what the Add panel says under its folder field (the
     route's shape says each field). A read: no write, no `mkdir`, no git process. The two
-    `stat`s go through `pagestat`, under the list's bound."""
+    `stat`s go through `pagestat`, under the list's bound. Finding the project the path is
+    in and how touches the path again, unbounded, so it runs only once the path's own
+    `stat` has answered: one that hangs (a mount that doesn't answer) leaves `project` and
+    `how` null rather than hold this server's thread."""
     typed = expand_tilde(call.query["path"], _home())
     if typed is None or "\0" in typed or not os.path.isabs(typed):
         return dict(_AT_PATH_NONE)
@@ -204,7 +207,7 @@ def at_path(call: Any) -> dict[str, Any]:
     except ProjectsError:
         key = None
     try:
-        found = api.for_path(path)
+        found = api.for_path(path) if seen[path] is not None else None
         taken = (None if key is None else
                  any(p.key.casefold() == key.casefold() for p in api.list_projects()))
     except ProjectsError:

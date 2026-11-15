@@ -535,6 +535,39 @@ def test_a_path_stat_that_hangs_reads_null_inside_the_bound_and_is_not_asked_aga
         let_go.set()
 
 
+def test_a_typed_tree_whose_every_stat_hangs_is_never_looked_up(tmp_path, monkeypatch):
+    root = tmp_path / "mount" / "proj"
+    (root / "src").mkdir(parents=True)
+    _register(("proj", root))
+    hung = str(tmp_path / "mount")
+    let_go = threading.Event()
+    touched: list[str] = []
+
+    def hanging(real):
+        def stat(path, *args, **kwargs):
+            text = os.fsdecode(os.fspath(path)) if not isinstance(path, int) else ""
+            if text == hung or text.startswith(hung + os.sep):
+                touched.append(text)
+                let_go.wait(30)
+            return real(path, *args, **kwargs)
+        return stat
+
+    monkeypatch.setattr(pagestat, "_POOL", pagestat.Pool(stat=hanging(os.stat)))
+    try:
+        # Every stat under the mount hangs from here, the pool's and any other's.
+        monkeypatch.setattr(os, "stat", hanging(os.stat))
+        monkeypatch.setattr(os, "lstat", hanging(os.lstat))
+        start = time.monotonic()
+        body = at_path(root / "src")
+        assert time.monotonic() - start < 2
+        assert (body["exists"], body["project"], body["how"]) == (None, None, None)
+        assert (body["key"], body["taken"]) == ("src", False)
+        # Only the pool's two stats reached the mount; nothing else waited on it.
+        assert sorted(touched) == sorted([str(root / "src"), str(root / "src" / ".git")])
+    finally:
+        let_go.set()
+
+
 def test_the_path_read_writes_nothing(golden_copy, store_path, tmp_path, own_pool):
     before = store_path.read_bytes(), store_path.stat().st_mtime_ns
     at_path(tmp_path / "new-one")

@@ -119,7 +119,8 @@ KINDS = {"found": lb.Out("list", items=KIND), "broken": lb.Out("list", items=BRO
 #: stands to it: `root` (its root), `inside` (under its root) or `worktree` (matched
 #: through a linked git worktree's main tree). `key`: the path's last segment when it is a
 #: valid key, else null; `taken`: whether a project already has that key, ignoring case.
-#: `project`, `how` and `taken` are null when the store can't be read.
+#: `project`, `how` and `taken` are null when the store can't be read; `project` and
+#: `how` are null too when the path's own `stat` did not answer.
 AT_PATH = {"path": _MAYBE_PATH, "exists": _MAYBE_BOOL, "git": _MAYBE_BOOL,
           "project": _MAYBE, "how": _MAYBE, "key": _MAYBE, "taken": _MAYBE_BOOL}
 #: What a remove of `key` would meet now, without removing: `key` as stored, and one row
