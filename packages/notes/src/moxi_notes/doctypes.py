@@ -199,12 +199,12 @@ def _types(file: str, text: str, data: dict) -> Types:
     if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
         raise bad("type must be a list of tables, each written [[type]]", "type")
     types: list[DocType] = []
-    for at, row in enumerate(rows):
-        types.append(_row(row, at, bad))
+    for position, row in enumerate(rows):
+        types.append(_row(row, position, bad))
     names = [t.name for t in types]
-    for at, name in enumerate(names):
-        if name in names[:at]:
-            raise bad(f"the type {name!r} is declared twice", "name", at)
+    for position, name in enumerate(names):
+        if name in names[:position]:
+            raise bad(f"the type {name!r} is declared twice", "name", position)
     return Types(path=file, present=True, required=tuple(required), types=tuple(types))
 
 

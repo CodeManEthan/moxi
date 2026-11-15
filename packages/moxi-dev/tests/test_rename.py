@@ -427,12 +427,6 @@ def run(timeout=1):
     pick = lambda timeout: timeout * 2
     return pick(3) + timeout
 ''', ("run", "timeout", "timeout_s"), "a scope inside run has its own 'timeout'"),
-    "field-and-method-parameter": ('''
-class Clock:
-    age_seconds: float = 0.0
-    def with_age(self, age_seconds):
-        return Clock(age_seconds=age_seconds)
-''', ("Clock", "age_seconds", "age_s"), "a scope inside Clock has its own 'age_seconds'"),
     "module-name-and-function-local": ('''
 HOME = "P_HOME"
 def read(env):
@@ -567,3 +561,198 @@ changes('.', False)
     use = (root / "packages/p/src/p/use.py").read_text()
     assert "changes('.', *rest)\nchanges(*rest)\n" in use
     assert "changes('.', staged=False)" in use
+
+
+def test_a_row_that_applies_only_after_another_has_applies_in_a_later_pass(tmp_path, capsys):
+    path = "packages/p/tests/test_page.py"
+    root = repo(tmp_path, {path: '''
+import pytest
+@pytest.fixture
+def folder(tmp_path):
+    return tmp_path
+@pytest.fixture
+def page(folder):
+    return folder
+def outer(items):
+    try:
+        return items[0]
+    except IndexError as e:
+        def inner(e):
+            return e
+        return inner(e)
+'''})
+    renames = table(tmp_path,
+                    row(path, "-", "name", "folder", "work_dir_fixture"),
+                    row(path, "outer", "name", "e", "exc"),
+                    row(path, "outer.inner", "name", "e", "err"),
+                    row(path, "page", "name", "folder", "work_dir"))
+    assert rename.run(root, renames) == 0
+    text = (root / path).read_text()
+    assert "def work_dir_fixture(tmp_path):" in text
+    assert "def page(work_dir):\n    return work_dir\n" in text
+    assert "except IndexError as exc:" in text and "return inner(exc)" in text
+    assert "def inner(err):\n            return err\n" in text
+    capsys.readouterr()
+    assert rename.run(root, renames, dry_run=True) == 0
+    assert "0 to apply, 4 applied, 0 not here" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("order", [(0, 1), (1, 0)])
+def test_a_chain_in_one_scope_applies_in_either_table_order_and_reads_applied(
+        tmp_path, capsys, order):
+    path = "packages/p/tests/test_stop.py"
+    root = repo(tmp_path, {path: '''
+def test_stops():
+    stopped = run()
+    record = []
+    record.append(stopped)
+    assert record == [stopped]
+'''})
+    chain = [row(path, "test_stops", "name", "stopped", "acted"),
+             row(path, "test_stops", "name", "record", "stopped")]
+    renames = table(tmp_path, *(chain[index] for index in order))
+    assert rename.run(root, renames) == 0
+    assert (root / path).read_text() == '''
+def test_stops():
+    acted = run()
+    stopped = []
+    stopped.append(acted)
+    assert stopped == [acted]
+'''
+    capsys.readouterr()
+    assert rename.run(root, renames) == 0
+    assert "0 to apply, 2 applied, 0 not here" in capsys.readouterr().out
+    assert "acted = run()\n    stopped = []" in (root / path).read_text()
+
+
+def test_a_nested_scope_that_binds_the_new_name_itself_is_no_collision(tmp_path):
+    path = "packages/p/src/p/doc.py"
+    texts = {
+        "before": '''
+def types(text):
+    def bad(at, why):
+        return f"{at}: {why}"
+    for at, char in enumerate(text):
+        if char == "!":
+            return bad(at, "bang")
+''',
+        # The nested function's row has applied already, the outer one's not yet.
+        "half": '''
+def types(text):
+    def bad(position, why):
+        return f"{position}: {why}"
+    for at, char in enumerate(text):
+        if char == "!":
+            return bad(at, "bang")
+''',
+    }
+    for name, text in texts.items():
+        (tmp_path / name).mkdir()
+        root = repo(tmp_path / name, {path: text})
+        renames = table(tmp_path / name,
+                        row(path, "types", "name", "at", "position"),
+                        row(path, "types.bad", "name", "at", "position"))
+        assert rename.run(root, renames) == 0, name
+        out = (root / path).read_text()
+        assert "for position, char in enumerate(text):" in out
+        assert 'return bad(position, "bang")' in out
+        assert 'def bad(position, why):\n        return f"{position}: {why}"' in out
+
+
+def test_a_nested_scope_that_reads_the_outer_name_still_refuses(tmp_path, capsys):
+    path = "packages/p/src/p/doc.py"
+    root = repo(tmp_path, {path: '''
+def types(text):
+    at = 0
+    def bad(position):
+        return at + position
+    return bad(1)
+'''})
+    renames = table(tmp_path, row(path, "types", "name", "at", "position"))
+    assert rename.run(root, renames) == 2
+    assert "'position' is already bound or read in types" in capsys.readouterr().out
+
+
+def test_kwonly_rows_on_one_signature_write_one_star_and_name_every_later_argument(
+        tmp_path):
+    root = repo(tmp_path, {
+        "packages/p/src/p/m.py": '''
+class Choice:
+    def __init__(self, slot, respawn=False, held=False, why="", chain=False):
+        self.slot = slot
+def f(a, b=False, c=False, *, d=None):
+    return a
+def resolve(d, cwd, logical, base=None):
+    return d
+''',
+        "packages/p/src/p/use.py": '''
+from p.m import Choice, f, resolve
+Choice("x", True, False, "because", True)
+f(1, True, False)
+resolve("a", ".", True, "b")
+''',
+    })
+    m = "packages/p/src/p/m.py"
+    renames = table(tmp_path,
+                    row(m, "Choice.__init__", "kwonly", "chain", "chain"),
+                    row(m, "Choice.__init__", "kwonly", "held", "held"),
+                    row(m, "Choice.__init__", "kwonly", "respawn", "respawn"),
+                    row(m, "f", "kwonly", "b", "b"),
+                    row(m, "f", "kwonly", "c", "c"),
+                    row(m, "resolve", "kwonly", "logical", "logical"),
+                    row(m, "resolve", "name", "base", "start"))
+    assert rename.run(root, renames) == 0
+    text = (root / m).read_text()
+    assert 'def __init__(self, slot, *, respawn=False, held=False, why="", chain=False):' \
+        in text
+    assert "def f(a, *, b=False, c=False, d=None):" in text
+    assert "def resolve(d, cwd, *, logical, start=None):" in text
+    use = (root / "packages/p/src/p/use.py").read_text()
+    assert 'Choice("x", respawn=True, held=False, why="because", chain=True)' in use
+    assert "f(1, b=True, c=False)" in use
+    assert 'resolve("a", ".", logical=True, start="b")' in use
+    before = {path: (root / path).read_text() for path in (m, "packages/p/src/p/use.py")}
+    assert rename.run(root, renames) == 0
+    assert before == {path: (root / path).read_text() for path in before}
+
+
+def test_edits_land_on_their_token_after_non_ascii_text_and_odd_line_breaks(tmp_path):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: (
+        'SPACES = "  　"\n'
+        'PAGE = "a\x0cb"\n'
+        "def show(e):\n"
+        '    print(f"→ {e.code}", e)\n'
+        "    return e\n")})
+    renames = table(tmp_path, row(path, "show", "name", "e", "exc"))
+    assert rename.run(root, renames) == 0
+    assert (root / path).read_text() == (
+        'SPACES = "  　"\n'
+        'PAGE = "a\x0cb"\n'
+        "def show(exc):\n"
+        '    print(f"→ {exc.code}", exc)\n'
+        "    return exc\n")
+
+
+def test_a_class_row_leaves_a_methods_own_bare_names_alone(tmp_path):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: '''
+class Clock:
+    age_seconds: float = 0.0
+    def with_age(self, age_seconds):
+        return Clock(age_seconds=age_seconds)
+    def any(self):
+        return any(self.age_seconds for _ in ())
+'''})
+    renames = table(tmp_path, row(path, "Clock", "name", "age_seconds", "age_s"),
+                    row(path, "Clock", "name", "any", "has_age"),
+                    row(path, "return any(self.age_s for _ in ())", "keep", "any", "any"))
+    assert rename.run(root, renames) == 0
+    assert (root / path).read_text() == '''
+class Clock:
+    age_s: float = 0.0
+    def with_age(self, age_seconds):
+        return Clock(age_s=age_seconds)
+    def has_age(self):
+        return any(self.age_s for _ in ())
+'''

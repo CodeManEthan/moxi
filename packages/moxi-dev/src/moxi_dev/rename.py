@@ -73,7 +73,11 @@ class Source:
     lines: list[str] = field(default_factory=list)
 
     def position(self, line: int, column: int) -> int:
-        return self.offsets[line - 1] + column
+        """The text offset of `ast`'s (line, column), whose column counts UTF-8 bytes."""
+        start = self.offsets[line - 1]
+        if column and not self.text.isascii():
+            column = len(self.text[start:start + column].encode()[:column].decode())
+        return start + column
 
     def span(self, node: ast.AST) -> tuple[int, int]:
         return (self.position(node.lineno, node.col_offset),
@@ -152,9 +156,25 @@ def _scope_map(tree: ast.Module) -> tuple[dict[str, ast.AST], dict[int, ast.AST]
     return scopes, parents, enclosing
 
 
+_NEWLINE = re.compile(r"\r\n|\r|\n")
+
+
+def _split(text: str) -> list[str]:
+    """`text`'s lines as `ast` numbers them, each with its end: only a line feed or a
+    carriage return ends one, never the other separators `str.splitlines` breaks at
+    (a form feed, U+2028), which a string in the source may hold."""
+    out, start = [], 0
+    for match in _NEWLINE.finditer(text):
+        out.append(text[start:match.end()])
+        start = match.end()
+    if start < len(text):
+        out.append(text[start:])
+    return out
+
+
 def _offsets(text: str) -> list[int]:
     out, total = [], 0
-    for line in text.splitlines(keepends=True):
+    for line in _split(text):
         out.append(total)
         total += len(line)
     if not out or text.endswith(("\n", "\r")):
@@ -188,6 +208,11 @@ class Project:
         # local renamed out of a parameter's way): its old name is the local, never
         # that parameter.
         self.chained = {(row.path, row.scope, row.new) for row in rows if row.kind == "name"}
+        # The old names of the rows that give each such name, by (path, scope, name).
+        self.chains: dict[tuple[str, str, str], list[str]] = {}
+        for row in rows:
+            if row.kind == "name":
+                self.chains.setdefault((row.path, row.scope, row.new), []).append(row.old)
         if texts is None:
             done = subprocess.run(["git", "ls-files", "-z", "--cached", "--others",
                                    "--exclude-standard", "packages"],
@@ -215,7 +240,8 @@ class Project:
             self.sources[path] = Source(path, text, tree, module, _offsets(text), scopes,
                                         parents, enclosing=enclosing,
                                         nodes=list(ast.walk(tree)),
-                                        lines=text.splitlines())
+                                        lines=[line.rstrip("\r\n")
+                                               for line in _split(text)])
         self.modules = {source.module: source for source in self.sources.values()}
         for source in self.sources.values():
             self._index(source)
@@ -470,6 +496,12 @@ def state(project: Project, row: Row) -> str:
     old = [node for node in _binding_nodes(source, row.scope, row.old)
            if not (chained and isinstance(node, ast.arg))]
     new = _binding_nodes(source, row.scope, row.new)
+    if chained and old and new and not any(
+            _binding_nodes(source, row.scope, earlier)
+            for earlier in project.chains[(row.path, row.scope, row.old)]):
+        # Another row of this scope gives the old name to what it renames, and has: the
+        # old name bound here now is that row's, and this row is done.
+        return "applied"
     return "to apply" if old else "applied" if new else "not here"
 
 
@@ -651,73 +683,165 @@ def _line(node: ast.AST) -> int:
     return getattr(node, "lineno", 0)
 
 
+def _own_bindings(node: ast.AST, name: str) -> bool:
+    """Whether scope `node` itself binds `name` (a parameter, an assigned or loop name, a
+    def, an import, an except name), not only a scope nested in it, and declares no
+    `global` or `nonlocal` for it: every bare `name` under it is then its own."""
+    found = False
+    pending = list(ast.iter_child_nodes(node))
+    while pending:
+        one = pending.pop()
+        if isinstance(one, (ast.Global, ast.Nonlocal)) and name in one.names:
+            return False
+        if isinstance(one, _SCOPES):
+            if getattr(one, "name", None) == name:
+                found = True
+            if isinstance(one, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                # The first iterable is read in the scope around it.
+                pending.append(one.generators[0].iter)
+            continue
+        if isinstance(one, ast.Name) and one.id == name and not isinstance(one.ctx, ast.Load):
+            found = True
+        elif isinstance(one, ast.arg) and one.arg == name:
+            found = True
+        elif isinstance(one, ast.alias) and (one.asname or one.name.split(".")[0]) == name:
+            found = True
+        elif isinstance(one, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) \
+                and one.name == name:
+            found = True
+        pending.extend(ast.iter_child_nodes(one))
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        found = found or any(_names(generator.target, name, stored=True)
+                             for generator in node.generators)
+    return found
+
+
+_FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _class_body(node: ast.ClassDef) -> list[ast.AST]:
+    """The nodes of a class body outside its methods, lambdas and nested classes: a bare
+    name in a method never means the class's attribute."""
+    found, pending = [], list(ast.iter_child_nodes(node))
+    while pending:
+        one = pending.pop()
+        found.append(one)
+        if not isinstance(one, (*_FUNCTIONS, ast.ClassDef)):
+            pending.extend(ast.iter_child_nodes(one))
+    return found
+
+
+def _kept_apart(node: ast.AST, old: str, new: str) -> set[int]:
+    """The nodes under `node` that sit in a nested scope binding `new` itself and never
+    naming `old`: a bare `new` there is that scope's own, and renaming `old` reaches
+    nothing there. A nested class keeps only its body's own names apart."""
+    kept: set[int] = set()
+    for inner in _inner_scopes(node):
+        if _names(inner, old) or not _own_bindings(inner, new):
+            continue
+        if isinstance(inner, ast.ClassDef):
+            kept |= {id(one) for one in _class_body(inner)}
+        else:
+            kept |= {id(one) for one in ast.walk(inner) if one is not inner}
+    return kept
+
+
+def _refused(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[int, str]:
+    """`refusals`, by the index of each refused row."""
+    active = [index for index, (row, status) in enumerate(zip(rows, states))
+              if status == "to apply" and row.kind in ("name", "kwonly")]
+    found: dict[int, str] = {}
+    # A row refused no longer renames its old name away, so a row whose new name only
+    # it cleared is read again.
+    while True:
+        leaving = {(rows[index].path, rows[index].scope, rows[index].old)
+                   for index in active if index not in found and rows[index].kind == "name"}
+        more = {index: why for index in active if index not in found
+                for why in [_refusal(project, rows[index], leaving)] if why}
+        if not more:
+            return found
+        found.update(more)
+
+
 def refusals(project: Project, rows: Sequence[Row], states: Sequence[str]) -> list[str]:
     """Each `name` row to apply whose edit would change what a token means: its new name
-    already bound or read in the scope it edits; a nested function, lambda, comprehension
-    or method there with its own binding of the old name (a field's old name read bare
-    in a method is never the field); a module-level row's old name bound inside a
-    function of a module the edit reaches. A binding another row of the same scope
-    renames away is no collision. Each names the row's table line and the code line."""
-    active = [row for row, status in zip(rows, states)
-              if status == "to apply" and row.kind == "name"]
-    leaving = {(row.path, row.scope, row.old) for row in active}
-    found = []
+    already bound or read in the scope it edits, other than as a nested scope's own
+    name; a nested function, lambda or comprehension there with its own binding of the
+    old name (a class's row edits only the class body's bare names and `self.`/`cls.`
+    attributes, since a bare name in a method never means the class's attribute); a
+    module-level row's old name bound inside a function of a module the edit reaches. A
+    binding another row of the same scope renames away is no collision. And each
+    `kwonly` row whose star cannot stand before its parameter (one after `*args`, or
+    before `/`). Each names the row's table line and the code line."""
+    return [why for _index, why in sorted(_refused(project, rows, states).items())]
 
-    def refuse(row: Row, source: Source, node: ast.AST, why: str) -> None:
-        found.append(f"row {row.line} ({row.path} {row.scope} {row.old} -> {row.new}): "
-                     f"{source.path}:{_line(node)}: {why}")
 
-    for row in active:
-        source = project.sources[row.path]
-        clear = (row.path, row.scope, row.new) in leaving
-        if row.scope != "-":
-            node = source.scopes[row.scope]
-            hits = [] if clear else _names(node, row.new)
-            if isinstance(node, ast.ClassDef) and not clear:
-                hits += [one for one in ast.walk(node) if isinstance(one, ast.Attribute)
-                         and one.attr == row.new and isinstance(one.value, ast.Name)
-                         and one.value.id in ("self", "cls")]
-            if hits:
-                first = min(hits, key=_line)
-                refuse(row, source, first, f"{row.new!r} is already bound or read in "
-                                           f"{row.scope}")
+def _refusal(project: Project, row: Row, leaving: set[tuple[str, str, str]]) -> str | None:
+    source = project.sources[row.path]
+
+    def refuse(where: Source, node: ast.AST, why: str) -> str:
+        return (f"row {row.line} ({row.path} {row.scope} {row.old} -> {row.new}): "
+                f"{where.path}:{_line(node)}: {why}")
+
+    if row.kind == "kwonly":
+        fn = source.scopes[row.scope]
+        parameter = _parameter(source, row.scope, row.old)
+        if fn.args.vararg is not None or parameter in fn.args.posonlyargs:
+            return refuse(source, parameter, f"a star cannot stand before {row.old!r}")
+        return None
+    clear = (row.path, row.scope, row.new) in leaving
+    if row.scope != "-":
+        node = source.scopes[row.scope]
+        hits = [] if clear else _names(node, row.new)
+        if hits:
+            kept = _kept_apart(node, row.old, row.new)
+            hits = [one for one in hits if id(one) not in kept]
+        if isinstance(node, ast.ClassDef) and not clear:
+            hits += [one for one in ast.walk(node) if isinstance(one, ast.Attribute)
+                     and one.attr == row.new and isinstance(one.value, ast.Name)
+                     and one.value.id in ("self", "cls")]
+        if hits:
+            first = min(hits, key=_line)
+            return refuse(source, first, f"{row.new!r} is already bound or read in "
+                                         f"{row.scope}")
+        for inner in _inner_scopes(node):
+            if isinstance(node, ast.ClassDef) and isinstance(inner, (*_FUNCTIONS,
+                                                                     ast.ClassDef)):
+                # The rename edits only the class body's own bare names.
                 continue
-            for inner in _inner_scopes(node):
-                own = (_names(inner, row.old) if isinstance(node, ast.ClassDef)
-                       and isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef))
-                       else _names(inner, row.old, stored=True))
-                if own:
-                    refuse(row, source, min(own, key=_line),
-                           f"a scope inside {row.scope} has its own {row.old!r}")
-                    break
-            continue
-        target = _canonical(project, f"sym:{source.module}:{row.old}")
-        reached = [source] + [other for other in project.sources.values()
-                              if other is not source and any(
-                                  value == target or _canonical(project, value) == target
-                                  for name, value in other.aliases.items()
-                                  if name == row.old)]
-        for other in reached:
-            hits = [] if clear else _names(other.tree, row.new)
-            if hits:
-                refuse(row, other, min(hits, key=_line),
-                       f"{row.new!r} is already bound or read in {other.module}")
-                break
-            # A function's own import of the definition binds the definition itself.
-            imported = {id(alias) for node in other.nodes if isinstance(node, ast.ImportFrom)
-                        for alias in node.names if _canonical(project, "sym:{}:{}".format(
-                            _relative(other.module, node.level, node.module,
-                                      package=other.path.endswith("/__init__.py")),
-                            alias.name)) == target}
-            local = [one for inner in _inner_scopes(other.tree)
-                     if not isinstance(inner, ast.ClassDef)
-                     for one in _names(inner, row.old, stored=True)
-                     if id(one) not in imported]
-            if local:
-                refuse(row, other, min(local, key=_line),
-                       f"{row.old!r} is also a local of a function there")
-                break
-    return found
+            own_old = _names(inner, row.old, stored=True)
+            if own_old:
+                return refuse(source, min(own_old, key=_line),
+                              f"a scope inside {row.scope} has its own {row.old!r}")
+        return None
+    target = _canonical(project, f"sym:{source.module}:{row.old}")
+    reached = [source] + [other for other in project.sources.values()
+                          if other is not source and any(
+                              value == target or _canonical(project, value) == target
+                              for name, value in other.aliases.items()
+                              if name == row.old)]
+    for other in reached:
+        hits = [] if clear else _names(other.tree, row.new)
+        if hits:
+            kept = _kept_apart(other.tree, row.old, row.new)
+            hits = [one for one in hits if id(one) not in kept]
+        if hits:
+            return refuse(other, min(hits, key=_line),
+                          f"{row.new!r} is already bound or read in {other.module}")
+        # A function's own import of the definition binds the definition itself.
+        imported = {id(alias) for node in other.nodes if isinstance(node, ast.ImportFrom)
+                    for alias in node.names if _canonical(project, "sym:{}:{}".format(
+                        _relative(other.module, node.level, node.module,
+                                  package=other.path.endswith("/__init__.py")),
+                        alias.name)) == target}
+        local = [one for inner in _inner_scopes(other.tree)
+                 if not isinstance(inner, ast.ClassDef)
+                 for one in _names(inner, row.old, stored=True)
+                 if id(one) not in imported]
+        if local:
+            return refuse(other, min(local, key=_line),
+                          f"{row.old!r} is also a local of a function there")
+    return None
 
 
 def plan(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[str, list[Edit]]:
@@ -740,40 +864,64 @@ def plan(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[s
                 put(row, row.path, _name_edit(source, node, row.old, row.new))
             if row.scope != "-":
                 scope_node = source.scopes[row.scope]
-                for node in ast.walk(scope_node):
+                reach = (_class_body(scope_node) if isinstance(scope_node, ast.ClassDef)
+                         else ast.walk(scope_node))
+                for node in reach:
                     if isinstance(node, ast.Name) and node.id == row.old:
                         put(row, row.path, _name_edit(source, node, row.old, row.new))
-                    elif (target.kind not in ("parameter", "local")
-                          and isinstance(node, ast.Attribute) and node.attr == row.old and isinstance(node.value, ast.Name)
-                          and node.value.id in ("self", "cls")):
-                        put(row, row.path, _name_edit(source, node, row.old, row.new))
-        else:
-            parameter = _parameter(source, row.scope, row.old)
-            if parameter is not None:
-                start = source.position(parameter.lineno, parameter.col_offset)
-                # A star before this parameter makes it and every following parameter
-                # keyword-only. Rows are expected to name the first such parameter.
-                put(row, row.path, Edit(start, start, "*, "))
-                fn = source.scopes[row.scope]
-                if fn.args.vararg is None and fn.args.kwonlyargs:
-                    # The bare star that already stood before the keyword-only
-                    # parameters goes: there is one star, now earlier.
-                    positional = [*fn.args.posonlyargs, *fn.args.args]
-                    ends = [source.span(positional[-1])[1]]
-                    if fn.args.defaults:
-                        ends.append(source.span(fn.args.defaults[-1])[1])
-                    after = max(ends)
-                    first = fn.args.kwonlyargs[0]
-                    before = source.position(first.lineno, first.col_offset)
-                    star = re.search(r"\*\s*,\s*", source.text[after:before])
-                    if star:
-                        put(row, row.path,
-                             Edit(after + star.start(), after + star.end(), ""))
+                if target.kind not in ("parameter", "local"):
+                    for node in ast.walk(scope_node):
+                        if (isinstance(node, ast.Attribute) and node.attr == row.old
+                                and isinstance(node.value, ast.Name)
+                                and node.value.id in ("self", "cls")):
+                            put(row, row.path, _name_edit(source, node, row.old, row.new))
+
+    # One star per signature, before the first parameter any of its `kwonly` rows names;
+    # every positional parameter from there on is keyword-only, and a call passes each of
+    # them by its keyword, the name a `name` row of this run gives it if one does.
+    renamed = {(row.path, row.scope, row.old): row.new for row, _target in active
+               if row.kind == "name"}
+    signatures: dict[tuple[str, str], tuple[Row, Target]] = {}
+    for row, target in active:
+        if row.kind != "kwonly" or target.position is None:
+            continue
+        key = (row.path, row.scope)
+        if key not in signatures or target.position < signatures[key][1].position:
+            signatures[key] = (row, target)
+    starred: list[tuple[Row, Target, tuple[str, ...]]] = []
+    for (path, scope), (row, target) in sorted(signatures.items()):
+        source = project.sources[path]
+        parameter = _parameter(source, scope, row.old)
+        if parameter is None:
+            continue
+        start = source.position(parameter.lineno, parameter.col_offset)
+        put(row, path, Edit(start, start, "*, "))
+        fn = source.scopes[scope]
+        if fn.args.vararg is None and fn.args.kwonlyargs:
+            # The bare star that already stood before the keyword-only parameters goes:
+            # there is one star, now earlier.
+            positional = [*fn.args.posonlyargs, *fn.args.args]
+            ends = [source.span(positional[-1])[1]]
+            if fn.args.defaults:
+                ends.append(source.span(fn.args.defaults[-1])[1])
+            after = max(ends)
+            first = fn.args.kwonlyargs[0]
+            before = source.position(first.lineno, first.col_offset)
+            star = re.search(r"\*\s*,\s*", source.text[after:before])
+            if star:
+                put(row, path, Edit(after + star.start(), after + star.end(), ""))
+        starred.append((row, target, tuple(renamed.get((path, scope, name), name)
+                                           for name in target.following)))
 
     by_old: dict[str, list[tuple[Row, Target]]] = {}
     for row, target in active:
         by_old.setdefault(row.old, []).append((row, target))
-    callers = [(row, target) for row, target in active if target.callee]
+    callers = [(row, target) for row, target in active
+               if target.callee and row.kind == "name"]
+    by_callee: dict[str, list[tuple[Row, Target, tuple[str, ...]]]] = {}
+    for row, target, following in starred:
+        if target.callee:
+            by_callee.setdefault(target.callee, []).append((row, target, following))
     for other in project.sources.values():
         for node in other.nodes:
             if isinstance(node, ast.ImportFrom):
@@ -794,11 +942,10 @@ def plan(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[s
                     scope = _scope_of(other, node)
                     if _canonical(project, project.resolve(other, node, scope)) == target.symbol:
                         put(row, other.path, _name_edit(other, node, row.old, row.new))
-            elif isinstance(node, ast.Call) and callers:
+            elif isinstance(node, ast.Call) and (callers or by_callee):
                 passed = {keyword.arg for keyword in node.keywords}
-                wanted = [(row, target) for row, target in callers
-                          if row.old in passed or row.kind == "kwonly"]
-                if not wanted:
+                wanted = [(row, target) for row, target in callers if row.old in passed]
+                if not wanted and not by_callee:
                     continue
                 callee = _canonical(project, project.resolve(other, node.func,
                                                              _scope_of(other, node)))
@@ -809,16 +956,13 @@ def plan(project: Project, rows: Sequence[Row], states: Sequence[str]) -> dict[s
                         if keyword.arg == row.old:
                             start = other.position(keyword.lineno, keyword.col_offset)
                             put(row, other.path, Edit(start, start + len(row.old), row.new))
-                    if (row.kind == "kwonly" and target.position is not None
-                            and len(node.args) > target.position):
-                        # Every positional argument from this one on is now keyword-only.
-                        for offset, argument in enumerate(node.args[target.position:]):
-                            if (isinstance(argument, ast.Starred)
-                                    or offset >= len(target.following)):
-                                break
-                            keyword = row.new if offset == 0 else target.following[offset]
-                            start = other.position(argument.lineno, argument.col_offset)
-                            put(row, other.path, Edit(start, start, f"{keyword}="))
+                for row, target, following in by_callee.get(callee, ()) if callee else ():
+                    # Every positional argument from the star on is now keyword-only.
+                    for argument, keyword in zip(node.args[target.position:], following):
+                        if isinstance(argument, ast.Starred):
+                            break
+                        start = other.position(argument.lineno, argument.col_offset)
+                        put(row, other.path, Edit(start, start, f"{keyword}="))
 
     for row, target in active:
         if row.kind != "name" or target.kind is not None:
@@ -1115,28 +1259,69 @@ def main_leftovers(root: Path, project: Project, rows: Sequence[Row], states: Se
     return found, f"compared not-here rows with {ref}"
 
 
+def apply_rows(root: Path, rows: Sequence[Row], texts: dict[str, str] | None = None
+               ) -> tuple[dict[str, str], list[str], dict[int, str], set[str]]:
+    """Apply the rows in passes, each reading the tree the passes before it left: a pass
+    applies every `name` and `kwonly` row to apply that nothing refuses, then every `use`
+    row whose line is there. So a row that can apply only once another has (a nested
+    scope's own name renamed first, a local renamed out of a fixture's way, a lambda's
+    parameter a `use` row renames) applies in a later pass, and the result doesn't
+    depend on the rows' order in the table. Returns the texts after the last pass, each
+    row's state as the first pass read it (`to apply` for a row any pass applied), the
+    rows still refused by index, and the paths edited. A `name` or `kwonly` row applies
+    in one pass at most: one whose only binding is an attribute a `use` row renames (a
+    local stored on `self`) still reads to apply after its pass."""
+    project = Project(root, texts, rows=rows)
+    texts = {path: source.text for path, source in project.sources.items()}
+    states = [state(project, row) if row.kind in ("name", "kwonly")
+              else line_state(texts, row, rows) for row in rows]
+    first = list(states)
+    written: set[str] = set()
+    done: set[int] = set()
+    while True:
+        states = ["applied" if index in done else status
+                  for index, status in enumerate(states)]
+        refused = _refused(project, rows, states)
+        step = ["held back" if index in refused else status
+                for index, status in enumerate(states)]
+        going = [index for index, status in enumerate(step)
+                 if status == "to apply" and rows[index].kind in ("name", "kwonly")]
+        edits = plan(project, rows, step) if going else {}
+        texts = transformed(project, edits, rows)
+        uses = [line_state(texts, row, rows) if row.kind == "use" else "applied"
+                for row in rows]
+        used = apply_uses(texts, rows, uses)
+        for index, status in enumerate(uses):
+            if status == "to apply":
+                first[index] = "to apply"
+        if not going and not used:
+            return texts, first, refused, written
+        for path in sorted(set(edits) | used):
+            try:
+                ast.parse(texts[path], filename=path)
+            except SyntaxError as exc:
+                raise RenameError(f"{path}:{exc.lineno}: the renamed file would not "
+                                  f"parse: {exc.msg}; nothing was written") from None
+        written |= set(edits) | used
+        for index in going:
+            first[index] = "to apply"
+        done.update(going)
+        project = Project(root, texts, rows=rows)
+        states = [state(project, row) if row.kind in ("name", "kwonly") else "applied"
+                  for row in rows]
+
+
 def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None = None) -> int:
     rows = read_table(table)
-    project = Project(root, rows=rows)
-    states = [state(project, row) for row in rows]
-    refused = refusals(project, rows, states)
+    texts, states, refused, written = apply_rows(root, rows)
     if refused:
-        for one in refused:
+        for _index, one in sorted(refused.items()):
             print(f"moxi-dev rename: refused: {table.name} {one}")
         print(f"moxi-dev rename: {len(refused)} rows refused; nothing was written")
         return 2
-    edits = plan(project, rows, states)
-    texts = transformed(project, edits, rows)
-    states = [line_state(texts, row, rows) if row.kind in ("use", "keep") else status
-              for row, status in zip(rows, states)]
-    written = set(edits) | apply_uses(texts, rows, states)
-    for path in sorted(written):
-        try:
-            ast.parse(texts[path], filename=path)
-        except SyntaxError as exc:
-            raise RenameError(f"{path}:{exc.lineno}: the renamed file would not parse: "
-                              f"{exc.msg}; nothing was written") from None
     after = Project(root, texts, rows=rows)
+    states = [line_state(texts, row, rows) if row.kind == "keep" else status
+              for row, status in zip(rows, states)]
     remaining = leftovers(after, rows)
     moved, comparison = main_leftovers(root, after, rows, states, main_ref)
     remaining = sorted(set(remaining + moved))

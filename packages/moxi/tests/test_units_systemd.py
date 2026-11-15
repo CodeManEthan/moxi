@@ -760,9 +760,9 @@ def test_after_a_home_move_a_changed_daemon_starts_its_sockets_so_resume_can(w, 
     w.script("moxi-demo-relay")
     w.module(DAEMONS=shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))
-    record: list = []
-    stopped = units.stop("demo", ["relay"], stopped=record, runner=w.sup)
-    assert stopped[0].ok and [e.unit for e in record] == [SOCK, SOCK_1, SERVICE]
+    stopped: list = []
+    acted = units.stop("demo", ["relay"], stopped=stopped, runner=w.sup)
+    assert acted[0].ok and [e.unit for e in stopped] == [SOCK, SOCK_1, SERVICE]
     assert not any(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
     service = w.root / SERVICE
     service.write_text(service.read_text() + "# an older text\n")
@@ -770,7 +770,7 @@ def test_after_a_home_move_a_changed_daemon_starts_its_sockets_so_resume_can(w, 
     assert all(a.ok for a in w.apply(units.plan("demo")))
     assert w.sup.calls == [RUNNING, ("daemon-reload",), ("start", SOCK), ("start", SOCK_1),
                            ("start", SERVICE)]
-    resumed = units.resume(record, runner=w.sup)
+    resumed = units.resume(stopped, runner=w.sup)
     assert [(a.ok, a.lines) for a in resumed] == [
         (True, (f"{u} started",)) for u in (SOCK, SOCK_1, SERVICE)]
     # What resume would have met had the sockets not started first.

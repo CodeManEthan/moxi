@@ -495,6 +495,7 @@ cache	packages/cache/tests/test_watch.py	assert watch.run(watcher=Once(agents=la
 cache	packages/cache/tests/test_watch.py	assert watch.sessions_dir({"HOME": "/h"}) == Path("/h/.claude/sessions")	keep	HOME	HOME
 cache	packages/cache/tests/test_watch.py	before = set(tmp_path.rglob("*"))	keep	set	set
 cache	packages/cache/tests/test_watch.py	env = {"PATH": str(tmp_path / "empty"), "HOME": str(tmp_path)}	keep	HOME	HOME
+cache	packages/cache/tests/test_watch.py	make(Fake([entry(11, A)]), sessions, directory=records_dir).tick()	use	directory=	records_dir=
 cache	packages/cache/tests/test_watch.py	path = claude_config() / "sessions"	keep	sessions	sessions
 cache	packages/cache/tests/test_watch.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_watch.py	self.set()	keep	set	set
@@ -3528,6 +3529,8 @@ launcher	packages/launcher/src/moxi_launcher/store.py	_insert_run	name	actor	by
 launcher	packages/launcher/src/moxi_launcher/store.py	_writing	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/store.py	`error`, word `job-gone`, and this run is inserted in the same transaction. The test	keep	error	error
 launcher	packages/launcher/src/moxi_launcher/store.py	`values_json`, `argv_json` and `env_json` expanded and `stale` set. A store not made	keep	stale	stale
+launcher	packages/launcher/src/moxi_launcher/store.py	except sqlite3.OperationalError as error:	use	error	exc
+launcher	packages/launcher/src/moxi_launcher/store.py	if _busy(error):	use	error	exc
 launcher	packages/launcher/src/moxi_launcher/store.py	if result.get("kind") != "refused" or result.get("reason") == "gone":	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/store.py	insert	name	actor	by
 launcher	packages/launcher/src/moxi_launcher/store.py	insert_run	name	actor	by
@@ -3536,6 +3539,7 @@ launcher	packages/launcher/src/moxi_launcher/store.py	launched_by	name	actor	by
 launcher	packages/launcher/src/moxi_launcher/store.py	log_lines	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/store.py	out["stale"] = self.stale(stale_after, now)	keep	stale	stale
 launcher	packages/launcher/src/moxi_launcher/store.py	places	name	actor	by
+launcher	packages/launcher/src/moxi_launcher/store.py	raise Busy(f"the launch log is busy: {error}") from error	use	error	exc
 launcher	packages/launcher/src/moxi_launcher/store.py	return [Event(id, rid, sid, at, kind, json.loads(detail)) for id, rid, sid, at, kind,	use	id	event_id
 launcher	packages/launcher/src/moxi_launcher/store.py	return [RunEvent(id, rid, at, kind, json.loads(detail)) for id, rid, at, kind, detail	use	id	event_id
 launcher	packages/launcher/src/moxi_launcher/store.py	return [_encode(row.as_json(stale_after=after, now=moment)) for row in rows]	keep	now	now
@@ -3638,6 +3642,7 @@ launcher	packages/launcher/tests/launcher_page_kit.py	server.wait(timeout=10)	ke
 launcher	packages/launcher/tests/launcher_page_kit.py	site.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/launcher_page_kit.py	start=time.time() - ago_s - 1.0)	keep	start	start
 launcher	packages/launcher/tests/test_alive.py	assert {"alive", "live"} <= set(pagehandlers.__all__)	keep	set	set
+launcher	packages/launcher/tests/test_alive.py	store.insert(conn, request_id=request_id, actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_bind.py	conn	name	connection	conn
 launcher	packages/launcher/tests/test_bind.py	monkeypatch.setattr(targets, "find", lambda command, env: command)	keep	find	find
 launcher	packages/launcher/tests/test_bind.py	rig	name	directory	slots_dir
@@ -3697,6 +3702,9 @@ launcher	packages/launcher/tests/test_browser_home_options.py	test_a_row_found_a
 launcher	packages/launcher/tests/test_browser_home_options.py	test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag_once	name	folder	project_dir
 launcher	packages/launcher/tests/test_browser_home_plus.py	-	name	folder	work_dir_fixture
 launcher	packages/launcher/tests/test_browser_home_plus.py	context	name	folder	work_dir
+launcher	packages/launcher/tests/test_browser_home_plus.py	kit.seed(shell, "worker-after-him", target="slot", cwd=str(work_dir), actor="planner")	use	actor=	by=
+launcher	packages/launcher/tests/test_browser_home_plus.py	kit.seed(shell, "worker-in-folder", target="slot", cwd=str(work_dir), actor=other)	use	actor=	by=
+launcher	packages/launcher/tests/test_browser_home_plus.py	sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), actor=kit.actor(shell))	use	actor=	by=
 launcher	packages/launcher/tests/test_browser_home_plus.py	test_a_brief_from_a_file_turns_the_box_off_and_launches_with_that_file	name	folder	work_dir
 launcher	packages/launcher/tests/test_browser_home_plus.py	test_clear_takes_the_brief_file_off_and_the_box_is_back	name	folder	work_dir
 launcher	packages/launcher/tests/test_browser_home_plus.py	test_continue_the_last_session_is_not_offered_for_another_actors_session	name	folder	work_dir
@@ -4065,6 +4073,7 @@ launcher	packages/launcher/tests/test_names.py	-	name	test_a_launch_is_shown_by_
 launcher	packages/launcher/tests/test_names.py	assert not any("work-gpt" in word for word in result.argv) and "-n" not in result.argv	keep	any	any
 launcher	packages/launcher/tests/test_names.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_names.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_names.py	store.insert(conn, request_id="running", actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_names.py	store.insert(conn, request_id=request_id, actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_page.py	"page": "page", "prompt": "block", "sessions": "block", "state": "inline"}	keep	sessions	sessions
 launcher	packages/launcher/tests/test_page.py	"refused": None, "why": None})	keep	refused	refused
@@ -4581,6 +4590,7 @@ launcher	packages/launcher/tests/test_waits.py	monkeypatch.setattr(waits, "_logg
 loadout	packages/loadout/src/moxi_loadout/adoption.py	-	name	at_its_folder	at_harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	at_its_folder	name	folder	harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	folder = None if row is None else row.folder(placed.kind)	use	row.folder	row.harness_dir
+loadout	packages/loadout/src/moxi_loadout/adoption.py	harness_dir = None if row is None else row.folder(placed.kind)	use	folder	harness_dir
 loadout	packages/loadout/src/moxi_loadout/adoption.py	if not any(str(p.path) == target for p in done):	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/adoption.py	left = any(str(p.path) == target for p in place.status(module))	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/adoption.py	take	name	folder	loadout_dir
@@ -5650,6 +5660,7 @@ moxi	packages/moxi/src/moxi/units/_declare.py	declared = set(daemons) | set(time
 moxi	packages/moxi/src/moxi/units/_declare.py	merged_daemons = set(daemons) | {n for k, n in rejected if k == "daemon"}	keep	set	set
 moxi	packages/moxi/src/moxi/units/_declare.py	runtime: set[str] = set()	keep	set	set
 moxi	packages/moxi/src/moxi/units/_fence.py	"show": _systemctl("show", properties=True),	keep	show	show
+moxi	packages/moxi/src/moxi/units/_fence.py	-	name	REAL_SUPERVISOR	REAL_SUPERVISOR_ENV
 moxi	packages/moxi/src/moxi/units/_fence.py	-	name	TASK_REFS	TASK_REFS_ENV
 moxi	packages/moxi/src/moxi/units/_fence.py	`disable`, each with or without `--now`; `start`, `stop`, `restart`; and `show` with	keep	show	show
 moxi	packages/moxi/src/moxi/units/_fence.py	proc = runner(cmd, env=dict(env) if env else None, timeout=TIMEOUT)	keep	timeout	timeout
@@ -5658,6 +5669,7 @@ moxi	packages/moxi/src/moxi/units/_home.py	-	name	environment	unit_env
 moxi	packages/moxi/src/moxi/units/_home.py	home_path	name	environ	effective_env
 moxi	packages/moxi/src/moxi/units/_home.py	locators_set	name	environ	effective_env
 moxi	packages/moxi/src/moxi/units/_launchd.py	_load	name	handle	fh
+moxi	packages/moxi/src/moxi/units/_launchd.py	body["EnvironmentVariables"] = {"MOXI_LOG_FILE": log, **dict(spec.environment)}	use	environment	env
 moxi	packages/moxi/src/moxi/units/_launchd.py	body["EnvironmentVariables"] = {LOG_FILE_ENV: log, **dict(spec.environment)}	keep	environment	environment
 moxi	packages/moxi/src/moxi/units/_launchd.py	body["EnvironmentVariables"] = {LOG_FILE_ENV: log, **dict(spec.environment)}	use	spec.environment	spec.env
 moxi	packages/moxi/src/moxi/units/_plan.py	_Planner.__init__	name	environ	unit_env
@@ -5674,6 +5686,7 @@ moxi	packages/moxi/src/moxi/units/_schtasks.py	SchtasksBackend.__init__	name	fol
 moxi	packages/moxi/src/moxi/units/_schtasks.py	SchtasksBackend.marked	name	folder	task_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	SchtasksBackend.running	name	folder	task_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	from this process's token when first needed unless given. `folder` is the task	use	folder	task_dir
+moxi	packages/moxi/src/moxi/units/_schtasks.py	home = dict(spec.environment).get("MOXI_HOME")	use	environment	env
 moxi	packages/moxi/src/moxi/units/_schtasks.py	home = dict(spec.environment).get(HOME_ENV)	keep	environment	environment
 moxi	packages/moxi/src/moxi/units/_schtasks.py	home = dict(spec.environment).get(HOME_ENV)	use	spec.environment	spec.env
 moxi	packages/moxi/src/moxi/units/_schtasks.py	listed: set[str] | None = set()	keep	set	set
@@ -6136,6 +6149,7 @@ moxi	packages/moxi/tests/test_place_windows.py	-	name	test_a_held_folder_links_r
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_link_places_a_folder_as_a_junction_and_removes_only_the_junction	test_link_places_a_dir_as_a_junction_and_removes_only_the_junction
 moxi	packages/moxi/tests/test_place_windows.py	monkeypatch.setattr(place, "_symlink_allowed", lambda folder: False)	use	folder	link_dir
 moxi	packages/moxi/tests/test_place_windows.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
+moxi	packages/moxi/tests/test_proc.py	"print(json.dumps([m.started_by, os.environ[m.NAME], m.program]))")	use	NAME	STARTED_BY_ENV
 moxi	packages/moxi/tests/test_proc.py	"print(m.started_by, os.environ[m.NAME] == m.program)")	use	m.NAME	m.STARTED_BY_ENV
 moxi	packages/moxi/tests/test_proc.py	(fake / "environ").write_bytes(b"")	keep	environ	environ
 moxi	packages/moxi/tests/test_proc.py	(fake / "environ").write_bytes(b"A=1\0B=x=y\0junk\0C=\0=nokey\0D=\xff\0")	keep	environ	environ
@@ -6535,6 +6549,8 @@ moxi	packages/moxi/tests/test_units_systemd.py	monkeypatch.setenv("HOME", str(tm
 moxi	packages/moxi/tests/test_units_systemd.py	self.show = show	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	show = self.show(args) if callable(self.show) else self.show	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	shows = [c for c in w.sup.calls if c[0] == "show"]	keep	show	show
+moxi	packages/moxi/tests/test_units_systemd.py	test_after_a_home_move_a_changed_daemon_starts_its_sockets_so_resume_can	name	record	stopped
+moxi	packages/moxi/tests/test_units_systemd.py	test_after_a_home_move_a_changed_daemon_starts_its_sockets_so_resume_can	name	stopped	acted
 moxi	packages/moxi/tests/test_units_systemd.py	test_the_stop_record_lists_every_socket_unit_first_in_unit_order	name	record	stopped
 moxi	packages/moxi/tests/test_units_systemd.py	textwrap.dedent(source.format(tool=str(tool), flag=flag)))	keep	flag	flag
 moxi	packages/moxi/tests/test_units_systemd.py	w.sup.fail[("show", None)] = NO_BUS	keep	show	show
@@ -6722,14 +6738,19 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	_relative	kwonly	package	packa
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	and (len(node.args) > target.position or any(	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	changed: set[str] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	cited = everywhere | own.get(source.path, set())	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	done: set[int] = set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	for path in sorted(set(edits) | used):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found = found or any(_names(generator.target, name, stored=True)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found: set[Leftover] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="compare not-here rows with this merged main ref")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="show states and leftovers without editing files")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if canonical == target.callee and any(	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if chained and old and new and not any(	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if not any(target.kind not in inner	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if other is not source and any(	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if other.module != source.module and not any(	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	in_getattr = any(scope.endswith("__getattr__") and node in ast.walk(one)	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	kept: set[int] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	own.setdefault(row.path, set()).add(row.old)	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("--table", type=Path, default=default, metavar="PATH")	keep	type	type
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("root", nargs="?", type=Path, default=Path.cwd(), metavar="ROOT")	keep	type	type
@@ -6740,7 +6761,8 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	return isinstance(node, ast.Cl
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	return run(root, args.table, dry_run=args.dry_run, main_ref=args.main_ref)	keep	dry_run	dry_run
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	shown = _git(root, "show", f"{ref}:{path}")	keep	show	show
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	touched.setdefault(id(row), set()).add(path)	keep	set	set
-moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	written = set(edits) | apply_uses(texts, rows, states)	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	written |= set(edits) | used	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	written: set[str] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/stamp.py	_git	name	input	stdin_data
 moxi-dev	packages/moxi-dev/src/moxi_dev/stamp.py	for rel in sorted(set(listed)):	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/stamp.py	help="read the index and check only the packages the staged "	keep	help	help
@@ -6917,14 +6939,20 @@ moxi-dev	packages/moxi-dev/tests/test_release.py	package.mkdir(parents=True, exi
 moxi-dev	packages/moxi-dev/tests/test_rename.py	"""The home is `HOME`, or `HOME`'s value."""	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_rename.py	"keep", "HOME", "HOME"))	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_rename.py	''', ("-", "HOME", "HOME_ENV"), "'HOME' is also a local of a function there"),	keep	HOME	HOME
-moxi-dev	packages/moxi-dev/tests/test_rename.py	''', ("Clock", "age_seconds", "age_s"), "a scope inside Clock has its own 'age_seconds'"),	keep	age_seconds	age_seconds
 moxi-dev	packages/moxi-dev/tests/test_rename.py	''', ("launch", "environ", "env"), "'env' is already bound or read in launch"),	keep	environ	environ
 moxi-dev	packages/moxi-dev/tests/test_rename.py	assert "The home is `HOME`" in text and "x = HOME_ENV" in text	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_rename.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row("packages/p/src/p/paths.py", "-", "name", "HOME", "HOME_ENV"),	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row(path, "Clock", "name", "age_seconds", "age_s"),	keep	age_seconds	age_seconds
 moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row(path, "launch", "name", "environ", "env"),	keep	environ	environ
+moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row(path, "show", "name", "e", "exc"))	keep	show	show
 moxi-dev	packages/moxi-dev/tests/test_rename.py	row("packages/p/src/p/model.py", "Clock", "name", "age_seconds", "age_s"))	keep	age_seconds	age_seconds
 moxi-dev	packages/moxi-dev/tests/test_rename.py	row("packages/p/src/p/paths.py", '"""The home is `HOME`, or `HOME`\'s value."""',	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_rename.py	row(path, "-", "name", "folder", "work_dir_fixture"),	keep	folder	folder
+moxi-dev	packages/moxi-dev/tests/test_rename.py	row(path, "Clock", "name", "any", "has_age"),	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_rename.py	row(path, "page", "name", "folder", "work_dir"))	keep	folder	folder
+moxi-dev	packages/moxi-dev/tests/test_rename.py	row(path, "return any(self.age_s for _ in ())", "keep", "any", "any"))	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_rename.py	row(path, "test_stops", "name", "record", "stopped")]	keep	record	record
 moxi-dev	packages/moxi-dev/tests/test_selection.py	assert ran(result) == (set() if var == testing.FINDING_ENV else {"test_unit"})	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_selection.py	assert ran(result) == set()	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_selection.py	assert set(json.loads(out.read_text())["tests"]) == {	keep	set	set
@@ -6993,6 +7021,7 @@ notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("snapshot", help="co
 notes	packages/notes/src/moxi_notes/doctypes.py	NATURES = ("record", "living-state", "ephemeral")	keep	record	record
 notes	packages/notes/src/moxi_notes/doctypes.py	_line	name	at	position
 notes	packages/notes/src/moxi_notes/doctypes.py	_row	name	at	position
+notes	packages/notes/src/moxi_notes/doctypes.py	_types	name	at	position
 notes	packages/notes/src/moxi_notes/doctypes.py	_types.bad	name	at	position
 notes	packages/notes/src/moxi_notes/doctypes.py	close = glob.find("]", index + 1)	keep	find	find
 notes	packages/notes/src/moxi_notes/doctypes.py	elif char == "[" and glob.find("]", index + 1) != -1:	keep	find	find
@@ -7007,7 +7036,7 @@ notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"nature of {name!r} m
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"priority of {name!r} must be a whole number", "priority", position)	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"status of {name!r} must be a list of values", "status", position)	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"the home {home!r} of {name!r} {why}", "homes", position)	keep	bad	bad
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"the type {name!r} is declared twice", "name", at)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"the type {name!r} is declared twice", "name", position)	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"type {position + 1} has no {key}", None, position)	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"{key!r} is not a key notes knows; it knows {', '.join(_TOP_KEYS)}",	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"{key!r} is not a key of a type; a type takes "	keep	bad	bad
@@ -7755,6 +7784,7 @@ rounds	packages/rounds/src/moxi_rounds/brake.py	write.Where(home.project, home.f
 rounds	packages/rounds/src/moxi_rounds/brake.py	write.Where(home.project, home.folder, slug), actor=actor,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/brake.py	write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/brake.py	write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/brake.py	write.Where(home.project, home.folder, slug), by=by,	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/cli.py	"again" for question, key in plan.refused]	keep	refused	refused
 rounds	packages/rounds/src/moxi_rounds/cli.py	"mark": _mark, "drop": _drop, "show": _show,	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/cli.py	"show": _show,	keep	show	show
@@ -8006,6 +8036,7 @@ rounds	packages/rounds/src/moxi_rounds/folders.py	folder = Path(os.path.expandus
 rounds	packages/rounds/src/moxi_rounds/folders.py	homes	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/folders.py	return [f"{one.project}/{slug}" for one in found for slug in slugs(one.folder)]	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/folders.py	return [f"{one.project}/{slug}" for one in found for slug in slugs(one.folder)]	use	one.folder	one.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/folders.py	return folder if folder.is_absolute() else _notes_dir(record) / folder	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/folders.py	return folder if folder.is_absolute() else _notes_folder(record) / folder	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/folders.py	slugs	name	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/folders.py	stores it, and `folder` its rounds folder, which need not exist yet."""	keep	folder	folder
@@ -8031,6 +8062,7 @@ rounds	packages/rounds/src/moxi_rounds/freezing.py	write.Where(home.project, hom
 rounds	packages/rounds/src/moxi_rounds/freezing.py	write.Where(home.project, home.folder, slug), actor=actor,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/freezing.py	write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/freezing.py	write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/freezing.py	write.Where(home.project, home.folder, slug), by=by,	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/holds.py	on_stage	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/index.py	"""Every round in the rounds folder `folder` of the project `project`, by slug, each	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/index.py	"""Every round in the rounds folder `folder` of the project `project`, by slug, each	use	`folder`	`rounds_dir`
@@ -8148,6 +8180,7 @@ rounds	packages/rounds/src/moxi_rounds/opening.py	open_round	name	actor	by
 rounds	packages/rounds/src/moxi_rounds/opening.py	open_round	name	folder	round_dir
 rounds	packages/rounds/src/moxi_rounds/opening.py	open_round	name	make_folder	make_round_dir
 rounds	packages/rounds/src/moxi_rounds/opening.py	raise RoundsError(f"the round's folder {folder} can't be made: {error}",	use	error	exc
+rounds	packages/rounds/src/moxi_rounds/opening.py	raise RoundsError(f"the round's folder {round_dir} can't be made: {error}",	use	error	exc
 rounds	packages/rounds/src/moxi_rounds/opening.py	round_dir = home.round_folder(slug)	use	.round_folder	.round_dir
 rounds	packages/rounds/src/moxi_rounds/opening.py	round_dir = home.round_folder(slug)	use	home.round_folder	home.round_dir
 rounds	packages/rounds/src/moxi_rounds/opening.py	round_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -8202,6 +8235,7 @@ rounds	packages/rounds/src/moxi_rounds/settings.py	-	name	_check_folders_apart	_
 rounds	packages/rounds/src/moxi_rounds/settings.py	-	name	has_notes_folder	has_notes_dir
 rounds	packages/rounds/src/moxi_rounds/settings.py	except NoFolder as none:	use	none	exc
 rounds	packages/rounds/src/moxi_rounds/settings.py	folder = os.path.expanduser(table["dir"])	use	folder	rounds_dir
+rounds	packages/rounds/src/moxi_rounds/settings.py	folder = os.path.join(folders.notes_dir(name), folder)	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/settings.py	folder = os.path.join(folders.notes_folder(name), folder)	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/settings.py	if not os.path.isabs(folder):	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/settings.py	real = os.path.realpath(folder)	use	folder	rounds_dir
@@ -8291,6 +8325,7 @@ rounds	packages/rounds/src/moxi_rounds/stages.py	write.Where(home.project, home.
 rounds	packages/rounds/src/moxi_rounds/stages.py	write.Where(home.project, home.folder, slug), actor=actor,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/stages.py	write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/stages.py	write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/stages.py	write.Where(home.project, home.folder, slug), by=by,	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/state.py	"""A stage of the round's plan: a build in `repo` on `branch`, or the round `round`	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/state.py	CLOSED = "closed"	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/state.py	_change(state, {**change, "record": event.get("record"),	keep	record	record
@@ -8315,6 +8350,7 @@ rounds	packages/rounds/src/moxi_rounds/stepping.py	write.Where(home.project, hom
 rounds	packages/rounds/src/moxi_rounds/stepping.py	write.Where(home.project, home.folder, slug), actor=actor,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/stepping.py	write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/stepping.py	write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/stepping.py	write.Where(home.project, home.folder, slug), by=by,	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/steps.py	Asked	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/steps.py	_each	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/steps.py	current	name	closed	on_closed
@@ -8323,8 +8359,10 @@ rounds	packages/rounds/src/moxi_rounds/steps.py	for one in holds.on_stage(state,
 rounds	packages/rounds/src/moxi_rounds/steps.py	held_by	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/steps.py	holding = holds.on_stage(state, about.stage, closed=about.closed)	use	about.closed	about.on_closed
 rounds	packages/rounds/src/moxi_rounds/steps.py	holding = holds.on_stage(state, about.stage, closed=about.closed)	use	closed=	on_closed=
+rounds	packages/rounds/src/moxi_rounds/steps.py	holding = holds.on_stage(state, about.stage, on_closed=about.closed)	use	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/steps.py	if questions.current(one, state, closed=about.closed) == questions.OPEN)	use	about.closed	about.on_closed
 rounds	packages/rounds/src/moxi_rounds/steps.py	if questions.current(one, state, closed=about.closed) == questions.OPEN)	use	closed=	on_closed=
+rounds	packages/rounds/src/moxi_rounds/steps.py	if questions.current(one, state, on_closed=about.closed) == questions.OPEN)	use	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/steps.py	is the round's name, for the commands a wait prints, and `closed` answers whether	use	`closed`	`on_closed`
 rounds	packages/rounds/src/moxi_rounds/steps.py	is_settled	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/steps.py	of	name	closed	on_closed
@@ -8360,6 +8398,7 @@ rounds	packages/rounds/src/moxi_rounds/verdicts.py	write.Where(home.project, hom
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	write.Where(home.project, home.folder, slug), actor=actor,	use	home.folder	home.rounds_dir
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/verdicts.py	write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/verdicts.py	write.Where(home.project, home.folder, slug), by=by,	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/versions.py	"""Where version `n` of the design of the round in `folder` is frozen."""	use	`folder`	`round_dir`
 rounds	packages/rounds/src/moxi_rounds/versions.py	"round": stage.round, "after": list(stage.after)}	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/versions.py	"version": one.version, "record": one.record,	keep	record	record
@@ -8977,6 +9016,7 @@ rounds	packages/rounds/tests/test_open.py	-	name	test_a_round_opens_in_a_folder_
 rounds	packages/rounds/tests/test_open.py	-	name	test_a_rounds_folder_that_cant_be_worked_out_is_refused	test_a_rounds_dir_that_cant_be_worked_out_is_refused
 rounds	packages/rounds/tests/test_open.py	actor="planner", inherits=["S1", "S1"])	use	actor=	by=
 rounds	packages/rounds/tests/test_open.py	assert "record" not in log.read(log.round_log(rounds / "b-round"))[0]	keep	record	record
+rounds	packages/rounds/tests/test_open.py	assert (found.status, found.flow, found.folder) == ("open", "fix", rounds / "a-round")	use	folder	log_dir
 rounds	packages/rounds/tests/test_open.py	assert (found.status, found.flow, found.round_dir) == ("open", "fix", rounds / "a-round")	use	found.round_dir	found.log_dir
 rounds	packages/rounds/tests/test_open.py	assert log.read(log.round_log(rounds / "a-round"))[0]["record"] == "comms:12"	keep	record	record
 rounds	packages/rounds/tests/test_open.py	assert log.read(log.round_log(rounds / "a-round"))[0]["record"] == pointer	keep	record	record
@@ -9185,10 +9225,12 @@ rounds	packages/rounds/tests/test_steps.py	assert api.round(ROUND)["step"] == {*
 rounds	packages/rounds/tests/test_steps.py	assert api.round(ROUND)["step"]["step"] == "commission"	use	api.round	api.round_data
 rounds	packages/rounds/tests/test_steps.py	assert main(["show", ROUND]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_steps.py	assert not any(one.waits for one in steps.of(found) if one.stage == "B1")	keep	any	any
+rounds	packages/rounds/tests/test_steps.py	assert step(round_dir, "docket", closed=lambda name: False).state == steps.DONE	use	closed=	on_closed=
 rounds	packages/rounds/tests/test_steps.py	at	name	folder	round_dir
 rounds	packages/rounds/tests/test_steps.py	dropping.drop(ROUND, by="operator", record=PTR, actor="planner")	use	actor=	run_by=
 rounds	packages/rounds/tests/test_steps.py	fold	name	folder	round_dir
 rounds	packages/rounds/tests/test_steps.py	folded	name	folder	round_dir
+rounds	packages/rounds/tests/test_steps.py	found = step(round_dir, "docket", closed=lambda name: name == "proj-a/another")	use	closed=	on_closed=
 rounds	packages/rounds/tests/test_steps.py	never_frozen	name	_folder	_round_dir
 rounds	packages/rounds/tests/test_steps.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
 rounds	packages/rounds/tests/test_steps.py	return asking.ask(ROUND, ASKED, origin="comms:11", blocks=blocks, actor="scout").id	use	actor=	by=
@@ -9406,8 +9448,8 @@ secrets	packages/secrets/src/moxi_secrets/engine.py	i = find("\n", i)	keep	find	
 secrets	packages/secrets/src/moxi_secrets/engine.py	out, find, text, i = [], self.etext.find, self.etext, 0	keep	find	find
 secrets	packages/secrets/src/moxi_secrets/fallback.py	line = self.replies.get(timeout=wait)	keep	timeout	timeout
 secrets	packages/secrets/src/moxi_secrets/fallback.py	self.proc.wait(timeout=5)	keep	timeout	timeout
-secrets	packages/secrets/src/moxi_secrets/names.py	def __init__(self, names: PrivateNames):	keep	set	set
-secrets	packages/secrets/src/moxi_secrets/names.py	if not found:	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/names.py	hit = set(found.Match(t.data) or ())	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/names.py	seen = set()	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/paths.py	globs	name	handle	fh
 secrets	packages/secrets/src/moxi_secrets/paths.py	if any(fnmatchcase(name, g) for g in names):	keep	any	any
 secrets	packages/secrets/src/moxi_secrets/paths.py	if any(fnmatchcase(part, g) for part in parts[:-1] for g in dirs):	keep	any	any
@@ -11233,6 +11275,7 @@ turns	packages/turns/src/moxi_turns/endpoint.py	previous, turn = self.ledger.sta
 turns	packages/turns/src/moxi_turns/endpoint.py	ready.result(timeout=OPEN_WAIT_S)	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/endpoint.py	refused = Refused(reason)	keep	refused	refused
 turns	packages/turns/src/moxi_turns/endpoint.py	return d is not None and d.state in (_QUEUED, _INFLIGHT) and not d.expired	keep	expired	expired
+turns	packages/turns/src/moxi_turns/endpoint.py	return live is None or live.busy(shells=include_shells)	use	shells=	include_shells=
 turns	packages/turns/src/moxi_turns/endpoint.py	return live is None or live.busy(shells=shells)	use	shells=	include_shells=
 turns	packages/turns/src/moxi_turns/endpoint.py	return self.future().result(timeout=max(0.0, timeout))	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/endpoint.py	root.mkdir(mode=0o700, exist_ok=True)	keep	exist_ok	exist_ok
@@ -11713,9 +11756,9 @@ turns	packages/turns/tests/test_codex_ws.py	client.close()	keep	timeout	timeout
 turns	packages/turns/tests/test_codex_ws.py	conn.send(json.dumps({"id": message["id"],	keep	fail	fail
 turns	packages/turns/tests/test_codex_ws.py	conn.send(json.dumps({"id": message["id"], "error": {	keep	fail	fail
 turns	packages/turns/tests/test_codex_ws.py	conn.send(json.dumps({"id": message["id"], "result": {"ready": True}}))	keep	fail	fail
+turns	packages/turns/tests/test_codex_ws.py	conn.send(json.dumps({"method": "item/completed",	keep	fail	fail
 turns	packages/turns/tests/test_codex_ws.py	conn.send(json.dumps({"method": "thread/status/changed",	keep	fail	fail
 turns	packages/turns/tests/test_codex_ws.py	initialized.set()	keep	set	set
-turns	packages/turns/tests/test_codex_ws.py	message = json.loads(raw)	keep	fail	fail
 turns	packages/turns/tests/test_codex_ws.py	thread.join(timeout=2)	keep	timeout	timeout
 turns	packages/turns/tests/test_commands.py	assert isinstance(r, turns.Failed) and r.reason.startswith("expired")	keep	expired	expired
 turns	packages/turns/tests/test_commands.py	ep, fake = make_endpoint(fake or FakeHarness(), env=dict(os.environ,	keep	env	env
@@ -12535,7 +12578,7 @@ ui	packages/ui/src/moxi_ui/terminal.py	newer	name	page	for_page
 ui	packages/ui/src/moxi_ui/terminal.py	no_place	name	page	for_page
 ui	packages/ui/src/moxi_ui/terminal.py	no_record	name	page	for_page
 ui	packages/ui/src/moxi_ui/terminal.py	not_full	kwonly	here	here
-ui	packages/ui/src/moxi_ui/terminal.py	return _with_anchor(unreadable(str(record), _error(outcome.exc), page=for_page),	use	outcome.exc	outcome.error
+ui	packages/ui/src/moxi_ui/terminal.py	return _with_anchor(unreadable(str(record), _error(outcome.exc), for_page=for_page),	use	outcome.exc	outcome.error
 ui	packages/ui/src/moxi_ui/terminal.py	the next check pass. `page` words the line for the browser page (the default) or for a	use	`page	`for_page
 ui	packages/ui/src/moxi_ui/terminal.py	unreadable	name	page	for_page
 ui	packages/ui/src/moxi_ui/testing/__init__.py	_open_settled	name	ended	on_ended
@@ -12612,6 +12655,7 @@ ui	packages/ui/tests/test_browser_confirm.py	"outcome": "refused", "code": 409, 
 ui	packages/ui/tests/test_browser_confirm.py	"outcome": "refused", "code": 413, "text": "the request was too large for the module"}	keep	refused	refused
 ui	packages/ui/tests/test_browser_confirm.py	"outcome": "refused", "code": 422, "text": "the fixture refuses this act"}	keep	refused	refused
 ui	packages/ui/tests/test_browser_confirm.py	assert _confirmed(page, {"by": 1}) == {"outcome": "refused", "code": 502, "text": NOT_SENT}	keep	refused	refused
+ui	packages/ui/tests/test_browser_confirm.py	fixture_kit.fail_start(shell, on=False)	use	on=	enabled=
 ui	packages/ui/tests/test_browser_confirm.py	{"outcome": "refused", "code": 502, "text": NOT_SENT}),	keep	refused	refused
 ui	packages/ui/tests/test_browser_confirm.py	{"outcome": "refused", "code": 503, "text": "the module was too busy to take the act; try again"}),	keep	refused	refused
 ui	packages/ui/tests/test_browser_confirm.py	{"outcome": "refused", "code": 503, "text": NOT_SENT}),	keep	refused	refused
@@ -12627,6 +12671,7 @@ ui	packages/ui/tests/test_browser_gateway.py	state.mkdir(parents=True, exist_ok=
 ui	packages/ui/tests/test_browser_home.py	assert not {"fixture.main", "fixture.row-one", "fixture.row-two", "ui.health"} & set(named)	keep	set	set
 ui	packages/ui/tests/test_browser_home.py	expect(health.get_by_role("status")).to_have_count(0, timeout=DOCTOR_MS)	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_home.py	expect(mine).to_have_count(0, timeout=DOCTOR_MS)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_home.py	fixture_kit.fail_check(shell, on=False)	use	on=	enabled=
 ui	packages/ui/tests/test_browser_home.py	state.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/test_browser_home.py	timeout=DOCTOR_MS)	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_place.py	assert any("moxi: fixture's block could not load" in text for text in said), said	keep	any	any
@@ -12918,6 +12963,7 @@ ui	packages/ui/tests/test_proxy.py	"pxfake", "GET", "/api/events?topics=tick", s
 ui	packages/ui/tests/test_proxy.py	"pxfake", "GET", "/api/events?topics=tick", stream=True))	use	stream=	streaming=
 ui	packages/ui/tests/test_proxy.py	(package / "page.py").write_text(textwrap.dedent(PAGE).replace("NAME", name))	keep	NAME	NAME
 ui	packages/ui/tests/test_proxy.py	).request("pxfake", "GET", "/api/events", stream=True)	keep	stream=	stream=
+ui	packages/ui/tests/test_proxy.py	).request("pxfake", "GET", "/api/events", stream=True)	use	stream=	streaming=
 ui	packages/ui/tests/test_proxy.py	after = await rig.send("GET", "/m/pxpage/api/echo", query=b"n=2")	keep	fail	fail
 ui	packages/ui/tests/test_proxy.py	again = await rig.send("POST", "/m/pxbad/api/act", body=b"{}")	keep	fail	fail
 ui	packages/ui/tests/test_proxy.py	assert (await rig.send("GET", "/m/pxpage/api/echo")).status == 200	keep	fail	fail
@@ -13344,6 +13390,7 @@ usage	packages/usage/src/moxi_usage/page.py	ref=lb.Out("table", nullable=True, i
 usage	packages/usage/src/moxi_usage/page.py	values=("project", "folder")), **FILTERS},	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": _str(folder), "started": started, "known": known}	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": _str(work_dir), "started": started, "known": known}	keep	folder	folder
+usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}	use	"folder":	"work_dir":
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"name": None, "folder": None, "started": None, "known": None,	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"opened": _str(row.get("opened")), "note": _str(row.get("note")),	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"opened": plan.iso(row.opened),	keep	opened	opened
@@ -13680,11 +13727,16 @@ usage	packages/usage/tests/test_browser_addresses.py	"folders", "models", "kinds
 usage	packages/usage/tests/test_browser_addresses.py	"folders": ("projects", "section[data-group=projects] [data-part=rows] .tr2"),	keep	folders	folders
 usage	packages/usage/tests/test_browser_addresses.py	body.update(opened=None, readings=None, used=None)	keep	opened	opened
 usage	packages/usage/tests/test_browser_addresses.py	body=json.dumps({"refused": "there is no fresh reading of this window"})))	keep	refused	refused
+usage	packages/usage/tests/test_browser_addresses.py	child.assistant("Found it.", usage=T.usage(input=100, output=400),	use	input=	input_tokens=
+usage	packages/usage/tests/test_browser_addresses.py	t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_chart.py	-	name	test_without_projects_the_filter_is_folder_and_filters_by_the_whole_path	test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path
 usage	packages/usage/tests/test_browser_chart.py	assert any(f"/m/usage/api/{read}" in url for url in check.requests), check.requests	keep	any	any
+usage	packages/usage/tests/test_browser_chart.py	t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_frame.py	assert any(f"/m/usage/api/{read}" in url for url in check.requests), check.requests	keep	any	any
 usage	packages/usage/tests/test_browser_frame.py	expect(foot).to_have_attribute("data-state", "up", timeout=30_000)	keep	timeout	timeout
 usage	packages/usage/tests/test_browser_frame.py	holder.wait(timeout=30)	keep	timeout	timeout
+usage	packages/usage/tests/test_browser_frame.py	t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),	use	input=	input_tokens=
+usage	packages/usage/tests/test_browser_home_row.py	t.assistant("Done.", usage=T.usage(input=200, output=1000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_page.py	"sessions": f'section[data-part=view] tr[data-session="{FIRST}"]',	keep	sessions	sessions
 usage	packages/usage/tests/test_browser_page.py	@pytest.mark.parametrize("route", list(VIEWS), ids=["daily", "sessions", "projects", "models",	keep	sessions	sessions
 usage	packages/usage/tests/test_browser_page.py	CONFIG.format(model=MODEL, start=start, seeded=SEEDED_ID))	keep	start	start
@@ -13709,15 +13761,18 @@ usage	packages/usage/tests/test_browser_questions.py	EARLIER = [{"harness": "cla
 usage	packages/usage/tests/test_browser_questions.py	LATE = {"harness": "claude", "session": session_id(30), "requests": 2, "folder": "proj-a", "ago": 10 * 60,	keep	folder	folder
 usage	packages/usage/tests/test_browser_questions.py	assert not [line for line in step if any(found in line for found in ids)], step	keep	any	any
 usage	packages/usage/tests/test_browser_questions.py	assert set(held["full"]) == {found.name for found in modules.scan()}	keep	set	set
+usage	packages/usage/tests/test_browser_questions.py	child.assistant("Found it.", usage=T.usage(input=100, output=400 * (k + 1)),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_questions.py	expect(section(panel, "projects" if shell.small else "folders")).to_have_count(0)	keep	folders	folders
 usage	packages/usage/tests/test_browser_questions.py	for k, (folder, days) in enumerate((("proj-b", 12), ("scratch", 20)))]	use	(folder,	(dir_name,
 usage	packages/usage/tests/test_browser_questions.py	held[name] = sorted(set(cards.evaluate_all("all => all.map((one) => one.dataset.module)")))	keep	set	set
 usage	packages/usage/tests/test_browser_questions.py	in_b = [key(spec) for spec in WEEK + [CODEX] if spec["folder"] == "proj-b"]	keep	folder	folder
 usage	packages/usage/tests/test_browser_questions.py	on_both.go	name	failed	exc
+usage	packages/usage/tests/test_browser_questions.py	r.request(T.token_usage(input=4000, cached=3000, output=800),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_questions.py	re.compile(r"^no newer reading: .+")], timeout=15_000)	keep	timeout	timeout
 usage	packages/usage/tests/test_browser_questions.py	return ("Folder", "folders") if shell.small else ("Project", "projects")	keep	folders	folders
 usage	packages/usage/tests/test_browser_questions.py	return Path(shell.env["HOME"]) / "work"	keep	HOME	HOME
 usage	packages/usage/tests/test_browser_questions.py	seeded	name	folder	work_dir
+usage	packages/usage/tests/test_browser_questions.py	t.assistant("Done.", usage=T.usage(input=200, cache_read=6000, cache_write=1000, output=1000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_questions.py	timeout=30_000)	keep	timeout	timeout
 usage	packages/usage/tests/test_browser_sections.py	(work / spec["folder"]).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_browser_sections.py	-	name	test_files_with_no_project_are_one_row_and_the_sentence_names_their_folder	test_files_with_no_project_are_one_row_and_the_sentence_names_their_dir
@@ -13727,6 +13782,7 @@ usage	packages/usage/tests/test_browser_sections.py	-	name	test_with_hundreds_of
 usage	packages/usage/tests/test_browser_sections.py	-	name	test_without_projects_folders_are_written_whole_with_no_row_for_no_project	test_without_projects_dirs_are_written_whole_with_no_row_for_no_project
 usage	packages/usage/tests/test_browser_sections.py	panel = open_page(page, "folders")	keep	folders	folders
 usage	packages/usage/tests/test_browser_sections.py	section = section_of(panel, "folders")	keep	folders	folders
+usage	packages/usage/tests/test_browser_sections.py	t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_sections.py	work = Path(shell.env["HOME"]) / "work"	keep	HOME	HOME
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b1", "folder": "proj-a", "model": SONNET, "requests": 3},	keep	folder	folder
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b2", "folder": "proj-a", "model": SONNET, "requests": 3},	keep	folder	folder
@@ -13735,6 +13791,7 @@ usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7
 usage	packages/usage/tests/test_browser_sessions.py	"Cost"} <= set(heads), heads	keep	set	set
 usage	packages/usage/tests/test_browser_sessions.py	EARLIER = [{"session": session_id(20 + n), "folder": "proj-b", "hours_ago": 24 * days,	keep	folder	folder
 usage	packages/usage/tests/test_browser_sessions.py	WEEK = [{"session": session_id(n), "folder": "proj-a" if n % 2 == 0 else "proj-b",	keep	folder	folder
+usage	packages/usage/tests/test_browser_sessions.py	t.assistant("Done.", usage=T.usage(input=200, output=1000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_whole.py	("folders", place, f"section[data-group={place}] [data-part=rows] .tr2"),	keep	folders	folders
 usage	packages/usage/tests/test_browser_whole.py	-	name	NOT_A_FOLDER	NOT_A_DIR
 usage	packages/usage/tests/test_browser_whole.py	-	name	test_without_projects_folders_and_the_folder_menu_fit_a_phone	test_without_projects_dirs_and_the_dir_menu_fit_a_phone
@@ -13869,6 +13926,7 @@ usage	packages/usage/tests/test_page.py	-	name	test_the_home_folder_is_the_accou
 usage	packages/usage/tests/test_page.py	FILTERS = {"since", "until", "harness", "project", "folder", "model", "utc"}	keep	folder	folder
 usage	packages/usage/tests/test_page.py	ROW_KEYS = set(page.ROW_SUMS)	keep	set	set
 usage	packages/usage/tests/test_page.py	SUM_KEYS = set(page.SUMS)	keep	set	set
+usage	packages/usage/tests/test_page.py	[request(f"{sid}-{n}", ts, harness="codex", input=input_tokens)	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	assert "opened" in limits.Row.__dataclass_fields__	keep	opened	opened
 usage	packages/usage/tests/test_page.py	assert "opened" not in windows[("claude", "5h")]["unknown"]	keep	opened	opened
 usage	packages/usage/tests/test_page.py	assert (body["opened"], body["used"], body["readings"]["count"]) == (None, None, 1)	keep	opened	opened
@@ -13944,19 +14002,41 @@ usage	packages/usage/tests/test_page.py	assert {path: (r["kind"], set(r["query"]
 usage	packages/usage/tests/test_page.py	assert {row["model"] for row in body["rows"]} == set(models_)	keep	set	set
 usage	packages/usage/tests/test_page.py	body = get("/api/projects", by="folder", utc="true")	keep	folder	folder
 usage	packages/usage/tests/test_page.py	body["opened"], body["resets_at"], body["readings"]["last"]["at"],	keep	opened	opened
+usage	packages/usage/tests/test_page.py	claude("dear", request("d1", t, input=9000), request("d2", t + 600, input=40_000),	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	claude("mid", request("m1", t + 60, input=5000), cwd="/w/app")	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	claude("unpriced", request("u1", t + 300, model="mystery-9", input=90_000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	codex_session	name	input	input_tokens
 usage	packages/usage/tests/test_page.py	for path, query in (*READS, ("/api/projects", {"by": "folder"}),	keep	folder	folder
 usage	packages/usage/tests/test_page.py	inner = lb.app(page.PAGE, module="usage", server_id=SERVER_ID, strict=True)	keep	strict	strict
+usage	packages/usage/tests/test_page.py	input=6000)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 usage	packages/usage/tests/test_page.py	names.held = {("codex", "reader"): {"folder": "/w/reader", "started": opened - 2 * HOUR},	keep	folder	folder
 usage	packages/usage/tests/test_page.py	names.held = {("codex", "unindexed"): {"folder": "/w/live", "started": now - HOUR}}	keep	folder	folder
 usage	packages/usage/tests/test_page.py	opencode = db.session(title="A title of unknown hand", directory="/work/proj-b",	use	directory=	work_dir=
 usage	packages/usage/tests/test_page.py	ref	name	folder	work_dir
+usage	packages/usage/tests/test_page.py	ref = pagehandlers._refs(pairs, folders=pairs)	use	folders=	work_dirs=
 usage	packages/usage/tests/test_page.py	release.set()	keep	set	set
+usage	packages/usage/tests/test_page.py	request("g2", T0 + 240, input=5000)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	request("r2", t + 600, input=40_000)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	request("t1", t, harness="codex", model="m-a", input=20_000),	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	request("t2", t + 60, harness="codex", model="m-a", input=51_680,	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	request("v2", t + 60, input=sessions.UNKNOWN)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	return body["refused"]	keep	refused	refused
 usage	packages/usage/tests/test_page.py	return {"harness": harness, "session_id": session_id, "name": name, "folder": folder,	keep	folder	folder
 usage	packages/usage/tests/test_page.py	return {"harness": harness, "session_id": session_id, "name": name, "folder": work_dir,	keep	folder	folder
 usage	packages/usage/tests/test_page.py	self._gone.set()	keep	set	set
+usage	packages/usage/tests/test_page.py	source(conn, "/c/thread.jsonl", [request("c1", T0 + 120, harness="codex", input=7000)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/gone.jsonl", [request("g1", T0 - 86_400, input=5000),	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/loose.jsonl", [request("l1", T0 + 300, input=10)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/more.jsonl", [request("m1", t, model="m-b", input=4500, output=0)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/other.jsonl", [request("o1", opened + 60, input=90_000)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/plain.jsonl", [request("p1", T0 + 60, input=8000)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/s1.jsonl", [request("r1", t, input=30_000),	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input=7)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/s2.jsonl", [request("u1", t, model="mystery-9", input=1234)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/s3.jsonl", [request("v1", t, input=500),	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],	use	input=	input_tokens=
+usage	packages/usage/tests/test_page.py	source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_page.py	used = get("/api/window", harness="codex", limit_id="codex", minutes=300)["used"]	keep	used	used
 usage	packages/usage/tests/test_prices_index.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_readings.py	rollout = builders.CodexRollout(tmp_path / "sessions", start=NOW - 600)	keep	sessions	sessions
