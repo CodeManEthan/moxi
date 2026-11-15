@@ -287,7 +287,7 @@ def test_a_copied_report_with_new_content_is_a_new_report(folder):
     assert len({one.sha256 for one in found}) == 3
 
 
-@pytest.mark.parametrize("kind", ["step", "majors", "retro"])
+@pytest.mark.parametrize("kind", ["step", "retro"])
 def test_a_report_of_another_kind_is_refused_as_not_recorded_yet(folder, kind):
     fold(folder, question("Q1"), stage("B1"))
     path = other(folder, kind)
@@ -297,8 +297,8 @@ def test_a_report_of_another_kind_is_refused_as_not_recorded_yet(folder, kind):
         record(path)
 
     [unmet] = refused.value.unmet
-    assert (f"is a {kind} report, and only a report of a design or of a build is "
-            "recorded") in unmet.reason
+    assert (f"is a {kind} report, and only a report of a design, of a build or of "
+            "a round's major decisions is recorded") in unmet.reason
     assert raw(folder) == before
 
 
@@ -1047,18 +1047,6 @@ def test_a_report_of_a_stage_with_no_open_build_is_refused(built):
     path.write_text(text, encoding="utf-8")
 
     assert "B2 of proj-a/a-round was never commissioned" in refusal(path)
-
-
-def test_decisions_in_a_build_report_are_refused_until_recorded(built):
-    folder, _repo, tree = built
-    more = ('[[wait]]\nid = "W1"\ntext = "check the page on a phone"',
-            ('[[decision]]\nid = "M1"\nweight = "minor"\nforecloses = false\n'
-             'text = "a search is retried twice"'))
-
-    said = refusal(of_build(folder, tree.rev(), more=more))
-
-    assert "declares decisions, and nothing records those" in said
-    assert "waiting item" not in said
 
 
 def test_a_build_report_lists_every_open_finding_and_sets_its_state(built):

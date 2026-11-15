@@ -21,6 +21,10 @@ declared once stays the round's until it is done. So a waiting item takes an id 
 earlier report of its stage used, a dropped build's included, as a new finding does.
 An item keeps its key when its build is dropped: what waits on the operator still does.
 
+**A rejected decision** owes a fix, so it is a waiting item too, `B2.M1 rejected: fix
+owed`, from the ruling that rejects it until a mark after that ruling names the fix. A
+rejection that is taken back or replaced by an acceptance owes nothing.
+
 Nothing here reads a file, the config or git, except `done`, which writes the round's
 log.
 """
@@ -31,7 +35,7 @@ import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
-from . import ending, folders, pointers, write
+from . import decisions, ending, folders, pointers, write
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Unmet
@@ -42,8 +46,9 @@ MARKED = "wait.marked"
 OPEN = "open"
 DONE = "done"
 
-#: A waiting item's key outside its report.
-KEY = re.compile(r"(B[1-9][0-9]*)\.(W[1-9][0-9]*)")
+#: A waiting item's key: `B2.W1` for one a report declared, `B2.M1` for the fix a
+#: rejected decision owes.
+KEY = re.compile(r"(B[1-9][0-9]*)\.([WM][1-9][0-9]*)")
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,22 @@ def of_round(state: states.State) -> tuple[Wait, ...]:
                     **{**was.__dict__, "state": DONE, "record": event.get("record"),
                        "done_by": event.get("actor"), "done_at": event.get("at"),
                        "set_by": event.get("n")})
+    for decision in decisions.of_round(state):
+        if decision.chose != decisions.REJECT or decision.ruled is None:
+            continue
+        # The fix is owed from the ruling that stands: a mark made before it, of a
+        # ruling since replaced, does not end it.
+        mark = next((event for event in reversed(state.history)
+                     if event.get("type") == MARKED and event.get("id") == decision.key
+                     and event.get("state") == DONE
+                     and event.get("n", 0) > decision.ruled), None)
+        owed = Wait(stage=decision.stage, id=decision.id,
+                    text=f"{decision.key} rejected: fix owed", report=None,
+                    by=decision.ruled_by, raised=decision.ruled, at=decision.ruled_at)
+        found[decision.key] = owed if mark is None else Wait(
+            **{**owed.__dict__, "state": DONE, "record": mark.get("record"),
+               "done_by": mark.get("actor"), "done_at": mark.get("at"),
+               "set_by": mark.get("n")})
     return tuple(found.values())
 
 
@@ -156,7 +177,8 @@ def done(target: str, key: str, *, record: str | None, actor: str, settings=None
     set, and nothing is written."""
     if KEY.fullmatch(key or "") is None:
         raise BadArgument(f"{key!r} is not the key of a waiting item",
-                          "name the waiting item as B<n>.W<k>, as show lists it")
+                          "name the waiting item as show lists it: B<n>.W<k>, or "
+                          "B<n>.M<k> for a rejected decision's fix")
     project, slug = folders.split(target)
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)

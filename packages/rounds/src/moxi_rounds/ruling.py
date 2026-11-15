@@ -61,6 +61,11 @@ it. Both rulings stay in the log. A correction recorded on a round that was clos
 dropped is recorded and reopens nothing. Any other ruling of such a round's own is
 refused: it would be new work, and that is for a new round.
 
+**Decisions.** `B2.M1=accept` or `B2.M1=reject` rules a decision a report declared
+(`decisions`): of substance, applying to no stage, with or without a sentence. A
+second ruling of it replaces the first and names it, and one taken back leaves the
+decision open.
+
 **Shown.** A ruling is recorded by someone else than the operator, so what is returned
 holds the sentence as the appended event has it, and the sentence of the question it
 answers, for whoever recorded it to put in front of him; `shown` has the mark that says
@@ -76,8 +81,8 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
-from . import (corrections, ending, folders, log, pointers, questions, shown, skips,
-               stages, stepping, write)
+from . import (corrections, decisions, ending, folders, log, pointers, questions, shown,
+               skips, stages, stepping, write)
 from . import options as choices
 from . import settings as own
 from . import state as states
@@ -323,6 +328,10 @@ def rule(target: str, *, actor: str, record: str | None = None, text: str | None
             # him the sentence recorded.
             asked_as = questions.find(held, form.rules)
             answers[0] = None if asked_as is None else (asked_as.id, asked_as.text)
+        elif decisions.item(form.rules) is not None:
+            # So does a decision, with what he chose of it.
+            decided = decisions.find(held, decisions.item(form.rules))
+            answers[0] = None if decided is None else (decided.key, decided.text)
         if corrects and not standing:
             # Recorded all the same: it changes what is read, and reopens nothing.
             ended[0] = corrections.ended(view.state)
@@ -650,6 +659,47 @@ def _revoke(item: str, asked: Asked) -> Form | None:
                                                            ruling_id))
 
 
+# -- a decision --------------------------------------------------------------------------
+
+def _decide(item: str, asked: Asked) -> Form | None:
+    """His ruling of a decision: `accept` or `reject`, of substance, applying to no
+    stage, since a decision holds none. Its sentence is optional."""
+    matched = decisions.ITEM.fullmatch(item)
+    if matched is None:
+        return None
+    key, chose = matched.groups()
+    if chose not in (decisions.ACCEPT, decisions.REJECT):
+        raise BadArgument(f"{chose!r} is not what is ruled of a decision",
+                          f"rule {key}={decisions.ACCEPT} or {key}={decisions.REJECT}")
+    _of_the_round(asked, "a ruling of a decision")
+    for flag, given in (("--stages", asked.stages is not None),
+                        ("--scope", asked.scoped),
+                        ("--standing", asked.standing)):
+        if given:
+            raise BadArgument(f"{flag} is for a plain ruling; a ruling of a decision "
+                              "is the round's and applies to no stage",
+                              f"leave {flag} out")
+    if asked.text is not None and not asked.text.strip():
+        raise BadArgument("--text says nothing", "give the sentence, or leave --text "
+                                                 "out")
+
+    def is_on_record(view):
+        held = decisions.find(view.state, key)
+        if held is None:
+            return Unmet(f"{asked.name} has no decision {key}",
+                         f"moxi rounds show {asked.name}")
+        if held.ruling is None or held.ruling == asked.supersedes:
+            return None
+        return Unmet(f"{key} is already ruled, {held.chose}, by {held.ruling}; a second "
+                     "ruling replaces the first and names it",
+                     f"moxi rounds rule {asked.name} {item} --record PTR --supersedes "
+                     f"{held.ruling}")
+
+    return Form(kind=SUBSTANCE, rules=item,
+                fields={**_said(asked), "chose": chose, "stages": decisions.BLOCKS},
+                gates=(is_on_record,))
+
+
 # -- skips, and the flow -----------------------------------------------------------------
 
 def _of_the_round(asked: Asked, what: str) -> None:
@@ -772,7 +822,7 @@ def _readback(item: str, asked: Asked) -> Form | None:
 #: None when the item is not its own. The first that knows the item builds the form.
 _ITEM_FORMS: tuple[Callable[[str, Asked], Form | None], ...] = (
     _answer, _park, _narrow, _withdraw, _revoke, _readback, _skip, _flow, _unstage,
-    _unafter)
+    _unafter, _decide)
 
 
 def _form(item: str | None, asked: Asked) -> Form:

@@ -48,7 +48,8 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (builds, checking, ci, closing, drift, findings, folders, index, log,
+from . import (builds, checking, ci, closing, decisions, drift, findings, folders,
+               index, log,
                open_builds, questions, shown, skips, steps, tracing, versions, waits)
 from . import settings as own
 from . import state as states
@@ -568,9 +569,45 @@ def _wait_lines(listed: list) -> list[str]:
     return lines
 
 
+def _decisions(found: Shown) -> list:
+    """Every decision of the round, in the order declared, open or ruled; an open one
+    with `to_rule`, the command that records his ruling."""
+    return [{**one.data(),
+             "to_rule": (decisions.rule_line(found.name, one.key)
+                         if one.state == decisions.OPEN else None)}
+            for one in decisions.of_round(found.state)]
+
+
+def decision_line(one: dict) -> str:
+    """A decision in words: `decision B1.M1: major, forecloses, open: the text`."""
+    weight = one["weight"] + (", forecloses" if one["forecloses"] else "")
+    return f"decision {one['id']}: {weight}, {one['state']}: {one['text']}"
+
+
+def decision_facts(one: dict) -> list[str]:
+    """What is known of a decision beyond its line: where it came from, and his
+    ruling or the command that records it."""
+    said = [f"from: {one['from']}   by: {one['by']}   at: {one['at']}"]
+    if one["ruling"] is not None:
+        said.append(f"ruled: {one['chose']} by {one['ruling']}   record: "
+                    f"{one['record']}")
+    else:
+        said.append(f"his to rule: {one['to_rule']}")
+    return said
+
+
+def _decision_lines(listed: list) -> list[str]:
+    lines = [f"decisions: {len(listed) or 'none'}"]
+    for one in listed:
+        lines.append(f"  {decision_line(one)}")
+        lines += [f"    {line}" for line in decision_facts(one)]
+    return lines
+
+
 SECTIONS: tuple[Section, ...] = (
     Section("builds", _builds, _build_lines),
     Section("waits", _waits, _wait_lines),
+    Section("decisions", _decisions, _decision_lines),
     Section("questions", _questions, _question_lines),
     Section("rulings", _rulings, _ruling_lines),
     Section("verdicts", _verdicts, verdict_lines),

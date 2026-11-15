@@ -339,6 +339,9 @@ parked questions, not put to him:
 open waiting items:
   none
 
+major decisions not yet ruled:
+  none
+
 rulings not yet shown to him:
   proj-a, not yet shown, through {T5}; once he has read them: moxi rounds rule \
 proj-a readback={T5} --record PTR
@@ -359,7 +362,8 @@ def test_what_waits_as_data_holds_the_same_rows(rounds, capsys):
     found = data(capsys, "--waiting")
 
     assert list(found) == ["computed", "project", "open", "parked", "waits",
-                           "not_shown", "builds", "unreadable", "no_folder"]
+                           "decisions", "not_shown", "builds", "unreadable",
+                           "no_folder"]
     assert found["computed"] == NOW and found["project"] is None
     assert [(one["holder"], one["id"]) for one in found["open"]] == [
         ("proj-a", "P1"), (A, "Q1"), (C, "Q1")]
@@ -443,6 +447,9 @@ parked questions, not put to him:
   none
 
 open waiting items:
+  none
+
+major decisions not yet ruled:
   none
 
 rulings not yet shown to him:

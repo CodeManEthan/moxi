@@ -366,11 +366,24 @@ def _waits(shown_as: dict) -> list[str]:
     return lines
 
 
+def _decisions(shown_as: dict) -> list[str]:
+    listed = shown_as["decisions"]
+    if not listed:
+        return ["No decision."]
+    lines = []
+    for one in listed:
+        lines += _item(showing.decision_line(one))
+        for line in showing.decision_facts(one):
+            lines += _item(line, indent="  ")
+    return lines
+
+
 #: The parts of a round's note, in the order they are written.
 PARTS: tuple[Part, ...] = (
     Part("Flow", _flow),
     Part("Builds", _builds),
     Part("Waiting items", _waits),
+    Part("Decisions", _decisions),
     Part("Questions", _questions),
     Part("Rulings", _rulings),
     Part("Verdicts", _verdicts),

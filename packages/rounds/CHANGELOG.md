@@ -97,6 +97,13 @@ does not yet build.
   the operator, is an open item of the round, `B<n>.W<k>`, from the moment the report
   is recorded. It holds the round's close and no finish, shows in `show`, the round
   note and `list --waiting`, and ends with `mark ROUND B<n>.W<k> --done --record PTR`.
+- Decisions: each `[[decision]]` of a build's report, and of a majors report for the
+  ones no build report carries, is a record of the round in a question's basic form,
+  `B<n>.M<k>`, with the options `accept` and `reject`. A later report may list one again
+  as heavy or heavier, never lighter. `rule ROUND B<n>.M<k>=accept|reject --record PTR`
+  rules it, a later ruling replaces it and `revoke:` takes it back; a rejected one is a
+  waiting item until its fix is marked done. Unruled majors show in `list --waiting` and
+  a project's export; every decision shows in `show` and the round note.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

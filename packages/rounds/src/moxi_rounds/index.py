@@ -52,7 +52,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import builds, folders, log, paths, questions, readback, state, versions
+from . import builds, decisions, folders, log, paths, questions, readback, state, versions
 from .errors import NoLog, Unreadable
 
 #: The schema, one step per version of it (`moxi.store.migrate`). A step is never
@@ -109,7 +109,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 18
+DERIVED = 19
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -133,8 +133,9 @@ STEP = "step"
 #: And each build that is open, under its stage: its commission, readings and finish
 #: tips, which with the round's landings make the build again (`builds.from_item`).
 BUILD = "build"
-#: And each waiting item that is still open.
+#: And each waiting item that is still open, and each decision not yet ruled.
 WAIT = "wait"
+DECISION = "decision"
 
 
 def _step(folded: state.State):
@@ -155,7 +156,8 @@ ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
     QUESTION: questions.waiting, RULING: readback.unmarked,
     READ_BACK: readback.read_backs, STAGE: versions.stages, VERSION: versions.newest,
     PENDING: versions.waiting, VERDICT: versions.verdicts,
-    THREAD: versions.threads, STEP: _step, BUILD: builds.opened, WAIT: _waits}
+    THREAD: versions.threads, STEP: _step, BUILD: builds.opened, WAIT: _waits,
+    DECISION: decisions.items}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""

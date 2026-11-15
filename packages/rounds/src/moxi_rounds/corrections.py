@@ -72,6 +72,8 @@ ALONE = ""
 ID = re.compile(r"[CS]([1-9][0-9]*)")
 
 _QUESTION = re.compile(r"[QP][1-9][0-9]*")
+#: The item of a ruling of a decision: its key, `=` and what he chose.
+_DECISION = re.compile(r"B[1-9][0-9]*\.M[1-9][0-9]*=[a-z]+")
 
 
 @dataclass(frozen=True)
@@ -211,6 +213,11 @@ KINDS: tuple[Kind, ...] = (
          again=False),
     Kind("a wait taken off a stage", _starts(UNAFTER), instead=_mark_it_after,
          again=False),
+    # Readers take the decision rulings that stand, so one taken back leaves the
+    # decision open with nothing more said.
+    Kind("a ruling of a decision",
+         lambda rules: rules.partition("=")[0]
+         if rules and _DECISION.fullmatch(rules) else None, undo=lambda ruling: {}),
 )
 
 

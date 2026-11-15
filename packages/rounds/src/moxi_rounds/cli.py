@@ -24,7 +24,7 @@
     moxi rounds mark ROUND B<n> --after LIST [--as NAME]
     moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
                      --no-behaviour-change [--as NAME]
-    moxi rounds mark ROUND B<n>.W<k> --done --record PTR [--as NAME]
+    moxi rounds mark ROUND B<n>.W<k>|B<n>.M<k> --done --record PTR [--as NAME]
     moxi rounds mark ROUND thread:NAME --close|--accept-risk --record PTR [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
@@ -97,7 +97,13 @@ merge of the target that brought no change to the build's paths; otherwise a re-
 of the commits since is owed. Each `[[wait]]` of a build's report, work that waits on
 the operator, is an open waiting item of the round, `B<n>.W<k>`, from the moment the
 report is recorded. It holds the round's close and is listed by `list --waiting` until
-`mark ROUND B<n>.W<k> --done --record PTR` names what shows it done.
+`mark ROUND B<n>.W<k> --done --record PTR` names what shows it done. Each
+`[[decision]]`, an as-built choice the operator would notice, is a record of the round,
+`B<n>.M<k>`, with the options `accept` and `reject`, until he rules it with `rule ROUND
+B<n>.M<k>=accept|reject --record PTR`; a later report may list it again as heavy or
+heavier, never lighter. A rejected decision owes a fix, a waiting item `B<n>.M<k>`
+until `mark ... --done --record PTR` names it. A report of `kind = "majors"`, by a
+checker who built none of the round, declares the decisions no build report carries.
 `commission` authorizes the build of a stage of the plan once its step waits for
 nothing: it reads the target (the repo's `into` setting, else the branch checked out
 at the project's root) and takes the target's head as the build's base, cuts the
@@ -331,6 +337,8 @@ def _declare_rule(verbs) -> None:
             "The ITEM skip:STEP says a step is not done, and flow:NAME moves the "
             "round to another flow. unstage:B<n> takes a stage out of the plan, and "
             "unafter:B<n>=B<m> takes one stage off what another waits for. "
+            "B<n>.M<k>=accept or B<n>.M<k>=reject rules a decision a build's report "
+            "declared; a rejected one is a waiting item until its fix is marked done. "
             "The ruling is printed as it was recorded, to show him. On a project, "
             "the ITEM readback=TIME records that he read the list of rulings not yet "
             "shown to him through TIME.")
@@ -626,7 +634,8 @@ def _declare_mark(verbs) -> None:
                         help="what is marked: a question, Q<n>; with --after, a "
                              "stage, B<n>; with --fixed, a build's finding, "
                              "B<n>.L<k>; with --done, a waiting item, "
-                             "B<n>.W<k>; with --close or --accept-risk, a thread "
+                             "B<n>.W<k>, or a rejected decision's fix, "
+                             "B<n>.M<k>; with --close or --accept-risk, a thread "
                              "of the design's verification, thread:NAME, the name "
                              "in letters, digits and . _ -; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
@@ -937,11 +946,15 @@ def _declare_verdict(verbs) -> None:
 
 
 def _verdict(args, out) -> int:
-    from . import verdicts, versions, waits
+    from . import decisions, verdicts, versions, waits
 
     done = verdicts.record(args.round, args.report, actor=_actor(args))
     one = done.verdict
-    if one.stage is not None:
+    if one.kind == "majors":
+        stages = ", ".join(done.event.get("stages") or ())
+        print(f"recorded for {done.name}: the major decisions of {stages}, by "
+              f"{one.by}, model {one.model}", file=out)
+    elif one.stage is not None:
         base = "none" if one.merge_base is None else one.merge_base[:12]
         print(f"recorded for {done.name}: {one.verdict} for {one.stage} at "
               f"{one.head[:12]}, {one.pass_} pass by {one.by}, model {one.model}",
@@ -954,6 +967,16 @@ def _verdict(args, out) -> int:
     print(f"sha256: {one.sha256}", file=out)
     if one.flags:
         print(f"flags: {', '.join(one.flags)}", file=out)
+    for decision in done.decisions:
+        foreclosing = ", forecloses" if decision.forecloses else ""
+        print(f"decision {decision.key}: {decision.weight}{foreclosing}, "
+              f"{decision.state}: {decision.text}", file=out)
+        if decision.state == "open":
+            print(f"  his to rule: {decisions.rule_line(done.name, decision.key)}",
+                  file=out)
+    if one.kind == "majors":
+        _warn_of(done.failed, args.prog, args.verb)
+        return codes.OK
     if one.stage is not None:
         for finding in done.findings:
             print(f"finding {finding.key}: {finding.severity}, {finding.state}: "

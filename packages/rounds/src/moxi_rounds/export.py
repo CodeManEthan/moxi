@@ -20,7 +20,9 @@ question whose record still reads as open or parked there (a correction made aft
 end can leave one so) is listed apart, as waiting for a new round, and is no entry.
 
 **A project's export** holds every open and every parked question on the project's list
-and in each open round of the project, each entry naming its holder. `waiting` gives
+and in each open round of the project, and every major decision of those rounds not yet
+ruled, each entry naming its holder. A decision's entry adds its stage, its weight and
+whether it forecloses; one that forecloses is marked `alone`, an entry of its own. `waiting` gives
 those rows, and is the one function anything that lists what waits in a project takes
 its question rows from.
 
@@ -43,7 +45,7 @@ from pathlib import Path
 
 from moxi import files
 
-from . import folders, index, log, questions, shown
+from . import decisions, folders, index, log, questions, report_block, shown
 from . import settings as own
 from . import state as states
 from .errors import (BadArgument, NoLog, NoRound, Refused, RoundsError, SharedFolder,
@@ -97,6 +99,15 @@ class Entry:
     left_as: str | None = None
     #: The builder of the build it came up in, whom `by` asked it for, or None.
     builder: str | None = None
+    #: For a decision: its stage, its weight and whether it forecloses a capability;
+    #: None for a question.
+    stage: str | None = None
+    weight: str | None = None
+    forecloses: bool = False
+
+    @property
+    def decision(self) -> bool:
+        return self.weight is not None
 
     def data(self) -> dict:
         """The entry as data: the fields every question has, then each further one only
@@ -118,6 +129,12 @@ class Entry:
             data["moved_from"] = self.moved_from
         if self.held is not None:
             data["held"] = questions.stored(self.held)
+        if self.decision:
+            data.update({"stage": self.stage, "weight": self.weight,
+                         "forecloses": self.forecloses})
+            if self.forecloses:
+                # An entry of its own wherever it is drawn: in no group or summary.
+                data["alone"] = True
         return data
 
 
@@ -157,11 +174,16 @@ class Export:
 
     @property
     def open(self) -> tuple[Entry, ...]:
-        return tuple(entry for entry in self.entries if entry.state == questions.OPEN)
+        return tuple(entry for entry in self.entries
+                     if entry.state == questions.OPEN and not entry.decision)
 
     @property
     def parked(self) -> tuple[Entry, ...]:
         return tuple(entry for entry in self.entries if entry.state == questions.PARKED)
+
+    @property
+    def decisions(self) -> tuple[Entry, ...]:
+        return tuple(entry for entry in self.entries if entry.decision)
 
     def data(self) -> dict:
         """The export as data: what `as_markdown` writes, for a program to read."""
@@ -200,6 +222,17 @@ def _question(holder: str, item: index.Item, closed: Callable[[str], bool]) -> E
         moved_from=body.get("moved_from"), held=_blocks(body.get("held")))
 
 
+def _decision(holder: str, item: index.Item, closed: Callable[[str], bool]) -> Entry:
+    body = item.body
+    return Entry(
+        holder=holder, id=item.id, text=body.get("text"), origin=body.get("from"),
+        blocks=decisions.BLOCKS, state=questions.OPEN, by=body.get("by"),
+        at=body.get("at"),
+        options=tuple(Option(key, line) for key, line in decisions.OPTIONS),
+        stage=body.get("stage"), weight=body.get("weight"),
+        forecloses=bool(body.get("forecloses")))
+
+
 def _blocks(value):
     return tuple(value) if isinstance(value, list) else value
 
@@ -207,7 +240,7 @@ def _blocks(value):
 #: What makes an entry of each kind of item the index keeps, as
 #: `fn(holder, item, closed) -> Entry`. A kind that is not here gives no row.
 ENTRIES: dict[str, Callable[[str, index.Item, Callable[[str], bool]], Entry]] = {
-    "question": _question}
+    "question": _question, index.DECISION: _decision}
 
 
 def _entries(summary: index.Summary, closed: Callable[[str], bool]) -> list[Entry]:
@@ -233,8 +266,11 @@ def _entries(summary: index.Summary, closed: Callable[[str], bool]) -> list[Entr
 
 
 def _ordered(entries: list[Entry]) -> tuple[Entry, ...]:
-    return tuple([entry for entry in entries if entry.state == questions.OPEN]
-                 + [entry for entry in entries if entry.state == questions.PARKED])
+    return tuple([entry for entry in entries
+                  if entry.state == questions.OPEN and not entry.decision]
+                 + [entry for entry in entries if entry.state == questions.PARKED]
+                 + [entry for entry in entries
+                    if entry.decision and entry.state == questions.OPEN])
 
 
 def _closed(settings) -> Callable[[str], bool]:
@@ -244,8 +280,9 @@ def _closed(settings) -> Callable[[str], bool]:
 def of_log(summary: index.Summary, *, settings=None) -> tuple[Entry, ...]:
     """The question rows one log gives, as the index answers for it: those that read
     as open, then the parked ones. For a count of what one round holds."""
-    return _ordered(_entries(summary, _closed(own.load() if settings is None
-                                              else settings)))
+    return _ordered([entry for entry in _entries(
+        summary, _closed(own.load() if settings is None else settings))
+        if not entry.decision])
 
 
 def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
@@ -265,7 +302,9 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
         if summary.unreadable is not None:
             unreadable.append(summary.unreadable)
         elif summary.status == states.OPEN:
-            entries += _entries(summary, closed)
+            # Of the decisions, only a major one waits on him here.
+            entries += [entry for entry in _entries(summary, closed)
+                        if entry.weight in (None, report_block.MAJOR)]
     return Rows(_ordered(entries), tuple(unreadable))
 
 
@@ -281,7 +320,8 @@ def of_round(home: folders.Home, slug: str, *, settings=None, env=None) -> Rows:
     if summary.unreadable is not None:
         raise summary.unreadable
     closed = _closed(own.load() if settings is None else settings)
-    found = _entries(summary, closed)
+    # A round's export is its docket, of asked questions.
+    found = [entry for entry in _entries(summary, closed) if not entry.decision]
     return Rows(_ordered(found), ended=summary.ended,
                 left=tuple(entry for entry in found if entry.state == questions.LEFT))
 
@@ -362,6 +402,9 @@ def as_markdown(export: Export) -> str:
     lines += _group(opened, "No question is open.")
     lines += ["## Parked: not put to the operator", ""]
     lines += _group(parked, "No question is parked.")
+    if export.round is None:
+        lines += ["## Major decisions not yet ruled", ""]
+        lines += _group(export.decisions, "No major decision waits.")
     if export.left:
         lines += ["## Waiting for a new round: not put to the operator", "",
                   "The round ended, and a ruling of each was replaced or taken back "
@@ -397,6 +440,9 @@ def _entry_lines(entry: Entry) -> list[str]:
         was = ("" if entry.held is None
                else f", where it held up {questions.said(entry.held)}")
         lines.append(f"- moved from: {entry.moved_from}{was}")
+    if entry.decision:
+        lines += [f"- stage: {entry.stage}", f"- weight: {entry.weight}",
+                  f"- forecloses: {'yes, an entry of its own' if entry.forecloses else 'no'}"]
     if entry.options:
         lines.append("- options:")
         lines += [f"  - {option.key}: {option.text}" for option in entry.options]

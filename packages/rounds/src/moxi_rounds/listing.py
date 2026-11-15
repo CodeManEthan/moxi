@@ -14,9 +14,9 @@ since nothing says which it belongs in.
 
 **What waits on the operator** (`waiting`): across every project, or in one, each open
 question, each parked question with what it waits for, each open waiting item of an
-open round, each project's rulings not yet shown to him, and each open build of its
-rounds that is idle, gone, empty or unclear, that shares commits with another, or that
-git could not read. The question rows are the ones a project's questions export holds,
+open round, each major decision of one not yet ruled, each project's rulings not yet
+shown to him, and each open build of its rounds that is idle, gone, empty or unclear,
+that shares commits with another, or that git could not read. The question rows are the ones a project's questions export holds,
 from the same function, so the two never differ. A waiting item is no question, and is
 in no export.
 
@@ -36,8 +36,8 @@ from datetime import datetime
 
 from moxi import store
 
-from . import (builds, checking, export, folders, index, log, open_builds, questions,
-               shown, steps, waits)
+from . import (builds, checking, decisions, export, folders, index, log, open_builds,
+               questions, shown, steps, waits)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet, Unreadable
@@ -264,7 +264,22 @@ class Kind:
 
 def _questions_in(state: str) -> Callable[[Project], Sequence]:
     return lambda project: [entry for entry in project.rows.entries
-                            if entry.state == state]
+                            if entry.state == state and not entry.decision]
+
+
+def _decisions(project: Project) -> Sequence:
+    return [entry for entry in project.rows.entries if entry.decision]
+
+
+def _decision_lines(entries: Sequence, now: str) -> list[str]:
+    lines = []
+    for entry in entries:
+        weight = entry.weight + (", forecloses" if entry.forecloses else "")
+        lines += [f"  {entry.holder} {entry.id}: {entry.text}",
+                  f"    from: {entry.origin}   {weight}   by: {entry.by}   at: "
+                  f"{entry.at}   age: {age(entry.at, now)}",
+                  f"    his to rule: {decisions.rule_line(entry.holder, entry.id)}"]
+    return lines
 
 
 def _entries_data(entries: Sequence) -> list:
@@ -390,6 +405,8 @@ WAITING: tuple[Kind, ...] = (
     Kind("parked", "parked questions, not put to him", _questions_in(questions.PARKED),
          _entries_data, _question_lines),
     Kind("waits", "open waiting items", _waits, _builds_data, _wait_lines),
+    Kind("decisions", "major decisions not yet ruled", _decisions, _entries_data,
+         _decision_lines),
     Kind("not_shown", "rulings not yet shown to him", _lists, _lists_data, _list_lines),
     Kind("builds", "builds idle, gone, empty, unclear, sharing or not read",
          _builds_to_look_at, _builds_data, _build_lines))

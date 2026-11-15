@@ -7,9 +7,13 @@ design the pass read, the model and the author the report names, the report's fi
 and the SHA-256 of its bytes, every finding of its block, and what the verdict takes
 out of the record. The report's file is read and never written.
 
-A report of a design or of a build is recorded here. A report of a step of the
-user's own, of a round's major decisions or a retrospective is refused, since nothing
-here records one.
+A report of a design, of a build or of a round's major decisions is recorded here. A
+report of a step of the user's own or a retrospective is refused, since nothing here
+records one.
+
+**A majors report** declares the decisions no build report will carry, each with its
+stage, and names in `stages` the builds it covers, so it can say a build has none. Each
+stage it names has a build, and its author built none of the round's builds.
 
 **A report of a build** reads one build, the stage's open one, at a head that is the
 tip of its branch or an ancestor of it. The verdict is recorded against the head it
@@ -23,7 +27,9 @@ bad faith. The report lists every finding the build holds as open, in some state
 a finding new to the build takes an id no earlier report of the stage used
 (`findings`). Each waiting item the report lists is an open waiting item of the round
 from the moment it is recorded, and takes an id no earlier report of the stage used
-(`waits`). Decisions in a build's report are refused: nothing records them yet. A
+(`waits`). Each decision it lists is a record of the round in a question's basic
+form, and stays on it: a decision listed again may be as heavy or heavier, never
+lighter (`decisions`). A
 report whose model the `models` setting places in a weaker tier than the
 `verify-build` step names for its pass is recorded with `model_tiers.BELOW_TIER`.
 
@@ -63,7 +69,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import (brake, builds, checking, ending, findings, folders, model_tiers,
+from . import (brake, builds, checking, decisions, ending, findings, folders,
+               model_tiers,
                open_builds, questions, report_block, stages, stepping, versions, waits,
                write)
 from . import settings as own
@@ -92,6 +99,9 @@ class Recorded:
     waits: tuple[str, ...] = ()
     #: For a report of a build: the waiting items it declared, open from now on.
     opened: tuple[waits.Wait, ...] = ()
+    #: For a report of a build or of majors: each decision it lists, as the record
+    #: now holds it.
+    decisions: tuple[decisions.Decision, ...] = ()
 
 
 @dataclass
@@ -222,11 +232,6 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
         raise Refused([Unmet(f"{stage} of {name} {how}, so there is no build for the "
                              "report to have read", shown)])
     unmet = []
-    if block.decisions:
-        unmet.append(Unmet(
-            "the report declares decisions, and nothing records those of a build's "
-            "report yet", "take them out of the block and say them in the report's "
-            "prose, then record it"))
     builder = checking.commission_of(state, build).get("builder")
     if block.by == builder:
         unmet.append(Unmet(
@@ -261,6 +266,7 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
                 "one on record stays open until it is marked done",
                 f"give it an id no report of the stage used; a waiting item on record "
                 f"is marked done with {waits.mark_line(name, f'{stage}.{one.id}')}"))
+    unmet += _decisions_unmet(state, [(stage, one) for one in block.decisions])
     unmet += _again(state, block, shown)
     merge_base = None
     try:
@@ -307,11 +313,82 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
                       "text": one.text} for one in block.findings]}
     if block.waits:
         fields["waits"] = [{"id": one.id, "text": one.text} for one in block.waits]
+    if block.decisions:
+        fields["decisions"] = [_decision(one) for one in block.decisions]
     noted = model_tiers.flags(settings["models"], state.steps, findings.VERIFY_BUILD,
                               pass_=block.pass_, model=block.model)
     if noted:
         fields["flags"] = noted
     return fields
+
+
+def _decision(one: report_block.Decision) -> dict:
+    """A decision of a report's block as its verdict's event holds it."""
+    entry = {"id": one.id, "weight": one.weight, "forecloses": one.forecloses,
+             "text": one.text}
+    if one.stage is not None:
+        entry["stage"] = one.stage
+    return entry
+
+
+def _decisions_unmet(state: states.State,
+                     declared: list[tuple[str, report_block.Decision]]) -> list[Unmet]:
+    """What refuses the decisions a report declares, each with its stage: one on record
+    listed lighter, and a new one under an id an earlier report of its stage used."""
+    unmet = []
+    for stage, one in declared:
+        key = f"{stage}.{one.id}"
+        held = decisions.find(state, key)
+        if held is not None:
+            lighter = decisions.lighter(one.weight, one.forecloses, held)
+            if lighter:
+                unmet.append(Unmet(
+                    f"the decision {key} is on record as {held.weight}"
+                    f"{', foreclosing' if held.forecloses else ''}, and the report "
+                    f"lists it lighter: {' and '.join(lighter)}. A report can't "
+                    "remove or lower a decision",
+                    f"list {one.id} with weight {held.weight!r} and forecloses "
+                    f"{str(held.forecloses).lower()}, or heavier, or leave it out: "
+                    "it stays on record either way"))
+        elif one.id in findings.taken(state, stage):
+            unmet.append(Unmet(
+                f"the decision {one.id} is new to {stage}, and an earlier report of "
+                f"{stage} used the id {one.id}: an old id never names a new decision",
+                "give it an id no report of the stage used"))
+    return unmet
+
+
+def _of_majors(state: states.State, block: report_block.ReportBlock, *, name: str,
+               report: str) -> dict:
+    """The fields of the verdict on a majors report: the decisions no build report
+    carries, of the builds it names. Refused with every unmet rule when it can't be
+    recorded."""
+    shown = f"moxi rounds show {name}"
+    unmet = []
+    builders = {}
+    for stage in block.stages:
+        build = builds.current(state, stage)
+        if build is None:
+            unmet.append(Unmet(f"{stage} of {name} was never commissioned, so it has "
+                               "no build whose decisions the report could declare",
+                               shown))
+            continue
+        for one in builds.builds(state):
+            if one.stage == stage:
+                builders[checking.commission_of(state, one).get("builder")] = stage
+    if block.by in builders:
+        unmet.append(Unmet(
+            f"the report is by {block.by}, who built {builders[block.by]}: a majors "
+            "report is written by a checker who built none of the round",
+            "have a checker who is neither the lead nor a builder of the round write "
+            "it"))
+    unmet += _decisions_unmet(state, [(one.stage, one) for one in block.decisions])
+    unmet += _again(state, block, shown)
+    if unmet:
+        raise Refused(unmet)
+    return {"kind": block.kind, "model": block.model, "by": block.by,
+            "report": report, "sha256": block.sha256, "stages": list(block.stages),
+            "decisions": [_decision(one) for one in block.decisions]}
 
 
 def record(name: str, report: Path | str, *, actor: str, settings=None,
@@ -355,10 +432,14 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
             return write.Entry("verdict.recorded", _of_build(
                 state, block, name=name, settings=settings,
                 report=_path(report, folder)))
+        if block.kind == report_block.MAJORS:
+            return write.Entry("verdict.recorded", _of_majors(
+                state, block, name=name, report=_path(report, folder)))
         if block.kind != report_block.DESIGN:
             raise Refused([Unmet(
-                f"{report} is a {block.kind} report, and only a report of a design "
-                "or of a build is recorded: nothing records this one yet", shown)])
+                f"{report} is a {block.kind} report, and only a report of a design, "
+                "of a build or of a round's major decisions is recorded: nothing "
+                "records this one yet", shown)])
         unmet = []
         if not stepping.has_step(state, VERIFIES):
             flow = stepping.current(state).name
@@ -410,9 +491,12 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
         held = findings.of_stage(after, one.stage)
         finish = finish_waits(after, one.stage, name=name, settings=settings)
         opened = tuple(wait for wait in waits.of_round(after) if wait.raised == one.n)
+    declared = tuple(decision for decision in decisions.of_round(after)
+                     if decision.key in {f"{stage}.{entry['id']}" for stage, entry in
+                                         decisions.listed(written.events[0])})
     return Recorded(name=name, verdict=one, standing=versions.standing(after),
                     event=written.events[0], failed=written.failed, findings=held,
-                    waits=finish, opened=opened)
+                    waits=finish, opened=opened, decisions=declared)
 
 
 def finish_waits(state: states.State, stage: str, *, name: str,

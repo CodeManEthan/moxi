@@ -190,12 +190,14 @@ def taken(state: states.State, stage: str) -> frozenset[str]:
     used, a dropped build's included."""
     used = set()
     for event in state.history:
-        if event.get("type") != "verdict.recorded" or event.get("stage") != stage:
+        if event.get("type") != "verdict.recorded":
             continue
         for name in _LISTS:
             listed = event.get(name)
+            # A majors report covers several stages, and gives each decision its own.
             used.update(one["id"] for one in (listed if isinstance(listed, list) else ())
-                        if isinstance(one, dict) and isinstance(one.get("id"), str))
+                        if isinstance(one, dict) and isinstance(one.get("id"), str)
+                        and (one.get("stage") or event.get("stage")) == stage)
     return frozenset(used)
 
 

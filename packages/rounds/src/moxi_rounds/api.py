@@ -73,10 +73,11 @@ def round(name: str) -> dict:
     """The round `name`, `<project>/<slug>`: its head (`name`, `project`, `slug`,
     `folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,
     `step`, `close`, `skips`, `stages`, `versions`, `standing`, `trace`, `threads`,
-    `register_unreadable`) and its records (`builds`, `waits`, `questions`,
-    `rulings`, `verdicts`, `history`). `close` is None for a round that has ended;
+    `register_unreadable`) and its records (`builds`, `waits`, `decisions`,
+    `questions`, `rulings`, `verdicts`, `history`). `close` is None for a round that has ended;
     for an open one it is `{"waits"}`, what its close waits for, a line each. The
-    record `waits` holds the round's waiting items, open and done.
+    record `waits` holds the round's waiting items, open and done, and `decisions`
+    its decisions, open and ruled.
 
     A round whose log can't be read is `{"name", "project", "slug", "folder",
     "notice", "unreadable": {"file", "line", "problem", "reason", "fix"}}` and nothing
@@ -91,9 +92,11 @@ def round(name: str) -> dict:
 
 def waiting() -> dict:
     """What waits on the operator, across every project: `{"computed", "project",
-    "open", "parked", "waits", "not_shown", "builds", "unreadable", "no_folder"}`.
+    "open", "parked", "waits", "decisions", "not_shown", "builds", "unreadable",
+    "no_folder"}`.
     `open` and `parked` hold the questions, each as the entry a questions export
     gives it; `waits` each open waiting item of an open round, with its round;
+    `decisions` each major decision of an open round not yet ruled, as its entry;
     `not_shown` holds, for each project that has any, its rulings not yet shown to
     him; `builds` each open build to look at. `unreadable` names each log that can't
     be read, whose rows are not here."""

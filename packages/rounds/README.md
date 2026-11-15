@@ -407,6 +407,16 @@ close, and `list --waiting` lists it, until `mark ROUND B1.W1 --done --record PT
 the report, commit or message that shows it done. Every waiting item a report lists is
 new, and takes an id no earlier report of the stage used.
 
+An as-built choice the operator would notice is a `[[decision]]`, with a `weight`
+(`major` or `minor`) and whether it `forecloses` a capability (then it is major). Each
+is a record of the round, `B1.M1`, with the options `accept` and `reject`; it holds no
+stage. A later report may list it again as heavy or heavier, never lighter. He rules it
+with `rule ROUND B1.M1=accept|reject --record PTR`; a rejected one is also a waiting
+item, `B1.M1`, until `mark ROUND B1.M1 --done --record PTR` names the fix. A report of
+`kind = "majors"`, by a checker who built none of the round, declares decisions no
+build report carries, each with its `stage`, and names the builds it covers in
+`stages`. `list --waiting` and a project's export list each unruled major.
+
 A verdict records the head it read and that head's merge-base with the target. When the
 target moves on, `show` reads whether the move touches the build: `target moved 4
 commits under B2; 0 paths meet`, or `...; 2 paths meet: re-check owed`. A re-check is

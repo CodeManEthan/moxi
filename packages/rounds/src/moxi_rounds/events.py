@@ -58,8 +58,8 @@ TYPES = _types(
                "added", "pending"),
               required=("version", "digest")),
     # A report's verdict: what kind of report and pass, the verdict word, what it read
-    # (a design version, or a stage with its head and merge-base), the user step it is
-    # for, the model and author, the report file and its digest, and what its block
+    # (a design version, a stage with its head and merge-base, or for a majors report
+    # the `stages` it covers), the user step it is for, the model and author, the report file and its digest, and what its block
     # listed. A design report's verdict that finds its version publishable is also the
     # whole of what it applies: `applied` lists what that version's block took away
     # and this event takes out of the record (for a hold, `gone` are the stages taken
@@ -67,9 +67,9 @@ TYPES = _types(
     # each with `why`. `flags` are what is noted of
     # the report and refuses nothing.
     EventType("verdict.recorded",
-              ("kind", "pass", "verdict", "design", "stage", "head", "merge_base", "step",
-               "model", "by", "report", "sha256", "findings", "waits", "decisions",
-               "applied", "not_applied", "flags")),
+              ("kind", "pass", "verdict", "design", "stage", "stages", "head",
+               "merge_base", "step", "model", "by", "report", "sha256", "findings",
+               "waits", "decisions", "applied", "not_applied", "flags")),
     # A question was put: its id, sentence, origin and what it holds up, its state, and
     # who asked it and when, which outlive a move to another log. `record` is the
     # operator's pointer when the question is his own; it is then the origin too.

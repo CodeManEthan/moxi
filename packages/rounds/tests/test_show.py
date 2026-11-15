@@ -86,6 +86,8 @@ builds: 0
 
 waiting items: none
 
+decisions: none
+
 questions: none
 
 rulings: none
@@ -100,7 +102,8 @@ history: 1 event
                            "ended", "description", "parent", "inherits", "flow",
                            "steps", "step", "close", "skips",
                            "stages", "versions", "standing", "trace", "threads",
-                           "register_unreadable", "builds", "waits", "questions",
+                           "register_unreadable", "builds", "waits", "decisions",
+                           "questions",
                            "rulings", "verdicts", "history"]
     assert {key: found[key] for key in list(found)[:21]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
