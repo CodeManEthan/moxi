@@ -7813,10 +7813,12 @@ repo	packages/repo/tests/test_records.py	demo.act(lint="raise", watch="record")	
 repo	packages/repo/tests/test_records.py	demo.act(watch="record")	keep	record	record
 repo	packages/repo/tests/test_records.py	out = set()	keep	set	set
 repo	packages/repo/tests/test_records.py	out.add("record")	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/api.py	"own_commits", "hand_merge", "idle", "shares", "problem"}`. `state` is `gone`,	use	"own_commits"	"has_own_commits"
 rounds	packages/rounds/src/moxi_rounds/api.py	-	name	round	round_data
 rounds	packages/rounds/src/moxi_rounds/api.py	_CLOSED = "closed"	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/api.py	__all__ = ["rounds", "round", "waiting", "questions", "builds"]	use	"round"	"round_data"
 rounds	packages/rounds/src/moxi_rounds/api.py	`folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,	keep	folder	folder
+rounds	packages/rounds/src/moxi_rounds/api.py	`own_commits` is true for an `empty` build that holds commits of its own. `idle`	use	`own_commits`	`has_own_commits`
 rounds	packages/rounds/src/moxi_rounds/api.py	and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
 rounds	packages/rounds/src/moxi_rounds/api.py	read, and `no_folder` each project whose rounds folder can't be worked out.	keep	no_folder	no_folder
 rounds	packages/rounds/src/moxi_rounds/asking.py	- `record`: the pointer to where the operator asked it, for a question that is his	keep	record	record
@@ -7845,9 +7847,12 @@ rounds	packages/rounds/src/moxi_rounds/brake.py	write.Where(home.project, home.f
 rounds	packages/rounds/src/moxi_rounds/brake.py	write.Where(home.project, home.folder, slug), by=by,	use	folder	rounds_dir
 rounds	packages/rounds/src/moxi_rounds/builds.py	"""The open build an index item's `body` holds, as `opened` wrote it, with those of	keep	opened	opened
 rounds	packages/rounds/src/moxi_rounds/builds.py	"NoTarget", "RANGED", "builds", "opened", "from_item", "landings", "current",	keep	opened	opened
+rounds	packages/rounds/src/moxi_rounds/builds.py	Status	name	own_commits	has_own_commits
 rounds	packages/rounds/src/moxi_rounds/builds.py	and not any(self.landed_under(one.commit, other)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/builds.py	builds	name	credits	credited
 rounds	packages/rounds/src/moxi_rounds/builds.py	have = set(git.present(commit for one in every	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/builds.py	head=head, merge_base=base, own_commits=own)	use	own_commits=	has_own_commits=
+rounds	packages/rounds/src/moxi_rounds/builds.py	if status.state == GONE or (status.state == EMPTY and not status.own_commits):	use	status.own_commits	status.has_own_commits
 rounds	packages/rounds/src/moxi_rounds/builds.py	taken_back: set[str] = set()	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/by_branch.py	"""The open build a worktree holds: the `round` it is in, its `stage`, and the	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/by_branch.py	__all__ = ["Found", "find", "open_on"]	keep	find	find
@@ -8152,6 +8157,7 @@ rounds	packages/rounds/src/moxi_rounds/dropping.py	found = index.read(home.proje
 rounds	packages/rounds/src/moxi_rounds/dropping.py	found = moving.arrivals(view.state, view.project_state, name, closed=on_closed)	use	closed=	on_closed=
 rounds	packages/rounds/src/moxi_rounds/dropping.py	held.append(f"its opening, on his go ({event['record']})")	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if event["type"] == "round.opened" and event.get("record") is not None:	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/dropping.py	if found.status.own_commits:	use	found.status.own_commits	found.status.has_own_commits
 rounds	packages/rounds/src/moxi_rounds/dropping.py	if question.record is not None]	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/dropping.py	moving.arrivals(view.state, view.project_state, name, closed=on_closed)	use	closed=	on_closed=
 rounds	packages/rounds/src/moxi_rounds/dropping.py	operator's acts, and `record` points to why. What counts as his (`his_acts`): a ruling,	keep	record	record
@@ -8458,6 +8464,7 @@ rounds	packages/rounds/src/moxi_rounds/next_step.py	return {"reads": ["the numbe
 rounds	packages/rounds/src/moxi_rounds/next_step.py	said = {"round": found.name, "folder": str(found.folder), "notice": found.notice}	keep	folder	folder
 rounds	packages/rounds/src/moxi_rounds/next_step.py	said = {"round": found.name, "folder": str(found.folder), "notice": found.notice}	use	found.folder	found.round_dir
 rounds	packages/rounds/src/moxi_rounds/open_builds.py	"""One open build: `round`, the name of the round that holds it, the `build` as its	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/open_builds.py	"own_commits", "hand_merge")	use	"own_commits"	"has_own_commits"
 rounds	packages/rounds/src/moxi_rounds/open_builds.py	"shares": [{"round": name, "stage": stage} for name, stage in self.shares],	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/open_builds.py	"unreadable": list(self.unreadable), "no_folder": list(self.unplaced)}	keep	no_folder	no_folder
 rounds	packages/rounds/src/moxi_rounds/open_builds.py	OpenBuilds	name	no_folder	unplaced
@@ -9048,6 +9055,10 @@ rounds	packages/rounds/tests/test_builds.py	a_round.check(other_tip, base)	keep	
 rounds	packages/rounds/tests/test_builds.py	a_round.check(reverted, base)	keep	ok	ok
 rounds	packages/rounds/tests/test_builds.py	a_round.check(tip, base)	keep	ok	ok
 rounds	packages/rounds/tests/test_builds.py	a_round.check(work, base)	keep	ok	ok
+rounds	packages/rounds/tests/test_builds.py	assert (after.state, after.own_commits) == (EMPTY, False)	use	after.own_commits	after.has_own_commits
+rounds	packages/rounds/tests/test_builds.py	assert (before.state, before.own_commits) == (EMPTY, False)	use	before.own_commits	before.has_own_commits
+rounds	packages/rounds/tests/test_builds.py	assert (status.state, status.by, status.own_commits) == (EMPTY, builds.NOTHING_OWN,	use	status.own_commits	status.has_own_commits
+rounds	packages/rounds/tests/test_builds.py	assert (status.state, status.own_commits) == (EMPTY, True)	use	status.own_commits	status.has_own_commits
 rounds	packages/rounds/tests/test_builds.py	return log.append(self.path, type_, fields, actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_builds.py	round_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_by_branch.py	-	name	test_a_build_is_found_from_a_folder_inside_its_worktree	test_a_build_is_found_from_a_dir_inside_its_worktree
@@ -9777,6 +9788,7 @@ rounds	packages/rounds/tests/test_open.py	opening.open_round("proj-a/a-round", d
 rounds	packages/rounds/tests/test_open.py	return ruling.rule("proj-a", actor="planner", record="comms:1234567", text=text,	use	actor=	by=
 rounds	packages/rounds/tests/test_open.py	ruling.rule("proj-a", actor="planner", record="comms:1234568", item="revoke:S1")	use	actor=	by=
 rounds	packages/rounds/tests/test_open_builds.py	"round": A, "stage": "B1", "repo": "proj-a", "branch": "work", "target": "main",	keep	round	round
+rounds	packages/rounds/tests/test_open_builds.py	"target_before": base, "merge_base": base, "own_commits": False,	use	"own_commits"	"has_own_commits"
 rounds	packages/rounds/tests/test_open_builds.py	(A, "building", [{"round": B, "stage": "B1"}]),	keep	round	round
 rounds	packages/rounds/tests/test_open_builds.py	(B, "building", [{"round": A, "stage": "B1"}])]	keep	round	round
 rounds	packages/rounds/tests/test_open_builds.py	assert (one["round"], one["state"], one["by"]) == (A, "empty", "nothing of its own")	keep	round	round

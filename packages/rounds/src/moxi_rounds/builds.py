@@ -242,7 +242,7 @@ class Status:
     gave it, `why` the same in words. `head` is `H`, `target_head` the target's head
     `M` and `target_before` is `P`, each None for a build whose end is on record, and
     `head` for one with no head. `merge_base` is `X` for a head off the target.
-    `own_commits` is true for an `empty` build that holds commits of its own.
+    `has_own_commits` is true for an `empty` build that holds commits of its own.
     `hand_merge` is the merge that brought a head merged by hand onto the target."""
 
     state: str
@@ -251,7 +251,7 @@ class Status:
     head: str | None = None
     target_head: str | None = None
     merge_base: str | None = None
-    own_commits: bool = False
+    has_own_commits: bool = False
     target_before: str | None = None
     hand_merge: str | None = None
 
@@ -473,7 +473,7 @@ def read(build: Build, git: Git, *, landings: Iterable[Landing] = (),
         return seen.status(EMPTY, OFF_TARGET, f"{build.branch} would change nothing on "
                            f"{build.target}" + (", though it holds commits of its own"
                                                 if own else ""),
-                           head=head, merge_base=base, own_commits=own)
+                           head=head, merge_base=base, has_own_commits=own)
     return seen.status(BUILDING, OFF_TARGET, f"{build.branch} holds work "
                        f"{build.target} does not", head=head, merge_base=base)
 
@@ -603,7 +603,7 @@ def drop_by(status: Status, shares: Iterable = ()) -> str:
     for one with no work a drop could lose, else `OPERATOR`."""
     if shares:
         return OPERATOR
-    if status.state == GONE or (status.state == EMPTY and not status.own_commits):
+    if status.state == GONE or (status.state == EMPTY and not status.has_own_commits):
         return LEAD
     return OPERATOR
 

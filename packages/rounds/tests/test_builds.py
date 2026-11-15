@@ -156,8 +156,8 @@ def test_a_branch_with_no_commit_of_its_own_reads_empty_at_its_base(a_round, git
     git_repo.switch("main")
     git_repo.commit("target-only.txt")
     status = read(a_round, git_repo)
-    assert (status.state, status.by, status.own_commits) == (EMPTY, builds.NOTHING_OWN,
-                                                             False)
+    assert (status.state, status.by, status.has_own_commits) == (EMPTY, builds.NOTHING_OWN,
+                                                                 False)
 
 
 def test_a_commit_and_its_revert_read_empty_with_commits_of_its_own(a_round, git_repo):
@@ -166,7 +166,7 @@ def test_a_commit_and_its_revert_read_empty_with_commits_of_its_own(a_round, git
     git_repo.commit("feature.txt")
     git_repo.git("revert", "--no-edit", "HEAD")
     status = read(a_round, git_repo)
-    assert (status.state, status.own_commits) == (EMPTY, True)
+    assert (status.state, status.has_own_commits) == (EMPTY, True)
 
 
 def test_the_target_merged_into_an_empty_branch_reads_empty_before_and_after_it_moves(
@@ -181,8 +181,8 @@ def test_the_target_merged_into_an_empty_branch_reads_empty_before_and_after_it_
     git_repo.switch("main")
     git_repo.commit("later.txt")
     after = read(a_round, git_repo)
-    assert (before.state, before.own_commits) == (EMPTY, False)
-    assert (after.state, after.own_commits) == (EMPTY, False)
+    assert (before.state, before.has_own_commits) == (EMPTY, False)
+    assert (after.state, after.has_own_commits) == (EMPTY, False)
 
 
 def test_a_branch_and_a_target_with_slashes_in_their_names_are_read(a_round, git_repo):

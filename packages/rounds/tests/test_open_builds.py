@@ -80,7 +80,7 @@ def test_an_open_build_is_given_with_its_state_read_from_git(repo, logs):
         "round": A, "stage": "B1", "repo": "proj-a", "branch": "work", "target": "main",
         "base": base, "state": "building", "by": "off the target",
         "why": "work holds work main does not", "head": tip, "target_head": base,
-        "target_before": base, "merge_base": base, "own_commits": False,
+        "target_before": base, "merge_base": base, "has_own_commits": False,
         "hand_merge": None, "idle": True, "drop_by": "operator", "shares": [],
         "problem": None}]
     assert json.loads(json.dumps(found)) == found

@@ -131,7 +131,7 @@ def test_a_build_that_shares_is_never_the_leads():
     assert builds.drop_by(empty) == builds.drop_by(gone) == builds.LEAD
     assert builds.drop_by(empty, [("proj-a/b-round", "B2")]) == builds.OPERATOR
     assert builds.drop_by(builds.Status(builds.EMPTY, builds.OFF_TARGET, "",
-                                        own_commits=True)) == builds.OPERATOR
+                                        has_own_commits=True)) == builds.OPERATOR
 
 
 # -- what a drop leaves --------------------------------------------------------------------

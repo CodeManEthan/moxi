@@ -372,7 +372,7 @@ def _not_the_leads(round_state: states.State, name: str, build: builds.Build, se
     if builds.drop_by(found.status, found.shares) == LEAD:
         return None
     said = found.status.state
-    if found.status.own_commits:
+    if found.status.has_own_commits:
         said += " with commits of its own"
     if found.shares:
         said += ", sharing with " + ", ".join(f"{other} {stage}"

@@ -32,7 +32,7 @@ from .gitreads import Git
 #: The fields of a build's state as data, each None for a build that could not be
 #: read.
 _STATUS = ("state", "by", "why", "head", "target_head", "target_before", "merge_base",
-           "own_commits", "hand_merge")
+           "has_own_commits", "hand_merge")
 
 
 @dataclass(frozen=True)
