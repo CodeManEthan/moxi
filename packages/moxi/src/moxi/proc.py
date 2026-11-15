@@ -521,15 +521,15 @@ def status(pid: int) -> int | None:
     """
     if isinstance(pid, int) and not isinstance(pid, bool):
         with _detached_guard:
-            for at, (kept, code) in enumerate(_codes):
+            for position, (kept, code) in enumerate(_codes):
                 if kept == pid:
-                    del _codes[at]
+                    del _codes[position]
                     return code
-            for at, child in enumerate(_detached):
+            for position, child in enumerate(_detached):
                 if child.pid == pid:
                     code = child.poll()
                     if code is not None:
-                        del _detached[at]
+                        del _detached[position]
                     return code
     raise LookupError(f"process {pid!r} is not a detached child of this process whose "
                       f"status is still unread")
@@ -950,33 +950,33 @@ def _procargs2_parts(raw: bytes) -> tuple[list[str], list[bytes]]:
     argc = int.from_bytes(raw[:width], sys.byteorder, signed=True)
     if argc < 0:
         raise short
-    at = raw.find(b"\0", width)
-    if at < 0:
+    position = raw.find(b"\0", width)
+    if position < 0:
         raise short
     # The path is padded with NULs to a pointer-size boundary from its start; only that
     # padding is skipped, so an empty argv[0] after it is still read as an argument. Fewer
     # NULs than that rule asks for means another layout: then every NUL is padding.
     nuls = 0
-    while at + nuls < len(raw) and raw[at + nuls] == 0:
+    while position + nuls < len(raw) and raw[position + nuls] == 0:
         nuls += 1
-    padded = width + _round_up(at + 1 - width, _POINTER)
-    at = padded if at + nuls >= padded else at + nuls
+    padded = width + _round_up(position + 1 - width, _POINTER)
+    position = padded if position + nuls >= padded else position + nuls
     args = []
     for _ in range(argc):
-        end = raw.find(b"\0", at)
+        end = raw.find(b"\0", position)
         if end < 0:
             raise short
-        args.append(raw[at:end].decode("utf-8", "replace"))
-        at = end + 1
+        args.append(raw[position:end].decode("utf-8", "replace"))
+        position = end + 1
     entries = []
-    while at < len(raw):
-        end = raw.find(b"\0", at)
+    while position < len(raw):
+        end = raw.find(b"\0", position)
         if end < 0:
             end = len(raw)
-        if end == at:
+        if end == position:
             break  # the empty string that ends the environment
-        entries.append(raw[at:end])
-        at = end + 1
+        entries.append(raw[position:end])
+        position = end + 1
     return args, entries
 
 
@@ -1066,8 +1066,8 @@ def _kinfo_parent(raw: bytes, pid: int) -> int | None:
     if len(raw) != _KINFO_PROC_SIZE:
         return None
 
-    def field(at: int) -> int:
-        return int.from_bytes(raw[at:at + 4], sys.byteorder, signed=True)
+    def field(position: int) -> int:
+        return int.from_bytes(raw[position:position + 4], sys.byteorder, signed=True)
 
     if field(_KINFO_PID_AT) != pid:
         return None

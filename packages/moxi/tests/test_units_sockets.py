@@ -220,9 +220,9 @@ def test_a_failed_stop_names_the_steps_left_undone_and_they_work(w):
 def test_the_stop_record_takes_every_socket_unit_first_in_unit_order(w):
     w.module(shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))
-    record: list = []
-    units.stop("demo", ["shell"], stopped=record)
-    assert [e.unit for e in record] == [f"{STEM}.socket", f"{STEM}-1.socket",
+    stopped: list = []
+    units.stop("demo", ["shell"], stopped=stopped)
+    assert [e.unit for e in stopped] == [f"{STEM}.socket", f"{STEM}-1.socket",
                                         f"{STEM}.service"]
 
 

@@ -930,10 +930,10 @@ def test_a_failed_runtime_read_stops_nothing_and_records_nothing(w):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not json")
     w.sup.calls.clear()
-    record: list = []
-    [done] = units.stop("demo", stopped=record, runner=w.sup)
+    stopped: list = []
+    [done] = units.stop("demo", stopped=stopped, runner=w.sup)
     assert not done.ok and done.lines[0].startswith("cannot tell which units of demo run")
-    assert record == [] and w.sup.calls == []
+    assert stopped == [] and w.sup.calls == []
 
 
 def test_stop_with_replace_ends_an_unmarked_task_by_its_path_and_resume_runs_it(w):
@@ -941,12 +941,12 @@ def test_stop_with_replace_ends_an_unmarked_task_by_its_path_and_resume_runs_it(
     task = "\\Moxi\\demo-relay"
     w.sup.tasks[task] = {"enabled": True, "running": True}
     live_runtime("demo", "relay")
-    record: list = []
-    [done] = units.stop("demo", replace=True, stopped=record, runner=w.sup)
+    stopped: list = []
+    [done] = units.stop("demo", replace=True, stopped=stopped, runner=w.sup)
     assert done.ok and done.lines == (f"{task} stopped",)
-    assert [(e.unit, e.marked, e.backend) for e in record] == [(task, False, "schtasks")]
+    assert [(e.unit, e.marked, e.backend) for e in stopped] == [(task, False, "schtasks")]
     assert w.sup.calls == [("/end", task)] and not w.sup.tasks[task]["running"]
-    [started] = units.resume(record, runner=w.sup)
+    [started] = units.resume(stopped, runner=w.sup)
     assert started.ok and w.sup.tasks[task]["running"]
 
 

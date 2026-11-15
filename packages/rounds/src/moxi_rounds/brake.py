@@ -215,7 +215,7 @@ def settled(state: states.State) -> frozenset[str]:
                      if one.state in (questions.RULED, questions.WITHDRAWN))
 
 
-def differences(before: dict, now: dict, *, settled=()) -> list[str]:
+def differences(before: dict, current: dict, *, settled=()) -> list[str]:
     """Where what the gates read differs between two versions' declarations, each as
     a line: a question or a stage that only one of them has, a question that holds up
     other stages, a stage that builds elsewhere or waits for other stages. A
@@ -225,7 +225,7 @@ def differences(before: dict, now: dict, *, settled=()) -> list[str]:
     question still asked that is gone is a difference, as is any stage."""
     found = []
     for kind, what in ((states.QUESTION, "question"), (states.STAGE, "stage")):
-        was, new = _by_id(before, kind), _by_id(now, kind)
+        was, new = _by_id(before, kind), _by_id(current, kind)
         found += [f"the {what} {one} is new" for one in new if one not in was]
         found += [f"the {what} {one} is gone" for one in was if one not in new
                   and not (kind == states.QUESTION and one in settled)]

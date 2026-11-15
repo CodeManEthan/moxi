@@ -49,7 +49,7 @@ def api():
 
 
 def in_work_tree(loadout_dir: str | os.PathLike) -> bool:
-    """Whether `loadout_dir` is an existing loadout_dir inside a git work tree: it, or a loadout_dir
+    """Whether `loadout_dir` is an existing folder inside a git work tree: it, or a folder
     above it, holds a `.git` (a folder, or the file a linked worktree or a submodule
     has). It runs no git, so it is cheap enough for every install and the doctor; repo
     reads the work tree itself when it registers."""

@@ -785,18 +785,18 @@ NO_BUS = "Failed to connect to bus: No such file or directory"
 
 def _moved(w):
     """The home move's stop of the relay: every socket unit, then the service."""
-    record: list = []
-    assert all(a.ok for a in units.stop("demo", ["relay"], stopped=record, runner=w.sup))
-    assert record[-1].unit == SERVICE and all(e.unit.endswith(".socket")
-                                              for e in record[:-1])
-    assert not any(w.sup.units[e.unit]["active"] for e in record)
-    return record
+    stopped: list = []
+    assert all(a.ok for a in units.stop("demo", ["relay"], stopped=stopped, runner=w.sup))
+    assert stopped[-1].unit == SERVICE and all(e.unit.endswith(".socket")
+                                              for e in stopped[:-1])
+    assert not any(w.sup.units[e.unit]["active"] for e in stopped)
+    return stopped
 
 
-def _resumed(w, record):
+def _resumed(w, stopped):
     """`resume` of the record: every start ok, none refused."""
-    resumed = units.resume(record, runner=w.sup)
-    assert [a.ok for a in resumed] == [True] * len(record), [a.lines for a in resumed]
+    resumed = units.resume(stopped, runner=w.sup)
+    assert [a.ok for a in resumed] == [True] * len(stopped), [a.lines for a in resumed]
     return resumed
 
 
@@ -1462,10 +1462,10 @@ def test_the_stop_record_lists_every_socket_unit_first_in_unit_order(w, v6):
     w.script("moxi-demo-relay")
     w.module(DAEMONS=shell("127.0.0.1", "::1", "10.0.0.7"))
     w.apply(units.plan("demo"))
-    record: list = []
+    stopped: list = []
     w.sup.calls.clear()
-    [acted] = units.stop("demo", ["relay"], stopped=record, runner=w.sup)
-    assert acted.ok and [(e.unit, e.marked) for e in record] == [
+    [acted] = units.stop("demo", ["relay"], stopped=stopped, runner=w.sup)
+    assert acted.ok and [(e.unit, e.marked) for e in stopped] == [
         (SOCK, True), (SOCK_1, True), (SOCK_2, True), (SERVICE, True)]
     assert w.sup.calls == [("show", "--property=Id,ActiveState", SOCK, SOCK_1, SOCK_2, SERVICE),
                            ("stop", SOCK), ("stop", SOCK_1), ("stop", SOCK_2), ("stop", SERVICE)]

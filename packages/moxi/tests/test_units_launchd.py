@@ -1242,11 +1242,11 @@ def test_a_failed_domain_read_stops_nothing_and_records_nothing(mac):
     mac.apply(units.plan("demo"))
     mac.ctl.calls.clear()
     mac.ctl.fail[("print", None)] = (1, "Operation not permitted")
-    record: list = []
-    [done] = units.stop("demo", stopped=record)
+    stopped: list = []
+    [done] = units.stop("demo", stopped=stopped)
     assert not done.ok and done.lines[0].startswith("cannot tell which units of demo run")
     assert "Operation not permitted" in done.lines[0]
-    assert record == [] and RELAY in mac.ctl.loaded and mac.ctl.verbs() == []
+    assert stopped == [] and RELAY in mac.ctl.loaded and mac.ctl.verbs() == []
 
 
 def test_stop_with_replace_takes_an_unmarked_job_by_its_label_and_resume_starts_it(mac):
@@ -1255,12 +1255,12 @@ def test_stop_with_replace_takes_an_unmarked_job_by_its_label_and_resume_starts_
     (mac.agents / f"{RELAY}.plist").write_bytes(plistlib.dumps(
         {"Label": RELAY, "ProgramArguments": ["/bin/true"], "RunAtLoad": True}))
     mac.ctl.loaded[RELAY] = [99, None]
-    record: list = []
-    [done] = units.stop("demo", replace=True, stopped=record)
+    stopped: list = []
+    [done] = units.stop("demo", replace=True, stopped=stopped)
     assert done.ok and done.lines == (f"{RELAY} stopped",)
-    assert [(e.unit, e.marked, e.backend) for e in record] == [(RELAY, False, "launchd")]
+    assert [(e.unit, e.marked, e.backend) for e in stopped] == [(RELAY, False, "launchd")]
     assert RELAY not in mac.ctl.loaded
-    [started] = units.resume(record)
+    [started] = units.resume(stopped)
     assert started.ok and RELAY in mac.ctl.loaded
 
 

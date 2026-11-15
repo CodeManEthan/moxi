@@ -107,7 +107,7 @@ def setup(*, say: Callable[[str], object] = print,
 
 
 def write_example(loadout_dir: str | os.PathLike) -> bool:
-    """Write the example manifest into `loadout_dir` when the loadout_dir is missing or empty.
+    """Write the example manifest into `loadout_dir` when the folder is missing or empty.
     Returns whether it wrote. Holds the manifest's lock, so it never writes over a
     manifest another writer has just made."""
     import importlib.resources

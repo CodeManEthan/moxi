@@ -130,7 +130,7 @@ def read_project_dirs(value, file) -> dict[str, dict[str, str]]:
 
 
 def relative_dir(project_dir, file, key: str) -> str:
-    """`project_dir` when it is a relative project_dir that stays inside a project, else
+    """`project_dir` when it is a relative folder that stays inside a project, else
     `ConfigError` naming `key`."""
     fix = "give a folder relative to the project's root, such as .claude/skills"
     if not isinstance(project_dir, str):

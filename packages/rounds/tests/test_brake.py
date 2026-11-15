@@ -574,16 +574,16 @@ def test_a_settled_question_left_out_beside_another_still_asked_is_refused_for_t
 def test_only_a_settled_question_that_is_gone_is_no_difference(settled, said):
     before = {"question": [{"id": "Q1", "blocks": ["B1"]}, {"id": "Q2"}],
               "stage": [{"id": "B1"}]}
-    now = {"question": [], "stage": [{"id": "B1"}]}
+    current = {"question": [], "stage": [{"id": "B1"}]}
 
-    assert brake.differences(before, now, settled=settled) == said
+    assert brake.differences(before, current, settled=settled) == said
 
 
 def test_a_settled_question_still_in_the_block_is_compared_as_any_other():
     before = {"question": [{"id": "Q1", "blocks": ["B1"]}]}
-    now = {"question": [{"id": "Q1", "blocks": "all"}, {"id": "Q2"}]}
+    current = {"question": [{"id": "Q1", "blocks": "all"}, {"id": "Q2"}]}
 
-    assert brake.differences(before, now, settled=("Q1", "Q2")) == [
+    assert brake.differences(before, current, settled=("Q1", "Q2")) == [
         "the question Q2 is new", "Q1 held up B1 and now holds up all"]
 
 

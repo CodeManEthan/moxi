@@ -182,8 +182,8 @@ def load(file=None) -> Types:
 
 
 def _types(file: str, text: str, data: dict) -> Types:
-    def bad(why: str, key: str | None = None, at: int | None = None):
-        return TypesError(file, _line(text, key, at), why)
+    def bad(why: str, key: str | None = None, position: int | None = None):
+        return TypesError(file, _line(text, key, position), why)
 
     for key in data:
         if key not in _TOP_KEYS:
@@ -208,39 +208,39 @@ def _types(file: str, text: str, data: dict) -> Types:
     return Types(path=file, present=True, required=tuple(required), types=tuple(types))
 
 
-def _row(row: dict, at: int, bad) -> DocType:
+def _row(row: dict, position: int, bad) -> DocType:
     for key in row:
         if key not in _TYPE_KEYS:
             raise bad(f"{key!r} is not a key of a type; a type takes "
-                      f"{', '.join(_TYPE_KEYS)}", key, at)
+                      f"{', '.join(_TYPE_KEYS)}", key, position)
     for key in _NEEDED:
         if key not in row:
-            raise bad(f"type {at + 1} has no {key}", None, at)
+            raise bad(f"type {position + 1} has no {key}", None, position)
     name = row["name"]
     if not isinstance(name, str) or not _NAME.match(name):
-        raise bad("name must be a word with no spaces", "name", at)
+        raise bad("name must be a word with no spaces", "name", position)
     homes = row["homes"]
     if not isinstance(homes, list) or not all(isinstance(h, str) for h in homes):
-        raise bad(f"homes of {name!r} must be a list of globs", "homes", at)
+        raise bad(f"homes of {name!r} must be a list of globs", "homes", position)
     for home in homes:
         why = _bad_home(home)
         if why:
-            raise bad(f"the home {home!r} of {name!r} {why}", "homes", at)
+            raise bad(f"the home {home!r} of {name!r} {why}", "homes", position)
     nature = row["nature"]
     if nature not in NATURES:
-        raise bad(f"nature of {name!r} must be one of {', '.join(NATURES)}", "nature", at)
+        raise bad(f"nature of {name!r} must be one of {', '.join(NATURES)}", "nature", position)
     priority = row.get("priority", DEFAULT_PRIORITY)
     if not isinstance(priority, int) or isinstance(priority, bool):
-        raise bad(f"priority of {name!r} must be a whole number", "priority", at)
+        raise bad(f"priority of {name!r} must be a whole number", "priority", position)
     status = row.get("status", [])
     if (not isinstance(status, list)
             or not all(isinstance(s, str) and s.strip() for s in status)):
-        raise bad(f"status of {name!r} must be a list of values", "status", at)
+        raise bad(f"status of {name!r} must be a list of values", "status", position)
     flags = {}
     for key in ("frozen", "exempt"):
         flags[key] = row.get(key, False)
         if not isinstance(flags[key], bool):
-            raise bad(f"{key} of {name!r} must be true or false", key, at)
+            raise bad(f"{key} of {name!r} must be true or false", key, position)
     return DocType(name=name, homes=tuple(homes), nature=nature, priority=priority,
                    status=tuple(status), **flags)
 
@@ -265,13 +265,13 @@ _TABLE = re.compile(r"^\s*\[")
 _TYPE_TABLE = re.compile(r"^\s*\[\[\s*type\s*\]\]")
 
 
-def _line(text: str, key: str | None, at: int | None) -> int | None:
-    """The 1-based line of `key` in the top level (`at` None) or in the `at`-th
+def _line(text: str, key: str | None, position: int | None) -> int | None:
+    """The 1-based line of `key` in the top level (`position` None) or in the `position`-th
     `[[type]]` table; the table's own line when the key isn't found there."""
     table, header = -1, None
     pattern = re.compile(rf"""^\s*(?:{re.escape(key)}|"{re.escape(key)}"|'{re.escape(key)}')\s*="""
                          ) if key else None
-    want = -1 if at is None else at
+    want = -1 if position is None else position
     for number, line in enumerate(text.splitlines(), 1):
         if _TYPE_TABLE.match(line):
             table += 1

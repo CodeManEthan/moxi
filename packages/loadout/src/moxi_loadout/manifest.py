@@ -182,7 +182,7 @@ def is_path_name(name: str) -> bool:
 
 def section_root(name: str, loadout_dir: str | os.PathLike) -> str:
     """Path section `name` as an absolute path: `~` expanded, a relative path read from
-    the loadout loadout_dir `loadout_dir`, normalized (links are not resolved)."""
+    the loadout folder `loadout_dir`, normalized (links are not resolved)."""
     path = os.path.expanduser(name)
     if not os.path.isabs(path):
         path = os.path.join(os.fspath(loadout_dir), path)
@@ -282,7 +282,7 @@ class Refusal:
 class Manifest:
     """The manifest as read and checked.
 
-    `path` is the file and `loadout_dir` the loadout loadout_dir; `exists` is False when there is
+    `path` is the file and `loadout_dir` the loadout folder; `exists` is False when there is
     no file yet (then nothing is listed). `mode` is `[global] mode`, or None when the
     file sets none (the install question is asked only then); `global_file` is the
     global text's absolute path. `items` maps `(kind, name)` to the item's table, as
@@ -343,7 +343,7 @@ class Manifest:
 # -- reading -------------------------------------------------------------------------------
 
 def load(loadout_dir: str | os.PathLike | None = None) -> Manifest:
-    """The manifest in `loadout_dir` (the configured loadout loadout_dir when None), read and
+    """The manifest in `loadout_dir` (the configured loadout folder when None), read and
     checked. A missing file is an empty manifest with `exists` False. Raises
     `ManifestError`, and `moxi.config.ConfigError` when `loadout_dir` is None and loadout's
     config doesn't read."""

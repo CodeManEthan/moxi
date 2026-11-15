@@ -4722,11 +4722,11 @@ loadout	packages/loadout/src/moxi_loadout/listing.py	entries	name	folder	loadout
 loadout	packages/loadout/src/moxi_loadout/listing.py	mine = found.folder / _FOLDERS[kind] / filename	keep	folder	folder
 loadout	packages/loadout/src/moxi_loadout/listing.py	mine = found.folder / _FOLDERS[kind] / filename	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/listing.py	mine = found.folder / _KIND_DIRS[kind] / filename	use	folder	loadout_dir
-loadout	packages/loadout/src/moxi_loadout/manifest.py	"""The manifest in `folder` (the configured loadout folder when None), read and	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	"""The manifest in `folder` (the configured loadout folder when None), read and	use	`folder`	`loadout_dir`
 loadout	packages/loadout/src/moxi_loadout/manifest.py	Manifest	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/manifest.py	_Reader.__init__	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/manifest.py	`ManifestError`, and `moxi.config.ConfigError` when `folder` is None and loadout's	use	folder	loadout_dir
-loadout	packages/loadout/src/moxi_loadout/manifest.py	`path` is the file and `folder` the loadout folder; `exists` is False when there is	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	`path` is the file and `folder` the loadout folder; `exists` is False when there is	use	`folder`	`loadout_dir`
 loadout	packages/loadout/src/moxi_loadout/manifest.py	empty	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/manifest.py	expand	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/manifest.py	expand_command	name	folder	loadout_dir
@@ -4742,7 +4742,7 @@ loadout	packages/loadout/src/moxi_loadout/manifest.py	return mode, item_source({
 loadout	packages/loadout/src/moxi_loadout/manifest.py	root = section_root(name, self.folder) if where == "path" else None	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/manifest.py	section_root	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/manifest.py	self.folder = path.parent	use	folder	loadout_dir
-loadout	packages/loadout/src/moxi_loadout/manifest.py	the loadout folder `folder`, normalized (links are not resolved)."""	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/manifest.py	the loadout folder `folder`, normalized (links are not resolved)."""	use	`folder`	`loadout_dir`
 loadout	packages/loadout/src/moxi_loadout/page.py	"argv": lb.Out("list", items=_SAYS, nullable=True),	keep	nullable=	nullable=
 loadout	packages/loadout/src/moxi_loadout/page.py	"exit": lb.Out("int", nullable=True),	keep	nullable=	nullable=
 loadout	packages/loadout/src/moxi_loadout/page.py	"harnesses": lb.Out("list", items=_TEXT, nullable=True),	keep	nullable=	nullable=
@@ -4799,7 +4799,7 @@ loadout	packages/loadout/src/moxi_loadout/planner.py	return ("stale", "its gener
 loadout	packages/loadout/src/moxi_loadout/planner.py	return ({USER} if self.user else set()) | set(self.projects)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/planner.py	user_skills = set(manifest.user.names("skill"))	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Register the pieces in the work tree holding `folder` while `on`, or remove them	use	folder	loadout_dir
-loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Whether `folder` is an existing folder inside a git work tree: it, or a folder	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""Whether `folder` is an existing folder inside a git work tree: it, or a folder	use	`folder`	`loadout_dir`
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	"""loadout's pieces registered in the repo holding `folder`, by id, each as repo's	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	_verb	kwonly	on	on
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	_verb	name	on	enabled
@@ -4813,7 +4813,7 @@ loadout	packages/loadout/src/moxi_loadout/repo_link.py	sync	kwonly	on	on
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	sync	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/repo_link.py	sync	name	on	enabled
 loadout	packages/loadout/src/moxi_loadout/settings.py	"""The schema's default `read_project_dirs`, a fresh copy."""	use	read_project_dirs	project_folders
-loadout	packages/loadout/src/moxi_loadout/settings.py	"""`folder` when it is a relative folder that stays inside a project, else	use	folder	project_dir
+loadout	packages/loadout/src/moxi_loadout/settings.py	"""`folder` when it is a relative folder that stays inside a project, else	use	`folder`	`project_dir`
 loadout	packages/loadout/src/moxi_loadout/settings.py	"""`value`, the file's `read_project_dirs`, merged over the default and checked, or	use	read_project_dirs	project_folders
 loadout	packages/loadout/src/moxi_loadout/settings.py	"project_folders")	use	project_folders	project_dirs
 loadout	packages/loadout/src/moxi_loadout/settings.py	(`read_project_dirs`). Every user choice of what goes where is in the manifest instead	use	read_project_dirs	project_folders
@@ -4834,7 +4834,7 @@ loadout	packages/loadout/src/moxi_loadout/settings.py	relative_folder	name	folde
 loadout	packages/loadout/src/moxi_loadout/settings.py	self.project_folders = project_dirs(settings[PROJECT_DIRS], settings.file)	use	project_folders	project_dirs
 loadout	packages/loadout/src/moxi_loadout/settings.py	self.project_folders = project_folders(settings[PROJECT_FOLDERS], settings.file)	use	project_folders	project_dirs
 loadout	packages/loadout/src/moxi_loadout/settings.py	self.project_folders = read_project_dirs(settings[PROJECT_DIRS], settings.file)	use	project_folders	project_dirs
-loadout	packages/loadout/src/moxi_loadout/setup.py	"""Write the example manifest into `folder` when the folder is missing or empty.	use	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/setup.py	"""Write the example manifest into `folder` when the folder is missing or empty.	use	`folder`	`loadout_dir`
 loadout	packages/loadout/src/moxi_loadout/setup.py	-	name	EXAMPLE_FOLDERS	EXAMPLE_DIRS
 loadout	packages/loadout/src/moxi_loadout/setup.py	_empty	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/setup.py	`folder` has no `[global] mode`. Returns the mode written, or None when nothing was	use	folder	loadout_dir
@@ -4881,7 +4881,7 @@ loadout	packages/loadout/tests/conftest.py	monkeypatch.setattr(moxi.modules._Dis
 loadout	packages/loadout/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/conftest.py	return any(real == str(r) or real.startswith(str(r).rstrip(os.sep) + os.sep)	keep	any	any
 loadout	packages/loadout/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
-loadout	packages/loadout/tests/loadout_kit.py	"""Make `folder` the configured loadout folder; return it."""	use	folder	loadout_dir
+loadout	packages/loadout/tests/loadout_kit.py	"""Make `folder` the configured loadout folder; return it."""	use	`folder`	`loadout_dir`
 loadout	packages/loadout/tests/loadout_kit.py	configure	name	folder	loadout_dir
 loadout	packages/loadout/tests/loadout_kit.py	loadout_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/loadout_kit.py	manifest	name	folder	loadout_dir
@@ -5539,23 +5539,26 @@ moxi	packages/moxi/src/moxi/proc.py	-	name	_linux_environ	_linux_env
 moxi	packages/moxi/src/moxi/proc.py	-	name	_linux_read_environ	_linux_read_env
 moxi	packages/moxi/src/moxi/proc.py	-	name	_mac_environ	_mac_env
 moxi	packages/moxi/src/moxi/proc.py	-	name	environ	process_env
+moxi	packages/moxi/src/moxi/proc.py	_kinfo_parent.field	name	at	position
 moxi	packages/moxi/src/moxi/proc.py	_linux_ended	name	f	fh
 moxi	packages/moxi/src/moxi/proc.py	_linux_file	name	error	exc
 moxi	packages/moxi/src/moxi/proc.py	_linux_file	name	f	fh
 moxi	packages/moxi/src/moxi/proc.py	_linux_parent	name	f	fh
 moxi	packages/moxi/src/moxi/proc.py	_mac_procargs	name	error	exc
+moxi	packages/moxi/src/moxi/proc.py	_procargs2_parts	name	at	position
 moxi	packages/moxi/src/moxi/proc.py	_psutil_read	name	error	exc
-moxi	packages/moxi/src/moxi/proc.py	at = raw.find(b"\0", width)	keep	find	find
 moxi	packages/moxi/src/moxi/proc.py	common = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=out,	keep	stdin	stdin
-moxi	packages/moxi/src/moxi/proc.py	end = raw.find(b"\0", at)	keep	find	find
+moxi	packages/moxi/src/moxi/proc.py	end = raw.find(b"\0", position)	keep	find	find
 moxi	packages/moxi/src/moxi/proc.py	found = first(snapshot, ctypes.byref(entry))	keep	unterminated	unterminated
 moxi	packages/moxi/src/moxi/proc.py	out, err = proc.communicate(stdin_data, timeout=timeout_s)	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/proc.py	out, err = proc.communicate(timeout=KILL_GRACE)	keep	timeout	timeout
+moxi	packages/moxi/src/moxi/proc.py	position = raw.find(b"\0", width)	keep	find	find
 moxi	packages/moxi/src/moxi/proc.py	raw = _linux_file(pid, root, "environ")	keep	environ	environ
 moxi	packages/moxi/src/moxi/proc.py	return dict(_psutil_read(pid, "environ"))	keep	environ	environ
 moxi	packages/moxi/src/moxi/proc.py	return proc.communicate(timeout=KILL_GRACE)	keep	timeout	timeout
 moxi	packages/moxi/src/moxi/proc.py	run	name	input	stdin_data
 moxi	packages/moxi/src/moxi/proc.py	run	name	timeout	timeout_s
+moxi	packages/moxi/src/moxi/proc.py	status	name	at	position
 moxi	packages/moxi/src/moxi/run.py	"seconds": round(max(seconds, 0.0), 3), "result": result, "exit": code,	keep	round	round
 moxi	packages/moxi/src/moxi/run.py	Args.__init__	name	runtime	is_runtime
 moxi	packages/moxi/src/moxi/run.py	paths.core().runtime_dir(create=True)	keep	create	create
@@ -6383,6 +6386,20 @@ moxi	packages/moxi/tests/test_units_acts.py	assert set(shown) == {"error", "fix"
 moxi	packages/moxi/tests/test_units_acts.py	assert w.calls("show") == [("show", "--property=Id,ActiveState",	keep	show	show
 moxi	packages/moxi/tests/test_units_acts.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi	packages/moxi/tests/test_units_acts.py	supervisor.state(timer).update(active=True, enabled=True)	keep	enabled	enabled
+moxi	packages/moxi/tests/test_units_acts.py	test_a_failed_running_read_stops_and_records_nothing	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_a_refused_start_is_reported_never_retried_and_the_next_is_started	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_a_start_that_raises_before_naming_its_command_has_no_by_hand_line	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_a_start_that_raises_is_caught_into_its_entry	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_a_stop_that_fails_is_recorded_first_and_resumed	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_a_stop_that_raises_leaves_its_entry_recorded_for_resume	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_acts_resume_and_wraps_yield_where_this_process_holds_the_lock.calls	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_every_act_takes_the_core_lock_nested	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_replace_stops_and_records_the_unmarked_unit_of_a_declared_daemon	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_resume_clears_the_record_of_a_unit_it_started_and_keeps_the_others	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_resume_never_starts_an_entry_twice_or_one_built_by_hand	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_resume_starts_a_unit_the_user_disabled_and_leaves_it_disabled	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_stop_names_none_takes_the_declared_and_rejected_daemons	name	record	stopped
+moxi	packages/moxi/tests/test_units_acts.py	test_stop_records_only_what_runs_socket_first_and_resume_starts_exactly_that	name	record	stopped
 moxi	packages/moxi/tests/test_units_acts.py	the ones status makes anyway: one `show`, and one more for the foreign timers."""	keep	show	show
 moxi	packages/moxi/tests/test_units_acts.py	w.sup.fail[("show", None)] = "Failed to connect to bus"	keep	show	show
 moxi	packages/moxi/tests/test_units_acts.py	w.sup.state("moxi-demo-relay.service").update(active=True, enabled=True)	keep	enabled	enabled
@@ -6427,6 +6444,8 @@ moxi	packages/moxi/tests/test_units_launchd.py	path.parent.mkdir(exist_ok=True)	
 moxi	packages/moxi/tests/test_units_launchd.py	return self._run(cmd, env=env, timeout=timeout)	keep	timeout	timeout
 moxi	packages/moxi/tests/test_units_launchd.py	self.disabled: set[str] = set()	keep	set	set
 moxi	packages/moxi/tests/test_units_launchd.py	self.overrides: set[str] = set()	keep	set	set
+moxi	packages/moxi/tests/test_units_launchd.py	test_a_failed_domain_read_stops_nothing_and_records_nothing	name	record	stopped
+moxi	packages/moxi/tests/test_units_launchd.py	test_stop_with_replace_takes_an_unmarked_job_by_its_label_and_resume_starts_it	name	record	stopped
 moxi	packages/moxi/tests/test_units_ported.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 moxi	packages/moxi/tests/test_units_ports.py	listening: set[tuple[str, int]] = set()	keep	set	set
 moxi	packages/moxi/tests/test_units_ports.py	w.sup.fail[("show", None)] = "Failed to connect to bus"	keep	show	show
@@ -6466,11 +6485,14 @@ moxi	packages/moxi/tests/test_units_schtasks.py	path.parent.mkdir(parents=True, 
 moxi	packages/moxi/tests/test_units_schtasks.py	return root.find("t:Actions/t:Exec/t:Arguments", N).text	keep	find	find
 moxi	packages/moxi/tests/test_units_schtasks.py	self.stuck: set[str] = set()	keep	set	set
 moxi	packages/moxi/tests/test_units_schtasks.py	test_a_disabled_daemon_is_created_disabled_and_a_flip_takes_effect_now.declare	kwonly	enabled	enabled
+moxi	packages/moxi/tests/test_units_schtasks.py	test_a_failed_runtime_read_stops_nothing_and_records_nothing	name	record	stopped
+moxi	packages/moxi/tests/test_units_schtasks.py	test_stop_with_replace_ends_an_unmarked_task_by_its_path_and_resume_runs_it	name	record	stopped
 moxi	packages/moxi/tests/test_units_schtasks.py	triggers = list(root.find("t:Triggers", N))	keep	find	find
 moxi	packages/moxi/tests/test_units_schtasks.py	week = trigger.find("t:ScheduleByWeek", N)	keep	find	find
 moxi	packages/moxi/tests/test_units_schtasks.py	with _backend.use(Old(user="PC\\ana")):	keep	user	user
 moxi	packages/moxi/tests/test_units_sockets.py	assert not any(c[0] in ("enable", "disable") and f"{STEM}.service" in c	keep	any	any
 moxi	packages/moxi/tests/test_units_sockets.py	service = [c for c in w.sup.calls if f"{STEM}.service" in c and c[0] != "show"]	keep	show	show
+moxi	packages/moxi/tests/test_units_sockets.py	test_the_stop_record_takes_every_socket_unit_first_in_unit_order	name	record	stopped
 moxi	packages/moxi/tests/test_units_systemd.py	("show", "--property=Id,ActiveState", "moxi-demo-relay.service",	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	("show", "--property=Id,LoadState,Type,ExecStart,DropInPaths",	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	("show", "--property=Version"), ("show", "--property=Id,LoadState,Triggers",	keep	show	show
@@ -6480,6 +6502,8 @@ moxi	packages/moxi/tests/test_units_systemd.py	-	name	test_unwrap_leaves_another
 moxi	packages/moxi/tests/test_units_systemd.py	RUNNING = ("show", "--property=Id,ActiveState", SERVICE)	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	The field comes out of the reads status makes anyway, one `show` and one more for	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	_marked_daemon	kwonly	socket	socket
+moxi	packages/moxi/tests/test_units_systemd.py	_moved	name	record	stopped
+moxi	packages/moxi/tests/test_units_systemd.py	_resumed	name	record	stopped
 moxi	packages/moxi/tests/test_units_systemd.py	assert len(run.calls) == 2 and not any("backup.service" in c for c in run.calls)	keep	any	any
 moxi	packages/moxi/tests/test_units_systemd.py	assert not any("backup.service" in c for c in run.calls)	keep	any	any
 moxi	packages/moxi/tests/test_units_systemd.py	assert not any("enable-linger" in line for line in w.lines)	keep	any	any
@@ -6489,7 +6513,7 @@ moxi	packages/moxi/tests/test_units_systemd.py	assert not any(c[0] == "enable-li
 moxi	packages/moxi/tests/test_units_systemd.py	assert not any(c[0] == "loginctl" for c in w.sup.calls)	keep	any	any
 moxi	packages/moxi/tests/test_units_systemd.py	assert not any(c[0] == "restart" for c in w.sup.calls)	keep	any	any
 moxi	packages/moxi/tests/test_units_systemd.py	assert not any(c[:1] == ("enable",) and SERVICE in c for c in w.sup.calls)	keep	any	any
-moxi	packages/moxi/tests/test_units_systemd.py	assert not any(w.sup.units[e.unit]["active"] for e in record)	keep	any	any
+moxi	packages/moxi/tests/test_units_systemd.py	assert not any(w.sup.units[e.unit]["active"] for e in stopped)	keep	any	any
 moxi	packages/moxi/tests/test_units_systemd.py	assert not any(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))	keep	any	any
 moxi	packages/moxi/tests/test_units_systemd.py	assert run.calls == [("show", "--property=Id,ActiveState", *ids)]	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	assert run.calls == [("show", f"--property={_systemd.STATUS_PROPERTIES}",	keep	show	show
@@ -6511,6 +6535,7 @@ moxi	packages/moxi/tests/test_units_systemd.py	monkeypatch.setenv("HOME", str(tm
 moxi	packages/moxi/tests/test_units_systemd.py	self.show = show	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	show = self.show(args) if callable(self.show) else self.show	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd.py	shows = [c for c in w.sup.calls if c[0] == "show"]	keep	show	show
+moxi	packages/moxi/tests/test_units_systemd.py	test_the_stop_record_lists_every_socket_unit_first_in_unit_order	name	record	stopped
 moxi	packages/moxi/tests/test_units_systemd.py	textwrap.dedent(source.format(tool=str(tool), flag=flag)))	keep	flag	flag
 moxi	packages/moxi/tests/test_units_systemd.py	w.sup.fail[("show", None)] = NO_BUS	keep	show	show
 moxi	packages/moxi/tests/test_units_systemd_live.py	Row.switch	kwonly	on	on
@@ -6674,13 +6699,16 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	old_modules = set(sys.modules)
 moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	protected: set[int] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	return set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/naming.py	seen = set()	keep	set	set
-moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	at = text.find("\n", end)	keep	find	find
+moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	_add_to_members	name	at	position
+moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	_add_to_sources	name	at	position
+moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	_array_tokens	name	at	position
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	help="the version range of moxi the module requires "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	i = text.find("\n", i)	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	parser.add_argument("--core-range", default=DEFAULT_CORE_RANGE,	keep	default	default
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	parser.add_argument("--summary", help="the module's SUMMARY and description, one line")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	parser.add_argument("module", help="the module's name, lower-case letters and digits")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	position = text.find("\n", end)	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/new.py	start = text.find("\n", found.end())	keep	find	find
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	#: For a `.refs-allow` line (`stale`): "unused", "malformed" or "duplicate".	keep	stale	stale
 moxi-dev	packages/moxi-dev/src/moxi_dev/refs.py	exists = (unchecked or any(p == clean or p.endswith("/" + clean) for p in paths)	keep	any	any
@@ -6963,24 +6991,27 @@ notes	packages/notes/src/moxi_notes/cli.py	p.add_argument("--limit", type=_limit
 notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("setup", help="ask setup's questions again and write the answers",	keep	help	help
 notes	packages/notes/src/moxi_notes/cli.py	verbs.add_parser("snapshot", help="commit a snapshot of the notes repo now",	keep	help	help
 notes	packages/notes/src/moxi_notes/doctypes.py	NATURES = ("record", "living-state", "ephemeral")	keep	record	record
+notes	packages/notes/src/moxi_notes/doctypes.py	_line	name	at	position
+notes	packages/notes/src/moxi_notes/doctypes.py	_row	name	at	position
+notes	packages/notes/src/moxi_notes/doctypes.py	_types.bad	name	at	position
 notes	packages/notes/src/moxi_notes/doctypes.py	close = glob.find("]", index + 1)	keep	find	find
 notes	packages/notes/src/moxi_notes/doctypes.py	elif char == "[" and glob.find("]", index + 1) != -1:	keep	find	find
 notes	packages/notes/src/moxi_notes/doctypes.py	if len(set(required)) != len(required):	keep	set	set
 notes	packages/notes/src/moxi_notes/doctypes.py	load	name	handle	fh
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad("name must be a word with no spaces", "name", at)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad("name must be a word with no spaces", "name", position)	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad("required must be a list of one or more frontmatter keys", "required")	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad("required names a key twice", "required")	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad("type must be a list of tables, each written [[type]]", "type")	keep	bad	bad
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"homes of {name!r} must be a list of globs", "homes", at)	keep	bad	bad
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"nature of {name!r} must be one of {', '.join(NATURES)}", "nature", at)	keep	bad	bad
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"priority of {name!r} must be a whole number", "priority", at)	keep	bad	bad
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"status of {name!r} must be a list of values", "status", at)	keep	bad	bad
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"the home {home!r} of {name!r} {why}", "homes", at)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"homes of {name!r} must be a list of globs", "homes", position)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"nature of {name!r} must be one of {', '.join(NATURES)}", "nature", position)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"priority of {name!r} must be a whole number", "priority", position)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"status of {name!r} must be a list of values", "status", position)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"the home {home!r} of {name!r} {why}", "homes", position)	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"the type {name!r} is declared twice", "name", at)	keep	bad	bad
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"type {at + 1} has no {key}", None, at)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"type {position + 1} has no {key}", None, position)	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"{key!r} is not a key notes knows; it knows {', '.join(_TOP_KEYS)}",	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"{key!r} is not a key of a type; a type takes "	keep	bad	bad
-notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"{key} of {name!r} must be true or false", key, at)	keep	bad	bad
+notes	packages/notes/src/moxi_notes/doctypes.py	raise bad(f"{key} of {name!r} must be true or false", key, position)	keep	bad	bad
 notes	packages/notes/src/moxi_notes/doctypes.py	return [t for t in self.types if any(_compile(h).match(relative) for h in t.homes)]	keep	any	any
 notes	packages/notes/src/moxi_notes/frontmatter.py	if not text.startswith("'") and any(char in text for char in ",[]{}'\""):	keep	any	any
 notes	packages/notes/src/moxi_notes/gates.py	_index_git	name	input	stdin_data
@@ -7715,6 +7746,7 @@ rounds	packages/rounds/src/moxi_rounds/brake.py	"record": record})	keep	record	r
 rounds	packages/rounds/src/moxi_rounds/brake.py	- `record`: the pointer to where the lead wrote why.	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/brake.py	after, waits = (set(entry.get("after") or ()) for entry in (was[one], new[one]))	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/brake.py	decide	name	actor	by
+rounds	packages/rounds/src/moxi_rounds/brake.py	differences	name	now	current
 rounds	packages/rounds/src/moxi_rounds/brake.py	else set(held or ()) == set(holds or ()))	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/brake.py	files	name	folder	round_dir
 rounds	packages/rounds/src/moxi_rounds/brake.py	for key in ("repo", "branch", "round"):	keep	round	round
@@ -7846,8 +7878,14 @@ rounds	packages/rounds/src/moxi_rounds/corrections.py	f"moxi rounds rule {name} 
 rounds	packages/rounds/src/moxi_rounds/corrections.py	f"moxi rounds {'fold' if designed else 'show'} {name}")	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/datablock.py	**Lines.** TOML's reader gives values and no lines, so `find` reads the block a second	keep	find	find
 rounds	packages/rounds/src/moxi_rounds/datablock.py	__all__ = ["INFO", "OPENS", "CLOSES", "Key", "Table", "Found", "Entry", "find", "check",	keep	find	find
+rounds	packages/rounds/src/moxi_rounds/datablock.py	_check	name	at	position
+rounds	packages/rounds/src/moxi_rounds/datablock.py	_decode_error	name	at	position
+rounds	packages/rounds/src/moxi_rounds/datablock.py	_starts	name	at	position
+rounds	packages/rounds/src/moxi_rounds/datablock.py	_string_end	name	at	position
+rounds	packages/rounds/src/moxi_rounds/datablock.py	_until	name	at	position
+rounds	packages/rounds/src/moxi_rounds/datablock.py	find	name	at	position
 rounds	packages/rounds/src/moxi_rounds/datablock.py	find	name	error	exc
-rounds	packages/rounds/src/moxi_rounds/datablock.py	found = source.find(mark, at)	keep	find	find
+rounds	packages/rounds/src/moxi_rounds/datablock.py	found = source.find(mark, position)	keep	find	find
 rounds	packages/rounds/src/moxi_rounds/datablock.py	wrong = key.check(entry[key.name])	keep	ok	ok
 rounds	packages/rounds/src/moxi_rounds/design_block.py	"""A stage the design plans: a build in `repo` on `branch`, or the round `round`	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/design_block.py	"`round` out for a build")]	keep	round	round
@@ -8446,6 +8484,7 @@ rounds	packages/rounds/tests/test_brake.py	test_a_second_full_pass_is_recorded_w
 rounds	packages/rounds/tests/test_brake.py	test_a_second_thread_is_decided_after_two_more_verdicts_sent_the_design_back	name	folder	round_dir
 rounds	packages/rounds/tests/test_brake.py	test_a_settled_question_left_out_beside_a_changed_stage_is_refused_for_the_stage	name	folder	round_dir
 rounds	packages/rounds/tests/test_brake.py	test_a_settled_question_left_out_beside_another_still_asked_is_refused_for_that	name	folder	round_dir
+rounds	packages/rounds/tests/test_brake.py	test_a_settled_question_still_in_the_block_is_compared_as_any_other	name	now	current
 rounds	packages/rounds/tests/test_brake.py	test_a_text_sent_back_through_a_later_version_is_counted_once	name	folder	round_dir
 rounds	packages/rounds/tests/test_brake.py	test_a_third_report_on_one_version_is_not_counted_either	name	folder	round_dir
 rounds	packages/rounds/tests/test_brake.py	test_a_thread_is_not_decided_before_the_design_was_frozen_again	name	folder	round_dir
@@ -8475,6 +8514,7 @@ rounds	packages/rounds/tests/test_brake.py	test_fold_takes_the_flag_and_says_wha
 rounds	packages/rounds/tests/test_brake.py	test_mark_decides_a_thread	name	folder	round_dir
 rounds	packages/rounds/tests/test_brake.py	test_no_pass_is_asked_for_over_a_text_that_was_sent_back_and_not_changed	name	folder	round_dir
 rounds	packages/rounds/tests/test_brake.py	test_one_verdict_that_sends_the_design_back_between_two_others_is_no_two_in_a_row	name	folder	round_dir
+rounds	packages/rounds/tests/test_brake.py	test_only_a_settled_question_that_is_gone_is_no_difference	name	now	current
 rounds	packages/rounds/tests/test_brake.py	test_the_count_starts_again_after_a_change_of_records_only_made_the_decision	name	folder	round_dir
 rounds	packages/rounds/tests/test_brake.py	test_the_decisions_and_the_carried_standing_are_in_the_index_and_the_list	name	folder	round_dir
 rounds	packages/rounds/tests/test_brake.py	test_the_pass_asked_for_across_a_design_found_publishable_and_changed	name	folder	round_dir

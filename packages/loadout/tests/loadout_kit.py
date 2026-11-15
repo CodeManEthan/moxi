@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 def configure(loadout_dir: Path) -> Path:
-    """Make `loadout_dir` the configured loadout loadout_dir; return it."""
+    """Make `loadout_dir` the configured loadout folder; return it."""
     from moxi import config
 
     loadout_dir.mkdir(parents=True, exist_ok=True)
