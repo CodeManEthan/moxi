@@ -231,9 +231,10 @@ def _owned(name: str, commissioned: Mapping, kind: str, *, settings, env):
     if not commissioned.get(kind):
         return None
     recorded = Path(str(commissioned[kind]))
-    if commissioned.get("host") not in (None, places.host()):
-        return Kept(recorded, "A1", f"it was made on {commissioned.get('host')}, not on "
-                    "this machine")
+    if not places.made_here(commissioned, unrecorded_is_here=False):
+        made = commissioned.get("host")
+        return Kept(recorded, "A1", "its record names no machine it was made on"
+                    if made is None else f"it was made on {made}, not on this machine")
     repo, branch, build = (commissioned.get(key) for key in ("repo", "branch", "build"))
     if not isinstance(repo, str) or not isinstance(branch, str):
         return Kept(recorded, "A2", "its record names no repo and branch")

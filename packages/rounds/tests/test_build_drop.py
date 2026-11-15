@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from moxi_rounds import builds, dropping, listing, log, opening, showing, stages, state
+from moxi_rounds import (builds, dropping, listing, log, opening, places, showing, stages,
+                         state)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
 
@@ -159,7 +160,7 @@ def test_a_drop_keeps_dirs_outside_rounds_roots_and_names_the_check(a_round, git
     log.append(a_round, "build.commissioned", {
         "stage": "B1", "repo": "proj-a", "branch": "work", "base": git_repo.rev("main"),
         "target": "main", "builder": "coder", "worktree": str(worktree),
-        "scratch": str(scratch)}, by="planner")
+        "scratch": str(scratch), "host": places.host()}, by="planner")
 
     dropped = lead_drops()
     assert [(one.place, one.check) for one in dropped.kept] == [(worktree, "A2"),

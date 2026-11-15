@@ -249,7 +249,7 @@ def seen_of(state: states.State, name: str, *, settings,
         try:
             _key, root = folders.root(build.repo)
             tip = tips.get(build.stage) or Git(root).branch(build.branch)
-            here = (commissioned.get("host") in (None, places.host())
+            here = (places.made_here(commissioned, unrecorded_is_here=True)
                     and commissioned.get("worktree") and worktree.is_dir())
             clean = bool(here) and read_tip(worktree, build.branch).clean
             head = tip if tip is not None else now.status.head
@@ -294,7 +294,7 @@ def _tree(commissioned: Mapping, worktree: Path, *, here: bool) -> str | None:
     untracked path is a change."""
     from . import finish_gates, removal
 
-    if commissioned.get("host") not in (None, places.host()):
+    if not places.made_here(commissioned, unrecorded_is_here=True):
         return finish_gates.ELSEWHERE
     if not here:
         return None
@@ -696,7 +696,7 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
     worktree = Path(str(commissioned.get("worktree") or ""))
     scratch = Path(str(commissioned.get("scratch") or ""))
     host = commissioned.get("host")
-    if host is not None and host != places.host():
+    if not places.made_here(commissioned, unrecorded_is_here=True):
         found.unmet.append(Unmet(
             f"the worktree of {stage} was made on {host}, and the check runs in it there",
             f"run moxi rounds check on {host}"))

@@ -26,6 +26,7 @@ import os
 import re
 import secrets
 import socket
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +66,17 @@ def is_build_id(value: object) -> bool:
 def host() -> str:
     """This machine's name, as a build that made folders here records it."""
     return socket.gethostname()
+
+
+def made_here(commissioned: Mapping, *, unrecorded_is_here: bool) -> bool:
+    """Whether the folders a build's commission record names were made on this machine,
+    by the `host` the record holds. A record with no host (only a hand-typed one has
+    none) is read as `unrecorded_is_here` says: a read or a run there may take it as
+    here, but a removal may not, since what it can't prove is not removed."""
+    recorded = commissioned.get("host")
+    if recorded is None:
+        return unrecorded_is_here
+    return recorded == host()
 
 
 def worktree_dir(settings, env=None) -> Path:

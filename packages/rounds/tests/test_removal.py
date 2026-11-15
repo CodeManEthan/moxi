@@ -129,6 +129,24 @@ def test_a_record_that_does_not_name_rounds_own_place_keeps_the_dir(made, change
     assert tree.root.is_dir()
 
 
+def test_a_record_with_no_host_is_not_read_as_this_machine_s(made):
+    _path, tree, event = made
+    unrecorded = {key: value for key, value in event.items() if key != "host"}
+
+    found = remove(unrecorded)
+
+    assert kept_by(found) == "A1" and "names no machine" in found.why
+    assert tree.root.is_dir()
+
+
+def test_whether_a_build_was_made_here_reads_a_missing_host_as_the_caller_says():
+    assert places.made_here({"host": places.host()},
+                                    unrecorded_is_here=False)
+    assert not places.made_here({"host": "box-1"}, unrecorded_is_here=True)
+    assert places.made_here({}, unrecorded_is_here=True)
+    assert not places.made_here({}, unrecorded_is_here=False)
+
+
 def test_a_worktree_dir_the_config_moved_from_is_outside_the_roots(made, write_config,
                                                                    tmp_path):
     _path, tree, event = made
