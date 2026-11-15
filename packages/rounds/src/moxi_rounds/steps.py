@@ -75,7 +75,8 @@ index keeps the step the log alone gives, and marks it so (`at`).
 - a command step of the user's own, of a stage: done once the newest run recorded
   under its name passed at the build's tip with the argv of its entry in the round's
   recorded flow, its placeholders filled for the build there, and once the build is
-  finished. Until then it waits for the build to have work. A run of one step is never
+  finished. Until then it waits, as `check` does, for the build to have work and for
+  its worktree to be clean. A run of one step is never
   read for another. It is read from what `Asked.seen` says of the stage's build.
   (`command_row` gives its row; `row_of` finds it for a step the flow lists.)
 
@@ -370,16 +371,23 @@ def _check(state: states.State, about: Asked) -> Step:
             return Step(CHECK, DONE, stage=stage)
         full = checking.why_not(state, stage, CHECK, tip=seen.tip, argv=seen.check)
         owes = (f"by the full check: {full}", f"by CI: {by_ci}")
+    waits = _before_a_run(stage, seen, "check")
+    return Step(CHECK, WAITING if waits else READY, stage=stage, waits=waits, owes=owes)
+
+
+def _before_a_run(stage: str, seen: Seen, what: str) -> tuple[Unmet, ...]:
+    """What a run at a build's tip waits for, as the verb that runs it checks before it
+    runs: work on the branch and a clean worktree. A row that read ready where the verb
+    refuses would tell the user to run what is then refused."""
     waits = []
     if seen.state not in checking.WITH_WORK:
-        waits.append(Unmet(f"{stage} has no work to check: it reads {seen.state}",
+        waits.append(Unmet(f"{stage} has no work to {what}: it reads {seen.state}",
                            "commit the build's work on its branch"))
     if not seen.clean:
         waits.append(Unmet(f"the worktree of {stage} is not clean on its branch here",
                            "commit or put away what is not committed, in the build's "
                            "worktree on the machine that made it"))
-    return Step(CHECK, WAITING if waits else READY, stage=stage, waits=tuple(waits),
-                owes=owes)
+    return tuple(waits)
 
 
 def command_row(step: str) -> Row:
@@ -403,11 +411,8 @@ def command_row(step: str) -> Row:
                 and checking.passes(state, stage, step, tip=seen.tip,
                                     argv=checking.fill(entry["argv"], seen.values))):
             return Step(step, DONE, stage=stage)
-        if seen.state not in checking.WITH_WORK:
-            return Step(step, WAITING, stage=stage, waits=(Unmet(
-                f"{stage} has no work to run {step} on: it reads {seen.state}",
-                "commit the build's work on its branch"),))
-        return Step(step, READY, stage=stage)
+        waits = _before_a_run(stage, seen, f"run {step} on")
+        return Step(step, WAITING if waits else READY, stage=stage, waits=waits)
 
     return row
 

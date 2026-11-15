@@ -612,6 +612,23 @@ def test_a_failed_run_of_the_command_step_leaves_it_ready(stepped):
     assert stepped_step(path).state == steps.READY
 
 
+def test_the_command_step_waits_for_a_clean_worktree_as_its_run_refuses_one(stepped):
+    path, tree, _made, _script = stepped(PASS)
+    (tree.root / "loose.txt").write_text("not committed\n", encoding="utf-8")
+
+    found = stepped_step(path)
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", actor="coder", step="staging")
+
+    assert found.state == steps.WAITING
+    assert "the worktree of B1 is not clean on its branch here" in [
+        one.reason for one in found.waits]
+    assert "holds changes not committed" in str(caught.value)
+
+    (tree.root / "loose.txt").unlink()
+    assert stepped_step(path).state == steps.READY
+
+
 def test_a_run_of_one_step_is_never_read_for_another(stepped):
     path, _tree, _made, _script = stepped(PASS, check=f"{PY} -c pass")
 
