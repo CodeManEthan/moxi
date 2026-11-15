@@ -10190,6 +10190,7 @@ sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, mo
 sessions	packages/sessions/tests/test_browser_page.py	ui_width_check(ui_page, module="sessions", route=f"claude/{SESSION}")	keep	sessions	sessions
 sessions	packages/sessions/tests/test_browser_questions.py	"""A Claude Code session in `folder` under the home folder, last changed at `at`:	use	`folder`	`work_dir`
 sessions	packages/sessions/tests/test_browser_questions.py	a.step(text=OPENCODE_REPLY, input=900, output=40)	keep	input	input
+sessions	packages/sessions/tests/test_browser_questions.py	a.step(text=OPENCODE_REPLY, input=900, output=40)	use	input=	input_tokens=
 sessions	packages/sessions/tests/test_browser_questions.py	assert not any(re.search(r"\bResume\b", line) and line != "Resume" for line in step)	keep	any	any
 sessions	packages/sessions/tests/test_browser_questions.py	assert set(held["full"]) == {found.name for found in modules.scan()}	keep	set	set
 sessions	packages/sessions/tests/test_browser_questions.py	choose(view, "folder", "proj-b")	keep	folder	folder
@@ -11110,7 +11111,7 @@ turns	packages/turns/src/moxi_turns/codex_hooks.py	_Ping	name	emitted	on_emitted
 turns	packages/turns/src/moxi_turns/codex_hooks.py	_Ping	name	wait_seconds	wait_s
 turns	packages/turns/src/moxi_turns/codex_hooks.py	_Ping.__init__	name	wait_seconds	wait_s
 turns	packages/turns/src/moxi_turns/codex_hooks.py	command	name	wait_seconds	wait_s
-turns	packages/turns/src/moxi_turns/codex_hooks.py	compacted = getattr(self.harness, "compacted", None)	keep	compacted	compacted
+turns	packages/turns/src/moxi_turns/codex_hooks.py	compacted = getattr(self.harness, "compacted", None)	use	"compacted"	"on_compacted"
 turns	packages/turns/src/moxi_turns/codex_hooks.py	compacted()	keep	compacted	compacted
 turns	packages/turns/src/moxi_turns/codex_hooks.py	conn.send(reply)	keep	fail	fail
 turns	packages/turns/src/moxi_turns/codex_hooks.py	conn.send({"ok": True, "block": reason})	keep	fail	fail

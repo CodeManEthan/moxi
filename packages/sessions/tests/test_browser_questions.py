@@ -204,7 +204,7 @@ def seed(env: dict[str, str], now: float) -> str:
     s = db.session(title="a title the harness made", work_dir=f"{home}/scratch")
     s.user("Rename the flag.")
     a = s.assistant()
-    a.step(text=OPENCODE_REPLY, input=900, output=40)
+    a.step(text=OPENCODE_REPLY, input_tokens=900, output=40)
     a.complete()
     db.write()
 

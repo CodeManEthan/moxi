@@ -450,7 +450,7 @@ class HookServer:
                 context = JOIN.join([*([context] if context else []), "\n".join(notes)])
             if source == "compact":
                 # A compaction the host sent took effect: its shell stop may begin.
-                compacted = getattr(self.harness, "compacted", None)
+                compacted = getattr(self.harness, "on_compacted", None)
                 if compacted is not None:
                     compacted()
             reply = {"ok": True, "context": context}

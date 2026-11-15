@@ -553,7 +553,9 @@ class OpenCodeHarness(Harness):
             # the busy loop, so the open turn stays open.
             self._ready_event("compact", sid)
         if tool_call is not None:
-            threading.Thread(target=self._after_tool, args=tool_call, daemon=True,
+            tool, call_id, agent_id, is_error, rows = tool_call
+            threading.Thread(target=self._after_tool, args=(tool, call_id, agent_id),
+                             kwargs={"is_error": is_error, "rows": rows}, daemon=True,
                              name="turns-opencode-after-tool").start()
 
     def context_tokens(self) -> int | None:

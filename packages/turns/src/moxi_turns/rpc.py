@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import math
 import re
 import threading
@@ -364,7 +365,7 @@ def in_thread(fn: Callable[..., Any], *args: Any) -> asyncio.Future:
         except BaseException as exc:  # noqa: BLE001 - handed to the loop to raise there
             value, ok = exc, False
         with contextlib.suppress(RuntimeError):     # the loop has closed
-            loop.call_soon_threadsafe(settle, ok, value)
+            loop.call_soon_threadsafe(functools.partial(settle, ok=ok, value=value))
 
     threading.Thread(target=run, daemon=True, name="turns-endpoint-call").start()
     return future
