@@ -503,6 +503,28 @@ def test_the_config_verb_exits_1_when_the_units_fail(w, capsys):
         "demo")))["relay.enabled"] is True
 
 
+def test_the_config_verb_with_json_puts_the_units_lines_in_its_one_object(w, capsys):
+    import json
+
+    from moxi import cli
+
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'relay.enabled'}}")
+    w.sup.fail[("enable", "moxi-demo-relay.service")] = "Access denied."
+    capsys.readouterr()
+    assert cli.main(["config", "set", "demo", "relay.enabled", "true", "--json"]) == 1
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1
+    done = json.loads(out)
+    assert (done["changed"], done["problem"], done["fix"]) == (True, None, None)
+    assert any("Access denied." in line for line in done["units"])
+    assert any("retries the units" in line for line in done["units"])
+    w.sup.fail.clear()
+    assert cli.main(["config", "unset", "demo", "relay.enabled", "--json"]) == 0
+    done = json.loads(capsys.readouterr().out)
+    assert done["changed"] is True and done["units"]
+
+
 def test_a_socket_takes_its_port_from_the_setting_and_a_new_port_is_a_change(w):
     w.script("moxi-demo-shell")
     w.module(DAEMONS="{'shell': {'command': 'moxi-demo-shell', "
