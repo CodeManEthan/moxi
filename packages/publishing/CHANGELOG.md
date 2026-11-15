@@ -32,6 +32,10 @@ The first version.
 - `moxi publishing ci siblings`: the release test from a fresh venv, at the newest and
   the lowest published siblings, with the site-packages check.
 - `moxi publishing workflows write`: the public scan and release workflow files.
+- `moxi doctor publishing`: fails a hook command running another interpreter than the
+  recorded one, and a later commit-msg hook while `drop-trailer` names `Commit-Check`;
+  warns on an unset GitHub repo, a workflow file unlike its template, an empty private
+  names list and a push log that can't be written.
 - `moxi publishing bump`: the next version, the dated CHANGELOG heading, the README
   links and `uv lock`, left unstaged.
 - `moxi publishing ci notes`: a tag's CHANGELOG section.

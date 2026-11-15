@@ -145,6 +145,10 @@ per hit and exits 3 when there is one, 1 when the tree can't be read. `--ci` lea
 private names list and the private allowlist, which exist only on your machine, for a scan
 run on a server.
 
+The pieces and the scan read git objects. A file stored with Git LFS is a small pointer in
+git; its content goes to the LFS server through git-lfs's own pre-push hook, and nothing
+here reads it.
+
 ## Releases
 
 Each package of a repo goes to the package index on its own tag, `<distribution>-v<version>`
@@ -241,6 +245,12 @@ upload uses no stored token: it needs a trusted publisher on the index for each 
 (this repo, `release.yml`, environment `pypi`), and a `pypi` environment on GitHub whose
 required reviewer approves each upload.
 
+The gate in CI is a third check, not a wall: the run uses the workflow file and the code
+of the tagged commit, so a bad commit can change both. What holds against one is the
+`pypi` environment's required reviewer, who approves each upload on GitHub before
+anything reaches the index, and the trusted publisher's environment claim: the index
+hands a token only to a job of `release.yml` running in the `pypi` environment.
+
 The steps the workflow runs:
 
 - `moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]`: the gate, with
@@ -258,6 +268,19 @@ The steps the workflow runs:
   what raised it. An extra left out is reported, not failed; a required sibling with no
   published version it admits refuses, naming it. Before any test runs, the run fails if
   the package imports from anywhere but the venv's site-packages.
+
+## Doctor
+
+`moxi doctor publishing` reads each repo repo has indexed, and uses no network. It fails
+a repo marked public where a piece is missing or disabled; a piece registered where the
+repo isn't marked public; a hook command repo wrote for the pieces that runs another
+interpreter than the one `enable` recorded in `moxi-publishing.interpreter`; and a repo
+where a commit-msg hook of its own runs after the pieces while the message piece's
+`drop-trailer` names `Commit-Check`, or holds no value, which reads as the seed that
+names it: that hook would never see the line. It warns when `moxi-publishing.github` is
+unset and when a workflow file `workflows write` writes is there but differs from the
+template; and, once, when secrets' private names list is empty and when the push log
+can't be written.
 
 ## Provenance rules
 
