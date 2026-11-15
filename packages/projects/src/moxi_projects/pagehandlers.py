@@ -169,17 +169,40 @@ def _under(path: str, root: str) -> bool:
     return os.path.normcase(path).startswith(base.rstrip(os.sep) + os.sep)
 
 
+def _identity(path: str) -> tuple[int, int] | None:
+    """The file `path` names, as its device and inode, or None when it can't be read."""
+    try:
+        found = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return found.st_dev, found.st_ino
+
+
 def _how(path: str, root: str) -> str:
     """How `path` stands to the project `for_path` found it in, whose root is `root`:
-    `root`, `inside`, else `worktree`. Each is compared as written and as resolved, since
-    `for_path` matches a symlinked spelling too."""
+    `root`, `inside`, else `worktree`. Compared as written and as resolved, since
+    `for_path` matches a symlinked spelling too; then by file identity, the path and each
+    of its parents against the root, so a spelling in another case on a disk that ignores
+    case (macOS's, Windows') is the root or inside it too."""
     root = os.path.normpath(root)
     spellings = [(path, root), (os.path.realpath(path), os.path.realpath(root))]
     if any(_same(a, b) for a, b in spellings):
         return "root"
     if any(_under(a, b) for a, b in spellings):
         return "inside"
-    return "worktree"
+    wanted = _identity(root)
+    if wanted is None:
+        return "worktree"
+    if _identity(path) == wanted:
+        return "root"
+    here = os.path.dirname(path)
+    while True:
+        if _identity(here) == wanted:
+            return "inside"
+        parent = os.path.dirname(here)
+        if parent == here:
+            return "worktree"
+        here = parent
 
 
 _AT_PATH_NONE = dict.fromkeys(("path", "exists", "has_git", "project", "how", "key",

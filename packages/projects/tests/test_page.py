@@ -453,6 +453,39 @@ def test_a_symlinked_spelling_of_a_root_is_that_root(tmp_path, own_pool):
     assert at_path(link)["how"] == "root"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlink_to_a_folder_inside_a_root_is_inside(tmp_path, own_pool):
+    root = tmp_path / "real"
+    (root / "src").mkdir(parents=True)
+    link = tmp_path / "into"
+    link.symlink_to(root / "src")
+    _register(("real", root))
+    assert pagehandlers._how(str(link), str(root)) == "inside"
+    assert pagehandlers._how(str(link / "deeper"), str(root)) == "inside"
+
+
+def test_root_and_inside_go_by_file_identity_on_a_disk_that_ignores_case(tmp_path, monkeypatch):
+    root = tmp_path / "code" / "atlas-api"
+    (root / "src").mkdir(parents=True)
+    (tmp_path / "code" / "other").mkdir()
+    real = os.stat
+    base = str(tmp_path)
+
+    def folded(path, *args, **kwargs):
+        # A disk that ignores case, as macOS's does: every spelling names one file.
+        text = os.fspath(path)
+        if isinstance(text, str) and text.startswith(base):
+            text = base + text[len(base):].lower()
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", folded)
+    typed = os.path.join(base, "Code", "Atlas-API")
+    assert pagehandlers._how(typed, str(root)) == "root"
+    assert pagehandlers._how(os.path.join(typed, "SRC"), str(root)) == "inside"
+    assert pagehandlers._how(os.path.join(typed, "src", "not-yet"), str(root)) == "inside"
+    assert pagehandlers._how(os.path.join(base, "Code", "Other"), str(root)) == "worktree"
+
+
 def test_a_linked_worktree_outside_any_root_is_a_worktree(tmp_path, own_pool):
     main = tmp_path / "repos" / "main"
     (main / ".git" / "worktrees" / "wt").mkdir(parents=True)
