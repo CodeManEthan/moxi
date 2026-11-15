@@ -361,7 +361,9 @@ Say = { runs: boolean; state: string; where?: string }
   component gives some project an `at`; with none (a component that says `activity` but
   gives no project an `at` counts as none) the list stays by key and nothing rises. A ranked
   section moves to the top of the opened project. Without a rank, in `order`.
-- **`heavy`** is weight only. **`warn`** is a warning: the text colour at normal weight,
+- **`heavy`** is weight only. On a row whose folder doesn't exist, the page's own heavy
+  words and their fix lead line two, and the heavy parts follow the fix in the text
+  colour at normal weight. **`warn`** is a warning: the text colour at normal weight,
   after the ranked parts and before the rest; it doesn't lift the row.
 - **Counted parts and claims.** A part with `count` is drawn as a number and words: the
   page counts its `claims` that no part or line of a lower `order` on the same project

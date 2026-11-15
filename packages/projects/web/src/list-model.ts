@@ -119,7 +119,8 @@ const joined = (texts: string[]): string | null => (texts.length === 0 ? null : 
  * source of all activity has reported and none gave one; then `Open` or `Close`. Line
  * two, only when it has a part: the missing folder first, then the heavy parts (ranked,
  * lower rank first, then the rest in order), the ranked parts that aren't heavy, the
- * warnings, and the others in order.
+ * warnings, and the others in order. The missing folder's fix follows its words, so with
+ * a missing folder the other heavy parts come after the fix, in the text's colour.
  */
 export function projectRow(project: Listed, facts: ListFacts): ProjectRow {
   const { reports, home, open, now, clock = LOCAL } = facts;
@@ -147,9 +148,9 @@ export function projectRow(project: Listed, facts: ListFacts): ProjectRow {
     where: kind === null ? root : `${root}${JOIN}${kind}`,
     fact,
     act: open === project.key ? "Close" : "Open",
-    lead: joined([...(missing ? [MISSING] : []), ...lead.map((part) => part.text)]),
+    lead: missing ? MISSING : joined(lead.map((part) => part.text)),
     leadMore: missing ? MISSING_FIX : null,
-    rest: joined(rest.map((part) => part.text)),
+    rest: joined([...(missing ? lead : []), ...rest].map((part) => part.text)),
     tail: joined(tail.map((part) => part.text)),
     changeFolder: missing,
     missing,

@@ -84,6 +84,19 @@ test("a missing folder leads line two, heavy, with its fix and Change folder", (
   assert.equal(got.tail, null);
 });
 
+test("with a missing folder and heavy news, the fix follows the folder's words", () => {
+  const services = report(50, { "quill-mobile": { parts: [
+    { text: "queue-worker failed at 18:31", heavy: true, rank: 30 },
+    { text: "docs-preview is stopped", warn: true },
+  ] } });
+  const got = row(QUILL, [services]);
+  assert.deepEqual([got.lead, got.leadMore, got.rest],
+                   [MISSING, MISSING_FIX, "queue-worker failed at 18:31 · docs-preview is stopped"]);
+  assert.equal(got.rank, 30);
+  const attributes = rowAttributes(got);
+  assert.deepEqual([attributes["lead-heavy"], attributes["rest-strong"]], ["", ""]);
+});
+
 test("a root the page server can't stat now says nothing", () => {
   const got = row(listed("atlas-api", { exists: null }));
   assert.equal(got.lead, null);
@@ -113,7 +126,8 @@ test("line two: heavy ranked parts lead, then ranked light ones and warnings, th
 test("the missing folder comes before every report's heavy part", () => {
   const services = report(50, { "quill-mobile": { parts: [{ text: "queue-worker failed", heavy: true, rank: 10 }] } });
   const got = row(QUILL, [services]);
-  assert.equal(got.lead, "Its folder doesn't exist · queue-worker failed");
+  assert.equal(got.lead, "Its folder doesn't exist");
+  assert.equal(got.rest, "queue-worker failed", "after the folder's fix");
   assert.equal(got.rank, 10);
 });
 
