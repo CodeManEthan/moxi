@@ -337,6 +337,26 @@ def test_a_foreign_commits_leftover_key_passes_but_its_text_is_still_read(repo, 
     refused(push(repo, "origin", "main"), "private-names/private-name")
 
 
+def test_ownership_is_read_from_the_committer_not_the_author(repo, names, remote):
+    public_repo(repo, PIECE, sets=("main=main",))
+    git(repo, "config", "moxi-repo.piece.publishing/message.drop-trailer", "Co-authored-by")
+    alice = {"GIT_COMMITTER_NAME": "alice", "GIT_COMMITTER_EMAIL": "alice@example.test",
+             "GIT_AUTHOR_NAME": "alice", "GIT_AUTHOR_EMAIL": "alice@example.test"}
+    git(repo, "switch", "-q", "-c", "topic")
+    commit(repo, "Add\n\nBody.\n\nCo-authored-by: carol <carol@example.test>\n", env=alice)
+    git(repo, "switch", "-q", "main")
+    # A cherry-pick keeps alice as the author and makes the repo's identity the committer.
+    git(repo, "cherry-pick", "topic")
+    assert git(repo, "log", "-1", "--format=%ae %ce").stdout.split() == [
+        "alice@example.test", "operator@example.test"]
+    refused(push(repo, "origin", "main"), "Co-authored-by is still there")
+    # The other way round: the repo's identity authored it, alice committed it.
+    git(repo, "reset", "-q", "--hard", "HEAD~1")
+    commit(repo, "Add\n\nBody.\n\nCo-authored-by: carol <carol@example.test>\n",
+           env={"GIT_COMMITTER_NAME": "alice", "GIT_COMMITTER_EMAIL": "alice@example.test"})
+    passed(push(repo, "origin", "main"))
+
+
 @pytest.mark.parametrize("env, header", [
     ({"GIT_AUTHOR_NAME": "bobsecret"}, "author header"),
     ({"GIT_COMMITTER_EMAIL": "bob@private.example.test"}, "committer header"),
