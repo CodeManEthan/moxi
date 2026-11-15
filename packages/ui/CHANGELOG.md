@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The shell reads the modules list once more when its first read at load gets no
+  answer. On a phone in Firefox, the gateway's worker being replaced dropped that read,
+  and the page said `No module named ui` until the push stream sent the list.
+- `ui_contexts(color_scheme=...)` also sets the scheme on its signed-in page with
+  `page.emulate_media`, so the page shows it in Firefox too. Firefox kept a context's
+  scheme from every shell document, each sent with `Cross-Origin-Opener-Policy:
+  same-origin`, and a test in dark mode saw light colours.
 - `moxi_ui.testing` makes the `--ui-traces` directory when the run starts, a relative one
   taken from where pytest started, so a failed browser test keeps its trace there even
   when the directory is outside every test's tmp (a directory in the repository). The

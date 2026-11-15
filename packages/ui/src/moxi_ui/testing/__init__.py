@@ -229,7 +229,14 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
                 tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[..., Any]]:
     """`ui_contexts(shell=None, *, sign_in=True, **context_args)`: a fresh browser context
     on `shell` (`ui_shell` by default), signed in unless `sign_in` is false. Closed when
-    the test ends, its trace kept when the test failed."""
+    the test ends, its trace kept when the test failed.
+
+    When `context_args` names `color_scheme`, the signed-in page also takes it through
+    `page.emulate_media`, which holds across its later navigations: in Firefox a
+    context's scheme never reaches a document the shell serves, as each is sent with
+    `Cross-Origin-Opener-Policy: same-origin`. A page a test opens itself takes
+    `page.emulate_media(color_scheme=...)` after its first navigation, as
+    `test_browser_settings.py` does."""
     opened: list[Any] = []
 
     def open_context(shell: Any = None, *, sign_in: bool = True, **context_args: Any) -> Any:
@@ -241,7 +248,10 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
         context.tracing.start(screenshots=True, snapshots=True)
         opened.append(context)
         if sign_in:
-            _open_settled(context.new_page(), "/m/ui/")
+            page = context.new_page()
+            _open_settled(page, "/m/ui/")
+            if "color_scheme" in context_args:
+                page.emulate_media(color_scheme=context_args["color_scheme"])
         return context
 
     try:
