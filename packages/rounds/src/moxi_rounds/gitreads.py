@@ -149,7 +149,7 @@ class Git:
 
     def committed_at(self, commit: str) -> int:
         """When `commit` was committed: its committer date, in seconds since the epoch."""
-        # The raw commit object, not `show`: a user's config can make `show` print a
+        # The raw commit object, not git show: a user's config can make git show print a
         # signature check before the date, and nothing decorates `cat-file`.
         argv = ["git", "-C", str(self.root), "cat-file", "commit", commit]
         out = self._run("cat-file", "commit", commit)[1]

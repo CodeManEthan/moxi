@@ -10028,6 +10028,7 @@ rounds	packages/rounds/tests/test_stages.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_stages.py	actor="scout")	use	actor=	by=
 rounds	packages/rounds/tests/test_stages.py	append	name	folder	round_dir
 rounds	packages/rounds/tests/test_stages.py	applied	name	folder	round_dir
+rounds	packages/rounds/tests/test_stages.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_stages.py	assert main(["show", ROUND]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_stages.py	build	name	folder	round_dir
 rounds	packages/rounds/tests/test_stages.py	declare	name	folder	round_dir
