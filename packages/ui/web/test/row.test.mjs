@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DOT, FLAG_ATTRIBUTES, ROW_ATTRIBUTES, TEXT_ATTRIBUTES, TOGGLE_EVENT, YOU, isToggleKey, rowPlan,
+  ACT_SLOTS, DOT, FLAG_ATTRIBUTES, ROW_ATTRIBUTES, TEXT_ATTRIBUTES, TOGGLE_EVENT, YOU, drawnLines, isToggleKey,
+  rowPlan,
 } from "../src/row-model.ts";
 
 /** The plan for a row with `attrs`; a flag is given as `""`, as the DOM holds it. */
@@ -194,4 +195,41 @@ test("Enter or Space alone toggles a row; no other key does", () => {
       assert.equal(isToggleKey({ key, [held]: true }), false, `${key} ${held}`);
     }
   }
+});
+
+test("the acts have two slots: acts-one on line one, acts on line two", () => {
+  assert.deepEqual([...ACT_SLOTS], ["acts-one", "acts"]);
+});
+
+test("a row with only an act in acts-one is one line", () => {
+  assert.deepEqual(drawnLines(plan({}), ["acts-one"]), { drawsOne: true, drawsTwo: false });
+  // Beside line one's pieces it adds no second line either.
+  const quiet = plan({ name: "alpha", where: "~/code/alpha", fact: "last active 19:09", toggles: "" });
+  assert.deepEqual(drawnLines(quiet, ["acts-one"]), { drawsOne: true, drawsTwo: false });
+  assert.deepEqual(drawnLines(quiet, new Set(["acts-one"])), { drawsOne: true, drawsTwo: false });
+});
+
+test("an act in acts draws line two, as before; an act in acts-one does not", () => {
+  assert.deepEqual(drawnLines(plan({ name: "alpha" }), ["acts"]), { drawsOne: true, drawsTwo: true });
+  assert.deepEqual(drawnLines(plan({}), ["acts"]), { drawsOne: false, drawsTwo: true });
+  assert.deepEqual(drawnLines(plan({}), ["acts-one", "acts"]), { drawsOne: true, drawsTwo: true });
+  assert.deepEqual(drawnLines(plan({ rest: "Done." }), ["acts-one"]), { drawsOne: true, drawsTwo: true });
+});
+
+test("with no act, a line is drawn only for its pieces", () => {
+  assert.deepEqual(drawnLines(plan({}), []), { drawsOne: false, drawsTwo: false });
+  assert.deepEqual(drawnLines(plan({ name: "alpha" }), []), { drawsOne: true, drawsTwo: false });
+  assert.deepEqual(drawnLines(plan({ rest: "Done." }), []), { drawsOne: false, drawsTwo: true });
+  // A blank attribute is no piece.
+  assert.deepEqual(drawnLines(plan({ name: "  ", rest: "" }), []), { drawsOne: false, drawsTwo: false });
+});
+
+test("an act in acts-one is not a piece: the plan and its tab stop are unchanged by it", () => {
+  // The plan reads attributes only; line one's button is its pieces, so a row that toggles
+  // with only an act on line one keeps its lines as the stop.
+  const bare = plan({ toggles: "" });
+  assert.deepEqual(bare.one, []);
+  assert.equal(bare.stop, "lines");
+  assert.equal(drawnLines(bare, ["acts-one"]).drawsOne, true);
+  assert.equal(plan({ name: "alpha", toggles: "" }).stop, "one");
 });

@@ -1,94 +1,272 @@
 // <moxi-projects-page route="...">: projects' panel.
 //
-// - The store file and the git the page server acts with, as `/api/where` gives them. The
-//   server takes the browser shell's environment, not the terminal's, so these can differ
-//   from what `moxi projects` uses in a terminal. Before every change the server compares
-//   the folders the change reads or writes (the store, the home folder, a contribution's
-//   folders) with where the user's last run in a terminal placed them, and refuses while
-//   any differs or nothing is recorded; the same line shows here as a note.
-// - The list, by key, with a kind filter (read through `/api/projects?kind=`) and, beside
-//   it, every contribution or kind that can't be used until it is fixed: a module that
-//   won't load blocks a remove and an add or set of a kind no loaded module declares, and
-//   any other add goes ahead without it, with a warning; a blocked kind can't be added or set. Each project opens to its fields, an edit form (root, kind, and the notes root
-//   while notes is installed), its lead and associated agents (set or clear the lead, add
-//   or remove an agent), and Remove. A save sends only what the user changed from the
-//   project as the form was opened. When a read again finds the open project changed, a
-//   form not typed in starts again from it, and one typed in keeps the user's values and
-//   says the project has changed.
-// - Remove is a confirmed act: the page's button opens the shell's confirm sheet, which
-//   names the key and root and mints a new key at each confirmation. The page then reads
-//   the status link once: removed, or refused with each sentence and the fix.
-// - The add form is projects' own component, placed as any host places it. After an add
-//   that was made or may have been it sends `CHANGED`, and the page reads its list again;
-//   after a lost answer to a create, the form says the directory may exist.
+// - The address: the route opens the list (`""`), a project (`open/<key>`, scrolled to),
+//   a project for its edit (`edit/<key>`) or its remove (`remove/<key>`), or the add
+//   (`add`); a key is matched ignoring case (`address.ts`). One thing is open at a time,
+//   and the page rewrites the browser's address with `history.replaceState` whenever what
+//   is open changes, so Back leaves the page. A route is opened once the list is read; a
+//   key that is no project opens the list, with one dim line at its foot.
+// - The list: each project a `<moxi-ui-row>` (`list-model.ts` gives every word), under a
+//   dim count with `Add a project`. Line one is the key, its folder in `~` form and its
+//   kind's word, at the right when it was last active, then `Open` (`Close` while open) in
+//   the row's `acts-one` slot. Line two shows only when there is something to say: a
+//   folder that doesn't exist, with `Change folder`, then the facts modules report. The
+//   rows are by key until every facts component has reported once, or for 3 s; then, with
+//   an activity source, bad news first and the rest by latest activity. Past twelve
+//   projects, a find field, a kind filter and the `Earlier` fold.
+// - Folders that are not projects: under the list, `Not a project` (`Worked in this week`
+//   when there is no project), each folder an activity source said was worked in, one
+//   line, newest first, with `Add` at the right, which opens the Add panel with the folder
+//   and the name filled. Five, then how many more, with `Show`.
+// - The list's states: nothing for 400 ms, then `Reading…`; while projects' page server
+//   isn't answering, a first row saying so over the last list, dim and with no acts; a
+//   store that refuses, its reason and fix and nothing else; no project, the empty
+//   sentence.
+// - The facts: every present module that declares a `project-facts` component has it
+//   placed, once, into one hidden host, with the `projects` attribute (every project the
+//   page holds) and `open` (the opened one's key). Each report replaces that module's
+//   last; reports heard within one frame are drawn together. A module that goes takes
+//   its component and its report with it. The contract is projects' README, "Facts on the
+//   Projects page".
+// - The panel (`panel.ts`): `Add a project`, and the `add` address, open the Add panel at
+//   the window's right edge, and the column moves aside where the window has the room.
+//   An opened project's `Edit`, its `Change folder` and the `edit/<key>` address open the
+//   Edit panel over it, its folder field focused; closing it leaves the project open.
+// - The remove step: an opened project's `Remove`, and the `remove/<key>` address, read
+//   `/api/remove-check` and draw under the foot either what goes and what stays, with
+//   `Remove from Moxi`, or each thing that refuses it now, with the button off. The step
+//   is the confirmation: the press sends `/api/remove` with a `job` minted for it, and is
+//   answered at once. A removed project's row becomes one line with `Add it back`, which
+//   adds it again as the page held it. Refused since the check, the step is drawn again
+//   from a fresh check; refused before the remove was tried, its text shows under the
+//   button. With no answer, the outcome kept under the `job` is read once, else the page
+//   says it may have been removed. While `/api/where` says a change would be refused, its
+//   note shows dim above the button.
 //
 // Every act sends what the same `moxi projects` verb takes, and every control that acts is
 // off while one is on its way. After an act that was done or may have been, the page
 // sends `CHANGED` on the document, so it and every projects component read again. The
-// page reads its routes when it opens, when its tab is shown again, and on "Read again".
+// page reads the list and the kinds when it opens, when its tab is shown again and on
+// `CHANGED`.
 
-import { css, html, LitElement, nothing } from "lit";
+import { css, html, LitElement, noChange, nothing, unsafeCSS } from "lit";
+import { Directive, directive, PartType } from "lit/directive.js";
+import type { ElementPart, PartInfo } from "lit/directive.js";
 import { live } from "lit/directives/live.js";
+import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, confirm, installed, place } from "/m/ui/client.js";
+import { api, components, installed, navigate, place, subscribe } from "/m/ui/client.js";
 
-import { CHANGED, Feed, parseKinds, parseOne, parseProjects, parseRemoveStatus, parseWhere, parseWritten } from "./feed.ts";
-import type { Kinds, Project, Projects, RemoveStatus, Where } from "./feed.ts";
-import { BASE } from "./styles.ts";
+import { keyIn, listState, noSuchProject, NOTHING_OPEN, parseRoute, pathToWrite, READING_AFTER_MS } from "./address.ts";
+import type { Address, ListState } from "./address.ts";
+import { FACTS_COMPONENT, FACTS_EVENT } from "./facts.ts";
+import type { Given } from "./facts.ts";
+import { CHANGED, Feed, parseAdded, parseKinds, parseListing, parseRemoveCheck, parseRemoveStatus, parseWhere } from "./feed.ts";
+import type { Kinds, Listed, Listing, Refusal } from "./feed.ts";
+import { factsModules, FirstOrder, givenOf, HeldReports, presentModules } from "./frame.ts";
+import { HOLD_MS, JOIN, listView, rowAttributes } from "./list-model.ts";
+import type { ListView, ProjectRow } from "./list-model.ts";
 import {
-  actedOf, actSaid, agentBody, brokenLines, clearLeadBody, editBody, editing, filterChoices, kindChoices,
-  leadBody, listView, MAY_HAVE_ACTED, NO_GIT, pickerPath, projectFields, removedSaid, removeSheet, removeStatusPath,
-  reread, STALE_LINE, WHERE_LINE, whereView,
-} from "./views.ts";
-import type { EditForm, Editing, Said } from "./views.ts";
+  addBackBody, emptySentence, folderAsk, folderGroup, GOES, MAY_BE_REMOVED, mintJob, NO_PROJECTS, NOTHING_CHANGED,
+  openedRows, pressedOf, refusedRows, refusedTitle, removedIndex, removedLine, removeStep,
+} from "./opened-model.ts";
+import type { FolderGroup, FolderRow, Pressed } from "./opened-model.ts";
+import type { OpenedRow } from "./opened-model.ts";
+import { PANEL_WIDTH_PX } from "./panel.ts";
+import type { PanelAsk } from "./panel.ts";
+import { BASE } from "./styles.ts";
+import { MAY_BE_ADDED } from "./panel-model.ts";
+import { actedOf } from "./views.ts";
+import { kindName } from "./words.ts";
 
 const TAG = "moxi-projects-page";
 
+/** The list's words the page draws itself. */
+const ADD_A_PROJECT = "Add a project";
+const CHANGE_FOLDER = "Change folder";
+const EDIT = "Edit";
+const REMOVE = "Remove";
+const EARLIER = "Earlier";
+const FIND_LABEL = "Find a project by its name or folder";
+const KIND = "Kind";
+const ALL = "all";
+const CLEAR = "Clear";
+const SHOW = "Show";
+const HIDE = "Hide";
+const GOES_LABEL = "Goes";
+const STAYS_LABEL = "Stays";
+const REMOVE_FROM_MOXI = "Remove from Moxi";
+const CANCEL = "Cancel";
+const CLOSE = "Close";
+const ADD_IT_BACK = "Add it back";
+const ADD = "Add";
+
+/** Sets each attribute of a map on the element it is bound to, and removes each one whose
+ * value is null. */
+class Attributes extends Directive {
+  constructor(part: PartInfo) {
+    super(part);
+    if (part.type !== PartType.ELEMENT) throw new Error("attributes() binds to an element");
+  }
+
+  render(_values: Record<string, string | null>): unknown {
+    return noChange;
+  }
+
+  update(part: ElementPart, [values]: [Record<string, string | null>]): unknown {
+    for (const [name, value] of Object.entries(values)) {
+      if (value === null) part.element.removeAttribute(name);
+      else if (part.element.getAttribute(name) !== value) part.element.setAttribute(name, value);
+    }
+    return noChange;
+  }
+}
+const attributes = directive(Attributes);
+
+/** The window's width from which the panel moves the column; under it the panel lies over
+ * the page. */
+const SIDE_FROM_PX = 1100;
+/** Half of the column's width. */
+const HALF_COLUMN_PX = 340;
+
+// The list is the Sessions page's rows under a dim count at the left, at its width; no
+// accent and no warning colour on it.
 const STYLES = [BASE, css`
-  h1 { margin: 0 0 var(--moxi-gap); font-size: 1.4em; }
-  h2 { margin: 0; font-size: 1.1em; }
-  h3 { margin: 0; font-size: 1em; }
-  .lede { margin-bottom: var(--moxi-gap); padding-left: 8px; border-left: 3px solid var(--moxi-accent);
-          color: var(--moxi-text-dim); }
-  section { display: grid; gap: var(--moxi-gap); min-width: 0; margin-top: calc(var(--moxi-gap) * 2); padding: 12px;
-            border: 1px solid var(--moxi-border); border-radius: var(--moxi-radius-lg); background: var(--moxi-bg-raised); }
-  section[data-part="add"] { padding: 0; border: 0; background: none; }
-  section[data-part="add"] > div { min-width: 0; }
+  :host { max-width: 680px; margin: 0 auto; padding: 4px 0 16px; font-size: 14px; line-height: 20px; }
+  /* Beside the panel, where the window has the room, the column stands at the centre of
+     what the panel leaves. */
+  @media (min-width: ${unsafeCSS(SIDE_FROM_PX)}px) {
+    :host([data-side]) { margin-left: calc(50% - ${unsafeCSS(HALF_COLUMN_PX + PANEL_WIDTH_PX / 2)}px); }
+  }
   .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); min-width: 0; }
-  .bar label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
-  .note { margin: 0; padding-left: 8px; border-left: 3px solid var(--moxi-warn); overflow-wrap: anywhere; }
-  .broken { padding-left: 8px; border-left: 3px solid var(--moxi-error); font-size: var(--moxi-font-size-sm); }
-  ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
-  .project { display: grid; gap: 6px; min-width: 0; padding: 4px 0 4px 8px; border-left: 3px solid var(--moxi-border); }
-  .project[data-open="true"] { border-left-color: var(--moxi-selected); }
-  .first { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); min-width: 0; }
-  .first .key { font-weight: 600; overflow-wrap: anywhere; text-align: left; }
-  .first code { flex: 1 1 12em; min-width: 0; color: var(--moxi-text-dim); }
-  .tag { padding: 0 6px; border-radius: var(--moxi-radius); background: var(--moxi-bg-sunken);
-         font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
-  .detail { display: grid; gap: var(--moxi-gap); min-width: 0; }
-  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px var(--moxi-gap); margin: 0; }
-  dt { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-  form { display: grid; gap: 6px; min-width: 0; }
-  form.line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); }
-  form.line input[type=text] { flex: 1 1 10em; }
-  form label { display: grid; gap: 2px; min-width: 0; }
-  form label > span { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  form:not(.line) input[type=text], form:not(.line) select { width: 100%; }
+
+  p.state, p.foot { margin: 16px 0 0; padding: 0 2px; overflow-wrap: anywhere; }
+  p.state.dim, p.foot { color: var(--moxi-text-dim); }
+  /* The last list kept while projects' page server isn't answering: every word dim, the
+     rows' own included, since each row draws its words in the text token. */
+  .grps.kept { --moxi-text: var(--moxi-text-dim); color: var(--moxi-text-dim); }
+  .find { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; margin-top: 16px;
+          border: 1px solid var(--moxi-border); border-radius: 10px; padding: 10px 14px; font-size: 15px; line-height: 22px;
+          color: var(--moxi-text-dim); }
+  .find input { flex: 1 1 auto; min-width: 0; font: inherit; color: var(--moxi-text); background: none; border: 0;
+                padding: 0; margin: 0; outline: none; }
+  .find input::placeholder { color: var(--moxi-text-dim); opacity: 1; }
+  .find:focus-within { border-color: var(--moxi-border-strong); }
+  .filt { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 14px; margin-top: 12px;
+          padding: 0 2px; color: var(--moxi-text-dim); white-space: nowrap; }
+  .filt .k { margin-right: 8px; }
+  /* The kind menu in the page's words, with the house arrow in place of the browser's. */
+  .filt .sel { position: relative; display: inline-block; }
+  .filt select { appearance: none; padding: 0 16px 0 0; border: 0; background: none; color: var(--moxi-text-dim);
+                 font: inherit; cursor: pointer; }
+  .filt .sel .v { position: absolute; right: 0; top: 0; color: var(--moxi-text-dim); pointer-events: none; }
+  .filt select.set { color: var(--moxi-text); }
+  .filt .n { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .grps { margin-top: 16px; border-top: 1px solid var(--moxi-border); }
+  .grp { display: grid; grid-template-columns: 96px minmax(0, 1fr); border-bottom: 1px solid var(--moxi-border);
+         padding: 5px 2px; }
+  .grp .gk { color: var(--moxi-text-dim); padding-top: 7px; }
+  .grp .gk small { display: block; font-size: 13px; line-height: 18px; margin-top: 3px; }
+  .grp .gl { grid-column: 2; min-width: 0; }
+  .grp button, moxi-ui-row > button { padding: 0; margin: 0; border: 0; background: none; font: inherit; text-align: left;
+                                      cursor: pointer; }
+  .grp button:hover:not(:disabled), moxi-ui-row > button:hover:not(:disabled) { background: none; }
+  .grp .gk small button { color: var(--moxi-text); }
+  moxi-ui-row > button.do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  moxi-ui-row > button.fix { font-size: 13px; line-height: 18px; color: var(--moxi-text); }
+  moxi-ui-row[open] + moxi-ui-row { border-top: 1px solid var(--moxi-border); padding-top: 3px; }
+  .one { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 7px 0;
+         color: var(--moxi-text-dim); }
+  .one button { flex: none; color: var(--moxi-text-dim); }
+  .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; padding-top: 24px; }
+  .first p { max-width: 520px; margin: 0 auto; }
+  .first .x { margin-top: 12px; padding: 0; border: 0; background: none; color: var(--moxi-text); }
+  p.said { margin: 16px 0 0; padding: 0 2px; overflow-wrap: anywhere; }
+  /* A removed project's one line, in its place: dim, with its act in the text colour. */
+  .gone { padding: 9px 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .gone button { margin-left: 14px; color: var(--moxi-text); }
+  .gone p { margin: 2px 0 0; }
+
+  .detail { min-width: 0; margin: 9px 0 3px; padding-top: 8px; border-top: 1px solid var(--moxi-border);
+            font-size: 13px; line-height: 18px; cursor: auto; }
+  /* The opened project: one labelled row each, the label dim at the left, the link dim at
+     the right. A line's first phrase is in the text's colour and the rest dim; heavy words
+     in the text's own colour, only heavier. */
+  .opened { min-width: 0; }
+  .orow { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; padding: 3px 0; align-items: baseline;
+          min-width: 0; }
+  .orow .ok { color: var(--moxi-text-dim); }
+  .orow .ol { min-width: 0; overflow-wrap: anywhere; }
+  .orow .ol p { margin: 0; }
+  .orow .ol .d { color: var(--moxi-text-dim); }
+  .orow .ol strong { font-weight: 600; color: var(--moxi-text); }
+  .orow .oa { padding-left: 18px; color: var(--moxi-text-dim); text-decoration: none; white-space: nowrap; }
+  .orow .oa:hover { text-decoration: underline; }
+  .orow button.oa { padding: 0 0 0 18px; margin: 0; border: 0; background: none; font: inherit; cursor: pointer;
+                    color: var(--moxi-text); }
+  /* Under the rows' words: Edit in the text's colour and Remove dim; while the remove step
+     is open, Remove in the text's colour and Edit dim. */
+  .foot { display: flex; gap: 18px; padding: 9px 0 0 76px; }
+  .foot button { padding: 0; margin: 0; border: 0; background: none; font: inherit; cursor: pointer;
+                 color: var(--moxi-text-dim); }
+  .foot button.on { color: var(--moxi-text); }
+  /* The remove step, under the foot and in line with the rows' words: its question
+     heavier, its rows labelled as the opened project's are, then its buttons. */
+  .step { display: grid; gap: 6px; margin: 10px 0 2px 76px; padding-top: 10px; border-top: 1px solid var(--moxi-border);
+          min-width: 0; }
+  .step .orow { padding: 0; }
+  .step .q { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
+  .step p.dim { margin: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .step .then { padding-left: 76px; }
+  .step .btns.then { padding-left: 0; }
+  .step .btns { display: flex; align-items: center; gap: 18px; padding: 4px 0 2px; }
+  .step button.btn { padding: 5px 13px; border: 1px solid var(--moxi-border-strong); border-radius: 7px; background: none;
+                     color: var(--moxi-text); font: inherit; font-size: 14px; line-height: 20px; cursor: pointer; }
+  .step button.btn:hover:not(:disabled) { background: var(--moxi-bg-hover); }
+  .step button.btn:disabled { color: var(--moxi-text-dim); border-color: var(--moxi-border); cursor: default; }
+  .step button.lnk { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); font: inherit; font-size: 14px;
+                     line-height: 20px; cursor: pointer; }
+  @media (max-width: 720px) {
+    .orow { grid-template-columns: minmax(0, 1fr) auto; }
+    .orow .ok { grid-column: 1 / -1; }
+    .foot { padding-left: 0; }
+    .step { margin-left: 0; }
+    .step .orow { grid-template-columns: minmax(0, 1fr) auto; }
+    .step .then { padding-left: 0; }
+  }
   .part { display: grid; gap: 6px; min-width: 0; padding-top: var(--moxi-gap); border-top: 1px solid var(--moxi-border); }
-  .agent { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); min-width: 0; }
-  .agent > span { overflow-wrap: anywhere; }
-  .said { display: grid; gap: 2px; padding-left: 8px; border-left: 3px solid var(--moxi-border-strong); }
-  .said.ok { border-left-color: var(--moxi-ok); }
-  .said.error { border-left-color: var(--moxi-error); color: var(--moxi-error); }
-  .said.warn { border-left-color: var(--moxi-warn); }
+
+  @media (max-width: 720px) {
+    :host { padding-top: 10px; }
+    .grp { display: block; padding: 4px 0 6px; }
+    /* The count above the rows, with Add a project beside it at the right. */
+    .grp .gk { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding-top: 9px;
+               font-size: 13px; }
+    .grp .gk small { margin-top: 0; }
+  }
 `];
 
-/** What the page last said, and the project it is about (null for the page itself). */
-interface Told {
-  key: string | null;
-  said: Said;
+/** The open project's remove step. */
+interface Step {
+  key: string;
+  /** `/api/remove-check`'s refusals; null until it is read. */
+  refusals: Refusal[] | null;
+  /** The check couldn't be read: what its answer said. */
+  failed: string | null;
+  /** `/api/where`'s note: what a change would be refused with now. */
+  note: string | null;
+  sending: boolean;
+  /** Under the button: a refusal's text, or that it may have been removed. */
+  said: string | null;
+}
+
+/** A project removed from the page, drawn as one line in its place until it is back. */
+interface Removed {
+  project: Listed;
+  /** The key drawn before it when it went. */
+  after: string | null;
+  sending: boolean;
+  said: string | null;
 }
 
 export class ProjectsPage extends LitElement {
@@ -100,45 +278,116 @@ export class ProjectsPage extends LitElement {
 
   route = "";
 
-  #list: Feed<Projects> | null = null;
+  #list: Feed<Listing> | null = null;
   #kinds: Feed<Kinds> | null = null;
-  #where: Feed<Where> | null = null;
-  /** The kind filter, "" for every kind. */
-  #kind = "";
   /** The key of the project that is open, as stored. */
   #open: string | null = null;
-  #edit: Editing | null = null;
-  #lead = "";
-  #agent = "";
-  /** An act is being sent, or the confirm sheet is open. */
-  #sending = false;
-  #told: Told | null = null;
-  #placed = false;
-  #missing = false;
+  /** What the open project was opened for: its address's piece. */
+  #openFor: "open" | "edit" | "remove" = "open";
+  /** `Add a project` was pressed, or the address said `add`: the add is what is open, in
+   * the panel, which opens with this. */
+  #adding: PanelAsk | null = null;
+  /** The route given, opened once the list is read; null once it is. */
+  #pending: Address | null = null;
+  /** The key of an address that named no project, said at the list's foot. */
+  #unknown: string | null = null;
+  /** The opened row takes the view once drawn. */
+  #scrollTo: "open" | null = null;
+  /** When the page was connected, for the first read's `Reading…`. */
+  #since = Date.now();
+  #readingTimer: ReturnType<typeof setTimeout> | null = null;
+  #step: Step | null = null;
+  /** Counts the steps opened, so an answer for one left behind is dropped. */
+  #steps = 0;
+  #removed: Removed | null = null;
+  /** A line at the list's top: what a step said of a project no longer listed. */
+  #told: string | null = null;
+
+  // The list's choices: the find field, the kind filter, the `Earlier` fold shown, and the
+  // keys in the order last drawn, so the open row keeps its place, with whether that draw
+  // was by key while the first order was held.
+  #typed = "";
+  #kind: string | null = null;
+  #earlierShown = false;
+  /** `Show` was pressed under the folders that are not projects. */
+  #foldersShown = false;
+  #order: string[] = [];
+  #orderWasHeld = true;
+
+  // The facts: the shell's module list as last heard (undefined before it is), the hidden
+  // host, the components placed and being placed by module, each component's element name
+  // by module, and the `projects` attribute as last given.
+  #modules: unknown = undefined;
+  #host: HTMLDivElement;
+  #facts = new Map<string, Element>();
+  #placing = new Set<string>();
+  #wanted: string[] = [];
+  #modulesOf = new Map<string, string>();
+  #given: Given[] = [];
+  #givenText = "[]";
+  #reports: HeldReports;
+  #first = new FirstOrder(Date.now());
+  #holdTimer: ReturnType<typeof setTimeout> | null = null;
+  #stop: (() => void) | null = null;
 
   #again = (): void => {
-    void this.#list?.refresh();
+    this.#readAll();
   };
   #shown = (): void => {
     if (document.visibilityState === "visible") this.#readAll();
   };
 
+  constructor() {
+    super();
+    this.#host = document.createElement("div");
+    this.#host.hidden = true;
+    this.#host.dataset.part = "facts";
+    this.#host.addEventListener(FACTS_EVENT, (event) => {
+      event.stopPropagation();
+      const module = this.#modulesOf.get((event.target as Element).localName);
+      if (module !== undefined && this.#wanted.includes(module)) {
+        this.#reports.heard(module, (event as CustomEvent).detail, this.#given, this.#open);
+      }
+    });
+    this.#reports = new HeldReports((draw) => { requestAnimationFrame(() => draw()); }, () => this.requestUpdate(),
+                                    (module, refused) => console.warn(`moxi: ${module}'s project facts refused in part:\n${
+                                      refused.join("\n")}`));
+  }
+
   connectedCallback(): void {
     super.connectedCallback();
     const changed = (): void => this.requestUpdate();
-    this.#list = new Feed<Projects>(() => api("projects", pickerPath(this.#kind || null)), parseProjects,
-                                    () => this.#listed());
+    this.#first = new FirstOrder(Date.now());
+    this.#holdTimer = setTimeout(() => this.requestUpdate(), HOLD_MS);
+    this.#since = Date.now();
+    this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
+    this.#pending = parseRoute(this.route);
+    this.#list = new Feed<Listing>(() => api("projects", "api/projects"), parseListing, () => this.#listed());
     this.#kinds = new Feed<Kinds>(() => api("projects", "api/kinds"), parseKinds, changed);
-    this.#where = new Feed<Where>(() => api("projects", "api/where"), parseWhere, changed);
     this.#readAll();
+    this.#stop = subscribe("ui", "modules", (data) => {
+      this.#modules = data;
+      this.#seat();
+    });
     document.addEventListener("visibilitychange", this.#shown);
     document.addEventListener(CHANGED, this.#again);
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    for (const feed of [this.#list, this.#kinds, this.#where]) feed?.close();
-    this.#list = this.#kinds = this.#where = null;
+    for (const feed of [this.#list, this.#kinds]) feed?.close();
+    this.#list = this.#kinds = null;
+    this.#stop?.();
+    this.#stop = null;
+    for (const timer of [this.#holdTimer, this.#readingTimer]) if (timer !== null) clearTimeout(timer);
+    this.#holdTimer = this.#readingTimer = null;
+    this.#wanted = [];
+    for (const [module, element] of this.#facts) {
+      element.remove();
+      this.#reports.forget(module);
+    }
+    this.#facts.clear();
+    this.#modules = undefined;
     document.removeEventListener("visibilitychange", this.#shown);
     document.removeEventListener(CHANGED, this.#again);
   }
@@ -146,28 +395,167 @@ export class ProjectsPage extends LitElement {
   #readAll(): void {
     void this.#list?.refresh();
     void this.#kinds?.refresh();
-    void this.#where?.refresh();
   }
 
-  /** The list was read: an open project that is no longer listed closes, and the open
-   * project's edit form takes in what was read. */
+  protected willUpdate(changed: Map<PropertyKey, unknown>): void {
+    if (changed.has("route") && this.isConnected) {
+      this.#pending = parseRoute(this.route);
+      this.#openPending();
+    }
+  }
+
+  /** The list was read: the facts components are given what changed, an open project
+   * that is no longer listed closes, and a route given before the list was read is
+   * opened. */
   #listed(): void {
     const projects = this.#list?.value?.projects ?? [];
+    if (this.#list?.value != null) {
+      const given = givenOf(projects);
+      const text = JSON.stringify(given);
+      if (text !== this.#givenText) {
+        this.#given = given;
+        this.#givenText = text;
+        for (const element of this.#facts.values()) element.setAttribute("projects", text);
+      }
+    }
     if (this.#open !== null && this.#list?.failure === null) {
       const open = projects.find((p) => p.key === this.#open) ?? null;
       if (open === null) {
-        this.#open = null;
-        this.#edit = null;
-      } else if (this.#edit !== null) {
-        this.#edit = reread(this.#edit, open);
+        // What its step said is said at the list's top.
+        if (this.#step?.said != null) this.#told = this.#step.said;
+        this.#close();
+        this.#write();
       }
+    }
+    const removed = this.#removed;
+    if (removed !== null && keyIn(projects, removed.project.key) !== null) this.#removed = null;
+    this.#openPending();
+    this.#seat();
+    this.requestUpdate();
+  }
+
+  // -- the address ---------------------------------------------------------------------------
+
+  /** What is open, as an address. */
+  #address(): Address {
+    if (this.#open !== null) return { piece: this.#openFor, key: this.#open };
+    return this.#adding !== null ? { piece: "add" } : NOTHING_OPEN;
+  }
+
+  /** Puts what is open in the browser's address, rewriting the entry the page is on. */
+  #write(): void {
+    const path = pathToWrite(this.#address(), location.pathname);
+    if (path !== null) history.replaceState(history.state, "", path);
+  }
+
+  /** Opens the route given, once the list has been read. */
+  #openPending(): void {
+    const address = this.#pending;
+    const list = this.#list;
+    if (address === null || list?.value == null || list.failure !== null) return;
+    this.#pending = null;
+    this.#unknown = null;
+    if (address.piece === "list") {
+      this.#close();
+    } else if (address.piece === "add") {
+      this.#close();
+      this.#adding = { mode: "add" };
+    } else {
+      const key = keyIn(list.value.projects, address.key);
+      const project = key === null ? null : this.#find(key);
+      if (project === null) {
+        this.#close();
+        this.#unknown = address.key;
+      } else {
+        this.#openProject(project, address.piece);
+        this.#scrollTo = "open";
+      }
+    }
+    this.#write();
+    this.requestUpdate();
+  }
+
+  /** Nothing is open. */
+  #close(): void {
+    this.#setOpen(null);
+    this.#openFor = "open";
+    this.#adding = null;
+    this.#step = null;
+  }
+
+  /** `project` is open, for `piece`; for its remove, the step is read anew. */
+  #openProject(project: Listed, piece: "open" | "edit" | "remove"): void {
+    this.#setOpen(project.key);
+    if (piece !== "remove") this.#step = null;
+    else if (this.#openFor !== "remove" || this.#step?.key !== project.key) this.#openStep(project.key);
+    this.#openFor = piece;
+    this.#adding = null;
+  }
+
+  #find(key: string | null): Listed | null {
+    if (key === null) return null;
+    return this.#list?.value?.projects.find((project) => project.key === key) ?? null;
+  }
+
+  // -- the facts components --------------------------------------------------------------
+
+  /** Places the facts component of each module now present that declares one and is not
+   * placed, and takes away those of modules gone. Nothing is placed before the list is
+   * first read, so every component starts with the projects. */
+  #seat(): void {
+    if (this.#modules === undefined || this.#list?.value == null) return;
+    const wanted = factsModules(this.#modules, (module) => this.#facts.has(module)
+      || components(module).some((item) => item.name === FACTS_COMPONENT));
+    this.#wanted = wanted;
+    for (const module of wanted) {
+      const element = components(module).find((item) => item.name === FACTS_COMPONENT)?.element;
+      if (element !== undefined) this.#modulesOf.set(element, module);
+    }
+    for (const [module, element] of [...this.#facts]) {
+      if (wanted.includes(module)) continue;
+      element.remove();
+      this.#facts.delete(module);
+      this.#reports.forget(module);
+    }
+    for (const module of wanted) {
+      if (!this.#facts.has(module) && !this.#placing.has(module)) void this.#placeFacts(module);
     }
     this.requestUpdate();
   }
 
-  #find(key: string | null): Project | null {
-    if (key === null) return null;
-    return this.#list?.value?.projects.find((project) => project.key === key) ?? null;
+  async #placeFacts(module: string): Promise<void> {
+    this.#placing.add(module);
+    let element: Element | null = null;
+    try {
+      element = await place(this.#host, module, FACTS_COMPONENT, this.#factsAttributes());
+    } catch (exc) {
+      console.error(`moxi: ${module}'s project facts could not be placed`, exc);
+    }
+    this.#placing.delete(module);
+    if (element !== null && this.isConnected && this.#wanted.includes(module) && !this.#facts.has(module)) {
+      // What changed while its script loaded.
+      element.setAttribute("projects", this.#givenText);
+      if (this.#open === null) element.removeAttribute("open");
+      else element.setAttribute("open", this.#open);
+      this.#facts.set(module, element);
+    } else {
+      element?.remove();
+    }
+    this.requestUpdate();
+  }
+
+  #factsAttributes(): Record<string, string> {
+    return this.#open === null ? { projects: this.#givenText } : { projects: this.#givenText, open: this.#open };
+  }
+
+  /** Opens `key`'s project, or closes it with null, and tells every facts component. */
+  #setOpen(key: string | null): void {
+    if (key === this.#open) return;
+    this.#open = key;
+    for (const element of this.#facts.values()) {
+      if (key === null) element.removeAttribute("open");
+      else element.setAttribute("open", key);
+    }
   }
 
   // -- acts --------------------------------------------------------------------------------
@@ -178,99 +566,129 @@ export class ProjectsPage extends LitElement {
     document.dispatchEvent(new Event(CHANGED));
   }
 
-  async #act(key: string, path: string, body: object, parse: (data: unknown) => { project: Project; notes?: string[] } | null,
-             line: string, done: (project: Project) => void = () => {}): Promise<void> {
-    if (this.#sending) return;
-    this.#sending = true;
-    this.#told = null;
-    this.requestUpdate();
+  // -- the remove step ----------------------------------------------------------------------
+
+  /** Opens the step for `key`: what a remove would meet now, and where a change would be
+   * refused, are read. */
+  #openStep(key: string): void {
+    this.#steps += 1;
+    this.#step = { key, refusals: null, failed: null, note: null, sending: false, said: null };
+    void this.#readCheck(this.#steps);
+    void this.#readWhere(this.#steps);
+  }
+
+  /** The step `mine`, while it is still the one open. */
+  #stepOf(mine: number): Step | null {
+    return mine === this.#steps ? this.#step : null;
+  }
+
+  async #readCheck(mine: number): Promise<void> {
+    const key = this.#stepOf(mine)?.key;
+    if (key === undefined) return;
+    let answer;
     try {
-      const answer = await api("projects", path, body);
-      const acted = actedOf(answer.status, answer.data, parse);
-      this.#told = { key, said: actSaid(acted, line) };
-      if (acted.outcome === "done") {
-        if (this.#open === key && this.#edit !== null) this.#edit = reread(this.#edit, acted.value.project);
-        done(acted.value.project);
-      }
-      if (acted.outcome !== "refused") this.#changed();
-    } finally {
-      this.#sending = false;
-      this.requestUpdate();
+      answer = await api("projects", `api/remove-check?key=${encodeURIComponent(key)}`);
+    } catch {
+      answer = { status: 0, data: null };
     }
-  }
-
-  #save(project: Project): void {
-    const edit = this.#edit;
-    const body = edit !== null ? editBody(edit.base, edit.form, { notes: installed("notes") }) : null;
-    if (body === null) return;
-    void this.#act(project.key, "api/set", body, parseWritten, `Saved ${project.key}.`,
-                   (saved) => { if (this.#open === project.key) this.#edit = editing(saved); });
-  }
-
-  #setLead(project: Project): void {
-    const body = leadBody(project.key, this.#lead);
-    if (body.lead === "") return;
-    void this.#act(project.key, "api/set", body, parseWritten, `${body.lead} leads ${project.key} now.`,
-                   () => { this.#lead = ""; });
-  }
-
-  #clearLead(project: Project): void {
-    void this.#act(project.key, "api/set", clearLeadBody(project.key), parseWritten,
-                   `${project.key} has no lead now.`);
-  }
-
-  #addAgent(project: Project): void {
-    const body = agentBody(project.key, this.#agent);
-    if (body.name === "") return;
-    void this.#act(project.key, "api/agents-add", body, parseOne, `Added ${body.name} to ${project.key}.`,
-                   () => { this.#agent = ""; });
-  }
-
-  #removeAgent(project: Project, name: string): void {
-    void this.#act(project.key, "api/agents-remove", agentBody(project.key, name), parseOne,
-                   `Took ${name} out of ${project.key}.`);
-  }
-
-  async #remove(project: Project): Promise<void> {
-    if (this.#sending) return;
-    this.#sending = true;
-    this.#told = null;
+    const step = this.#stepOf(mine);
+    if (step === null) return;
+    const check = actedOf(answer.status, answer.data, parseRemoveCheck);
+    this.#step = check.outcome === "done" ? { ...step, refusals: check.value.refusals, failed: null }
+      : { ...step, failed: check.text };
     this.requestUpdate();
+  }
+
+  async #readWhere(mine: number): Promise<void> {
+    let answer;
     try {
-      const outcome = await confirm("projects", "api/remove", { key: project.key }, removeSheet(project));
-      if (outcome.outcome === "cancelled") return;
-      if (outcome.outcome === "refused") {
-        this.#told = { key: project.key, said: { tone: "error", lines: [outcome.text] } };
-        return;
-      }
-      // Nothing was sent, and confirm() has already shown where to take the act.
-      if (outcome.outcome === "desk") return;
-      if (outcome.outcome === "unknown") {
-        this.#told = { key: project.key, said: { tone: "warn", lines: [MAY_HAVE_ACTED] } };
-        this.#changed();
-        return;
-      }
-      const path = removeStatusPath(outcome.status);
-      if (path === null) {
-        this.#told = { key: project.key, said: { tone: "warn", lines: [
-          "projects' page server took the remove but gave no status link to read; the list has been read again."] } };
-        this.#changed();
-        return;
-      }
-      const status = new Feed<RemoveStatus>(() => api("projects", path), parseRemoveStatus, () => {});
-      await status.refresh();
-      if (status.value !== null) {
-        const removed = status.value.state === "removed";
-        this.#told = { key: removed ? null : project.key, said: removedSaid(status.value) };
-      } else {
-        this.#told = { key: project.key, said: { tone: "warn", lines: [
-          `The remove was taken, but what it came to can't be read: ${status.failure?.said ?? status.failure?.why ?? "no answer"}.`] } };
+      answer = await api("projects", "api/where");
+    } catch {
+      return;
+    }
+    const step = this.#stepOf(mine);
+    if (step === null) return;
+    this.#step = { ...step, note: answer.status === 200 ? parseWhere(answer.data)?.note ?? null : null };
+    this.requestUpdate();
+  }
+
+  /** `Remove from Moxi`: the remove is sent under a `job` of its own, and its answer drawn. */
+  async #press(project: Listed): Promise<void> {
+    const mine = this.#steps;
+    const step = this.#stepOf(mine);
+    if (step === null || step.sending || step.refusals === null || step.refusals.length > 0) return;
+    this.#step = { ...step, sending: true, said: null };
+    this.requestUpdate();
+    const job = mintJob();
+    const pressed = await this.#sendRemove(project.key, job);
+    if (pressed.outcome === "removed") {
+      const index = this.#order.indexOf(project.key);
+      this.#removed = { project, after: index > 0 ? this.#order[index - 1] : null, sending: false, said: null };
+      if (this.#open === project.key) {
+        this.#close();
+        this.#write();
       }
       this.#changed();
-    } finally {
-      this.#sending = false;
-      this.requestUpdate();
+    } else if (pressed.outcome === "held") {
+      // Something changed since the check: the step is drawn from a fresh one.
+      await this.#readCheck(mine);
+      const now = this.#stepOf(mine);
+      if (now !== null) {
+        const held = now.refusals !== null && now.refusals.length > 0;
+        this.#step = { ...now, sending: false, said: held ? null : pressed.reason };
+      }
+    } else {
+      const now = this.#stepOf(mine);
+      if (now !== null) {
+        this.#step = { ...now, sending: false, said: pressed.outcome === "refused" ? pressed.text : MAY_BE_REMOVED };
+      }
+      if (pressed.outcome === "unknown") this.#changed();
     }
+    this.requestUpdate();
+  }
+
+  /** Sends the remove of `key` under `job`; with no answer, reads the outcome kept under
+   * `job` once. */
+  async #sendRemove(key: string, job: string): Promise<Pressed> {
+    let answer;
+    try {
+      answer = await api("projects", "api/remove", { key, job });
+    } catch {
+      answer = { status: 0, data: null };
+    }
+    const acted = actedOf(answer.status, answer.data, parseRemoveStatus);
+    if (acted.outcome === "done") return pressedOf(acted.value);
+    if (acted.outcome === "refused") return { outcome: "refused", text: acted.text };
+    try {
+      const kept = await api("projects", `api/remove-status?job=${job}`);
+      const status = kept.status === 200 ? parseRemoveStatus(kept.data) : null;
+      if (status !== null) return pressedOf(status);
+    } catch {
+      // Nothing more can be read: it may have been removed.
+    }
+    return { outcome: "unknown" };
+  }
+
+  /** `Add it back`: the removed project is added again as the page held it. */
+  async #addBack(): Promise<void> {
+    const removed = this.#removed;
+    if (removed === null || removed.sending) return;
+    this.#removed = { ...removed, sending: true, said: null };
+    this.requestUpdate();
+    let answer;
+    try {
+      answer = await api("projects", "api/add",
+                         addBackBody(removed.project, { notesInstalled: this.#list?.value?.notes_installed ?? false }));
+    } catch {
+      answer = { status: 0, data: null };
+    }
+    const acted = actedOf(answer.status, answer.data, parseAdded);
+    if (this.#removed?.project.key === removed.project.key) {
+      this.#removed = acted.outcome === "done" ? null
+        : { ...this.#removed, sending: false, said: acted.outcome === "refused" ? acted.text : MAY_BE_ADDED };
+    }
+    if (acted.outcome !== "refused") this.#changed();
+    this.requestUpdate();
   }
 
   // -- rendering ---------------------------------------------------------------------------
@@ -278,176 +696,332 @@ export class ProjectsPage extends LitElement {
   render() {
     const list = this.#list;
     if (list === null) return nothing;
-    if (list.gone) return html`<p class="problem">projects is no longer installed.</p>`;
-    return html`<h1>Projects</h1>
-      <p class="lede">Named places: each project's key, root, kind and agents. Each change here does what the same <code>moxi projects</code> command does in a terminal.</p>
-      ${this.#wherePart()}
-      ${this.#listPart()}
-      <section data-part="add"><div data-part="add-form"></div>
-        ${this.#missing ? html`<p class="problem" data-line="no-add">The add form can't be shown here. Run <code>moxi projects add</code> in a terminal.</p>` : nothing}
-      </section>`;
+    const state = listState(list, Date.now() - this.#since);
+    if (state.state === "gone") return html`<p class="problem">projects is no longer installed.</p>`;
+    const ask = this.#panelAsk();
+    // A panel of its own for each thing it opens for: what it holds is that thing's alone.
+    return html`${this.#listPart(list, state)}
+      ${ask !== null ? keyed(JSON.stringify(ask), html`<moxi-projects-panel .ask=${ask} .listing=${list.value}
+        .kinds=${this.#kinds?.value ?? null} ?hidden=${!state.acts}
+        @moxi-projects-panel-close=${() => this.#closePanel()}></moxi-projects-panel>`) : nothing}
+      ${this.#host}`;
   }
 
-  #wherePart() {
-    const feed = this.#where;
-    if (feed === null) return nothing;
-    const view = whereView(feed);
-    if (view.state === "gone") return nothing;
-    return html`<section data-part="where" data-state=${view.state}>
-      <h2>Where this page acts</h2>
-      ${view.state === "loading" ? html`<div class="placeholder"></div>` : nothing}
-      ${view.store !== null ? html`<p>Store: <code data-line="store">${view.store}</code></p>
-        <p>Git: ${view.git !== null ? html`<code data-line="git">${view.git}</code>`
-          : html`<span class="warn" data-line="git">${NO_GIT}</span>`}</p>
-        <p class="dim">${WHERE_LINE}</p>` : nothing}
-      ${view.note !== null ? html`<p class="note" data-line="note" role="status">${view.note}</p>` : nothing}
-      ${view.line !== null ? html`<p class="problem" data-line="failed">${view.line}</p>` : nothing}
-    </section>`;
+  /** What the panel is open for: the add, or the open project's edit; null while it is
+   * closed. */
+  #panelAsk(): PanelAsk | null {
+    if (this.#adding !== null) return this.#adding;
+    return this.#open !== null && this.#openFor === "edit" ? { mode: "edit", key: this.#open } : null;
   }
 
-  #listPart() {
-    const list = this.#list!;
-    const kinds = this.#kinds?.value ?? null;
-    const view = listView(list, this.#kind || null);
-    const choices = filterChoices(kinds, view.projects, this.#kind);
-    const broken = brokenLines(kinds);
+  #listPart(list: Feed<Listing>, state: ListState) {
     const told = this.#told;
-    const loose = told !== null && (told.key === null || this.#find(told.key) === null) ? told.said : null;
-    return html`<section data-part="list" data-state=${view.state}>
-      <h2>Projects</h2>
-      <div class="bar">
-        <label><span class="dim">Show</span>
-          <select name="filter" data-action="filter" aria-label="Show the kind" .value=${live(this.#kind)} @change=${this.#filter}>
-            ${choices.map((choice) => html`<option value=${choice.value} ?selected=${choice.value === this.#kind}>${choice.label}</option>`)}
-          </select></label>
-        <button type="button" data-action="read" ?disabled=${list.reading} @click=${() => this.#readAll()}>Read again</button>
-      </div>
-      ${broken.length ? html`<div data-part="broken">
-        <p class="dim">Can't be used now. Until each is repaired or uninstalled, while a module won't load a remove is refused, as is an add or set of a kind no loaded module declares, and any other add goes ahead without it, with a warning; a blocked kind can't be added or set:</p>
-        ${broken.map((line) => html`<p class="broken" data-line="broken">${line}</p>`)}</div>` : nothing}
-      ${loose !== null ? this.#saidPart(loose) : nothing}
-      ${view.state === "loading" ? html`<div class="placeholder"></div>` : nothing}
-      ${view.state === "empty" ? html`<p class="dim" data-line="empty">${view.line}</p>` : nothing}
-      ${view.state === "failed" ? html`<p class="problem" data-line="failed">${view.line}</p>` : nothing}
-      ${view.projects.length ? html`<ul aria-label="Projects">
-        ${repeat(view.projects, (project) => project.key, (project) => this.#project(project))}</ul>` : nothing}
+    const listing = state.rows ? list.value : null;
+    const reports = this.#reports.reports();
+    // Which components it places is known only once the shell's module list is heard and
+    // the list is read (nothing is placed before); until then the first order holds.
+    const placed = this.#modules === undefined || list.value == null ? null
+      : this.#facts.size + this.#placing.size;
+    const held = this.#first.held(placed, this.#reports.reported, Date.now());
+    // The open row keeps the place it was drawn at, but not a place by key from before the
+    // first order: a row opened by its address takes its place in that order when it applies.
+    const previous = this.#orderWasHeld ? [] : this.#order;
+    this.#orderWasHeld = held;
+    const open = state.acts ? this.#open : null;
+    const now = Date.now() / 1000;
+    const folders = listing === null ? null : folderGroup(reports, {
+      home: listing.home, now, hasProjects: listing.projects.length > 0, showAll: this.#foldersShown,
+      roots: listing.projects.map((project) => project.root) });
+    return html`<section data-part="list" data-state=${state.state}>
+      ${state.line !== null ? html`<p class="state ${state.state === "loading" ? "dim" : ""}"
+        data-line=${state.state === "loading" ? "reading" : "failed"} role="status">${state.line}</p>` : nothing}
+      ${told !== null && state.acts ? html`<p class="said" data-line="said" role="status">${told}</p>` : nothing}
+      ${listing === null ? nothing : listing.projects.length === 0 ? state.acts ? html`${
+          this.#removed !== null ? this.#removedPart(this.#removed) : nothing}<div class="first" data-part="empty">
+          <p data-line="empty">${NO_PROJECTS}</p><p data-line="sentence">${emptySentence(reports)}</p>
+          <button type="button" class="x" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button></div>
+          ${folders !== null ? html`<div class="grps">${this.#foldersPart(folders, true)}</div>` : nothing}` : nothing
+        : this.#rows(listing, listView(listing.projects, { home: listing.home, reports, open, now },
+                                       { find: this.#typed, kind: this.#kind, held, previous }), folders,
+                     state.acts)}
+      ${this.#unknown !== null && state.acts ? html`<p class="foot" data-line="unknown">${noSuchProject(this.#unknown)}</p>`
+        : nothing}
     </section>`;
   }
 
-  #saidPart(said: Said) {
-    return html`<div class="said ${said.tone}" data-line="said" data-tone=${said.tone} role="status">
-      ${said.lines.map((line) => html`<p>${line}</p>`)}</div>`;
+  /** The rows, then the folders that are not projects, with their acts when `acts`;
+   * without, the last list kept, dim. */
+  #rows(listing: Listing, view: ListView, folders: FolderGroup | null, acts: boolean) {
+    this.#order = view.order;
+    const byKey = new Map(listing.projects.map((project) => [project.key, project]));
+    const row = (item: ProjectRow) => this.#row(byKey.get(item.key) as Listed, item, acts);
+    // A project removed here keeps a line where its row was.
+    const removed = acts ? this.#removed : null;
+    const shown: (ProjectRow | Removed)[] = [...view.rows];
+    if (removed !== null) shown.splice(removedIndex(view.rows.map((item) => item.key), removed.after), 0, removed);
+    const drawn = (item: ProjectRow | Removed) => ("project" in item ? this.#removedPart(item) : row(item));
+    return html`${view.long ? this.#findPart(view) : nothing}
+      <div class=${acts ? "grps" : "grps kept"}>
+        <section class="grp" data-part="projects"><div class="gk"><span data-line="count">${view.count}</span>${acts
+          ? html`<small><button type="button" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button></small>`
+          : nothing}</div>
+          <div class="gl">${repeat(shown, (item) => ("project" in item ? `\n${item.project.key}` : item.key), drawn)}</div></section>
+        ${view.earlierLine !== null ? html`<section class="grp" data-part="earlier"><div class="gk">${EARLIER}</div>
+          <div class="gl"><div class="one"><span data-line="earlier">${view.earlierLine}</span><button type="button"
+            data-action="earlier" aria-expanded=${this.#earlierShown ? "true" : "false"}
+            @click=${() => { this.#earlierShown = !this.#earlierShown; this.requestUpdate(); }}>${
+            this.#earlierShown ? HIDE : SHOW}</button></div>
+            ${this.#earlierShown ? repeat(view.earlier, (item) => item.key, row) : nothing}</div></section>` : nothing}
+        ${folders !== null ? this.#foldersPart(folders, acts) : nothing}
+      </div>`;
   }
 
-  #project(project: Project) {
-    const open = project.key === this.#open;
-    return html`<li class="project" data-key=${project.key} data-open=${open ? "true" : "false"}>
-      <div class="first">
-        <button type="button" class="key" data-action="open" aria-expanded=${open ? "true" : "false"}
-          @click=${() => this.#toggle(project)}>${project.key}</button>
-        <span class="tag">${project.kind}</span>
-        <code>${project.root}</code>
+  /** The folders worked in that are not projects: one line each, `Add` at the right, and
+   * how many more there are, with `Show` while some are held back. */
+  #foldersPart(group: FolderGroup, acts: boolean) {
+    return html`<section class="grp" data-part="folders"><div class="gk" data-line="folders">${group.label}</div>
+      <div class="gl">${repeat(group.rows, (item) => item.folder, (item) => this.#folderRow(item, acts))}
+        ${group.more !== null ? html`<div class="one"><span data-line="more-folders">${group.more}</span>${
+          group.canShow && acts ? html`<button type="button" data-action="show-folders"
+            @click=${() => { this.#foldersShown = true; this.requestUpdate(); }}>${SHOW}</button>` : nothing}</div>`
+          : nothing}</div></section>`;
+  }
+
+  #folderRow(item: FolderRow, acts: boolean) {
+    return html`<moxi-ui-row data-folder=${item.folder} ${attributes({ name: item.name, where: item.where, fact: item.fact })}>
+      ${acts ? html`<button type="button" slot="acts-one" class="fix" data-action="add-folder"
+        @click=${() => this.#addFolder(item)}>${ADD}</button>` : nothing}
+    </moxi-ui-row>`;
+  }
+
+  #findPart(view: ListView) {
+    return html`<div class="find" data-part="find">
+        <input type="text" aria-label=${FIND_LABEL} placeholder=${FIND_LABEL} autocomplete="off" spellcheck="false"
+          .value=${live(this.#typed)} @input=${(event: Event) => {
+            this.#typed = (event.target as HTMLInputElement).value;
+            this.requestUpdate();
+          }}>
+        ${this.#typed !== "" ? html`<button type="button" class="x" data-action="clear-find"
+          @click=${() => { this.#typed = ""; this.requestUpdate(); }}>${CLEAR}</button>` : nothing}
       </div>
-      ${open ? this.#detail(project) : nothing}
-    </li>`;
+      ${view.kinds.length > 0 || view.shownOf !== null ? html`<div class="filt" data-part="filters">
+        ${view.kinds.length > 0 ? html`<label><span class="k">${KIND}</span><span class="sel"><select class=${this.#kind !== null ? "set" : ""}
+          data-action="kind" .value=${live(this.#kind ?? "")} @change=${(event: Event) => {
+            const value = (event.target as HTMLSelectElement).value;
+            this.#kind = value === "" ? null : value;
+            this.requestUpdate();
+          }}><option value="">${ALL}</option>${view.kinds.map((kind) => html`<option value=${kind}
+            ?selected=${kind === this.#kind}>${kindName(kind)}</option>`)}</select><span class="v" aria-hidden="true">▾</span></span></label>`
+          : nothing}
+        ${view.shownOf !== null ? html`<span class="n" data-line="shown">${view.shownOf}</span>` : nothing}
+      </div>` : nothing}`;
   }
 
-  #toggle(project: Project): void {
-    if (this.#open === project.key) {
-      this.#open = null;
-      this.#edit = null;
-    } else {
-      this.#open = project.key;
-      this.#edit = editing(project);
-      this.#lead = "";
-      this.#agent = "";
+  #row(project: Listed, row: ProjectRow, acts: boolean) {
+    const open = row.act === "Close";
+    if (!acts) {
+      return html`<moxi-ui-row data-key=${row.key} ${attributes({ ...rowAttributes(row), toggles: null })}></moxi-ui-row>`;
     }
-    if (this.#told?.key !== null && this.#told?.key !== this.#open) this.#told = null;
-    this.requestUpdate();
+    return html`<moxi-ui-row data-key=${row.key} ${attributes(rowAttributes(row))}
+        @moxi-row-toggle=${() => this.#toggle(project)}>
+      <button type="button" slot="acts-one" class="do" data-action="open" aria-expanded=${open ? "true" : "false"}
+        @click=${() => this.#toggle(project)}>${row.act}</button>
+      ${row.changeFolder ? html`<button type="button" slot="acts" class="fix" data-action="change-folder"
+        @click=${() => this.#editOpen(project)}>${CHANGE_FOLDER}</button>` : nothing}
+      ${open ? this.#detail(project) : nothing}
+    </moxi-ui-row>`;
   }
 
-  #detail(project: Project) {
-    const busy = this.#sending;
-    const edit = this.#edit ?? editing(project);
-    const form = edit.form;
-    const notes = installed("notes");
-    const kinds = this.#kinds?.value ?? null;
-    const changes = editBody(edit.base, form, { notes });
-    const told = this.#told?.key === project.key ? this.#told.said : null;
-    return html`<div class="detail">
-      <dl>${projectFields(project).map((field) => html`<dt>${field.label}</dt><dd data-field=${field.name}>${
-        field.name === "root" || field.name === "notes_root" ? html`<code>${field.value}</code>` : field.value}</dd>`)}</dl>
-      ${told !== null ? this.#saidPart(told) : nothing}
-      <form class="part" data-part="edit" @submit=${(event: Event) => { event.preventDefault(); this.#save(project); }}>
-        <h3>Change</h3>
-        <label><span>Root, an absolute path</span>
-          <input type="text" name="root" autocomplete="off" spellcheck="false" ?disabled=${busy}
-            .value=${live(form.root)} @input=${this.#editField("root")}></label>
-        <label><span>Kind</span>
-          <select name="kind" ?disabled=${busy || kinds === null} .value=${live(form.kind)} @change=${this.#editField("kind")}>
-            ${kindChoices(kinds, edit.base.kind).map((choice) => html`<option value=${choice.value}
-              ?selected=${choice.value === form.kind}>${choice.label}</option>`)}
-          </select></label>
-        ${notes ? html`<label><span>Notes root, an absolute path (empty it to clear it)</span>
-          <input type="text" name="notes_root" autocomplete="off" spellcheck="false" ?disabled=${busy}
-            .value=${live(form.notesRoot)} @input=${this.#editField("notesRoot")}></label>` : nothing}
-        ${edit.stale ? html`<p class="warn" data-line="stale" role="status">${STALE_LINE}</p>` : nothing}
-        <div class="bar"><button type="submit" class="go" data-action="save" ?disabled=${busy || changes === null}>Save</button></div>
-      </form>
-      <div class="part" data-part="agents">
-        <h3>Agents</h3>
-        <div class="agent" data-part="lead"><span>Lead: <strong data-line="lead">${project.lead ?? "none"}</strong></span>
-          ${project.lead !== null ? html`<button type="button" data-action="clear-lead" ?disabled=${busy}
-            @click=${() => this.#clearLead(project)}>Clear lead</button>` : nothing}</div>
-        <form class="line" data-part="set-lead" @submit=${(event: Event) => { event.preventDefault(); this.#setLead(project); }}>
-          <input type="text" name="lead" aria-label="Lead agent" placeholder="agent name" autocomplete="off" spellcheck="false"
-            ?disabled=${busy} .value=${live(this.#lead)}
-            @input=${(event: Event) => { this.#lead = (event.target as HTMLInputElement).value; this.requestUpdate(); }}>
-          <button type="submit" data-action="set-lead" ?disabled=${busy || this.#lead.trim() === ""}>Set lead</button>
-        </form>
-        ${project.associated.length ? html`<ul aria-label="Associated agents">${project.associated.map((name) => html`
-          <li class="agent" data-agent=${name}><span>${name}</span>
-            <button type="button" data-action="remove-agent" aria-label=${`Remove ${name}`} ?disabled=${busy}
-              @click=${() => this.#removeAgent(project, name)}>Remove</button></li>`)}</ul>`
-          : html`<p class="dim" data-line="no-agents">No associated agents.</p>`}
-        <form class="line" data-part="add-agent" @submit=${(event: Event) => { event.preventDefault(); this.#addAgent(project); }}>
-          <input type="text" name="agent" aria-label="Agent name" placeholder="agent name" autocomplete="off" spellcheck="false"
-            ?disabled=${busy} .value=${live(this.#agent)}
-            @input=${(event: Event) => { this.#agent = (event.target as HTMLInputElement).value; this.requestUpdate(); }}>
-          <button type="submit" data-action="add-agent" ?disabled=${busy || this.#agent.trim() === ""}>Add agent</button>
-        </form>
-      </div>
-      <div class="part" data-part="remove"><div class="bar">
-        <button type="button" data-action="remove" ?disabled=${busy} @click=${() => void this.#remove(project)}>Remove…</button>
-        <span class="dim">Takes it off the list; its files stay.</span>
-      </div></div>
+  /** A removed project's one line, with `Add it back`, and what that came to. */
+  #removedPart(removed: Removed) {
+    return html`<div class="gone" data-part="removed" data-key=${removed.project.key}>
+      <span data-line="removed">${removedLine(removed.project.key)}</span><button type="button" data-action="add-back"
+        ?disabled=${removed.sending} @click=${() => void this.#addBack()}>${ADD_IT_BACK}</button>
+      ${removed.said !== null ? html`<p data-line="said" role="status">${removed.said}</p>` : nothing}
     </div>`;
   }
 
-  #editField(name: keyof EditForm) {
-    return (event: Event): void => {
-      const value = (event.target as HTMLInputElement | HTMLSelectElement).value;
-      if (this.#edit !== null) this.#edit = { ...this.#edit, form: { ...this.#edit.form, [name]: value } };
-      this.requestUpdate();
-    };
+  /** `Open` or `Close`, or the row's own line: the row opens, or closes, and the address
+   * says so. */
+  #toggle(project: Listed): void {
+    if (this.#open === project.key) this.#close();
+    else this.#openProject(project, "open");
+    this.#unknown = null;
+    this.#told = null;
+    this.#write();
+    this.requestUpdate();
   }
 
-  #filter = (event: Event): void => {
-    this.#kind = (event.target as HTMLSelectElement).value;
-    void this.#list?.refresh();
+  /** `Edit` in the opened project's foot, or `Change folder`: the project opens with the
+   * Edit panel over it, its folder field focused. */
+  #editOpen(project: Listed): void {
+    this.#openProject(project, "edit");
+    this.#unknown = null;
+    this.#write();
     this.requestUpdate();
-  };
+    // A panel already open for it keeps its values, and takes the focus again.
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>("moxi-projects-panel")?.focus());
+  }
+
+  /** `Remove` in the opened project's foot: it is open for its remove. */
+  #removeOpen(project: Listed): void {
+    this.#openProject(project, "remove");
+    this.#unknown = null;
+    this.#told = null;
+    this.#write();
+    this.requestUpdate();
+  }
+
+  /** `Add a project`: the add is what is open, in the panel. */
+  #add(): void {
+    this.#close();
+    this.#unknown = null;
+    this.#told = null;
+    this.#adding = { mode: "add" };
+    this.#write();
+    this.requestUpdate();
+  }
+
+  /** A folder row's `Add`: the add is open, with that folder and its name filled. The
+   * address says `add`: what is filled lives only in the panel. */
+  #addFolder(row: FolderRow): void {
+    this.#close();
+    this.#unknown = null;
+    this.#told = null;
+    this.#adding = folderAsk(row);
+    this.#write();
+    this.requestUpdate();
+  }
+
+  /** The panel's `Close`, `Cancel` or Escape, or a save that saved everything. The add
+   * closes to nothing open, the focus back on `Add a project`; the edit to its project
+   * open, the focus on its `Edit`. */
+  #closePanel(): void {
+    let focus = '[data-action="add"]';
+    if (this.#adding !== null) {
+      this.#adding = null;
+    } else if (this.#open !== null && this.#openFor === "edit") {
+      this.#openFor = "open";
+      focus = `moxi-ui-row[data-key="${CSS.escape(this.#open)}"] [data-part="foot"] [data-action="edit"]`;
+    }
+    this.#write();
+    this.requestUpdate();
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(focus)?.focus());
+  }
+
+  /** The opened project: its labelled rows, then the foot, `Edit` and `Remove`, and under
+   * it the remove step while it is open for its remove. */
+  #detail(project: Listed) {
+    const listing = this.#list?.value;
+    const rows = openedRows(project, { home: listing?.home ?? null, notesInstalled: listing?.notes_installed ?? false,
+                                       reports: this.#reports.reports(), installed: presentModules(this.#modules) });
+    return html`<div class="detail">
+      <div class="opened" data-part="opened">${rows.map((item) => this.#openedRow(project, item))}</div>
+      <div class="foot" data-part="foot">
+        <button type="button" data-action="edit" class=${this.#openFor === "remove" ? "" : "on"}
+          aria-pressed=${this.#openFor === "edit" ? "true" : "false"}
+          @click=${() => this.#editOpen(project)}>${EDIT}</button>
+        <button type="button" data-action="remove" class=${this.#openFor === "remove" ? "on" : ""}
+          aria-pressed=${this.#openFor === "remove" ? "true" : "false"}
+          @click=${() => this.#removeOpen(project)}>${REMOVE}</button>
+      </div>
+      ${this.#openFor === "remove" && this.#step?.key === project.key ? this.#stepPart(project, this.#step) : nothing}
+    </div>`;
+  }
+
+  /** The remove step: nothing until the check is read; then what goes and what stays,
+   * with `Remove from Moxi` and `Cancel`, or what refuses it now, with the button off and
+   * `Close`. */
+  #stepPart(project: Listed, step: Step) {
+    if (step.refusals === null) {
+      return step.failed === null ? nothing : html`<div class="step" data-part="remove" data-state="failed">
+        <p class="dim" data-line="said" role="status">${step.failed}</p>
+        <div class="btns"><button type="button" class="lnk" data-action="cancel"
+          @click=${() => this.#leaveStep(project)}>${CLOSE}</button></div></div>`;
+    }
+    const listing = this.#list?.value;
+    const facts = { home: listing?.home ?? null, notesInstalled: listing?.notes_installed ?? false,
+                    reports: this.#reports.reports(), installed: presentModules(this.#modules) };
+    const refused = step.refusals.length > 0;
+    const busy = step.sending;
+    const tail = html`
+      ${step.note !== null ? html`<p class="dim then" data-line="note">${step.note}</p>` : nothing}
+      <div class="btns then">
+        <button type="button" class="btn" data-action="remove-press" ?disabled=${refused || busy}
+          @click=${() => void this.#press(project)}>${REMOVE_FROM_MOXI}</button>
+        <button type="button" class="lnk" data-action="cancel" @click=${() => this.#leaveStep(project)}>${
+          refused ? CLOSE : CANCEL}</button>
+      </div>
+      ${step.said !== null ? html`<p class="dim then" data-line="said" role="status">${step.said}</p>` : nothing}`;
+    if (refused) {
+      const rows = refusedRows(project, step.refusals, (module) => this.#pageTitle(module));
+      return html`<div class="step" data-part="remove" data-state="refused">
+        <p class="q" data-line="title">${refusedTitle(project.key)}</p>
+        ${rows.map((item) => html`<div class="orow" data-label=${item.label}><span class="ok">${item.label}</span>
+          <div class="ol">${item.lines.map((line) => html`<p>${line}</p>`)}</div>
+          ${item.page !== null ? this.#pageLink(item.page, item.label)
+            : item.edit ? html`<button type="button" class="oa" data-action="edit"
+              @click=${() => this.#editOpen(project)}>${EDIT}</button>` : nothing}</div>`)}
+        <p class="dim then" data-line="unchanged">${NOTHING_CHANGED}</p>
+        ${tail}</div>`;
+    }
+    const words = removeStep(project, facts);
+    return html`<div class="step" data-part="remove" data-state="ask">
+      <p class="q" data-line="title">${words.title}</p>
+      <div class="orow" data-label=${GOES_LABEL}><span class="ok">${GOES_LABEL}</span><div class="ol"><p>${GOES}</p></div></div>
+      ${words.stays.length > 0 ? html`<div class="orow" data-label=${STAYS_LABEL}><span class="ok">${STAYS_LABEL}</span>
+        <div class="ol">${words.stays.map((line) => html`<p>${line}</p>`)}</div></div>` : nothing}
+      <p class="dim then" data-line="foot">${words.foot}</p>
+      ${tail}</div>`;
+  }
+
+  /** A module's page title, or null when it has no page. */
+  #pageTitle(module: string): string | null {
+    if (!installed(module)) return null;
+    return components(module).find((item) => item.name === "page")?.title ?? null;
+  }
+
+  /** A link to `module`'s page, at a row's right. */
+  #pageLink(module: string, text: string, route = "") {
+    return html`<a class="oa" href=${`/m/${module}/${route}`} data-action="link" @click=${(event: MouseEvent) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigate(module, route);
+      }}>${text}</a>`;
+  }
+
+  /** The step's `Cancel` or `Close`: the project stays open, its step gone. */
+  #leaveStep(project: Listed): void {
+    this.#openProject(project, "open");
+    this.#write();
+    this.requestUpdate();
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(
+      `moxi-ui-row[data-key="${CSS.escape(project.key)}"] [data-part="foot"] [data-action="remove"]`)?.focus());
+  }
+
+  /** One labelled row: the label dim at the left, its lines, and at the right its link or
+   * `Change folder`. */
+  #openedRow(project: Listed, item: OpenedRow) {
+    const link = item.link;
+    return html`<div class="orow" data-label=${item.label}><span class="ok">${item.label}</span>
+      <div class="ol">${item.lines.map((one) => html`<p class=${one.dim ? "d" : ""}>${one.parts.map((part, n) =>
+        part.heavy ? html`${n > 0 ? html`<span class="d">${JOIN}</span>` : ""}<strong>${part.text}</strong>`
+          : n > 0 ? html`<span class="d">${JOIN}${part.text}</span>` : part.text)}</p>`)}</div>
+      ${link !== null ? this.#pageLink(link.module, link.text, link.route)
+        : item.changeFolder ? html`<button type="button" class="oa fix" data-action="change-folder"
+          @click=${() => this.#editOpen(project)}>${CHANGE_FOLDER}</button>` : nothing}
+    </div>`;
+  }
 
   updated(): void {
-    if (this.#placed) return;
-    const host = this.renderRoot.querySelector('[data-part="add-form"]');
-    if (host === null) return;
-    this.#placed = true;
-    const missing = (): void => {
-      this.#missing = true;
-      this.requestUpdate();
-    };
-    place(host, "projects", "add").then((element) => { if (element === null) missing(); }, missing);
+    if (this.#scrollTo !== null) {
+      const target = this.#open === null ? null
+        : this.renderRoot.querySelector(`moxi-ui-row[data-key="${CSS.escape(this.#open)}"]`);
+      this.#scrollTo = null;
+      target?.scrollIntoView({ block: "nearest" });
+    }
+    const panel = this.renderRoot.querySelector<HTMLElement>("moxi-projects-panel");
+    this.toggleAttribute("data-side", panel !== null && !panel.hidden);
   }
 }
 
