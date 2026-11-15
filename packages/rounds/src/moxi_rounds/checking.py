@@ -450,11 +450,12 @@ def _push(found: _Look, *, again: str) -> None:
     if done.returncode == 0:
         return
     said = (done.stderr or b"").decode(errors="replace").strip()
-    rebased = "non-fast-forward" in said or "fetch first" in said
-    fix = (f"the branch was rebased: push it yourself with --force-with-lease, then "
-           f"{again}" if rebased else f"fix what git says, then {again}")
-    raise Refused([Unmet(f"{shlex.join(argv)} was refused, so nothing is recorded: "
-                         f"{said or f'exit {done.returncode}'}", fix)])
+    # git's words are shown, not read: the way on names both cases.
+    raise Refused([Unmet(
+        f"{shlex.join(argv)} was refused, so nothing is recorded: "
+        f"{said or f'exit {done.returncode}'}",
+        f"fix what git says, then {again}; where the branch was rebased and the push is "
+        "not a fast-forward, push it yourself with --force-with-lease first")])
 
 
 def _by_ci(found: _Look, *, again: str) -> _ByCi:
