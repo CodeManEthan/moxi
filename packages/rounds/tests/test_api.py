@@ -342,22 +342,36 @@ def test_no_source_of_the_package_imports_repo_turns_or_comms():
             assert name not in text, f"{path.name} names {name}"
 
 
-def test_the_package_requires_no_repo_turns_or_comms():
+def _name(requirement: str) -> str:
+    """The distribution a requirement names, without its version or marker."""
+    return requirement.split(";")[0].split("<")[0].split(">")[0].split("=")[0].strip()
+
+
+def test_the_package_requires_none_of_repo_turns_or_comms_and_turns_only_as_its_extra():
     declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
     project = declared["project"]
-    named = [*project["dependencies"],
-             *(one for extra in project.get("optional-dependencies", {}).values()
-               for one in extra)]
+    extras = project.get("optional-dependencies", {})
+
+    required = {_name(one) for one in project["dependencies"]}
+    assert not required & {"moxi-repo", "moxi-turns", "moxi-comms"}
+    for extra, named in extras.items():
+        names = {_name(one) for one in named}
+        assert not names & {"moxi-repo", "moxi-comms"}
+        assert ("moxi-turns" in names) == (extra == "turns")
+    assert "turns" in extras
+
     installed = metadata.distribution("moxi-rounds").requires or []
+    for requirement in installed:
+        name = _name(requirement)
+        assert name not in {"moxi-repo", "moxi-comms"}
+        if name == "moxi-turns":
+            assert "extra == 'turns'" in requirement.replace('"', "'")
 
-    for requirement in (*named, *installed):
-        assert not requirement.startswith(("moxi-repo", "moxi-turns", "moxi-comms"))
 
-
-def test_the_package_registers_no_git_hook():
+def test_the_package_registers_its_module_and_its_turns_listener_and_no_git_hook():
     declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
-    assert set(declared["project"]["entry-points"]) == {"moxi.modules"}
+    assert set(declared["project"]["entry-points"]) == {"moxi.modules", "moxi.turns.listeners"}
 
     groups = {point.group for point in metadata.distribution("moxi-rounds").entry_points}
-    assert groups == {"moxi.modules"}
+    assert groups == {"moxi.modules", "moxi.turns.listeners"}
     assert "moxi.repo.git_hooks" not in groups
