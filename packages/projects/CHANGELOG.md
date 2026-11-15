@@ -5,6 +5,10 @@
 - The read API offers interface 2: interface 1 and `for_paths(paths)`, which answers the
   key of the project each path is in (or None) with one read of the store, by
   `for_path`'s rules. A module that calls it loads projects with `interface=2`.
+- The page's `/api/projects` gives each project `exists` (whether its root is a directory
+  now, null when the server can't say within 250 ms), and the answer `home` (the page
+  server's home folder) and `notes_installed`. A root on a mount that hangs holds at most
+  four of the page server's threads and never the list.
 
 ## 0.1.4 (2026-11-08)
 

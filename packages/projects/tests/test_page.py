@@ -30,7 +30,8 @@ import pytest
 
 import moxi.modules
 from moxi import modules, paths
-from moxi_projects import acts, api, cli, page, pagecheck, pagehandlers, rules, store
+from moxi_projects import (acts, api, cli, page, pagecheck, pagehandlers, pagestat, rules,
+                           store)
 
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
@@ -209,7 +210,7 @@ def test_every_root_is_marked_path_and_every_sentence_redact():
                               ("/api/agents-remove", "project"))
              for field in ("root", "notes_root")}
     assert {k for k, v in marks.items() if v == "path"} == roots | {
-        "/api/where store", "/api/where git"}
+        "/api/projects home", "/api/where store", "/api/where git"}
     assert {k for k, v in marks.items() if v == "redact"} == {
         "/api/kinds broken[].reason", "/api/add notes[]", "/api/add warnings[]",
         "/api/set notes[]", "/api/where note",
@@ -255,7 +256,8 @@ def test_each_component_is_a_built_asset_of_the_page():
 
 def test_projects_lists_every_project_by_key_as_the_read_api_does(golden_copy):
     body = read("/api/projects")
-    assert body == {"projects": [p.as_dict() for p in api.list_projects()]}
+    assert body["projects"] == [{**p.as_dict(), "exists": False}
+                                for p in api.list_projects()]
     assert [p["key"] for p in body["projects"]] == ["alpha", "Beta", "delta.web", "gamma"]
     alpha = body["projects"][0]
     assert alpha["agents"] == ["lead-a", "helper", "scout"]
@@ -264,12 +266,124 @@ def test_projects_lists_every_project_by_key_as_the_read_api_does(golden_copy):
 
 def test_projects_by_kind(golden_copy):
     assert [p["key"] for p in read("/api/projects", "kind=agent")["projects"]] == ["Beta"]
-    assert read("/api/projects", "kind=nothing") == {"projects": []}
+    assert read("/api/projects", "kind=nothing")["projects"] == []
 
 
 def test_no_store_yet_lists_nothing_and_makes_no_file(store_path):
-    assert read("/api/projects") == {"projects": []}
+    assert read("/api/projects")["projects"] == []
     assert not store_path.exists()
+
+
+# -- the list's home, notes and exists ---------------------------------------------------
+
+@pytest.fixture
+def own_pool(monkeypatch):
+    """A stat pool of the test's own, so no thread or pending stat leaks between tests."""
+    fresh = pagestat.Pool()
+    monkeypatch.setattr(pagestat, "_POOL", fresh)
+    return fresh
+
+
+def _exists(body: dict) -> dict[str, bool | None]:
+    return {p["key"]: p["exists"] for p in body["projects"]}
+
+
+def _register(*rows) -> None:
+    store.write(lambda conn: [store.insert(conn, key=k, root=str(r)) for k, r in rows])
+
+
+def test_exists_says_whether_each_root_is_a_dir_now(tmp_path, own_pool):
+    there = tmp_path / "there"
+    there.mkdir()
+    a_file = tmp_path / "a-file"
+    a_file.write_text("")
+    _register(("there", there), ("gone", tmp_path / "gone"), ("file", a_file),
+              ("under-file", a_file / "sub"))
+    assert _exists(read("/api/projects")) == {"there": True, "gone": False, "file": False,
+                                              "under-file": False}
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                    reason="POSIX permissions, which root ignores")
+def test_exists_is_null_when_the_stat_fails_another_way(tmp_path, own_pool):
+    shut = tmp_path / "shut"
+    (shut / "proj").mkdir(parents=True)
+    _register(("proj", shut / "proj"))
+    shut.chmod(0)
+    try:
+        assert _exists(read("/api/projects")) == {"proj": None}
+    finally:
+        shut.chmod(0o755)
+
+
+def test_a_stat_that_hangs_reads_null_inside_the_bound_and_is_not_asked_again(
+        tmp_path, monkeypatch):
+    quick, slow = tmp_path / "quick", tmp_path / "slow"
+    quick.mkdir()
+    slow.mkdir()
+    _register(("quick", quick), ("slow", slow))
+    let_go = threading.Event()
+    asked: list[str] = []
+
+    def stat(path):
+        asked.append(path)
+        if path == str(slow):
+            let_go.wait(30)
+        return os.stat(path)
+
+    monkeypatch.setattr(pagestat, "_POOL", pagestat.Pool(stat=stat))
+    try:
+        start = time.monotonic()
+        assert _exists(read("/api/projects")) == {"quick": True, "slow": None}
+        assert time.monotonic() - start < 2
+        assert _exists(read("/api/projects")) == {"quick": True, "slow": None}
+        assert asked.count(str(slow)) == 1
+        assert asked.count(str(quick)) == 2
+    finally:
+        let_go.set()
+    deadline = time.monotonic() + 5
+    while not pagestat._POOL._out[str(slow)].ended.is_set():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    assert _exists(read("/api/projects")) == {"quick": True, "slow": True}
+    assert asked.count(str(slow)) == 1
+    assert _exists(read("/api/projects")) == {"quick": True, "slow": True}
+    assert asked.count(str(slow)) == 2
+
+
+def test_a_hung_mount_holds_at_most_four_threads(tmp_path):
+    let_go = threading.Event()
+    pool = pagestat.Pool(stat=lambda path: let_go.wait(30) and os.stat(path))
+    before = threading.active_count()
+    try:
+        found = pool.look([str(tmp_path / f"r{n}") for n in range(9)], timeout_s=0.05)
+        assert set(found.values()) == {None}
+        assert pool._threads == pagestat.WORKERS == 4
+        assert threading.active_count() - before == 4
+    finally:
+        let_go.set()
+
+
+def test_home_is_where_moxi_paths_places_it(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "the-home"))
+    assert read("/api/projects")["home"] == str(paths.home())
+    assert read("/api/projects")["home"] == str(tmp_path / "the-home")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="HOME and the user database")
+def test_an_empty_home_reads_as_unset_and_nothing_placing_one_is_null(monkeypatch):
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(paths, "_account_home", lambda: "/from/the/user/database")
+    assert read("/api/projects")["home"] == "/from/the/user/database"
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    assert read("/api/projects")["home"] is None
+
+
+def test_notes_installed_says_whether_notes_is(site):
+    assert read("/api/projects")["notes_installed"] is False
+    site.module("notes")
+    moxi.modules.reset()
+    assert read("/api/projects")["notes_installed"] is True
 
 
 def test_project_matches_its_key_ignoring_case(golden_copy):

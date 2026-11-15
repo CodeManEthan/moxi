@@ -1,6 +1,8 @@
 """projects' page: the routes its page server answers, declared as data.
 
-    GET  /api/projects       every project, by key; only those of `kind` when it is given
+    GET  /api/projects       every project, by key, with whether its root is a directory
+                             now; only those of `kind` when it is given; this server's
+                             home folder, and whether notes is installed
     GET  /api/project        one project, by `key` (matched ignoring case)
     GET  /api/kinds          the kinds a project may have, and every contribution or kind
                              that can't be used, with why
@@ -70,9 +72,7 @@ _SAYS = lb.Out("string", mark="redact")
 _MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)
 _NAMES = lb.Out("list", items=_TEXT)
 
-#: One project, as the read API's `Project` gives it: `agents` is the lead first, then
-#: the associated set; `created` UTC, ISO 8601 with `Z`.
-PROJECT = lb.Out("table", items={
+_PROJECT_FIELDS = {
     "key": _TEXT,
     "root": _PATH,
     "kind": _TEXT,
@@ -81,7 +81,15 @@ PROJECT = lb.Out("table", items={
     "agents": _NAMES,
     "notes_root": _MAYBE_PATH,
     "created": _TEXT,
-})
+}
+#: One project, as the read API's `Project` gives it: `agents` is the lead first, then
+#: the associated set; `created` UTC, ISO 8601 with `Z`.
+PROJECT = lb.Out("table", items=_PROJECT_FIELDS)
+#: One project in the list: a `PROJECT` and `exists`, true when its root is a directory
+#: now, false when nothing is there or it is not a directory, null when this server
+#: can't say (the `stat` failed another way, or did not answer within the list's bound).
+LISTED = lb.Out("table", items={**_PROJECT_FIELDS,
+                                "exists": lb.Out("bool", nullable=True)})
 
 #: One kind: `module` is `projects` for a built-in one; `mint` is how a create makes its
 #: root, `git`, `dir` or `refuse` (the page hides create for `refuse`).
@@ -89,7 +97,11 @@ KIND = lb.Out("table", items={"name": _TEXT, "doc": _TEXT, "module": _TEXT, "min
 #: A contribution that won't load, or a kind that is blocked, and why.
 BROKEN = lb.Out("table", items={"module": _TEXT, "reason": _SAYS})
 
-PROJECTS = {"projects": lb.Out("list", items=PROJECT)}
+#: The list: every project, `home`, this server's home folder (null when nothing places
+#: one), under which a root is written `~/...`, and `notes_installed`, whether notes is
+#: installed, without which no notes root is stored.
+PROJECTS = {"projects": lb.Out("list", items=LISTED), "home": _MAYBE_PATH,
+            "notes_installed": lb.Out("bool")}
 ONE = {"project": PROJECT}
 KINDS = {"found": lb.Out("list", items=KIND), "broken": lb.Out("list", items=BROKEN)}
 #: `store` is the store file; `git` the git a create would run, null when there is none
@@ -167,6 +179,6 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "BROKEN", "BUDGET", "KIND", "KINDS", "ONE",
-           "PAGE", "PROJECT", "PROJECTS", "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE",
+__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "BROKEN", "BUDGET", "KIND", "KINDS", "LISTED",
+           "ONE", "PAGE", "PROJECT", "PROJECTS", "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE",
            "WRITTEN"]

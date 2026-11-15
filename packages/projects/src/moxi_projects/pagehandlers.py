@@ -5,7 +5,9 @@ so every store call, contribution and `git init` here runs off the loop. None ca
 `moxi.aio.offload` itself: a worker thread has no loop to offload from.
 
 **Reads** call the read API's functions (`list_projects`, `get`, `kinds`) and the remove
-status read, and never write. `/api/where` names the store file this server reads and the
+status read, and never write. The list adds whether each root is a directory now, asked
+through `pagestat`, which never lets a read wait on a hung mount past its bound, the home
+folder this server places and whether notes is installed. `/api/where` names the store file this server reads and the
 git a create would run, since the page server takes the browser shell's environment and
 not the terminal's, and the two can differ. Its `note` is the line a write would be
 refused with now (below), or null.
@@ -50,7 +52,9 @@ from __future__ import annotations
 import shutil
 from typing import Any
 
-from moxi_projects import acts, api, contributions, pagecheck, store
+import moxi.paths
+
+from moxi_projects import acts, api, contributions, pagecheck, pagestat, store
 from moxi_projects.api import DEFAULT_KIND, Busy, Project, ProjectsError
 from moxi_projects.errors import NoGit
 from moxi_projects.page import STATUS_ROUTE, lb
@@ -89,13 +93,30 @@ def _project(project: Project) -> dict[str, Any]:
 
 # -- reads ----------------------------------------------------------------------------------
 
+#: A root's `exists`, from what `pagestat.look` found there.
+_EXISTS = {pagestat.DIR: True, pagestat.OTHER: False, pagestat.MISSING: False, None: None}
+
+
+def _home() -> str | None:
+    """This server's home folder as `moxi.paths.home()` places it, or None when nothing
+    places one."""
+    try:
+        return str(moxi.paths.home())
+    except LookupError:
+        return None
+
+
 def projects(call: Any) -> dict[str, Any]:
-    """`GET /api/projects[?kind=K]`: every project, by key, as `moxi projects list`."""
+    """`GET /api/projects[?kind=K]`: every project, by key, as `moxi projects list`, each
+    with `exists`; `home` and `notes_installed`. Each root's `stat` goes through
+    `pagestat.look`, so the read never waits on the filesystem past its bound."""
     try:
         found = api.list_projects(call.query.get("kind"))
     except ProjectsError as exc:
         raise _answer(exc) from None
-    return {"projects": [_project(p) for p in found]}
+    seen = pagestat.look(p.root for p in found)
+    return {"projects": [{**_project(p), "exists": _EXISTS[seen[p.root]]} for p in found],
+            "home": _home(), "notes_installed": contributions.notes_present()}
 
 
 def project(call: Any) -> dict[str, Any]:
