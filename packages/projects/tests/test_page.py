@@ -481,7 +481,7 @@ def test_a_symlinked_spelling_of_a_root_is_that_root(tmp_path, own_pool):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
-def test_a_symlink_to_a_folder_inside_a_root_is_inside(tmp_path, own_pool):
+def test_a_symlink_into_a_root_is_inside(tmp_path, own_pool):
     root = tmp_path / "real"
     (root / "src").mkdir(parents=True)
     link = tmp_path / "into"
