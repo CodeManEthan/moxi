@@ -50,6 +50,23 @@
   `Change folder`), `Agents` (who leads, what the facts modules say of them, and who also
   works there), the other sections, and `Notes`; each section's link shows that module's
   page. Its foot holds `Edit` and `Remove`, which replace its old field list.
+- `Add a project` opens a panel at the window's right instead of the old add form. It
+  takes the folder first, with `~` or in full, and says what is there as you type:
+  whether the folder exists and is a git repository, whether it is a project's already,
+  inside one or a worktree of one, or that nothing is there yet, with `Create the
+  folder`. The name fills from the folder's last part until you type one; `More` holds
+  the kind, the lead and the notes folder.
+- `Edit` opens the same panel over a project instead of the old edit form: folder, kind,
+  lead, the agents who also work there and the notes folder. `Save` sends only what
+  changed, the agents taken off first and the agents added last, so the lead can move
+  onto an agent taken off in one save; a refusal part way says what was saved before it.
+- Remove is a step under the opened project instead of the shell's confirm sheet: what
+  goes and what stays, or every thing that refuses the remove now with a way to it, and
+  `Remove from Moxi`. A removed project's row becomes one line with `Add it back`.
+- With a module that knows where you worked, the folders worked in that no project holds
+  show under the list, `Not a project` (or `Worked in this week` with no projects), one
+  line each with `Add`, which opens the Add panel with the folder and its name filled.
+- The README's page section describes the page as it now is.
 
 ## 0.1.4 (2026-11-08)
 

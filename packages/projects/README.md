@@ -116,9 +116,85 @@ With the `ui` extra (`moxi-ui`, the browser UI shell), projects has a page in th
 `/m/projects/`. Each change on it runs the same code as the `moxi projects` command you
 would run in a terminal, and refuses where that command refuses, before it makes anything.
 
-- **Where this page acts.** The store file the page reads and writes, and the git a create
-  would run, or none. Both are the shell's, found from the environment the shell was
-  started with, and can differ from your terminal's.
+- **The list.** One row per project: its key, its folder in `~` form, its kind when it is
+  not a code project (`agent's home`, or a contributed kind's name), at the right when it
+  was last active, and `Open`. A row has a second line only when there is something to
+  say: a folder that doesn't exist, with `Change folder`, and what other modules report
+  of it (see Facts on the Projects page). With a module that knows when each project was
+  worked in, projects with bad news come first and the rest follow by latest activity;
+  without one the list is by key, and bad news stays on its row's second line. Past
+  twelve projects the list gains a find field (by name or folder), a `Kind` filter when
+  it holds more than one kind, and an `Earlier` fold for the projects not used in 30
+  days, which only a module that knows all activity can say.
+- **Reading.** The page reads its list when it opens, when its tab is shown again, after
+  each change and on `moxi-projects-changed`; a read still out after 400 ms shows
+  `Reading…`. While the page server isn't answering, the last list stays, dim and with
+  no acts. A store that can't be read, is too new or stays locked shows its reason and
+  fix, and no rows.
+- **Addresses.** `/m/projects/open/<key>` opens a project, `edit/<key>` opens it with the
+  Edit panel, `remove/<key>` with its remove step, and `add` the Add panel. A key is
+  matched ignoring case; one that names no project opens the list with a line saying so.
+  Opening and closing rewrite the address without a new history entry, so Back leaves the
+  page.
+- **An opened project.** One labelled row each: what other modules report with a rank (a
+  failing service, say) first; `Folder`, its folder and kind, or that it doesn't exist,
+  with `Change folder`; `Agents`, who leads, whether the lead is running where a module
+  can say so, and who else works there; the other modules' rows; and `Notes`, while the
+  notes module is installed. A module's row links to that module's page. The foot holds
+  `Edit` and `Remove`.
+- **Folders that are not projects.** With a module that knows where you worked, the
+  folders it says you worked in that no project holds show under the list as `Not a
+  project` (`Worked in this week` when there are no projects yet), one line each, newest
+  first, with `Add`, which opens the Add panel with that folder and its name filled. Five
+  show, then how many more there are, with `Show`.
+- **Add.** `Add a project` opens a panel at the window's right. Give the folder first, in
+  full or starting with `~`; the panel says what is there: whether the folder exists and
+  is a git repository, whether it is a project's already, inside one or a worktree of
+  one, or that nothing is there yet, with `Create the folder` (`Create the folder and run
+  git init` for a kind that makes a repository; hidden for a kind that refuses to make
+  its root). The name fills from the folder's last part until you type one; it can't be
+  changed later, since everything other modules file under the project is filed by it.
+  `More` holds the kind, the lead and, with the notes module, the notes folder. The page
+  gives `git init` 20 seconds, so its answer arrives inside the shell's deadline; the
+  terminal's add gives it 30. If the shell's `PATH` has no git, a create is refused and
+  the answer says how to fix it for good: set `PATH` in the service manager's environment
+  and run `moxi ui stop`, or run the add in a terminal. When an add's answer is lost, the
+  page reads its list again and says the project may have been added.
+- **Edit.** `Edit`, or `Change folder`, opens the same panel over the project: its folder,
+  kind, lead, the agents who also work there (each with `Take off`, and a field to add
+  one), and, with the notes module, its notes folder; the name stays as it is. `Save`
+  sends only what changed, in an order the lead rule allows: the agents taken off, then
+  the fields (`moxi projects set`), then the agents added (`moxi projects agents`). The
+  first refusal stops it, and the panel says what was saved before it.
+- **Folders and `~`.** A folder must be an absolute path, or start with `~/` (`~\` too on
+  Windows), or be `~` alone: the page expands `~` to the home folder only once it has
+  found the shell's home is your terminal's (below), so `~` means what it means in your
+  terminal. It refuses a relative path, `~user`, and a `~` path while nothing places the
+  home.
+- **Kinds and contributions that won't load.** A contribution that won't load, or a kind
+  that is blocked, is named in a dim line under the panel's `Kind` until it is repaired
+  or uninstalled. While a module's contribution won't load, a remove is refused, and so
+  is an add or a kind change to a kind no module that loads declares, since it may be
+  that module's; any other add goes ahead without it, and the panel shows a warning beside
+  the success: which module was skipped, that its defaults and checks were not applied,
+  and the fix (repair it, or `moxi uninstall` it). `moxi projects add` prints the same
+  warning on one line to stderr and exits 0. A blocked kind can't be added or set.
+- **Remove.** Remove asks once, in a step under the opened project: what goes (the
+  project's entry in Moxi) and what stays (its folder and every file in it, its notes
+  folder, and what other modules keep of it), and nothing is sent until you press
+  `Remove from Moxi`; Cancel sends nothing. Before that the page reads what would refuse
+  the remove now (associated agents, with `Edit`, and each module that still holds the
+  project, with its sentence and its page), and while anything does the button is off.
+  Removing deletes nothing on disk, only projects' row: the project's row becomes one
+  line saying so, with `Add it back`, which adds it again as it was. The remove is an
+  ordinary act, not one the shell's sheet confirms: the step is the confirmation, and
+  every remove is still refused while anything holds the project. Each press carries a
+  job of its own, under which the outcome is kept in the store for a day, so the same
+  press sent again, two sent at once, or one sent again after the page server restarts,
+  all get the first answer and act once. When an answer is lost, the page reads the
+  outcome kept under its job. A store newer than this version of projects reads, an
+  unreadable or locked one, or none yet, is answered at once, and nothing is written.
+  `moxi projects remove` in a terminal keeps nothing.
 - **The page writes only where your terminal does.** When you type a `moxi` command in a
   terminal of your own, Moxi records the environment variables that place its folders
   (projects records nothing itself; `moxi paths moxi` names the file). Before every
@@ -129,49 +205,10 @@ would run in a terminal, and refuses where that command refuses, before it makes
   refuses too while nothing is recorded yet. The refusal names what differs, the variables
   to set for the browser shell and their values in your terminal, where to set them so
   the shell has them at every login, and the step that restarts it; or run the command in
-  a terminal. The same line shows as a note under "Where this page acts", and the list
-  still reads. Commands in a terminal never refuse over the record. The check is ui's, so
-  the page needs a `moxi-ui` that offers it; with an older one every change is refused
-  with the step that updates it.
-- **The list.** Every project with its key, kind and root, filtered by kind as `moxi
-  projects list --kind` filters it. A contribution that won't load, or a kind that is
-  blocked, is named beside the filter until it is repaired or uninstalled. While a
-  module's contribution won't load, a remove is refused, and so is an add or a kind change
-  to a kind no module that loads declares, since it may be that module's; any other add
-  goes ahead without it, with a warning (see Add). A blocked kind can't be added or set.
-  Open a project to see its fields and edit its root, its kind and, while the
-  notes module is installed, its notes root (`moxi projects set`), set or clear its lead,
-  and add or remove associated agents (`moxi projects agents add` and `remove`). A root
-  must be an absolute path, or start with `~/` (`~\` too on Windows), or be `~` alone:
-  the page expands `~` to the home folder only once it has found the shell's home is your
-  terminal's (the check above), so `~` means what it means in your terminal. It refuses a
-  relative path, `~user`, and a `~` path while nothing places the home.
-- **Add.** The form `moxi projects add` takes: key, root (leave it empty when the kind's
-  module gives one), kind, lead, the notes root while the notes module is installed, and
-  create for a kind that makes its root. Create is hidden for a kind that refuses it. The
-  page gives `git init` 20 seconds, so its answer arrives inside the shell's deadline; the
-  terminal's add gives it 30. If the shell's `PATH` has no git, a create is refused and the
-  answer says how to fix it for good: set `PATH` in the service manager's environment and
-  run `moxi ui stop`, or run the add in a terminal. When an add's answer is lost, the page
-  reads its list again and, after a create, says the directory may exist. An add made
-  while a module's contribution won't load shows a warning beside the success: which
-  module was skipped, that its defaults and checks were not applied, and the fix (repair
-  it, or `moxi uninstall` it). `moxi projects add` prints the same warning on one line to
-  stderr and exits 0.
-- **Remove.** Remove asks once, in a step under the opened project: what goes (the
-  project's entry in Moxi) and what stays (its folder and every file in it), and nothing
-  is sent until you press `Remove from Moxi`; Cancel sends nothing. Before that the page
-  reads what would refuse the remove now (associated agents, and each module that still
-  holds the project, with its sentence), and while anything does the button is dimmed.
-  Removing deletes nothing on disk, only projects' row, and adding the same folder under
-  the same name puts it back. The remove is an ordinary act, not one the shell's sheet
-  confirms: the page's step is the confirmation, and every remove is still refused while
-  anything holds the project. Each press carries a job of its own, under which the outcome
-  is kept in the store for a day, so the same press sent again, two sent at once, or one
-  sent again after the page server restarts, all get the first answer and act once. When
-  an answer is lost, the page reads the outcome kept under its job. A store newer than
-  this version of projects reads, an unreadable or locked one, or none yet, is answered at
-  once, and nothing is written. `moxi projects remove` in a terminal keeps nothing.
+  a terminal. The same line shows dim above the panel's button and the remove step's, and
+  the list still reads. Commands in a terminal never refuse over the record. The check is
+  ui's, so the page needs a `moxi-ui` that offers it; with an older one every change is
+  refused with the step that updates it.
 
 ### Components
 
