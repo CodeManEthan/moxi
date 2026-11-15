@@ -1,7 +1,7 @@
 """The release step of `moxi-dev check`: what every package must hold before it is published.
 
 It reads the root `pyproject.toml`'s workspace members and each member's own
-`pyproject.toml`, whatever the change touched, and checks three things:
+`pyproject.toml`, whatever the change touched, and checks four things:
 
 1. The catalogue, `catalogue.toml` in the core's package (the member named `moxi`),
    lists exactly the members that declare a `moxi.modules` entry point: one line for
@@ -21,6 +21,9 @@ It reads the root `pyproject.toml`'s workspace members and each member's own
    current version as the ref, `<distribution>-v<version>`, so the page PyPI shows for a
    version links to the files of that version. moxi-publishing owns the tag scheme and
    the CHANGELOG heading reader, and this step takes both from it.
+4. When the root's `[tool.moxi-publishing]` keeps a `ready` list, every member is on
+   exactly one of it and `not-ready`, so a member added to the workspace is never ready
+   until a commit says so. The reading is moxi-publishing's, the one its tag gate uses.
 
 Each problem names the member, the field and the fix. `scan` returns them all.
 """
@@ -87,7 +90,22 @@ def scan(root: Path) -> list[Problem]:
     problems += requirement_problems(members)
     for member in members:
         problems += metadata_problems(member)
+    problems += readiness_problems(root)
     return problems
+
+
+def readiness_problems(root: Path) -> list[Problem]:
+    """Each member on neither or both of the not-ready and ready lists, where the root
+    keeps a ready list."""
+    where = f"[tool.{tags.TABLE}]"
+    try:
+        wrong = tags.work_tree_workspace(str(root)).unlisted()
+    except tags.ReleaseError as exc:
+        return [Problem("pyproject.toml", where, f"can't be read ({exc})",
+                        f"make {tags.NOT_READY} and {tags.READY} lists of distribution names")]
+    return [Problem("pyproject.toml", where, f"{dist} is {said}",
+                    f"put {dist} on {tags.NOT_READY}, or on {tags.READY} once it is confirmed")
+            for dist, said in wrong.items()]
 
 
 def _read_member(root: Path, name: str, problems: list[Problem]) -> _Member | None:

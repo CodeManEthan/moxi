@@ -6,6 +6,9 @@
   package's own release tag at its current version (`.../blob/moxi-comms-v0.3.0/...`),
   not `main`; a relative link's fix gives that form. moxi-dev now requires
   moxi-publishing, whose tag scheme and CHANGELOG heading reader it uses.
+- The release step refuses a workspace member on neither or both of the root's
+  `[tool.moxi-publishing]` `not-ready` and `ready` lists, when the root keeps a `ready`
+  list, so a member added later never starts ready.
 
 ## 0.1.1 (2026-11-08)
 
