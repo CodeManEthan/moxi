@@ -41,6 +41,12 @@ TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 
+#: How long a wait gives something that must happen: a stream event, a read landing, a
+#: session dropped. The test proves that it happens, not how fast, so the bound is long; it
+#: costs time only when a test is failing. A wait for something that must not happen keeps
+#: its own short bound.
+LIVE_S = 30.0
+
 SESSION_KEYS = ["key", "harness", "pid", "session_id", "cwd", "started", "capabilities",
                 "endpoint_version", "mod_version", "trouble", "facts", "agents",
                 "read_error"]
@@ -84,7 +90,7 @@ class Odd:
         self._ready: concurrent.futures.Future = concurrent.futures.Future()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        self._ready.result(5)
+        self._ready.result(LIVE_S)
         self.dir.mkdir(parents=True, exist_ok=True)
         hello = {"address": self.address, "protocol": 2, "started": info.get("started", 0)}
         (self.dir / protocol.HELLO).write_text(json.dumps(hello))
@@ -240,7 +246,7 @@ class Stream:
 
     async def close(self) -> None:
         self._gone.set()
-        async with asyncio.timeout(3):
+        async with asyncio.timeout(LIVE_S):
             await self.task
 
 
@@ -256,11 +262,77 @@ def row_of(data: dict, key: str) -> dict | None:
     return next((row for row in data["sessions"] if row["key"] == key), None)
 
 
-def watched(*endpoints, timeout: float = 5.0) -> None:
+def watched(*endpoints, timeout: float = LIVE_S) -> None:
     """Wait until each fake endpoint has a watcher: the reader's watch of it."""
     deadline = time.monotonic() + timeout
     while not all(ep._watchers for ep in endpoints):
         assert time.monotonic() < deadline, "the reader's watch never started"
+        time.sleep(0.02)
+
+
+class Dirty(threading.Event):
+    """A held session's dirty flag that counts. `sets` is how many times it was set; `read`
+    is how many of those sets a finished read pass covers. The reads thread clears the flag
+    just before a pass, so the pass covers every set made before the clear, and waits on it
+    just after the pass, once the pass's reads have reported."""
+
+    def __init__(self):
+        super().__init__()
+        self._count_lock = threading.Lock()
+        self._sets = 0
+        self._taken = 0
+        self._read = 0
+
+    def set(self):
+        with self._count_lock:
+            self._sets += 1
+            super().set()
+
+    def clear(self):
+        with self._count_lock:
+            self._taken = self._sets
+            super().clear()
+
+    def wait(self, timeout=None):
+        with self._count_lock:
+            self._read = self._taken
+        return super().wait(timeout)
+
+    def counts(self) -> tuple[int, int]:
+        """`(sets, read)`, taken together."""
+        with self._count_lock:
+            return self._sets, self._read
+
+
+def counted_reads(monkeypatch) -> list:
+    """Give each session the reader holds from now on a counting dirty flag; returns the
+    list each new held session joins."""
+    made = []
+
+    class Counted(pagereader._Held):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # The threads start later, in `start()`; this is the first set, as the base's.
+            self.dirty = Dirty()
+            self.dirty.set()
+            made.append(self)
+
+    monkeypatch.setattr(pagereader, "_Held", Counted)
+    return made
+
+
+def read_through(made: list, count: int, timeout: float = LIVE_S) -> None:
+    """Wait until `count` sessions are held, each has opened its watch, and every read each
+    started has reported. A held session's flag is set once when it is made and once when
+    its watch opens, after the watch is in place, so two sets covered by a finished pass
+    means the read the watch's opening asked for has reported, whether it was a pass of its
+    own or the first pass began after it."""
+    deadline = time.monotonic() + timeout
+    while True:
+        seen = [held.dirty.counts() for held in made]
+        if len(seen) == count and all(sets >= 2 and read == sets for sets, read in seen):
+            return
+        assert time.monotonic() < deadline, f"the reads never settled: (sets, read) {seen}"
         time.sleep(0.02)
 
 
@@ -379,13 +451,12 @@ def test_a_new_endpoint_appears_within_one_rescan(make_endpoint):
     async def go():
         stream = Stream(served())
         try:
-            name, data = await stream.next(5)
+            name, data = await stream.next(LIVE_S)
             assert name == "sessions" and keys(data) == [a.dir.name]
             assert stream.status == 200
             b, _ = make_endpoint(session_id="s-2")
             began = time.monotonic()
-            data = await stream.until(lambda d: b.dir.name in keys(d),
-                                      pagereader.RESCAN_S + 1.5)
+            data = await stream.until(lambda d: b.dir.name in keys(d), LIVE_S)
             assert time.monotonic() - began <= pagereader.RESCAN_S + 1.5
             assert set(keys(data)) == {a.dir.name, b.dir.name}
         finally:
@@ -394,17 +465,24 @@ def test_a_new_endpoint_appears_within_one_rescan(make_endpoint):
     run(go())
 
 
-def test_session_gone_drops_it_and_a_later_scan_does_not_bring_it_back(make_endpoint):
+def test_session_gone_drops_it_and_a_later_scan_does_not_bring_it_back(make_endpoint,
+                                                                         monkeypatch):
     a, _ = make_endpoint(session_id="s-1")
     b, _ = make_endpoint(session_id="s-2")
+    made = counted_reads(monkeypatch)
 
     async def go():
         stream = Stream(served())
         try:
-            await stream.until(lambda d: len(d["sessions"]) == 2, 5)
-            await asyncio.to_thread(watched, a, b)
+            # Every read of both sessions has reported before b stops: the first reads and
+            # the facts read each watch's opening asks for. Each facts read carries a new
+            # `at`, so one reporting after the stop would publish again.
+            await stream.until(lambda d: len(d["sessions"]) == 2 and all(
+                row["facts"] is not None and row["agents"] is not None
+                for row in d["sessions"]), LIVE_S)
+            await asyncio.to_thread(read_through, made, 2)
             b.stop("the session ended")
-            data = await stream.until(lambda d: b.dir.name not in keys(d), 1.5)
+            data = await stream.until(lambda d: b.dir.name not in keys(d), LIVE_S)
             assert keys(data) == [a.dir.name]
             # Two scans later it is still gone, and nothing else was published.
             with pytest.raises(TimeoutError):
@@ -422,14 +500,14 @@ def test_a_turn_start_and_end_update_turn_open_and_turn_number(make_endpoint):
     async def go():
         stream = Stream(served())
         try:
-            await stream.until(lambda d: turn(d, key) == (0, False), 5)
+            await stream.until(lambda d: turn(d, key) == (0, False), LIVE_S)
             fake.start_turn()
             began = time.monotonic()
-            await stream.until(lambda d: turn(d, key) == (1, True), 1.5)
+            await stream.until(lambda d: turn(d, key) == (1, True), LIVE_S)
             fake.end_turn()
-            await stream.until(lambda d: turn(d, key) == (1, False), 1.5)
+            await stream.until(lambda d: turn(d, key) == (1, False), LIVE_S)
             fake.start_turn()
-            await stream.until(lambda d: turn(d, key) == (2, True), 1.5)
+            await stream.until(lambda d: turn(d, key) == (2, True), LIVE_S)
             assert time.monotonic() - began < 4
         finally:
             await stream.close()
@@ -446,10 +524,10 @@ def test_a_second_stream_gets_the_current_value_first(make_endpoint):
         app = served()
         first = Stream(app)
         try:
-            await first.until(lambda d: turn(d, key) == (1, True), 5)
+            await first.until(lambda d: turn(d, key) == (1, True), LIVE_S)
             second = Stream(app)
             try:
-                _, data = await second.next(1)
+                _, data = await second.next(LIVE_S)
                 assert turn(data, key) == (1, True)
             finally:
                 await second.close()
@@ -468,11 +546,10 @@ def test_trouble_passes_through_and_follows_the_endpoint(make_endpoint):
     async def go():
         stream = Stream(served())
         try:
-            data = await stream.until(lambda d: row_of(d, key) is not None, 5)
+            data = await stream.until(lambda d: row_of(d, key) is not None, LIVE_S)
             assert row_of(data, key)["trouble"] == "the host is loading the thread"
             fake.trouble = None
-            data = await stream.until(lambda d: row_of(d, key)["trouble"] is None,
-                                      pagereader.RESCAN_S + 1.5)
+            data = await stream.until(lambda d: row_of(d, key)["trouble"] is None, LIVE_S)
             assert row_of(data, key)["read_error"] is None
         finally:
             await stream.close()
@@ -501,11 +578,14 @@ def test_an_endpoint_that_hangs_stalls_neither_the_topic_nor_the_read(make_endpo
         stream = Stream(app)
         try:
             data = await stream.until(
-                lambda d: (row_of(d, "claude-hung") or {}).get("read_error") is not None, 3)
+                lambda d: (row_of(d, "claude-hung") or {}).get("read_error") is not None,
+                LIVE_S)
             hung_row = row_of(data, "claude-hung")
             assert hung_row["facts"] is None and hung_row["agents"] is None
             assert "watch" in hung_row["read_error"]
             fake.start_turn()
+            # The short bound is the claim that the topic is not stalled: a topic held up
+            # by the hung reads would come free when their client timeouts end.
             await stream.until(lambda d: turn(d, key) == (1, True), 1.5)
             began = time.monotonic()
             status, data = await get(app)
@@ -527,10 +607,12 @@ def test_an_endpoint_whose_hello_hangs_stalls_neither_the_topic_nor_the_read(mak
         app = served()
         stream = Stream(app)
         try:
-            await stream.until(lambda d: turn(d, key) == (0, False), 5)
+            await stream.until(lambda d: turn(d, key) == (0, False), LIVE_S)
             odd("claude-mute", info(), hold_hello=True)
             await asyncio.sleep(pagereader.RESCAN_S + 0.5)     # a scan is now held on it
             fake.start_turn()
+            # The short bound is the claim that the topic is not stalled: a topic held up
+            # by the held scan would come free when its connect timeout ends.
             await stream.until(lambda d: turn(d, key) == (1, True), 1.5)
             began = time.monotonic()
             status, data = await get(app)
@@ -575,7 +657,9 @@ def test_a_failed_read_keeps_the_last_agents_and_says_so(make_endpoint, monkeypa
     async def go():
         stream = Stream(served())
         try:
-            await stream.until(lambda d: turn(d, key) == (0, False), 5)
+            # Its first agents read has landed: that is the agents a failed read keeps.
+            await stream.until(lambda d: turn(d, key) == (0, False)
+                               and row_of(d, key)["agents"] is not None, LIVE_S)
             await asyncio.to_thread(watched, ep)
             failing.set()
             fake.start_turn()
@@ -584,14 +668,14 @@ def test_a_failed_read_keeps_the_last_agents_and_says_so(make_endpoint, monkeypa
             # and one the opening queued can read agents again after `failing` clears while
             # the turn is still open. So each wait is for the error and the turn together.
             data = await stream.until(lambda d: row_of(d, key)["read_error"] is not None
-                                      and turn(d, key) == (1, True), 5)
+                                      and turn(d, key) == (1, True), LIVE_S)
             assert row_of(data, key)["read_error"] == (
                 "turns could not read this session's agents; what is shown may be old")
             assert row_of(data, key)["agents"] == {"entries": [], "complete": True}
             failing.clear()
             fake.end_turn()
             await stream.until(lambda d: row_of(d, key)["read_error"] is None
-                               and turn(d, key) == (1, False), 5)
+                               and turn(d, key) == (1, False), LIVE_S)
         finally:
             await stream.close()
 
@@ -619,7 +703,7 @@ def test_the_reader_starts_on_the_first_ask_and_stop_closes_every_watch(make_end
     assert reader is not None
     watched(ep)
     reader.stop()
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + LIVE_S
     while ep._watchers and time.monotonic() < deadline:
         time.sleep(0.02)
     assert not ep._watchers
