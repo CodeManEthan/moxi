@@ -1077,6 +1077,9 @@ def _verdict(args, out) -> int:
         stages = ", ".join(done.event.get("stages") or ())
         print(f"recorded for {done.name}: the major decisions of {stages}, by "
               f"{one.by}, model {one.model}", file=out)
+    elif one.kind == "retro":
+        print(f"recorded for {done.name}: the retrospective, by {one.by}, model "
+              f"{one.model}", file=out)
     elif one.stage is not None:
         base = "none" if one.merge_base is None else one.merge_base[:12]
         print(f"recorded for {done.name}: {one.verdict} for {one.stage} at "
@@ -1097,7 +1100,8 @@ def _verdict(args, out) -> int:
         if decision.state == "open":
             print(f"  his to rule: {decisions.rule_line(done.name, decision.key)}",
                   file=out)
-    if one.kind == "majors":
+    if one.kind in ("majors", "retro"):
+        # Neither names a design version or a build: no standing or gates to print.
         _warn_of(done.failed, args.prog, args.verb)
         return codes.OK
     if one.stage is not None:
