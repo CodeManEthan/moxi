@@ -145,8 +145,31 @@ def test_a_slice_over_the_limit_is_refused_naming_its_minutes_and_the_limit(buil
 
     said = str(caught.value)
     assert "1c of B1 is given 60 minutes, over the limit of 45 (slice_minutes)" in said
-    assert "cut the slice in two" in said
+    # The fix flow has no design to cut the slice in.
+    assert "cut the slice" not in said
+    assert ("raise slice_minutes in the project's settings: with no design step, a "
+            "stage's slices are the ones its commission declared") in said
     assert events(built) == before
+
+
+def test_a_slice_over_the_limit_in_a_flow_with_a_design_is_cut_in_the_design(
+        git_repo, tmp_path):
+    from moxi import cli
+
+    assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
+    assert cli.main(["projects", "set", "proj-a", "--notes-root",
+                     str(tmp_path / "notes")]) == 0
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
+                       flow="small")
+    round_dir = tmp_path / "notes" / "rounds" / "a-round"
+    log.append(log.round_log(round_dir), "stage.declared",
+               {"id": "B1", "repo": "proj-a", "branch": "work", "after": [],
+                "slices": SLICES}, by="planner")
+
+    with pytest.raises(Refused) as caught:
+        size(brief(round_dir, 'stage = "B1"', 'slice = "1c"'))
+
+    assert "cut the slice in two in the design and fold it" in str(caught.value)
 
 
 def test_a_slice_the_stage_does_not_declare_is_refused_naming_its_slices(built):

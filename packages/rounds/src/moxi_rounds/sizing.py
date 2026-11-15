@@ -42,7 +42,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import builds, datablock, ending, folders, questions, stages, verdicts, write
+from . import (builds, datablock, ending, flows, folders, questions, stages, steps, verdicts,
+               write)
 from . import settings as own
 from . import state as states
 from .datablock import Entry, Key, Table
@@ -361,11 +362,16 @@ def size(target: str, stage_id: str, brief: Path | str, *, by: str, settings=Non
         if piece is None or not isinstance(piece.get("minutes"), int) \
                 or piece["minutes"] <= limit:
             return None
+        if flows.has(view.state.steps, steps.DESIGN):
+            fix = (f"cut the slice in two in the design and fold it, then size a brief "
+                   f"for each; or raise {LIMIT} in the project's settings")
+        else:
+            # No fold reaches a slice declared at commission.
+            fix = (f"raise {LIMIT} in the project's settings: with no design step, a "
+                   "stage's slices are the ones its commission declared")
         return Unmet(f"the slice {block.slice} of {stage_id} is given "
                      f"{piece['minutes']} minutes, over the limit of {limit} "
-                     f"({LIMIT}): a worker gets one piece, well under an hour",
-                     f"cut the slice in two in the design and fold it, then size a "
-                     f"brief for each; or raise {LIMIT} in the project's settings")
+                     f"({LIMIT}): a worker gets one piece, well under an hour", fix)
 
     def sized(view, result):
         if _same(view.state, stage_id, block) is not None:
