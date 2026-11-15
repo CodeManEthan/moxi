@@ -15,6 +15,8 @@
     GET /api/thread   the messages between two addresses, or by or to one, oldest
                       first, and on a refresh the newer ones and the rows in the books
                       of every recipient shown
+    POST /api/check   every check a send makes, as the operator, posting nothing
+    POST /api/send    one message to one address, posted as the operator
 
 The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
 --json` prints, and the `Roster` it was joined from; the mail read from one
@@ -22,8 +24,10 @@ The roster and its stream answer from `api.roster_rows()`, which `moxi comms age
 books in the page server's process on connections that can't write (`pagereads`), so
 they answer with the daemon down. `/api/roster`'s `today` is the page server's local date, `YYYY-MM-DD`,
 which the page words a day against; the topic leaves it out, so it publishes only when a
-row or the mail waiting changes. Every route is a read. `/api/mail` is the one route the
-gateway reaches: it holds names, counts and times, and no message text or path, so it
+row or the mail waiting changes. The acts run the send verb's own path as the operator's
+lane, in the page server's process (`pageacts`), and answer its outcome and refusal code,
+never its text. No act is the gateway's. `/api/mail` is the one route the gateway
+reaches: it holds names, counts and times, and no message text or path, so it
 carries no mark. Every message's `text` is marked `redact`.
 
 The browser UI shell starts the page server on the first request for comms' page, and
@@ -37,6 +41,9 @@ CLI or console scripts does. comms' distribution doesn't require ui, which comes
 from __future__ import annotations
 
 from moxi import modules
+
+from .machine_line import POSTURES
+from .record import MAX_CONTENT_LENGTH
 
 _ui = modules.load("ui", interface=3)
 if not _ui.ok:
@@ -229,6 +236,38 @@ THREAD = {
     })),
 }
 
+#: The body of `/api/check` and `/api/send`: `to` one address, `text` the message
+#: without its address line, at most the record's cap in characters, `posture` the reply
+#: it wants, `held` to hold it for the recipient's next turn, and `reply_to` the id (a
+#: string of digits) of the message it answers.
+SEND_BODY = {
+    "to": lb.Field("string", max=200),
+    "text": lb.Field("string", max=MAX_CONTENT_LENGTH),
+    "posture": lb.Field("enum", values=POSTURES),
+    "held": lb.Field("bool"),
+    "reply_to": lb.Field("string", required=False, max=20),
+}
+#: The acts' body cap in bytes: 16,000 characters can be 64,000 bytes of UTF-8, and
+#: 96,000 once JSON escapes them.
+SEND_BODY_CAP = 128 * 1024
+
+#: What `/api/check` and `/api/send` answer: the verb's `outcome` (`would-send`, `sent`,
+#: `refused`, `cache-unread`, `blocked`, `offline`, `failed` or `unknown`); the posted
+#: message's id, a string of digits, or null; each recipient's `delivery` (`live`,
+#: `held-cold`, `held-flag`, `waiting`, `unbound` or `operator`), with `cold_at`, line
+#: zero's time its cache goes or went cold in epoch seconds, or null; and `refusal`, the
+#: code of why nothing was posted, or null. No answer carries the verb's text.
+SENT = {
+    "outcome": lb.Out("string"),
+    "message_id": lb.Out("string", nullable=True),
+    "recipients": lb.Out("list", items=lb.Out("table", items={
+        "qualified": lb.Out("string"),
+        "delivery": lb.Out("string"),
+        "cold_at": lb.Out("float", nullable=True),
+    })),
+    "refusal": lb.Out("table", nullable=True, items={"code": lb.Out("string")}),
+}
+
 PAGE = lb.Page(
     routes=(
         lb.Route("/api/roster", "read", "moxi_comms.pagehandlers:roster",
@@ -254,9 +293,13 @@ PAGE = lb.Page(
                         "after": lb.Field("string", required=False, max=20),
                         "limit": lb.Field("int", required=False, max=100)},
                  returns=THREAD),
+        lb.Route("/api/check", "act", "moxi_comms.pageacts:check", body=SEND_BODY,
+                 body_cap=SEND_BODY_CAP, returns=SENT),
+        lb.Route("/api/send", "act", "moxi_comms.pageacts:send", body=SEND_BODY,
+                 body_cap=SEND_BODY_CAP, returns=SENT),
     ),
     assets="web",
 )
 
 __all__ = ["DELIVERY", "MAIL", "MAIL_STATE", "MESSAGE", "MESSAGES", "PAGE", "QUEUE", "ROSTER",
-           "ROW", "THREAD"]
+           "ROW", "SEND_BODY", "SEND_BODY_CAP", "SENT", "THREAD"]

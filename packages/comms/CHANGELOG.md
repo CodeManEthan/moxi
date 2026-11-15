@@ -66,6 +66,14 @@
   messages above it and adds `changed`: for the messages at or below it, the two names'
   rows in the delivery books, or, with one name, every row of that name's messages. It
   asks the daemon nothing.
+- comms' page server has two acts, `POST /api/check` and `POST /api/send`, which take
+  `{to, text, posture, held, reply_to}` (one address, at most 16,000 characters, a
+  posture always given) and run `moxi comms send --check` and `moxi comms send` as the
+  operator's lane, with `--new-name`. The operator is `MOXI_COMMS_OPERATOR` in the page
+  server's environment, else the directory's one operator; with neither the act refuses
+  with `operator-unknown`. Each answers `{outcome, message_id, recipients, refusal}`:
+  each recipient's `delivery` and `cold_at`, and the refusal's `code`, never the verb's
+  text. Neither is reachable through the phone's gateway.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the

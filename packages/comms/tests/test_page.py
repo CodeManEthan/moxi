@@ -180,12 +180,16 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_its_reads():
+def test_the_page_declares_its_reads_and_acts():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
     assert list(routes) == ["/api/roster", "/api/mail", "/api/events", "/api/messages",
-                           "/api/mail-state", "/api/queue", "/api/thread"]
-    assert all(r["kind"] == "read" and not r["confirmed"] for r in routes.values())
+                           "/api/mail-state", "/api/queue", "/api/thread", "/api/check",
+                           "/api/send"]
+    acts = {path for path, r in routes.items() if r["kind"] == "act"}
+    assert acts == {"/api/check", "/api/send"}
+    assert all(r["kind"] == "read" for path, r in routes.items() if path not in acts)
+    assert not any(r["confirmed"] for r in routes.values())
     assert not routes["/api/mail"]["query"] and not routes["/api/mail"]["stream"]
     assert routes["/api/events"]["stream"] and list(routes["/api/events"]["topics"]) == ["roster"]
     assert exported["assets"] == ["build-stamp.txt", "mail.js", "page.js", "roster.js"]
