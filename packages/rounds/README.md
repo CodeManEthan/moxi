@@ -81,6 +81,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds rule ROUND skip:STEP[:B<n>] --record PTR` | say that a step is not done, for the round or for one stage |
 | `moxi rounds rule ROUND skip-action:B<n>=ID --record PTR` | say that the finish action `ID` is not run for one stage: `finish` treats it as done and writes no record of it; the way out of a command that ran but whose result was lost, or that can't pass again |
 | `moxi rounds rule ROUND flow:NAME --record PTR` | move the round to another flow, whichever it is |
+| `moxi rounds rule ROUND credit:B<n> --record PTR` | credit to a stage's open build what its target gained by a fast-forward no reading of the build's explains: the build then reads `merged`, until `revoke:` takes the credit back |
 | `moxi rounds rule ROUND unstage:B<n> --record PTR` | take a stage out of the plan |
 | `moxi rounds rule ROUND unafter:B<n>=B<m> --record PTR` | make a stage wait for one stage fewer |
 | `moxi rounds mark ROUND Q<n> --blocks B<n>[,...]\|all`, `mark ROUND Q<n> --reopen` | make a question hold up more stages, or reopen a parked one |
@@ -102,6 +103,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
 | `moxi rounds list ROUND\|PROJECT --questions [--view docket\|ratify] [--json] [--out DIR]` | the questions written out as markdown; `--out` writes `questions.md` and `questions.json` into DIR; a round's two views are both given when `--view` is left out |
 | `moxi rounds drop ROUND --by operator\|lead --record PTR [--withdraw-questions]` | end a round short of its work |
+| `moxi rounds drop ROUND B<n> --by operator\|lead --record PTR` | drop the open build of one stage; the stage stays owed |
 
 No command closes a round: a round closes itself (see Closing).
 
@@ -610,10 +612,28 @@ its stages are finished: `show` says so, and such a round ends by `drop`.
 ends only a round that holds none of the operator's acts: no ruling, no question asked
 with his pointer, no opening on his go. The round's open and parked questions go to the
 project's list as they are, or with `--withdraw-questions`, which is the operator's
-alone, are withdrawn.
+alone, are withdrawn. Its open builds end with it, each branch's tip recorded, and
+the lead's drop is refused while one of them is not his to drop (below).
 
 A dropped round takes no new question and no new ruling. A correction of one of its
 rulings is still recorded, and its rulings are still marked as shown.
+
+`drop ROUND B<n>` drops the open build of one stage, and the round goes on. Who may
+drop it is read from git at the drop. The lead drops a build with no work a drop could
+lose: its branch is gone, or it is `empty` and holds no commit of its own (nothing but
+merges of the target), and it shares no commit with another build. Every other build,
+and one git can't read, is the operator's. `show` and `list --waiting` name, for each
+build to look at, who drops it and the command. The drop records the branch's tip and
+deletes nothing: the branch stays, so the work can be commissioned again, and the
+build's worktree and scratch folder are kept and named. No question or hold changes,
+and the stage stays owed.
+
+A build is `unclear` when its target was fast-forwarded onto its work and nothing on
+record says the branch held that work first. The operator either drops it or credits
+it: `rule ROUND credit:B<n> --record PTR` records the head as the build's work, and the
+build reads `merged`, owing its check, verification and ratification like any build
+merged by hand. A credit is taken only for that kind of `unclear`, and only when the
+head changes something against the build's base. `revoke:` takes it back.
 
 ## The store
 

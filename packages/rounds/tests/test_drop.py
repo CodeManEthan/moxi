@@ -102,7 +102,8 @@ def test_the_operator_drops_a_round_that_holds_his_rulings(rounds, capsys):
 
     [event] = added(round_log(rounds), before)
     assert event == {"actor": "curator", "type": "round.dropped", "at": event["at"],
-                     "by": "operator", "record": "comms:30", "questions": {}}
+                     "by": "operator", "record": "comms:30", "tips": [],
+                     "questions": {}}
     found = held(round_log(rounds))
     assert found.status == state.DROPPED
     assert found.ended == state.Ended(how="dropped", by="operator", record="comms:30",
@@ -428,7 +429,7 @@ def test_a_round_that_was_never_opened_is_not_dropped(rounds, capsys):
 @pytest.mark.parametrize("argv", [
     [A], [A, "--by", "checker", "--record", "comms:30"],
     ["proj-a", "--by", "operator", "--record", "comms:30"],
-    [A, "B1", "--by", "operator", "--record", "comms:30"],
+    [A, "B1", "B2", "--by", "operator", "--record", "comms:30"],
     ["--by", "operator", "--record", "comms:30"]])
 def test_a_call_that_cant_be_read_is_a_usage_error(rounds, capsys, argv):
     before = logs(rounds)

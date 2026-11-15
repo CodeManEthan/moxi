@@ -188,6 +188,9 @@ def _placed(state: states.State) -> tuple[dict[int, list[Sized]], dict[str, list
     taken: dict[int, list[Sized]] = {}
     waiting: dict[str, list[Sized]] = {}
     for event in state.history:
+        if event["type"] == "round.dropped":
+            # The builds still open end with their round.
+            open_of.clear()
         stage = event.get("stage")
         if not isinstance(stage, str):
             continue

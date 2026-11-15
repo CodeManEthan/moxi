@@ -112,13 +112,15 @@ TYPES = _types(
     # another log names the record it became there, `moved_to`. A skip of the questions
     # step for a stage lists the questions it lets that stage past, `covers`. A ruling
     # of the round's flow holds the name the flow had (`was`), the new name (`flow`)
-    # and its `steps`, and is the whole of the move. A ruling
+    # and its `steps`, and is the whole of the move. The operator's credit of a
+    # fast-forward names the build by its commission's line (`build`) and holds the
+    # head it credits (`head`). A ruling
     # that replaces an earlier one names it in `supersedes`, and one that takes an
     # earlier one back in `revokes`; the earlier ruling's line is never changed.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",
-               "revokes", "moved_to", "was", "flow", "steps"),
+               "revokes", "moved_to", "was", "flow", "steps", "build", "head"),
               required=("id", "record", "kind")),
     # Rulings of this log were put in front of the operator: their ids, and the pointer
     # to where he was shown them.
@@ -155,8 +157,10 @@ TYPES = _types(
     EventType("finish.done", ("stage", "tip")),
     # A dead holder's finish lock was cleared.
     EventType("lock.cleared", ("ref", "holder")),
-    # A build or the whole round was withdrawn: by whom, the pointer, each branch's tip,
-    # and where the questions went.
+    # A build or the whole round was withdrawn: by whom, the pointer, each open build's
+    # branch and its tip (`tips`, each `{"stage", "repo", "branch", "tip"}`, the tip
+    # None for a branch that is not there), and, for a round, where the questions
+    # went.
     EventType("build.dropped", ("stage", "by", "record", "tips", "questions")),
     EventType("round.dropped", ("by", "record", "tips", "questions")),
     # A thread of design verification was closed or its risk accepted.

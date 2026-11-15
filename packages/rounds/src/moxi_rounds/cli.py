@@ -34,6 +34,7 @@
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
                      [--as NAME]
+    moxi rounds drop ROUND B<n> --by lead|operator --record PTR [--as NAME]
     moxi rounds next [ROUND] [--json]
     moxi rounds next --schema design|build|step|majors|retro
     moxi rounds show ROUND [--json]
@@ -178,7 +179,14 @@ project's list, where they hold up nothing, and `open` of a later round of the p
 prints them, to be adopted by the round that takes the work up. A round that was dropped
 or closed takes no new question, no change to a question and no new ruling; a
 correction of one of its rulings is still recorded, and `mark --shown` still marks
-its rulings.
+its rulings. The builds still open end with it, each branch's tip recorded.
+`drop ROUND B<n>` drops the open build of one stage: the lead's only when git reads
+it `gone`, or `empty` with no commit of its own, sharing with no other build; any
+other is the operator's. The stage stays owed. A drop deletes no branch and removes
+no folder. `rule ROUND credit:B<n>` is the operator's word that what the target
+gained under the head of a build `unclear` by a fast-forward is that build's work:
+it then reads `merged`, owing its check, verification and ratification, until
+`revoke:` takes the credit back.
 A builder with a question for the operator tells its lead, and the lead asks it with
 `--build B<n>` in place of `--from`: its origin is that stage's open build at its
 branch's tip, and every listing says the lead asked it for the build's builder.
@@ -367,7 +375,9 @@ def _declare_rule(verbs) -> None:
             "--supersedes it replaces it, and the ITEM revoke:C<n> takes it back. "
             "The ITEM skip:STEP says a step is not done, skip-action:B<n>=ID that "
             "finish does not run one finish action for a stage and treats it as done, "
-            "and flow:NAME moves the round to another flow. unstage:B<n> takes a stage out of the plan, and "
+            "and flow:NAME moves the round to another flow. credit:B<n> credits to "
+            "a build what its target gained by a fast-forward. unstage:B<n> takes a "
+            "stage out of the plan, and "
             "unafter:B<n>=B<m> takes one stage off what another waits for. "
             "B<n>.M<k>=accept or B<n>.M<k>=reject rules a decision a build's report "
             "declared; a rejected one is a waiting item until its fix is marked done. "
@@ -391,6 +401,9 @@ def _declare_rule(verbs) -> None:
                              "skip-action:B<n>=ID, the finish action ID that finish "
                              "does not run for B<n> and treats as done; flow:NAME, "
                              "the flow the round follows from then on; "
+                             "credit:B<n>, the head of B<n>'s open build credited "
+                             "as its work, for a build unclear because its target "
+                             "was fast-forwarded with no reading; "
                              "unstage:B<n>, a stage with no open or finished build "
                              "that leaves the plan for good; unafter:B<n>=B<m>, a "
                              "stage B<n> that waits for B<m> no longer; or, on a "
@@ -1357,22 +1370,30 @@ def _ci_way_on(name: str, stage: str, whole: str) -> list[str]:
 # -- drop --------------------------------------------------------------------------------
 
 def _declare_drop(verbs) -> None:
-    said = ("Drop a round: end it short of its work. The operator drops any round, "
-            "with a pointer to where he said so; the lead drops only a round that "
-            "holds none of the operator's acts, with a pointer to why. Its open and "
+    said = ("Drop a round, or with a stage the open build of that stage: end it short "
+            "of its work. The operator drops any round or build, with a pointer to "
+            "where he said so; the lead drops only a round that holds none of the "
+            "operator's acts, or a build that is gone or empty with no commit of its "
+            "own, as git reads it now, with a pointer to why. A round's open and "
             "parked questions go to the project's list as they are, where they hold "
             "up nothing, or with --withdraw-questions are withdrawn. A dropped round "
             "takes no new work; a correction of one of its rulings is still recorded, "
-            "and its rulings are still marked as shown.")
+            "and its rulings are still marked as shown. A dropped build's stage stays "
+            "owed. No branch is deleted and no folder removed.")
     parser = verbs.add_parser("drop", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")
+    parser.add_argument("stage", metavar="STAGE", nargs="?",
+                        help="the stage, B<n>, whose open build is dropped; left out, "
+                             "the whole round is")
     parser.add_argument("--by", choices=("lead", "operator"), required=True,
-                        help="whose drop it is: the operator's, of any round, or the "
-                             "lead's, of a round that holds no ruling, no skip, no "
-                             "question asked with the operator's pointer, no opening "
-                             "on his go, no build that reached its target or may "
-                             "have, no decision on such a build and no open waiting "
-                             "item")
+                        help="whose drop it is: the operator's, of any round or "
+                             "build, or the lead's, of a round that holds no ruling, "
+                             "no skip, no question asked with the operator's "
+                             "pointer, no opening on his go, no build that reached "
+                             "its target or may have, no decision on such a build, "
+                             "no open waiting item and no open build he may not "
+                             "drop; or of a build git reads as gone, or empty with "
+                             "no commit of its own, that shares with no other")
     parser.add_argument("--record", metavar="PTR",
                         help="with --by operator, a pointer to where he dropped it; "
                              "with --by lead, a pointer to why; one token: "
@@ -1389,6 +1410,8 @@ def _declare_drop(verbs) -> None:
 def _drop(args, out) -> int:
     from . import dropping
 
+    if args.stage is not None:
+        return _drop_build(args, out)
     dropped = dropping.drop(args.round, by=args.by, record=args.record,
                             actor=_actor(args),
                             withdraw_questions=args.withdraw_questions)
@@ -1404,8 +1427,40 @@ def _drop(args, out) -> int:
         print(f"questions withdrawn: {', '.join(withdrawn)}", file=out)
     if not dropped.went:
         print("it had no open or parked question", file=out)
+    for one in dropped.event.get("tips") or ():
+        print(f"ended {one['stage']}: {one['branch']} at "
+              f"{'no branch' if one['tip'] is None else one['tip'][:12]}, kept in git",
+              file=out)
+    _kept_lines(dropped.kept, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
+
+
+def _drop_build(args, out) -> int:
+    """`drop ROUND B<n>`: drop the open build of one stage."""
+    from . import dropping
+
+    if args.withdraw_questions:
+        raise BadArgument("a build's drop changes no question: --withdraw-questions is "
+                          "for a round's drop", "leave --withdraw-questions out")
+    dropped = dropping.drop_build(args.round, args.stage, by=args.by,
+                                  record=args.record, actor=_actor(args))
+    [tip] = dropped.event["tips"]
+    print(f"dropped {dropped.name} {dropped.stage}   by: {dropped.by}   record: "
+          f"{dropped.record}", file=out)
+    print(f"branch: {tip['branch']} at "
+          f"{'no branch' if tip['tip'] is None else tip['tip'][:12]}, kept in git; "
+          f"the stage stays owed: commission it again, or take it out of the plan",
+          file=out)
+    _kept_lines(dropped.kept, out)
+    _warn_of(dropped.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _kept_lines(kept, out) -> None:
+    for folder in kept:
+        print(f"kept {folder}: this version removes no folder at a drop; removing a "
+              "dropped build's folders comes with a later version", file=out)
 
 
 # -- next --------------------------------------------------------------------------------

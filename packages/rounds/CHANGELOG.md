@@ -150,6 +150,14 @@ does not yet build.
   `brief.sized` with the brief's SHA-256. `fold`, and `commission` where it declares
   the stage's slices, warn of a slice over the limit; `show` and the round note say which slices of an open build have a sized
   brief, and `next` names the ones that have none.
+- `drop ROUND B<n>` drops one open build: the lead's when git reads it gone, or empty
+  with no commit of its own and sharing with none, else the operator's. It records the
+  branch's tip, deletes nothing and keeps the build's folders; the stage stays owed. A
+  round's drop ends its open builds the same way, and the lead's is refused while one
+  is not his. `show` and `list --waiting` name who drops each build to look at.
+- `rule ROUND credit:B<n>` credits to a build what its target gained by a fast-forward
+  with no reading of the build's: the build reads `merged` until `revoke:` takes it
+  back.
 - The finish lock: one finish at a time per repo and target, held as the ref
   `refs/rounds/finishing/<into>` (or the repo's `lock_ref`) pointing at a blob with the
   holder's line. A holder on this machine whose process has ended is cleared in one

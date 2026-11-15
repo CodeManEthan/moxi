@@ -382,6 +382,7 @@ def _build_lines(listed: Sequence, now: str) -> list[str]:
             if one.shares:
                 what += ", shares with " + ", ".join(f"{name} {stage}"
                                                      for name, stage in one.shares)
+            what += f"; the {said['drop_by']}'s to drop"
         lines.append(f"  {one.round} {one.build.stage}: {one.build.repo} on "
                      f"{one.build.branch}; {what}")
     return lines

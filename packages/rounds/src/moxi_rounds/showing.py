@@ -424,6 +424,7 @@ def _builds(found: Shown) -> list:
                                                   "scratch", "host", "build", "at")},
                "ended": one.ended, "state": one.ended, "by": None, "why": None,
                "head": None, "idle": False, "shares": [], "problem": None,
+               "drop_by": None, "drop": None, "credit": None,
                "check": _check_run(found.state, one),
                "step_runs": [run for run in (
                    _check_run(found.state, one, step)
@@ -440,7 +441,12 @@ def _builds(found: Shown) -> list:
         if now is not None and now.build.n == one.n:
             data = now.data()
             row.update({key: data[key] for key in ("state", "by", "why", "head", "idle",
-                                                   "shares", "problem")})
+                                                   "shares", "problem", "drop_by")})
+            row["drop"] = (f"moxi rounds drop {found.name} {one.stage} --by "
+                           f"{data['drop_by']} --record PTR")
+            if data["state"] == builds.UNCLEAR and data["by"] == builds.FAST_FORWARD:
+                row["credit"] = (f"moxi rounds rule {found.name} {builds.CREDIT}"
+                                 f"{one.stage} --record PTR")
             row["drift"] = _drift(found, one, now.status)
         elif one.ended is None:
             row["problem"] = {"reason": f"the repo {one.repo} could not be read",
@@ -594,8 +600,26 @@ def _build_lines(listed: list) -> list[str]:
         lines += [f"    {finding_line(finding)}" for finding in one.get("findings", ())]
         if one["ended"] is None:
             lines += [f"    {line}" for line in briefs_lines(one)]
+        lines += [f"    {line}" for line in drop_lines(one)]
         if one["record"] is not None:
             lines.append(f"    go: {one['record']}")
+    return lines
+
+
+def drop_lines(one: dict) -> list[str]:
+    """For an open build that is looked at (gone, empty, unclear, idle, sharing or
+    not read), why, and who may drop it with the command; for one unclear by a
+    fast-forward with no reading, also the operator's credit."""
+    if one.get("drop") is None or not (
+            one["state"] in (builds.GONE, builds.EMPTY, builds.UNCLEAR)
+            or one["idle"] or one["shares"] or one["problem"] is not None):
+        return []
+    lines = []
+    if one.get("why"):
+        lines.append(f"why: {one['why']}")
+    if one.get("credit") is not None:
+        lines.append(f"the operator credits it: {one['credit']}")
+    lines.append(f"the {one['drop_by']} drops it: {one['drop']}")
     return lines
 
 

@@ -1,8 +1,8 @@
 """Builds: each build a round's log records, and its state as read from git.
 
 **A build** is one commission of a stage and the records written for that stage while
-it was open: from its own `build.commissioned` up to its drop, its finish, or the next
-commission of the stage. A stage commissioned again after a drop is a new build, and the
+it was open: from its own `build.commissioned` up to its drop, its finish, its round's
+drop, or the next commission of the stage. A stage commissioned again after a drop is a new build, and the
 dropped build's records count for nothing in it. `builds(state)` gives every build of a
 round's log, `current(state, stage)` the last one of a stage. Its base is the target's
 head at its commission, until a repair moves it while the build is open: the lead's
@@ -17,7 +17,10 @@ repo and target of its build.
 
 **Its readings.** Each record that read the build at a commit holds that commit `h` and
 `x`, the merge-base of `h` and the target's head at that moment: a check's run and a
-verdict on a report of the build. `READINGS` names the field of each. A reading is
+verdict on a report of the build. `READINGS` names the field of each. The operator's
+credit of a fast-forward (`credit:B<n>`, a ruling naming the build by its commission's
+line) is one more, while it stands: `h` is the head it recorded and `x` the build's
+base, so a build it credits reads `merged` with the base as `P`. A reading is
 off-target when `h` is not `x`, so the branch held commits the target did not, and it
 shows work when, also, the tree of `h` differs from the tree of `x`. A reading whose
 merge-base git gave as none or several holds no `x`: it is not off-target and shows no
@@ -83,9 +86,15 @@ shared commits or loses them. A build that ended has no range.
 **Idle** qualifies `building`: a build reads idle when the commit date of its head is
 older than the `idle_days` of its round's project (`idle`).
 
+**Who may drop it** (`drop_by`) is read from its state: the lead, for a build with no
+work a drop could lose (`gone`, or `empty` holding no commit of its own) that shares
+with no other; the operator, for every other. `credit_refusal` says why a build can't
+be credited: only one `unclear` by a fast-forward with no reading, whose head's tree
+differs from its base's, can be.
+
 **Open builds.** A build is open while no end is on record for it, it is the last
 build of its stage, and its round is open: the builds still open when a round ends end
-with it. `opened(state)` lists them for the index, and `from_item` makes a `Build`
+with it, and a round's drop on record is a drop of each. `opened(state)` lists them for the index, and `from_item` makes a `Build`
 again from what the index keeps.
 """
 
@@ -147,6 +156,12 @@ READINGS = {
 }
 #: Each type of record that holds a finish's tip, and its field for it.
 TIPS = {"finish.action": "tip", "finish.done": "tip"}
+#: What starts the item of the operator's credit of a fast-forward; the stage follows.
+CREDIT = "credit:"
+#: Who may drop a build.
+LEAD = "lead"
+OPERATOR = "operator"
+
 #: The kind of finish action that lands a build, and the states of its record that say
 #: it did: made by the finish, or found already on the target.
 MERGE = "merge"
@@ -245,11 +260,23 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
     """Every build the round's log records, in the order commissioned."""
     found: list[dict] = []
     open_by_stage: dict[str, dict] = {}
+    credits: list[dict] = []
+    taken_back: set[str] = set()
     for event in round_state.history:
+        kind = event["type"]
+        if kind == "ruling.recorded":
+            if isinstance(event.get("revokes"), str):
+                taken_back.add(event["revokes"])
+            if (str(event.get("rules") or "").startswith(CREDIT)
+                    and is_id(event.get("head")) and isinstance(event.get("build"), int)):
+                credits.append(event)
+        if kind == "round.dropped":
+            for one in open_by_stage.values():
+                one["ended"] = DROPPED
+            open_by_stage.clear()
         stage = event.get("stage")
         if not isinstance(stage, str):
             continue
-        kind = event["type"]
         if kind == "build.commissioned":
             one = {"event": event, "readings": [], "tips": [], "landings": [],
                    "ended": None}
@@ -275,6 +302,13 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
         if kind in ("build.dropped", "finish.done"):
             one["ended"] = DROPPED if kind == "build.dropped" else FINISHED
             del open_by_stage[stage]
+    by_line = {one["event"]["n"]: one for one in found}
+    for credit in credits:
+        one = by_line.get(credit["build"])
+        if one is not None and credit.get("id") not in taken_back and is_id(_base_of(one)):
+            one["readings"].append(Reading(credit["type"], credit["n"], credit["head"],
+                                           _base_of(one)))
+            one["readings"].sort(key=lambda reading: reading.n)
     return tuple(_build(one) for one in found)
 
 
@@ -563,6 +597,32 @@ class _Seen:
 
 _END_WORD = {DROPPED: "drop", FINISHED: "finish"}
 
+
+def drop_by(status: Status, shares: Iterable = ()) -> str:
+    """Who may drop a build read as `status`, sharing with the builds `shares`: `LEAD`
+    for one with no work a drop could lose, else `OPERATOR`."""
+    if shares:
+        return OPERATOR
+    if status.state == GONE or (status.state == EMPTY and not status.own_commits):
+        return LEAD
+    return OPERATOR
+
+
+def credit_refusal(git: Git, build: Build, status: Status) -> str | None:
+    """Why the operator's credit of a fast-forward is not taken for `build` read as
+    `status`, in words; None when it is: the build is `unclear` because its target was
+    fast-forwarded with no reading of the build's, and the tree of its head differs
+    from the tree of its base."""
+    if status.state != UNCLEAR:
+        return f"it reads {status.state}, and only an unclear build is credited"
+    if status.by != FAST_FORWARD:
+        return (f"it is unclear because {status.why}, and only a fast-forward with no "
+                "reading is credited")
+    if git.tree(status.head) == git.tree(build.base):
+        return (f"its head {status.head[:12]} holds the tree of its base "
+                f"{build.base[:12]}, so there is no work to credit")
+    return None
+
 #: The states whose builds have a range, and so may share.
 RANGED = (BUILDING, MERGED)
 
@@ -602,9 +662,10 @@ def sharing(git: Git, statuses: Mapping[_Key, Status]) -> dict[_Key, tuple[_Key,
     return found
 
 
-__all__ = ["DROPPED", "FINISHED", "GONE", "EMPTY", "BUILDING", "UNCLEAR", "MERGED",
-           "ENDED", "NO_HEAD", "OFF_TARGET", "NO_ANSWER", "PARTED", "NO_LANDING",
+__all__ = ["CREDIT", "LEAD", "OPERATOR", "DROPPED", "FINISHED", "GONE", "EMPTY",
+           "BUILDING", "UNCLEAR", "MERGED", "ENDED", "NO_HEAD", "OFF_TARGET", "NO_ANSWER", "PARTED", "NO_LANDING",
            "OWN_LANDING", "NOTHING_OWN", "HAND_MERGE", "FAST_FORWARD", "READINGS",
            "TIPS", "MERGE", "LANDED", "Reading", "Landing", "Build", "Status",
            "NoTarget", "RANGED", "builds", "opened", "from_item", "landings", "current",
-           "shows_work", "read", "idle", "span", "sharing"]
+           "shows_work", "read", "idle", "span", "sharing", "drop_by",
+           "credit_refusal"]

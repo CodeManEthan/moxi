@@ -183,6 +183,18 @@ def commission_of(state: states.State, build: builds.Build) -> dict:
     return next(event for event in state.history if event["n"] == build.n)
 
 
+def kept_folders(state: states.State, build: builds.Build) -> tuple[Path, ...]:
+    """The build's worktree and scratch folder that are still there, which a build's
+    end keeps: nothing is removed until a removal can tell what may go without losing
+    work."""
+    commissioned = commission_of(state, build)
+    found = []
+    for key in ("worktree", "scratch"):
+        if commissioned.get(key) and Path(str(commissioned[key])).is_dir():
+            found.append(Path(str(commissioned[key])))
+    return tuple(found)
+
+
 @dataclass(frozen=True)
 class Tip:
     """The build's worktree as read now: the branch's `tip`, and whether the worktree
@@ -766,5 +778,5 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
 
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "fill", "declared",
            "values", "argv_now", "runs", "newest", "why_not", "passes", "step_entry",
-           "report_steps", "commission_of",
+           "report_steps", "commission_of", "kept_folders",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]

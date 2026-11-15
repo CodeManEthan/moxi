@@ -618,13 +618,13 @@ def test_a_ruling_of_a_kind_nothing_here_knows_is_neither_taken_back_nor_replace
         rounds):
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C1", "record": "comms:12", "kind": "process",
-                "rules": "credit:B2"}, actor="planner")
+                "rules": "hold:B2"}, actor="planner")
     before = logs(rounds)
 
-    with pytest.raises(Refused, match="C1 rules credit:B2, and nothing here says "
+    with pytest.raises(Refused, match="C1 rules hold:B2, and nothing here says "
                                       "how such a ruling is taken back"):
         revoke("C1")
-    with pytest.raises(Refused, match="a ruling of credit:B2 is not ruled a "
+    with pytest.raises(Refused, match="a ruling of hold:B2 is not ruled a "
                                       "second time"):
         rule(text=SAID, supersedes="C1")
     assert logs(rounds) == before
@@ -776,18 +776,18 @@ def test_each_ruling_has_its_kind_and_the_thing_it_rules(rules, name, item):
     assert corrections.item_of(rules) == item
 
 
-@pytest.mark.parametrize("rules", ["credit:B2", ""])
+@pytest.mark.parametrize("rules", ["hold:B2", ""])
 def test_a_ruling_of_no_kind_in_the_table_has_none(rules):
     assert corrections.kind_of(rules) is None and corrections.item_of(rules) is None
 
 
 def test_a_kind_added_to_the_table_is_taken_back_and_replaced(rounds, monkeypatch):
-    credit = corrections.Kind("a credit", lambda rules: rules if (
-        rules or "").startswith("credit:") else None, undo=lambda ruling: {})
-    monkeypatch.setattr(corrections, "KINDS", (*corrections.KINDS, credit))
+    hold = corrections.Kind("a hold", lambda rules: rules if (
+        rules or "").startswith("hold:") else None, undo=lambda ruling: {})
+    monkeypatch.setattr(corrections, "KINDS", (*corrections.KINDS, hold))
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C1", "record": "comms:12", "kind": "process",
-                "rules": "credit:B2"}, actor="planner")
+                "rules": "hold:B2"}, actor="planner")
 
     revoke("C1")
 

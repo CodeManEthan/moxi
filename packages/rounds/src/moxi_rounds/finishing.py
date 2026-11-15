@@ -303,7 +303,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                     cleared=None if taken.cleared is None else taken.cleared.line,
                     event=written.events[-1] if written.events else None,
                     released=released, failed=written.failed,
-                    kept=_kept(view.state, build))
+                    kept=checking.kept_folders(view.state, build))
 
 
 # -- reading the build -------------------------------------------------------------------
@@ -357,17 +357,6 @@ def _moved(seen, tip: str, *, name: str, stage: str) -> list[Unmet]:
         return []
     return [Unmet(f"{stage}'s branch moved from {tip[:12]} to {seen.tip[:12]} since its "
                   "gates were read", f"moxi rounds finish {name} {stage}")]
-
-
-def _kept(state: states.State, build: builds.Build) -> tuple[Path, ...]:
-    """The build's worktree and scratch folder that are still there. Nothing is removed
-    until a removal can tell what may go without losing work, so every one is kept."""
-    commissioned = checking.commission_of(state, build)
-    found = []
-    for key in ("worktree", "scratch"):
-        if commissioned.get(key) and Path(str(commissioned[key])).is_dir():
-            found.append(Path(str(commissioned[key])))
-    return tuple(found)
 
 
 # -- a merge found in git ----------------------------------------------------------------

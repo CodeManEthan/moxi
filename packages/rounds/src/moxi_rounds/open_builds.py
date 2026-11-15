@@ -6,7 +6,8 @@ index, or from its log where the index is behind, and read in its repo with ever
 landing on record for that repo and target, in any round. Two qualifiers follow the
 state: `idle`, for a `building` build whose head was committed more than its round's
 `idle_days` ago, and `shares`, each other open build of the same repo and target whose
-range has a commit in common with this one's.
+range has a commit in common with this one's. Its data says who may drop it
+(`builds.drop_by`): the operator for one that could not be read.
 
 A build that can't be read (its repo is not in the projects list, git can't read the
 repo, its target branch is not there) is listed with its `problem` and no state. It
@@ -56,6 +57,8 @@ class OpenBuild:
                       for name in _STATUS})
         found.update({
             "idle": self.idle,
+            "drop_by": builds.OPERATOR if self.status is None
+            else builds.drop_by(self.status, self.shares),
             "shares": [{"round": name, "stage": stage} for name, stage in self.shares],
             "problem": None if self.problem is None
             else {"reason": self.problem.reason, "fix": self.problem.fix}})
