@@ -858,8 +858,12 @@ def _config_json(module: str, found, schema) -> int:
     """`moxi config <module> show --json`: one JSON list, one object per live key.
 
     Each object holds the key's schema fields (`name`, `type`, `default`, `doc`,
-    `values`, `read`, `env`, `needs`, `items`), its `value` and its `source` (`default`,
-    `file` or `env`). A switch table also holds `switch_table: true` and `entries`, one
+    `values`, `read`, `env`, `needs`, `items`), its page fields, its `value` and its
+    `source` (`default`, `file` or `env`). The page fields are `label`, `line`, `group`,
+    `unit` and `elsewhere` (a string or null), `common` and `pick` (a bool, false when not
+    given), `choices` (one `{value, words}` per value it names, in the enum's order, or
+    null), `hurts` (`{when, says, confirm, rest}` or null) and `terminal` (`{on, off}` or
+    null). A switch table also holds `switch_table: true` and `entries`, one
     `{name, value, source, named_by}` per entry in the file and per entry the module's
     units, wraps and questions name as a switch (see `_switch_names`). When the file
     cannot be read the output is one `{"error", "fix"}` object instead, and the exit 1.
@@ -879,6 +883,7 @@ def _config_json(module: str, found, schema) -> int:
         item = {field: _plain_json(getattr(key, field))
                 for field in ("name", "type", "default", "doc", "values", "read", "env",
                               "needs", "items")}
+        item.update(_page_json(key))
         item["value"] = _plain_json(settings[key.name])
         item["source"] = settings.source(key.name)
         if config.is_switch_table(key):
@@ -894,6 +899,18 @@ def _config_json(module: str, found, schema) -> int:
         out.append(item)
     print(json.dumps(out, indent=2))
     return 0
+
+
+def _page_json(key) -> dict:
+    """Key `key`'s page fields as `show --json` prints them, each always present."""
+    choices = None
+    if key.choices is not None:
+        choices = [{"value": value, "words": key.choices[value]}
+                   for value in key.values if value in key.choices]
+    return {"label": key.label, "line": key.line, "common": bool(key.common),
+            "group": key.group, "unit": key.unit, "choices": choices,
+            "pick": bool(key.pick), "hurts": _plain_json(key.hurts),
+            "terminal": _plain_json(key.terminal), "elsewhere": key.elsewhere}
 
 
 def _plain_json(value):

@@ -1,11 +1,12 @@
 """A key's page fields: how the settings page shows it, checked when the schema is read."""
 
 import copy
+import json
 import pickle
 
 import pytest
 
-from moxi import config
+from moxi import cli, config
 from moxi.config import Schema, SchemaError
 
 PAGE = """
@@ -195,3 +196,64 @@ def test_the_cores_own_schema_passes():
     config._core.clear()
     schema = config._core_schema()
     assert sum(1 for key in schema.live() if key.common) <= config.COMMON_MAX
+
+
+# -- moxi config <module> show --json ------------------------------------------------------
+
+@pytest.fixture
+def paged(site, tmp_path, monkeypatch):
+    """Module `demo`, whose schema is `PAGE` with a key that has no page field."""
+    site.write("moxi_demo/settings.toml", PAGE + key_spec(**INT).replace("[a]", "[plain]"))
+    site.module("demo", SETTINGS="'settings.toml'")
+    monkeypatch.setenv("MOXI_DEMO_CONFIG_HOME", str(tmp_path / "config"))
+    return site
+
+
+def show_json(capsys, module="demo") -> dict:
+    capsys.readouterr()
+    assert cli.main(["config", module, "show", "--json"]) == 0
+    return {key["name"]: key for key in json.loads(capsys.readouterr().out)}
+
+
+PAGE_NULL = {"label": None, "line": None, "common": False, "group": None, "unit": None,
+             "choices": None, "pick": False, "hurts": None, "terminal": None,
+             "elsewhere": None}
+
+
+def test_show_json_carries_each_page_field(paged, capsys):
+    keys = show_json(capsys)
+    port = keys["port"]
+    assert {field: port[field] for field in PAGE_NULL} == {
+        **PAGE_NULL, "label": "Port", "line": "The page's port on this machine.",
+        "common": True, "group": "Address", "unit": "port number"}
+    assert port["value"] == 8460 and port["source"] == "default"
+    assert keys["look"]["choices"] == [{"value": "plain", "words": "Plain"},
+                                       {"value": "neon", "words": "Midnight neon"}]
+    assert keys["look"]["pick"] is True
+    assert keys["guard"]["hurts"] == {"when": "off", "says": "turns this guard off",
+                                      "confirm": "Anything goes.", "rest": False}
+    assert keys["trust"]["hurts"]["rest"] is True
+    assert keys["carry"]["hurts"]["when"] == "add"
+    assert keys["gate"]["terminal"] == {"on": "moxi demo gate enable",
+                                        "off": "moxi demo gate disable"}
+    assert keys["template"]["elsewhere"] == "The template is edited on Home."
+
+
+def test_show_json_gives_null_for_each_page_field_not_given(paged, capsys):
+    plain = show_json(capsys)["plain"]
+    assert {field: plain[field] for field in PAGE_NULL} == PAGE_NULL
+
+
+def test_show_json_lists_choices_in_the_enums_order(site, tmp_path, monkeypatch, capsys):
+    site.write("moxi_demo/settings.toml", key_spec(
+        type='"enum"', values='["a", "b", "c"]', default='"a"',
+        choices='{ c = "Sea", a = "Ay" }'))
+    site.module("demo", SETTINGS="'settings.toml'")
+    monkeypatch.setenv("MOXI_DEMO_CONFIG_HOME", str(tmp_path / "config"))
+    assert show_json(capsys)["a"]["choices"] == [{"value": "a", "words": "Ay"},
+                                                 {"value": "c", "words": "Sea"}]
+
+
+def test_show_json_of_the_core_carries_the_page_fields(capsys):
+    keys = show_json(capsys, "moxi")
+    assert keys and all(set(PAGE_NULL) <= set(key) for key in keys.values())
