@@ -109,7 +109,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 22
+DERIVED = 23
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -203,10 +203,10 @@ class Summary:
     items: tuple[Item, ...] = ()
     changed_since: str | None = None
     unreadable: Unreadable | None = None
-    #: How a round that is open no longer ended: `{"how", "by", "record", "at"}`, the
-    #: status it has since, whose act it was, the pointer it carried and when; a
-    #: round that closed has no `by` and no `record`. None for an open round and for
-    #: a project.
+    #: How a round that is open no longer ended: `{"how", "by", "record", "at",
+    #: "numbers"}`, the status it has since, whose act it was, the pointer it carried,
+    #: when, and the round's numbers as its ending event holds them; a round that
+    #: closed has no `by` and no `record`. None for an open round and for a project.
     ended: Mapping | None = None
     #: Each merge a finish recorded in the round's log, in the log's order.
     landings: tuple[builds.Landing, ...] = ()
@@ -428,7 +428,8 @@ def _ended(folded: state.State) -> dict | None:
     end = folded.ended
     if end is None:
         return None
-    return {"how": end.how, "by": end.by, "record": end.record, "at": end.at}
+    return {"how": end.how, "by": end.by, "record": end.record, "at": end.at,
+            "numbers": end.numbers}
 
 
 def _plain(body: Mapping) -> dict:

@@ -170,7 +170,9 @@ does not yet build.
   named with the command that rules it; done once none is left and the plan is
   finished, or when the project's `ratify` is `off`.
 - A round's numbers, counted from its log, in the `round.closed` or `round.dropped`
-  event that ends it, with the time it spent at each step.
+  event that ends it, with the time it spent at each step; `show` gives them, `retro.md`
+  is written beside the round's note from them, and `list --numbers` sums those of the
+  closed rounds.
 - The sweep at a session's start: with turns installed, a listener on `ready` starts the
   sweep in a detached process when `sweep.at_start` and `sweep.armed` are both on and
   the last removing run began more than ten minutes ago, and returns at once.

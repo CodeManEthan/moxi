@@ -8,7 +8,7 @@ import json
 import pytest
 
 from moxi_rounds import (api, asking, closing, dropping, freezing, holds, log, numbers,
-                         opening, ruling, state, verdicts)
+                         opening, rendering, ruling, state, verdicts)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
 
@@ -617,7 +617,9 @@ def test_a_closed_round_is_shown_as_closed_with_when(closed, capsys):
     assert found["status"] == "closed" and found["close"] is None
     assert found["step"] is None
     assert found["ended"] == {"how": "closed", "by": None, "record": None,
-                              "actor": "planner", "at": at, "questions": {}}
+                              "actor": "planner", "at": at, "questions": {},
+                              "numbers": events(closed)[-1]["numbers"]}
+    assert "\nnumbers:\n  design: passes 0, fold-first 0, folds 1 (records only 0)" in shown
     assert shown.splitlines()[-1].endswith("  planner  round.closed")
 
 
@@ -631,8 +633,10 @@ def test_a_closed_round_is_listed_with_the_ended_ones(closed, capsys):
     assert api.rounds()["rounds"] == []
     (found,) = api.rounds(status="closed")["rounds"]
     assert (found["name"], found["status"], found["step"]) == (ROUND, "closed", None)
-    assert found["ended"] == {"how": "closed", "by": None, "record": None, "at": at}
+    assert found["ended"] == {"how": "closed", "by": None, "record": None, "at": at,
+                              "numbers": events(closed)[-1]["numbers"]}
     assert api.round(ROUND)["close"] is None
+    assert api.round(ROUND)["ended"]["numbers"] == events(closed)[-1]["numbers"]
 
 
 def test_a_closed_round_s_note_and_its_export_say_so(closed, capsys):
@@ -745,3 +749,15 @@ def test_a_part_added_to_the_condition_is_asked_with_the_rest(folder, monkeypatc
 
     assert waits(folder) == ("a placeholder",)
     assert status(folder) == "open"
+
+
+def test_a_closed_round_s_numbers_are_written_beside_its_note(closed):
+    closing_event = events(closed)[-1]
+
+    text = (closed / rendering.RETRO_FILE).read_text(encoding="utf-8")
+
+    assert "\nstatus: closed\n" in text
+    assert f"\n- ended: closed at {closing_event['at']}\n" in text
+    assert "\n- skips 1, step-ups 0, repairs 0, corrections 0, dropped builds 0, " \
+           "cleared locks 0\n" in text
+    assert text == rendering.retro("proj-a", "a-round", events(closed))

@@ -109,7 +109,8 @@ def test_the_operator_drops_a_round_that_holds_his_rulings(rounds, capsys):
     found = held(round_log(rounds))
     assert found.status == state.DROPPED
     assert found.ended == state.Ended(how="dropped", by="operator", record="comms:30",
-                                      actor="curator", at=event["at"])
+                                      actor="curator", at=event["at"],
+                                      numbers=event["numbers"])
     assert not log.exists(project_log(rounds))
     out, err = capsys.readouterr()
     assert out.splitlines() == [
@@ -786,7 +787,8 @@ def test_a_dropped_round_is_shown_as_dropped_with_who_and_when(rounds, capsys):
     assert found["status"] == "dropped"
     assert found["ended"] == {"how": "dropped", "by": "operator", "record": "comms:30",
                               "actor": "planner", "at": DROPPED_AT,
-                              "questions": {"Q1": "P1"}}
+                              "questions": {"Q1": "P1"},
+                              "numbers": log.read(round_log(rounds))[-1]["numbers"]}
     assert found["questions"][0]["moved_to"] == "P1"
     assert found["history"][-1]["type"] == "round.dropped"
 
@@ -807,7 +809,8 @@ def test_the_index_keeps_how_a_round_ended(rounds):
     drop()
     kept = index.read("proj-a", rounds, "a-round")
     assert (kept.status, kept.ended) == ("dropped", {
-        "how": "dropped", "by": "operator", "record": "comms:30", "at": DROPPED_AT})
+        "how": "dropped", "by": "operator", "record": "comms:30", "at": DROPPED_AT,
+        "numbers": log.read(round_log(rounds))[-1]["numbers"]})
 
     # The same from the logs alone, and from an index made again.
     from moxi_rounds import folders, paths

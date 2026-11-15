@@ -41,6 +41,7 @@
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
     moxi rounds list [PROJECT] --waiting [--json]
+    moxi rounds list [PROJECT] --numbers [--json]
     moxi rounds list ROUND --questions [--view docket|ratify] [--json] [--out DIR]
     moxi rounds list PROJECT --questions [--json] [--out DIR]
 
@@ -225,7 +226,8 @@ waits for, its questions by state, its rulings and whether each was shown to him
 its history. `list` with no flag lists the open
 rounds, each with its flow and its counts, and with `--closed` the rounds that have
 ended; `list --waiting` lists what waits on the operator, the open and the parked
-questions and the rulings not yet shown to him. Each is of every project, or of the
+questions and the rulings not yet shown to him; `list --numbers` sums the numbers of
+the closed rounds. Each is of every project, or of the
 one named, and `--json` gives it as data. `show` and `list` record nothing. A verb
 that writes takes `--as NAME`, who is doing it; without it that is the user the
 command runs as.
@@ -1614,7 +1616,8 @@ def _declare_list(verbs) -> None:
             "many questions it has open and parked and how many of its rulings were "
             "not yet shown to him; with --closed, the rounds that have ended. With "
             "--waiting: every open question, every parked one, and the rulings not "
-            "yet shown to him. With --questions: the questions of one round or one "
+            "yet shown to him. With --numbers: the numbers of the closed rounds, "
+            "summed. With --questions: the questions of one round or one "
             "project written out, the open ones, then the parked ones, then the "
             "rulings not yet shown. Nothing is recorded.")
     parser = verbs.add_parser("list", help=said, description=said)
@@ -1626,6 +1629,10 @@ def _declare_list(verbs) -> None:
                         help="list what waits on the operator")
     parser.add_argument("--closed", action="store_true",
                         help="list the rounds that have ended, not the open ones")
+    parser.add_argument("--numbers", action="store_true",
+                        help="sum the numbers of the closed rounds: passes, folds, "
+                             "time in each step, findings, questions, decisions, "
+                             "skips and the rest")
     parser.add_argument("--questions", action="store_true",
                         help="list the questions of the round or the project")
     parser.add_argument("--view", metavar="docket|ratify", choices=("docket", "ratify"),
@@ -1645,6 +1652,7 @@ def _list(args, out) -> int:
 
     kinds = [flag for flag, given in (("--waiting", args.waiting),
                                       ("--closed", args.closed),
+                                      ("--numbers", args.numbers),
                                       ("--questions", args.questions)) if given]
     if len(kinds) > 1:
         raise BadArgument(f"{' and '.join(kinds)} are each a listing of their own",
@@ -1658,6 +1666,9 @@ def _list(args, out) -> int:
     if args.waiting:
         found = listing.waiting(args.name)
         as_text = listing.waiting_as_text
+    elif args.numbers:
+        found = listing.numbers(args.name)
+        as_text = listing.numbers_as_text
     else:
         found = listing.rounds(args.name, ended=args.closed)
         as_text = listing.rounds_as_text

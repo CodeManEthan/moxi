@@ -20,6 +20,12 @@ that shares commits with another, or that git could not read. The question rows 
 from the same function, so the two never differ. A waiting item is no question, and is
 in no export.
 
+**The numbers** (`numbers`): the numbers of every closed round, or of one project's,
+summed key by key, read from what each round's closing event holds as the index keeps
+it. A dropped round's numbers stay in its drop and its `retro.md`, and are not summed.
+A closed round whose closing holds no numbers is named and not summed, and so is a
+round whose log can't be read.
+
 **A later kind of record** joins a listing in one place. A count of the rounds listing
 is a row of `COUNTS`. A kind of row that waits on the operator is a row of `WAITING`:
 what one project gives, how the rows read as data, and how they read as lines.
@@ -38,6 +44,7 @@ from moxi import store
 
 from . import (builds, checking, decisions, export, folders, index, log, open_builds,
                questions, shown, steps, waits)
+from . import numbers as counted
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet, Unreadable
@@ -494,9 +501,75 @@ def _time(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ")
 
 
+# -- the numbers -------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Numbers:
+    """The numbers of the closed rounds summed: `project` is the one the listing was
+    kept to, or None; `rounds` the closed rounds summed, by name; `uncounted` the
+    closed rounds whose closing holds no numbers; `unreadable` a line for each log
+    that can't be read, and `no_folder` one for each project whose rounds folder
+    can't be worked out, whose rounds are therefore not summed."""
+
+    computed: str
+    project: str | None
+    rounds: tuple[str, ...]
+    numbers: Mapping
+    uncounted: tuple[str, ...] = ()
+    unreadable: tuple[str, ...] = ()
+    no_folder: tuple[str, ...] = ()
+
+    def data(self) -> dict:
+        return {"computed": self.computed, "project": self.project,
+                "rounds": list(self.rounds), "numbers": dict(self.numbers),
+                "uncounted": list(self.uncounted), "unreadable": list(self.unreadable),
+                "no_folder": list(self.no_folder)}
+
+
+def numbers(project: str | None = None, *, settings=None, now: str | None = None,
+            refresh: bool = True) -> Numbers:
+    """The numbers of the closed rounds of every project, or of `project`, summed.
+    `settings`, `now` and `refresh` are as `rounds` takes them, and so are its
+    refusals."""
+    now = log.stamp() if now is None else now
+    homes, no_folder, _settings = _homes(project, settings, refresh=refresh)
+    summed, uncounted, unreadable = [], [], []
+    for home in homes:
+        for summary in index.rounds(home.project, home.folder):
+            if summary.unreadable is not None:
+                unreadable.append(summary.unreadable.reason)
+            elif summary.status == states.CLOSED:
+                held = (summary.ended or {}).get("numbers")
+                if isinstance(held, Mapping):
+                    summed.append((summary.name, held))
+                else:
+                    uncounted.append(summary.name)
+    return Numbers(computed=now, project=None if project is None else homes[0].project,
+                   rounds=tuple(name for name, _held in summed),
+                   numbers=counted.summed(held for _name, held in summed),
+                   uncounted=tuple(uncounted), unreadable=tuple(unreadable),
+                   no_folder=no_folder)
+
+
+def numbers_as_text(listing: Numbers) -> str:
+    """The numbers listing as lines, ending in a line break."""
+    where = "" if listing.project is None else f" of {listing.project}"
+    if listing.rounds:
+        count = len(listing.rounds)
+        lines = [f"numbers of {count} closed round{'' if count == 1 else 's'}{where}",
+                 *(f"  {line}" for line in counted.lines(listing.numbers))]
+    else:
+        lines = [f"no round{where} has closed with its numbers"]
+    if listing.uncounted:
+        lines.append("closed with no numbers, not summed: "
+                     f"{', '.join(listing.uncounted)}")
+    lines += _trouble(listing.unreadable, listing.no_folder)
+    return "\n".join(lines) + "\n"
+
+
 # -- both listings -----------------------------------------------------------------------
 
-def as_json(listing: Rounds | Waiting) -> str:
+def as_json(listing: Rounds | Waiting | Numbers) -> str:
     """A listing as JSON text, ending in a line break."""
     return json.dumps(listing.data(), indent=2, ensure_ascii=False) + "\n"
 
@@ -507,6 +580,16 @@ def _projects(project: str | None, settings, now: str, *,
     folder can't be worked out. With `project`, that one alone. The index is brought
     up to every project's logs first, unless `refresh` is false: the reads below
     answer the same from an index that is behind, and write nothing."""
+    homes, no_folder, settings = _homes(project, settings, refresh=refresh)
+    return [_project(home, settings, now) for home in homes], no_folder
+
+
+def _homes(project: str | None, settings, *,
+           refresh: bool = True) -> tuple[list[folders.Home], tuple[str, ...], object]:
+    """The rounds folder of each project of a listing, or of `project` alone, a line
+    for each project whose rounds folder can't be worked out, and the settings read.
+    The index is brought up to every project's logs first, unless `refresh` is
+    false."""
     if project is not None and (not isinstance(project, str) or not project.strip()):
         raise BadArgument("the project to keep the listing to has no name",
                           "name a project by its key, or leave it out")
@@ -526,8 +609,7 @@ def _projects(project: str | None, settings, now: str, *,
             pass
     if project is not None:
         homes, unresolved = [folders.home(project, settings)], []
-    return ([_project(home, settings, now) for home in homes],
-            tuple(error.reason for error in unresolved))
+    return homes, tuple(error.reason for error in unresolved), settings
 
 
 def _project(home: folders.Home, settings, now: str) -> Project:
@@ -556,4 +638,5 @@ def _error(error: RoundsError) -> dict:
 
 
 __all__ = ["Project", "COUNTS", "Round", "Rounds", "rounds", "rounds_as_text", "Kind",
-           "WAITING", "Waiting", "waiting", "waiting_as_text", "age", "as_json"]
+           "WAITING", "Waiting", "waiting", "waiting_as_text", "Numbers", "numbers",
+           "numbers_as_text", "age", "as_json"]

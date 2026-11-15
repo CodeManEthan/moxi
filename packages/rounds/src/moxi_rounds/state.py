@@ -94,6 +94,12 @@ class Ended:
     #: Where each question that was open or parked went, in the order asked: its id
     #: on the project's list, or `withdrawn`.
     questions: tuple[tuple[str, str], ...] = ()
+    #: The round's numbers, as the event holds them; None for one that holds none.
+    numbers: dict | None = None
+
+
+def _numbers(event: dict) -> dict | None:
+    return event["numbers"] if isinstance(event.get("numbers"), dict) else None
 
 
 @dataclass(frozen=True)
@@ -444,7 +450,8 @@ def _round_dropped(state: State, event: dict) -> None:
                  if isinstance(where, str)) if isinstance(went, dict) else ()
     state.status = DROPPED
     state.ended = Ended(how=DROPPED, by=event.get("by"), record=event.get("record"),
-                        actor=event["actor"], at=event["at"], questions=went)
+                        actor=event["actor"], at=event["at"], questions=went,
+                        numbers=_numbers(event))
     for question_id, where in went:
         change = ({"state": _WITHDRAWN} if where == _WITHDRAWN else
                   {"state": _MOVED, "moved_to": where})
@@ -460,7 +467,7 @@ def _round_closed(state: State, event: dict) -> None:
         return
     state.status = CLOSED
     state.ended = Ended(how=CLOSED, by=None, record=None, actor=event["actor"],
-                        at=event["at"])
+                        at=event["at"], numbers=_numbers(event))
 
 
 def _ruling_recorded(state: State, event: dict) -> None:

@@ -171,6 +171,11 @@ def test_no_open_round_is_among_the_ended_ones(rounds, capsys):
     assert found["ended"] is True and found["rounds"] == []
 
 
+def numbers_of(rounds, slug):
+    """The numbers the event that ended the round `slug` holds."""
+    return log.read(log.round_log(rounds / slug))[-1]["numbers"]
+
+
 def test_a_dropped_round_is_listed_only_among_the_ended_with_how_and_when(
         rounds, capsys):
     rule(B, text=RULED)
@@ -181,7 +186,7 @@ def test_a_dropped_round_is_listed_only_among_the_ended_with_how_and_when(
     [found] = data(capsys, "--closed")["rounds"]
     assert (found["name"], found["status"]) == (B, "dropped")
     assert found["ended"] == {"how": "dropped", "by": "operator", "record": "comms:30",
-                              "at": T6}
+                              "at": T6, "numbers": numbers_of(rounds, "b-round")}
     assert found["counts"] == {"open": 0, "parked": 0, "not_shown": 1}
     assert printed(capsys, "--closed") == printed(capsys, "proj-a", "--closed") == (
         f"{B}   dropped by operator at {T6}, record comms:30   flow fix   "
@@ -194,7 +199,8 @@ def test_a_dropped_round_is_listed_the_same_with_no_index(rounds, capsys):
     paths.index_file().unlink()
 
     assert listing.rounds(ended=True).rounds[0].ended == {
-        "how": "dropped", "by": "lead", "record": "comms:30", "at": T6}
+        "how": "dropped", "by": "lead", "record": "comms:30", "at": T6,
+        "numbers": numbers_of(rounds, "b-round")}
 
 
 def test_nothing_of_a_dropped_round_waits_on_the_operator(rounds, capsys):
@@ -575,7 +581,7 @@ def test_a_project_that_is_not_known_is_refused(rounds, capsys):
 @pytest.mark.parametrize("argv", [
     ["--waiting", "--closed"], ["--waiting", "--questions"],
     ["proj-a", "--closed", "--questions"], ["--view", "docket"], ["--out", "somewhere"],
-    ["--waiting", "--out", "somewhere"], ["--dormant"], ["--numbers"], [""],
+    ["--waiting", "--out", "somewhere"], ["--dormant"], [""],
     ["proj-a", "proj-b"]])
 def test_a_listing_that_cant_be_read_is_a_usage_error(rounds, capsys, argv):
     assert main(["list", *argv]) == 2
@@ -594,3 +600,69 @@ def test_help_says_what_each_listing_is(capsys):
     for part in ("--waiting", "--closed", "--questions", "--json",
                  "what waits on the operator", "the rounds that have ended"):
         assert part in said
+
+
+# -- the numbers -------------------------------------------------------------------------
+
+def close(folder, slug, held, *, at=T6):
+    """End a round with a closing event that holds `held` as its numbers, or none."""
+    log.append(log.round_log(folder / slug), "round.closed",
+               {} if held is None else {"numbers": held}, actor="planner", at=at)
+
+
+def test_the_numbers_of_the_closed_rounds_are_summed_and_a_dropped_one_s_are_not(
+        rounds, tmp_path, capsys):
+    close(rounds, "a-round", {"folds": 1, "step_time_s": {"commission B1": 30},
+                              "findings": {"major": 1, "minor": 0}})
+    close(tmp_path / "notes-b" / "rounds", "c-round",
+          {"folds": 2, "step_time_s": {"commission B1": 5, "build B1": 60},
+           "findings": {"major": 0, "minor": 2}})
+    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T6)
+
+    found = data(capsys, "--numbers")
+
+    assert found["rounds"] == [A, C] and found["uncounted"] == []
+    assert found["numbers"] == {"folds": 3,
+                                "step_time_s": {"commission B1": 35, "build B1": 60},
+                                "findings": {"major": 1, "minor": 2}}
+    text = printed(capsys, "--numbers")
+    assert text.startswith("numbers of 2 closed rounds\n  design: passes 0, ")
+    assert "\n  time in steps: commission B1 35s, build B1 1m\n" in text
+    assert data(capsys, "proj-a", "--numbers")["rounds"] == [A]
+
+
+def test_a_closed_round_whose_closing_holds_no_numbers_is_named_and_not_summed(
+        rounds, capsys):
+    close(rounds, "a-round", None)
+
+    found = data(capsys, "proj-a", "--numbers")
+
+    assert (found["rounds"], found["numbers"], found["uncounted"]) == ([], {}, [A])
+    assert printed(capsys, "proj-a", "--numbers") == (
+        "no round of proj-a has closed with its numbers\n"
+        f"closed with no numbers, not summed: {A}\n")
+
+
+def test_a_round_whose_log_can_t_be_read_is_named_and_not_summed(rounds, capsys):
+    close(rounds, "b-round", {"folds": 1})
+    spoil(rounds)
+
+    found = data(capsys, "proj-a", "--numbers")
+
+    assert found["rounds"] == [B] and found["numbers"] == {"folds": 1}
+    [reason] = found["unreadable"]
+    assert str(log.round_log(rounds / "a-round")) in reason
+
+
+def test_the_numbers_are_the_same_with_no_index(rounds, capsys):
+    close(rounds, "a-round", {"folds": 1})
+    paths.index_file().unlink()
+    assert listing.numbers("proj-a", refresh=False).numbers == {"folds": 1}
+
+
+def test_the_numbers_are_a_listing_of_their_own(rounds, capsys):
+    for other in ("--closed", "--waiting", "--questions"):
+        assert main(["list", "--numbers", other]) == 2
+        assert "are each a listing of their own" in capsys.readouterr().err
+    assert main(["list", A, "--numbers"]) == 3
+    assert f"moxi rounds show {A}" in capsys.readouterr().err

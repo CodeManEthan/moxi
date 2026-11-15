@@ -141,4 +141,88 @@ def of(state: states.State, *, ended_at: str | None = None) -> dict:
     }
 
 
-__all__ = ["FLAGS", "OTHER", "step_time_s", "of"]
+# -- the numbers as people read them, and summed -----------------------------------------
+
+def _count(numbers: Mapping, key: str) -> object:
+    value = numbers.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _counts(value: object) -> str:
+    if not isinstance(value, Mapping) or not value:
+        return "none"
+    return ", ".join(f"{name} {count}" for name, count in value.items())
+
+
+def _duration(seconds: object) -> str:
+    """Whole seconds as `2h 5m 3s`, leaving out what is nothing."""
+    if not isinstance(seconds, int) or isinstance(seconds, bool) or seconds <= 0:
+        return "0s"
+    hours, rest = divmod(seconds, 3600)
+    minutes, rest = divmod(rest, 60)
+    return " ".join(f"{amount}{unit}" for amount, unit in
+                    ((hours, "h"), (minutes, "m"), (rest, "s")) if amount)
+
+
+#: The keys `lines` gives a line of their own to; any other is given as it is.
+_SAID = ("design_passes", "fold_first", "folds", "records_only_folds", "lead_decisions",
+         "step_time_s", "findings", "rechecks", "drift_rechecks", "checks_failed",
+         "questions", "decisions", "skips", "step_ups", "repairs", "corrections", "drops",
+         "cleared_locks", "flags")
+
+
+def lines(numbers: Mapping) -> list[str]:
+    """The numbers as lines for people to read, each group on one. A key a later
+    version counts is given as it is, so nothing held is left unsaid."""
+    spent = numbers.get("step_time_s")
+    times = (", ".join(f"{step} {_duration(seconds)}" for step, seconds in spent.items())
+             if isinstance(spent, Mapping) and spent else "none")
+    decided = numbers.get("decisions")
+    decided = decided if isinstance(decided, Mapping) else {}
+    found = [
+        f"design: passes {_count(numbers, 'design_passes')}, fold-first "
+        f"{_count(numbers, 'fold_first')}, folds {_count(numbers, 'folds')} "
+        f"(records only {_count(numbers, 'records_only_folds')}), lead decisions "
+        f"{_count(numbers, 'lead_decisions')}",
+        f"time in steps: {times}",
+        f"findings: {_counts(numbers.get('findings'))}; re-checks "
+        f"{_count(numbers, 'rechecks')}, drift re-checks "
+        f"{_count(numbers, 'drift_rechecks')}; check runs failed "
+        f"{_count(numbers, 'checks_failed')}",
+        f"questions by origin: {_counts(numbers.get('questions'))}",
+        f"decisions: accepted {_count(decided, decisions.ACCEPT)}, rejected "
+        f"{_count(decided, decisions.REJECT)}",
+        f"skips {_count(numbers, 'skips')}, step-ups {_count(numbers, 'step_ups')}, "
+        f"repairs {_count(numbers, 'repairs')}, corrections "
+        f"{_count(numbers, 'corrections')}, dropped builds {_count(numbers, 'drops')}, "
+        f"cleared locks {_count(numbers, 'cleared_locks')}",
+        f"flags: {_counts(numbers.get('flags'))}"]
+    found += [f"{key}: {value}" for key, value in numbers.items() if key not in _SAID]
+    return found
+
+
+def summed(each: Iterable[Mapping]) -> dict:
+    """The numbers of several rounds added together key by key: a count to the same
+    count, and a group (findings by severity, time by step) name by name. A value of
+    another kind, which no version writes, is passed over."""
+    total: dict = {}
+    for numbers in each:
+        _add(total, numbers)
+    return total
+
+
+def _add(total: dict, numbers: Mapping) -> None:
+    for key, value in numbers.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            had = total.get(key, 0)
+            total[key] = (had if isinstance(had, int) else 0) + value
+        elif isinstance(value, Mapping):
+            had = total.get(key)
+            if not isinstance(had, dict):
+                had = total[key] = {}
+            _add(had, value)
+
+
+__all__ = ["FLAGS", "OTHER", "step_time_s", "of", "lines", "summed"]

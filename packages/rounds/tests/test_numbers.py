@@ -194,3 +194,44 @@ def test_the_drop_s_numbers_time_its_last_step_to_the_drop_itself(folder):
     assert dropped["at"] == log.stamp(4e9)
     assert spent == numbers.step_time_s([opened], ended_at=dropped["at"])
     assert spent["commission"] > 0
+
+
+def test_the_numbers_read_as_one_line_a_group():
+    found = numbers.lines({
+        "design_passes": 2, "fold_first": 1, "folds": 3, "records_only_folds": 1,
+        "lead_decisions": 1, "step_time_s": {"design": 3725, "build B1": 0},
+        "findings": {"blocker": 0, "major": 2, "minor": 1, "note": 0}, "rechecks": 1,
+        "drift_rechecks": 0, "checks_failed": 1, "questions": {"comms": 2},
+        "decisions": {"accept": 1, "reject": 0}, "skips": 1, "step_ups": 0,
+        "repairs": 0, "corrections": 1, "drops": 1, "cleared_locks": 0,
+        "flags": {"extra-full-pass": 0, "model-below-tier": 1},
+        "a_later_count": 4})
+
+    assert found == [
+        "design: passes 2, fold-first 1, folds 3 (records only 1), lead decisions 1",
+        "time in steps: design 1h 2m 5s, build B1 0s",
+        "findings: blocker 0, major 2, minor 1, note 0; re-checks 1, drift re-checks 0; "
+        "check runs failed 1",
+        "questions by origin: comms 2",
+        "decisions: accepted 1, rejected 0",
+        "skips 1, step-ups 0, repairs 0, corrections 1, dropped builds 1, cleared locks 0",
+        "flags: extra-full-pass 0, model-below-tier 1",
+        "a_later_count: 4"]
+
+
+def test_numbers_missing_a_key_read_as_none_counted():
+    assert numbers.lines({})[:2] == [
+        "design: passes 0, fold-first 0, folds 0 (records only 0), lead decisions 0",
+        "time in steps: none"]
+
+
+def test_numbers_are_summed_key_by_key_and_group_by_group():
+    found = numbers.summed([
+        {"folds": 1, "step_time_s": {"design": 10}, "questions": {"comms": 1}},
+        {"folds": 2, "step_time_s": {"design": 5, "build B1": 7}, "questions": {},
+         "drops": 1},
+        {"folds": "not a count", "flagged": True}])
+
+    assert found == {"folds": 3, "step_time_s": {"design": 15, "build B1": 7},
+                     "questions": {"comms": 1}, "drops": 1}
+    assert numbers.summed([]) == {}

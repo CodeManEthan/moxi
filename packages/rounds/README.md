@@ -38,7 +38,7 @@ It does not yet do the rest of a round:
 
 - removing a finished build's worktree, scratch folder and branch;
 - decisions a build records for the operator to ratify;
-- the retrospective, `retro.md` and `list --numbers`;
+- the written retrospective, a retro report recorded with `verdict`;
 - answers prepared ahead for a sitting with the operator;
 - parent rounds.
 
@@ -100,6 +100,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
+| `moxi rounds list [PROJECT] --numbers [--json]` | the numbers of the closed rounds, summed key by key; a dropped round's are not summed |
 | `moxi rounds list ROUND\|PROJECT --questions [--view docket\|ratify] [--json] [--out DIR]` | the questions written out as markdown; `--out` writes `questions.md` and `questions.json` into DIR; a round's two views are both given when `--view` is left out |
 | `moxi rounds drop ROUND --by operator\|lead --record PTR [--withdraw-questions]` | end a round short of its work |
 | `moxi rounds drop ROUND B<n> --by operator\|lead --record PTR` | drop the open build of one stage; the stage stays owed |
@@ -620,7 +621,9 @@ skips, step-ups, repairs, corrections, dropped builds, cleared locks, and report
 flagged `extra-full-pass` or `model-below-tier`. The time at each step is in whole
 seconds, under the step's name or `<step> B<n>` for a stage's: the log is read once at
 the end, and the time from each event to the next goes to the step the round was at
-then, as read from the log alone. A flow with a `retro` step
+then, as read from the log alone. `show` gives them under the line that says how the
+round ended, `retro.md` beside the round's note holds them, and `list --numbers` sums
+those of the closed rounds (a dropped round's stay with it). A flow with a `retro` step
 waits for it too, until that step is skipped; the retro report is not in this version.
 
 ## Dropping a round
@@ -711,12 +714,13 @@ are backed up and pushed with them.
 <dir>/questions.md           generated: the project's questions
 <dir>/<slug>/round.jsonl     the round's log
 <dir>/<slug>/round-note.md   generated: the round's state and history
+<dir>/<slug>/retro.md        generated once the round has ended: its numbers
 <dir>/<slug>/design.md       written by the lead; rounds reads its data block
 <dir>/<slug>/versions/design-v<N>.md   the design as `fold` froze it
 <dir>/<slug>/*.md            reports, written by checkers; rounds reads their data block
 ```
 
-A log is only appended to. The three generated files are written again whole after every
+A log is only appended to. The generated files are written again whole after every
 write to their log, so an edit to one is lost; keep your own notes on a round in another
 file of its folder. A folder of the rounds folder that holds a `round.jsonl` is a round,
 however it got there: one that arrived by git is listed as soon as it is there.

@@ -13,7 +13,7 @@ the operator was shown it; and its history, every event, oldest first.
 
 A round that is open is shown with what its close waits for, since no verb closes a
 round: it closes on the write that leaves nothing waited for. A round that has ended
-is shown with how it ended. A question whose record still reads
+is shown with how it ended and the numbers its ending event holds. A question whose record still reads
 as open or parked there (a correction made after the end can leave one so) is shown as
 waiting for a new round, apart from the open and the parked ones: it is put to nobody
 on a round that has ended.
@@ -53,7 +53,7 @@ from pathlib import Path
 from moxi import store
 
 from . import (builds, checking, ci, closing, decisions, drift, findings, folders,
-               index, log,
+               index, log, numbers,
                open_builds, questions, shown, sizing, skips, steps, tracing, versions,
                waits)
 from . import settings as own
@@ -887,13 +887,14 @@ def skip_line(one: dict) -> str:
 
 def _ended(state: states.State) -> dict | None:
     """How the round ended, or None while it is open: the status it has since, whose
-    act it was and the pointer it carried, who recorded it and when, and where each
-    question that was open or parked went."""
+    act it was and the pointer it carried, who recorded it and when, where each
+    question that was open or parked went, and the round's numbers as the event that
+    ended it holds them."""
     end = state.ended
     if end is None:
         return None
     return {"how": end.how, "by": end.by, "record": end.record, "actor": end.actor,
-            "at": end.at, "questions": dict(end.questions)}
+            "at": end.at, "questions": dict(end.questions), "numbers": end.numbers}
 
 
 def ended_line(ended: dict) -> str:
@@ -948,6 +949,9 @@ def as_text(found: Shown) -> str:
         lines.append(f"inherits: {', '.join(shown_as['inherits'])}")
     if shown_as["ended"] is not None:
         lines.append(f"ended: {ended_line(shown_as['ended'])}")
+        if shown_as["ended"]["numbers"] is not None:
+            lines += ["numbers:", *(f"  {line}" for line in
+                                    numbers.lines(shown_as["ended"]["numbers"]))]
     if found.notice is not None:
         lines.append(found.notice)
     if found.register_unreadable is not None:

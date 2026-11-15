@@ -275,8 +275,9 @@ def test_an_index_of_the_first_schema_is_brought_up_by_the_next_write(home):
     [(status, ended)] = conn.execute("SELECT status, ended FROM rounds").fetchall()
     conn.close()
     assert status == "dropped"
+    # This event holds no numbers, so none are kept.
     assert json.loads(ended) == {"how": "dropped", "by": "operator",
-                                 "record": "comms:30", "at": AT}
+                                 "record": "comms:30", "at": AT, "numbers": None}
     assert index.disagreements([home]) == []
 
 
@@ -481,6 +482,21 @@ def test_each_way_the_index_and_the_logs_differ_is_named(home):
         index.Disagreement("proj-a/a-round", "has a row in the index and no log")]
     index.rebuild([home])
     assert index.disagreements([home]) == []
+
+
+def test_the_index_keeps_a_round_s_numbers_and_numbers_it_was_not_given_differ(home):
+    at = open_round(home)
+    write.record(at, actor="planner", at=AT, event=lambda view, result: write.Entry(
+        "round.closed", {"numbers": {"folds": 2}}))
+    assert index.read("proj-a", home.folder, "a-round").ended["numbers"] == {"folds": 2}
+
+    conn = sqlite3.connect(paths.index_file())
+    conn.execute("UPDATE rounds SET ended = json_set(ended, '$.numbers.folds', 3)")
+    conn.commit()
+    conn.close()
+
+    assert index.disagreements([home]) == [index.Disagreement(
+        "proj-a/a-round", "has rows in the index that its log does not give")]
 
 
 # -- landings ------------------------------------------------------------------------------
