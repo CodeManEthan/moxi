@@ -862,7 +862,7 @@ def _config_json(module: str, found, schema) -> int:
     `source` (`default`, `file` or `env`). The page fields are `label`, `line`, `group`,
     `unit` and `elsewhere` (a string or null), `common` and `pick` (a bool, false when not
     given), `choices` (one `{value, words}` per value it names, in the enum's order, or
-    null), `hurts` (`{when, says, confirm, rest}` or null) and `terminal` (`{on, off}` or
+    null), `hurts` (`{when, says, confirm, stays}` or null) and `terminal` (`{on, off}` or
     null). A switch table also holds `switch_table: true` and `entries`, one
     `{name, value, source, named_by}` per entry in the file and per entry the module's
     units, wraps and questions name as a switch (see `_switch_names`). When the file

@@ -42,7 +42,7 @@ type = "bool"
 default = false
 doc = "Answer the trust question."
 read = "use"
-hurts = { when = "on", says = "answers for you", confirm = "Every folder is trusted.", rest = true }
+hurts = { when = "on", says = "answers for you", confirm = "Every folder is trusted.", stays = true }
 
 [carry]
 type = "list"
@@ -90,8 +90,8 @@ def test_each_page_field_is_read_onto_the_key():
     assert keys["look"].choices == {"plain": "Plain", "neon": "Midnight neon"}
     assert keys["look"].pick is True
     assert keys["guard"].hurts == {"when": "off", "says": "turns this guard off",
-                                   "confirm": "Anything goes.", "rest": False}
-    assert keys["trust"].hurts["rest"] is True
+                                   "confirm": "Anything goes.", "stays": False}
+    assert keys["trust"].hurts["stays"] is True
     assert keys["carry"].hurts["when"] == "add"
     assert keys["gate"].terminal == {"on": "moxi demo gate enable",
                                      "off": "moxi demo gate disable"}
@@ -153,10 +153,10 @@ def test_page_fields_change_nothing_the_key_reads():
      "has hurts.confirm 'a\\nb', which is not one line"),
     ({**BOOL, "hurts": '{ when = "on", says = "s", confirm = "c", why = "w" }'},
      "unknown hurts field(s) why"),
-    ({**BOOL, "hurts": '{ when = "on", says = "s", confirm = "c", rest = "yes" }'},
-     "hurts.rest 'yes', not a bool"),
-    ({**LIST, "hurts": '{ when = "add", says = "s", confirm = "c", rest = true }'},
-     "has hurts.rest but is a list"),
+    ({**BOOL, "hurts": '{ when = "on", says = "s", confirm = "c", stays = "yes" }'},
+     "hurts.stays 'yes', not a bool"),
+    ({**LIST, "hurts": '{ when = "add", says = "s", confirm = "c", stays = true }'},
+     "has hurts.stays but is a list"),
     ({**BOOL, "hurts": '"off"'}, "hurts that is not a table"),
     ({**INT, "terminal": '{ on = "x on", off = "x off" }'}, "has terminal but is an int"),
     ({**BOOL, "terminal": '{ on = "x on" }'}, "terminal that is not a table of on and off"),
@@ -236,8 +236,8 @@ def test_show_json_carries_each_page_field(paged, capsys):
                                        {"value": "neon", "words": "Midnight neon"}]
     assert keys["look"]["pick"] is True
     assert keys["guard"]["hurts"] == {"when": "off", "says": "turns this guard off",
-                                      "confirm": "Anything goes.", "rest": False}
-    assert keys["trust"]["hurts"]["rest"] is True
+                                      "confirm": "Anything goes.", "stays": False}
+    assert keys["trust"]["hurts"]["stays"] is True
     assert keys["carry"]["hurts"]["when"] == "add"
     assert keys["gate"]["terminal"] == {"on": "moxi demo gate enable",
                                         "off": "moxi demo gate disable"}

@@ -68,8 +68,8 @@ else reads them: they never change what a key is or how it is read. Each is opti
     pick       a bool, on an enum: true shows its values as a pick list
     hurts      a change that can hurt, on a bool or a list: `when` ("on" or "off" on a
                bool, "add" or "remove" on a list), `says` and `confirm` (one line each),
-               and on a bool `rest`, true when holding the value `when` names is itself
-               the harm
+               and on a bool `stays`, true when holding the value `when` names is itself
+               the harm, so the warning stays while the key holds it
     terminal   on a bool turned on and off at the terminal: `on` and `off`, each the one
                command that turns it so; the page shows the value and does not change it
     elsewhere  one line naming the other page the key is edited on; the page leaves the
@@ -907,7 +907,7 @@ def _hurts(hurts, kind, bad) -> dict:
     if kind not in _HURTS_WHEN:
         raise bad(f"has hurts but is {_a(kind)}",
                   "remove hurts; only a change of a bool or a list can hurt")
-    fields = ("when", "says", "confirm", "rest")
+    fields = ("when", "says", "confirm", "stays")
     if not isinstance(hurts, dict):
         raise bad("has hurts that is not a table", f"give hurts as a table of "
                   f"{', '.join(fields)}")
@@ -923,14 +923,15 @@ def _hurts(hurts, kind, bad) -> dict:
         if not _one_line(hurts.get(field)):
             raise bad(f"has hurts.{field} {hurts.get(field)!r}, which is not one line of "
                       "text", f"give hurts.{field} as one line")
-    rest = hurts.get("rest", False)
-    if not isinstance(rest, bool):
-        raise bad(f"has hurts.rest {rest!r}, not a bool", "set hurts.rest to true or false")
-    if rest and kind != "bool":
-        raise bad(f"has hurts.rest but is {_a(kind)}",
-                  "remove hurts.rest; only a bool's value held can hurt")
+    stays = hurts.get("stays", False)
+    if not isinstance(stays, bool):
+        raise bad(f"has hurts.stays {stays!r}, not a bool",
+                  "set hurts.stays to true or false")
+    if stays and kind != "bool":
+        raise bad(f"has hurts.stays but is {_a(kind)}",
+                  "remove hurts.stays; only a bool's value held can hurt")
     return {"when": hurts["when"], "says": hurts["says"], "confirm": hurts["confirm"],
-            "rest": rest}
+            "stays": stays}
 
 
 def _terminal(terminal, kind, bad) -> dict:
