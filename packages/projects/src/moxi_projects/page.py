@@ -13,6 +13,8 @@
     GET  /api/where          the store file this server reads and writes, the git it
                              would run for a create (or none), and the line a write
                              would be refused with now (or none)
+    GET  /api/remove-check   what a remove of `key` would be refused with now, each
+                             holder with its sentence, without removing
     GET  /api/remove-status  what the remove request `job` came to: removed, or refused
                              with each sentence
     POST /api/add            `moxi projects add KEY [--root DIR] [--create] [--kind KIND]
@@ -120,6 +122,13 @@ KINDS = {"found": lb.Out("list", items=KIND), "broken": lb.Out("list", items=BRO
 #: `project`, `how` and `taken` are null when the store can't be read.
 AT_PATH = {"path": _MAYBE_PATH, "exists": _MAYBE_BOOL, "git": _MAYBE_BOOL,
           "project": _MAYBE, "how": _MAYBE, "key": _MAYBE, "taken": _MAYBE_BOOL}
+#: What a remove of `key` would meet now, without removing: `key` as stored, and one row
+#: per refusal. `module` is `projects` for the associated agents (its `sentence` names
+#: them), else the contribution's module, with its sentence, which carries its own fix;
+#: `fix` is set only for a contribution that won't load, raises or answers out of shape,
+#: whose `sentence` is the reason. Empty when nothing would refuse it.
+REMOVE_CHECK = {"key": _TEXT, "refusals": lb.Out("list", items=lb.Out("table", items={
+    "module": _TEXT, "sentence": _SAYS, "fix": _MAYBE_SAYS}))}
 #: `store` is the store file; `git` the git a create would run, null when there is none
 #: on this server's PATH; `note` the line an add, a set or a remove would be refused with
 #: now, since this server would write elsewhere than the user's terminal or can't tell,
@@ -184,6 +193,8 @@ PAGE = lb.Page(
                  query={"path": lb.Field("string", max=PATH_MAX)}, returns=AT_PATH),
         lb.Route("/api/kinds", "read", _target("kinds"), returns=KINDS),
         lb.Route("/api/where", "read", _target("where"), returns=WHERE),
+        lb.Route("/api/remove-check", "read", _target("remove_check"), query={"key": _KEY},
+                 returns=REMOVE_CHECK),
         lb.Route(STATUS_ROUTE, "read", _target("remove_status"),
                  query={"job": lb.Field("string", max=JOB_MAX)}, returns=STATUS),
         lb.Route("/api/add", "act", _target("add"), body=ADD_BODY, returns=ADDED),
@@ -198,5 +209,5 @@ PAGE = lb.Page(
 )
 
 __all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "AT_PATH", "BROKEN", "BUDGET", "KIND", "KINDS",
-           "LISTED", "ONE", "PAGE", "PROJECT", "PROJECTS", "SET_BODY", "STATUS",
-           "STATUS_ROUTE", "WHERE", "WRITTEN"]
+           "LISTED", "ONE", "PAGE", "PROJECT", "PROJECTS", "REMOVE_CHECK", "SET_BODY",
+           "STATUS", "STATUS_ROUTE", "WHERE", "WRITTEN"]

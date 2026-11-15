@@ -9,7 +9,8 @@ status read, and never write. The list adds whether each root is a directory now
 through `pagestat`, which never lets a read wait on a hung mount past its bound, the home
 folder this server places and whether notes is installed. `/api/folder` says what is at
 a typed path for the Add panel: whether it is a directory and a git repository (through
-`pagestat` too), the project it is in by `for_path` and how, and the key it would make. `/api/where` names the store file this server reads and the
+`pagestat` too), the project it is in by `for_path` and how, and the key it would make. `/api/remove-check` gathers what a remove would be refused with now, as the remove
+asks it, without removing. `/api/where` names the store file this server reads and the
 git a create would run, since the page server takes the browser shell's environment and
 not the terminal's, and the two can differ. Its `note` is the line a write would be
 refused with now (below), or null.
@@ -222,6 +223,24 @@ def where(call: Any) -> dict[str, Any]:
             "note": pagecheck.line(c.module for c in found.loaded)}
 
 
+def remove_check(call: Any) -> dict[str, Any]:
+    """`GET /api/remove-check?key=K`: what a remove of K would be refused with now, by the
+    tests `acts.remove` makes, every one gathered rather than the first: the associated
+    agents, then each contribution's refusal, or its fault. 422 for no such key. Each
+    contribution reads locally only, by its contract, so this writes nothing."""
+    try:
+        found = api.get(call.query["key"])
+    except ProjectsError as exc:
+        raise _answer(exc) from None
+    refusals = []
+    if found.associated:
+        refusals.append({"module": "projects", "fix": None,
+                         "sentence": store.refuse_held_by_agents(found).reason})
+    refusals += [{"module": module, "sentence": sentence, "fix": fix}
+                 for module, sentence, fix in contributions.load().remove_check(found)]
+    return {"key": found.key, "refusals": refusals}
+
+
 def remove_status(call: Any) -> dict[str, Any]:
     """`GET /api/remove-status?job=<key>`: what the remove request came to; 422 for a key
     no request is kept under (an outcome is kept for a day)."""
@@ -364,5 +383,5 @@ def remove(call: Any) -> Any:
 
 
 __all__ = ["GIT_TIMEOUT", "KEY_REUSED", "expand_tilde", "projects", "project", "at_path",
-           "kinds", "where", "remove_status", "add", "set_fields", "agents_add",
-           "agents_remove", "remove"]
+           "kinds", "where", "remove_check", "remove_status", "add", "set_fields",
+           "agents_add", "agents_remove", "remove"]

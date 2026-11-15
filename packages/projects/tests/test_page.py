@@ -179,7 +179,7 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     routes = {r["path"]: r for r in LB.export(page.PAGE)["routes"]}
     assert {p for p, r in routes.items() if r["kind"] == "read"} == {
         "/api/projects", "/api/project", "/api/folder", "/api/kinds", "/api/where",
-        "/api/remove-status"}
+        "/api/remove-check", "/api/remove-status"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/set", "/api/agents-add", "/api/agents-remove", "/api/remove"}
     assert {p for p, r in routes.items() if r.get("confirmed")} == {"/api/remove"}
@@ -215,6 +215,7 @@ def test_every_root_is_marked_path_and_every_sentence_redact():
     assert {k for k, v in marks.items() if v == "redact"} == {
         "/api/kinds broken[].reason", "/api/add notes[]", "/api/add warnings[]",
         "/api/set notes[]", "/api/where note",
+        "/api/remove-check refusals[].sentence", "/api/remove-check refusals[].fix",
         "/api/remove-status reason", "/api/remove-status fix",
         "/api/remove-status sentences[]"}
 
@@ -538,6 +539,66 @@ def test_the_path_read_writes_nothing(golden_copy, store_path, tmp_path, own_poo
     at_path(os.path.join(golden_copy, "alpha"))
     assert (store_path.read_bytes(), store_path.stat().st_mtime_ns) == before
     assert not (tmp_path / "new-one").exists()
+
+
+# -- the remove check -------------------------------------------------------------------
+
+def check_of(key: str) -> dict:
+    return read("/api/remove-check", f"key={key}")
+
+
+@pytest.fixture
+def unchanged(golden_copy, store_path):
+    """The store's bytes and mtime, checked unchanged when the test ends."""
+    before = store_path.read_bytes(), store_path.stat().st_mtime_ns
+    yield golden_copy
+    assert (store_path.read_bytes(), store_path.stat().st_mtime_ns) == before
+
+
+def test_nothing_holding_the_project_checks_clean(unchanged):
+    assert check_of("GAMMA") == {"key": "gamma", "refusals": []}
+
+
+def test_associated_agents_are_projects_own_refusal(unchanged):
+    body = check_of("alpha")
+    assert body["refusals"] == [{"module": "projects", "fix": None,
+                                 "sentence": "project 'alpha' still has associated agents: "
+                                             "helper scout"}]
+
+
+def test_each_contributions_sentence_is_a_row_with_no_fix(site, unchanged):
+    site.contribution("svc", holds("services run for it; `moxi services stop` frees it"))
+    site.contribution("links", holds("two watches name it; `moxi links clear` frees it"))
+    rows = check_of("alpha")["refusals"]
+    assert rows[0]["module"] == "projects"
+    assert sorted((r["module"], r["sentence"], r["fix"]) for r in rows[1:]) == [
+        ("links", "two watches name it; `moxi links clear` frees it", None),
+        ("svc", "services run for it; `moxi services stop` frees it", None)]
+
+
+def test_a_broken_contribution_is_a_row_with_its_reason_and_fix_and_the_rest_still_ask(
+        site, unchanged):
+    site.contribution("gone", "raise ImportError('gone')\n")
+    site.contribution("raises", "INTERFACE = 1\n\ndef refuse_remove(project):\n"
+                                "    raise RuntimeError('boom')\n")
+    site.contribution("svc", holds("services run for it"))
+    rows = {r["module"]: r for r in check_of("gamma")["refusals"]}
+    assert set(rows) == {"gone", "raises", "svc"}
+    assert "won't load" in rows["gone"]["sentence"]
+    assert "moxi uninstall gone" in rows["gone"]["fix"]
+    assert "RuntimeError: boom" in rows["raises"]["sentence"]
+    assert "moxi uninstall raises" in rows["raises"]["fix"]
+    assert rows["svc"] == {"module": "svc", "sentence": "services run for it", "fix": None}
+
+
+def test_no_such_key_is_422_as_the_project_read_answers(unchanged):
+    said = refused(get("/api/remove-check", "key=nosuch"))
+    assert said == refused(get("/api/project", "key=nosuch"))
+
+
+def test_the_check_on_no_store_is_422_and_makes_no_file(store_path):
+    refused(get("/api/remove-check", "key=any"))
+    assert not store_path.exists()
 
 
 def test_project_matches_its_key_ignoring_case(golden_copy):

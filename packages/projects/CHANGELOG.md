@@ -13,6 +13,11 @@
   the path with a leading `~` taken as the page server's home, whether it is a directory
   and a git repository, the project it is in and how (`root`, `inside`, `worktree`), the
   key its last segment would make and whether that key is taken. It writes nothing.
+- The page serves `/api/remove-check?key=`, what a remove would be refused with now,
+  without removing: the associated agents, then each contribution's sentence, or the
+  reason and fix of one that won't load, raises or answers out of shape. It gathers them
+  all rather than stopping at the first. `Contributions.remove_check` gives the
+  contributions' rows.
 
 ## 0.1.4 (2026-11-08)
 
