@@ -81,9 +81,8 @@ has every attribute, the slots and the `moxi-row-toggle` event.
 
 ## Confirmed acts in a page
 
-An act the user should confirm a second time, such as stopping a service or removing a
-project, is a confirmed act: it runs at most once, and only after the user says yes on a
-sheet the shell draws. The page declares it in its route table with `confirmed=True` and
+An act the user should confirm a second time, such as stopping a service, is a confirmed
+act: it runs at most once, and only after the user says yes on a sheet the shell draws. The page declares it in its route table with `confirmed=True` and
 the status route it reports on; [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/loopback.md), "Confirmed acts",
 has the route's whole shape. For example:
 
