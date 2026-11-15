@@ -100,3 +100,19 @@ test("a 404 means comms went away", async () => {
   await feed.refresh();
   assert.equal(feed.gone, true);
 });
+
+test("a feed that isn't clocked takes a body with no now, keeps no offset and takes topic values", async () => {
+  const body = { state: "up", detail: null, rows: [ROW] };
+  const feed = new Feed(async () => ({ status: 200, data: body }), parseRoster, () => {},
+                        { wait: async () => {}, clock: () => 400, clocked: false });
+  await feed.refresh();
+  assert.deepEqual(feed.value, body);
+  assert.equal(feed.offset, null);
+  assert.equal(feed.now(), null);
+  feed.topic({ ...body, rows: [] });
+  assert.deepEqual(feed.value.rows, []);
+  const clocked = new Feed(async () => ({ status: 200, data: body }), parseRoster, () => {}, { clock: () => 400 });
+  await clocked.refresh();
+  assert.equal(clocked.value, null);
+  assert.equal(clocked.failure.status, 200);
+});

@@ -1,7 +1,7 @@
-"""comms' roster and page in a browser, through a real shell that starts comms' and cache's
-real page servers, comms' asking the rig's daemon: the contract check, the rows and the
-states, cache's chip on each live row, push updates, every failure state, and the 360 px
-width check.
+"""comms' roster in a browser, placed by the shell's modules view, through a real shell that
+starts comms' and cache's real page servers, comms' asking the rig's daemon: the contract
+check of the roster and of the page, the rows and the states, cache's chip on each live
+row, push updates, every failure state, and the 360 px width check.
 
 The shell's page servers stop after a second idle. A test sets its daemon up, then waits
 for the running comms page server to stop (`roster_kit.current`), so the next one's first
@@ -34,6 +34,8 @@ pytestmark = [pytest.mark.browser,
 HELP = "An identity is a name only one session can hold at a time."
 OFFLINE = "The comms daemon isn't answering. moxi doctor comms says why."
 FAILED = "Can't reach the comms panel's server."
+#: The shell's modules view, which places the roster block.
+MODULES = "/m/ui/modules"
 #: How long a change on the daemon may take to reach an open roster: the poller's period,
 #: and the gather and the push after it.
 PUSH_MS = 12_000
@@ -91,8 +93,8 @@ def awaits(data: dict, qualified: str) -> list[str]:
 def open_panel(ui_contexts):
     """A signed-in page on comms' panel, and the roster in it."""
     page = ui_contexts().pages[0]
-    page.goto("/m/comms/")
-    return page, page.locator("#moxi-panel > moxi-comms-page moxi-comms-roster div.roster")
+    page.goto(MODULES)
+    return page, page.locator("moxi-comms-roster div.roster")
 
 
 def rows(roster):
@@ -153,7 +155,6 @@ def test_the_roster_lists_live_then_standing_names_with_a_chip_on_each_live_row(
     put_clock(shell, planner.session_id, age=4000)
     roster_kit.current(shell, lambda data: holding([P, R])(data) and awaits(data, R) == [P])
     page, roster = open_panel(ui_contexts)
-    expect(page.locator("#moxi-panel > moxi-comms-page h1")).to_have_text("Comms")
     expect(roster).to_have_attribute("data-state", "up")
     expect(roster.locator("h2 a")).to_have_text("Agents")
     expect(roster.locator("p.help")).to_have_text(HELP)
@@ -189,8 +190,8 @@ def test_a_new_binding_and_a_wait_reach_the_open_roster_by_push(shell, rig, ui_c
     reads: list[str] = []
     page.on("request", lambda request: reads.append(request.url)
             if roster_kit.ROSTER in request.url else None)
-    page.goto("/m/comms/")
-    roster = page.locator("#moxi-panel > moxi-comms-page moxi-comms-roster div.roster")
+    page.goto(MODULES)
+    roster = page.locator("moxi-comms-roster div.roster")
     expect(rows(roster)).to_have_count(4)
     rig.shim(**PLANNER)
     bound(rig, P)
@@ -373,8 +374,8 @@ def test_a_chip_cache_cannot_place_leaves_its_cell_empty(shell, rig, ui_contexts
     page = ui_contexts().pages[0]
     # cache's script can't load, so place() gives null.
     page.route("**/m/cache/chip.js*", lambda route: route.fulfill(status=404, body=""))
-    page.goto("/m/comms/")
-    roster = page.locator("#moxi-panel > moxi-comms-page moxi-comms-roster div.roster")
+    page.goto(MODULES)
+    roster = page.locator("moxi-comms-roster div.roster")
     cell = row(roster, R).locator(f'span.cache[data-session="{reviewer.session_id}"]')
     expect(cell).to_have_attribute("data-placed", reviewer.session_id)
     page.wait_for_timeout(300)
@@ -398,7 +399,9 @@ def test_the_page_the_roster_and_the_home_view_fit_a_phone(shell, rig, ui_contex
     page = ui_contexts().pages[0]
     ui_width_check(page)
     ui_width_check(page, module="comms")
-    roster = page.locator("#moxi-panel > moxi-comms-page moxi-comms-roster div.roster")
+    expect(page.locator("#moxi-panel > moxi-comms-page moxi-ui-row")).to_have_count(2)
+    page.goto(MODULES)
+    roster = page.locator("moxi-comms-roster div.roster")
     expect(rows(roster)).to_have_count(5)
     expect(chip(roster, qualified, long.session_id)).to_have_attribute("data-shows", "warm")
     expect(row(roster, R).locator('[data-field="awaiting"]')).to_have_text(
