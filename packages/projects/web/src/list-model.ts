@@ -5,7 +5,7 @@
 import { claimedBelow, inOrder, partText } from "./claims.ts";
 import type { Report } from "./facts.ts";
 import type { Listed } from "./feed.ts";
-import { homeForm, kindWord, lastActive, LOCAL } from "./words.ts";
+import { dayWord, homeForm, kindWord, lastActive, LOCAL } from "./words.ts";
 import type { Clock } from "./words.ts";
 
 /** Line two's heavy words for a root that is not a directory. */
@@ -169,5 +169,151 @@ export function rowAttributes(row: ProjectRow): Record<string, string | null> {
     lead: row.lead, "lead-heavy": flag(row.lead !== null), "lead-more": row.leadMore,
     rest: row.rest, "rest-strong": flag(row.rest !== null), tail: row.tail,
     toggles: "", open: flag(row.act === "Close"),
+  };
+}
+
+// -- the order, the fold, find and the kind filter --------------------------------------------
+
+/** Past this many projects the list has the find field, the kind filter and the fold. */
+export const LONG_PAST = 12;
+/** A project whose newest activity is older than this folds under `Earlier`. */
+export const EARLIER_DAYS = 30;
+/** How long the first order waits for every placed component's first report. */
+export const HOLD_MS = 3000;
+
+const DAY_S = 86_400;
+
+/** `<n> project(s)`. */
+export function projectsWord(n: number): string {
+  return `${n} ${n === 1 ? "project" : "projects"}`;
+}
+
+/** Keys compare without case, then as they are, so the order is the same everywhere. */
+export function byKey(a: string, b: string): number {
+  const lower = a.toLowerCase().localeCompare(b.toLowerCase(), "en");
+  return lower !== 0 ? lower : a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Whether the list still holds its first order, by key: until every placed component has
+ * reported once or `HOLD_MS` has passed since the page opened, whichever is first.
+ */
+export function orderHeld(placed: number, reported: number, elapsedMs: number): boolean {
+  return reported < placed && elapsedMs < HOLD_MS;
+}
+
+/** Whether a row rises above the order by activity: a missing folder or a ranked part. */
+export const isRisen = (row: ProjectRow): boolean => row.rank !== null;
+
+/**
+ * The rows in the list's order. With an activity source: the risen rows first, lowest
+ * rank first, then every row by its newest `at`, newest first, and rows with no `at` last
+ * by key. With none, or while the first order is held: by key, whatever ranks.
+ */
+export function ordered(rows: readonly ProjectRow[], { active, held }: { active: boolean; held: boolean }): ProjectRow[] {
+  const keyed = [...rows].sort((a, b) => byKey(a.key, b.key));
+  if (!active || held) return keyed;
+  const byAt = (a: ProjectRow, b: ProjectRow): number => {
+    if (a.at !== null && b.at !== null && a.at !== b.at) return b.at - a.at;
+    if ((a.at === null) !== (b.at === null)) return a.at === null ? 1 : -1;
+    return byKey(a.key, b.key);
+  };
+  const risen = keyed.filter(isRisen).sort((a, b) => (a.rank as number) - (b.rank as number) || byAt(a, b));
+  return [...risen, ...keyed.filter((row) => !isRisen(row)).sort(byAt)];
+}
+
+/**
+ * `rows` with the open row back at the place it had in `previous`, the keys as last drawn,
+ * and the others ordered around it. A row that wasn't drawn before takes its own place.
+ */
+export function keepOpenPlace(rows: readonly ProjectRow[], open: string | null,
+                              previous: readonly string[]): ProjectRow[] {
+  const was = open === null ? -1 : previous.indexOf(open);
+  const now = rows.findIndex((row) => row.key === open);
+  if (was < 0 || now < 0) return [...rows];
+  const others = rows.filter((row) => row.key !== open);
+  const place = Math.min(was, others.length);
+  return [...others.slice(0, place), rows[now], ...others.slice(place)];
+}
+
+/** Whether `row` matches what is typed in the find field: its key or `~` root, without case. */
+export function matches(row: ProjectRow, root: string, find: string): boolean {
+  const typed = find.trim().toLowerCase();
+  return typed === "" || row.key.toLowerCase().includes(typed) || root.toLowerCase().includes(typed);
+}
+
+/** What the list's head and rows show for a set of choices. */
+export interface ListAsk {
+  /** The find field, "" for none. */
+  find: string;
+  /** The kind filter, null for all. */
+  kind: string | null;
+  /** The first order is still held. */
+  held: boolean;
+  /** The keys in the order last drawn, so the open row keeps its place. */
+  previous: readonly string[];
+}
+
+/** The list as it is drawn. */
+export interface ListView {
+  /** The rows shown, in order. */
+  rows: ProjectRow[];
+  /** The rows folded under `Earlier`, in order: the newest activity first, never-used by key. */
+  earlier: ProjectRow[];
+  /** The fold's words after `Earlier · `: `24 projects not used since Oct 10`, null with no fold. */
+  earlierLine: string | null;
+  /** `<n> projects` at the left, counting the matches while the find field or filter is set. */
+  count: string;
+  /** `<shown> of <all> projects` beside the field while it or the filter is set. */
+  shownOf: string | null;
+  /** Past twelve projects: the find field shows. */
+  long: boolean;
+  /** The kinds the filter offers, by name; none unless the list is long and holds more than one. */
+  kinds: string[];
+  /** Every key in the order drawn, the folded ones after the rest. */
+  order: string[];
+}
+
+/**
+ * The list. Past `LONG_PAST` projects the find field and the kind filter apply, and,
+ * while a source of all activity has reported and the order is no longer held, projects
+ * whose newest activity is over `EARLIER_DAYS` days old, or absent, fold under
+ * `Earlier`; a risen row, the open row and any row while the find field is set never
+ * fold. Twelve or fewer: no field, no filter, no fold.
+ */
+export function listView(projects: readonly Listed[], facts: ListFacts, ask: ListAsk): ListView {
+  const { reports, home, open, now, clock = LOCAL } = facts;
+  const all = projects.map((project) => ({ project, row: projectRow(project, facts) }));
+  const long = projects.length > LONG_PAST;
+  const kindsHeld = [...new Set(projects.map((project) => project.kind))].sort(byKey);
+  const kinds = long && kindsHeld.length > 1 ? kindsHeld : [];
+  const kind = kinds.length > 0 && ask.kind !== null ? ask.kind : null;
+  const find = long ? ask.find.trim() : "";
+  const shown = all.filter(({ project, row }) =>
+    (kind === null || project.kind === kind) && matches(row, homeForm(project.root, home), find))
+    .map(({ row }) => row);
+
+  const sorted = keepOpenPlace(ordered(shown, { active: hasActivity(reports), held: ask.held }), open, ask.previous);
+  const folds = long && find === "" && !ask.held && saysUnused(reports);
+  const since = now - EARLIER_DAYS * DAY_S;
+  const folded = (row: ProjectRow): boolean =>
+    folds && !isRisen(row) && row.key !== open && (row.at === null || row.at < since);
+  const rows = sorted.filter((row) => !folded(row));
+  const earlier = [...sorted.filter(folded)].sort((a, b) =>
+    a.at !== null && b.at !== null ? b.at - a.at || byKey(a.key, b.key)
+      : a.at === null && b.at === null ? byKey(a.key, b.key) : a.at === null ? 1 : -1);
+
+  let earlierLine: string | null = null;
+  if (earlier.length > 0) {
+    const newest = earlier[0].at;
+    earlierLine = newest === null ? projectsWord(earlier.length)
+      : `${projectsWord(earlier.length)} not used since ${dayWord(clock.day(newest), clock.day(now))}`;
+  }
+  const narrowed = kind !== null || find !== "";
+  return {
+    rows, earlier, earlierLine, long, kinds,
+    count: projectsWord(narrowed ? shown.length : projects.length),
+    shownOf: narrowed ? `${shown.length} of ${projectsWord(projects.length)}` : null,
+    order: [...rows, ...earlier].map((row) => row.key),
   };
 }
