@@ -341,7 +341,7 @@ class _Push:
         drop = self.message_keys(message.DROP_TRAILER)
         passed = self.message_keys(message.PASS_TRAILER)
         own = _own_identity()
-        from moxi_repo import commit_rules_problems
+        from moxi_repo.api import commit_rules_problems
 
         for sha in commits:
             short = sha[:12]
@@ -510,7 +510,7 @@ def _log(record: dict) -> None:
 
 def pre_push(ctx):
     """The piece."""
-    from moxi_repo import Outcome
+    from moxi_repo.api import Outcome
 
     from moxi_publishing.message import is_public, no_flag
 

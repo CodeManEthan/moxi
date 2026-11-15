@@ -358,7 +358,7 @@ def pre_commit(ctx):
     """The piece."""
     import os
 
-    from moxi_repo import Outcome
+    from moxi_repo.api import Outcome
 
     from moxi_publishing.message import is_public, no_flag
 

@@ -61,12 +61,12 @@ def _project_path(path: str | os.PathLike) -> str:
 def resolve(path: str | os.PathLike) -> str:
     """The main work tree of the repo at `path`, which may be a project key where repo
     resolves one. Raises `Failure`."""
-    from moxi_repo import gitconf
+    from moxi_repo.api import NotARepo, resolve_repo
 
     where = _project_path(path)
     try:
-        return str(gitconf.resolve(where).root)
-    except gitconf.NotARepo as exc:
+        return str(resolve_repo(where).root)
+    except NotARepo as exc:
         raise Failure(f"no git work tree at {exc}", 2) from None
 
 

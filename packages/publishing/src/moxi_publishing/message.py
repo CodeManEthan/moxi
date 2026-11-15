@@ -150,7 +150,7 @@ def is_public(ctx) -> bool:
 
 def no_flag(ctx, piece_id: str):
     """The refusal of a piece registered in a repo without the public flag."""
-    from moxi_repo import Outcome
+    from moxi_repo.api import Outcome
 
     return Outcome.refuse(
         f"{piece_id} is registered here but the repo isn't marked public "
@@ -172,8 +172,8 @@ def _next_step(ctx) -> str:
 
 def commit_msg(ctx):
     """The piece."""
-    from moxi_repo import Outcome
-    from moxi_repo.commit_rules import comment_prefix
+    from moxi_repo.api import Outcome
+    from moxi_repo.api import comment_prefix
 
     if not is_public(ctx):
         return no_flag(ctx, PIECE_ID)

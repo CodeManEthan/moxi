@@ -22,7 +22,7 @@ MODULE = "publishing"
 
 def rows() -> Iterator[Row]:
     from moxi_repo import api
-    from moxi_repo.run import quote_arg
+    from moxi_repo.api import quote_arg
 
     from moxi_publishing import flag
 
