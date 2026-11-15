@@ -3,8 +3,9 @@
 ## Unreleased
 
 - Every setting carries page fields, which `moxi config secrets show --json` prints
-  and the settings page draws: a plain label and a line, and on the three lists of
-  private names a can-hurt mark on taking one away. secrets needs moxi 0.1.9 or later.
+  and the settings page draws: a plain label and a line, a can-hurt mark on taking a
+  name away from the three lists of private names, and one on adding text to the list
+  that is public on purpose. secrets needs moxi 0.1.9 or later.
 - `Allowlist.from_text(public_text, private)`: the public allowlist from text a caller
   read (from git's index or a commit), the private file read as `Allowlist.read` reads
   it.

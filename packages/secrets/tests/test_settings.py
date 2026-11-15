@@ -10,6 +10,8 @@ from moxi.config import Schema
 
 #: The lists whose names the scan guards: taking one away can hurt.
 GUARDED = ["private_names.words", "private_names.anywhere", "private_names.emails"]
+#: The list of text that is public on purpose: adding to it lets text through.
+ALLOWED = "private_names.allowed"
 
 
 def show_json(capsys) -> dict:
@@ -34,8 +36,14 @@ def test_show_json_gives_every_key_a_label_and_a_line(capsys):
 
 def test_show_json_marks_taking_a_private_name_away_as_able_to_hurt(capsys):
     keys = show_json(capsys)
-    assert [name for name, key in keys.items() if key["hurts"]] == GUARDED
+    assert [name for name, key in keys.items() if key["hurts"]] == [*GUARDED, ALLOWED]
     for name in GUARDED:
         hurt = keys[name]["hurts"]
         assert hurt["when"] == "remove" and hurt["stays"] is False
         assert hurt["says"].startswith("stops guarding this ") and hurt["confirm"]
+
+
+def test_show_json_marks_adding_text_that_is_public_on_purpose_as_able_to_hurt(capsys):
+    hurt = show_json(capsys)[ALLOWED]["hurts"]
+    assert hurt["when"] == "add" and hurt["stays"] is False
+    assert hurt["says"] == "lets this text through" and hurt["confirm"]
