@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import signal
 import time
 import types
 
@@ -540,3 +541,174 @@ def test_the_start_plan_reads_the_config_from_the_env_it_is_given(installed, tur
 def test_the_start_plan_refuses_a_harness_turns_does_not_know():
     with pytest.raises(ValueError, match="harness"):
         turns.start_plan("fake")
+
+
+# -- run entries ---------------------------------------------------------------------------
+
+def _program(tmp_path, name, body):
+    """An executable Python script at tmp_path/name; `body` is its code after the imports."""
+    import sys
+
+    path = tmp_path / name
+    path.write_text(f"#!{sys.executable}\nimport json, os, subprocess, sys, time\n{body}\n")
+    path.chmod(0o755)
+    return path
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # A killed child of the program is a zombie until init reaps it.
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().split(") ", 1)[1][0] != "Z"
+    except OSError:
+        return True
+
+
+def test_the_run_test_comes_before_the_file_test():
+    assert listeners.is_run_entry("run:~/x") and not listeners.is_file_entry("run:~/x")
+    assert listeners.is_run_entry("run:/a/b") and not listeners.is_file_entry("run:/a/b")
+    assert listeners.is_file_entry("~/x") and not listeners.is_run_entry("~/x")
+    assert not listeners.is_run_entry("comms") and not listeners.is_file_entry("comms")
+
+
+def test_a_run_entry_adds_its_output_on_exit_0_and_gets_the_starts_facts(tmp_path):
+    prog = _program(tmp_path, "facts", (
+        "facts = json.load(sys.stdin)\n"
+        "print(sys.argv[1], facts['harness'], facts['session_id'], facts['source'],\n"
+        "      facts['cwd'] == os.getcwd(), os.environ.get('HOME'), os.getpgrp() == os.getpid())"))
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
+                   order=("comms", f"run:{prog}"))
+    for source in ("startup", "resume", "clear", "compact"):
+        got = listeners.ask(reg, event("ready", source=source, cwd=str(tmp_path)), 5.0)
+        assert got == f"comms at start\n\n{source} fake s-1 {source} True /h True\n"
+
+
+def test_a_run_entry_with_a_home_path_is_expanded(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _program(tmp_path, "hello", "print('hello')")
+    reg = registry(order=("run:~/hello",))
+    assert listeners.ask(reg, event("start", source="startup"), 5.0) == "hello\n"
+
+
+def test_empty_output_passes_its_share_on(tmp_path):
+    quiet = _program(tmp_path, "quiet", "pass")
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
+                   order=(f"run:{quiet}", "comms"))
+    assert listeners.ask(reg, event("start", source="startup"), 5.0) == "comms at start"
+
+
+def test_a_failing_missing_unrunnable_or_non_utf8_run_entry_adds_nothing(tmp_path, caplog):
+    fails = _program(tmp_path, "fails", "print('not this'); sys.exit(3)")
+    binary = _program(tmp_path, "binary", "sys.stdout.buffer.write(b'\\xff\\xfe')")
+    plain = tmp_path / "plain"
+    plain.write_text("#!/bin/sh\necho no\n")
+    missing = tmp_path / "gone"
+    order = (f"run:{fails}", f"run:{binary}", f"run:{plain}", f"run:{missing}",
+             "run:relative/prog", "comms")
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]), order=order)
+    for _ in range(2):
+        assert listeners.ask(reg, event("start", source="startup"), 5.0) == "comms at start"
+    logged = [r.message for r in caplog.records if "adds nothing" in r.message]
+    assert len(logged) == 5                     # each bad entry once per endpoint
+    assert any("exited with 3" in m for m in logged)
+    assert any("not UTF-8" in m for m in logged)
+    assert dict(listeners.plan(reg).skipped) == {
+        f"run:{plain}": "is not executable", f"run:{missing}": "does not exist",
+        "run:relative/prog": "not an absolute path; write it from / or ~"}
+
+
+def test_at_the_bound_turns_stops_waiting_and_kills_the_programs_group(tmp_path):
+    pids = tmp_path / "pids"
+    slow = _program(tmp_path, "slow", (
+        "child = subprocess.Popen(['sleep', '30'])\n"
+        f"open({str(pids)!r}, 'w').write(f'{{os.getpid()}} {{child.pid}}')\n"
+        "time.sleep(30)\nprint('too late')"))
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
+                   order=(f"run:{slow}", "comms"))
+    began = time.monotonic()
+    ev = event("start", source="startup")
+    ev = dataclasses.replace(ev, env={**ev.env, "PATH": os.environ["PATH"]})
+    assert listeners.ask(reg, ev, 0.8) == "comms at start"
+    assert time.monotonic() - began < 3
+    program, child = map(int, pids.read_text().split())
+    deadline = time.monotonic() + 3
+    while (_alive(program) or _alive(child)) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _alive(program) and not _alive(child)
+
+
+def test_a_detached_child_outlives_the_bound(tmp_path):
+    done = tmp_path / "done"
+    starter = _program(tmp_path, "starter", (
+        "subprocess.Popen([sys.executable, '-c', 'import time, sys; time.sleep(1.2); "
+        "open(sys.argv[1], \"w\").write(\"ran\")', "
+        f"{str(done)!r}], start_new_session=True, stdout=subprocess.DEVNULL, "
+        "stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)\n"
+        "time.sleep(30)"))
+    reg = registry(order=(f"run:{starter}",))
+    assert listeners.ask(reg, event("start", source="startup"), 0.5) is None
+    deadline = time.monotonic() + 5
+    while not done.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert done.read_text() == "ran"
+
+
+def test_a_program_that_exits_while_its_child_holds_stdout_is_logged_as_exited(
+        tmp_path, caplog):
+    pids = tmp_path / "pids"
+
+    def holder(name, code):
+        # Prints, starts a detached child that inherits stdout, and exits with `code`.
+        return _program(tmp_path, name, (
+            "print('kept?', flush=True)\n"
+            "child = subprocess.Popen(['sleep', '30'], start_new_session=True)\n"
+            f"open({str(pids)!r}, 'a').write(f'{{child.pid}}\\n')\n"
+            f"sys.exit({code})"))
+
+    clean, failed = holder("clean", 0), holder("failed", 3)
+    running = _program(tmp_path, "running", "print('x', flush=True); time.sleep(30)")
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
+                   order=(f"run:{clean}", f"run:{failed}", f"run:{running}", "comms"))
+    ev = event("start", source="startup")
+    ev = dataclasses.replace(ev, env={**ev.env, "PATH": os.environ["PATH"]})
+    try:
+        assert listeners.ask(reg, ev, 0.6) == "comms at start"
+
+        def logged():
+            return dict(m.removeprefix("start list entry ").split(" adds nothing: ", 1)
+                        for m in (r.message for r in caplog.records) if "adds nothing" in m)
+
+        deadline = time.monotonic() + 3
+        while len(logged()) < 3 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert logged() == {
+            f"run:{clean}": "it exited, but its output stayed open past 600 ms "
+                            "(a process it started still holds it)",
+            f"run:{failed}": "it exited with 3, and its output stayed open past 600 ms "
+                             "(a process it started still holds it)",
+            f"run:{running}": "it ran past 600 ms and was stopped"}
+        children = [int(p) for p in pids.read_text().split()]
+        assert len(children) == 2 and all(_alive(c) for c in children)  # left to live on
+    finally:
+        for c in (int(p) for p in pids.read_text().split()) if pids.exists() else ():
+            try:
+                os.kill(c, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_the_start_plan_lists_a_run_entry_and_runs_none(installed, turns_env, tmp_path):
+    from conftest import write_config
+
+    marker = tmp_path / "ran"
+    prog = _program(tmp_path, "prog", f"open({str(marker)!r}, 'w').write('x')")
+    write_config(turns_env, f'[start]\norder = ["run:{prog}", "run:{tmp_path / "gone"}"]\n')
+    got = turns.start_plan("claude")
+    assert got.entries == (turns.StartEntry(f"run:{prog}", "run", 9500),)
+    assert dict(got.skipped) == {f"run:{tmp_path / 'gone'}": "does not exist"}
+    time.sleep(0.2)
+    assert not marker.exists()

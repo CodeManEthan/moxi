@@ -107,6 +107,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
   on('classic.SessionStart', async () => ({}))
   on('classic.UserPromptSubmit', async () => ({}))
   on('classic.Stop', async () => ({}))
+  on('classic.PermissionRequest', async () => ({}))
   on('fs.read', async ($, e) => {
     w.reads.push(e.path)
     if (e.path.endsWith('/endpoint.json') && endpointJson !== null) return { value: endpointJson }
@@ -194,7 +195,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
       await clock.settle()
     },
     async hello(extra: Record<string, unknown> = {}) {
-      await this.line({ op: 'hello', leg: 3, mod_sock: SOCK, stop_wait_ms: 2000, listen_wait_ms: 2000, endpoint_version: '0.1.0', pid: 42, ...extra })
+      await this.line({ op: 'hello', leg: 4, mod_sock: SOCK, stop_wait_ms: 2000, listen_wait_ms: 2000, endpoint_version: '0.1.0', pid: 42, ...extra })
     },
     async end() {
       w.childDone = true

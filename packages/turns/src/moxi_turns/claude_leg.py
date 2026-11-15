@@ -18,7 +18,7 @@ Lines (endpoint to runner)
 
 The first line, always first, before the runner sends anything:
 
-    {"op": "hello", "leg": 3, "mod_sock": "<absolute path>", "stop_wait_ms": n,
+    {"op": "hello", "leg": 4, "mod_sock": "<absolute path>", "stop_wait_ms": n,
      "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>,
      "stop_after_clear": bool, "guards": [<entry>, ...], "after_tool_wait_ms": n,
      "floors": {"<row id>": n, ...}}
@@ -33,10 +33,17 @@ in its own process (`moxi_turns.guards.run` states the rule). Each entry:
     {"id": "<module>.<name>", "calls": ["<pattern>", ...], "who": "any" | "main" | "agents",
      "match": {"<input field>": "<regex>"} | null, "match_flags": "" | "i",
      "judge": bool, "deny": "<text>", "wants": ["prompts"]?, "on_error": "allow" | "deny",
-     "deadline_ms": n}
+     "deadline_ms": n, "step": "call" | "ask"}
 
 `deadline_ms` is already clamped to `guards.max_wait_ms`. A covering entry with no judge
 refuses with its `deny` and no trip; covering judge entries are asked on `/ask/guard`.
+The runner matches `call` entries at each tool call and `ask` entries at each permission
+request (Claude Code's `PermissionRequest`, which fires only when a person would be asked):
+nothing covering leaves the ask to Claude Code at once, a covering data-only entry denies
+it with its `deny`, and covering judge entries are asked on `/ask/guard` with `step`
+`ask`. A deny answer denies the call, and the model reads its text; anything else leaves
+the ask to Claude Code. A runner of leg 3 would match ask entries at tool calls, so the
+step came with leg 4.
 
 `floors` names every after-tool row (a listener row naming `after-tool`) by its id, with
 its floor in tokens (0 for a row with no floor, or before its first read). An empty map
@@ -48,7 +55,7 @@ or a context not known yet (none since the last SessionStart), skips none.
 
 or, when the endpoint cannot start (its config is broken), its only line:
 
-    {"op": "failed", "leg": 3, "error": "<words>"}
+    {"op": "failed", "leg": 4, "error": "<words>"}
 
 Then, in any order:
 
@@ -168,7 +175,10 @@ person>"}`; the gate drops a `drop` with `text` and never calls `next`. A nonce 
 no open window reads `late`, and the endpoint logs the late entry.
 
 `/ask/guard` — `{call: {tool, tool_use_id, input, agentId, cwd?, prompts?}, guards: [id,
-...]}` for a tool call that judge entries of the table cover: `input` is the call's envelope
+...], step?}` for a tool call that judge entries of the table cover (`step` absent or
+`call`), or a permission ask that ask entries cover (`step` `ask`; the call then also
+carries `permission_mode` and `transcript_path` from the hook input, and an ask's answer
+carries no lines): `input` is the call's envelope
 less `tool`, `tool_use_id` and `agentId` (absent or null on the main loop); `cwd`, the
 directory the call runs in, `$.session.cwd()` read in the call's hook (a subagent's own in
 a subagent, and meant to follow the Bash tool's `cd`s), absent when that read failed, and
@@ -211,7 +221,7 @@ from . import hooktimes
 log = logging.getLogger("moxi.turns.claude")
 
 #: This leg's version.
-LEG = 3
+LEG = 4
 
 #: Whether the runner stops a `clear`'s shells after the clear. Claude Code may no longer
 #: find a task through `TaskStop` once `/clear` has run; until a live session shows it

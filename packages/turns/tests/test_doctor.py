@@ -89,7 +89,10 @@ def test_the_start_list_rows(turns_env, registry, tmp_path, monkeypatch):
     registry["entries"] = [Entry("comms", [("start", "listener_targets:comms")]),
                            Entry("other", [("start", "listener_targets:cache")])]
     missing = tmp_path / "gone.md"
-    write_config(turns_env, f"[start]\norder = ['comms', 'notes', '{missing}']\n")
+    unrunnable = tmp_path / "plain"
+    unrunnable.write_text("#!/bin/sh\n")
+    write_config(turns_env, f"[start]\norder = ['comms', 'notes', '{missing}', "
+                            f"'run:{unrunnable}']\n")
     rows = rows_by_name()
     assert rows["start list"].state == "ok"
     assert rows["start list"].detail.startswith("asks comms; skipped ")
@@ -98,6 +101,9 @@ def test_the_start_list_rows(turns_env, registry, tmp_path, monkeypatch):
     assert off.state == "warn" and off.fix == "add it to start.order"
     assert rows[f"start list: {missing}"].state == "warn"
     assert "does not exist" in rows[f"start list: {missing}"].detail
+    run_row = rows[f"start list: run:{unrunnable}"]
+    assert run_row.state == "warn"
+    assert run_row.detail == "this run entry adds nothing: is not executable"
 
 
 def test_the_listener_rows(turns_env, registry):
@@ -332,10 +338,10 @@ def test_a_guard_on_names_its_source_and_where_it_runs(turns_env, registry, guar
     write_config(turns_env, "[guards]\nrun = ['mod.both', 'mod.claude-only']\n")
     rows = guard_rows()
     detail = rows["guards"].detail
-    assert "mod.both (on by guards.run): runs claude in the runner, codex behind the hook" \
-        in detail
-    assert "mod.claude-only (on by guards.run): runs claude in the runner" in detail
-    assert "mod.by-switch (on by its switch)" in detail
+    assert ("mod.both (call step, on by guards.run): runs claude in the runner, codex "
+            "behind the hook") in detail
+    assert "mod.claude-only (call step, on by guards.run): runs claude in the runner" in detail
+    assert "mod.by-switch (call step, on by its switch)" in detail
     assert rows["guard mod.claude-only: codex"].state == "ok"
     assert "covers no call on codex" in rows["guard mod.claude-only: codex"].detail
     assert "guard mod.both: codex" not in rows and "guard mod.both: claude" not in rows
@@ -394,8 +400,8 @@ def test_a_listed_module_not_installed_and_a_slow_import_warn(turns_env, registr
     assert slow.state == "warn" and "over 10 ms" in slow.detail
 
 
-@pytest.mark.parametrize("installed, warned", [("2.1.320 (Claude Code)", True),
-                                               ("2.1.316 (Claude Code)", False),
+@pytest.mark.parametrize("installed, warned", [("2.1.330 (Claude Code)", True),
+                                               ("2.1.325 (Claude Code)", False),
                                                ("2.0.99 (Claude Code)", False)])
 def test_the_removal_guard_warns_on_a_newer_claude_code(turns_env, registry, monkeypatch,
                                                         installed, warned):
@@ -404,17 +410,17 @@ def test_the_removal_guard_warns_on_a_newer_claude_code(turns_env, registry, mon
     from moxi_turns import claude_setup
     from moxi_turns.guards import removal
 
-    assert removal.CHECKED_CLAUDE == "2.1.316"
+    assert removal.CHECKED_CLAUDE == "2.1.325"
     monkeypatch.setattr(claude_setup, "_claude", lambda: "/x/claude")
     monkeypatch.setattr(claude_setup, "_run", lambda argv: subprocess.CompletedProcess(
         argv, 0, installed + "\n", ""))
     write_config(turns_env, "[guards]\nremoval = true\n")
     rows = guard_rows()
-    assert "turns.removal (on by its switch): runs claude in the runner" \
+    assert "turns.removal (call step, on by its switch): runs claude in the runner" \
         in rows["guards"].detail
     row = rows.get("guard turns.removal")
     if warned:
-        assert row.state == "warn" and "2.1.320" in row.detail and "2.1.316" in row.detail
+        assert row.state == "warn" and "2.1.330" in row.detail and "2.1.325" in row.detail
         assert row.fix == "moxi config set turns guards.removal false"
     else:
         assert row is None

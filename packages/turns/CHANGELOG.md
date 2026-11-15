@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- The Claude runner plugin is version 0.2.0, for the leg it speaks now. Claude Code runs
+  a user-scope plugin from a cache kept per version, so `moxi install turns` now updates
+  a plugin installed at another version than the one it ships (`claude plugin update`)
+  instead of skipping it. Before, an earlier install kept running the old runner, which
+  the endpoint refuses, so every session it loaded in ran without turns. `moxi doctor
+  turns` has a new row, `claude installed runner`, that reads the leg of the runner
+  Claude Code runs at user scope and fails when it is not the endpoint's.
+
 ## 0.2.4 (2026-11-08)
 
 - Config keys `start.limit` and `guards.on` are now `start.limit_chars` and

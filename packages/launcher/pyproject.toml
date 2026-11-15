@@ -57,9 +57,14 @@ launcher = "moxi_launcher.module"
 launcher = "moxi_launcher.listeners"
 
 # The launcher's subscriptions to cache's timer (recycle on expiry, keep-warm), read by
-# cache's watcher. usage's crossings group gets the crossing handler once usage is built.
+# cache's watcher.
 [project.entry-points."moxi.cache.timers"]
 launcher = "moxi_launcher.cachetimers"
+
+# The crossing handler, called by usage in a session's endpoint process when the session
+# passes its launch's `limit_at` mark: the relaunch line once, or the limit compact.
+[project.entry-points."moxi.usage.crossings"]
+launcher = "moxi_launcher.recycle:on_crossing"
 
 # The launcher's commands run as `moxi launcher <verb>` (only the core declares `moxi`),
 # the detached first-turn sender (`moxi launcher deliver`) among them. One console script
