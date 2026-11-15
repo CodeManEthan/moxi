@@ -3,7 +3,10 @@ record and asks the rig's daemon: who can be messaged and in which session, when
 message to each would be read, which names need launching, who owes a reply, the thread
 between two agents and whether comms is working, on the full install and on the small
 one; and the acts: a send end to end with `Take back`, `Reply` with the ask quoted, and a
-refused check with `Check again`.
+refused check with `Check again`. Then each address, `Earlier today` and `Before today`,
+the empty state with launcher and without, the daemon's error, markup drawn as text, the
+page at 1280 and 400 px in the light and the dark theme with colour from the text tokens
+and the accent on Send alone, and what the small install leaves out.
 
 Each test starts its own shell after its rig, with the rig's roots in the shell's
 environment (`rig_env`), so the shell's comms page server opens the rig's `comms.db`, its
@@ -35,7 +38,8 @@ import roster_kit
 import shim_drive
 from conftest import cache_absent, write_transcript
 from moxi import paths as moxi_paths
-from moxi_comms import machine_line
+from moxi.store import transaction
+from moxi_comms import machine_line, store
 from moxi_comms.paths import daemon_socket
 from roster_kit import holding, wait_for
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, last, reply, send
@@ -177,6 +181,24 @@ def open_page(shell, ui_contexts, launcher: list[dict] | None = None) -> tuple[A
     page.goto(PAGE)
     page.wait_for_function("() => window.pushed.includes('ui.modules')")
     return page, page.locator("#moxi-panel > moxi-comms-page"), stub
+
+
+def visit(page, route: str) -> Any:
+    """The page at `route` after `/m/comms/`, placed anew, once the shell has its modules;
+    its root."""
+    page.goto(PAGE + route)
+    page.wait_for_function("() => window.pushed.includes('ui.modules')")
+    return page.locator("#moxi-panel > moxi-comms-page")
+
+
+def no_standing_names() -> None:
+    """Retire the rig's standing names, so the roster has no row."""
+    conn = store.open_write()
+    try:
+        with transaction(conn):
+            conn.execute("UPDATE identities SET status = 'retired'")
+    finally:
+        conn.close()
 
 
 def agent(root, name: str) -> Any:
@@ -532,3 +554,329 @@ def test_a_cache_comms_cannot_read_refuses_the_check_until_check_again(
     expect(dry).to_contain_text("Delivered. reviewer reads it at its next turn boundary.")
     expect(dry.locator('[data-action="check-again"]')).to_have_count(0)
     expect(box.locator('[data-action="send"]')).to_be_enabled()
+
+
+# --- The addresses ------------------------------------------------------------------------------
+
+def test_each_address_opens_its_piece_and_writing_one_adds_no_history(page_shell, rig, ui_contexts):
+    rig.shim(**PLANNER)
+    rig.shim(**REVIEWER)
+    bound(rig, P, R)
+    asked = ask_him(rig, "critic", "Which branch takes the fix?")
+    between = send(rig, R, "Is the cursor fix safe to ship?", "--posture", "once", who=PLANNER)
+    shell = page_shell()
+    roster_kit.current(shell, holding([P, R]))
+    page, root, _ = open_page(shell, ui_contexts, [])
+    expect(agent(root, R)).to_have_count(1)
+    expect(root.locator('[data-part="opened"]')).to_have_count(0)
+    # Opening and closing writes the address in place: Back still leaves the page.
+    entries = page.evaluate("history.length")
+    agent(root, R).locator('[data-action="message"]').click()
+    assert address(page) == "agent/reviewer"
+    agent(root, R).locator('[data-action="close"]').click()
+    assert address(page) == ""
+    root.locator('[data-action="show-others"]').click()
+    assert address(page) == "others"
+    assert page.evaluate("history.length") == entries
+
+    root = visit(page, "agent/reviewer")
+    expect(root.locator('[data-part="opened"][data-to="reviewer"] [data-part="box"]')).to_have_count(1)
+    root = visit(page, f"reply/{asked.id}")
+    expect(root.locator('[data-part="box"][data-to="critic"] [data-line="quote"] .msg')).to_have_text(
+        "Which branch takes the fix?")
+    root = visit(page, "thread/planner/reviewer")
+    expect(root.locator('[data-line="thread-header"]')).to_have_text(
+        re.compile(r"^planner and reviewer · 1 message today"))
+    root = visit(page, "mail/planner")
+    expect(agent(root, P).locator('[data-line="thread-header"]')).to_have_text(
+        re.compile(r"^All mail with planner · 1 message today"))
+    root = visit(page, "others")
+    expect(root.locator('[data-group="others"] moxi-ui-row')).to_have_count(3)
+    expect(root.locator('[data-group="others"] moxi-ui-row').first).to_have_attribute("name", "herald")
+    # A name the page doesn't know, a message no longer owed, and no view at all.
+    root = visit(page, "agent/nobody")
+    expect(root.locator('[data-line="foot-address"]')).to_have_text("nobody isn't on this page.")
+    expect(root.locator('[data-part="opened"]')).to_have_count(0)
+    root = visit(page, f"reply/{between.id}")
+    expect(root.locator('[data-line="foot-address"]')).to_have_text(
+        "That message no longer waits for your reply.")
+    expect(root.locator('[data-part="box"][data-to="planner"] [data-line="quote"]')).to_have_count(0)
+    expect(root.locator('[data-part="box"][data-to="planner"]')).to_have_count(1)
+    root = visit(page, "nowhere/at-all")
+    expect(root.locator('[data-line="foot-address"]')).to_have_text("There is no such view here.")
+
+
+# --- Earlier today, Before today -------------------------------------------------------------
+
+def test_earlier_today_and_before_today_add_their_messages(page_shell, rig, ui_contexts):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    now = rig.clock.t
+    rig.clock.t = now - 86400
+    for n in range(2):
+        rig.post_as("reviewer", [P], f"Yesterday's note {n}.")
+    rig.clock.t = now
+    for n in range(14):
+        rig.post_as("reviewer", [P], f"Today's note {n}.")
+    shell = page_shell()
+    roster_kit.current(shell, holding([P]))
+    _, root, _ = open_page(shell, ui_contexts, [])
+    today = root.locator('[data-group="today"] moxi-ui-row')
+    expect(today).to_have_count(12)
+    expect(today.first).to_have_attribute("lead", "Today's note 13.")
+    earlier = root.locator('[data-group="earlier-today"]')
+    expect(earlier.locator('[data-line="more"] span')).to_have_text("2 more messages")
+    earlier.locator("button").click()
+    expect(today).to_have_count(14)
+    expect(today.last).to_have_attribute("lead", "Today's note 0.")
+    expect(root.locator('[data-group="earlier-today"]')).to_have_count(0)
+    before = root.locator('[data-group="before"]')
+    expect(before.locator(".gk")).to_have_text("Before today")
+    expect(before.locator('[data-line="before"] span')).to_have_text(
+        re.compile(r"^2 messages, back to \w{3} \w{3} \d{1,2}$"))
+    before.locator("button").click()
+    yesterday = root.locator('[data-part="messages"] section.grp').nth(1)
+    expect(yesterday.locator(".gk")).to_have_text("Yesterday")
+    expect(yesterday.locator("moxi-ui-row")).to_have_count(2)
+    expect(yesterday.locator("moxi-ui-row").first).to_have_attribute("lead", "Yesterday's note 1.")
+    expect(root.locator('[data-group="before"]')).to_have_count(0)
+
+
+# --- The states --------------------------------------------------------------------------------
+
+@needs_launcher
+def test_the_empty_state_offers_a_launch_from_home_with_launcher(page_shell, rig, ui_contexts):
+    no_standing_names()
+    shell = page_shell()
+    roster_kit.current(shell, holding([], standing=[]))
+    _, root, _ = open_page(shell, ui_contexts, [])
+    expect(root.locator('[data-line="empty"]')).to_have_text("No agents yet.")
+    empty = root.locator('[data-part="empty"]')
+    expect(empty).to_contain_text("An agent is a name that one session holds at a time")
+    expect(empty.locator('[data-action="launch-home"]')).to_have_text("Launch one from Home")
+    expect(empty.locator('[data-action="launch-home"]')).to_have_attribute("href", "/m/ui/")
+    expect(empty.locator("code")).to_have_count(0)
+    expect(root.locator('[data-part="agents"]')).to_have_count(0)
+
+
+def test_the_empty_state_gives_the_command_without_launcher(page_shell, rig, ui_contexts,
+                                                            monkeypatch):
+    cache_absent(monkeypatch)
+    no_standing_names()
+    shell = page_shell(leave_out=SMALL)
+    roster_kit.current(shell, holding([], standing=[]))
+    _, root, _ = open_page(shell, ui_contexts)
+    expect(root.locator('[data-line="empty"]')).to_have_text("No agents yet.")
+    empty = root.locator('[data-part="empty"]')
+    expect(empty.locator("code")).to_have_text("moxi comms claude --name NAME")
+    expect(empty.locator('[data-action="copy-command"]')).to_have_text("Copy")
+    expect(empty.locator('[data-action="launch-home"]')).to_have_count(0)
+
+
+def test_an_error_from_the_daemon_takes_the_first_row_with_a_fixed_line(
+        page_shell, rig, ui_contexts, monkeypatch):
+    def fails(frame):
+        raise OSError("/x/y can't be read")
+
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    monkeypatch.setattr(rig.daemon, "_agents_query", fails)
+    shell = page_shell()
+    roster_kit.current(shell, lambda data: data["state"] == "error")
+    _, root, _ = open_page(shell, ui_contexts, [])
+    down = root.locator('[data-part="down"] [data-line="down"]')
+    expect(down).to_have_text(re.compile(r"\S"))
+    expect(down).not_to_contain_text("/x/y")
+    expect(root.locator('[data-part="box"]')).to_have_count(0)
+    expect(root.locator('[data-line="answering"]')).to_have_text("")
+
+
+# --- Markup as text ------------------------------------------------------------------------------
+
+#: A message whose text is markup: the page draws it as text, everywhere it shows.
+MARKUP = '<img src="x" onerror="window.markupRan = 1"><b>bold</b> & <script>window.markupRan = 2</script>'
+#: Whether any element of these tags is under the page, in any shadow tree.
+_TAGS_UNDER = """(names) => {
+  const panel = document.querySelector("#moxi-panel > moxi-comms-page");
+  const found = [];
+  const walk = (root) => { for (const node of root.querySelectorAll("*")) {
+    if (names.includes(node.localName)) found.push(node.localName);
+    if (node.shadowRoot) walk(node.shadowRoot);
+  } };
+  walk(panel.shadowRoot);
+  return found;
+}"""
+
+
+def test_markup_in_a_message_is_drawn_as_text(page_shell, rig, ui_contexts):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    ask_him(rig, "critic", MARKUP)
+    send(rig, "builder-2", MARKUP, "--posture", "none", who=PLANNER)
+    shell = page_shell()
+    roster_kit.current(shell, holding([P]))
+    page, root, _ = open_page(shell, ui_contexts, [])
+    today = root.locator('[data-group="today"] moxi-ui-row')
+    expect(today).to_have_count(2)
+    expect(today.first).to_have_attribute("lead", MARKUP)
+    expect(today.first.locator("css=.lead, .said").first).to_contain_text("<img")
+    # The ask quoted in the box, the queue of a name no session holds, and the thread.
+    agent(root, "critic").locator('[data-action="reply"]').click()
+    expect(root.locator('[data-line="quote"] .msg')).to_have_text(MARKUP)
+    agent(root, "builder-2").locator('[data-action="message"]').click()
+    expect(root.locator('[data-line="waiting"] .msg')).to_contain_text(MARKUP)
+    today.first.locator('[data-action="open-thread"]').click()
+    expect(root.locator('[data-part="thread"] .tm p.msg')).to_have_text([MARKUP])
+    assert page.evaluate(_TAGS_UNDER, ["img", "b", "script"]) == []
+    assert page.evaluate("() => window.markupRan") is None
+
+
+# --- Widths, themes and colour ---------------------------------------------------------------
+
+#: The tokens a piece of the page may take a colour from: the text tokens and the neutral
+#: border and background ones; and the accent, on Send alone (with the colour set on it).
+ALLOWED = {"text", "text-dim", "text-faint", "border", "border-strong", "bg", "bg-raised",
+           "bg-sunken", "bg-hover"}
+#: For each colour token the shell's style sheets define, the nodes under the page whose
+#: colours change when that token alone changes on the page's element, and in which
+#: property. The walk goes into every shadow tree under the page. Focus is taken off
+#: first, and the outline's colour is left out: a focus ring takes the accent on every
+#: element.
+REACHED = """async () => {
+  const panel = document.querySelector("#moxi-panel > moxi-comms-page");
+  function* tree(root) {
+    for (const node of root.querySelectorAll("*")) {
+      yield node;
+      if (node.shadowRoot) yield* tree(node.shadowRoot);
+    }
+  }
+  let focused = document.activeElement;
+  while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+  focused?.blur?.();
+  const nodes = [panel, ...tree(panel.shadowRoot), ...tree(panel)];
+  const props = ["color", "background-color", "background-image", "border-top-color",
+                 "border-right-color", "border-bottom-color", "border-left-color",
+                 "text-decoration-color", "box-shadow", "fill", "stroke", "stop-color"];
+  const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  const colours = () => nodes.map((node) => {
+    const style = getComputedStyle(node);
+    return props.map((name) => style.getPropertyValue(name));
+  });
+  const names = new Set();
+  for (const sheet of document.styleSheets) {
+    let rules;
+    try { rules = sheet.cssRules; } catch { continue; }
+    for (const rule of rules) {
+      if (!rule.style) continue;
+      for (const name of rule.style) if (name.startsWith("--moxi-")) names.add(name.slice(7));
+    }
+  }
+  const what = (node) => node.localName + (node.dataset?.action ? `[${node.dataset.action}]` : "")
+    + (node.className && typeof node.className === "string" ? `.${node.className.split(" ").join(".")}` : "");
+  await frames();
+  const before = colours();
+  const reached = {};
+  for (const token of [...names].sort()) {
+    if (/^(font|radius|gap)/.test(token)) continue;
+    panel.style.setProperty(`--moxi-${token}`, "rgb(1, 2, 3)");
+    await frames();
+    const after = colours();
+    panel.style.removeProperty(`--moxi-${token}`);
+    const changed = [];
+    after.forEach((seen, n) => seen.forEach((value, i) => {
+      if (value !== before[n][i]) changed.push(`${what(nodes[n])} ${props[i]}`);
+    }));
+    if (changed.length) reached[token] = [...new Set(changed)];
+  }
+  await frames();
+  return {reached, text: getComputedStyle(panel).color};
+}"""
+
+
+#: At a width where a row keeps each line to one, the elements under the page that reach
+#: past the viewport's right edge and are not inside a box that cuts them with an
+#: ellipsis (the row's own cut), and the document's horizontal scroll.
+PAST_THE_EDGE = """() => {
+  const edge = document.documentElement.clientWidth;
+  const panel = document.querySelector("#moxi-panel > moxi-comms-page");
+  const up = (node) => node.parentElement ?? node.getRootNode().host ?? null;
+  const cut = (node) => {
+    for (let at = up(node); at !== null; at = up(at)) {
+      const style = getComputedStyle(at);
+      if (style.textOverflow === "ellipsis" && style.overflowX !== "visible")
+        return at.getBoundingClientRect().right <= edge + 0.5;
+    }
+    return false;
+  };
+  const past = [];
+  const walk = (root) => { for (const node of root.querySelectorAll("*")) {
+    const box = node.getBoundingClientRect();
+    if (box.width > 0 && box.right > edge + 0.5 && !cut(node)) past.push(`${node.localName}.${node.className}`);
+    if (node.shadowRoot) walk(node.shadowRoot);
+  } };
+  walk(panel.shadowRoot);
+  return {past, scroll: document.documentElement.scrollWidth - edge};
+}"""
+
+
+def test_the_page_fits_both_widths_in_both_themes_and_only_send_takes_the_accent(
+        page_shell, rig, ui_contexts, ui_width_check):
+    cold_shim(rig, PLANNER)
+    rig.shim(**REVIEWER)
+    bound(rig, P, R)
+    ask_him(rig, "critic", "Which branch takes the fix? " * 12)
+    send(rig, "builder-2@kestrel-web", "A long brief for the parser change. " * 10, "--posture", "none",
+         who=PLANNER)
+    shell = page_shell()
+    roster_kit.current(shell, holding([P, R]))
+    page, root, _ = open_page(shell, ui_contexts, [])
+    agent(root, R).locator('[data-action="message"]').click()
+    box = root.locator('[data-part="box"][data-to="reviewer"]')
+    box.locator("textarea").fill("Is the cursor fix safe to ship?")
+    expect(box.locator('[data-action="send"]')).to_have_class("go")
+    expect(root.get_by_role("heading")).to_have_count(0)
+    texts = set()
+    for scheme in ("light", "dark"):
+        page.emulate_media(color_scheme=scheme)
+        seen = page.evaluate(f"({REACHED})()")
+        texts.add(seen["text"])
+        reached = seen["reached"]
+        refused = {token: where for token, where in reached.items()
+                   if token not in ALLOWED | {"accent", "on-accent"}}
+        assert not refused, f"{scheme}: colour from {refused}"
+        for token in ("accent", "on-accent"):
+            assert reached.get(token) and all(where.startswith("button[send].go ")
+                                              for where in reached[token]), (scheme, reached.get(token))
+        assert {"text", "text-dim"} <= set(reached), (scheme, reached)
+        # At 1280 a line is cut by the row's ellipsis; at 400 line two wraps, and nothing
+        # may pass the edge.
+        page.set_viewport_size({"width": 1280, "height": 800})
+        assert page.evaluate(PAST_THE_EDGE) == {"past": [], "scroll": 0}, scheme
+        ui_width_check(page, width=400)
+    assert len(texts) == 2, f"the text colour is the same in both themes: {texts}"
+
+
+# --- The small install -----------------------------------------------------------------------
+
+def test_on_the_small_install_mail_reads_not_read_yet_with_no_session_cache_or_links(
+        page_shell, rig, ui_contexts, monkeypatch):
+    cache_absent(monkeypatch)
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    send(rig, "builder-2", "Pick up the parser.", "--posture", "none", who=PLANNER)
+    send(rig, P, "The cursor commit is in.", "--posture", "none", who=REVIEWER)
+    shell = page_shell(leave_out=SMALL)
+    roster_kit.current(shell, holding([P]))
+    _, root, _ = open_page(shell, ui_contexts)
+    today = root.locator('[data-group="today"] moxi-ui-row')
+    expect(today.first).to_have_attribute("where", re.compile(r"^to planner · not read yet$"))
+    expect(today.nth(1)).to_have_attribute("where", "to builder-2 · not read yet, builder-2 isn't running")
+    agent(root, P).locator('[data-action="message"]').click()
+    opened = root.locator('[data-part="opened"][data-to="planner"]')
+    expect(opened.locator('[data-part="box"]')).to_have_count(1)
+    for line in ("session", "cache"):
+        expect(opened.locator(f'[data-line="{line}"]')).to_have_count(0)
+    expect(opened.locator('[data-action="sessions"], [data-action="cache"]')).to_have_count(0)
+    opened.locator('[data-action="details"]').click()
+    expect(opened.locator('[data-line="address"]').last).to_contain_text("planner")
+    expect(opened.locator('[data-action="sessions"], [data-action="cache"]')).to_have_count(0)
