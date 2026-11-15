@@ -13,16 +13,22 @@
 // leaves the page. While the roster isn't up the last rows read stay, dim, with no acts,
 // and none opens.
 //
-// It reads `/api/roster`, then follows the topic `roster`. It reads `/api/mail-state` when
-// it opens, when the roster's waiting mail or its bound names change, when its tab is shown
-// again and every 30 s while the tab is visible.
+// An opened row (`opened-model.ts`) speaks for one address, the lead or the one pressed: the
+// addresses it can speak for, `Cache`, the address's queue in full (`Held`, `Waiting`,
+// `Unread`, each message cut at four lines with `Show all`), `Waits on` with `Thread`,
+// `Directs`, `Directed by`, and `Details` folded at its foot.
+//
+// It reads `/api/roster`, then follows the topic `roster`. It reads `/api/mail-state`, and
+// the opened address's `/api/queue` with it, when it opens, when the roster's waiting mail
+// or its bound names change, when its tab is shown again and every 30 s while the tab is
+// visible; a newly opened address's queue is read at once.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { repeat } from "lit/directives/repeat.js";
 import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
-import { addressWrite, NOTHING_OPEN, parseAddress, sameAddress } from "./address-model.ts";
+import { addressWrite, NOTHING_OPEN, parseAddress, sameAddress, threadAddress } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
 import { parseMailState, parsePageRoster } from "./agents-model.ts";
 import type { Act, MailState, PageRoster } from "./agents-model.ts";
@@ -32,7 +38,11 @@ import {
   SETTINGS_ROUTE,
 } from "./frame-model.ts";
 import type { Down, Empty, Frame, FrameRow, Placed } from "./frame-model.ts";
-import { newestDay } from "./words.ts";
+import { parseQueue } from "./messages-model.ts";
+import type { Queue } from "./messages-model.ts";
+import { COPY_ID, DETAILS, HELP, openedAgent, SHOW_ALL, THREAD_LINK } from "./opened-model.ts";
+import type { Line } from "./opened-model.ts";
+import { newestDay, whenWords } from "./words.ts";
 
 const TAG = "moxi-comms-page";
 const TICK_MS = 1000;
@@ -72,6 +82,18 @@ const STYLES = css`
 
   .det { margin: 9px 0 3px; padding: 8px 0 0; border-top: 1px solid var(--moxi-border); font-size: 13px; line-height: 18px;
          cursor: auto; }
+  .det .r { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; padding: 3px 0; align-items: baseline; }
+  .det .k, .det .d { color: var(--moxi-text-dim); }
+  .det .f { min-width: 0; overflow-wrap: anywhere; }
+  .det .x { color: var(--moxi-text-dim); padding-left: 18px; }
+  .det .pick { color: var(--moxi-text-dim); margin-right: 14px; }
+  .det .pick[aria-pressed="true"] { color: var(--moxi-text); }
+  .det .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .det .msg.cut { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .det .note { padding: 3px 0 3px 92px; }
+  .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 92px; }
+  .det .foot button, .det .r button { font-size: 13px; line-height: 18px; }
+  .det .help { padding: 3px 0 0 92px; color: var(--moxi-text-dim); }
 
   .quietline { font-size: 22px; line-height: 32px; text-align: center; letter-spacing: -0.005em; padding: 150px 0 14px; }
   .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; }
@@ -112,6 +134,15 @@ export class CommsPage extends LitElement {
   tick = 0;
   #feed: Feed<PageRoster> | null = null;
   #mail: Feed<MailState> | null = null;
+  /** The opened row's address, and the read of its rows in the books. */
+  #queueFor: string | null = null;
+  #queue: Feed<Queue> | null = null;
+  /** The address the row opened in the last drawing speaks for. */
+  #drawnTo: string | null = null;
+  #details = false;
+  /** The ids of the messages cut at four lines, and those shown in full. */
+  #cut = new Set<string>();
+  #whole = new Set<string>();
   /** The last roster that was up, and its time on the server's clock. */
   #kept: { value: PageRoster; at: number } | null = null;
   #taken: PageRoster | null = null;
@@ -131,8 +162,14 @@ export class CommsPage extends LitElement {
   #shown = (): void => {
     if (document.visibilityState !== "visible") return;
     void this.#feed?.refresh();
-    void this.#mail?.refresh();
+    this.#readMail();
   };
+
+  /** Reads the mail state again, and the opened row's queue with it. */
+  #readMail(): void {
+    void this.#mail?.refresh();
+    void this.#queue?.refresh();
+  }
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -152,7 +189,7 @@ export class CommsPage extends LitElement {
     this.#tickTimer = setInterval(() => { this.tick += 1; }, TICK_MS);
     this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#mailTimer = setInterval(() => {
-      if (document.visibilityState === "visible") void this.#mail?.refresh();
+      if (document.visibilityState === "visible") this.#readMail();
     }, MAIL_EVERY_MS);
   }
 
@@ -160,7 +197,9 @@ export class CommsPage extends LitElement {
     super.disconnectedCallback();
     this.#feed?.close();
     this.#mail?.close();
-    this.#feed = this.#mail = null;
+    this.#queue?.close();
+    this.#feed = this.#mail = this.#queue = null;
+    this.#queueFor = null;
     this.#stop?.();
     this.#stop = null;
     document.removeEventListener("visibilitychange", this.#shown);
@@ -192,7 +231,7 @@ export class CommsPage extends LitElement {
       if (value.state === "up" && now !== null) {
         this.#kept = { value, at: now };
         const key = mailKey(value);
-        if (this.#mailKey !== null && key !== this.#mailKey) void this.#mail?.refresh();
+        if (this.#mailKey !== null && key !== this.#mailKey) this.#readMail();
         this.#mailKey = key;
       }
     }
@@ -205,6 +244,7 @@ export class CommsPage extends LitElement {
   open(address: Address): void {
     if (sameAddress(address, this.#at)) return;
     this.#placed = null;
+    this.#details = false;
     this.#setAt(address);
     this.requestUpdate();
   }
@@ -266,6 +306,7 @@ export class CommsPage extends LitElement {
 
   render() {
     const frame = this.frame();
+    this.#drawnTo = frame?.rows.find((item) => item.open)?.to ?? null;
     if (frame === null || frame.state === "gone") return nothing;
     if (frame.state === "loading") {
       return html`${frame.reading !== null ? html`<p class="waiting" data-line="reading" role="status">${frame.reading}</p>`
@@ -324,9 +365,95 @@ export class CommsPage extends LitElement {
     </moxi-ui-row>`;
   }
 
-  /** What an opened agent row shows under its lines, speaking for the address `to`. */
+  /** What an opened agent row shows under its lines, speaking for the address `to`: the
+   * addresses it can speak for, `Cache`, the queue in full, `Waits on`, `Directs`,
+   * `Directed by`, the send box, then `Details`. */
   protected opened(item: FrameRow, to: string): unknown {
-    return html`<div class="det" data-part="opened" data-to=${to}></div>`;
+    const feed = this.#feed;
+    const now = feed?.now() ?? null;
+    if (feed === null || now === null) return nothing;
+    const roster = this.#kept?.value.rows ?? [];
+    const queue = this.#queueFor === to && this.#queue !== null ? this.#queue
+      : { loading: true, gone: false, failure: null, value: null };
+    const view = openedAgent({
+      row: item.row, to, roster, asks: this.#mail?.value?.asks ?? [], queue, now,
+      when: (at) => whenWords(at, this.#today), cache: installed("cache"), details: this.#details,
+    });
+    const sessionId = view.sessionId;
+    return html`<div class="det" data-part="opened" data-to=${to}>
+      ${view.choices.length > 0 ? html`<div class="r" data-line="address"><span class="k">Address</span><span class="f">${
+        view.choices.map((choice) => html`<button type="button" class="pick" aria-pressed=${choice.current ? "true" : "false"}
+          data-action="address" data-address=${choice.qualified}
+          @click=${() => this.open({ piece: "agent", qualified: choice.qualified })}>${choice.qualified}</button>`)}</span>
+        <span></span></div>` : nothing}
+      ${view.before.map((line) => this.#line(line))}
+      ${view.queue.map((group) => group.items.map((one, i) => html`<div class="r" data-line=${group.label.toLowerCase()}
+        data-message=${one.message_id}><span class="k">${i === 0 ? group.label : ""}</span><span class="f"><span
+        class=${this.#whole.has(one.message_id) ? "msg" : "msg cut"} data-message=${one.message_id}>${one.time} from ${
+        one.author} · ${one.text}</span>${this.#cut.has(one.message_id) && !this.#whole.has(one.message_id)
+          ? html` <button type="button" class="d" data-action="show-all" @click=${() => {
+            this.#whole.add(one.message_id);
+            this.requestUpdate();
+          }}>${SHOW_ALL}</button>` : nothing}</span>${this.queueAct(one, to)}</div>`))}
+      ${view.more !== null ? html`<p class="note" data-line="more">${view.more}</p>` : nothing}
+      ${view.queueNote !== null ? html`<p class="note" data-line="queue-note">${view.queueNote}</p>` : nothing}
+      ${view.after.map((line) => this.#line(line))}
+      ${this.box(item, to)}
+      <div class="foot"><button type="button" class="d" data-action="details" aria-expanded=${this.#details ? "true" : "false"}
+        @click=${() => { this.#details = !this.#details; this.requestUpdate(); }}>${DETAILS}</button></div>
+      ${view.details !== null ? html`${view.details.map((line) => this.#line(line))}${sessionId !== null
+        ? html`<div class="foot"><button type="button" class="d" data-action="copy-id"
+          @click=${() => void this.#copy("id", sessionId)}>${this.#copied === "id" ? COPIED : COPY_ID}</button></div>`
+        : nothing}<p class="help" data-line="help">${HELP}</p>` : nothing}
+    </div>`;
+  }
+
+  /** The act at the right of one queued message. */
+  protected queueAct(_item: { message_id: string; takeable: boolean }, _to: string): unknown {
+    return html`<span></span>`;
+  }
+
+  /** The send box of an opened row. */
+  protected box(_item: FrameRow, _to: string): unknown {
+    return nothing;
+  }
+
+  #line(line: Line) {
+    const link = line.link;
+    let end: unknown = html`<span></span>`;
+    if (link?.kind === "cache") end = this.#link("cache", "", line.label, { cls: "x", action: "cache" });
+    else if (link?.kind === "thread") {
+      end = html`<button type="button" class="x" data-action="thread"
+        @click=${() => this.open(threadAddress(link.a, link.b))}>${THREAD_LINK}</button>`;
+    }
+    return html`<div class="r" data-line=${line.key}><span class="k">${line.label}</span><span class="f">${line.value}${
+      line.tail !== null ? html` <span class="d">· ${line.tail}</span>` : nothing}</span>${end}</div>`;
+  }
+
+  /** Follows the opened row's address with a read of its queue, and marks the messages a
+   * four-line cut hides part of. */
+  protected updated(changed: Map<PropertyKey, unknown>): void {
+    super.updated(changed);
+    const to = this.#drawnTo;
+    if (to !== this.#queueFor) {
+      this.#queue?.close();
+      this.#queueFor = to;
+      this.#cut.clear();
+      this.#whole.clear();
+      this.#queue = to === null ? null
+        : new Feed<Queue>(() => api("comms", `api/queue?name=${encodeURIComponent(to)}`), parseQueue,
+                          () => this.requestUpdate(), { clocked: false });
+      void this.#queue?.refresh();
+    }
+    let grew = false;
+    for (const node of this.renderRoot.querySelectorAll<HTMLElement>(".msg.cut")) {
+      const id = node.dataset.message;
+      if (id !== undefined && node.scrollHeight > node.clientHeight + 1 && !this.#cut.has(id)) {
+        this.#cut.add(id);
+        grew = true;
+      }
+    }
+    if (grew) this.requestUpdate();
   }
 }
 
