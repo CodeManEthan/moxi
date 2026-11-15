@@ -405,3 +405,184 @@ def test_an_absent_or_empty_harness_file_is_written_then_removed(lo, start):
     assert claude.read_text().count("@") == 2
     assert cli.main(["global", "remove"]) == 0
     assert not claude.exists()
+
+
+# -- if-absent: the generated file ---------------------------------------------------------
+
+def _gen(h):
+    from moxi_loadout.globalfile import generated_path
+
+    return generated_path(h)
+
+
+def test_if_absent_places_a_generated_file_for_a_harness_with_a_part(lo):
+    from moxi_loadout.globalfile import generated_state
+
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    mode(lo, "if-absent")
+    out = install.install()
+    assert out.code == 0, out.text()
+    claude, codex = harness.global_file("claude"), harness.global_file("codex")
+    assert os.path.realpath(codex) == str(lo / "global.md")
+    assert os.path.realpath(claude) == str(_gen("claude"))
+    first, rest = _gen("claude").read_text().split("\n", 1)
+    assert first.startswith(f"<!-- moxi loadout: from {lo / 'global.md'} and "
+                            f"{lo / 'global.claude.md'}; sha256 ")
+    assert rest == "Be brief.\n\nClaude only.\n"
+    assert generated_state(_gen("claude")) == "ok"
+    assert install.status().code == 0
+    # The part deleted: re-pointed to the shared file, and the generated file deleted.
+    (lo / "global.claude.md").unlink()
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert os.path.realpath(claude) == str(lo / "global.md")
+    assert not _gen("claude").exists()
+
+
+def test_an_empty_assembled_text_is_the_marker_line_alone(lo):
+    (lo / "global.md").write_text("")
+    (lo / "global.codex.md").write_text("\n")
+    mode(lo, "if-absent")
+    assert install.install().code == 0
+    text = _gen("codex").read_text()
+    assert text.count("\n") == 1 and text.startswith("<!-- moxi loadout: from ")
+
+
+def test_a_hand_edit_to_the_generated_file_is_kept_until_replace(lo):
+    from moxi_loadout import stores
+
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    mode(lo, "if-absent")
+    assert install.install().code == 0
+    claude = harness.global_file("claude")
+    with open(claude, "a") as f:
+        f.write("My own line.\n")
+    edited = _gen("claude").read_bytes()
+    out = install.install()
+    assert out.code == 3 and _rows(out, "modified") == {"claude"}
+    reason = next(r.reason for r in out.rows if r.state == "modified")
+    assert "global.claude.md" in reason and "--replace global:global@claude" in reason
+    assert _gen("claude").read_bytes() == edited
+    # The part deleted while edited: the placement is kept, not re-pointed.
+    (lo / "global.claude.md").unlink()
+    assert install.install().code == 3
+    assert os.path.realpath(claude) == str(_gen("claude"))
+    assert _gen("claude").read_bytes() == edited
+    # --replace backs the edit up and places afresh.
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    out = install.install(replace=["global:global@claude"])
+    assert out.code == 0, out.text()
+    assert "My own line." not in _gen("claude").read_text()
+    backups = list((stores.backups_dir() / "claude").iterdir())
+    assert any(b.read_bytes() == edited for b in backups)
+
+
+def test_an_edited_generated_file_no_placement_uses_is_left_with_a_note(lo):
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    mode(lo, "if-absent")
+    assert install.install().code == 0
+    with open(_gen("claude"), "a") as f:
+        f.write("Mine.\n")
+    os.unlink(harness.global_file("claude"))
+    harness.global_file("claude").write_text("theirs\n")
+    out = install.install()
+    assert _gen("claude").exists()
+    assert any(str(_gen("claude")) in n and "edited by hand" in n for n in out.notes)
+
+
+def test_a_lost_ledger_still_reads_the_generated_file_by_its_marker(lo):
+    (lo / "global.codex.md").write_text("Codex only.\n")
+    mode(lo, "if-absent")
+    assert install.install().code == 0
+    from moxi_loadout import ledger
+
+    ledger.write({"placed": {}, "entries": []})
+    assert install.install().code == 0
+    assert install.status().code == 0
+    assert os.path.realpath(harness.global_file("codex")) == str(_gen("codex"))
+
+
+def test_a_run_killed_after_the_generated_file_is_written_ends_ok(lo, monkeypatch):
+    from moxi_loadout import ledger
+
+    (lo / "global.codex.md").write_text("Codex only.\n")
+    mode(lo, "if-absent")
+    with monkeypatch.context() as m:
+        m.setattr(ledger, "write", lambda data: None)
+        install.install()
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert not any(r.state == "modified" for r in out.rows)
+
+
+def test_an_occupied_harness_file_gets_nothing_generated(lo):
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    claude = harness.global_file("claude")
+    claude.parent.mkdir(parents=True)
+    claude.write_text("")
+    mode(lo, "if-absent")
+    assert install.install().code == 0
+    assert claude.read_text() == "" and not _gen("claude").exists()
+    claude.unlink()
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert os.path.realpath(claude) == str(_gen("claude"))
+
+
+def test_a_user_link_reaching_a_re_pointed_placement_is_blocked(lo):
+    claude, codex = harness.global_file("claude"), harness.global_file("codex")
+    codex.parent.mkdir(parents=True)
+    codex.symlink_to(claude)
+    mode(lo, "if-absent")
+    assert install.install().code == 0
+    assert os.path.realpath(codex) == str(lo / "global.md")
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    out = install.install()
+    assert out.code == 3, out.text()
+    assert _rows(out, "blocked") == {"claude", "codex"}
+    assert os.readlink(codex) == str(claude)
+    assert os.path.realpath(claude) == str(lo / "global.md")
+    assert not _gen("claude").exists()
+
+
+def test_mode_changes_with_parts_leave_nothing_of_the_old_mode(lo):
+    for h in ("claude", "codex"):
+        (lo / f"global.{h}.md").write_text(f"{h} only.\n")
+    claude = harness.global_file("claude")
+    mode(lo, "if-absent")
+    assert install.install().code == 0
+    assert os.path.realpath(claude) == str(_gen("claude"))
+    assert cli.main(["global", "mode", "managed"]) == 0
+    assert not claude.is_symlink() and claude.read_text().count("@") == 2
+    assert not _gen("claude").exists()
+    assert (lo / "global.claude.md").read_text() == "claude only.\n"
+    assert cli.main(["global", "mode", "if-absent"]) == 0
+    assert os.path.realpath(claude) == str(_gen("claude"))
+    assert cli.main(["global", "remove"]) == 0
+    assert not os.path.lexists(claude) and not _gen("claude").exists()
+    assert cli.main(["global", "mode", "managed"]) == 0
+    assert cli.main(["global", "remove"]) == 0
+    assert not os.path.lexists(claude)
+
+
+def test_if_absent_to_managed_keeps_an_edited_generated_file_placed(lo):
+    from moxi import modules
+
+    from moxi_loadout import teardown
+
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    mode(lo, "if-absent")
+    assert install.install().code == 0
+    with open(_gen("claude"), "a") as f:
+        f.write("Mine.\n")
+    edited = _gen("claude").read_bytes()
+    assert cli.main(["global", "mode", "managed"]) == 3
+    claude = harness.global_file("claude")
+    assert os.path.realpath(claude) == str(_gen("claude"))
+    assert _gen("claude").read_bytes() == edited
+    assert cli.main(["global", "remove"]) == 3
+    assert _gen("claude").read_bytes() == edited
+    with pytest.raises(modules.Refused) as exc:
+        teardown.teardown(say=lambda line: None)
+    assert "global:global@claude" in str(exc.value)
+    assert _gen("claude").read_bytes() == edited

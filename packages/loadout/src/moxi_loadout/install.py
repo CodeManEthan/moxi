@@ -6,7 +6,8 @@
    them into the manifest, and record them in loadout's ledger;
 2. read the manifest, the settings and the ledger, and build the whole plan
    (`moxi_loadout.planner`);
-3. write the generated agent files of the wants in scope;
+3. write the generated agent and global files of the wants in scope (a generated global
+   file edited by hand that `--replace` names is backed up first);
 4. plan through the core placer and apply the steps in scope: each `add`, `update` and
    `keep`; each `remove` whose record names a section in scope (a `remove` with no record
    only in an unscoped run in which every section resolved); a refusal `--replace` names,
@@ -23,8 +24,8 @@
    file once, and the ledger with their records straight after, `SIGINT` and `SIGTERM`
    deferred across both;
 6. write loadout's ledger: a record per placement made or kept and per entry written or
-   kept, none for one removed; then delete each generated agent file nothing uses any
-   more, unless it was edited by hand (a note names it);
+   kept, none for one removed; then delete each generated agent or global file nothing
+   uses any more, unless it was edited by hand (a note names it);
 7. with repo installed and the folder in a git work tree, register the two git hook
    pieces there while `reinstall_on_commit` is on, or remove them while it is off
    (`moxi_loadout.repo_link`); a failure is a line, not an exit code.
@@ -70,7 +71,7 @@ SKIPPED = "the would-commit check skipped"
 class Outcome:
     """What a run came to: its `rows` (every want for `status`, those in scope for
     `install`), the `lines` said on the way, `notes`, and the exit `code`. `status` also
-    gives the generated agent files no agent uses (`orphans`, see `orphans`)."""
+    gives the generated agent and global files nothing uses (`orphans`, see `orphans`)."""
 
     rows: list[Row] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
@@ -287,6 +288,7 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     found = manifest_mod.load(machine.source)
     lines.extend(r.line for r in found.refused)
     claims = _claims(replace)
+    _replace_generated_global(claims, machine.backups_keep, say)
     written: list[Row] = []
     notes: list[str] = []
 
@@ -515,30 +517,59 @@ def _moved(step, mine: set[str], old_source) -> bool:
 
 
 def _write_generated(want, claims: dict[str, bool], say) -> None:
-    """Write `want`'s generated agent file when it needs writing: missing, out of date
+    """Write `want`'s generated agent or global file when it needs writing: missing, out of date
     with its header intact, or edited by hand and named by `--replace`."""
     from moxi.files import atomic_write
 
     if want.generated is None or want.state is not None:
         return
     path, data, current = want.generated
-    if current == "same":
+    if current == "same" or data is None:
         return
     if current == "modified" and not _claimed(claims, want):
         return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     atomic_write(path, data, mode=0o644)
     want.generated = (path, data, "same")
     if current == "modified":
         say(f"rewrote {path}, which was edited by hand")
 
 
+def _replace_generated_global(claims: dict[str, bool], keep: int, say) -> None:
+    """Each generated global file edited by hand that a `--replace global:global@<harness>`
+    names: its bytes backed up under the harness's backups, then deleted, so the run
+    writes it afresh (or places the shared file, when the harness has no part)."""
+    from moxi_loadout import globalfile
+    from moxi_loadout import harness as hz
+
+    for text in claims:
+        if not text.startswith("global:"):
+            continue
+        which = text.rsplit("@", 1)[-1]
+        for h in hz.HARNESSES if which == "*" else (which,):
+            path = globalfile.generated_path(h)
+            if globalfile.generated_state(path) != "modified":
+                continue
+            kept = hz.backup(path, h, path.read_bytes(), keep)
+            path.unlink()
+            claims[text] = True
+            say(f"backed up {path}, which was edited by hand, to {kept}; install writes it "
+                "again")
+
+
 def generated_in_use(data: dict, wanted: Iterable = ()) -> set[str]:
-    """The generated agent files still in use, by real path: those `wanted` names, those
-    a record in loadout's ledger was placed from, and those a placement of loadout's
-    links to (so a lost ledger keeps them too)."""
+    """The generated agent and global files still in use, by real path: those `wanted`
+    names, those a record in loadout's ledger was placed from, those a placement of
+    loadout's links to (so a lost ledger keeps them too), and those a harness global file
+    links to."""
     from moxi import place
 
+    from moxi_loadout import harness as hz
+
     out = {os.path.realpath(p) for p in wanted}
+    for h in hz.HARNESSES:
+        if os.path.islink(hz.global_file(h)):
+            out.add(os.path.realpath(hz.global_file(h)))
     for record in data["placed"].values():
         item = record.get("place")
         if isinstance(item, dict) and isinstance(item.get("source"), str):
@@ -550,34 +581,45 @@ def generated_in_use(data: dict, wanted: Iterable = ()) -> set[str]:
 
 
 def orphans(plan: planner.Plan, data: dict) -> list[tuple[str, str]]:
-    """Each generated agent file no want names and no placement uses any more, with its
-    state: `ok` as it was generated, `modified` when edited by hand."""
-    from moxi_loadout import convert, stores
+    """Each generated agent or global file no want names and no placement uses any more,
+    with its state: `ok` as it was generated, `modified` when edited by hand."""
+    from moxi_loadout import convert, globalfile, stores
+    from moxi_loadout import harness as hz
 
-    used = generated_in_use(data, [w.generated[0] for w in plan.wants if w.generated])
+    wanted = [w.generated[0] for w in plan.wants if w.generated]
+    used = generated_in_use(data, wanted)
+    # A generated global file is in use while a want names it or a harness reads it.
+    reached = {os.path.realpath(p) for p in wanted} | {
+        os.path.realpath(hz.global_file(h)) for h in hz.HARNESSES}
     out = []
     for top, _, names in os.walk(stores.generated_dir()):
         for name in sorted(names):
             path = os.path.join(top, name)
-            if os.path.realpath(path) in used:
+            mine = globalfile.is_generated(path)
+            if os.path.realpath(path) in (reached if mine else used):
                 continue
-            state = convert.state(path)
+            state = globalfile.generated_state(path) if mine else convert.state(path)
             if state in ("ok", "modified"):
                 out.append((path, state))
     return out
 
 
 def _drop_generated(plan: planner.Plan, data: dict, say) -> list[str]:
-    """Delete each generated agent file no want names and no placement uses any more,
+    """Delete each generated agent or global file no want names and no placement uses any more,
     as it was generated; one edited by hand is left, and named in the note returned."""
+    from moxi_loadout import globalfile
+
     notes = []
     for path, state in orphans(plan, data):
+        what = "harness" if globalfile.is_generated(path) else "agent"
         if state == "ok":
             os.unlink(path)
-            say(f"deleted {path}, which no agent uses any more")
+            say(f"deleted {path}, which no {what} uses any more")
         else:
-            notes.append(f"{path} was edited by hand and no agent uses it any more; "
-                         "copy the edit into its source if you want it, then delete it")
+            into = ("the global file or the harness's part" if what == "harness"
+                    else "its source")
+            notes.append(f"{path} was edited by hand and no {what} uses it any more; "
+                         f"copy the edit into {into} if you want it, then delete it")
     return notes
 
 

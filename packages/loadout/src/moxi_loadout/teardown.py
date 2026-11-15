@@ -7,10 +7,11 @@ or it takes everything out. `teardown()`, in order:
 1. **Plan, and refuse first.** Every removal is planned and nothing is written yet: each
    harness entry in the ledger (`moxi_loadout.entries` over an empty manifest), the
    managed global part as `global remove` takes it out, loadout's ignore files, its
-   placements. When an entry, an ignore file or a generated agent file was changed since
-   loadout wrote it, a harness global file is one real file with another harness's (or is
-   another harness's part), a harness file that holds loadout's entries doesn't read, or the
-   CLI that removes an MCP server is missing while the server is there, it raises
+   placements. When an entry, an ignore file or a generated agent or global file was
+   changed since loadout wrote it, a harness global file is one real file with another
+   harness's (or is another harness's part), a harness file that holds loadout's entries
+   doesn't read, or the CLI that removes an MCP server is missing while the server is
+   there, it raises
    `moxi.modules.Refused` naming each with its fix: nothing is removed and the uninstall
    exits 3.
 2. **The harness entries.** MCP servers through their CLIs first, then each harness file
@@ -207,9 +208,9 @@ def _ignore_files(data: dict) -> list[str]:
 
 
 def _generated(data: dict) -> list[str]:
-    """Each generated agent file edited by hand, which a purge would lose. One no
+    """Each generated agent or global file edited by hand, which a purge would lose. One no
     placement uses any more has no `--replace` to name: deleting it is the fix."""
-    from moxi_loadout import convert, install, stores
+    from moxi_loadout import convert, globalfile, install, stores
 
     root = stores.generated_dir()
     used = install.generated_in_use(data)
@@ -217,6 +218,13 @@ def _generated(data: dict) -> list[str]:
     for top, _, names in os.walk(root):
         for name in sorted(names):
             path = Path(top) / name
+            if globalfile.is_generated(path):
+                if globalfile.generated_state(path) == "modified":
+                    h = path.stem
+                    out.append(f"{path} was edited by hand: copy the edit into the global "
+                               f"file or its part, then run moxi loadout install --replace "
+                               f"global:global@{h}")
+                continue
             if convert.state(path) != "modified":
                 continue
             if os.path.realpath(path) not in used:

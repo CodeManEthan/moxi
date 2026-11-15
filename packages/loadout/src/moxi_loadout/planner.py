@@ -93,7 +93,9 @@ class Want:
     `item` is the `Item` passed for it, or None when it is carried or not wanted.
     `carried` holds the items passed in its place. `state` is set when the planner
     decides it without the placer (`bad-source`, `off`, a refused section), with `reason`
-    and `code`. `generated` is the converted file to write first, when it needs writing.
+    and `code`; a global file's generated file edited by hand keeps its `reason` without a
+    `state`. `generated` is the converted file to write first, when it needs writing
+    (its bytes None when nothing would be written there).
     """
 
     section: Section
@@ -239,39 +241,159 @@ def build(manifest: Manifest, machine, data: dict, *,
                 for harness in (every if harnesses is None else harnesses):
                     plan.wants.append(_want(plan, machine, section, root, kind, name,
                                             harness, user_skills))
-    if manifest.global_mode == "if-absent":
-        plan.wants += _global_wants(plan, manifest, every)
+    plan.wants += _global_wants(plan, manifest, every)
     return plan
 
 
 def _global_wants(plan: Plan, manifest: Manifest, every) -> list[Want]:
-    """In `if-absent` mode, each harness's global file placed from the folder's global
-    text where the harness has none; an existing file is left alone."""
+    """In `if-absent` mode, each harness's global file placed where the harness has none:
+    the shared file while the harness has no part in use, else its generated file
+    (`moxi_loadout.globalfile`); an existing file is left alone. In the other modes, a
+    placement of a generated file edited by hand is carried as it stands. A user's file
+    that reaches another harness's global file, part or generated file through links
+    reads `blocked`, and that other harness's placement is not placed or re-pointed."""
+    from moxi import place
     from moxi.place import Item
 
+    from moxi_loadout import globalfile
     from moxi_loadout import harness as hz
-    from moxi_loadout import stores
 
-    out = []
     source = Path(manifest.global_file)
-    for h in every:
-        if h not in hz.HARNESSES:
-            continue
-        dest = hz.global_file(h)
+    names = [h for h in every if h in hz.HARNESSES]
+    mine = {place.target_key(p.path) for p in place.status(OWNER) if p.state != "modified"}
+    dests = {h: hz.global_file(h) for h in names}
+    occupied = {h for h in names if os.path.lexists(dests[h])
+                and not _placed_here(dests[h], mine, source, globalfile.generated_path(h))}
+    in_use = globalfile.parts(source)
+    blocked = _crossed_links(source, dests, occupied, in_use)
+    out = []
+    for h in names:
+        dest, gen = dests[h], globalfile.generated_path(h)
         want = Want(manifest.user, GLOBAL_KIND, GLOBAL_KIND, h)
+        out.append(want)
+        kept = os.path.realpath(dest) == os.path.realpath(gen) and h not in occupied \
+            and globalfile.generated_state(gen) == "modified"
+        if kept:
+            # Edited by hand: the placement stands as it is, whatever the mode or the parts.
+            want.item = Item(gen, h, dest.name, "agent", dest=dest)
+            want.generated = (gen, None, "modified")
+            want.reason = _edited_reason(gen, source, h)
+            if manifest.global_mode != "if-absent":
+                want.item = None
+                want.state, want.code = "modified", REFUSED
+                want.reason = _edited_reason(gen, source, h)
+                want.carried = _global_items(plan, h, gen, dest)
+            continue
+        if manifest.global_mode != "if-absent":
+            out.pop()
+            continue
+        if h in blocked:
+            want.state, want.reason, want.code = "blocked", blocked[h], REFUSED
+            want.carried = () if h in occupied else _global_items(plan, h, None, dest)
+            continue
         if not source.is_file() or source.is_symlink():
             want.state, want.reason, want.code = ("bad-source", f"no global text at "
                                                   f"{source}", ERROR)
-            items = [ledger.item_of(r) for r in plan.ledger["placed"].values()
-                     if (r.get("kind"), r.get("harness")) == (GLOBAL_KIND, h)]
-            items = [i for i in items if i is not None] or [
-                Item(stores.state_dir() / ".carried" / dest.name, h, dest.name, "agent",
-                     dest=dest)]
-            want.carried = tuple(items)
-        else:
+            want.carried = _global_items(plan, h, None, dest)
+            continue
+        part = in_use.get(h)
+        if h in occupied or part is None:
             want.item = Item(source, h, dest.name, "agent", dest=dest)
-        out.append(want)
+            continue
+        try:
+            text = globalfile.assemble([globalfile.read(source), globalfile.read(part)])
+        except (OSError, UnicodeDecodeError) as exc:
+            want.state, want.code = "bad-source", ERROR
+            want.reason = f"{part} or {source} can't be read ({exc})"
+            want.carried = _global_items(plan, h, None, dest)
+            continue
+        data = globalfile.generated_bytes([source, part], text)
+        try:
+            now = gen.read_bytes()
+        except OSError:
+            now = None
+        current = None if now is None else (
+            "same" if now == data else globalfile.generated_state(gen))
+        want.item = Item(gen, h, dest.name, "agent", dest=dest)
+        want.generated = (gen, data, current)
+        if current == "modified":
+            want.reason = _edited_reason(gen, source, h)
     return out
+
+
+def _crossed_links(source: Path, dests: dict, occupied: set, in_use: dict) -> dict[str, str]:
+    """`if-absent`'s real-path rule: each user's harness file whose links reach another
+    harness's global file while that harness has a part (so loadout would place or keep
+    its generated file there), or whose real path is another harness's part or generated
+    file. Both harnesses read `blocked`; the reason is the same line."""
+    from moxi_loadout import globalfile
+
+    out: dict[str, str] = {}
+    for h in occupied:
+        chain = _chain(dests[h])
+        real = os.path.realpath(dests[h])
+        for g, dest in dests.items():
+            if g == h:
+                continue
+            theirs = {os.path.realpath(globalfile.part_path(source, g)),
+                      os.path.realpath(globalfile.generated_path(g))}
+            if real in theirs or (os.path.abspath(dest) in chain and g in in_use):
+                line = (f"{dests[h]} reaches {g}'s global file or part through links "
+                        f"({real}), so {h} would read {g}'s part; loadout leaves both: "
+                        "make it a file of its own")
+                out[h] = line
+                out.setdefault(g, line)
+    return out
+
+
+def _placed_here(dest: Path, mine: set, source: Path, gen: Path) -> bool:
+    """Whether `dest` is loadout's placement of a global file: the placer records it, and
+    it is a copy or a link straight to the shared file or the harness's generated file (a
+    user's link to another file that reaches the same place is not)."""
+    from moxi import place
+
+    if place.target_key(dest) not in mine:
+        return False
+    if not os.path.islink(dest):
+        return True
+    chain = _chain(dest)
+    return bool(chain) and chain[0] in (os.path.abspath(source), os.path.abspath(gen))
+
+
+def _chain(path) -> list[str]:
+    """The paths a link passes through on its way to a file, `path` itself excluded."""
+    out, seen = [], set()
+    here = os.path.abspath(path)
+    while os.path.islink(here) and here not in seen and len(out) < 40:
+        seen.add(here)
+        here = os.path.normpath(os.path.join(os.path.dirname(here), os.readlink(here)))
+        out.append(here)
+    return out
+
+
+def _global_items(plan: Plan, harness: str, gen, dest) -> tuple:
+    """The placement of `harness`'s global file loadout's ledger records, else one naming
+    `gen` (or nowhere) at `dest`, so the placer keeps whatever is there."""
+    from moxi.place import Item
+
+    from moxi_loadout import stores
+
+    items = [ledger.item_of(r) for r in plan.ledger["placed"].values()
+             if (r.get("kind"), r.get("harness")) == (GLOBAL_KIND, harness)]
+    items = [i for i in items if i is not None]
+    if items:
+        return tuple(items)
+    where = gen if gen is not None else stores.state_dir() / ".carried" / Path(dest).name
+    return (Item(where, harness, Path(dest).name, "agent", dest=dest),)
+
+
+def _edited_reason(gen, source, harness: str) -> str:
+    from moxi_loadout import globalfile
+
+    part = globalfile.part_path(source, harness)
+    return (f"{gen} was edited by hand, and {harness} reads it; to keep the edit copy it "
+            f"into {source} or {part.name}, then run moxi loadout install --replace "
+            f"global:global@{harness}")
 
 
 def _want(plan: Plan, machine, section: Section, root, kind, name, harness,
@@ -537,6 +659,9 @@ def state_of(want: Want) -> tuple[str, str, int]:
     if want.kind == GLOBAL_KIND and step.action == "refuse" \
             and step.cause in ("occupant", "tracked"):
         return "ok", f"{step.target} is there already; if-absent leaves it", 0
+    if want.kind == GLOBAL_KIND and want.generated is not None \
+            and want.generated[2] == "modified":
+        return "modified", want.reason, REFUSED
     if want.generated is not None and want.generated[2] == "modified":
         return ("modified", f"{want.generated[0]} was edited by hand; edit the source, "
                 f"or install --replace {want.kind}:{want.name}@{want.harness}", REFUSED)
@@ -581,12 +706,12 @@ def replaceable(want: Want) -> bool:
     reads it: an occupant in the way, one git tracks among them, or a generated file edited
     by hand. A target git would commit for want of an ignore rule is no such case."""
     step = want.step
-    if step is None or want.state is not None or want.adoptable or want.commit is not None \
-            or want.kind == GLOBAL_KIND:
+    if step is None or want.state is not None or want.adoptable or want.commit is not None:
         return False
     if want.generated is not None and want.generated[2] == "modified":
         return True
-    return step.action == "refuse" and step.cause in ("occupant", "tracked")
+    return want.kind != GLOBAL_KIND and step.action == "refuse" \
+        and step.cause in ("occupant", "tracked")
 
 
 def target_of(want: Want) -> str | None:
