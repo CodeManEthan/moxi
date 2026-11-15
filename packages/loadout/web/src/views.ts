@@ -198,6 +198,15 @@ export function replaceAct(row: Row): Act & { sheet: string[] } {
   const scope = row.scope === null || row.kind === "global" ? {}
     : row.scope === "user" ? { user: true } : { projects: [row.scope] };
   const where = row.target ?? value;
+  if (row.kind === "global") {
+    // An edited global file is backed up by loadout itself; nothing moves aside.
+    return { path: "api/replace", body: { replace: [value], ...scope }, sheet: [
+      `Runs moxi loadout install --replace ${value}, a whole install, since only a whole `
+        + "install writes the global file.",
+      `The edited text at ${where} is backed up to loadout's backups, and loadout writes its `
+        + "own there again.",
+    ] };
+  }
   const sheet = [
     `Runs moxi loadout install --replace ${value}.`,
     `What stands at ${where} now moves to Moxi's displaced folder, and loadout places its own there.`,

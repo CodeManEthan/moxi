@@ -126,7 +126,8 @@ and links to the page. An item counts once, however many of its harnesses aren't
   loadout wrote them. A `would-commit` row whose path holds a copy the project's git
   tracks is one: the copy is moved aside, so git shows it deleted, and the row reads
   `would-commit` until you commit that. A global file's row runs the whole install,
-  since only a whole install writes the global file.
+  since only a whole install writes the global file, and its edited text goes to
+  loadout's backups rather than Moxi's displaced folder.
 - **The global instruction file.** The mode, and what the next install does to each
   global file, with its diff. Managed and Only where absent run `moxi loadout global
   mode`. Turn off runs `moxi loadout global remove` once you confirm on the sheet.
