@@ -99,8 +99,8 @@ def private_place_ok(common_dir) -> bool:
     """True when secrets will read a private allowlist in `common_dir`: its resolved path
     has a folder named `.git` in it, as secrets requires of a private file outside its own
     config directory. A notes repo made with `--separate-git-dir`, or one whose common git
-    dir is a bare `notes.git`, has none, and every judge then reads its allowlist as
-    empty."""
+    dir is a bare `notes.git`, has none: a private file there makes every judge read its
+    allowlist as empty, and with no file there no private allowance can apply."""
     from pathlib import Path
 
     return ".git" in Path(os.fspath(common_dir)).resolve().parts
