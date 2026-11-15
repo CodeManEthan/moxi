@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Every setting carries page fields, which `moxi config tunnel show --json` prints
+  and the settings page draws: a plain label, and a line where the label can't carry
+  it. tunnel needs moxi 0.1.9 or later.
+
 ## 0.2.0 (2026-11-08)
 
 The first public release.
