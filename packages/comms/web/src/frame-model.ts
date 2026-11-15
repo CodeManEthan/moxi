@@ -64,6 +64,8 @@ export interface FrameFacts {
   /** How long ago the page opened. */
   waitedMs: number;
   at: Address;
+  /** Today's messages have been read (or their read failed), so `authorOf` can answer. */
+  messagesRead?: boolean;
   /** The author of a message the page holds, by id, beyond `owed`; null when it holds none. */
   authorOf?: (messageId: string) => string | null;
   /** Where the address was placed once its reads answered, kept until another opens, so a
@@ -161,8 +163,9 @@ export function readLine(what: string, read: Read<{ state: string; detail: strin
 
 /** Where the address opens among `rows` and `others`, given which reads have answered. */
 export function openedOf(at: Address, rows: readonly AgentRow[], others: readonly OtherName[],
-                         { rosterRead, mailRead, authorOf }: { rosterRead: boolean; mailRead: boolean;
-                                                              authorOf: (id: string) => string | null })
+                         { rosterRead, mailRead, messagesRead = true, authorOf }
+                           : { rosterRead: boolean; mailRead: boolean; messagesRead?: boolean;
+                               authorOf: (id: string) => string | null })
   : Placed {
   const rowOf = (qualified: string): AgentRow | undefined =>
     rows.find((row) => row.addresses.some((address) => address.qualified === qualified));
@@ -189,7 +192,7 @@ export function openedOf(at: Address, rows: readonly AgentRow[], others: readonl
       return { opened: { kind: "none" }, line: `${at.qualified} isn't on this page.` };
     }
     case "reply": {
-      if (!rosterRead || !mailRead) return { opened: { kind: "pending" }, line: null };
+      if (!rosterRead || !mailRead || !messagesRead) return { opened: { kind: "pending" }, line: null };
       for (const row of rows) {
         for (const address of row.addresses) {
           const owed = address.owed.find((entry) => entry.message_id === at.message_id);
@@ -245,7 +248,8 @@ export function frameModel(facts: FrameFacts, clock: Clock = LOCAL): Frame {
 
   const mailRead = mail.gone || mail.failure !== null || mailValue !== null;
   const placed = facts.placed ?? openedOf(facts.at, agents.rows, agents.others,
-                                          { rosterRead: shown !== null, mailRead, authorOf: facts.authorOf ?? (() => null) });
+                                          { rosterRead: shown !== null, mailRead, messagesRead: facts.messagesRead ?? true,
+                                            authorOf: facts.authorOf ?? (() => null) });
   if (placed.line !== null) lines.push({ key: "address", text: placed.line });
   const opened = stale ? { kind: "none" as const } : placed.opened;
 

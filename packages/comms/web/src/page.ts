@@ -22,10 +22,15 @@
 // take back; after either act the mail state and the queue are read again. A box set to
 // answer a message quotes it, and the row's `Message` act clears that.
 //
-// It reads `/api/roster`, then follows the topic `roster`. It reads `/api/mail-state`, and
-// the opened address's `/api/queue` with it, when it opens, when the roster's waiting mail
+// Under the agents, the messages (`today-model.ts`): `Today`, newest first, each with `Open`
+// for its thread; `Earlier today · N more · Show`, which adds thirty; and `Before today ·
+// N messages, back to <day> · Show`, which adds that day under its own label and moves down.
+//
+// It reads `/api/roster`, then follows the topic `roster`. It reads `/api/mail-state`,
+// today's `/api/messages` and the opened address's `/api/queue` with them, when it opens, when the roster's waiting mail
 // or its bound names change, when its tab is shown again and every 30 s while the tab is
-// visible; a newly opened address's queue is read at once.
+// visible, and after a send or a take-back; a newly opened address's queue is read at once.
+// Today's read takes as many messages as the page shows, so a refresh leaves no gap.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -40,17 +45,22 @@ import {
   CHECK_AGAIN, DELIVER, FROM, OPERATOR, REPLY_WANTED, SEND, SendBox, TAKE_BACK, TEXT_MAX_CHARS,
 } from "./box-model.ts";
 import type { Choice } from "./box-model.ts";
-import { Feed, parseRoster } from "./feed.ts";
+import { failureWhy, Feed, parseRoster } from "./feed.ts";
 import {
-  ACT_WORDS, CLOSE, COPIED, COPIED_MS, COPY, DOWN_LABEL, frameModel, LAUNCH_FROM_HOME, READING_AFTER_MS, SETTINGS_LINK,
-  SETTINGS_ROUTE,
+  ACT_WORDS, CLOSE, COPIED, COPIED_MS, COPY, DOWN_LABEL, frameModel, LAUNCH_FROM_HOME, READING_AFTER_MS, readLine,
+  SETTINGS_LINK, SETTINGS_ROUTE,
 } from "./frame-model.ts";
 import type { Down, Empty, Frame, FrameRow, Placed } from "./frame-model.ts";
-import { parseQueue } from "./messages-model.ts";
+import { byHim, parseQueue } from "./messages-model.ts";
 import type { Queue } from "./messages-model.ts";
 import { COPY_ID, DETAILS, HELP, openedAgent, SHOW_ALL, THREAD_LINK } from "./opened-model.ts";
 import type { Line } from "./opened-model.ts";
 import type { Said } from "./words.ts";
+import {
+  authorIn, EARLIER_TODAY, FIRST, joined, messagesPath, messagesView, MORE, OPEN, parseMessagesAnswer,
+  SHOW, todayOf,
+} from "./today-model.ts";
+import type { Messages, ReadDay } from "./today-model.ts";
 import { newestDay, whenWords } from "./words.ts";
 
 const TAG = "moxi-comms-page";
@@ -138,6 +148,12 @@ const STYLES = css`
   .dry button { padding-left: 18px; color: var(--moxi-text); }
   .dry .t { min-width: 0; overflow-wrap: anywhere; }
 
+  .msgs moxi-ui-row + moxi-ui-row { margin-top: 2px; }
+  .one { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 7px 0;
+         color: var(--moxi-text-dim); }
+  .one button { flex: none; color: var(--moxi-text); }
+  .one button:disabled { color: var(--moxi-text-dim); cursor: default; }
+
   .quietline { font-size: 22px; line-height: 32px; text-align: center; letter-spacing: -0.005em; padding: 150px 0 14px; }
   .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; }
   .first p { max-width: 520px; margin: 0 auto; }
@@ -177,6 +193,13 @@ export class CommsPage extends LitElement {
   tick = 0;
   #feed: Feed<PageRoster> | null = null;
   #mail: Feed<MailState> | null = null;
+  /** Today's read, and what the page shows of today and of the days before it added. */
+  #messages: Feed<Messages> | null = null;
+  #todayRead: ReadDay | null = null;
+  #days: ReadDay[] = [];
+  /** The `Show` whose read is out, and the line of one that failed. */
+  #showing: string | null = null;
+  #showFailed: string | null = null;
   /** The opened row's address, and the read of its rows in the books. */
   #queueFor: string | null = null;
   #queue: Feed<Queue> | null = null;
@@ -219,6 +242,7 @@ export class CommsPage extends LitElement {
   /** Reads the mail state again, and the opened row's queue with it. */
   #readMail(): void {
     void this.#mail?.refresh();
+    void this.#messages?.refresh();
     void this.#queue?.refresh();
   }
 
@@ -235,7 +259,16 @@ export class CommsPage extends LitElement {
     void feed.refresh().then(() => {
       if (this.#feed === feed) this.#stop = subscribe("comms", "roster", (data) => feed.topic(data));
     });
+    const messages = new Feed<Messages>(
+      () => api("comms", messagesPath({ limit: Math.max(FIRST, this.#todayRead?.messages.length ?? 0) })),
+      parseMessagesAnswer, () => {
+        this.#today = newestDay(this.#today, messages.value?.today ?? null);
+        this.#todayRead = todayOf(messages);
+        this.requestUpdate();
+      }, { clocked: false });
+    this.#messages = messages;
     void this.#mail.refresh();
+    void messages.refresh();
     document.addEventListener("visibilitychange", this.#shown);
     this.#tickTimer = setInterval(() => { this.tick += 1; }, TICK_MS);
     this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
@@ -248,6 +281,8 @@ export class CommsPage extends LitElement {
     super.disconnectedCallback();
     this.#feed?.close();
     this.#mail?.close();
+    this.#messages?.close();
+    this.#messages = null;
     this.#queue?.close();
     this.#box?.close();
     this.#box = null;
@@ -356,6 +391,8 @@ export class CommsPage extends LitElement {
     const frame = frameModel({
       roster: feed, kept: this.#kept, mail, now: feed.now(), today: this.#today, cache: installed("cache"),
       launcher: installed("launcher"), waitedMs: Date.now() - this.#openedAt, at: this.#at, placed: this.#placed,
+      messagesRead: this.#messages !== null && !this.#messages.loading,
+      authorOf: (id) => authorIn([this.#todayRead, ...this.#days], id),
     });
     this.#placed = frame.placed;
     return frame;
@@ -378,13 +415,98 @@ export class CommsPage extends LitElement {
           <div class="gl">${repeat(frame.rows, (item) => item.row.name, (item) => this.#row(item, frame.stale))}</div>
         </section></div>` : nothing}
       ${frame.empty !== null ? this.#empty(frame.empty) : nothing}
+      ${this.#messagesPart(frame.stale)}
       <div class="cfoot" data-part="foot"><span data-line="answering">${frame.foot ?? ""}</span>${
         this.#link("ui", SETTINGS_ROUTE, SETTINGS_LINK, { action: "settings" })}</div>
       ${this.#lines(frame)}`;
   }
 
   #lines(frame: Frame) {
-    return frame.lines.map((line) => html`<p class="last" data-line=${`foot-${line.key}`} role="status">${line.text}</p>`);
+    const read = this.#messages;
+    const failed = read === null ? null : readLine("The messages", read);
+    const lines = [...frame.lines, ...(failed !== null ? [{ key: "messages", text: failed }] : []),
+                   ...(this.#showFailed !== null ? [{ key: "show", text: this.#showFailed }] : [])];
+    return lines.map((line) => html`<p class="last" data-line=${`foot-${line.key}`} role="status">${line.text}</p>`);
+  }
+
+  // -- messages ----------------------------------------------------------------------------
+
+  /** `Today`, `Earlier today`, the days added and `Before today`; dim with no acts while the
+   * roster isn't up. */
+  #messagesPart(stale: boolean) {
+    const rows = this.#kept?.value.rows ?? [];
+    const him = new Set(["operator", ...[this.#todayRead, ...this.#days].flatMap((read) =>
+      (read?.messages ?? []).filter(byHim).map((message) => message.author))]);
+    const view = messagesView(this.#todayRead, this.#days, {
+      bound: (qualified) => rows.some((row) => row.qualified === qualified && row.live), cache: installed("cache"),
+      him: (tag) => him.has(tag),
+    }, this.#when, this.#today);
+    if (view.groups.length === 0 && view.before === null) return nothing;
+    const show = (key: string, read: () => Promise<void>) => html`<button type="button" data-action=${key}
+      ?disabled=${stale || this.#showing !== null} @click=${() => void this.#show(key, read)}>${SHOW}</button>`;
+    return html`<div class=${stale ? "grps msgs stale" : "grps msgs"} data-part="messages">
+      ${view.groups.map((group) => html`<section class="grp" data-group=${group.key}><div class="gk">${group.label}</div>
+        <div class="gl">${repeat(group.rows, (row) => row.message_id, (row) => html`<moxi-ui-row data-message=${
+          row.message_id} name=${row.name} where=${ifDefined(row.where || undefined)} fact=${row.time} lead=${row.text}>${
+          !stale && row.thread !== null ? html`<button type="button" slot="acts" class="do" data-action="open-thread"
+            @click=${() => this.open(threadAddress(row.thread?.a ?? "", row.thread?.b ?? ""))}>${OPEN}</button>` : nothing}
+          </moxi-ui-row>`)}${group.show !== null && group.key !== "today" ? html`<div class="one" data-line="more"><span>${
+          group.more}</span>${show(`more:${group.key}`, () => this.#readMore(group.show?.day ?? null,
+                                                                              group.show?.before ?? ""))}</div>` : nothing}
+        </div></section>${group.key === "today" && group.show !== null ? html`<section class="grp" data-group="earlier-today">
+          <div class="gk">${EARLIER_TODAY}</div><div class="gl"><div class="one" data-line="more"><span>${group.more}</span>${
+          show("more:today", () => this.#readMore(null, group.show?.before ?? ""))}</div></div></section>` : nothing}`)}
+      ${view.before !== null ? html`<section class="grp" data-group="before"><div class="gk">${view.before.label}</div>
+        <div class="gl"><div class="one" data-line="before"><span>${view.before.text}</span>${show("before", () =>
+          this.#readDay(view.before?.earlier.day ?? "", view.before?.earlier.before ?? ""))}</div></div></section>`
+        : nothing}
+    </div>`;
+  }
+
+  /** Runs one `Show`'s read; one at a time. */
+  async #show(key: string, read: () => Promise<void>): Promise<void> {
+    if (this.#showing !== null) return;
+    this.#showing = key;
+    this.#showFailed = null;
+    this.requestUpdate();
+    try {
+      await read();
+    } finally {
+      this.#showing = null;
+      this.requestUpdate();
+    }
+  }
+
+  /** One read of `/api/messages` for a `Show`; null after it failed, with its line set. */
+  async #page(path: string): Promise<Messages | null> {
+    const result = await api("comms", path);
+    const value = result.status === 200 ? parseMessagesAnswer(result.data) : null;
+    if (value === null || value.state !== "up") {
+      const why = value?.detail ?? failureWhy(result.status);
+      this.#showFailed = `The messages can't be read: ${why.replace(/\.$/, "")}.`;
+      return null;
+    }
+    return value;
+  }
+
+  /** `Earlier today · Show`, or a day's own `Show`: thirty more of that day below `before`. */
+  async #readMore(day: string | null, before: string): Promise<void> {
+    const value = await this.#page(messagesPath({ day, before, limit: MORE }));
+    if (value === null) return;
+    if (day === null) {
+      const held = this.#todayRead;
+      if (held !== null) this.#todayRead = { ...held, messages: joined(held.messages, value.messages), more: value.more };
+      return;
+    }
+    this.#days = this.#days.map((read) => (read.day !== day ? read
+      : { ...read, messages: joined(read.messages, value.messages), more: value.more }));
+  }
+
+  /** `Before today · Show`: the newest day before what the page shows, under its own label. */
+  async #readDay(day: string, before: string): Promise<void> {
+    const value = await this.#page(messagesPath({ day, before, limit: MORE }));
+    if (value === null) return;
+    this.#days = [...this.#days, { day, messages: value.messages, more: value.more, earlier: value.earlier }];
   }
 
   #down(down: Down) {

@@ -182,6 +182,14 @@ test("reply/<id> no longer owed: the line, and the author's row when the page kn
   assert.deepEqual(known.lines.map((l) => l.text), [NO_LONGER_OWED]);
 });
 
+test("reply/<id> no longer owed waits for today's messages before it places the author's row", () => {
+  const at_ = { piece: "reply", message_id: "1000000000000000009" };
+  const waiting = frame({ at: at_, messagesRead: false, authorOf: () => null });
+  assert.deepEqual([waiting.opened, waiting.placed, waiting.lines], [{ kind: "pending" }, null, []]);
+  const read_ = frame({ at: at_, messagesRead: true, authorOf: () => "planner" });
+  assert.equal(read_.opened.kind, "agent");
+});
+
 test("a placement kept stays open after the ask it answered is gone", () => {
   const ask = owed("planner", "19:02", "1000000000000000007");
   const first = frame({ mail: mail({ owed: [ask] }), at: { piece: "reply", message_id: ask.message_id } });
