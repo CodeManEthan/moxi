@@ -8047,6 +8047,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	type=int, dest="minutes",	keep	typ
 rounds	packages/rounds/src/moxi_rounds/closing.py	"""What a close waits for, as the line `show` gives an open round."""	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/closing.py	_nothing_open	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/closing.py	_plan_done	name	closed	on_closed
+rounds	packages/rounds/src/moxi_rounds/closing.py	_ratified	name	closed	on_closed
 rounds	packages/rounds/src/moxi_rounds/closing.py	`closed` answers whether another round, by name, is closed, for how a question	use	`closed`	`on_closed`
 rounds	packages/rounds/src/moxi_rounds/closing.py	`closed`, the answer it read them with, so one question has one state in what it	use	`closed`	`on_closed`
 rounds	packages/rounds/src/moxi_rounds/closing.py	reads = questions.current(question, state, closed=closed)	use	closed=	on_closed=
@@ -9390,6 +9391,7 @@ rounds	packages/rounds/tests/test_finish_actions.py	actor="planner")	use	actor=	
 rounds	packages/rounds/tests/test_finish_actions.py	assert any("worktree, which is gone" in one.reason for one in refused.value.unmet)	keep	any	any
 rounds	packages/rounds/tests/test_finish_actions.py	assert cli.main(["projects", "set", "proj-a", "--notes-root",	keep	set	set
 rounds	packages/rounds/tests/test_finish_actions.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
+rounds	packages/rounds/tests/test_finish_actions.py	assert main(["show", ROUND]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_finish_again.py	actor="planner")	use	actor=	by=
 rounds	packages/rounds/tests/test_finish_again.py	assert any("has no record" in one.reason and one.fix == f"moxi rounds finish {ROUND} B1"	keep	any	any
 rounds	packages/rounds/tests/test_finish_again.py	assert any("the operator skipped deploy for B1, by C1" in one.reason	keep	any	any

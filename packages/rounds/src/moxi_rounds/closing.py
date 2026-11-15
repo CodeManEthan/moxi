@@ -107,7 +107,7 @@ def _nothing_open(state: states.State, on_closed: Closed, ratify: str) -> Iterat
         yield f"waiting item {wait.key}, open"
 
 
-def _ratified(state: states.State, closed: Closed, ratify: str) -> Iterator[str]:
+def _ratified(state: states.State, on_closed: Closed, ratify: str) -> Iterator[str]:
     """Every major decision that reached the target is ruled, and every finished
     build has a report that declares its decisions; or `ratify` is skipped or off."""
     if not flows.has(state.steps, RATIFY) or ratify == RATIFY_OFF:
