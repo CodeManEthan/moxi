@@ -20,8 +20,9 @@ that stopped short is made by the next write, whatever that write is.
 The `ratify` step is read in the third part and not as a step. Its row and that part
 read the same decisions (`decisions.unruled_majors`); the part also waits for each
 finished build's report that declares its decisions. The project's setting it reads
-is passed in (`ratify`), since nothing here reads the config. A round with a `retro` step waits for that step like
-any other.
+is passed in (`ratify`), since nothing here reads the config. A round with a `retro`
+step waits for that step like any other; the step is due once the close waits for
+nothing else (`waits_before_retro`), and done once a retro report is recorded.
 
 Whether the round closes reads its own log alone: a question parked until another
 round closes keeps this one open whether or not that round has closed. How such a
@@ -71,10 +72,14 @@ def _never(_name: str) -> bool:
     return False
 
 
-def _plan_done(state: states.State, closed: Closed, ratify: str) -> Iterator[str]:
+def _plan_done(state: states.State, closed: Closed, ratify: str, *,
+               but: tuple[str, ...] = ()) -> Iterator[str]:
     """The plan is done: each step of the flow is done or skipped, each stage of the
-    plan is finished, and a round that builds has finished at least one."""
-    for step in steps.of(state, closed=closed):
+    plan is finished, and a round that builds has finished at least one. The steps in
+    `but` are not read."""
+    # The setting is passed to the steps as their rows read it, under no stage.
+    for step in steps.of(state, closed=closed, but=but,
+                         seen={None: steps.Seen(ratify=ratify)}):
         # The questions step waits for exactly the open questions, and the ratify
         # step for exactly what the third part names; each is named one by one there.
         if step.step not in (steps.QUESTIONS, RATIFY) and not step.settled:
@@ -160,6 +165,18 @@ def waits(state: states.State, *, closed: Closed | None = None,
                  for line in condition(state, asked, setting))
 
 
+def waits_before_retro(state: states.State, *, ratify: str | None = None
+                       ) -> tuple[str, ...]:
+    """What the close of the round waits for apart from its retro step, a line each:
+    the retrospective is due once this is empty. It reads the state alone, as the
+    close does, so no other round reads as closed."""
+    setting = RATIFY_DEFAULT if ratify is None else ratify
+    lines = list(_plan_done(state, _never, setting, but=(steps.RETRO,)))
+    for condition in CONDITIONS[1:]:
+        lines += condition(state, _never, setting)
+    return tuple(lines)
+
+
 def ratify_of(settings, name: str) -> str:
     """The `ratify` setting of the project the round `name` is of."""
     return str(own.round_setting(settings, folders.split(name)[0], RATIFY))
@@ -189,4 +206,5 @@ def said(waited: tuple[str, ...] | list[str]) -> str:
 
 
 __all__ = ["CLOSED", "BUILD", "RATIFY", "RATIFY_OFF", "RATIFY_DEFAULT", "CONDITIONS",
-           "builds", "waits", "ratify_of", "is_due", "entry", "said"]
+           "builds", "waits", "waits_before_retro", "ratify_of", "is_due", "entry",
+           "said"]

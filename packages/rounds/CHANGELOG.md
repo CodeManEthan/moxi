@@ -173,6 +173,9 @@ does not yet build.
   event that ends it, with the time it spent at each step; `show` gives them, `retro.md`
   is written beside the round's note from them, and `list --numbers` sums those of the
   closed rounds.
+- The retro step: due once a round's close waits for nothing else, with the numbers as
+  they stand in `next`; a retro report recorded with `verdict` makes it done, and the
+  round closes on it.
 - The sweep at a session's start: with turns installed, a listener on `ready` starts the
   sweep in a detached process when `sweep.at_start` and `sweep.armed` are both on and
   the last removing run began more than ten minutes ago, and returns at once.

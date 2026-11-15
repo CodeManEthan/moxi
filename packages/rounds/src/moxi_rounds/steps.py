@@ -107,6 +107,10 @@ index keeps the step the log alone gives, and marks it so (`at`).
   setting is read from what `Asked.seen` holds under no stage, the round's own; where
   that is not given and a decision would make the step ready, it waits on a read of
   the settings, as a step read from git waits on a read of git.
+- `retro`, of the round: done once a retro report is recorded. Ready once the close
+  waits for nothing else (`closing.waits_before_retro`), and not due before then. The
+  `ratify` setting that close reads is read as the `ratify` row reads it; where it is
+  not given and it would decide whether the step is due, the step waits on that read.
 
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
@@ -123,7 +127,7 @@ that needs the design as it was verified asks `versions.unchanged` beside this.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 
 from . import (brake, builds, checking, decisions, findings, finish_actions, finish_gates,
@@ -535,6 +539,27 @@ def _ratify(state: states.State, about: Asked) -> Step:
         Unmet(f"decision {one.key}, major and not yet ruled: {one.text}",
               decisions.rule_line(about.name, one.key)) for one in unruled))
 
+RETRO = "retro"
+
+
+def _retro(state: states.State, about: Asked) -> Step:
+    if any(one.kind == RETRO for one in state.verdicts):
+        return Step(RETRO, DONE)
+    # Imported here: the close reads every step, this one among them.
+    from . import closing
+
+    seen = (about.seen or {}).get(None)
+    ratify = closing.RATIFY_DEFAULT if seen is None else seen.ratify
+    if not closing.waits_before_retro(state, ratify=ratify):
+        return Step(RETRO, READY)
+    if seen is None and not closing.waits_before_retro(state, ratify=RATIFY_OFF):
+        return Step(RETRO, WAITING, unread=True, waits=(Unmet(
+            "whether the project's ratify setting puts the round's decisions to the "
+            "operator before its retrospective is read from the settings, which were "
+            "not read here", f"moxi rounds next {about.name}"),))
+    return Step(RETRO, NOT_DUE)
+
+
 def report_row(step: str) -> Row:
     """The row of the report step `step` of the user's own: done at the tip when its
     own newest report is publishable and counts there by the rule the build's
@@ -602,7 +627,8 @@ def command_row(step: str) -> Row:
 #: no row here: `row_of` gives it its own.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
                         COMMISSION: _commission, BUILD: _build, CHECK: _check,
-                        VERIFY_BUILD: _verify_build, FINISH: _finish, RATIFY: _ratify}
+                        VERIFY_BUILD: _verify_build, FINISH: _finish, RATIFY: _ratify,
+                        RETRO: _retro}
 
 
 def row_of(step: str, entry: Mapping | None) -> Row | None:
@@ -704,9 +730,11 @@ def _has(step: str, stage: str | None, seen: Mapping[str, Seen] | None) -> bool:
 
 def _each(state: states.State, name: str, closed: Callable[[str], bool] | None,
           register: states.State | None,
-          seen: Mapping[str, Seen] | None) -> Iterator[Step]:
+          seen: Mapping[str, Seen] | None, but: Collection[str] = ()) -> Iterator[Step]:
     planned = [stage.id for stage in stages.in_plan(state)]
     for step, entry in order(state.steps):
+        if step in but:
+            continue
         of_stages = planned if _is_of_a_stage(step) and planned else [None]
         for stage in of_stages:
             if _has(step, stage, seen):
@@ -716,13 +744,14 @@ def _each(state: states.State, name: str, closed: Callable[[str], bool] | None,
 def of(state: states.State, *, name: str = "ROUND",
        closed: Callable[[str], bool] | None = None,
        register: states.State | None = None,
-       seen: Mapping[str, Seen] | None = None) -> tuple[Step, ...]:
+       seen: Mapping[str, Seen] | None = None,
+       but: Collection[str] = ()) -> tuple[Step, ...]:
     """Every step of the round `state` is of, in order, each with its state. `name`
     is the round's name, for the commands a wait prints, `closed` answers whether
     a round, by name, is closed (`questions.is_closed` when left out), `register`
     is the state of the project's log and `seen` what was read of each open build
-    (see `Asked`)."""
-    return tuple(_each(state, name, closed, register, seen))
+    (see `Asked`). The steps named in `but` are left out, and their rows not asked."""
+    return tuple(_each(state, name, closed, register, seen, but))
 
 
 def one(state: states.State, step: str, stage: str | None = None, *,
@@ -803,7 +832,7 @@ def said(step: Mapping | None) -> str:
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
            "SETTLED", "HELD", "COMMISSION", "BUILD", "CHECK", "FINISH", "RATIFY",
-           "RATIFY_OFF", "Seen", "Asked",
+           "RATIFY_OFF", "RETRO", "Seen", "Asked",
            "Step", "Row",
            "ROWS", "report_row", "command_row", "row_of", "answer",
            "held_by", "held_unbuilt", "order", "of", "one", "is_settled", "current", "at",

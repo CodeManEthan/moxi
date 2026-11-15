@@ -7,8 +7,14 @@ design the pass read, the model and the author the report names, the report's fi
 and the SHA-256 of its bytes, every finding of its block, and what the verdict takes
 out of the record. The report's file is read and never written.
 
-A report of a design, of a build, of a step of the user's own or of a round's major
-decisions is recorded here. A retrospective is refused, since nothing here records one.
+A report of a design, of a build, of a step of the user's own, of a round's major
+decisions or a retrospective is recorded here.
+
+**A retro report** (`kind = "retro"`) is the round's written retrospective: it carries
+no verdict word and no lists, and its event holds who wrote it, the model, and the
+report's path and hash. It is refused in a flow with no `retro` step, which gets the
+numbers only. Recorded, it makes the round's `retro` step done, and the round closes
+on it once nothing else is waited for.
 
 **A step report** (`kind = "step"`) is for a report step of the user's own that the
 round's flow has, and reads one build as a report of the build does, by the same
@@ -440,6 +446,34 @@ def _of_majors(state: states.State, block: report_block.ReportBlock, *, name: st
             "decisions": [_decision(one) for one in block.decisions]}
 
 
+def _of_retro(state: states.State, block: report_block.ReportBlock, *, name: str,
+              settings, report: str) -> dict:
+    """The fields of the verdict on a retro report: who wrote it, with which model,
+    and the report's path and hash. Refused in a flow with no retro step, and for a
+    report recorded already."""
+    shown = f"moxi rounds show {name}"
+    unmet = []
+    if not stepping.has_step(state, report_block.RETRO):
+        flow = stepping.current(state).name
+        unmet.append(Unmet(
+            f"the flow {flow} of {name} has no {report_block.RETRO} step, so no "
+            "retrospective is recorded on it: the round gets its numbers only; a flow "
+            "that has one is the lead's to move it to",
+            f"moxi rounds mark {name} --flow NAME"))
+    unmet += _again(state, block, shown)
+    if unmet:
+        raise Refused(unmet)
+    fields: dict[str, object] = {"kind": block.kind, "model": block.model,
+                                 "by": block.by, "report": report,
+                                 "sha256": block.sha256}
+    # One pass writes a retrospective, so it is held to the step's own tier.
+    noted = model_tiers.flags(settings["models"], state.steps, report_block.RETRO,
+                              pass_=report_block.FULL, model=block.model)
+    if noted:
+        fields["flags"] = noted
+    return fields
+
+
 def record(name: str, report: Path | str, *, actor: str, settings=None,
            wait_s: float = write.WAIT_S, at: str | None = None) -> Recorded:
     """Record the verdict of the report file `report` on the round `name`,
@@ -453,9 +487,10 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
     Raises `BadName` for a name that can't be used, `UnknownProject`, `NoFolder` or
     `NoRound` for a round that can't be found, `BadBlock` when the report's block
     can't be read or names a version of the design that was never frozen, and
-    `Refused` when the round has ended, the report is of a kind that is not recorded
-    here, the round's flow has no step that verifies its design, a report with these
-    bytes was recorded already, or a report of a build breaks a rule above. A refusal
+    `Refused` when the round has ended, the round's flow has no step that verifies
+    its design (a design report) or no retro step (a retro report), a report with
+    these bytes was recorded already, or a report of a build breaks a rule above. A
+    refusal
     leaves the log as it was.
     """
     project, slug = folders.split(name)
@@ -484,11 +519,10 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
         if block.kind == report_block.MAJORS:
             return write.Entry("verdict.recorded", _of_majors(
                 state, block, name=name, report=path(report, folder)))
-        if block.kind != report_block.DESIGN:
-            raise Refused([Unmet(
-                f"{report} is a {block.kind} report, and only a report of a design, "
-                "of a build, of a step of the user's own or of a round's major "
-                "decisions is recorded: nothing records this one yet", shown)])
+        if block.kind == report_block.RETRO:
+            return write.Entry("verdict.recorded", _of_retro(
+                state, block, name=name, settings=settings,
+                report=path(report, folder)))
         unmet = []
         if not stepping.has_step(state, VERIFIES):
             flow = stepping.current(state).name

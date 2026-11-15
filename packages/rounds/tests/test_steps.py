@@ -323,7 +323,10 @@ def test_a_skip_taken_back_leaves_the_step_as_it_was(folder):
     ("skip:retro", "retro", None),
 ])
 def test_a_skip_of_a_step_whose_row_is_not_built_is_read_all_the_same(
-        folder, item, name, stage_id):
+        folder, item, name, stage_id, monkeypatch):
+    # Every step of the vocabulary has a row; one is taken out to stand for a step
+    # whose row is not built.
+    monkeypatch.delitem(steps.ROWS, name)
     fold(folder, stage("B1"), stage("B2"))
     assert step(folder, name, stage_id).state == steps.NOT_BUILT
 
@@ -432,7 +435,9 @@ def test_a_flow_with_no_questions_step_shows_the_hold_on_the_stage_it_stops(open
 # -- a step with no row ------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", ["retro"])
-def test_a_step_with_no_row_is_not_built_and_never_read_as_done(folder, name):
+def test_a_step_with_no_row_is_not_built_and_never_read_as_done(folder, name,
+                                                                  monkeypatch):
+    monkeypatch.delitem(steps.ROWS, name)
     fold(folder, stage("B1"))
     found = step(folder, name)
     assert found.state == steps.NOT_BUILT

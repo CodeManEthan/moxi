@@ -219,7 +219,7 @@ def test_a_round_whose_flow_ends_in_a_retro_closes_on_the_skip_of_it(opened):
     folder = opened("review")
     fold(folder)
     assert status(folder) == "open"
-    assert waits(folder) == ("step retro, not-built",)
+    assert waits(folder) == ("step retro, ready",)
 
     rule("skip:retro")
 
@@ -241,10 +241,11 @@ def test_a_skipped_retro_reads_the_same_in_every_place_that_shows_it(opened, cap
     folder = opened("review")
     fold(folder, question("Q1", blocks='"none"'))
     before = run(capsys, "show", ROUND)
-    assert "step: retro, not-built\n" in before
-    assert "close waits for: step retro, not-built; question Q1, open\n" in before
-    assert run(capsys, "next", ROUND).splitlines() == [
-        f"round {ROUND}   flow review   step retro   not built in this version"]
+    # Not due while the question holds the close.
+    assert "step: retro, not-due\n" in before
+    assert "close waits for: step retro, not-due; question Q1, open\n" in before
+    assert run(capsys, "next", ROUND).splitlines()[0] == (
+        f"round {ROUND}   flow review   step retro   by worker")
 
     rule("skip:retro")
 
@@ -268,8 +269,8 @@ def test_a_skip_of_the_retro_taken_back_keeps_the_round_open_again(opened, capsy
 
     rule("revoke:C1")
 
-    assert waits(folder) == ("step retro, not-built", "question Q1, open")
-    assert "step: retro, not-built\n" in run(capsys, "show", ROUND)
+    assert waits(folder) == ("step retro, not-due", "question Q1, open")
+    assert "step: retro, not-due\n" in run(capsys, "show", ROUND)
     rule("Q1", text="They do.")
     assert status(folder) == "open"
 
@@ -388,7 +389,7 @@ def test_a_round_with_a_retro_step_waits_for_it_after_its_build(opened):
     folder = opened("small")
     fold(folder)
     built(folder)
-    assert waits(folder) == ("step retro, not-built",)
+    assert waits(folder) == ("step retro, ready",)
 
 
 # -- the verb whose write closes a round says so -----------------------------------------
@@ -557,7 +558,7 @@ def test_every_step_of_the_flow_keeps_a_round_open_not_only_the_design_s(
     verdict(folder)
 
     assert types(folder)[-1] == "verdict.recorded" and status(folder) == "open"
-    assert waits(folder) == ("step retro, not-built",)
+    assert waits(folder) == ("step retro, ready",)
     rule("skip:retro")
     assert status(folder) == "closed"
 

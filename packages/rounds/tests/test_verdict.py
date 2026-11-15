@@ -287,8 +287,22 @@ def test_a_copied_report_with_new_content_is_a_new_report(folder):
     assert len({one.sha256 for one in found}) == 3
 
 
-def test_a_retrospective_is_refused_as_not_recorded_yet(folder):
+def test_a_retrospective_is_recorded_with_who_wrote_it_and_the_report(folder):
     fold(folder, question("Q1"), stage("B1"))
+    path = other(folder, "retro")
+
+    record(path)
+
+    event = events(folder)[-1]
+    assert {key: event[key] for key in ("type", "kind", "by", "model", "report")} == {
+        "type": "verdict.recorded", "kind": "retro", "by": "critic", "model": "a-model",
+        "report": "retro.md"}
+    assert "verdict" not in event and "pass" not in event
+    assert folded(folder).verdicts[-1].kind == "retro"
+
+
+def test_a_retrospective_is_refused_in_a_flow_with_no_retro_step(opened):
+    folder = opened("fix")
     path = other(folder, "retro")
     before = raw(folder)
 
@@ -296,9 +310,20 @@ def test_a_retrospective_is_refused_as_not_recorded_yet(folder):
         record(path)
 
     [unmet] = refused.value.unmet
-    assert ("is a retro report, and only a report of a design, of a build, of a step "
-            "of the user's own or of a round's major decisions is recorded"
-            ) in unmet.reason
+    assert "the flow fix of proj-a/a-round has no retro step" in unmet.reason
+    assert unmet.fix == "moxi rounds mark proj-a/a-round --flow NAME"
+    assert raw(folder) == before
+
+
+def test_a_retrospective_recorded_already_is_refused(folder):
+    path = other(folder, "retro")
+    record(path)
+    before = raw(folder)
+
+    with pytest.raises(Refused) as refused:
+        record(path)
+
+    assert "recorded already" in refused.value.unmet[0].reason
     assert raw(folder) == before
 
 

@@ -38,7 +38,6 @@ It does not yet do the rest of a round:
 
 - removing a finished build's worktree, scratch folder and branch;
 - decisions a build records for the operator to ratify;
-- the written retrospective, a retro report recorded with `verdict`;
 - answers prepared ahead for a sitting with the operator;
 - parent rounds.
 
@@ -60,7 +59,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
 | `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
-| `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, on a build or on a build for a report step of your own, run by whoever wrote the report |
+| `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, on a build or on a build for a report step of your own, or a majors or retro report, run by whoever wrote the report |
 | `moxi rounds ask ROUND TEXT --from PTR [--blocks B<n>[,...]\|none] [--option K=TEXT ...]` | put a question to the operator in a round, as `Q<n>`; it holds up every stage unless `--blocks` names the ones it holds up, or `none` |
 | `moxi rounds ask ROUND TEXT --build B<n> [--blocks B<n>[,...]\|none]` | put a question that came up in the open build of a stage: a builder tells you, and you ask it; it comes from that build at its branch's tip, and is listed as asked by you for the builder |
 | `moxi rounds ask PROJECT TEXT --from PTR [--option K=TEXT ...]` | put a question on the project's list, as `P<n>`, where it holds up nothing |
@@ -623,8 +622,15 @@ seconds, under the step's name or `<step> B<n>` for a stage's: the log is read o
 the end, and the time from each event to the next goes to the step the round was at
 then, as read from the log alone. `show` gives them under the line that says how the
 round ended, `retro.md` beside the round's note holds them, and `list --numbers` sums
-those of the closed rounds (a dropped round's stay with it). A flow with a `retro` step
-waits for it too, until that step is skipped; the retro report is not in this version.
+those of the closed rounds (a dropped round's stay with it).
+
+A flow with a `retro` step (`full` and `small` as shipped) waits for it too. The step
+is due once the close waits for nothing else, and `next` then gives it with the
+numbers as they stand, the note and the reports to read. The worker writes what went
+wrong and what to change, with the block from `next --schema retro` (`kind`, `by` and
+`model`, no verdict word), and records it with `verdict`; the round closes on that
+record. A retro report is refused in a flow with no `retro` step, which gets the
+numbers only, and the operator's `skip:retro` lets the round close without one.
 
 ## Dropping a round
 

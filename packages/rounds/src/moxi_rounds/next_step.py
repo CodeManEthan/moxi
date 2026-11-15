@@ -26,6 +26,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 - `changed`: in the group of a stage with an open build, each ruling recorded since
   the build's block was printed that reaches the stage (`commission_block.changed`),
   so a correction reaches a build already commissioned.
+- `numbers`: in the `retro` group, the round's numbers as they stand now, counted from
+  its log as its ending will count them, for the retrospective to read.
 - `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
   is printed for a round at no step, where nothing else says why it is still open.
 - `warnings`: what the lead should know beside the steps: a ruling that holds a stage
@@ -55,8 +57,9 @@ import json
 from collections.abc import Callable
 
 from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
-               model_tiers, report_block, showing, sizing, stages, steps, tracing,
-               versions)
+               model_tiers, rendering, report_block, showing, sizing, stages, steps,
+               tracing, versions)
+from . import numbers as counted
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -227,12 +230,23 @@ def _finish(found: showing.Shown, step: steps.Step) -> dict:
                      "finish in the build's worktree"]}
 
 
+def _retro(found: showing.Shown, step: steps.Step) -> dict:
+    """The round's retrospective: the numbers as they stand, which the round's ending
+    will hold, the note and the reports, the report's block, and the verdict."""
+    return {"reads": ["the numbers below", str(found.folder / rendering.NOTE_FILE),
+                      f"the reports in {found.folder}", *_named(step)],
+            "numbers": counted.of(found.state),
+            "write": (f"a report in {found.folder} with the block from: moxi rounds "
+                      f"next --schema {report_block.RETRO}"),
+            "then": [f"moxi rounds verdict {found.name} <your report>"]}
+
+
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
 #: and `then`, and any key of its own.
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
     steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket,
     steps.COMMISSION: _commission, steps.BUILD: _build, steps.CHECK: _check,
-    steps.VERIFY_BUILD: _verify_build, steps.FINISH: _finish}
+    steps.VERIFY_BUILD: _verify_build, steps.FINISH: _finish, steps.RETRO: _retro}
 
 
 def _waits(step: steps.Step) -> list[dict]:
@@ -446,6 +460,9 @@ def _group_lines(said: dict, group: dict) -> list[str]:
                 url = "" if one.get("url") is None else f"   {one['url']}"
                 lines.append(f"         {one['path']}: {one['reading']}{url}")
         lines += [f"owes:  {line}" for line in group.get("owes", ())]
+        if "numbers" in group:
+            lines += ["numbers:", *(f"  {line}" for line in
+                                    counted.lines(group["numbers"]))]
     told = _told(group)
     for wait in group["waits"]:
         if wait != told:
