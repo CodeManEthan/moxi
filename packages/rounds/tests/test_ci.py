@@ -514,3 +514,36 @@ def test_the_doctor_names_a_repo_that_meets_the_gate_on_ci_alone(repo, write_con
 
     assert alone.state == "ok" and "on CI alone" in alone.detail
     assert with_local.state == "ok" and "on CI alone" not in with_local.detail
+
+
+@pytest.mark.parametrize("gh", ["missing", "logged out"])
+def test_the_doctor_names_a_repo_on_ci_alone_in_a_row_that_warns(
+        repo, write_config, monkeypatch, tmp_path, gh):
+    if gh == "missing":
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    else:
+        gh_on_path(tmp_path, monkeypatch, 1)
+    default_ci(write_config)
+    [alone] = ci_rows()
+
+    default_ci(write_config, '{ command = "make quick" }')
+    [with_local] = ci_rows()
+
+    assert alone.state == "warn" and "on CI alone" in alone.detail
+    assert with_local.state == "warn" and "on CI alone" not in with_local.detail
+
+
+def test_the_doctor_asks_gh_with_no_git_variable_of_the_caller(repo, write_config,
+                                                               monkeypatch, tmp_path):
+    default_ci(write_config)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text('#!/bin/sh\n[ -z "$GIT_DIR" ] || exit 1\nexit 0\n')
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere"))
+
+    [row] = ci_rows()
+
+    assert row.state == "ok"

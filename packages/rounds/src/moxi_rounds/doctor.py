@@ -99,26 +99,32 @@ def _ci() -> Iterator[Row]:
             continue
         found = ci.declared(settings, repo)
         name, way = f"ci {repo}", "moxi rounds check ROUND B<n> --full, in place of CI"
+        # Each such repo is named at any level of its row: its check rests on CI.
+        alone = (" It meets the check gate on CI alone: its ci.local is \"none\"."
+                 if found.local is None else "")
         missing = [argv[0] for argv in (found.status, found.ids)
                    if shutil.which(argv[0]) is None]
         if missing:
             yield Row(MODULE, name, "warn",
                       f"{', '.join(dict.fromkeys(missing))} is not on PATH, so CI can't be "
-                      "read for a build in it", way)
+                      f"read for a build in it.{alone}", way)
             continue
         if (found.status, found.ids) == (ci.STATUS, ci.IDS) and not _gh_logged_in():
             yield Row(MODULE, name, "warn",
                       "gh auth status does not exit 0: gh is not logged in to the repo's "
-                      "host, so CI can't be read", f"gh auth login, or {way}")
+                      f"host, so CI can't be read.{alone}", f"gh auth login, or {way}")
             continue
-        alone = (" It meets the check gate on CI alone: its ci.local is \"none\"."
-                 if found.local is None else "")
         yield Row(MODULE, name, "ok", f"the commands that read CI are there.{alone}")
 
 
 def _gh_logged_in() -> bool:
+    from .gitreads import git_env
+
+    # gh gets the caller's environment less every GIT_ variable, as every process
+    # rounds starts does.
     try:
-        done = proc.run(["gh", "auth", "status"], timeout_s=AUTH_TIMEOUT_S)
+        done = proc.run(["gh", "auth", "status"], timeout_s=AUTH_TIMEOUT_S, stdin_data="",
+                        env=git_env())
     except (OSError, subprocess.TimeoutExpired):
         return False
     return done.returncode == 0
@@ -201,13 +207,11 @@ def _floor() -> str:
 def git_version() -> tuple[tuple[int, ...] | None, str]:
     """The version of the git on PATH as numbers, and in words what it said: the
     numbers are None when there is no git, or it gave no version."""
-    # git gets the caller's environment less every GIT_ variable, as every git rounds
-    # starts does.
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith("GIT_")}
+    from .gitreads import git_env
+
     try:
         done = proc.run(["git", "version"], timeout_s=GIT_TIMEOUT_S, stdin_data="",
-                        env=env)
+                        env=git_env())
     except FileNotFoundError:
         return None, "no git is on PATH"
     except OSError as exc:
