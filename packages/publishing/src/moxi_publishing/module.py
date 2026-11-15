@@ -1,0 +1,24 @@
+"""The announcement of Moxi's publishing module, which moxi.modules reads.
+
+publishing keeps private text out of a public repo and releases that repo's packages. It
+declares three git hook pieces, which repo runs (`moxi_publishing.message`, `.content` and
+`.push`), and reads secrets' pattern sets and lists. No daemon, timer, store or page.
+"""
+
+INTERFACES = frozenset({1})
+API = None
+#: What `moxi publishing` runs, in process, as `main(argv, prog="moxi publishing")`.
+CLI = "moxi_publishing.cli:main"
+SUMMARY = "Keep private text out of a public git repo, and release its packages."
+OPTIONAL = {}
+GATED = {}
+#: The push word is the user's, set per push; nothing here stamps it on a session.
+INTERNAL_ENV = {}
+SETTINGS = "settings.toml"
+# The schema can't tell a rule name from a typo, nor a pattern that won't compile.
+CONFIG_CHECK = "moxi_publishing.settings:check_text"
+SETUP = None
+SEGMENT = None
+#: The doctor's rows for each repo carrying the public flag.
+DOCTOR = "moxi_publishing.doctor:rows"
+ANNOUNCES = 1

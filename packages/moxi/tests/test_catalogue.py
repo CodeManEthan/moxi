@@ -29,10 +29,11 @@ def text(version=2, extra=""):
 
 def test_the_shipped_catalogue_lists_every_first_party_module():
     shipped = catalogue.shipped()
-    assert shipped.version == 3 and shipped.source == "shipped"
+    assert shipped.version == 4 and shipped.source == "shipped"
     assert shipped.names() == ["cache", "comms", "connector", "launcher", "loadout", "notes",
-                               "projects", "repo", "rounds", "secrets", "services",
-                               "sessions", "slots", "tunnel", "turns", "ui", "usage"]
+                               "projects", "publishing", "repo", "rounds", "secrets",
+                               "services", "sessions", "slots", "tunnel", "turns", "ui",
+                               "usage"]
     for entry in shipped.entries:
         assert entry.distribution == f"moxi-{entry.name}"
         assert entry.summary and "\n" not in entry.summary
@@ -194,7 +195,7 @@ def test_available_as_json(site, capsys):
     site.module("comms")
     assert cli.main(["modules", "--available", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert data["version"] == 3 and data["source"] == "shipped"
+    assert data["version"] == 4 and data["source"] == "shipped"
     rows = {row["name"]: row for row in data["modules"]}
     assert rows["comms"]["state"] == "present" and rows["comms"]["version"] == "0.1.0"
     assert rows["turns"] == {"name": "turns", "distribution": "moxi-turns",
@@ -219,10 +220,10 @@ def test_a_failed_refresh_says_so_and_lists_the_catalogue_in_effect(monkeypatch,
 
 
 def test_a_refresh_that_fetches_a_newer_copy_lists_it(monkeypatch, capsys):
-    monkeypatch.setattr(catalogue, "_fetch", lambda url: text(version=4).encode())
+    monkeypatch.setattr(catalogue, "_fetch", lambda url: text(version=5).encode())
     assert cli.main(["modules", "--available", "--refresh"]) == 0
     out, err = capsys.readouterr()
-    assert "catalogue version 4 kept in" in err
+    assert "catalogue version 5 kept in" in err
     assert out.startswith("comms  moxi-comms")
     assert "cache" not in out
 
