@@ -503,8 +503,8 @@ def test_the_data_holds_each_group_and_each_warning(opened, capsys):
              "questions": [],
              "waits": [{"reason": "the design is not verified: it stands at none",
                         "fix": f"moxi rounds next {ROUND}"}]}],
-        "close": {"waits": ["a finished stage, which this version does not build, so "
-                            "the round does not close in it"]},
+        "close": {"waits": ["a close, which this version does not make for a round "
+                            "that builds"]},
         "warnings": [
             {"what": "not-shown",
              "text": f"not yet shown to the operator: {ROUND} {made} {SAID}",

@@ -218,12 +218,18 @@ def _report(found: showing.Shown, step: steps.Step) -> dict:
     return said
 
 
+def _finish(found: showing.Shown, step: steps.Step) -> dict:
+    """A build's finish: the command that runs it, by name or in the build's worktree."""
+    return {"then": [f"moxi rounds finish {found.name} {step.stage}, or moxi rounds "
+                     "finish in the build's worktree"]}
+
+
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
 #: and `then`, and any key of its own.
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
     steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket,
     steps.COMMISSION: _commission, steps.BUILD: _build, steps.CHECK: _check,
-    steps.VERIFY_BUILD: _verify_build}
+    steps.VERIFY_BUILD: _verify_build, steps.FINISH: _finish}
 
 
 def _waits(step: steps.Step) -> list[dict]:

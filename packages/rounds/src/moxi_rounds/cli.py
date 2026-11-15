@@ -8,6 +8,7 @@
                            [--slice ID=TEXT --minutes N]... [--record PTR] [--existing]
                            [--as NAME]
     moxi rounds check [ROUND STAGE] [--timeout-s N] [--as NAME]
+    moxi rounds finish [ROUND STAGE] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND TEXT --build B<n> [--blocks LIST|none] [--option K=TEXT]...
@@ -149,6 +150,14 @@ duration; when the tip moved or the worktree changed while it ran, nothing is
 recorded. Run with no round in a build's worktree, it checks that build. A check
 counts for a gate only at the tip being finished, with the command the repo declares
 then.
+`finish` finishes a build at its branch's tip once every gate of finish holds there:
+it takes the repo's finish lock (a ref, `refs/rounds/finishing/<into>` or the repo's
+`lock_ref`), reads the gates the target's moves can change again, runs the repo's
+finish actions in order, each recorded under its id before the next starts, and records
+the finish when the gates read on the log still hold. The merge action merges the tip,
+by its commit id, into the target with a merge commit. A failed action is recorded and
+undoes nothing; a conflict is aborted and refused with the way through. Run with no
+round in a build's worktree, it finishes that build.
 `mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no
@@ -156,8 +165,8 @@ further pass is run, and the design stands at `lead-decision`.
 No verb closes a round. A round closes itself on the write that leaves its close
 nothing to wait for: in a flow with no `build` step, every step done or skipped, no
 question open or parked, and no stage left in its plan. `show` says what the close
-of an open round waits for. A round whose flow has a `build` step waits for a
-finished stage, which this version does not build, so it does not close in it.
+of an open round waits for. A round whose flow has a `build` step does not close
+itself; it ends by `drop`.
 `drop` ends a round short of its work: the operator drops any round, and the lead one
 that holds none of the operator's acts. Its open and parked questions go to the
 project's list, where they hold up nothing, and `open` of a later round of the project
@@ -1183,6 +1192,63 @@ def _check(args, out) -> int:
     return codes.OK if ran.passed else codes.ERROR
 
 
+# -- finish ------------------------------------------------------------------------------
+
+def _declare_finish(verbs) -> None:
+    said = ("Finish a build at its branch's tip, once every gate of finish holds there: "
+            "take the repo's finish lock, run the repo's finish actions in order, each "
+            "recorded under its id before the next starts, and record the finish. The "
+            "merge action merges the tip into the target with a merge commit. A failed "
+            "action is recorded and undoes nothing; run finish again once it is fixed.")
+    parser = verbs.add_parser("finish", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND", nargs="?",
+                        help="the round, <project>/<slug>; left out in a build's "
+                             "worktree, the round of the open build on the branch "
+                             "checked out there")
+    parser.add_argument("stage", metavar="STAGE", nargs="?",
+                        help="the stage whose build is finished, B<n>; given with ROUND")
+    _writes(parser)
+
+
+def _finish(args, out) -> int:
+    from . import finishing
+
+    name, stage = args.round, args.stage
+    if name is None:
+        from . import by_branch
+
+        found = by_branch.find(os.getcwd(), verb="finish")
+        name, stage = found.round, found.stage
+    elif stage is None:
+        raise BadArgument(f"{name} is named with no stage, and a finish is of one build",
+                          f"moxi rounds finish {name} B<n>, or moxi rounds finish in the "
+                          "build's worktree")
+    try:
+        done = finishing.finish(name, stage, actor=_actor(args))
+    except finishing.ActionFailed as failed:
+        if failed.output:
+            print(failed.output, file=out)
+        raise
+    print(f"finish {done.name} {done.stage} at {done.tip[:12]}", file=out)
+    if done.cleared is not None:
+        print(f"cleared the finish lock of a holder that had ended: {done.cleared}",
+              file=out)
+    for one in done.actions:
+        how = one.state if one.ran else f"{one.state} before, not run again"
+        landed = ("" if one.landing is None else
+                  f": {one.landing[:12]} on the target, which was at "
+                  f"{str(one.target_before)[:12]}")
+        print(f"{one.id}: {how}{landed}", file=out)
+    print(f"finished {done.stage}" if done.event is not None
+          else f"{done.stage} was already recorded as finished", file=out)
+    if not done.released:
+        print(f"{args.prog} finish: warning: the finish lock no longer pointed at this "
+              "finish's own and was left as it is; moxi doctor rounds names it if it "
+              "stays", file=sys.stderr)
+    _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
 def _ci_checked(ran, args, out) -> int:
     from . import ci
 
@@ -1414,7 +1480,8 @@ def _list_questions(args, out) -> int:
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
 _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict,
-                                  _declare_commission, _declare_check, _declare_ask,
+                                  _declare_commission, _declare_check, _declare_finish,
+                                  _declare_ask,
                                   _declare_rule,
                                   _declare_mark, _declare_drop, _declare_next,
                                   _declare_show,
@@ -1423,6 +1490,7 @@ _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
 _VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict,
                                "commission": _commission, "check": _check,
+                               "finish": _finish,
                                "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "next": _next,
                                "show": _show,

@@ -1,0 +1,419 @@
+"""`finish` with the merge action: the merge made in the target's checkout or in one
+added for it, its record under its id with the landing and the target before it,
+`finish.done` once the gates read on the log still hold, the finish lock taken and
+released, and every refusal writing nothing."""
+
+from __future__ import annotations
+
+import json
+import shlex
+import stat
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from moxi_rounds import (asking, builds, checking, commissioning, finish_lock, finishing,
+                         log, next_step, opening, places, verdicts)
+from moxi_rounds import settings as own
+from moxi_rounds import state as states
+from moxi_rounds.cli import main
+from moxi_rounds.errors import Refused
+
+ROUND = "proj-a/a-round"
+CHECK = shlex.join([sys.executable, "-c", "print('the check passed')"])
+POINTER = "comms:1234567"
+LOCK = "refs/rounds/finishing/main"
+
+
+@pytest.fixture
+def repo(git_repo, tmp_path):
+    from moxi import cli
+
+    assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
+    assert cli.main(["projects", "set", "proj-a", "--notes-root",
+                     str(tmp_path / "notes")]) == 0
+    # The merge commit finish makes is the user's own, so the repo names who they are.
+    git_repo.git("config", "user.name", "coder")
+    git_repo.git("config", "user.email", "coder@example.test")
+    return git_repo
+
+
+@pytest.fixture
+def configure(write_config):
+    """`configure(extra="")`: the config with proj-a's check and `extra` keys of its
+    table."""
+
+    def write(extra: str = "") -> None:
+        write_config(f"[projects.proj-a]\ncheck = {{ command = {json.dumps(CHECK)} }}\n"
+                     f"{extra}\n")
+
+    write()
+    return write
+
+
+def verify(path: Path, head: str) -> None:
+    report = path.parent / "build-report.md"
+    report.write_text("# report\n\n```toml rounds\n" + "\n".join([
+        'kind = "build"', 'verdict = "publishable"', 'pass = "full"', 'by = "critic"',
+        'model = "a-model"', 'stage = "B1"', f'head = "{head}"']) + "\n```\n",
+        encoding="utf-8")
+    verdicts.record(ROUND, report, actor="critic")
+
+
+@pytest.fixture
+def ready(repo, configure, tmp_path, capsys):
+    """The round in `fix` with B1 on `work`, one commit of work, checked and verified at
+    its tip: every gate holds. Returns `(log, worktree repo)`."""
+    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+                       flow="fix")
+    path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
+    log.append(path, "stage.declared",
+               {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+               actor="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    tree = type(repo)(made.worktree)
+    tree.commit("work.txt", "the work")
+    checking.check(ROUND, "B1", actor="coder")
+    verify(path, tree.rev())
+    capsys.readouterr()
+    return path, tree
+
+
+def events(path: Path) -> list[dict]:
+    return log.read_round(path)
+
+
+def of_type(path: Path, kind: str) -> list[dict]:
+    return [one for one in events(path) if one["type"] == kind]
+
+
+def lock_ref(repo) -> str | None:
+    found = finish_lock.found(repo.root, LOCK)
+    return None if found is None else found.oid
+
+
+def build_of(path: Path) -> builds.Build:
+    return builds.current(states.fold(events(path)), "B1")
+
+
+# -- a finish ------------------------------------------------------------------------------
+
+def test_a_ready_build_is_merged_into_the_target_recorded_and_finished(ready, repo):
+    path, tree = ready
+    tip, before = tree.rev(), repo.rev("main")
+
+    done = finishing.finish(ROUND, "B1", actor="coder")
+
+    landing = repo.rev("main")
+    assert repo.git("rev-list", "--parents", "-n", "1", landing).split()[1:] == [before,
+                                                                                  tip]
+    assert repo.git("log", "-1", "--format=%s", landing) == "Merge branch 'work'"
+    (action,) = of_type(path, "finish.action")
+    assert {key: action[key] for key in ("stage", "tip", "id", "kind", "state", "landing",
+                                         "target_before")} == {
+        "stage": "B1", "tip": tip, "id": "merge", "kind": "merge", "state": "ok",
+        "landing": landing, "target_before": before}
+    (finished,) = of_type(path, "finish.done")
+    assert (finished["stage"], finished["tip"]) == ("B1", tip)
+    assert finished["n"] == action["n"] + 1
+    assert done.tip == tip and done.event == finished
+    assert [(one.id, one.state, one.landing) for one in done.actions] == [
+        ("merge", "ok", landing)]
+    assert build_of(path).ended == builds.FINISHED
+    assert lock_ref(repo) is None and done.released
+    assert repo.git("status", "--porcelain") == ""
+
+
+def test_a_branch_that_moved_once_the_lock_was_taken_is_refused(ready, repo,
+                                                                  monkeypatch):
+    path, tree = ready
+    tip = tree.rev()
+    take = finish_lock.take
+
+    def take_then_commit(*args, **kwargs):
+        taken = take(*args, **kwargs)
+        tree.commit("late.txt", "a commit made after the gates were read")
+        return taken
+
+    monkeypatch.setattr(finish_lock, "take", take_then_commit)
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+    assert f"moved from {tip[:12]}" in refused.value.unmet[0].reason
+    assert of_type(path, "finish.action") == [] and lock_ref(repo) is None
+
+
+def test_the_merge_takes_the_tip_the_gates_read_by_its_id(ready, repo, monkeypatch):
+    path, tree = ready
+    tip = tree.rev()
+    merge = finishing._merge
+
+    def commit_then_merge(*args, **kwargs):
+        tree.commit("late.txt", "a commit made after the gates were read")
+        return merge(*args, **kwargs)
+
+    monkeypatch.setattr(finishing, "_merge", commit_then_merge)
+    with pytest.raises(Refused):
+        # The gates read on the log after the merge are read at the branch's tip,
+        # which has moved: the finish is not recorded, and the build reads merged.
+        finishing.finish(ROUND, "B1", actor="coder")
+
+    assert repo.git("rev-list", "--parents", "-n", "1", "main").split()[2] == tip
+    assert repo.git("ls-tree", "--name-only", "main").split() == ["README", "work.txt"]
+    (action,) = of_type(path, "finish.action")
+    assert (action["tip"], action["state"]) == (tip, "ok")
+    assert of_type(path, "finish.done") == [] and lock_ref(repo) is None
+
+
+def test_a_target_no_worktree_has_is_merged_in_a_checkout_added_and_removed(
+        ready, repo):
+    path, tree = ready
+    repo.switch("elsewhere", new_from="main")
+    before = repo.rev("main")
+
+    finishing.finish(ROUND, "B1", actor="coder")
+
+    assert repo.rev("main") != before
+    assert repo.git("rev-list", "--parents", "-n", "1", "main").split()[1:] == [
+        before, tree.rev()]
+    place = places.worktree_dir(own.load()) / "proj-a" / ".finish-main"
+    assert not place.exists()
+    assert str(place) not in repo.git("worktree", "list", "--porcelain")
+    assert repo.git("symbolic-ref", "--short", "HEAD") == "elsewhere"
+
+
+def test_the_target_checked_out_in_a_worktree_is_merged_there(ready, repo, tmp_path):
+    _path, tree = ready
+    repo.switch("elsewhere", new_from="main")
+    repo.git("worktree", "add", "-q", str(tmp_path / "main-tree"), "main")
+
+    finishing.finish(ROUND, "B1", actor="coder")
+
+    assert repo.git("-C", str(tmp_path / "main-tree"), "rev-parse", "HEAD") == repo.rev(
+        "main")
+    assert (tmp_path / "main-tree" / "work.txt").read_text() == "the work\n"
+
+
+# -- refusals that write nothing ----------------------------------------------------------
+
+def test_an_unmet_gate_refuses_before_the_lock_with_nothing_written(ready, repo):
+    path, tree = ready
+    tree.commit("more.txt", "a commit after the verdict")
+    before, main_before = events(path), repo.rev("main")
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+    assert any("verification" in one.reason for one in refused.value.unmet)
+    assert events(path) == before and repo.rev("main") == main_before
+    assert lock_ref(repo) is None
+
+
+def test_a_second_finish_of_a_finished_build_is_refused_and_writes_nothing(ready, repo):
+    path, _tree = ready
+    finishing.finish(ROUND, "B1", actor="coder")
+    before, main_before = events(path), repo.rev("main")
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+    assert "is finished: nothing is left to do" in refused.value.unmet[0].reason
+    assert events(path) == before and repo.rev("main") == main_before
+
+
+def test_a_stage_with_no_build_is_refused(ready):
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B2", actor="coder")
+    assert "B2 has no build" in refused.value.unmet[0].reason
+
+
+def test_a_held_lock_refuses_naming_its_holder_with_nothing_written(ready, repo):
+    path, _tree = ready
+    held = finish_lock.take(repo.root, LOCK, actor="pilot", name="proj-a/b-round",
+                            stage="B3")
+    before = events(path)
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+    assert held.holder.line in refused.value.unmet[0].reason
+    assert events(path) == before and lock_ref(repo) == held.blob
+
+
+def test_a_repos_lock_ref_is_the_lock_finish_takes(ready, repo, configure):
+    path, _tree = ready
+    configure('lock_ref = "refs/locks/merging"')
+    repo.git("update-ref", "refs/locks/merging", repo.rev("main"))
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+    assert "refs/locks/merging" in refused.value.unmet[0].reason
+    assert of_type(path, "finish.action") == []
+
+
+def test_a_dead_holders_lock_is_cleared_and_recorded_before_the_merge(ready, repo):
+    path, _tree = ready
+    line = finish_lock.holder("pilot", ROUND, "B1", at="2026-01-02T03:04:05Z",
+                              pid=dead_pid()).line
+    blob = _blob(repo, line + "\n")
+    repo.git("update-ref", LOCK, blob)
+
+    done = finishing.finish(ROUND, "B1", actor="coder")
+
+    assert done.cleared == line
+    kinds = [one["type"] for one in events(path)][-3:]
+    assert kinds == ["lock.cleared", "finish.action", "finish.done"]
+    (cleared,) = of_type(path, "lock.cleared")
+    assert (cleared["ref"], cleared["holder"]) == (LOCK, line)
+    assert lock_ref(repo) is None
+
+
+def test_a_conflict_is_aborted_and_refused_with_the_way_through(ready, repo, configure):
+    path, tree = ready
+    configure('check_on = "tip"')
+    assert main(["rule", ROUND, "skip:verify-build:B1", "--record", POINTER,
+                 "--as", "planner"]) == 0
+    repo.commit("work.txt", "the target's own text")
+    before, main_before = events(path), repo.rev("main")
+
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+
+    (unmet,) = refused.value.unmet
+    assert "conflicts; the merge was aborted" in unmet.reason
+    assert unmet.fix.startswith("git merge --no-ff main in the build's worktree")
+    assert events(path) == before and repo.rev("main") == main_before
+    assert repo.git("status", "--porcelain") == "" and lock_ref(repo) is None
+
+
+def test_a_target_checkout_with_changes_is_refused_and_kept(ready, repo):
+    path, _tree = ready
+    (repo.root / "README").write_text("changed by hand\n", encoding="utf-8")
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+    assert "holds uncommitted changes" in refused.value.unmet[0].reason
+    assert of_type(path, "finish.action") == []
+    assert (repo.root / "README").read_text() == "changed by hand\n"
+
+
+def test_an_action_of_a_kind_not_run_here_is_refused_before_anything(ready, repo,
+                                                                      configure):
+    path, _tree = ready
+    configure('finish = [ { do = "merge" }, { do = "push", remote = "origin" } ]')
+    before = events(path)
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+    assert "push" in refused.value.unmet[0].reason
+    assert events(path) == before and lock_ref(repo) is None
+
+
+# -- a failed merge, and the gates after it ------------------------------------------------
+
+def hook(repo, name: str, code: int) -> None:
+    script = repo.root / ".git" / "hooks" / name
+    script.parent.mkdir(exist_ok=True)
+    script.write_text(f"#!/bin/sh\necho 'the {name} hook says no'\nexit {code}\n",
+                      encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+
+
+def test_a_failed_merge_is_recorded_undoes_nothing_and_runs_again(ready, repo):
+    path, tree = ready
+    hook(repo, "pre-merge-commit", 1)
+    main_before = repo.rev("main")
+
+    with pytest.raises(finishing.ActionFailed) as failed:
+        finishing.finish(ROUND, "B1", actor="coder")
+
+    assert failed.value.exit_code == 1 and "hook says no" in failed.value.output
+    (action,) = of_type(path, "finish.action")
+    assert (action["id"], action["state"], action["tip"]) == ("merge", "failed",
+                                                             tree.rev())
+    assert action["landing"] is None
+    assert of_type(path, "finish.done") == []
+    assert repo.rev("main") == main_before and repo.git("status", "--porcelain") == ""
+    assert lock_ref(repo) is None
+    assert build_of(path).ended is None
+
+    hook(repo, "pre-merge-commit", 0)
+    done = finishing.finish(ROUND, "B1", actor="coder")
+    assert [one["state"] for one in of_type(path, "finish.action")] == ["failed", "ok"]
+    assert done.event is not None and build_of(path).ended == builds.FINISHED
+
+
+def test_a_gate_the_log_no_longer_meets_after_the_merge_refuses_and_a_rerun_merges_once(
+        ready, repo, monkeypatch):
+    path, tree = ready
+    merge = finishing._merge
+
+    def merge_then_ask(*args, **kwargs):
+        made = merge(*args, **kwargs)
+        asking.ask(ROUND, "Is the merge what was wanted?", actor="scout",
+                   origin="comms:1234568")
+        return made
+
+    monkeypatch.setattr(finishing, "_merge", merge_then_ask)
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", actor="coder")
+    assert any("Q1" in one.reason for one in refused.value.unmet)
+    (action,) = of_type(path, "finish.action")
+    assert action["state"] == "ok"
+    assert of_type(path, "finish.done") == [] and lock_ref(repo) is None
+    landing = repo.rev("main")
+
+    monkeypatch.setattr(finishing, "_merge", merge)
+    assert main(["rule", ROUND, "withdraw:Q1", "--record", POINTER, "--as",
+                 "planner"]) == 0
+    done = finishing.finish(ROUND, "B1", actor="coder")
+    assert [(one.state, one.ran) for one in done.actions] == [("ok", False)]
+    assert len(of_type(path, "finish.action")) == 1 and repo.rev("main") == landing
+    assert done.event is not None
+
+
+# -- the command ---------------------------------------------------------------------------
+
+def test_the_command_finishes_by_name_and_says_what_it_did(ready, repo, capsys):
+    _path, tree = ready
+    tip = tree.rev()
+    assert main(["finish", ROUND, "B1", "--as", "coder"]) == 0
+    out = capsys.readouterr().out
+    assert f"finish {ROUND} B1 at {tip[:12]}" in out
+    assert f"merge: ok: {repo.rev('main')[:12]} on the target" in out
+    assert "finished B1" in out
+
+
+def test_the_command_in_the_builds_worktree_finds_its_build(ready, repo, monkeypatch,
+                                                            capsys):
+    _path, tree = ready
+    monkeypatch.chdir(tree.root)
+    assert main(["finish", "--as", "coder"]) == 0
+    assert "finished B1" in capsys.readouterr().out
+
+
+def test_the_command_exits_3_on_a_refusal_and_1_on_a_failed_action(ready, repo, capsys):
+    path, tree = ready
+    tree.commit("more.txt", "a commit after the verdict")
+    assert main(["finish", ROUND, "B1"]) == 3
+    verify(path, tree.rev())
+    checking.check(ROUND, "B1", actor="coder")
+    hook(repo, "pre-merge-commit", 1)
+    capsys.readouterr()
+    assert main(["finish", ROUND, "B1"]) == 1
+    assert "hook says no" in capsys.readouterr().out
+
+
+def test_next_names_the_finish_command_once_the_gates_hold(ready):
+    found = next_step.read(ROUND)
+    (group,) = [one for one in found["groups"] if one["step"] == "finish"]
+    assert group["then"] == [f"moxi rounds finish {ROUND} B1, or moxi rounds finish in "
+                             "the build's worktree"]
+
+
+# -- helpers --------------------------------------------------------------------------------
+
+def dead_pid() -> int:
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    return done.pid
+
+
+def _blob(repo, text: str) -> str:
+    done = subprocess.run(["git", "-C", str(repo.root), "hash-object", "-w", "--stdin"],
+                          input=text, capture_output=True, text=True, env=repo.env(),
+                          check=True)
+    return done.stdout.strip()
+

@@ -16,7 +16,7 @@ ROUND = "proj-a/a-round"
 ASKED = "Do agent-read times follow the settings?"
 PTR = "comms:1234567"
 SHOWN = "comms:1234599"
-BUILDS = "a finished stage, which this version does not build, so the round does not close in it"
+BUILDS = "a close, which this version does not make for a round that builds"
 
 FLOWS = """\
     [flows.paper]

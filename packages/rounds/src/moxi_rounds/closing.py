@@ -20,9 +20,8 @@ has closed: whoever prints the lines beside its own reading of the questions pas
 `closed`, the answer it read them with, so one question has one state in what it
 prints.
 
-A round whose flow has a `build` step also waits for a finished stage. This version
-finishes none, so such a round does not close in it, and `waits` says only that. It
-ends by being dropped.
+A round whose flow has a `build` step does not close itself in this version, even
+once its stages are finished, and `waits` says only that. It ends by being dropped.
 
 The closing event holds nothing yet: `entry` is where what a round is closed with is
 added.
@@ -42,8 +41,7 @@ CLOSED = "round.closed"
 BUILD = "build"
 
 #: What a round whose flow has a `build` step waits for, in this version.
-NOT_IN_THIS_VERSION = ("a finished stage, which this version does not build, so the "
-                       "round does not close in it")
+NOT_IN_THIS_VERSION = "a close, which this version does not make for a round that builds"
 
 
 Closed = Callable[[str], bool]

@@ -31,11 +31,13 @@ This version keeps the record of a round and takes it through its design: a roun
 its questions and rulings, the frozen versions of its design, the verdicts of the
 reports that verify it, the stages the design plans, a project's own list of questions
 and its register of standing rulings, and the files generated from them. Its verbs are
-`open`, `fold`, `verdict`, `ask`, `rule`, `mark`, `next`, `show`, `list` and `drop`.
+`open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`, `mark`,
+`next`, `show`, `list` and `drop`.
 
 It does not yet do the rest of a round:
 
-- verifying a build and finishing it, which puts it where it goes;
+- finish actions other than the merge (a push, a command of your own), and removing a
+  finished build's worktree, scratch folder and branch;
 - decisions a build records for the operator to ratify;
 - the retrospective, and the numbers of a round that ended;
 - answers prepared ahead for a sitting with the operator;
@@ -93,6 +95,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
 | `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set, runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
+| `moxi rounds finish [ROUND B<n>]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` at the tip not run again; and record the finish when the gates read on the log still hold. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. With no round, in a build's worktree, it finishes that build. This version runs the `merge` action alone |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
@@ -571,8 +574,8 @@ closed round is listed by `list --closed`, and its note says when it closed. Lik
 one it takes no new question and no new ruling; a correction of one of its rulings is
 still recorded, and its rulings are still marked as shown.
 
-A round whose flow has a `build` step waits for a finished stage, which this version
-does not build, so it does not close: `show` says so, and such a round ends by `drop`.
+A round whose flow has a `build` step does not close itself in this version, even once
+its stages are finished: `show` says so, and such a round ends by `drop`.
 
 ## Dropping a round
 

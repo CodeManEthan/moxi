@@ -80,7 +80,7 @@ round {B}   open   flow fix ({names})
 description: a placeholder round
 folder: {rounds / "b-round"}
 step: commission, ready
-close waits for: a finished stage, which this version does not build, so the round does not close in it
+close waits for: a close, which this version does not make for a round that builds
 
 builds: 0
 
@@ -115,8 +115,8 @@ history: 1 event
         "steps": steps,
         "step": {"step": "commission", "stage": None, "state": "ready",
                  "waits": [], "questions": []},
-        "close": {"waits": ["a finished stage, which this version does not build, so "
-                            "the round does not close in it"]},
+        "close": {"waits": ["a close, which this version does not make for a round "
+                            "that builds"]},
         "skips": [], "stages": [], "versions": [],
         "standing": "none", "trace": None, "threads": [],
         "register_unreadable": None}

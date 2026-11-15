@@ -252,6 +252,16 @@ def record(where: Where, *, actor: str,
         return append(_read(where, facts, opens=opens), result)
 
 
+def look(where: Where, *, facts: Callable[[Where], object] | None = None,
+         wait_s: float = WAIT_S, env=None) -> View:
+    """Read `where` under its lock, as a write's first step reads it, and append
+    nothing. A verb whose long act is made of several writes, each taking the lock for
+    itself, reads the logs between them with this. Raises `Locked`, `NoLog` and
+    `Unreadable` as `record` does."""
+    with _hold(where, with_project=False, wait_s=wait_s, env=env):
+        return _read(where, facts, opens=False)
+
+
 # -- the locks ---------------------------------------------------------------------------
 
 @contextmanager
@@ -380,4 +390,4 @@ def _append(view: View, entries: list[Entry], result: object, *, actor: str,
 
 __all__ = ["WAIT_S", "ROUND", "PROJECT", "ROUND_LOCKS_DIR", "PROJECT_LOCKS_DIR",
            "ON_APPEND", "round_lock", "project_lock",
-           "Where", "Entry", "View", "Written", "Gate", "record", "watching"]
+           "Where", "Entry", "View", "Written", "Gate", "record", "look", "watching"]
