@@ -8,7 +8,8 @@ or it takes everything out. `teardown()`, in order:
    harness entry in the ledger (`moxi_loadout.entries` over an empty manifest), the
    managed global part as `global remove` takes it out, loadout's ignore files, its
    placements. When an entry, an ignore file or a generated agent file was changed since
-   loadout wrote it, or a harness file that holds loadout's entries doesn't read, or the
+   loadout wrote it, a harness global file is one real file with another harness's (or is
+   another harness's part), a harness file that holds loadout's entries doesn't read, or the
    CLI that removes an MCP server is missing while the server is there, it raises
    `moxi.modules.Refused` naming each with its fix: nothing is removed and the uninstall
    exits 3.
@@ -73,7 +74,8 @@ def _teardown(say) -> int | str:
     folders = _folders(data, machine)
     run = _plan(data, machine)
 
-    problems = _changed(run) + _unreadable(run) + _ignore_files(data) + _generated(data)
+    problems = (_changed(run) + _crossed(run) + _unreadable(run) + _ignore_files(data)
+                + _generated(data))
     if problems:
         raise modules.Refused(
             "uninstall refused; nothing was removed. Changed since loadout wrote it, or "
@@ -168,6 +170,12 @@ def _changed(run) -> list[str]:
         out.append(f"{_label(r)} in {r.get('file')} was edited since loadout wrote it: "
                    f"{fix}")
     return out
+
+
+def _crossed(run) -> list[str]:
+    """Each harness global file the real-path rule leaves blocked: one real file with
+    another harness's, or another harness's part or generated file."""
+    return [r.reason for r in run.rows if r.kind == "global" and r.state == "blocked"]
 
 
 def _unreadable(run) -> list[str]:

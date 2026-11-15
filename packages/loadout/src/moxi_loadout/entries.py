@@ -49,6 +49,7 @@ from pathlib import Path
 
 from moxi.exit import ERROR, REFUSED
 
+from moxi_loadout import globalfile
 from moxi_loadout import harness as hz
 from moxi_loadout.manifest import USER, expand, expand_command
 from moxi_loadout.planner import Row
@@ -136,9 +137,10 @@ class Run:
 
 # -- what the manifest wants ---------------------------------------------------------------
 
-def wanted(manifest, folder, rows: dict, run: Run) -> tuple[list[Entry], set]:
+def wanted(manifest, folder, rows: dict, run: Run, records=()) -> tuple[list[Entry], set]:
     """Every entry the manifest wants, and the (item, harness) pairs it wants but can't
-    build this run, whose records are carried as they stand."""
+    build this run, whose records are carried as they stand. `records` are the ledger's
+    entries, which the global file's real-path rule reads."""
     out: list[Entry] = []
     carried: set = set()
     every = [h for h in rows]
@@ -173,7 +175,7 @@ def wanted(manifest, folder, rows: dict, run: Run) -> tuple[list[Entry], set]:
         text = RULES_HEADER.format(hashlib.sha256(body.encode()).hexdigest()) + body
         out.append(Entry("permissions:*", "codex", str(hz.rules_file()), "rules", [], text,
                          by=tuple(sorted({e.ident()[1] for e in rules}))))
-    out += _global(manifest, rows, run, carried)
+    out += _global(manifest, rows, run, carried, records)
     if any(e.harness == "codex" and e.kind in ("hook", "rules") for e in out):
         run.notes.append(UNCONFIRMED["codex"])
     if any(e.harness == "opencode" for e in out):
@@ -266,12 +268,35 @@ def _mcp(item, name, table, h, folder) -> Entry:
                  value)
 
 
-def _global(manifest, rows, run, carried) -> list[Entry]:
+def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
     """The managed global file's entries; nothing for `off` and `if-absent` (the placer
-    places that one)."""
-    if manifest.global_mode != "managed":
-        return []
+    places that one). In every mode, a harness global file the real-path rule
+    (`moxi_loadout.globalfile.crossed`) says not to edit is carried as it stands: in
+    `managed` always, otherwise when loadout has a record in it to remove."""
+    mode = manifest.global_mode
     path = manifest.global_file
+    every = [h for h in rows if h in hz.HARNESSES]
+    if mode != "off" and path is not None:
+        for p in globalfile.mistyped(path, rows):
+            run.notes.append(f"{p} is named like a part of the global file but isn't one, "
+                             "so nothing reads it")
+    recorded = {r.get("harness") for r in records if r.get("item") == "global:global"}
+    # OpenCode's global entry is its `instructions` path in `opencode.json`, not a line in
+    # its `AGENTS.md`, so that file is never edited here.
+    edited = [h for h in every if h != "opencode"]
+    standing = {}
+    for h, c in (globalfile.crossed(path, edited).items() if path is not None else ()):
+        if mode != "managed" and h not in recorded:
+            continue
+        standing[h] = c
+        carried.add(("global:global", h))
+        if c.verdict == "blocked":
+            run.rows.append(Row(USER, "global", "global", h, "blocked", c.line,
+                                str(hz.global_file(h)), REFUSED))
+        else:
+            run.lines.append(c.line)
+    if mode != "managed":
+        return []
     try:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -282,14 +307,10 @@ def _global(manifest, rows, run, carried) -> list[Entry]:
                             "it stands", None, ERROR))
         return []
     out = []
-    for h in rows:
-        if h not in hz.HARNESSES:
+    for h in every:
+        if h in standing:
             continue
         target = str(hz.global_file(h))
-        if os.path.islink(target) and os.path.realpath(target) == os.path.realpath(path):
-            carried.add(("global:global", h))
-            run.lines.append(f"{target} links to {path}; loadout leaves it")
-            continue
         if h == "claude":
             line = f"@{os.path.abspath(path)}"
             out.append(Entry("global:global", h, target, "global-line", [line], line))
@@ -495,9 +516,9 @@ def plan(manifest, folder, data: dict, *, claims=None) -> Run:
         run.notes.append("the global file is off: the manifest sets no [global] mode; "
                          "moxi loadout global mode MODE sets one")
     table, _ = place.harnesses()
-    want, carried = wanted(manifest, folder, table, run)
     records = [r for r in data.get("entries", []) if isinstance(r, dict)
                and r.get("kind") not in KEPT_ELSEWHERE]
+    want, carried = wanted(manifest, folder, table, run, records)
     claims = {} if claims is None else claims
     for where in want + [r for r in records
                          if (r.get("item"), r.get("harness")) not in carried]:

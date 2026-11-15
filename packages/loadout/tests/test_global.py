@@ -147,3 +147,125 @@ def test_a_global_file_not_in_utf8_comes_back_byte_equal(lo):
     assert cli.main(["global", "remove"]) == 0
     for name in ("claude", "codex"):
         assert harness.global_file(name).read_bytes() == mine
+
+
+# -- the part files ------------------------------------------------------------------------
+
+def test_a_part_is_named_after_the_shared_file(tmp_path):
+    from moxi_loadout.globalfile import part_path
+
+    assert part_path(tmp_path / "global.md", "claude") == tmp_path / "global.claude.md"
+    assert part_path(tmp_path / "rules" / "team.md", "codex") == \
+        tmp_path / "rules" / "team.codex.md"
+    assert part_path(tmp_path / "global", "opencode") == tmp_path / "global.opencode"
+
+
+def test_a_part_is_in_use_while_a_file_is_at_its_path(tmp_path):
+    from moxi_loadout.globalfile import parts
+
+    shared = tmp_path / "global.md"
+    shared.write_text(TEXT)
+    assert parts(shared) == {}
+    (tmp_path / "global.codex.md").write_text("")
+    assert parts(shared) == {"codex": tmp_path / "global.codex.md"}
+
+
+def test_a_file_named_like_a_mistyped_part_is_noted(tmp_path):
+    from moxi_loadout.globalfile import mistyped
+
+    shared = tmp_path / "global.md"
+    for name in ("global.md", "global.claud.md", "global.old.md", "global.v2.md",
+                 "global.cloud.md", "global.gemini.md", "global.claude.md"):
+        (tmp_path / name).write_text("x\n")
+    found = mistyped(shared, ["claude", "codex", "opencode", "gemini"])
+    assert [p.name for p in found] == ["global.claud.md", "global.gemini.md"]
+
+
+def test_a_mistyped_part_is_a_note_and_changes_no_exit_code(lo):
+    mode(lo, "managed")
+    (lo / "global.claud.md").write_text("Never read.\n")
+    (lo / "global.old.md").write_text("Kept aside.\n")
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert any("global.claud.md" in n for n in out.notes)
+    assert not any("global.old.md" in n for n in out.notes)
+    assert "Never read." not in harness.global_file("claude").read_text()
+
+
+# -- the real-path rule --------------------------------------------------------------------
+
+def _rows(out, state):
+    return {r.harness for r in out.rows if r.kind == "global" and r.state == state}
+
+
+def test_two_harness_files_that_are_one_file_are_left_blocked(lo):
+    claude, codex = harness.global_file("claude"), harness.global_file("codex")
+    claude.parent.mkdir(parents=True)
+    codex.parent.mkdir(parents=True)
+    mine = "# Mine\n"
+    claude.write_text(mine)
+    codex.symlink_to(claude)
+    mode(lo, "managed")
+    for _ in range(2):
+        out = install.install()
+        assert out.code == 3, out.text()
+        assert _rows(out, "blocked") == {"claude", "codex"}
+        assert claude.read_text() == mine and codex.is_symlink()
+    assert any(str(codex) in line and str(claude) in line and "separate files" in line
+               for line in out.text())
+    assert install.status().code == 1
+
+
+def test_global_remove_stands_on_harness_files_that_became_one_file(lo):
+    mode(lo, "managed")
+    assert install.install().code == 0
+    claude, codex = harness.global_file("claude"), harness.global_file("codex")
+    codex.unlink()
+    codex.symlink_to(claude)
+    before = claude.read_bytes()
+    assert cli.main(["global", "remove"]) == 3
+    assert claude.read_bytes() == before and codex.is_symlink()
+
+
+def test_uninstall_refuses_while_a_recorded_global_file_is_another_harness_file(lo):
+    from moxi import modules
+
+    from moxi_loadout import teardown
+
+    mode(lo, "managed")
+    assert install.install().code == 0
+    claude, codex = harness.global_file("claude"), harness.global_file("codex")
+    before = claude.read_bytes()
+    codex.unlink()
+    codex.symlink_to(claude)
+    with pytest.raises(modules.Refused) as exc:
+        teardown.teardown(say=lambda line: None)
+    assert "separate files" in str(exc.value)
+    assert claude.read_bytes() == before
+
+
+def test_a_harness_file_that_is_another_harness_part_is_blocked(lo):
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    codex = harness.global_file("codex")
+    codex.parent.mkdir(parents=True)
+    codex.symlink_to(lo / "global.claude.md")
+    mode(lo, "managed")
+    out = install.install()
+    assert out.code == 3, out.text()
+    assert _rows(out, "blocked") == {"codex"}
+    assert (lo / "global.claude.md").read_text() == "Claude only.\n"
+    assert any("claude's part" in line for line in out.text())
+
+
+@pytest.mark.parametrize("to", ["global.md", "global.codex.md"])
+def test_a_link_to_the_shared_file_or_the_own_part_is_left_with_a_line(lo, to):
+    (lo / "global.codex.md").write_text("Codex only.\n")
+    codex = harness.global_file("codex")
+    codex.parent.mkdir(parents=True)
+    codex.symlink_to(lo / to)
+    mode(lo, "managed")
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert (lo / "global.md").read_text() == TEXT
+    assert (lo / "global.codex.md").read_text() == "Codex only.\n"
+    assert sum(f"{codex} links to" in line for line in out.lines) == 1
