@@ -98,7 +98,7 @@ def test_the_announcement_names_the_doctor_and_the_core_runs_it(rounds, capsys):
 
 def test_with_no_project_every_row_is_fine():
     found = by_name()
-    assert list(found) == ["git", "rounds folders", "logs", "index"]
+    assert list(found) == ["git", "rounds folders", "logs", "index", "finish locks"]
     assert all(row.state == "ok" for row in found.values()), found
 
 
@@ -366,5 +366,5 @@ def test_the_doctor_changes_no_byte_or_time_of_any_file(rounds, tmp_path, capsys
 
     assert everything(tmp_path) == before
     assert states == {"git": "ok", "rounds folders": "ok", f"log {B}": "fail",
-                      "index": "warn" if index == "stale" else "ok"}
+                      "index": "warn" if index == "stale" else "ok", "finish locks": "ok"}
     assert os.path.exists(paths.index_file()) == (index != "none")

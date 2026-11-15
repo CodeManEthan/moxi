@@ -293,6 +293,8 @@ def history_of(event: dict) -> str | None:
         of = f"{event.get('thread')}, {event.get('decision')}"
     if event.get("type") == "repair":
         of = repair_of(event)
+    if event.get("type") == "lock.cleared":
+        of = f"{event.get('ref')}, held by {event.get('holder')}"
     if event.get("type") == "verdict.recorded" and event.get("design") is not None:
         of = f"{event.get('verdict')} for v{event.get('design')}"
     if event.get("type") == "verdict.recorded" and event.get("stage") is not None:

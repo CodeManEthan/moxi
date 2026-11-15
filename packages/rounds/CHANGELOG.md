@@ -124,6 +124,11 @@ does not yet build.
   tip, every step of your own done, a build with work, and no commits shared with
   another build. `next`, `show` and `list` read it, and `verdict` prints each gate that
   does not hold, by number, with the command that meets it.
+- The finish lock: one finish at a time per repo and target, held as the ref
+  `refs/rounds/finishing/<into>` (or the repo's `lock_ref`) pointing at a blob with the
+  holder's line. A holder on this machine whose process has ended is cleared in one
+  swap that git lets only one finish make; any other holder is named with the git
+  command that clears it. The doctor names a lock older than an hour.
 - A round's export has two views, both when `--view` is left out: `docket`, its open
   and parked questions, and `ratify`, the unruled decisions of its finished builds,
   which it names under `covers`, as the project's `ratify` setting picks them (`majors`,

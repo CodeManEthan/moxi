@@ -18,6 +18,12 @@ be, with the right mode and size. These look at what rounds needs and keeps:
   `gh auth status` does not exit 0 (only its exit code is read), naming `moxi rounds
   check --full` as the way through; else `ok`. A repo whose `ci.local` is `"none"` is
   named as meeting the check gate on CI alone.
+- finish locks: `warn` for each finish lock older than an hour, in the repo of any
+  project, with its holder's line and the one git command that clears it, for the lead
+  to run after asking the holder; else one `ok` row. Only a lock in the format `finish`
+  writes has a holder and a time to read; whatever else a repo's `lock_ref` points at
+  is another tool's, and not judged here. A project whose root git can't read has no
+  locks to look at.
 
 The doctor only reads. It writes nothing in a rounds folder and nothing in the index:
 an index that is behind is reported, and left for the command that brings it up.
@@ -65,6 +71,7 @@ def rows() -> Iterator[Row]:
     yield from _logs(homes)
     yield _index(homes)
     yield from _ci()
+    yield from _locks()
 
 
 # -- ci ----------------------------------------------------------------------------------
@@ -110,6 +117,40 @@ def _gh_logged_in() -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     return done.returncode == 0
+
+
+# -- finish locks --------------------------------------------------------------------------
+
+def _locks() -> Iterator[Row]:
+    from . import finish_lock
+    from . import settings as own
+    from .gitreads import GitError
+
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        settings = None
+    old, read = [], 0
+    for key, root in folders.roots():
+        if not root.is_dir():
+            continue
+        named = [] if settings is None else [own.build_setting(settings, key, "lock_ref")]
+        try:
+            found = finish_lock.stale(root, [one for one in named if one])
+        except GitError:
+            continue
+        read += 1
+        old += [(key, one) for one in found]
+    for key, one in old:
+        hours = one.holder.age_s() / 3600
+        yield Row(MODULE, f"finish lock {key} {one.ref}", "warn",
+                  f"held for {hours:.1f} hours, longer than finish takes, by "
+                  f"{one.holder.line}",
+                  f"ask the holder; once no finish of theirs runs: {one.clear}")
+    if not old:
+        yield Row(MODULE, "finish locks", "ok",
+                  f"no finish lock older than an hour in the {read} "
+                  f"repo{'' if read == 1 else 's'} read")
 
 
 # -- git -----------------------------------------------------------------------------------

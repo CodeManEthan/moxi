@@ -748,6 +748,7 @@ its call raises as a `moxi_rounds.errors.RoundsError`, with `reason`, `fix` and
 | `rounds folders` | warns for each project whose rounds folder can't be worked out or is another project's too, with the setting that fixes it |
 | `logs` | fails for each log that can't be read, with the file, the line and the way back |
 | `index` | warns when the index says something else than the logs do; `moxi rounds list` brings it up to them |
+| `finish locks` | warns for each finish lock older than an hour in a project's repo, with its holder and the one git command that clears it, for you to run after asking the holder |
 
 The doctor only reads.
 
