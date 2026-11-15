@@ -25,8 +25,10 @@ no view it holds both, the docket first:
   ids; `off` none. A group is a way to draw, not a thing to answer: each id in it is
   ruled on its own. The major decisions of builds that are not finished are listed
   under `later`, which are no entries: they come in a later export, once their build
-  is finished. Nothing here waits on a build that is not finished, and no ruling
-  waits on an export.
+  is finished. A build answers only for the decisions its own reports declared: a
+  dropped build counts for nothing, so a decision only a dropped build declared is in
+  neither, until a report of a later build of its stage lists it again. Nothing here
+  waits on a build that is not finished, and no ruling waits on an export.
 
 A decision that forecloses a capability is major, and wherever it is written out it
 is an entry of its own: its data is marked `alone`, the markdown gives it a heading
@@ -400,9 +402,13 @@ def _ratification(summary: index.Summary, found: list[Entry], setting: str):
     decisions not yet ruled, `found`, those of the finished builds that `setting` puts
     to him, the major ones first and then the minor ones as one group; the stages of
     the finished builds; and the major decisions of the builds not yet finished."""
-    covers = tuple(item.id for item in summary.of(index.STAGE)
-                   if item.body.get("finished") is True)
-    unruled = [entry for entry in found if entry.state == questions.OPEN]
+    stages = summary.of(index.STAGE)
+    covers = tuple(item.id for item in stages if item.body.get("finished") is True)
+    # A stage's current build answers only for the decisions its own reports
+    # declared: one only a dropped build declared never reached the target.
+    own = {key for item in stages for key in item.body.get("decisions") or ()}
+    unruled = [entry for entry in found
+               if entry.state == questions.OPEN and entry.id in own]
     if setting == OFF:
         return (), covers, ()
     majors = [entry for entry in unruled

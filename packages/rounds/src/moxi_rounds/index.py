@@ -109,7 +109,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 20
+DERIVED = 21
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -119,7 +119,8 @@ DERIVED = 20
 QUESTION = "question"
 RULING = "ruling"
 READ_BACK = "read-back"
-#: A round's plan is here too: each stage it has, with whether its build is finished,
+#: A round's plan is here too: each stage it has, with whether its build is finished
+#: and the decisions that build's reports declared,
 #: the current version of its design
 #: with the design's standing, what that version took away and still waits for a
 #: verdict or a ruling, each verdict recorded of the design, and each decision the
@@ -148,11 +149,16 @@ def _step(folded: state.State):
 
 def _stages(folded: state.State):
     # Whether a stage's build is finished is an act on record, so it is read here
-    # with no git: the ratification covers the builds that are.
+    # with no git: the ratification covers the builds that are, and of each only the
+    # decisions its own reports declared. A dropped build counts for nothing, so its
+    # stage then has none.
     for stage_id, body in versions.stages(folded):
         build = builds.current(folded, stage_id)
+        own = (() if build is None or build.ended == builds.DROPPED
+               else decisions.of_build(folded, build))
         yield stage_id, {**body, "finished": build is not None
-                         and build.ended == builds.FINISHED}
+                         and build.ended == builds.FINISHED,
+                         "decisions": [one.key for one in own]}
 
 
 def _waits(folded: state.State):

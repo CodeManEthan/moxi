@@ -655,6 +655,7 @@ def ids(found):
 
 def test_the_ratification_covers_the_finished_builds_and_puts_off_the_rest(rounds):
     built(rounds, "B1")
+    built(rounds, "B2", finished=False)
     decided(rounds, "B1", ("M1", "major", False), ("M2", "minor", False))
     decided(rounds, "B2", ("M1", "major", False), ("M2", "minor", False),
             report="other.md")
@@ -688,6 +689,70 @@ def test_a_build_finished_since_brings_its_decisions_into_a_later_export(rounds)
         ("B1",), [], ["B2.M1"])
     assert (after.covers, ids(after.entries), ids(after.later)) == (
         ("B1", "B2"), ["B2.M1"], [])
+
+
+def dropped(rounds, stage):
+    """Record the stage's open build dropped, as a later verb will."""
+    log.append(log.round_log(rounds / "a-round"), "build.dropped",
+               {"stage": stage, "by": "operator", "record": "comms:40"},
+               actor="planner")
+
+
+def test_a_decision_only_a_dropped_build_declared_is_in_no_view(rounds):
+    built(rounds, "B1", finished=False)
+    decided(rounds, "B1", ("M1", "major", False))
+    dropped(rounds, "B1")
+    built(rounds, "B1", finished=False)
+    decided(rounds, "B1", ("M2", "major", False), report="again.md")
+    unfinished = export.questions_of(A, view="ratify")
+
+    finish(rounds, "B1")
+    found = export.questions_of(A, view="ratify")
+
+    assert (unfinished.covers, ids(unfinished.entries), ids(unfinished.later)) == (
+        (), [], ["B1.M2"])
+    assert (found.covers, ids(found.entries), ids(found.later)) == (
+        ("B1",), ["B1.M2"], [])
+
+
+def test_a_dropped_build_s_decision_listed_again_by_the_next_build_is_its_own(
+        rounds, write_config):
+    ratify_setting(write_config, "majors+minors")
+    built(rounds, "B1", finished=False)
+    decided(rounds, "B1", ("M1", "major", False), ("M2", "minor", False))
+    dropped(rounds, "B1")
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M2", "minor", False), report="again.md")
+
+    found = export.questions_of(A, view="ratify")
+
+    assert (found.covers, ids(found.entries), ids(found.later)) == (
+        ("B1",), ["B1.M2"], [])
+
+
+def test_a_stage_whose_last_build_was_dropped_puts_nothing_off(rounds):
+    built(rounds, "B1", finished=False)
+    decided(rounds, "B1", ("M1", "major", False))
+    dropped(rounds, "B1")
+
+    found = export.questions_of(A, view="ratify")
+
+    assert (found.covers, ids(found.entries), ids(found.later)) == ((), [], [])
+
+
+def test_a_majors_report_s_decision_is_the_build_open_when_it_was_recorded(rounds):
+    built(rounds, "B1", finished=False)
+    log.append(log.round_log(rounds / "a-round"), "verdict.recorded", {
+        "kind": "majors", "by": "critic", "report": "majors.md", "stages": ["B1"],
+        "decisions": [{"id": "M1", "stage": "B1", "weight": "major",
+                       "forecloses": False, "text": "as built: B1.M1"}]},
+        actor="critic")
+    dropped(rounds, "B1")
+    built(rounds, "B1")
+
+    found = export.questions_of(A, view="ratify")
+
+    assert (found.covers, ids(found.entries), ids(found.later)) == (("B1",), [], [])
 
 
 def test_a_ruled_decision_is_in_no_view(rounds):

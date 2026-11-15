@@ -110,8 +110,10 @@ does not yet build.
   and parked questions, and `ratify`, the unruled decisions of its finished builds,
   which it names under `covers`, as the project's `ratify` setting picks them (`majors`,
   `majors+minors` with the minor ones as one group of ids, or `off`). The major
-  decisions of builds not yet finished are listed under `later`. A decision that
-  forecloses a capability is always an entry of its own, marked `alone`.
+  decisions of builds not yet finished are listed under `later`. A build answers only
+  for the decisions its own reports declared, so one only a dropped build declared is
+  in neither list. A decision that forecloses a capability is always an entry of its
+  own, marked `alone`.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

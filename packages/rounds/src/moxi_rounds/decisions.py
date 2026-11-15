@@ -23,6 +23,12 @@ which leaves the decision open. A rejected decision owes a fix: it is also a wai
 item of the round, `B2.M1`, from its ruling until `mark ... --done --record` names the
 fix (`waits`).
 
+**Its build.** A decision belongs to each build of its stage whose reports listed it: a
+build report recorded while that build was the stage's, or a majors report recorded
+then that gives it that stage (`of_build`). A dropped build counts for nothing, so a
+decision only a dropped build's reports declared never reached the target; a later
+build of the stage covers only the decisions its own reports declare.
+
 A decision holds no stage. What it holds is the round's close, when it is major and
 reached the target; that, and when one reached it, is the close's to read. It is never
 parked, narrowed, moved or withdrawn: those rulings are of asked questions.
@@ -36,7 +42,7 @@ import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 
-from . import corrections, report_block
+from . import builds, corrections, findings, report_block
 from . import state as states
 
 #: A decision's key outside its report, and the item of a ruling of one.
@@ -155,6 +161,16 @@ def of_round(state: states.State) -> tuple[Decision, ...]:
     return tuple(found.values())
 
 
+def of_build(state: states.State, build: builds.Build) -> tuple[Decision, ...]:
+    """The decisions of the round that a report recorded while `build` was its stage's
+    build declared or listed again, in the order declared."""
+    keys = {f"{stage}.{one['id']}"
+            for event in state.history if event.get("type") == "verdict.recorded"
+            and findings.within(state, build, event.get("n"))
+            for stage, one in listed(event) if stage == build.stage}
+    return tuple(one for one in of_round(state) if one.key in keys)
+
+
 def find(state: states.State, key: str) -> Decision | None:
     """The decision of the round with that key, or None."""
     return next((one for one in of_round(state) if one.key == key), None)
@@ -184,5 +200,5 @@ def rule_line(name: str, key: str) -> str:
 
 
 __all__ = ["KEY", "ITEM", "ACCEPT", "REJECT", "OPTIONS", "BLOCKS", "OPEN", "RULED",
-           "Decision", "listed", "lighter", "of_round", "find", "item", "items",
-           "rule_line"]
+           "Decision", "listed", "lighter", "of_round", "of_build", "find", "item",
+           "items", "rule_line"]

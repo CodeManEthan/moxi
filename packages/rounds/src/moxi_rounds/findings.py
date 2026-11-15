@@ -85,7 +85,7 @@ class Finding:
                 "set_by": self.set_by}
 
 
-def _within(state: states.State, build: builds.Build, n: int | None) -> bool:
+def within(state: states.State, build: builds.Build, n: int | None) -> bool:
     """Whether the line `n` was written while `build` was its stage's build: after its
     commission and before its stage's next one."""
     ends = [one.n for one in builds.builds(state)
@@ -98,7 +98,7 @@ def verdicts_of(state: states.State, build: builds.Build) -> tuple[states.Verdic
     """The verdicts recorded for `build`, oldest first: those of its stage after its
     commission and before its stage's next one."""
     return tuple(one for one in state.verdicts
-                 if one.stage == build.stage and _within(state, build, one.n))
+                 if one.stage == build.stage and within(state, build, one.n))
 
 
 def marks_of(state: states.State, build: builds.Build) -> tuple[dict, ...]:
@@ -106,7 +106,7 @@ def marks_of(state: states.State, build: builds.Build) -> tuple[dict, ...]:
     them."""
     prefix = f"{build.stage}."
     return tuple(event for event in state.history
-                 if event.get("type") == MARKED and _within(state, build, event.get("n"))
+                 if event.get("type") == MARKED and within(state, build, event.get("n"))
                  and str(event.get("id") or "").startswith(prefix))
 
 
@@ -201,5 +201,5 @@ def taken(state: states.State, stage: str) -> frozenset[str]:
     return frozenset(used)
 
 
-__all__ = ["VERIFY_BUILD", "FINISH", "MARKED", "Finding", "verdicts_of", "marks_of",
-           "of_build", "of_stage", "marked_commits", "why_not_counted", "taken"]
+__all__ = ["VERIFY_BUILD", "FINISH", "MARKED", "Finding", "within", "verdicts_of",
+           "marks_of", "of_build", "of_stage", "marked_commits", "why_not_counted", "taken"]

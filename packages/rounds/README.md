@@ -426,7 +426,10 @@ operator is the project's `ratify` setting: `majors` (the default) each major de
 `majors+minors` the minor ones too, drawn as one group that lists their ids and is
 still ruled one id at a time, and `off` none. The major decisions of builds not yet
 finished are listed under `later`, and come in an export run once their build is
-finished. A decision that forecloses a capability is an entry of its own everywhere:
+finished. A build answers only for the decisions its own reports declared: a dropped
+build counts for nothing, so a decision only a dropped build declared is in neither
+list until a report of a later build of its stage lists it again. A decision that
+forecloses a capability is an entry of its own everywhere:
 `alone` in the data, its own heading in the markdown, never in a group.
 
 A verdict records the head it read and that head's merge-base with the target. When the
