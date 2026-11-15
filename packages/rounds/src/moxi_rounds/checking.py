@@ -183,18 +183,6 @@ def commission_of(state: states.State, build: builds.Build) -> dict:
     return next(event for event in state.history if event["n"] == build.n)
 
 
-def kept_folders(state: states.State, build: builds.Build) -> tuple[Path, ...]:
-    """The build's worktree and scratch folder that are still there, which a build's
-    end keeps: nothing is removed until a removal can tell what may go without losing
-    work."""
-    commissioned = commission_of(state, build)
-    found = []
-    for key in ("worktree", "scratch"):
-        if commissioned.get(key) and Path(str(commissioned[key])).is_dir():
-            found.append(Path(str(commissioned[key])))
-    return tuple(found)
-
-
 @dataclass(frozen=True)
 class Tip:
     """The build's worktree as read now: the branch's `tip`, and whether the worktree
@@ -281,15 +269,17 @@ def seen_of(state: states.State, name: str, *, settings,
 
 def _tree(commissioned: Mapping, worktree: Path, *, here: bool) -> str | None:
     """The build's worktree as `finish` reads it: None when it no longer exists,
-    `elsewhere` when it was made on another machine, else whether it is clean. Ignored
-    paths are left out; a tracked change or an untracked path is a change."""
-    from . import finish_gates
+    `elsewhere` when it was made on another machine, else whether it is clean by the
+    removal rule's read of git (`removal.changes`), which no setting of the user's
+    hides work from. Ignored paths are left to the removal; a tracked change or an
+    untracked path is a change."""
+    from . import finish_gates, removal
 
     if commissioned.get("host") not in (None, places.host()):
         return finish_gates.ELSEWHERE
     if not here:
         return None
-    return finish_gates.CHANGED if Git(worktree).has_changes() else finish_gates.CLEAN
+    return finish_gates.CHANGED if removal.changes(worktree) else finish_gates.CLEAN
 
 
 def _since_verdict(state: states.State, build: builds.Build, status: builds.Status,
@@ -778,5 +768,5 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
 
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "fill", "declared",
            "values", "argv_now", "runs", "newest", "why_not", "passes", "step_entry",
-           "report_steps", "commission_of", "kept_folders",
+           "report_steps", "commission_of",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]

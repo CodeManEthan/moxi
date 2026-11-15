@@ -148,7 +148,8 @@ def test_a_dropped_build_ends_and_its_stage_stays_owed(a_round):
     assert "B1 has no open build: its last was dropped" in str(caught.value)
 
 
-def test_a_drop_keeps_the_builds_folders_and_names_them(a_round, git_repo, tmp_path):
+def test_a_drop_keeps_folders_outside_rounds_roots_and_names_the_check(a_round, git_repo,
+                                                                      tmp_path):
     worktree, scratch = tmp_path / "wt", tmp_path / "scratch"
     worktree.mkdir()
     scratch.mkdir()
@@ -160,7 +161,10 @@ def test_a_drop_keeps_the_builds_folders_and_names_them(a_round, git_repo, tmp_p
         "target": "main", "builder": "coder", "worktree": str(worktree),
         "scratch": str(scratch)}, actor="planner")
 
-    assert lead_drops().kept == (worktree, scratch)
+    dropped = lead_drops()
+    assert [(one.place, one.check) for one in dropped.kept] == [(worktree, "A2"),
+                                                                 (scratch, "A2")]
+    assert dropped.removed == ()
     assert worktree.is_dir() and scratch.is_dir()
 
 

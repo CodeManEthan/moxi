@@ -1311,11 +1311,13 @@ def _finish(args, out) -> int:
                   f": {one.landing[:12]} on the target, which was at "
                   f"{str(one.target_before)[:12]}")
         print(f"{one.id}: {how}{landed}", file=out)
+        if one.kept is not None:
+            print(f"{one.id}: kept the checkout it added, {one.kept}", file=out)
     print(f"finished {done.stage}" if done.event is not None
           else f"{done.stage} was already recorded as finished", file=out)
-    for folder in done.kept:
-        print(f"kept {folder}: this version removes no folder at finish; removing a "
-              "finished build's folders comes with a later version", file=out)
+    _cleanup_lines(done.removed, done.kept, out)
+    if done.branch is not None:
+        print(f"branch: {done.branch}", file=out)
     if not done.released:
         print(f"{args.prog} finish: warning: the finish lock no longer pointed at this "
               "finish's own and was left as it is; moxi doctor rounds names it if it "
@@ -1431,7 +1433,7 @@ def _drop(args, out) -> int:
         print(f"ended {one['stage']}: {one['branch']} at "
               f"{'no branch' if one['tip'] is None else one['tip'][:12]}, kept in git",
               file=out)
-    _kept_lines(dropped.kept, out)
+    _cleanup_lines(dropped.removed, dropped.kept, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
 
@@ -1452,15 +1454,19 @@ def _drop_build(args, out) -> int:
           f"{'no branch' if tip['tip'] is None else tip['tip'][:12]}, kept in git; "
           f"the stage stays owed: commission it again, or take it out of the plan",
           file=out)
-    _kept_lines(dropped.kept, out)
+    _cleanup_lines(dropped.removed, dropped.kept, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
 
 
-def _kept_lines(kept, out) -> None:
-    for folder in kept:
-        print(f"kept {folder}: this version removes no folder at a drop; removing a "
-              "dropped build's folders comes with a later version", file=out)
+def _cleanup_lines(removed, kept, out) -> None:
+    """Say which of an ended build's folders were removed, and which the removal rule
+    kept, with the check that kept each."""
+    for folder in removed:
+        print(f"removed {folder}", file=out)
+    for one in kept:
+        print(f"kept {one.place}: {one.line()}; it is left for the sweep of leftover "
+              "folders", file=out)
 
 
 # -- next --------------------------------------------------------------------------------

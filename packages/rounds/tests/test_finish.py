@@ -167,21 +167,24 @@ def test_a_commit_made_while_the_actions_run_is_not_merged_and_the_finish_is_at_
     (finished,) = of_type(path, "finish.done")
     assert finished["tip"] == tip and done.tip == tip
     assert build_of(path).ended == builds.FINISHED and lock_ref(repo) is None
-    # The branch moved past what was merged, so its worktree and the late commit stay.
+    # The branch moved past what was merged, so its folders and the late commit stay.
     assert tree.root.is_dir() and repo.rev("work") == late
+    assert [(one.check, one.kind) for one in done.kept] == [("tip", "worktree"),
+                                                            ("tip", "scratch")]
+    assert done.removed == () and done.branch is None
 
 
 def test_a_target_no_worktree_has_is_merged_in_a_checkout_added_and_removed(
         ready, repo):
     path, tree = ready
     repo.switch("elsewhere", new_from="main")
-    before = repo.rev("main")
+    before, tip = repo.rev("main"), tree.rev()
 
     finishing.finish(ROUND, "B1", actor="coder")
 
     assert repo.rev("main") != before
     assert repo.git("rev-list", "--parents", "-n", "1", "main").split()[1:] == [
-        before, tree.rev()]
+        before, tip]
     place = places.worktree_dir(own.load()) / "proj-a" / ".finish-main"
     assert not place.exists()
     assert str(place) not in repo.git("worktree", "list", "--porcelain")
@@ -358,7 +361,7 @@ def test_a_gate_the_log_no_longer_meets_after_the_merge_refuses_and_a_rerun_merg
     assert done.event is not None
 
 
-def test_the_cleanup_removes_nothing_and_names_each_folder_it_kept(ready, repo):
+def test_the_cleanup_removes_both_folders_and_deletes_the_merged_branch(ready, repo):
     path, tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))
     worktree, scratch = Path(made["worktree"]), Path(made["scratch"])
@@ -366,20 +369,37 @@ def test_the_cleanup_removes_nothing_and_names_each_folder_it_kept(ready, repo):
     done = finishing.finish(ROUND, "B1", actor="coder")
 
     assert done.event is not None
-    assert done.kept == (worktree, scratch)
-    assert worktree.is_dir() and scratch.is_dir()
+    assert (done.removed, done.kept, done.branch) == ((worktree, scratch), (), "deleted")
+    assert not worktree.exists() and not scratch.exists()
+    assert repo.git("branch", "--list", "work") == ""
+
+
+def test_with_keep_branch_the_cleanup_removes_the_folders_and_keeps_the_branch(
+        ready, repo, configure):
+    configure("keep_branch = true")
+    done = finishing.finish(ROUND, "B1", actor="coder")
+    assert len(done.removed) == 2 and done.branch is None
     assert repo.git("branch", "--list", "work").strip().endswith("work")
 
 
-def test_the_command_says_each_folder_the_cleanup_kept(ready, repo, capsys):
-    path, _tree = ready
+def test_the_command_says_what_the_cleanup_removed_and_kept(ready, repo, capsys):
+    path, tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))
+    exclude = repo.root / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text(".env\n", encoding="utf-8")
+    (tree.root / ".env").write_text("TOKEN=kept only here\n", encoding="utf-8")
+
     assert main(["finish", ROUND, "B1", "--as", "coder"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    kept = [line for line in lines if line.startswith("kept ")]
-    assert [line.split(":")[0] for line in kept] == [f"kept {made['worktree']}",
-                                                     f"kept {made['scratch']}"]
-    assert all("removes no folder" in line for line in kept)
+
+    assert f"removed {made['scratch']}" in lines
+    (kept,) = [line for line in lines if line.startswith("kept ")]
+    assert kept.startswith(f"kept {made['worktree']}: B3: ") and "(.env)" in kept
+    assert (tree.root / ".env").is_file()
+    assert [line for line in lines if line.startswith("branch: ")] == [
+        "branch: kept: its worktree was kept, and git deletes no branch a worktree has "
+        "checked out"]
 
 
 # -- the command ---------------------------------------------------------------------------

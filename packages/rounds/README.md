@@ -97,7 +97,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
 | `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set, runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
-| `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. It removes no folder yet, and names each of the build's folders it kept, its worktree and its scratch folder. With no round, in a build's worktree, it finishes that build |
+| `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. With no round, in a build's worktree, it finishes that build |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
@@ -624,9 +624,27 @@ lose: its branch is gone, or it is `empty` and holds no commit of its own (nothi
 merges of the target), and it shares no commit with another build. Every other build,
 and one git can't read, is the operator's. `show` and `list --waiting` name, for each
 build to look at, who drops it and the command. The drop records the branch's tip and
-deletes nothing: the branch stays, so the work can be commissioned again, and the
-build's worktree and scratch folder are kept and named. No question or hold changes,
-and the stage stays owed.
+deletes no branch, so the work can be commissioned again. The build's worktree and
+scratch folder are removed under the removal rule below, and one it keeps is named. No
+question or hold changes, and the stage stays owed.
+
+**The removal rule.** rounds removes a build's folder only when both halves hold, read
+as it removes. Ownership: the build was made on this machine; the folder is at the place
+rounds builds for it from the roots as config stands now, with no link below the root;
+and it carries the marker naming the build, which for a worktree git must also list on
+the build's branch, its `.git` file naming the repo's own worktree folder. No lost
+work: git, run with no `GIT_` variable and with the settings that hide work overridden,
+shows no change, untracked path or hidden path in the worktree; every ignored path in it
+has a part one of the repo's `disposable` globs matches (by default only environments
+and caches, such as `.venv`, `__pycache__` and `node_modules`); every commit its `HEAD`
+and its own refs name is on a branch, tag or remote ref that stays; no submodule is
+checked out in it; it is not locked; and no other filesystem is mounted inside either
+folder. The scratch folder is disposable whole. The second half is read again just
+before the removal. A worktree goes by `git worktree remove`, never forced; a scratch
+folder is moved into rounds' trash and deleted there. A folder either half keeps is
+left, named with the check that kept it, for a later sweep. Finish's worktree gate reads
+the worktree with the same git read, so an untracked file stays a change whatever the
+user's git config says.
 
 A build is `unclear` when its target was fast-forwarded onto its work and nothing on
 record says the branch held that work first. The operator either drops it or credits
@@ -737,8 +755,9 @@ now. The full check, run with `check --full`, meets the step whatever CI reads. 
 `ci` in a project with no `check` is refused. `defaults.ratify` (and a project's
 `ratify`) picks what a round's ratification view puts to the operator. It also takes
 `defaults.check_on`, `defaults.dormant_days`, `defaults.slice_minutes` and
-`defaults.sitting_at`, and in a project's table `finish`, `keep_branch` and
-`lock_ref`. They are checked when the file is read, and nothing in this version acts on
+`defaults.sitting_at`, `defaults.disposable` (the name globs of ignored paths a
+worktree's removal may lose; an entry that is empty, holds a `/`, or would match every
+name is refused), and in a project's table `finish`, `keep_branch` and `lock_ref`. They are checked when the file is read, and nothing in this version acts on
 them. A project's `shared_paths` lists globs of paths every build of its repo shares,
 beside the common lockfiles: a change to one on the target owes a build a re-check.
 

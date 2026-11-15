@@ -83,6 +83,13 @@ default = 10
 doc = "The count of open questions at which a sitting is suggested. 0 never suggests one."
 read = "use"
 
+[defaults.disposable]
+type = "list"
+items = "str"
+default = [".venv", "__pycache__", "*.pyc", ".pytest_cache", ".ruff_cache", ".mypy_cache", "node_modules", "*.egg-info"]
+doc = "Name globs for ignored files a build's worktree may lose when rounds removes it. A worktree holding any other ignored file is kept. An entry holds no path separator and can't match every name."
+read = "use"
+
 [projects]
 type = "table"
 default = {}

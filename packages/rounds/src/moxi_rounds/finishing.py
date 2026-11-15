@@ -24,9 +24,14 @@ tip as read (its head, once the branch is gone), in this order:
    refuse with what is owed. The build is read at `T` here, not at its branch's tip
    now: `T` is what the merge took, and a commit made on the branch while the actions
    ran is not part of this finish.
-6. Clean up: this version removes nothing. Each of the build's folders still there, its
-   worktree and its scratch folder, is kept and named in `Finished.kept`, for the caller
-   to say so; the removal comes with the rule that says what may go.
+6. Clean up (`_clean_up`), with the finish lock released. After a merge action that is
+   `ok` or `found`, and only while the branch's tip is still `T`: remove the build's
+   worktree, then its scratch folder, then delete the branch with `git branch -d`,
+   unless the repo's `keep_branch` is set or its worktree was kept. With no such merge
+   the work is not on the target: the worktree and the branch stay, and only the scratch
+   folder is removed. Each removal obeys the removal rule (`removal`). A folder it keeps,
+   or a branch git won't delete, is named with why in `Finished`, and the finish stands:
+   a later sweep takes the folder once the rule holds.
 
 The finish lock is released however the verb ends once it was taken: only while it
 still points at this finish's own blob.
@@ -39,7 +44,9 @@ the branch after them is not merged; the message names the branch. Its record ho
 landing, the merge commit, and `P`, the target before it, which is `M`. A conflict is
 aborted and refused with the way through: merge the target into the branch in the
 build's worktree, check, and finish again. A merge that fails otherwise (a hook refused
-it, say) is aborted too, and recorded as failed.
+it, say) is aborted too, and recorded as failed. A checkout added for the merge is
+removed after it under the removal rule's no-lost-work half; one that half keeps is left
+and named in the action's `kept`.
 
 **A merge found in git.** Before a merge is made, the build is read as step 3 read it:
 when it is already `merged` (by a hand merge, or by a fast-forward of the target onto
@@ -71,14 +78,14 @@ from __future__ import annotations
 import shlex
 import subprocess
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from moxi import exit as exits
 from moxi import proc
 
 from . import (builds, checking, finish_actions, finish_gates, finish_lock, folders,
-               gitreads, open_builds, places, questions, write)
+               gitreads, open_builds, places, questions, removal, write)
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, Refused, Unmet
@@ -157,8 +164,10 @@ class Action:
 class Finished:
     """What `finish` did: the round, the stage, the tip `T` it finished, each action,
     the dead holder's line when its lock was cleared, the `finish.done` event (None when
-    the log already held one), the after-append callbacks that failed, and the build's
-    folders the cleanup kept."""
+    the log already held one), the after-append callbacks that failed, and what the
+    cleanup did: the folders it `removed`, those it `kept` with why, and the branch:
+    `deleted`, or why it stayed (None when the repo keeps its branches or no merge put
+    the work on the target)."""
 
     name: str
     stage: str
@@ -168,7 +177,9 @@ class Finished:
     event: dict | None = None
     released: bool = True
     failed: tuple = field(default=())
-    kept: tuple[Path, ...] = ()
+    removed: tuple[Path, ...] = ()
+    kept: tuple[removal.Kept, ...] = ()
+    branch: str | None = None
 
 
 def finish(name: str, stage: str, *, actor: str, settings=None,
@@ -299,11 +310,67 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                                wait_s=wait_s, at=at, env=env)
     finally:
         released = finish_lock.release(taken)
+    cleaned = _clean_up(view.state, name, build, tip, done, root, settings=settings,
+                        env=env)
     return Finished(name=name, stage=stage, tip=tip, actions=tuple(done),
                     cleared=None if taken.cleared is None else taken.cleared.line,
                     event=written.events[-1] if written.events else None,
-                    released=released, failed=written.failed,
-                    kept=checking.kept_folders(view.state, build))
+                    released=released, failed=written.failed, removed=cleaned.removed,
+                    kept=cleaned.kept, branch=cleaned.branch)
+
+
+# -- the cleanup -------------------------------------------------------------------------
+
+def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
+              done: list[Action], root: Path, *, settings, env) -> _Cleaned:
+    """Step 6: remove what the finish of `build` at `tip` leaves, under the removal
+    rule, and give what was done; `branch` is said on the result. Nothing here undoes
+    the finish."""
+    commissioned = checking.commission_of(state, build)
+    merged = any(one.kind == own.MERGE and one.state in (OK, FOUND) for one in done)
+    there = {kind: Path(str(commissioned[kind]))
+             for kind in (removal.WORKTREE, removal.SCRATCH)
+             if commissioned.get(kind) and Path(str(commissioned[kind])).is_dir()}
+    if not merged:
+        cleaned = removal.removes(name, commissioned, (removal.SCRATCH,),
+                                  settings=settings, env=env)
+        stays = tuple(removal.Kept(there[kind], "no merge", "no merge action put the "
+                                   "work on the target, so the worktree and the "
+                                   "branch stay", kind=kind)
+                      for kind in there if kind == removal.WORKTREE)
+        return _Cleaned(cleaned.removed, stays + cleaned.kept)
+    try:
+        now = Git(root).branch(build.branch)
+        why = (f"the branch {build.branch} is gone" if now is None else
+               f"the branch {build.branch} moved to {now[:12]} after the finish at "
+               f"{tip[:12]}")
+    except GitError as error:
+        now, why = None, f"the branch {build.branch} can't be read: {error.reason}"
+    if now != tip:
+        return _Cleaned(kept=tuple(removal.Kept(place, "tip", f"{why}, so its folders "
+                                                "and the branch stay", kind=kind)
+                                   for kind, place in there.items()))
+    keep_branch = own.build_setting(settings, build.repo, "keep_branch")
+    cleaned = removal.removes(name, commissioned, settings=settings, env=env,
+                              deletes=None if keep_branch else build.branch)
+    if keep_branch:
+        return _Cleaned(cleaned.removed, cleaned.kept)
+    if any(one.kind == removal.WORKTREE for one in cleaned.kept):
+        return _Cleaned(cleaned.removed, cleaned.kept,
+                        "kept: its worktree was kept, and git deletes no branch a "
+                        "worktree has checked out")
+    try:
+        Git(root)._run("branch", "-d", build.branch)
+    except GitError as error:
+        return _Cleaned(cleaned.removed, cleaned.kept, f"kept: {error.reason}")
+    return _Cleaned(cleaned.removed, cleaned.kept, "deleted")
+
+
+@dataclass(frozen=True)
+class _Cleaned:
+    removed: tuple[Path, ...] = ()
+    kept: tuple[removal.Kept, ...] = ()
+    branch: str | None = None
 
 
 # -- reading the build -------------------------------------------------------------------
@@ -434,47 +501,55 @@ def _merge(root: Path, build: builds.Build, tip: str, target_head: str, *, setti
            action_id: str, rerun: str) -> Action:
     git = _MergeGit(root)
     place = git.checkout_of(build.target)
-    added = None
-    if place is None:
-        place = (places.worktree_dir(settings) / build.repo
-                 / f"{CHECKOUT_PREFIX}{places.encode(build.target)}")
-        git.add_checkout(place, build.target)
-        added = place
+    if place is not None:
+        return _merge_at(place, build, tip, target_head, action_id=action_id,
+                         rerun=rerun)
+    place = (places.worktree_dir(settings) / build.repo
+             / f"{CHECKOUT_PREFIX}{places.encode(build.target)}")
+    git.add_checkout(place, build.target)
     try:
-        there = _MergeGit(place)
-        unmet = []
-        if there.has_changes():
-            unmet.append(Unmet(f"the checkout of {build.target} at {place} holds "
-                               "uncommitted changes, so the merge can't be made there",
-                               f"commit or remove them, then {rerun}"))
-        head = there.head()
-        if head != target_head:
-            unmet.append(Unmet(f"the checkout of {build.target} at {place} is at "
-                               f"{str(head)[:12]}, not the target's head "
-                               f"{target_head[:12]}",
-                               f"bring that checkout to {build.target}, then {rerun}"))
-        if unmet:
-            raise Refused(unmet)
-        code, output = there.merge(tip, f"Merge branch '{build.branch}'")
-        conflicts = code != 0 and there.conflicts()
-        if code != 0 and there.merging():
-            # A merge stopped by a conflict or by a hook is taken back whole, so the
-            # target's checkout is as it was.
-            there.abort()
-        if conflicts:
-            raise Refused([Unmet(
-                f"merging {build.branch} at {tip[:12]} into {build.target} conflicts; "
-                "the merge was aborted",
-                f"git merge --no-ff {build.target} in the build's worktree, run moxi "
-                f"rounds check, then {rerun}")])
-        if code != 0:
-            return Action(action_id, own.MERGE, FAILED, output=output)
-        landing = there.head()
-        return Action(action_id, own.MERGE, OK, landing=landing,
-                      target_before=target_head, output=output)
+        made = _merge_at(place, build, tip, target_head, action_id=action_id,
+                         rerun=rerun)
     finally:
-        if added is not None:
-            git.remove_checkout(added)
+        # The checkout made for the merge goes only when it holds nothing a removal
+        # would lose; the merge it made stands either way.
+        kept = removal.checkout_removal(root, place, settings=settings, repo=build.repo)
+    return made if kept is None else replace(made, kept=f"{kept.place}: {kept.line()}")
+
+
+def _merge_at(place: Path, build: builds.Build, tip: str, target_head: str, *,
+              action_id: str, rerun: str) -> Action:
+    there = _MergeGit(place)
+    unmet = []
+    if there.has_changes():
+        unmet.append(Unmet(f"the checkout of {build.target} at {place} holds "
+                           "uncommitted changes, so the merge can't be made there",
+                           f"commit or remove them, then {rerun}"))
+    head = there.head()
+    if head != target_head:
+        unmet.append(Unmet(f"the checkout of {build.target} at {place} is at "
+                           f"{str(head)[:12]}, not the target's head "
+                           f"{target_head[:12]}",
+                           f"bring that checkout to {build.target}, then {rerun}"))
+    if unmet:
+        raise Refused(unmet)
+    code, output = there.merge(tip, f"Merge branch '{build.branch}'")
+    conflicts = code != 0 and there.conflicts()
+    if code != 0 and there.merging():
+        # A merge stopped by a conflict or by a hook is taken back whole, so the
+        # target's checkout is as it was.
+        there.abort()
+    if conflicts:
+        raise Refused([Unmet(
+            f"merging {build.branch} at {tip[:12]} into {build.target} conflicts; "
+            "the merge was aborted",
+            f"git merge --no-ff {build.target} in the build's worktree, run moxi "
+            f"rounds check, then {rerun}")])
+    if code != 0:
+        return Action(action_id, own.MERGE, FAILED, output=output)
+    landing = there.head()
+    return Action(action_id, own.MERGE, OK, landing=landing,
+                  target_before=target_head, output=output)
 
 
 class _MergeGit(Git):
@@ -493,13 +568,6 @@ class _MergeGit(Git):
 
     def add_checkout(self, place: Path, branch: str) -> None:
         self._run("worktree", "add", "--quiet", str(place), branch)
-
-    def remove_checkout(self, place: Path) -> None:
-        try:
-            self._run("worktree", "remove", str(place))
-        except GitError:
-            # A checkout that can't be removed is left; the merge it made stands.
-            pass
 
     def head(self) -> str | None:
         return self._commit("HEAD")

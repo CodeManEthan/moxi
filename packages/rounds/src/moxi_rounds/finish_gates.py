@@ -20,8 +20,10 @@ answer.
    whenever gate 3 is met only by CI's form. With `check_on = "tip"` and gate 3 met by
    the full check, a skip or no check at all, this gate is off.
 7. **The worktree and the branch.** The worktree, while it exists, holds no change to a
-   tracked file and no untracked path. One made on another machine can't be read here
-   and does not hold. The branch, while it exists, is at `T`.
+   tracked file and no untracked path, read as the removal rule reads git, so no
+   setting of the user's hides one; ignored paths are left to the removal. One made on
+   another machine can't be read here and does not hold. The branch, while it exists,
+   is at `T`.
 8. **Steps of the user's own.** Each is done at `T`, or skipped for the stage.
 9. **Work.** The build reads `building` or `merged`.
 10. **Sharing.** The build shares commits with no other build.

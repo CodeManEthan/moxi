@@ -466,14 +466,16 @@ def test_a_build_to_look_at_waits_on_the_operator_and_one_with_fresh_work_does_n
 
     assert main(["list", "--waiting"]) == 0
     assert (f"builds idle, gone, empty, unclear, sharing or not read:\n"
-            f"  {ROUND} B1: proj-a on work; empty\n") in capsys.readouterr().out
+            f"  {ROUND} B1: proj-a on work; empty; the lead's to drop\n"
+            ) in capsys.readouterr().out
 
     (made.worktree / "feature.txt").write_text("work\n", encoding="utf-8")
     repo.git("-C", str(made.worktree), "add", "feature.txt")
     repo.git("-C", str(made.worktree), "commit", "-q", "-m", "work")
     # The test repo dates its commits in 2023, long before now.
     assert main(["list", "--waiting"]) == 0
-    assert f"  {ROUND} B1: proj-a on work; building, idle\n" in capsys.readouterr().out
+    assert (f"  {ROUND} B1: proj-a on work; building, idle; the operator's to drop\n"
+            in capsys.readouterr().out)
     write_config("[defaults]\nidle_days = 100000\n")
     assert main(["list", "--waiting", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["builds"] == []

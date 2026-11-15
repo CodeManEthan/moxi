@@ -38,9 +38,10 @@ none); the operator, any build, and one git can't read. One `build.dropped` even
 the whole drop: who, the pointer, and the branch's tip. It changes no question and no
 hold, and the stage stays owed: it is commissioned again, or taken out of the plan.
 
-**Nothing is deleted.** A drop deletes no branch, so the work can be commissioned
-again, and removes no folder: a dropped build's worktree and scratch folder are kept
-and named (`kept`), as a finish keeps them.
+**What goes.** A drop deletes no branch, so the work can be commissioned again. Once
+its event is on the log, the worktree and scratch folder of each build it ended are
+removed under the removal rule (`removal`), and those the rule keeps are named with
+why (`kept`) and left for a later sweep.
 
 `left_behind` gives the questions on a project's list that came from a round since
 dropped, for the opening of a later round to print: whoever takes that work up adopts
@@ -54,7 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import (builds, checking, ending, folders, index, moving, open_builds, pointers,
-               questions, waits, write)
+               questions, removal, waits, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadName, NoLog, NoRound, RoundsError, Unmet
@@ -78,7 +79,8 @@ class Dropped:
     where each of its open and parked questions `went` (`(Q<n>, P<n>)`, or
     `(Q<n>, WITHDRAWN)`), the `event` that dropped it and every one of the `events`
     written. `finished` says the call completed a drop that an earlier call was stopped
-    in the middle of. `kept` holds the folders of the builds that ended with it.
+    in the middle of. `removed` and `kept` hold the folders of the builds that ended
+    with it that the removal rule took and kept.
     `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
@@ -88,14 +90,16 @@ class Dropped:
     event: dict
     events: tuple[dict, ...]
     finished: bool = False
-    kept: tuple[Path, ...] = ()
+    removed: tuple[Path, ...] = ()
+    kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
 @dataclass(frozen=True)
 class BuildDropped:
     """One build as it was dropped: the round's `name`, the `stage`, who it was `by`
-    and the `record` given, the `event` written, and the build's folders `kept`.
+    and the `record` given, the `event` written, and the build's folders the removal
+    rule `removed` and `kept`.
     `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
@@ -103,7 +107,8 @@ class BuildDropped:
     by: str
     record: str
     event: dict
-    kept: tuple[Path, ...] = ()
+    removed: tuple[Path, ...] = ()
+    kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
@@ -232,11 +237,11 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
         raise NoRound(name) from None
     event = written.events[-1]
     ended = [one for one in builds.builds(written.view.state) if one.ended is None]
-    kept = tuple(folder for one in ended
-                 for folder in checking.kept_folders(written.view.state, one))
+    cleaned = _remove_folders(written.view.state, name, ended, settings)
     return Dropped(name=name, by=by, record=record,
                    went=tuple(event["questions"].items()), event=event,
-                   events=written.events, finished=finished[0], kept=kept,
+                   events=written.events, finished=finished[0],
+                   removed=cleaned.removed, kept=cleaned.kept,
                    failed=written.failed)
 
 
@@ -318,8 +323,21 @@ def drop_build(name: str, stage_id: str, *, by: str, record: str | None, actor: 
     build = builds.current(written.view.state, stage_id)
     return BuildDropped(name=name, stage=stage_id, by=by, record=record,
                         event=written.events[0],
-                        kept=checking.kept_folders(written.view.state, build),
+                        **vars(_remove_folders(written.view.state, name, [build],
+                                               settings)),
                         failed=written.failed)
+
+
+def _remove_folders(state: states.State, name: str, ended, settings) -> removal.Removed:
+    """Remove the folders of the builds `ended`, which the drop just ended, under the
+    removal rule. No branch is deleted, so B reads every branch as staying."""
+    removed, kept = [], []
+    for build in ended:
+        done = removal.removes(name, checking.commission_of(state, build),
+                               settings=settings)
+        removed += done.removed
+        kept += done.kept
+    return removal.Removed(tuple(removed), tuple(kept))
 
 
 def _tip(build: builds.Build) -> dict:

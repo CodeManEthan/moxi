@@ -60,6 +60,8 @@ def check(settings):
     flows.check(settings)
     _check_sitting_at(settings.file, "defaults.sitting_at",
                       settings["defaults.sitting_at"])
+    _check_disposable(settings.file, "defaults.disposable",
+                      settings["defaults.disposable"])
     named: dict[str, str] = {}
     for name, table in settings["projects"].items():
         first = named.setdefault(name.casefold(), name)
@@ -81,7 +83,7 @@ ROUND_KEYS = ("flow", "dir", "ratify", "trace", "idle_days", "dormant_days",
               "slice_minutes", "sitting_at")
 #: The keys read for a build, from the build's repo.
 BUILD_KEYS = ("into", "check", "ci", "finish", "check_on", "shared_paths", "keep_branch",
-              "lock_ref", "brief")
+              "lock_ref", "brief", "disposable")
 
 #: What a finish action does.
 MERGE = "merge"
@@ -169,6 +171,8 @@ def _check_project(file, name, table) -> None:
             f"in [{key}]")
     if "sitting_at" in table:
         _check_sitting_at(file, f"{key}.sitting_at", table["sitting_at"])
+    if "disposable" in table:
+        _check_disposable(file, f"{key}.disposable", table["disposable"])
     if "dir" in table:
         _check_dir(file, f"{key}.dir", name, table["dir"])
 
@@ -178,6 +182,9 @@ def _check_as_default(file, where, name, value) -> None:
     that key."""
     declared = schema().keys[f"defaults.{name}"]
     kind = declared.type
+    if kind == "list":
+        _check_strings(file, where, value)
+        return
     if kind == "enum":
         if value not in declared.values:
             raise ConfigError(file, where, f"is {value!r}, which it cannot be",
@@ -195,6 +202,43 @@ def _check_sitting_at(file, where, value) -> None:
         raise ConfigError(file, where, f"is {value}, below 0",
                           "give the count of open questions at which a sitting is "
                           "suggested, or 0 to suggest none")
+
+
+def _check_disposable(file, where, value) -> None:
+    """Refuse a `disposable` entry that is empty, holds a path separator, or would match
+    every name: one with no character outside `*`, `?` and bracket expressions."""
+    for entry in value:
+        if not entry or "/" in entry or "\\" in entry:
+            raise ConfigError(file, where, f"holds {entry!r}, which is not a name glob",
+                              "give each entry as a glob for one part of a path, such "
+                              "as .venv or *.pyc")
+        if not _fixed_part(entry):
+            raise ConfigError(file, where, f"holds {entry!r}, which matches every name, "
+                              "so no ignored file would keep a worktree",
+                              "name what may be lost, such as .venv or *.pyc")
+
+
+def _fixed_part(glob: str) -> bool:
+    """Whether `glob` holds a character outside `*`, `?` and bracket expressions, read
+    as `fnmatch` reads them."""
+    at = 0
+    while at < len(glob):
+        char = glob[at]
+        if char in "*?":
+            at += 1
+            continue
+        if char == "[":
+            end = at + 1
+            if end < len(glob) and glob[end] == "!":
+                end += 1
+            if end < len(glob) and glob[end] == "]":
+                end += 1
+            end = glob.find("]", end)
+            if end != -1:
+                at = end + 1
+                continue
+        return True
+    return False
 
 
 def _check_dir(file, where, project, value) -> None:

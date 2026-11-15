@@ -142,8 +142,17 @@ does not yet build.
   is refused otherwise, naming both ways on; the finish row in `next` and `show` waits
   where `finish` would refuse. The ruling `skip-action:B<n>=ID` is the operator's
   skip of one finish action for one stage: `finish` passes it as done, `show` lists
-  it with the other skips, and it is replaced or taken back like any skip. A finish
-  removes no folder yet: it names the build's worktree and scratch folder it kept.
+  it with the other skips, and it is replaced or taken back like any skip.
+- The removal rule: a build's worktree or scratch folder is removed only when rounds
+  made it on this machine (its place under rounds' roots, no link below them, its
+  marker naming the build) and no work is lost (git read with the settings that hide
+  work overridden: no change, untracked or hidden path, ignored path outside the
+  `disposable` globs, unreachable commit, checked-out submodule, lock or mount inside).
+  `finish` removes the folders and deletes the branch after a merge while the branch is
+  at the tip it finished, and only the scratch folder with no merge; both drops remove
+  the folders of the builds they end. A folder kept is named with the check that kept
+  it. `defaults.disposable` sets the globs. The finish gate on the worktree reads git
+  the same way.
 - `mark ROUND B<n> --brief FILE` sizes a worker's brief: its data block names one
   slice of the stage within `slice_minutes`, or one verification, or neither for a
   stage that declares no slices, which is one slice; the pass is recorded as

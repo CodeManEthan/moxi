@@ -123,6 +123,19 @@ def test_a_push_with_no_merge_pushes_the_branch_at_the_tip(ready, repo, configur
     assert actions_of(path) == [("push", "ok")] and ended(path) == builds.FINISHED
 
 
+def test_with_no_merge_the_cleanup_removes_only_the_scratch_folder(ready, repo,
+                                                                   configure):
+    _path, tree = ready
+    configure('{ do = "push", remote = "origin" }')
+
+    done = finishing.finish(ROUND, "B1", actor="coder")
+
+    (scratch,) = done.removed
+    assert not scratch.exists() and tree.root.is_dir()
+    assert [(one.check, one.kind) for one in done.kept] == [("no merge", "worktree")]
+    assert done.branch is None and repo.rev("work") == tree.rev()
+
+
 def test_a_push_git_refuses_is_recorded_failed(ready, repo, configure):
     path, _tree = ready
     configure('{ do = "merge" }', '{ do = "push", remote = "nowhere" }')
@@ -142,12 +155,13 @@ def test_a_command_runs_in_the_worktree_with_its_placeholders_after_its_start_is
     path, tree = ready
     said = tmp_path / "said.txt"
     configure('{ do = "merge" }', command("pr", 0, said))
+    tip, place = tree.rev(), tree.root.resolve()
 
     finishing.finish(ROUND, "B1", actor="coder")
 
     words, cwd = json.loads(said.read_text())
-    assert words == [ROUND, "B1", "work", tree.rev(), "main"]
-    assert Path(cwd).resolve() == tree.root.resolve()
+    assert words == [ROUND, "B1", "work", tip, "main"]
+    assert Path(cwd) == place
     assert "the command spoke" in capfd.readouterr().out
     assert actions_of(path) == [("merge", "ok"), ("pr", "started"), ("pr", "ok")]
     assert ended(path) == builds.FINISHED

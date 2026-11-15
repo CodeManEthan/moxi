@@ -267,6 +267,16 @@ def test_an_ignored_path_in_the_worktree_is_left_to_the_removal(ready, repo):
     assert gates(path) == ()
 
 
+def test_an_untracked_file_a_config_hides_from_git_status_fails_the_worktree_gate(
+        ready, repo):
+    path, tree = ready
+    repo.git("config", "status.showUntrackedFiles", "no")
+    (tree.root / "notes.txt").write_text("work kept only here\n", encoding="utf-8")
+    assert repo.git("-C", str(tree.root), "status", "--porcelain") == ""
+
+    assert finish_gates.WORKTREE in numbers(gates(path))
+
+
 def test_a_worktree_removed_holds_the_worktree_gate(ready, repo):
     path, tree = ready
     repo.git("worktree", "remove", "--force", str(tree.root))
