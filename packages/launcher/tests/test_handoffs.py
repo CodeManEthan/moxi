@@ -119,6 +119,70 @@ def test_the_pointer_names_the_path_and_date(tmp_path):
         "Read it before other work.")
 
 
+# -- other seats' handoffs -----------------------------------------------------------------
+
+
+def files(folder, *names):
+    for name in names:
+        (folder / name).write_text("x", encoding="utf-8")
+
+
+def test_a_trailing_count_is_a_count_only_beside_the_name_without_it(tmp_path):
+    files(tmp_path, "2026-10-29-lead.md", "2026-10-29-lead-2.md", "2026-10-29-worker-7.md",
+          "2026-10-30-lead-3.md", "2026-10-29-pair-1.md", "notes.md", "2026-10-29-.md")
+    read = sorted((key, h.path.name, h.count) for key, h in handoffs.keyed(tmp_path))
+    assert read == [("lead", "2026-10-29-lead-2.md", 2), ("lead", "2026-10-29-lead.md", 1),
+                    ("lead-3", "2026-10-30-lead-3.md", 1),
+                    ("pair-1", "2026-10-29-pair-1.md", 1),
+                    ("worker-7", "2026-10-29-worker-7.md", 1)]
+    assert handoffs.keyed(tmp_path / "missing") == []
+
+
+def test_others_are_each_other_keys_newest_waiting_handoff_newest_first(tmp_path):
+    files(tmp_path, "2026-10-27-lead.md", "2026-10-28-lead.md", "2026-10-26-planner.md",
+          "2026-10-30-worker-7.md", "2026-10-29-builder.md", "2026-10-29-builder-2.md")
+    found = handoffs.others(None, tmp_path, "lead")
+    assert [(key, h.path.name) for key, h in found] == [
+        ("worker-7", "2026-10-30-worker-7.md"), ("builder", "2026-10-29-builder-2.md"),
+        ("planner", "2026-10-26-planner.md")]
+    assert [key for key, _ in handoffs.others(None, tmp_path, None)] == [
+        "worker-7", "builder", "lead", "planner"]
+
+
+def test_on_one_date_the_file_written_last_comes_first(tmp_path):
+    files(tmp_path, "2026-10-29-alpha.md", "2026-10-29-beta.md")
+    os.utime(tmp_path / "2026-10-29-alpha.md", ns=(2_000_000_000, 2_000_000_000))
+    os.utime(tmp_path / "2026-10-29-beta.md", ns=(1_000_000_000, 1_000_000_000))
+    assert [key for key, _ in handoffs.others(None, tmp_path, None)] == ["alpha", "beta"]
+
+
+def test_a_file_the_seat_reads_as_its_own_is_not_another_seats(tmp_path):
+    files(tmp_path, "2026-10-29-lead-2.md")
+    assert handoffs.others(None, tmp_path, "lead") == []
+    assert [key for key, _ in handoffs.others(None, tmp_path, "planner")] == ["lead-2"]
+
+
+def test_another_key_picked_up_to_its_newest_is_not_listed(tmp_path):
+    conn = store.connect()
+    try:
+        files(tmp_path, "2026-10-29-planner.md", "2026-10-30-builder.md")
+        store.add_pick(conn, str(tmp_path / "2026-10-29-planner.md"), "planner", "shown")
+        assert [key for key, _ in handoffs.others(conn, tmp_path, "lead")] == ["builder"]
+    finally:
+        conn.close()
+
+
+def test_other_lines_show_five_then_count_the_rest(tmp_path):
+    found = [(f"seat{n}", handoffs.Handoff(tmp_path / f"2026-10-2{n}-seat{n}.md",
+                                           f"2026-10-2{n}", 1)) for n in range(7, 0, -1)]
+    lines = handoffs.other_lines(found)
+    assert lines[0] == (f"Another seat's handoff: {tmp_path / '2026-10-27-seat7.md'} "
+                        "(seat7, 2026-10-27)")
+    assert len(lines) == 6 and lines[5] == "… and 2 more"
+    assert len(handoffs.other_lines(found[:5])) == 5
+    assert handoffs.other_lines([]) == []
+
+
 # -- the folder ----------------------------------------------------------------------------
 
 

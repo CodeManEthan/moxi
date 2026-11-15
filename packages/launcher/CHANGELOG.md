@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The handoff lines answer at a resume as at a startup, and a resume of a launch the
+  endpoint holds marks the handoff it shows as picked. After the seat's own pointer, one
+  line per other seat's waiting handoff in the same folder, newest first, at most 5, then
+  `… and N more`; these lines mark nothing picked. A session with no key gets them
+  for every waiting handoff in its folder. New `handoffs.others`, `handoffs.keyed` and
+  `handoffs.other_lines`: read without a key, a name's trailing `-<n>` is a count only
+  when the same date holds the name without it.
+- The crossing handler `recycle.on_crossing` is declared on usage's
+  `moxi.usage.crossings` group, so a launch with `recycle_at_limit` gets the relaunch line
+  or the limit compact when its session passes `limit_at`. Before, nothing called it.
 - Home's Sessions row: a new component `running` (`<moxi-launcher-running>`), a row under
   Home's box that says how many launched sessions are running, and none when nothing is.
   Opened, it lists the first four with where each runs, its cache when known and the
