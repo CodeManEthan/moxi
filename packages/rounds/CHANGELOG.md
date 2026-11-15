@@ -82,6 +82,12 @@ does not yet build.
   verb prints what the build's finish still waits for, and `show` and the round note
   give each build's newest verdict and findings.
 - A user command step waits, as `check` does, for a clean worktree.
+- `mark ROUND B<n>.L<k> --fixed --commit SHA... --no-behaviour-change`: the lead marks
+  a minor or note finding fixed without a re-check, naming every commit of the fix. A
+  build's `verify-build` step is done once its newest report is publishable and every
+  commit since the head it read is named by such a mark or is a merge of the target
+  that brings no change to the build's paths; otherwise `next` says a re-check is owed
+  and the range it reads.
 - `show` and the round note say how far the target moved under each open build since
   its newest verdict, and whether that owes a re-check: one is owed when the target
   changed a path the build changes, or a lockfile or a path of the repo's

@@ -223,6 +223,9 @@ def seen_of(state: states.State, name: str, *, settings,
             here = (commissioned.get("host") in (None, places.host())
                     and commissioned.get("worktree") and worktree.is_dir())
             clean = bool(here) and read_tip(worktree, build.branch).clean
+            head = tip if tip is not None else now.status.head
+            since, moved = _since_verdict(state, build, now.status, Git(root),
+                                          head=head, settings=settings)
         except RoundsError as error:
             found[build.stage] = steps.Seen(problem=Unmet(
                 f"{build.stage} can't be read from git: {error.reason}",
@@ -234,8 +237,23 @@ def seen_of(state: states.State, name: str, *, settings,
             check=None if argv is None and declared(settings, build.repo) is None
             else tuple(argv or ()),
             values=None if tip is None else values(name, build, root=root, tip=tip),
-            ci=_ci_now(settings, build, name=name, root=root, tip=tip))
+            ci=_ci_now(settings, build, name=name, root=root, tip=tip),
+            head=head, since=since, drift=moved)
     return found
+
+
+def _since_verdict(state: states.State, build: builds.Build, status: builds.Status,
+                   git: Git, *, head: str | None, settings):
+    """The commits from the head the build's newest verdict read to `head`, None when
+    it has no verdict or git does not hold that head; and the build's drift (`drift`)."""
+    from . import drift
+
+    verdict = drift.newest_verdict(state, build)
+    if verdict is None or head is None:
+        return None, None
+    since = (tuple(git.between(verdict.head, head))
+             if verdict.head and git.present([verdict.head]) else None)
+    return since, drift.of_build(state, build, status, git, settings=settings)
 
 
 def _ci_now(settings, build: builds.Build, *, name: str, root, tip: str | None):

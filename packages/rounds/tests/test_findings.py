@@ -70,3 +70,50 @@ def test_a_design_report_s_findings_are_no_build_s():
     assert findings.of_stage(state, "B1") == ()
     assert findings.taken(state, "B1") == frozenset()
     assert findings.of_stage(state, "B9") == ()
+
+
+def mark(n: int, key: str, *commits: str) -> dict:
+    return event(n, "finding.marked", id=key, state="fixed", commits=list(commits))
+
+
+def test_a_lead_s_mark_sets_a_finding_until_a_newer_report_lists_it():
+    state = fold(commissioned(2), report(3, ("L1", "minor", "open", "a slip")),
+                 mark(4, "B1.L1", "c" * 40))
+
+    [found] = findings.of_stage(state, "B1")
+    assert (found.state, found.set_by, found.raised) == ("fixed", 4, 3)
+
+    state = fold(commissioned(2), report(3, ("L1", "minor", "open", "a slip")),
+                 mark(4, "B1.L1", "c" * 40),
+                 report(5, ("L1", "minor", "open", "still there")))
+
+    [found] = findings.of_stage(state, "B1")
+    assert (found.state, found.set_by) == ("open", 5)
+
+
+def test_a_mark_counts_for_its_own_build_only():
+    state = fold(commissioned(2), report(3, ("L1", "minor", "open", "a slip")),
+                 mark(4, "B1.L1", "c" * 40), event(5, "build.dropped", stage="B1"),
+                 commissioned(6), mark(7, "B1.L9", "d" * 40))
+    old, new = builds.builds(state)
+
+    assert findings.marked_commits(state, old) == {"c" * 40}
+    assert findings.marked_commits(state, new) == {"d" * 40}
+    assert findings.of_build(state, new) == ()
+
+
+def test_verification_counts_when_every_commit_since_is_marked_or_covered():
+    state = fold(commissioned(2),
+                 event(3, "verdict.recorded", kind="build", verdict="publishable",
+                       stage="B1", head=HEAD, findings=[]),
+                 mark(4, "B1.L1", "c" * 40))
+    [build] = builds.builds(state)
+
+    def why(since, covered=()):
+        return findings.why_not_counted(state, build, tip="e" * 40, since=since,
+                                        covered=covered)
+
+    assert why(()) is None
+    assert why(("c" * 40, "d" * 40), covered=("d" * 40,)) is None
+    assert "1 commit since the verdict" in why(("c" * 40, "d" * 40))
+    assert "can't be read from git" in why(None)

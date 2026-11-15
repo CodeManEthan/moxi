@@ -404,7 +404,8 @@ def finish_waits(state: states.State, stage: str, *, name: str,
                  settings) -> tuple[str, ...]:
     """What the finish of `stage` still waits for, of what the round's steps and
     findings say, a line each: every step of the stage before its finish that is
-    neither done nor skipped, and every open finding of its build. Reads git for the
+    neither done nor skipped, with what it waits for or owes, and every open finding
+    of its build. Reads git for the
     steps that need it."""
     from . import steps
 
@@ -416,7 +417,7 @@ def finish_waits(state: states.State, stage: str, *, name: str,
         if one.step == findings.FINISH:
             break
         if not one.settled:
-            why = "; ".join(wait.reason for wait in one.waits)
+            why = "; ".join([wait.reason for wait in one.waits] + list(one.owes))
             lines.append(f"{one.step}: {one.state}" + (f" ({why})" if why else ""))
     lines += [f"finding {one.key}: {one.severity}, open: {one.text}"
               for one in findings.of_stage(state, stage) if one.open]

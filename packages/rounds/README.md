@@ -84,6 +84,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND Q<n> --blocks B<n>[,...]\|all`, `mark ROUND Q<n> --reopen` | make a question hold up more stages, or reopen a parked one |
 | `moxi rounds mark ROUND --flow NAME` | move the round up to a heavier flow, or to its own flow's steps as the config has them now |
 | `moxi rounds mark ROUND B<n> --after B<m>[,...]` | make a stage wait for more stages |
+| `moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA... --no-behaviour-change` | the lead's mark of a minor or note finding fixed, naming every commit of the fix |
 | `moxi rounds mark ROUND thread:NAME --close\|--accept-risk --record PTR` | the lead's decision on a design that was sent back twice in a row |
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
@@ -387,6 +388,16 @@ the build holds as open, so none is dropped by being left out, and a finding new
 build takes an id no earlier report of the stage used, a dropped build's included.
 `verdict` prints the build's findings and what its finish still waits for; `show` and
 the round note give each build's newest verdict and its findings.
+
+The lead may mark a `minor` or `note` finding fixed without a re-check: `mark ROUND
+B1.L3 --fixed --commit SHA [--commit SHA]... --no-behaviour-change`, naming every
+commit of the fix, each on the build's branch. The flag is the lead's statement that
+the fix changes nothing a command, hook or page reads, decides, writes, refuses or
+accepts; without it, and for a `blocker` or `major`, the mark is refused and the fix
+gets a re-check of its diff. The build's `verify-build` step is done once its newest
+report is `publishable` and every commit since the head it read is named by a mark or
+is a merge of the target that the drift rule below accepts. Otherwise `next` says a
+re-check is owed, with the range it reads, at the step's re-check tier.
 
 A verdict records the head it read and that head's merge-base with the target. When the
 target moves on, `show` reads whether the move touches the build: `target moved 4

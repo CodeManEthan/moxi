@@ -22,6 +22,8 @@
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND --flow NAME [--as NAME]
     moxi rounds mark ROUND B<n> --after LIST [--as NAME]
+    moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
+                     --no-behaviour-change [--as NAME]
     moxi rounds mark ROUND thread:NAME --close|--accept-risk --record PTR [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
@@ -85,7 +87,13 @@ of the `models` setting than its pass is held to is recorded with the flag
 of the build's branch or an ancestor of it, and not from the build's builder. It lists
 every finding the build holds as open, in some state, and the newest report that lists
 a finding sets its state: `open`, `fixed` or `no-action`. A finding new to the build
-takes an id no earlier report of the stage used.
+takes an id no earlier report of the stage used. The lead may mark a `minor` or `note`
+finding fixed without a re-check, `mark ROUND B<n>.L<k> --fixed --commit SHA...
+--no-behaviour-change`, naming every commit of the fix and stating that it changes no
+behaviour. A build's verification counts at its tip when its newest report is
+`publishable` and every commit since the head it read is named by such a mark or is a
+merge of the target that brought no change to the build's paths; otherwise a re-check
+of the commits since is owed.
 `commission` authorizes the build of a stage of the plan once its step waits for
 nothing: it reads the target (the repo's `into` setting, else the branch checked out
 at the project's root) and takes the target's head as the build's base, cuts the
@@ -601,7 +609,7 @@ def _carry(args, out) -> int:
 def _declare_mark(verbs) -> None:
     said = ("Change a record in a way that is not the operator's ruling: make a "
             "question of a round hold up more stages, reopen a parked one, make a "
-            "stage wait for more stages, move a "
+            "stage wait for more stages, mark a minor finding of a build fixed, move a "
             "round up to a heavier flow, decide a thread of the design's "
             "verification, or say that rulings were shown to the "
             "operator as recorded, with a pointer to where.")
@@ -612,7 +620,8 @@ def _declare_mark(verbs) -> None:
                              "rulings of its register")
     parser.add_argument("id", metavar="ID", nargs="?",
                         help="what is marked: a question, Q<n>; with --after, a "
-                             "stage, B<n>; with --close or --accept-risk, a thread "
+                             "stage, B<n>; with --fixed, a build's finding, "
+                             "B<n>.L<k>; with --close or --accept-risk, a thread "
                              "of the design's verification, thread:NAME, the name "
                              "in letters, digits and . _ -; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
@@ -631,6 +640,10 @@ def _declare_mark(verbs) -> None:
                            "be a stage of the round, and none may wait for B<n>; "
                            "only the operator takes one off (rule "
                            "unafter:B<n>=B<m>)")
+    form.add_argument("--fixed", action="store_true",
+                      help="the lead's mark that a minor or note finding of a build "
+                           "is fixed, with no re-check; needs every commit of the fix "
+                           "as --commit and --no-behaviour-change")
     form.add_argument("--flow", metavar="NAME",
                       help="move the round up to this flow: one later in the tiers "
                            "that has every step the round follows, or the round's "
@@ -648,6 +661,14 @@ def _declare_mark(verbs) -> None:
     form.add_argument("--shown", action="store_true",
                       help="the rulings were put in front of the operator as "
                            "recorded; needs --record")
+    parser.add_argument("--commit", metavar="SHA", action="append", default=[],
+                        help="with --fixed, a commit of the fix, on the build's "
+                             "branch; once for each")
+    parser.add_argument("--no-behaviour-change", action="store_true",
+                        help="with --fixed, the lead's statement that the fix "
+                             "changes nothing a command, hook or page reads, "
+                             "decides, writes, refuses or accepts; a fix that does "
+                             "gets a re-check of its diff")
     parser.add_argument("--record", metavar="PTR",
                         help="with --close or --accept-risk, a pointer to where the "
                              "lead wrote why, one token: comms:<digits>, "
@@ -669,7 +690,14 @@ def _mark(args, out) -> int:
     if args.id is None:
         raise BadArgument("nothing says what is marked",
                           "name the question, Q<n>, with --after the stage, B<n>, "
-                          "or with --shown the rulings")
+                          "with --fixed the finding, B<n>.L<k>, or with --shown the "
+                          "rulings")
+    if not args.fixed and (args.commit or args.no_behaviour_change):
+        raise BadArgument("--commit and --no-behaviour-change go with --fixed, the "
+                          "lead's mark of a finding", "leave them out, or mark the "
+                          "finding with --fixed")
+    if args.fixed:
+        return _mark_fixed(args, out)
     if args.shown:
         return _mark_shown(args, out)
     if args.close or args.accept_risk:
@@ -688,6 +716,22 @@ def _mark(args, out) -> int:
     print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
           file=out)
     _warn_of(marked.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_fixed(args, out) -> int:
+    """`mark B<n>.L<k> --fixed`: the lead's mark of a minor finding fixed."""
+    from . import fixes
+
+    if args.record is not None:
+        raise BadArgument("the lead's mark of a finding carries no pointer: it names "
+                          "the commits of the fix", "leave --record out")
+    done = fixes.fix(args.target, args.id, args.commit,
+                     no_behaviour_change=args.no_behaviour_change, actor=_actor(args))
+    found = done.finding
+    print(f"finding {found.key}: {found.severity}, {found.state}   commits: "
+          f"{', '.join(one[:12] for one in done.event['commits'])}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
     return codes.OK
 
 

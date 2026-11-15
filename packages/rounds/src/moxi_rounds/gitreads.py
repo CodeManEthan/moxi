@@ -3,12 +3,12 @@
 `Git(root)` runs plain git in the repo at `root` and answers one question per method:
 the top of the work tree `root` is in, which branch is checked out at the root, whether
 its work tree holds anything not committed, whether a name is one git takes for a branch,
-which commit a branch is, which of some commits git still has, a commit's tree,
-parents and commit date, whether one commit is an ancestor of another, the merge bases
-of two, the one commit of several that has the others as ancestors, the merge that
-brought a commit onto a branch's first-parent line, the commits of a range, whether
-a range holds a commit that is not a merge, and the paths two commits differ in. It
-writes nothing.
+which commit a branch or a commit's short id is, which of some commits git still has, a
+commit's tree, parents and commit date, whether one commit is an ancestor of another,
+the merge bases of two, the one commit of several that has the others as ancestors, the
+merge that brought a commit onto a branch's first-parent line, the commits of a range,
+whether a range holds a commit that is not a merge, and the paths two commits differ
+in. It writes nothing.
 
 git runs with the caller's environment less every `GIT_` variable, so a variable meant
 for another repo or another git never steers what is read here.
@@ -121,6 +121,13 @@ class Git:
         code, out = self._run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
                               ok=(0, 1))
         return out.strip() if code == 0 and out.strip() else None
+
+    def commit_of(self, prefix: str) -> str | None:
+        """The whole id of the one commit whose id starts with the hex `prefix`, or None
+        when git holds none, or more than one, by it."""
+        if not re.fullmatch(r"[0-9a-fA-F]{4,64}", prefix or ""):
+            return None
+        return self._commit(prefix.lower())
 
     def present(self, commits: Iterable[str]) -> tuple[str, ...]:
         """The commits of `commits` that git has, in the order given, each once."""

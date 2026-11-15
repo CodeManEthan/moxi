@@ -19,7 +19,10 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
   step that verifies the design the `pass` asked for, `why`, the two frozen `files` a
   re-check compares, and `instead`, what is done in place of a pass.
 - `ci` and `owes`: in the `check` group of a build whose repo declares `ci`, its newest
-  read of CI and what each form of the gate still owes at the tip.
+  read of CI and what each form of the gate still owes at the tip. In the
+  `verify-build` group, `owes` says why the build's verification does not count at its
+  tip, with the range a re-check reads, and once a report of the build is on record
+  the group's tier is the one a re-check is held to.
 - `changed`: in the group of a stage with an open build, each ruling recorded since
   the build's block was printed that reaches the stage (`commission_block.changed`),
   so a correction reaches a build already commissioned.
@@ -50,7 +53,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import (brake, builds, checking, ci, closing, commission_block, flows,
+from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
                model_tiers, report_block, showing, stages, steps, tracing, versions)
 from . import settings as own
 from . import shown as showings
@@ -177,6 +180,23 @@ def _check(found: showing.Shown, step: steps.Step) -> dict:
     return said
 
 
+def _verify_build(found: showing.Shown, step: steps.Step) -> dict:
+    """A build's verification: the diff of its branch, the report's block, and the
+    tier of a re-check once a report of the build is on record."""
+    build = builds.current(found.state, step.stage)
+    said = {"reads": _named(step),
+            "write": (f"a report in {found.folder} with the block from: moxi rounds "
+                      f"next --schema {report_block.BUILD}"),
+            "then": [f"moxi rounds verdict {found.name} <your report>"]}
+    if build is None or build.ended is not None:
+        return said
+    said["reads"] = [f"the diff {build.base[:7]}..{build.branch}", *said["reads"]]
+    if drift.newest_verdict(found.state, build) is not None:
+        said["tier"] = model_tiers.held_to(found.state.steps, steps.VERIFY_BUILD,
+                                           report_block.RECHECK)
+    return said
+
+
 def _command(found: showing.Shown, step: steps.Step) -> dict:
     """The lines of a command step of the user's own."""
     name = step.step
@@ -189,7 +209,8 @@ def _command(found: showing.Shown, step: steps.Step) -> dict:
 #: and `then`, and any key of its own.
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
     steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket,
-    steps.COMMISSION: _commission, steps.BUILD: _build, steps.CHECK: _check}
+    steps.COMMISSION: _commission, steps.BUILD: _build, steps.CHECK: _check,
+    steps.VERIFY_BUILD: _verify_build}
 
 
 def _waits(step: steps.Step) -> list[dict]:

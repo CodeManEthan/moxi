@@ -66,7 +66,14 @@ other, so its row says when the stage reads as skipped.
   where that is not given the step waits on a read of git. A stage whose repo declares
   no check has no `check` step, where `Asked.seen` says so.
 
-**What git says.** The `build` and `check` rows, and a command step's, read a stage's open build as the
+- `verify-build` of a stage: done once the build's verification counts at its tip
+  (`findings.why_not_counted`): its newest build verdict is `publishable` and every
+  commit since the head it read is named by a lead's mark or brought by a merge of
+  the target the drift rule accepts; and once the build is finished. Until then it
+  waits for the build to have work, and `Step.owes` says why a re-check is owed, with
+  the range to read. It is read from what `Asked.seen` says of the stage's build.
+
+**What git says.** The `build`, `check` and `verify-build` rows, and a command step's, read a stage's open build as the
 caller read it from git (`Asked.seen`, which `checking.seen_of` gives). Every reader
 of a step passes it. A caller that read nothing of git gets such a step as `WAITING`
 on that read, with `Step.unread` set, and is to read git before it says the step: the
@@ -98,8 +105,8 @@ import dataclasses
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
-from . import (brake, checking, flows, holds, questions, skips, stages, tracing,
-               versions)
+from . import (brake, builds, checking, findings, flows, holds, questions, skips, stages,
+               tracing, versions)
 from . import ci as ci_reads
 from . import state as states
 from .errors import Unmet
@@ -139,8 +146,11 @@ class Seen:
     when the repo declares no check; `values`, what the placeholders of a command read
     for the build at the tip (`checking.values`); `ci`, what CI's form of the check
     gate compares at the tip where the repo declares `ci` (`ci.Now`), else None;
-    `problem`, what kept the build from being read, in which case nothing else is
-    known."""
+    `head`, the tip, or the build's head where its branch is gone; `since`, the commits
+    from the head its newest build verdict read to `head`, None with no such verdict or
+    when git does not hold that head; `drift`, the build's drift against that verdict
+    (`drift.Drift`), None with none; `problem`, what kept the build from being read, in
+    which case nothing else is known."""
 
     state: str | None = None
     tip: str | None = None
@@ -148,6 +158,9 @@ class Seen:
     check: tuple[str, ...] | None = None
     values: Mapping[str, str] | None = None
     ci: ci_reads.Now | None = None
+    head: str | None = None
+    since: tuple[str, ...] | None = None
+    drift: object = None
     problem: Unmet | None = None
 
 
@@ -375,6 +388,36 @@ def _check(state: states.State, about: Asked) -> Step:
     return Step(CHECK, WAITING if waits else READY, stage=stage, waits=waits, owes=owes)
 
 
+VERIFY_BUILD = findings.VERIFY_BUILD
+
+
+def _verify_build(state: states.State, about: Asked) -> Step:
+    stage = about.stage
+    built = None if stage is None else stages.build_of(state, stage)
+    if built is None:
+        return Step(VERIFY_BUILD, NOT_DUE, stage=stage)
+    if built == stages.FINISHED:
+        return Step(VERIFY_BUILD, DONE, stage=stage)
+    seen = (about.seen or {}).get(stage)
+    if seen is None:
+        return _not_read(VERIFY_BUILD, stage, f"whether {stage}'s verification counts "
+                         "at its tip", about.name)
+    if seen.problem is not None:
+        return Step(VERIFY_BUILD, WAITING, stage=stage, waits=(seen.problem,))
+    build = builds.current(state, stage)
+    covered = () if seen.drift is None else seen.drift.covered
+    why = findings.why_not_counted(state, build, tip=seen.head, since=seen.since,
+                                   covered=covered)
+    if why is None:
+        return Step(VERIFY_BUILD, DONE, stage=stage)
+    waits = ()
+    if seen.state not in checking.WITH_WORK:
+        waits = (Unmet(f"{stage} has no work to verify: it reads {seen.state}",
+                       "commit the build's work on its branch"),)
+    return Step(VERIFY_BUILD, WAITING if waits else READY, stage=stage, waits=waits,
+                owes=(why,))
+
+
 def _before_a_run(stage: str, seen: Seen, what: str) -> tuple[Unmet, ...]:
     """What a run at a build's tip waits for, as the verb that runs it checks before it
     runs: work on the branch and a clean worktree. A row that read ready where the verb
@@ -421,7 +464,8 @@ def command_row(step: str) -> Row:
 #: and a skipped step is read before its row is asked. A command step of the user's
 #: own has no row here: `row_of` gives it its own.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
-                        COMMISSION: _commission, BUILD: _build, CHECK: _check}
+                        COMMISSION: _commission, BUILD: _build, CHECK: _check,
+                        VERIFY_BUILD: _verify_build}
 
 
 def row_of(step: str, entry: Mapping | None) -> Row | None:
