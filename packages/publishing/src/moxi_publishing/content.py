@@ -60,6 +60,10 @@ SHOWN_CHARS = 100
 DIFF_FLAGS = ("--unified=0", "--no-renames", "--text", "--no-textconv", "--no-ext-diff",
               "--no-color", "--no-relative", "--src-prefix=a/", "--dst-prefix=b/", "-z")
 
+#: git's option that makes a read ignore `refs/replace/*`. A push sends the objects
+#: themselves, so every read here sees those, not a local stand-in.
+NO_REPLACE = "--no-replace-objects"
+
 _HUNK = re.compile(rb"@@ -[0-9]+(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@")
 _ESCAPES = {ord("a"): 7, ord("b"): 8, ord("t"): 9, ord("n"): 10, ord("v"): 11,
             ord("f"): 12, ord("r"): 13, ord('"'): 34, ord("\\"): 92}
@@ -366,7 +370,7 @@ def pre_commit(ctx):
         return no_flag(ctx, PIECE_ID)
 
     def git(*args, stdin_data=None):
-        return ctx.git(*args, stdin_data=stdin_data, binary=True)
+        return ctx.git(NO_REPLACE, *args, stdin_data=stdin_data, binary=True)
 
     try:
         lines, names = staged(git, ctx.git_dir)
@@ -395,7 +399,7 @@ def scan_tree(root: str, rev: str = "HEAD", *, ci: bool = False) -> list[str]:
     from moxi_repo.api import git as _git
 
     def git(*args, stdin_data=None):
-        return _git(root, *args, stdin_data=stdin_data, binary=True)
+        return _git(root, NO_REPLACE, *args, stdin_data=stdin_data, binary=True)
 
     done = git("rev-parse", "--verify", "--quiet", "--end-of-options", f"{rev}^{{tree}}")
     if done.returncode != 0:
@@ -434,5 +438,6 @@ def scan_tree(root: str, rev: str = "HEAD", *, ci: bool = False) -> list[str]:
 
 
 __all__ = ["CONTENT", "PIECE_ID", "SETS", "CI_SETS", "NAME_PATH", "DIFF_FLAGS",
-           "FileChange", "ScanError", "parse_patch", "residue_allowed", "read_objects",
-           "read_blobs", "allowlists", "judge", "staged", "pre_commit", "scan_tree"]
+           "NO_REPLACE", "FileChange", "ScanError", "parse_patch", "residue_allowed",
+           "read_objects", "read_blobs", "allowlists", "judge", "staged", "pre_commit",
+           "scan_tree"]

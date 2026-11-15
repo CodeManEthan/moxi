@@ -245,12 +245,15 @@ class Workspace:
 
 
 def repo_git(root: str):
-    """A git runner for the repo at `root`, as `content.read_objects` takes one."""
+    """A git runner for the repo at `root`, as `content.read_objects` takes one. It reads
+    with replace refs off, as the pieces do."""
     from moxi_repo.api import git
+
+    from moxi_publishing.content import NO_REPLACE
 
     def run(*args, stdin_data=None, timeout_s=None):
         extra = {} if timeout_s is None else {"timeout_s": timeout_s}
-        return git(root, *args, stdin_data=stdin_data, binary=True, **extra)
+        return git(root, NO_REPLACE, *args, stdin_data=stdin_data, binary=True, **extra)
 
     return run
 

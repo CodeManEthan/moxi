@@ -223,7 +223,10 @@ class _Push(_Reader):
         self.commits: list[str] = []
 
     def git(self, *args, stdin_data=None, timeout_s=None):
-        return self.ctx.git(*args, stdin_data=stdin_data, timeout_s=timeout_s, binary=True)
+        from moxi_publishing.content import NO_REPLACE
+
+        return self.ctx.git(NO_REPLACE, *args, stdin_data=stdin_data, timeout_s=timeout_s,
+                            binary=True)
 
     def checked(self, *args, stdin_data=None, timeout_s=None) -> bytes:
         from moxi_publishing.content import ScanError, _first_line
