@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Every setting carries page fields, which `moxi config usage show --json` prints and
+  the settings page draws: a plain label, a line where the label can't carry it, the
+  unit of each wait, age and token count, seven settings shown first (the default
+  warn-at mark, the worker ceiling and its two numbers, the Claude Code folders to read,
+  the weekly restart-point measure and the price table's age), the rest under Prices,
+  Reading, Limits, Marks, Restart point and Worker ceiling, and a can-hurt mark on
+  turning the worker ceiling off. usage needs moxi 0.1.9 or later.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_usage.api.report`: `folder` is now `work_dir`. The
   CLI flag `--folder`, the page's query parameter and the report's JSON filter key stay
