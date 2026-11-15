@@ -442,7 +442,7 @@ def _on_another_device(found: os.stat_result) -> os.stat_result:
     return os.stat_result(fields)
 
 
-def test_a_folder_below_the_root_on_another_device_keeps_the_dir(made, monkeypatch):
+def test_a_part_below_the_root_on_another_device_keeps_the_dir(made, monkeypatch):
     _path, tree, event = made
     place = Path(os.path.realpath(event["worktree"]))
     real_lstat = os.lstat
@@ -497,7 +497,7 @@ def test_an_entry_on_another_device_inside_keeps_the_dir(made, monkeypatch, kind
     assert (place / "node_modules" / "data.bin").is_file()
 
 
-def test_a_worktree_of_a_repo_whose_git_folder_is_elsewhere_goes(repo, tmp_path,
+def test_a_worktree_of_a_repo_made_with_a_separate_git_dir_goes(repo, tmp_path,
                                                                   write_config):
     repo.git("init", "-q", f"--separate-git-dir={tmp_path / 'git-folder'}")
     assert (repo.root / ".git").is_file()

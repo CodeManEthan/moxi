@@ -534,7 +534,7 @@ def _mounted(repo, tree, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("plant", [_untracked_hidden_by_config, _skip_worktree, _ignored,
                                    _commit_no_ref_holds, _submodule, _locked, _mounted])
-def test_no_drop_or_sweep_takes_work_or_a_folder_rounds_did_not_make(
+def test_no_drop_or_sweep_takes_work_or_a_dir_rounds_did_not_make(
         made, later, repo, write_config, tmp_path, monkeypatch, plant):
     from moxi_rounds import dropping
 
