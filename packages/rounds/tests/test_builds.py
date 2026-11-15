@@ -534,6 +534,22 @@ def test_the_target_fast_forwarded_onto_a_checked_branch_reads_merged_at_the_new
         MERGED, builds.FAST_FORWARD, moved)
 
 
+@pytest.mark.parametrize("gone", [False, True])
+def test_a_read_of_ci_is_a_reading_like_a_check(a_round, git_repo, gone):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    tip = work_on(git_repo)
+    a_round.add("ci.read", stage="B1", commit=tip, merge_base=base, status_argv=["true"],
+                ids_argv=["true"], workflows={}, reading="passed")
+    git_repo.switch("main")
+    git_repo.git("merge", "-q", "--ff-only", "work")
+    if gone:
+        git_repo.git("branch", "-D", "work")
+    status = read(a_round, git_repo)
+    assert (status.state, status.by, status.target_before) == (
+        MERGED, builds.FAST_FORWARD, base)
+
+
 def test_a_hand_merge_that_changed_the_target_reads_merged_at_its_first_parent(
         a_round, git_repo):
     a_round.commission(base=git_repo.rev("main"))

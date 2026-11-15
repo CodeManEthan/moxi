@@ -16,8 +16,8 @@ of the build since. `landings(state)` gives every landing of a round's log with 
 repo and target of its build.
 
 **Its readings.** Each record that read the build at a commit holds that commit `h` and
-`x`, the merge-base of `h` and the target's head at that moment: a check's run and a
-verdict on a report of the build. `READINGS` names the field of each. The operator's
+`x`, the merge-base of `h` and the target's head at that moment: a check's run, a read
+of CI and a verdict on a report of the build. `READINGS` names the field of each. The operator's
 credit of a fast-forward (`credit:B<n>`, a ruling naming the build by its commission's
 line) is one more, while it stands: `h` is the head it recorded and `x` the build's
 base, so a build it credits reads `merged` with the base as `P`. A reading is
@@ -153,6 +153,7 @@ FAST_FORWARD = "a fast-forward"
 READINGS = {
     "check.ran": ("commit", "merge_base"),
     "verdict.recorded": ("head", "merge_base"),
+    "ci.read": ("commit", "merge_base"),
 }
 #: Each type of record that holds a finish's tip, and its field for it.
 TIPS = {"finish.action": "tip", "finish.done": "tip"}
