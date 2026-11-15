@@ -135,11 +135,15 @@ can't be written refuses the push.
 
 ## Scanning a whole tree
 
-`moxi publishing scan [PATH] [--rev REV] [--ci]` reads every file of the tree at `REV`
-(default `HEAD`) as git stores it, and every path name, as the content piece reads what a
-commit adds, with the allowlists of that tree. It prints one line per hit and exits 3 when
-there is one, 1 when the tree can't be read. `--ci` leaves out the private names list and
-the private allowlist, which exist only on your machine, for a scan run on a server.
+`moxi publishing scan [PATH] [--rev REV] [--since REV] [--ci]` reads every file of the
+tree at `--rev` (default `HEAD`) as git stores it, and every path name, as the content
+piece reads what a commit adds, with the allowlists of that tree. When `--rev` names an
+annotated tag, each tag object of its chain is read too: message and tagger. With
+`--since`, each commit of `SINCE..REV` is read whole as well: its message and every header
+(author, committer, a merged signed tag), as the push piece reads them. It prints one line
+per hit and exits 3 when there is one, 1 when the tree can't be read. `--ci` leaves out the
+private names list and the private allowlist, which exist only on your machine, for a scan
+run on a server.
 
 ## Releases
 

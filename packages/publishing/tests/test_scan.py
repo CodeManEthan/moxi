@@ -113,3 +113,43 @@ def test_a_tree_that_cannot_be_read_fails(tmp_path, gitenv, names, capsys, args)
 def test_not_a_repo_is_a_usage_error(tmp_path, gitenv, capsys):
     code, _, err = scan(capsys, str(tmp_path))
     assert code == 2 and "no git work tree" in err
+
+
+# -- the commits a push brings: --since -----------------------------------------------------
+
+def test_since_reads_each_commits_message_and_headers(repo, names, capsys):
+    base = git(repo, "rev-parse", "HEAD").stdout.strip()
+    put(repo, "a.md", "clean\n", message=f"Add a\n\nsee {POINTER}\n")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "Quiet",
+        env={"GIT_AUTHOR_NAME": "bobsecret"})
+    code, out, _ = scan(capsys, str(repo))
+    assert code == 0
+    code, out, err = scan(capsys, str(repo), "--since", base)
+    assert code == 3
+    lines = out.splitlines()
+    assert any(line.endswith("author header: private-names/private-name") for line in lines)
+    assert any(f"message line 3, session-pointer: see {POINTER}" in line for line in lines)
+    assert "bobsecret" not in out + err
+    # The commits the base already holds aren't read again.
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    assert scan(capsys, str(repo), "--since", head)[0] == 0
+
+
+def test_since_with_ci_leaves_out_private_names(repo, names, capsys):
+    base = git(repo, "rev-parse", "HEAD").stdout.strip()
+    git(repo, "commit", "-q", "--allow-empty", "-m", "Quiet",
+        env={"GIT_AUTHOR_NAME": "bobsecret"})
+    assert scan(capsys, str(repo), "--since", base, "--ci")[0] == 0
+    git(repo, "commit", "-q", "--allow-empty", "-m", f"key {token(5)}")
+    code, out, _ = scan(capsys, str(repo), "--since", base, "--ci")
+    assert code == 3 and "credentials/github-pat" in out
+
+
+def test_a_tag_named_as_rev_has_its_message_and_tagger_read(repo, names, capsys):
+    git(repo, "tag", "-a", "-m", f"Release\n\nsee {POINTER}", "docs-1",
+        env={"GIT_COMMITTER_EMAIL": "bob@private.example.test"})
+    code, out, _ = scan(capsys, str(repo), "--rev", "docs-1", "--since", "HEAD")
+    assert code == 3
+    assert "tag docs-1 tagger header: private-names/" in out
+    assert "tag docs-1 message line 3, session-pointer" in out
+    assert scan(capsys, str(repo), "--rev", "docs-1")[0] == 3

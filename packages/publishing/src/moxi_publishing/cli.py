@@ -3,7 +3,7 @@
     moxi publishing enable PATH [--github OWNER/REPO] [--set KEY=VALUE]...
     moxi publishing disable PATH
     moxi publishing list [--json]
-    moxi publishing scan [PATH] [--rev REV] [--ci]
+    moxi publishing scan [PATH] [--rev REV] [--since REV] [--ci]
     moxi publishing bump PACKAGE... [--part patch|minor|major] [--path PATH]
     moxi publishing tag PACKAGE [--at REV] [--remote NAME] [--path PATH]
     moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]
@@ -65,6 +65,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("path", metavar="PATH", nargs="?", default=".",
                    help="a path inside the repo, or a project key (default: here)")
     p.add_argument("--rev", default="HEAD", help="the commit or tree (default: HEAD)")
+    p.add_argument("--since", metavar="REV",
+                   help="also read each commit of REV..--rev whole: its message and every "
+                        "header (author, committer, a merged signed tag). When --rev names "
+                        "an annotated tag, its message and tagger are read either way")
     p.add_argument("--ci", action="store_true",
                    help="leave out the private names list and the private allowlist, "
                         "which only your machine has")
@@ -138,11 +142,15 @@ def _release(args, prog: str) -> int:
 def _scan(args, prog: str) -> int:
     from moxi_secrets import AllowlistError, SetUnavailable
 
-    from moxi_publishing import content, flag
+    from moxi_publishing import content, flag, tags
 
     try:
         root = flag.work_tree(args.path)
         refused = content.scan_tree(root, args.rev, ci=args.ci)
+        from moxi_publishing import push
+
+        refused += push.judge_history(tags.repo_git(root), args.rev, args.since,
+                                      sets=content.CI_SETS if args.ci else content.SETS)
     except flag.Failure as exc:
         print(f"{prog}: {exc.text}", file=sys.stderr)
         return exc.code

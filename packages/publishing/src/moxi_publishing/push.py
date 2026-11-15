@@ -129,10 +129,87 @@ def _identity(value: str) -> tuple[str, str]:
     return name.strip(), rest.partition(">")[0].strip()
 
 
-class _Push:
+class _Reader:
+    """Judges commit and tag objects' headers and messages, adding to `reasons`."""
+
+    def __init__(self, sets=None):
+        from moxi_publishing.content import SETS
+
+        self.sets = SETS if sets is None else tuple(sets)
+        self.reasons: list[str] = []
+
+    def judge_headers(self, where: str, headers, skip) -> None:
+        """Every header but those in `skip`, through secrets' sets at `@author`; a merged
+        signed tag's text also as a tag."""
+        from moxi_secrets import scan_lines
+
+        lines, n = [], 0
+        for name, value in headers:
+            if name in skip:
+                continue
+            if name == "mergetag":
+                self.judge_tag(f"{where} mergetag", value.encode("utf-8", "surrogateescape"))
+                continue
+            for part in value.split("\n"):
+                n += 1
+                lines.append((AUTHOR_PATH, n, f"{name} {part}"))
+        for hit in scan_lines(lines, self.sets):
+            name = lines[hit.line - 1][2].partition(" ")[0]
+            self.reasons.append(f"{where} {name} header: {hit.hit.set}/{hit.hit.rule}")
+
+    def judge_tag(self, where: str, data: bytes) -> None:
+        from moxi_publishing import message
+
+        headers, text = _headers(data)
+        self.judge_headers(where, headers, skip=("object", "type"))
+        judged = message.judge(text, sets=self.sets)
+        self.reasons += [f"{where} message {line}" for _, line in judged.refusals]
+
+
+def judge_history(git, rev: str, since: str | None, *, sets=None) -> list[str]:
+    """The refusals for what `rev` brings beyond `since`: each commit of `since..rev`, its
+    headers whole and its message, and, when `rev` names an annotated tag, each tag object
+    of its chain. `git(*args, stdin_data=)` runs git with bytes on stdout. Raises
+    `content.ScanError`."""
+    from moxi_publishing import message
+    from moxi_publishing.content import ScanError, _first_line, read_objects
+
+    reader = _Reader(sets)
+    obj = rev
+    seen = set()
+    while True:
+        found = read_objects(git, [obj])[obj]
+        if found is None:
+            raise ScanError(f"{obj} names no object here")
+        if found[0] != "tag" or obj in seen:
+            break
+        seen.add(obj)
+        reader.judge_tag(f"tag {rev}", found[1])
+        obj = dict(_headers(found[1])[0]).get("object", "").strip()
+    if since is None:
+        return reader.reasons
+    done = git("rev-list", f"{since}..{rev}", "--")
+    if done.returncode != 0:
+        raise ScanError(f"git rev-list failed: {_first_line(done.stderr)}")
+    commits = done.stdout.decode("ascii").split()
+    raw = read_objects(git, commits)
+    for sha in commits:
+        kind, data = raw[sha] or ("missing", b"")
+        if kind != "commit":
+            reader.reasons.append(f"{sha[:12]}: can't be read as a commit")
+            continue
+        headers, text = _headers(data)
+        reader.judge_headers(sha[:12], headers, skip=("tree", "parent"))
+        judged = message.judge(text, sets=reader.sets)
+        reader.reasons += [f"{sha[:12]} message {line}" for _, line in judged.refusals]
+    return reader.reasons
+
+
+class _Push(_Reader):
     """One push being judged: the context, its settings, and what it found."""
 
     def __init__(self, ctx):
+        super().__init__()
         self.ctx = ctx
         settings = ctx.settings
         self.main = _one(settings, MAIN) or "main"
@@ -142,7 +219,6 @@ class _Push:
         self.remote = ctx.args[0] if ctx.args else ""
         self.url = ctx.args[1] if len(ctx.args) > 1 else self.remote
         self.updates = ctx.updates
-        self.reasons: list[str] = []
         self.word = os.environ.get(WORD_ENV)
         self.commits: list[str] = []
 
@@ -400,35 +476,6 @@ class _Push:
         values = done.stdout.decode("utf-8", "surrogateescape").split("\n")
         return {v.strip().lower() for v in values if v.strip()}
 
-    def judge_headers(self, where: str, headers, skip) -> None:
-        """Every header but those in `skip`, through secrets' sets at `@author`; a merged
-        signed tag's text also as a tag."""
-        from moxi_secrets import scan_lines
-
-        from moxi_publishing.content import SETS
-
-        lines, n = [], 0
-        for name, value in headers:
-            if name in skip:
-                continue
-            if name == "mergetag":
-                self.judge_tag(f"{where} mergetag", value.encode("utf-8", "surrogateescape"))
-                continue
-            for part in value.split("\n"):
-                n += 1
-                lines.append((AUTHOR_PATH, n, f"{name} {part}"))
-        for hit in scan_lines(lines, SETS):
-            name = lines[hit.line - 1][2].partition(" ")[0]
-            self.reasons.append(f"{where} {name} header: {hit.hit.set}/{hit.hit.rule}")
-
-    def judge_tag(self, where: str, data: bytes) -> None:
-        from moxi_publishing import message
-
-        headers, text = _headers(data)
-        self.judge_headers(where, headers, skip=("object", "type"))
-        judged = message.judge(text)
-        self.reasons += [f"{where} message {line}" for _, line in judged.refusals]
-
     def judge_content(self, commits: list[str], content) -> None:
         import re
 
@@ -555,4 +602,4 @@ def pre_push(ctx):
 
 
 __all__ = ["PUSH", "PIECE_ID", "MAIN", "PROTECTED", "WORD_REQUIRED", "FREE_REF", "WORD_ENV",
-           "MAX_TAGS", "LOG_FILE", "log_path", "pre_push"]
+           "MAX_TAGS", "LOG_FILE", "log_path", "judge_history", "pre_push"]
