@@ -81,10 +81,13 @@ class OpenBuilds:
                 "unreadable": list(self.unreadable), "no_folder": list(self.no_folder)}
 
 
-def read(repo: str | None = None, *, settings=None, now: str | None = None) -> OpenBuilds:
+def read(repo: str | None = None, *, settings=None, now: str | None = None,
+         tips: Mapping[tuple[str, str], str] | None = None) -> OpenBuilds:
     """The open builds of every project, or with `repo` those that build in that
     project, each read from git now. `settings` is what `settings.load()` gives, read
     now when left out, and `now` the second idle is read at, as a log writes a time.
+    `tips` holds, by `(round, stage)`, the commit to read a build at as its branch's
+    tip; every other build is read at its branch's tip as it is now.
 
     Raises `BadArgument` for a `repo` with no name and `UnknownProject` for one the
     projects list does not hold."""
@@ -116,7 +119,7 @@ def read(repo: str | None = None, *, settings=None, now: str | None = None) -> O
     at = datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     for (key, target), members in groups.items():
         here = [one for one in landed if one.repo.casefold() == key and one.target == target]
-        read_now.update(_group(members, here, settings, at))
+        read_now.update(_group(members, here, settings, at, tips or {}))
     return OpenBuilds(
         computed=now, repo=repo,
         builds=tuple(read_now[(summary.name, one.stage)] for summary, one in found),
@@ -125,8 +128,8 @@ def read(repo: str | None = None, *, settings=None, now: str | None = None) -> O
 
 
 def _group(members: list[tuple[index.Summary, builds.Build]],
-           landed: list[builds.Landing], settings,
-           at: datetime) -> Mapping[tuple[str, str], OpenBuild]:
+           landed: list[builds.Landing], settings, at: datetime,
+           tips: Mapping[tuple[str, str], str]) -> Mapping[tuple[str, str], OpenBuild]:
     """The builds `members`, all of one repo and one target, read in that repo."""
     try:
         _key, root = folders.root(members[0][1].repo)
@@ -138,7 +141,7 @@ def _group(members: list[tuple[index.Summary, builds.Build]],
     for summary, one in members:
         name = (summary.name, one.stage)
         try:
-            status = builds.read(one, git, landings=landed)
+            status = builds.read(one, git, landings=landed, tip=tips.get(name))
             idle = builds.idle(
                 git, status, now=at,
                 idle_days=own.round_setting(settings, summary.project, "idle_days"))
@@ -160,14 +163,17 @@ def _group(members: list[tuple[index.Summary, builds.Build]],
             for name, found in done.items()}
 
 
-def of_round(name: str, repos, *, settings=None) -> dict[str, OpenBuild]:
+def of_round(name: str, repos, *, settings=None,
+             tips: Mapping[str, str] | None = None) -> dict[str, OpenBuild]:
     """The open builds of the round `name` by stage, read as `read` reads every open
-    build of each repo of `repos` (so sharing is read against every round). A repo that
-    can't be read at all gives no build here; the caller says so."""
+    build of each repo of `repos` (so sharing is read against every round). `tips`
+    holds, by stage, the commit to read a build of this round at as its branch's tip.
+    A repo that can't be read at all gives no build here; the caller says so."""
     found: dict[str, OpenBuild] = {}
+    at = {(name, stage): tip for stage, tip in (tips or {}).items()}
     for repo in dict.fromkeys(repos):
         try:
-            listed = read(repo, settings=settings)
+            listed = read(repo, settings=settings, tips=at)
         except RoundsError:
             continue
         found.update({one.build.stage: one for one in listed.builds if one.round == name})

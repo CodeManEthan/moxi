@@ -382,11 +382,14 @@ class NoTarget(RoundsError):
     git."""
 
 
-def read(build: Build, git: Git, *, landings: Iterable[Landing] = ()) -> Status:
+def read(build: Build, git: Git, *, landings: Iterable[Landing] = (),
+         tip: str | None = None) -> Status:
     """The state of `build`, read from the repo `git` now. `landings` are the landings
     on record for the build's repo and target, of every build in any round; the
-    build's own among them are told by `build.landings`. Raises `NoTarget` when the
-    target branch is not in the repo."""
+    build's own among them are told by `build.landings`. `tip` is the commit to read as
+    the branch's tip, the branch's tip as it is now when left out: `finish` reads its
+    build at the tip its merge took, though the branch may have moved since. Raises
+    `NoTarget` when the target branch is not in the repo."""
     if build.ended is not None:
         return Status(build.ended, ENDED, f"its {_END_WORD[build.ended]} is on record")
     target_head = git.branch(build.target)
@@ -401,7 +404,7 @@ def read(build: Build, git: Git, *, landings: Iterable[Landing] = ()) -> Status:
     seen = _Seen(build, git, target_head,
                  own=tuple(one for one in every if one in build.landings),
                  others=tuple(one for one in every if one not in build.landings))
-    tip = git.branch(build.branch)
+    tip = git.branch(build.branch) if tip is None else tip
     if tip is not None:
         head = tip
     else:

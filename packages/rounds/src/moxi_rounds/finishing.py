@@ -18,8 +18,10 @@ tip as read (its head, once the branch is gone), in this order:
    exit 1); nothing is undone.
 5. Under the round's lock, read the log again and append `finish.done` when the log
    holds none for the build and the gates read on the log (`AFTER`: verification,
-   findings, the check, questions, steps of the user's own) still hold; else refuse
-   with what is owed.
+   findings, the check, questions, steps of the user's own) still hold at `T`; else
+   refuse with what is owed. The build is read at `T` here, not at its branch's tip
+   now: `T` is what the merge took, and a commit made on the branch while the actions
+   ran is not part of this finish.
 
 The finish lock is released however the verb ends once it was taken: only while it
 still points at this finish's own blob.
@@ -144,6 +146,9 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
     build = _open_build(view.state, name, stage)
     seen = _seen(view, name, stage, settings)
     tip = seen.tip or seen.head
+    # Read again at `T` after the actions only where `T` was the branch's tip: a build
+    # whose branch was gone is read as gone.
+    at_tip = None if seen.tip is None else {stage: tip}
     found = [one.unmet for one in _found(view, name, stage, seen, tip, settings)]
     actions = own.finish_actions(own.build_setting(settings, build.repo, "finish"))
     found += _not_run(actions, build.repo)
@@ -195,7 +200,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
         def after(view) -> list[Unmet]:
             if _ended(view.state, stage):
                 return []
-            now = _seen(view, name, stage, settings, refuse=False)
+            now = _seen(view, name, stage, settings, refuse=False, tips=at_tip)
             if isinstance(now, Unmet):
                 return [now]
             return [one.unmet for one in _found(view, name, stage, now, tip, settings)
@@ -238,11 +243,12 @@ def _ended(state: states.State, stage: str) -> bool:
     return build is not None and build.ended is not None
 
 
-def _seen(view, name: str, stage: str, settings, *, refuse: bool = True):
-    """What git and the settings say now of the stage's build; with `refuse` false,
-    the problem that kept it from being read is given back as an `Unmet` instead of
-    raised."""
-    seen = checking.seen_of(view.state, name, settings=settings).get(stage)
+def _seen(view, name: str, stage: str, settings, *, refuse: bool = True,
+          tips: Mapping[str, str] | None = None):
+    """What git and the settings say now of the stage's build, at the tip `tips` gives
+    it, else at its branch's tip now; with `refuse` false, the problem that kept it
+    from being read is given back as an `Unmet` instead of raised."""
+    seen = checking.seen_of(view.state, name, settings=settings, tips=tips).get(stage)
     problem = (Unmet(f"{stage}'s build can't be read", f"moxi rounds show {name}")
                if seen is None else seen.problem)
     if problem is None:

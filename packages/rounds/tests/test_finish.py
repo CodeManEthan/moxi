@@ -144,7 +144,8 @@ def test_a_branch_that_moved_once_the_lock_was_taken_is_refused(ready, repo,
     assert of_type(path, "finish.action") == [] and lock_ref(repo) is None
 
 
-def test_the_merge_takes_the_tip_the_gates_read_by_its_id(ready, repo, monkeypatch):
+def test_a_commit_made_while_the_actions_run_is_not_merged_and_the_finish_is_at_the_tip(
+        ready, repo, monkeypatch):
     path, tree = ready
     tip = tree.rev()
     merge = finishing._merge
@@ -154,16 +155,20 @@ def test_the_merge_takes_the_tip_the_gates_read_by_its_id(ready, repo, monkeypat
         return merge(*args, **kwargs)
 
     monkeypatch.setattr(finishing, "_merge", commit_then_merge)
-    with pytest.raises(Refused):
-        # The gates read on the log after the merge are read at the branch's tip,
-        # which has moved: the finish is not recorded, and the build reads merged.
-        finishing.finish(ROUND, "B1", actor="coder")
 
+    done = finishing.finish(ROUND, "B1", actor="coder")
+
+    late = tree.rev()
+    assert late != tip
     assert repo.git("rev-list", "--parents", "-n", "1", "main").split()[2] == tip
     assert repo.git("ls-tree", "--name-only", "main").split() == ["README", "work.txt"]
     (action,) = of_type(path, "finish.action")
     assert (action["tip"], action["state"]) == (tip, "ok")
-    assert of_type(path, "finish.done") == [] and lock_ref(repo) is None
+    (finished,) = of_type(path, "finish.done")
+    assert finished["tip"] == tip and done.tip == tip
+    assert build_of(path).ended == builds.FINISHED and lock_ref(repo) is None
+    # The branch moved past what was merged, so its worktree and the late commit stay.
+    assert tree.root.is_dir() and repo.rev("work") == late
 
 
 def test_a_target_no_worktree_has_is_merged_in_a_checkout_added_and_removed(

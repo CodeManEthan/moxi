@@ -201,11 +201,14 @@ def read_tip(worktree: Path, branch: str) -> Tip:
 
 
 def seen_of(state: states.State, name: str, *, settings,
-            read: Mapping[str, open_builds.OpenBuild] | None = None) -> dict:
+            read: Mapping[str, open_builds.OpenBuild] | None = None,
+            tips: Mapping[str, str] | None = None) -> dict:
     """What git and the settings say now of each open build of the round `name`, by
     stage, as the step function reads it (`steps.Seen`). `read` is the round's open
-    builds by stage as `open_builds` read them, read here when left out. A build that
-    can't be read is given with its problem. Nothing is written."""
+    builds by stage as `open_builds` read them, read here when left out. `tips` holds,
+    by stage, the commit to read a build at as its branch's tip, in every read that
+    names that tip; the others are read at their branch's tip as it is now. A build
+    that can't be read is given with its problem. Nothing is written."""
     from . import steps
 
     opened = [one for one in builds.builds(state) if one.ended is None
@@ -213,7 +216,9 @@ def seen_of(state: states.State, name: str, *, settings,
     if not opened or state.status != states.OPEN:
         return {}
     if read is None:
-        read = open_builds.of_round(name, [one.repo for one in opened], settings=settings)
+        read = open_builds.of_round(name, [one.repo for one in opened], settings=settings,
+                                    tips=tips)
+    tips = tips or {}
     found = {}
     for build in opened:
         now = read.get(build.stage)
@@ -227,7 +232,7 @@ def seen_of(state: states.State, name: str, *, settings,
         worktree = Path(str(commissioned.get("worktree") or ""))
         try:
             _key, root = folders.root(build.repo)
-            tip = Git(root).branch(build.branch)
+            tip = tips.get(build.stage) or Git(root).branch(build.branch)
             here = (commissioned.get("host") in (None, places.host())
                     and commissioned.get("worktree") and worktree.is_dir())
             clean = bool(here) and read_tip(worktree, build.branch).clean

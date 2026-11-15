@@ -128,7 +128,7 @@ does not yet build.
   reads again the gates a move of the target can change, merges the tip by its commit
   id into the target with a merge commit, recording the action under its id with where
   it landed and the target before it, and records the build finished when the gates
-  read on the log still hold. A conflict is aborted and refused; a failed action is
+  read on the log still hold at the tip it merged, even if the branch has moved since. A conflict is aborted and refused; a failed action is
   recorded and undoes nothing, and the next finish runs it again; an action recorded
   `ok` at the tip is not run again. It runs the `merge` action alone.
 - The finish lock: one finish at a time per repo and target, held as the ref
