@@ -5,8 +5,9 @@ asks `look(paths)`, which hands each path's `stat` to a pool of at most `WORKERS
 of this page server's own and waits for them together at most `BOUND_S` from its start.
 A path whose `stat` has not answered by then reads None. A path whose earlier `stat` is
 still running is not asked again: it reads None until that `stat` ends, and the next
-`look` takes its answer. So a mount that hangs holds at most `WORKERS` threads, and a read
-never waits past the bound.
+`look` takes its answer while it is at most `KEPT_S` old; an older one is dropped and the
+path asked anew. So a mount that hangs holds at most `WORKERS` threads, a read never waits
+past the bound, and a late answer is never read long after it was true.
 
 The threads are daemon threads, so one stuck in a `stat` never holds up the server's
 exit.
@@ -25,6 +26,9 @@ from collections.abc import Callable, Iterable
 WORKERS = 4
 #: How long a `look` waits for its paths, in seconds, from its start.
 BOUND_S = 0.25
+#: How long a `stat` that ended after its `look` gave up is kept for the next `look`, in
+#: seconds from when it ended.
+KEPT_S = 10.0
 
 #: What `look` answers for a path: a directory, something else (a file, a device), or
 #: nothing there (or a parent that is not a directory). None means it can't say: the
@@ -45,22 +49,26 @@ def _what(stat: Callable[[str], os.stat_result], path: str) -> str | None:
 
 
 class _Job:
-    __slots__ = ("path", "ended", "answer")
+    __slots__ = ("path", "ended", "ended_at", "answer")
 
     def __init__(self, path: str):
         self.path = path
         self.ended = threading.Event()
+        #: `time.monotonic()` when the `stat` ended.
+        self.ended_at = 0.0
         self.answer: str | None = None
 
 
 class Pool:
     """The threads that `stat` paths for `look`, and the paths whose `stat` is still out.
-    `stat` is the call that asks the filesystem (`os.stat` unless a test gives another)."""
+    `stat` is the call that asks the filesystem (`os.stat` unless a test gives another);
+    `kept_s` how long a late answer is kept."""
 
     def __init__(self, *, workers: int = WORKERS,
-                 stat: Callable[[str], os.stat_result] = os.stat):
+                 stat: Callable[[str], os.stat_result] = os.stat, kept_s: float = KEPT_S):
         self._workers = workers
         self._stat = stat
+        self._kept_s = kept_s
         self._lock = threading.Lock()
         self._jobs: queue.SimpleQueue[_Job] = queue.SimpleQueue()
         self._out: dict[str, _Job] = {}
@@ -70,6 +78,7 @@ class Pool:
         while True:
             job = self._jobs.get()
             job.answer = _what(self._stat, job.path)
+            job.ended_at = time.monotonic()
             job.ended.set()
 
     def look(self, paths: Iterable[str], *, timeout_s: float = BOUND_S
@@ -79,15 +88,17 @@ class Pool:
         found: dict[str, str | None] = {}
         asked: list[_Job] = []
         with self._lock:
+            now = time.monotonic()
             for path in dict.fromkeys(paths):
                 job = self._out.get(path)
                 if job is not None:
-                    if job.ended.is_set():
-                        found[path] = job.answer
-                        del self._out[path]
-                    else:
+                    if not job.ended.is_set():
                         found[path] = None
-                    continue
+                        continue
+                    del self._out[path]
+                    if now - job.ended_at <= self._kept_s:
+                        found[path] = job.answer
+                        continue
                 job = _Job(path)
                 self._out[path] = job
                 asked.append(job)
@@ -118,4 +129,4 @@ def look(paths: Iterable[str]) -> dict[str, str | None]:
     return _POOL.look(paths)
 
 
-__all__ = ["BOUND_S", "DIR", "MISSING", "OTHER", "WORKERS", "Pool", "look"]
+__all__ = ["BOUND_S", "DIR", "KEPT_S", "MISSING", "OTHER", "WORKERS", "Pool", "look"]

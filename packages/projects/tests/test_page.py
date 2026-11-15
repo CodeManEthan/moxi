@@ -355,6 +355,33 @@ def test_a_stat_that_hangs_reads_null_inside_the_bound_and_is_not_asked_again(
     assert asked.count(str(slow)) == 2
 
 
+def test_a_late_answer_past_its_age_is_dropped_and_the_path_asked_anew(tmp_path):
+    slow = tmp_path / "slow"
+    slow.mkdir()
+    let_go = threading.Event()
+    asked: list[str] = []
+
+    def stat(path):
+        asked.append(path)
+        if len(asked) == 1:
+            let_go.wait(30)
+            raise FileNotFoundError(path)
+        return os.stat(path)
+
+    pool = pagestat.Pool(stat=stat, kept_s=0.05)
+    assert pool.look([str(slow)]) == {str(slow): None}
+    let_go.set()
+    deadline = time.monotonic() + 5
+    while not pool._out[str(slow)].ended.is_set():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    time.sleep(0.1)
+    # The late answer said missing; it is past its age, so the path is asked again.
+    assert pool.look([str(slow)]) == {str(slow): pagestat.DIR}
+    assert len(asked) == 2
+    assert pagestat.KEPT_S == 10.0
+
+
 def test_a_hung_mount_holds_at_most_four_threads(tmp_path):
     let_go = threading.Event()
     pool = pagestat.Pool(stat=lambda path: let_go.wait(30) and os.stat(path))
