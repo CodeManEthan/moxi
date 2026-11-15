@@ -36,7 +36,7 @@ def no_turns(monkeypatch):
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds, so no verb asks a real tmux
     server."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     real = modules.available
     monkeypatch.setattr(modules, "available",
                         lambda name: name not in ("slots", "cache") and real(name))
@@ -67,7 +67,7 @@ def calls(monkeypatch, module, name: str, answer) -> list:
 
 def launched(conn, *, request_id="r1", session_id=SID, target_="slot", values=None,
              at=None) -> None:
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target=target_,
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target=target_,
                  cwd="/work", values={"model": "opus", **(values or {})}, argv=["claude"],
                  env={}, posture="operator", session_id=session_id,
                  slot="3" if target_ == "slot" else None, at=at)
@@ -76,7 +76,7 @@ def launched(conn, *, request_id="r1", session_id=SID, target_="slot", values=No
 def ended_run(conn, outcome, *, kind="relaunch", mode="self", request_id="r1", word=None,
               detail=None, at=None) -> store.Run:
     run_ = store.insert_run(conn, kind=kind, mode=mode, request_id=request_id,
-                            session_id=SID, actor="ann", state="acting", job="proc:1@1.0",
+                            session_id=SID, by="ann", state="acting", job="proc:1@1.0",
                             slot="3", at=at)
     store.end_run(conn, run_.run_id, outcome, word=word, detail=detail, at=at)
     return store.get_run(conn, run_.run_id)
@@ -84,16 +84,16 @@ def ended_run(conn, outcome, *, kind="relaunch", mode="self", request_id="r1", w
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def too_new() -> None:
     store.path().parent.mkdir(parents=True, exist_ok=True)
-    raw = sqlite3.connect(store.path())
-    raw.execute("PRAGMA user_version = 99")
-    raw.close()
+    conn = sqlite3.connect(store.path())
+    conn.execute("PRAGMA user_version = 99")
+    conn.close()
 
 
 # -- parsing --------------------------------------------------------------------------------
@@ -192,7 +192,7 @@ REFUSALS = [
      codes.ERROR, "comms-failed"),
     (target.NotLaunched(), codes.REFUSED, "not-launched"),
     (target.Unclaimed("r1"), codes.REFUSED, "unclaimed"),
-    (target.Changed("r1", "1@1.0", "2@2.0", False), codes.REFUSED, "changed"),
+    (target.Changed("r1", "1@1.0", "2@2.0", reclaim_pending=False), codes.REFUSED, "changed"),
     (target.NoTurns(), codes.REFUSED, "no-turns"),
     (target.TurnsFailed(OSError("no socket")), codes.ERROR, "turns-failed"),
     (targets.SlotsBusy("slot", "slots is locked", "try again"), codes.TEMPFAIL, "try-again"),
@@ -338,7 +338,7 @@ def test_relaunch_director_without_comms_is_refused(monkeypatch, capsys):
 def test_relaunch_status_shows_the_run_and_its_latest_wait(conn, capsys):
     launched(conn)
     run_ = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                            session_id=SID, actor="ann", job="slots:relaunch-x", slot="3")
+                            session_id=SID, by="ann", job="slots:relaunch-x", slot="3")
     store.add_run_event(conn, run_.run_id, "wait", {"word": "turn", "detail": "a turn is open"},
                         at="2026-10-31T10:00:00.000000Z")
     store.add_run_event(conn, run_.run_id, "wait",

@@ -83,14 +83,14 @@ def script() -> dict:
 
 
 def record(call: str, **detail) -> None:
-    with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as out:
-        out.write(json.dumps({"call": call, "pid": os.getpid(), **detail}) + "\n")
+    with open(_dir() / "calls.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"call": call, "pid": os.getpid(), **detail}) + "\n")
 
 
 #: Set by `hide`, so a launch a test runs in a process of its own (`launcher_child`) finds
 #: no turns either.
 HIDDEN = "LAUNCHER_NO_TURNS"
-#: The launcher's seam (`moxi_launcher.first.TURNS_SEAM`), named here so this module
+#: The launcher's seam (`moxi_launcher.first.TURNS_ENV`), named here so this module
 #: imports nothing of the launcher's.
 SEAM = "MOXI_LAUNCHER_TURNS"
 
@@ -119,8 +119,8 @@ def hide_here(setattr_=setattr) -> None:
     setattr_(modules, "available", available)
 
 
-def calls(directory: Path) -> list[dict]:
-    path = Path(directory) / "calls.jsonl"
+def calls(turns_dir: Path) -> list[dict]:
+    path = Path(turns_dir) / "calls.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line]

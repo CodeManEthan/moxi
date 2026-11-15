@@ -95,7 +95,7 @@ def server_instance(address: str, sddl: str, *, first: bool) -> int:
     descriptor = _win._descriptor(sddl)
     try:
         attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
-                                             descriptor, False)
+                                             descriptor, False)  # noqa: FBT003 -- Win32 fields are positional
         handle = create(
             address,
             _PIPE_ACCESS_DUPLEX | _FILE_FLAG_OVERLAPPED
@@ -168,7 +168,8 @@ class Pipe:
         import _overlapped
 
         self._handle = handle
-        self._stop = _overlapped.CreateEvent(None, True, False, None)
+        self._stop = _overlapped.CreateEvent(
+            None, True, False, None)  # noqa: FBT003 -- Win32 API arguments are positional
         self._cond = threading.Condition()
         self._busy = 0
         self._closing = False
@@ -294,15 +295,16 @@ class Pipe:
         if err == _ERROR_IO_PENDING:
             try:
                 wait = _INFINITE if deadline is None else _ms(deadline - time.monotonic())
-                got = _winapi.WaitForMultipleObjects([ov.event, self._stop], False, wait)
+                got = _winapi.WaitForMultipleObjects(
+                    [ov.event, self._stop], False, wait)  # noqa: FBT003 -- Win32 API arguments are positional
             except BaseException:
                 ov.cancel()
                 try:
-                    ov.GetOverlappedResult(True)
+                    ov.GetOverlappedResult(True)  # noqa: FBT003 -- Win32 API argument is positional
                 except OSError:
                     pass
                 raise
             if got != _WAIT_OBJECT_0:
                 ov.cancel()
-        n, err = ov.GetOverlappedResult(True)
+        n, err = ov.GetOverlappedResult(True)  # noqa: FBT003 -- Win32 API argument is positional
         return n, err != _ERROR_OPERATION_ABORTED

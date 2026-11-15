@@ -184,11 +184,11 @@ def parent(argv: list[str]) -> int:
 
     subprocess.Popen.send_signal = send_signal
 
-    def run_settle(python, module, *, replace=False, teardown=False, skills=None):
+    def run_settle(python, module, *, replace=False, teardown=False, install_skills=None):
         child = [sys.executable, str(HERE), "child"]
         child += ["--teardown", module] if teardown else [module]
         child += ["--replace"] if replace else []
-        child += ["--skills"] if skills else []
+        child += ["--skills"] if install_skills else []
         note("parent", settle=module)
         outcome = _settle.run_child(child)
         note("parent", outcome=outcome.code, signals=[int(s) for s in outcome.signals])
@@ -203,7 +203,7 @@ def parent(argv: list[str]) -> int:
             from moxi.units import _backend
 
             _backend._override.append(backend())
-            install.environment = lambda: install.Environment(
+            install.install_env = lambda: install.InstallEnv(
                 install.PLAIN, Path(sys.prefix), sys.executable)
             install.run = lambda argv, env=None: note("parent", ran=argv) or 0
             uninstall.run_teardown = (

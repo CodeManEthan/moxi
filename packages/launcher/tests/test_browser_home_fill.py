@@ -90,14 +90,14 @@ def fake(module_fake):
     return module_fake
 
 
-@pytest.fixture
-def folder(shell):
+@pytest.fixture(name="work_dir")
+def work_dir_fixture(shell):
     """Home opens on a folder of the test's own, which no launch has run in."""
     return kit.fresh_place(shell)
 
 
 @pytest.fixture
-def page(shell, fake, folder, ui_contexts):
+def page(shell, fake, work_dir, ui_contexts):
     return ui_contexts(shell).pages[0]
 
 
@@ -113,7 +113,7 @@ def open_list(piece):
     return listed
 
 
-def note(whose: str, them: bool = False) -> re.Pattern:
+def note(whose: str, *, them: bool = False) -> re.Pattern:
     """The sentence under the item's list."""
     return re.compile(rf"^Filled from {re.escape(whose)} last launch, today .+\. "
                       rf"The preset sets nothing for {'them' if them else 'it'}\.$")
@@ -135,7 +135,7 @@ def control(panel, name: str):
     return panel.locator(f'[data-row="{name}"] [data-control="{name}"]')
 
 
-def add_folder(panel, path: str) -> None:
+def add_dir(panel, path: str) -> None:
     control(panel, "add_dir").fill(path)
     panel.locator('[data-row="add_dir"]').get_by_role("button", name="Add").click()
 
@@ -191,7 +191,7 @@ def test_a_value_the_last_launch_typed_fills_its_row_and_clear_puts_the_forms_ba
     extra = str(Path(shell.env["HOME"]) / "work" / "proj-b")
     panel = open_options(piece)
     open_sub(panel, "access", "Reach")
-    add_folder(panel, extra)
+    add_dir(panel, extra)
     open_sub(panel, "seat", "Name & notes")
     control(panel, "native_name").fill("helper-1")
     control(panel, "native_name").blur()
@@ -255,7 +255,7 @@ def test_two_seats_with_one_home_do_not_fill_from_each_other(page, shell):
     extra = str(Path(shell.env["HOME"]) / "work" / "proj-a")
     panel = open_options(piece)
     open_sub(panel, "access", "Reach")
-    add_folder(panel, extra)
+    add_dir(panel, extra)
     body = launch(page, piece, "say the word planner")
     assert body["seat"] == "planner" and body["values"]["add_dir"] == [extra], body
     piece = kit.open_home(page)

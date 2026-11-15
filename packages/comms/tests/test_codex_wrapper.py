@@ -209,7 +209,7 @@ def test_the_verb_is_listed_in_help(capsys):
 
 # --------------------------------------------------------------------------- the env
 
-def test_the_hosts_environment_carries_this_identity_alone_and_no_lifeline(
+def test_the_hosts_env_carries_this_identity_alone_and_no_lifeline(
         tmp_path, monkeypatch):
     launch = plan(args("--name", NAME, "--scope", "proj-a"), cwd=str(tmp_path))
     base = {"PATH": "/bin", "MOXI_LIFELINE_FD": "7", "STAMPED_BY_CALLER": "kept",
@@ -272,9 +272,9 @@ def run_wrapper(fake_host, *argv, env=None):
             "moxi_turns.codex_host_available = lambda: True\n"
             "from moxi_comms.adapters import codex_wrapper\n"
             f"raise SystemExit(codex_wrapper.main({list(argv)!r}))\n")
-    environ = dict(os.environ if env is None else env)
-    environ["MOXI_LIFELINE_FD"] = "99"
-    return subprocess.Popen([sys.executable, "-c", code], env=environ,
+    wrapper_env = dict(os.environ if env is None else env)
+    wrapper_env["MOXI_LIFELINE_FD"] = "99"
+    return subprocess.Popen([sys.executable, "-c", code], env=wrapper_env,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 

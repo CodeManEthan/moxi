@@ -19,10 +19,10 @@ DONE = {"stage": "B1", "tip": "0" * 40}
 @pytest.fixture
 def where(tmp_path):
     """The round `proj-a/a-round`, opened, in a rounds folder of the test's own."""
-    folder = tmp_path / "rounds"
-    (folder / "a-round").mkdir(parents=True)
-    where = write.Where("proj-a", folder, "a-round")
-    log.append(where.round_log, "round.opened", OPENED, actor="planner")
+    rounds_dir = tmp_path / "rounds"
+    (rounds_dir / "a-round").mkdir(parents=True)
+    where = write.Where("proj-a", rounds_dir, "a-round")
+    log.append(where.round_log, "round.opened", OPENED, by="planner")
     return where
 
 
@@ -35,8 +35,8 @@ def shown(view, result):
                        log=write.PROJECT)
 
 
-def files_under(folder):
-    return sorted(str(path.relative_to(folder)) for path in folder.rglob("*")
+def files_under(root_dir):
+    return sorted(str(path.relative_to(root_dir)) for path in root_dir.rglob("*")
                   if path.is_file())
 
 
@@ -44,13 +44,13 @@ def files_under(folder):
 
 def test_the_cores_lock_locks_the_file_it_is_given_and_writes_the_holders_pid(
         tmp_path, holder):
-    folder = tmp_path / "locks"
-    path = folder / "a.lock"
+    locks_dir = tmp_path / "locks"
+    path = locks_dir / "a.lock"
     proc = holder(path)
 
-    assert files_under(folder) == ["a.lock"]
+    assert files_under(locks_dir) == ["a.lock"]
     assert path.read_text().split() == [str(proc.pid)]
-    with files.lock(folder / "another.lock", timeout_s=0):
+    with files.lock(locks_dir / "another.lock", timeout_s=0):
         pass  # only the file given is locked, not its folder
 
 
@@ -79,7 +79,7 @@ def test_the_cores_lock_is_free_again_once_its_holder_is_gone(tmp_path, holder):
 
 # -- where the lock files are ------------------------------------------------------------
 
-def test_a_rounds_lock_and_a_projects_lock_are_in_the_state_directory(tmp_path):
+def test_a_rounds_lock_and_a_projects_lock_are_in_the_state_dir(tmp_path):
     env = {"MOXI_ROUNDS_STATE_HOME": str(tmp_path / "state")}
     locks = tmp_path / "state" / "rounds" / "locks"
 
@@ -107,34 +107,34 @@ def test_no_projects_key_puts_one_lock_at_or_inside_another(holder):
 
 
 def test_a_project_keyed_like_anothers_lock_file_is_written_beside_it(tmp_path, holder):
-    folders = {key: tmp_path / key for key in ("x", "x.project.lock")}
-    for key, folder in folders.items():
+    lock_dirs = {key: tmp_path / key for key in ("x", "x.project.lock")}
+    for key, lock_dir in lock_dirs.items():
         holder(write.project_lock(key))
-        (folder / "a-round").mkdir(parents=True)
+        (lock_dir / "a-round").mkdir(parents=True)
 
-    for key, folder in folders.items():
-        written = write.record(write.Where(key, folder, "a-round"), actor="planner",
+    for key, lock_dir in lock_dirs.items():
+        written = write.record(write.Where(key, lock_dir, "a-round"), by="planner",
                                opens=True, wait_s=0,
                                event=lambda view, result: write.Entry("round.opened",
                                                                       OPENED))
         assert written.events[0]["n"] == 1
 
 
-def test_a_write_leaves_no_lock_file_in_the_rounds_folder(where):
-    write.record(where, actor="planner", event=done)
-    write.record(where, actor="planner", event=shown, with_project=True)
-    write.record(write.Where("proj-a", where.folder), actor="planner", event=shown)
+def test_a_write_leaves_no_lock_file_in_the_rounds_dir(where):
+    write.record(where, by="planner", event=done)
+    write.record(where, by="planner", event=shown, with_project=True)
+    write.record(write.Where("proj-a", where.rounds_dir), by="planner", event=shown)
 
-    assert files_under(where.folder) == [
+    assert files_under(where.rounds_dir) == [
         "a-round/round-note.md", "a-round/round.jsonl", "project.jsonl",
         "questions.md", "rulings.md"]
     assert files_under(paths.locks_dir()) == ["projects/proj-a.lock",
                                                "rounds/proj-a/a-round.lock"]
-    assert not where.folder.is_relative_to(paths.locks_dir())
+    assert not where.rounds_dir.is_relative_to(paths.locks_dir())
 
 
 def test_a_lock_file_holds_nothing_once_the_write_is_over(where):
-    write.record(where, actor="planner", event=done)
+    write.record(where, by="planner", event=done)
 
     assert write.round_lock("proj-a", "a-round").read_bytes() == b""
 
@@ -165,20 +165,20 @@ def taken(monkeypatch):
 
 
 def test_a_verb_that_writes_both_logs_takes_the_rounds_lock_first(where, taken):
-    write.record(where, actor="planner", event=shown, with_project=True)
+    write.record(where, by="planner", event=shown, with_project=True)
 
     assert taken == [("take", "a-round.lock"), ("take", "proj-a.lock"),
                      ("free", "proj-a.lock"), ("free", "a-round.lock")]
 
 
 def test_a_verb_on_a_round_alone_takes_only_the_rounds_lock(where, taken):
-    write.record(where, actor="planner", event=done)
+    write.record(where, by="planner", event=done)
 
     assert taken == [("take", "a-round.lock"), ("free", "a-round.lock")]
 
 
 def test_a_verb_on_a_project_alone_takes_only_the_projects_lock(where, taken):
-    write.record(write.Where("proj-a", where.folder), actor="planner", event=shown)
+    write.record(write.Where("proj-a", where.rounds_dir), by="planner", event=shown)
 
     assert taken == [("take", "proj-a.lock"), ("free", "proj-a.lock")]
 
@@ -188,7 +188,7 @@ def test_a_verb_refused_on_the_projects_lock_lets_the_rounds_lock_go(
     holder(write.project_lock("proj-a"))
 
     with pytest.raises(Locked) as caught:
-        write.record(where, actor="planner", event=shown, with_project=True, wait_s=0.1)
+        write.record(where, by="planner", event=shown, with_project=True, wait_s=0.1)
 
     assert caught.value.file == write.project_lock("proj-a")
     assert taken == [("take", "a-round.lock"), ("free", "a-round.lock")]
@@ -204,7 +204,7 @@ def test_a_verb_that_finds_the_lock_held_refuses_after_its_wait_and_names_the_pi
 
     started = time.monotonic()
     with pytest.raises(Locked) as caught:
-        write.record(where, actor="planner", event=done, wait_s=0.2)
+        write.record(where, by="planner", event=done, wait_s=0.2)
     waited = time.monotonic() - started
 
     error = caught.value
@@ -221,7 +221,7 @@ def test_a_held_lock_stops_the_verb_before_its_gates_and_its_act(where, holder):
     ran = []
 
     with pytest.raises(Locked):
-        write.record(where, actor="planner", event=done, wait_s=0,
+        write.record(where, by="planner", event=done, wait_s=0,
                      gates=[lambda view: ran.append("gate")],
                      act=lambda view: ran.append("act"),
                      facts=lambda where: ran.append("facts"))
@@ -236,7 +236,7 @@ def test_a_verb_waits_thirty_seconds_unless_told_otherwise():
 def test_a_held_project_lock_does_not_stop_a_verb_on_the_round_alone(where, holder):
     holder(write.project_lock("proj-a"))
 
-    written = write.record(where, actor="planner", event=done, wait_s=0)
+    written = write.record(where, by="planner", event=done, wait_s=0)
 
     assert [event["n"] for event in written.events] == [2]
 
@@ -245,7 +245,7 @@ def test_a_held_project_lock_stops_a_verb_on_the_project(where, holder):
     proc = holder(write.project_lock("proj-a"))
 
     with pytest.raises(Locked) as caught:
-        write.record(write.Where("proj-a", where.folder), actor="planner", event=shown,
+        write.record(write.Where("proj-a", where.rounds_dir), by="planner", event=shown,
                      wait_s=0)
 
     assert caught.value.holder == proc.pid
@@ -254,10 +254,10 @@ def test_a_held_project_lock_stops_a_verb_on_the_project(where, holder):
 
 def test_one_rounds_lock_does_not_hold_another_round(where, holder):
     holder(write.round_lock("proj-a", "a-round"))
-    (where.folder / "b-round").mkdir()
-    other = write.Where("proj-a", where.folder, "b-round")
+    (where.rounds_dir / "b-round").mkdir()
+    other = write.Where("proj-a", where.rounds_dir, "b-round")
 
-    written = write.record(other, actor="planner", opens=True, wait_s=0,
+    written = write.record(other, by="planner", opens=True, wait_s=0,
                            event=lambda view, result: write.Entry("round.opened", OPENED))
 
     assert written.events[0]["n"] == 1

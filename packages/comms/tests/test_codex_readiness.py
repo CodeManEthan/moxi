@@ -83,7 +83,7 @@ def test_a_script_path_with_a_space_is_quoted_for_the_shell(tmp_path):
         f"'{tmp_path / 'my env/moxi'}' comms"
 
 
-def test_an_environment_with_no_moxi_script_finds_none():
+def test_an_env_with_no_moxi_script_finds_none():
     def missing(name):
         raise FileNotFoundError(name)
 

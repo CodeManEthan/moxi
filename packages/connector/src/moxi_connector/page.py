@@ -125,7 +125,7 @@ def page(under: Under):
     async def show(send, status: int, title: str, body: str) -> None:
         await _show(send, form_action, status, title, body)
 
-    async def refused(send, status: int, text: str) -> None:
+    async def send_refusal(send, status: int, text: str) -> None:
         await show(send, status, "Sign-in refused", f"<p>{_text(text)}</p>")
 
     async def redirect(send, url: str) -> None:
@@ -137,7 +137,7 @@ def page(under: Under):
     async def form(send, status: int, pid: str, *, said: str | None = None) -> None:
         found = under.waiting(pid)
         if found is None:
-            await refused(send, 400, GONE)
+            await send_refusal(send, 400, GONE)
             return
         req = found.request
         name = shown_name(req.client_name)
@@ -168,7 +168,7 @@ def page(under: Under):
             else:
                 params[key] = value
         if repeated & {"client_id", "redirect_uri"}:
-            await refused(send, 400, "This sign-in request names its client or its return "
+            await send_refusal(send, 400, "This sign-in request names its client or its return "
                                      "address more than once.")
             return
         try:
@@ -178,11 +178,11 @@ def page(under: Under):
                     req.redirect_uri, error="invalid_request", error_description=REPEATED,
                     state=req.state, iss=under.origin.issuer), "invalid_request")
             pid = under.open(req)
-        except RedirectError as e:
-            await redirect(send, e.url)
+        except RedirectError as exc:
+            await redirect(send, exc.url)
             return
-        except PageError as e:
-            await refused(send, e.status, e.text)
+        except PageError as exc:
+            await send_refusal(send, exc.status, exc.text)
             return
         await form(send, 200, pid)
 
@@ -191,22 +191,22 @@ def page(under: Under):
         origin = heads.get(b"origin")
         if origin is not None and origin != b"null" \
                 and origin.decode("latin-1") != under.origin.page_origin:
-            await refused(send, 403, FORBIDDEN_POST)
+            await send_refusal(send, 403, FORBIDDEN_POST)
             return
         site = heads.get(b"sec-fetch-site")
         if site is not None and site != b"same-origin":
-            await refused(send, 403, FORBIDDEN_POST)
+            await send_refusal(send, 403, FORBIDDEN_POST)
             return
         body = await _read(receive, MAX_FORM)
         if body is None:
-            await refused(send, 413, TOO_BIG)
+            await send_refusal(send, 413, TOO_BIG)
             return
         fields = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
         pid = fields.get("pending", "")
         typed = fields.get("code", "")
         found = under.waiting(pid) if pid else None
         if found is None:
-            await refused(send, 400, GONE)
+            await send_refusal(send, 400, GONE)
             return
         # The spend: the terminal code and the pending request, in one step on the loop.
         live = oauth.codes.take(typed) if typed else None
@@ -222,7 +222,7 @@ def page(under: Under):
         if burned:
             await oauth.event("code-burned", misses=BURN_AFTER)
         if left <= 0:
-            await refused(send, 400, DROPPED)
+            await send_refusal(send, 400, DROPPED)
             return
         await form(send, 400, pid,
                    said=WRONG.format(left="1 try" if left == 1 else f"{left} tries"))

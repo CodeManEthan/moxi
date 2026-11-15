@@ -110,8 +110,8 @@ class InProcessClient(DaemonClient):
             raise DaemonOffline("comms offline: the daemon has stopped")
         try:
             answer = self._daemon._call(self._conn, method, params)
-        except ipc.RpcError as e:
-            raise _error(ipc.RpcError(e.code, e.message, _wire_copy(e.data))) from None
+        except ipc.RpcError as exc:
+            raise _error(ipc.RpcError(exc.code, exc.message, _wire_copy(exc.data))) from None
         if isinstance(answer, wire.Then):
             # Only `bind` answers one, and it isn't served here.
             raise DaemonError(f"{method} answered work for a connection; nothing here "
@@ -136,9 +136,9 @@ class InProcessClient(DaemonClient):
                 held = [name for name in names if reserved.lookup(conn, name) is not None]
             finally:
                 conn.close()
-        except Exception as e:  # noqa: BLE001 - a read that fails sends nothing
+        except Exception as exc:  # noqa: BLE001 - a read that fails sends nothing
             log.warning("the reserved names couldn't be read (%s); the request is refused",
-                        type(e).__name__)
+                        type(exc).__name__)
             raise DaemonError("comms couldn't read its reserved names; try again in a "
                               "moment", wire.FAILED, {}) from None
         if held:
@@ -194,7 +194,7 @@ class Calls:
         self.running = 0
 
     async def run(self, body, *args):
-        await self._host.opened()
+        await self._host.on_opened()
         await self._places.acquire()
         loop = asyncio.get_running_loop()
         try:

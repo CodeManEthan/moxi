@@ -236,7 +236,7 @@ def _holding(rig, name):
                                           "MOXI_COMMS_NAME": name}))
 
 
-def test_an_unreadable_claim_directory_leaves_only_the_directors_empty(rig):
+def test_an_unreadable_claim_dir_leaves_only_the_directors_empty(rig):
     reviewer = rig.shim(**REVIEWER, directors=(P,))
     bound(rig, R)
     claims = claimfile.claim_dir()

@@ -24,15 +24,15 @@ from moxi.terminal import Evidence, Undecided, _lines, _record, _walk
 def acct(tmp_path, monkeypatch):
     """The account's folder under the test's tmp, `MOXI_ANCHOR_HOME` unset, and a walk
     that finds nothing; returns the record's path."""
-    folder = tmp_path / "acct"
-    folder.mkdir()
+    account_dir = tmp_path / "acct"
+    account_dir.mkdir()
     monkeypatch.delenv(paths.ANCHOR_HOME_ENV)
     if os.name == "nt":
         real = _win.known_folder
         monkeypatch.setattr(_win, "known_folder",
-                            lambda name: str(folder) if name == "local" else real(name))
+                            lambda name: str(account_dir) if name == "local" else real(name))
     else:
-        monkeypatch.setattr(paths, "_account_home", lambda: str(folder))
+        monkeypatch.setattr(paths, "_account_home", lambda: str(account_dir))
     monkeypatch.setattr(_walk, "walk", lambda view=None, run=None: None)
     monkeypatch.setattr(terminal, "last", None)
     return paths.terminal_record()
@@ -51,7 +51,7 @@ def test_the_kits_anchor_variable_is_named():
     assert got.fix == "take it out of this terminal's environment"
 
 
-def test_a_record_of_this_environment_is_ok(acct):
+def test_a_record_of_this_env_is_ok(acct):
     _record.write(None)
     got = row()
     assert got.state == "ok"
@@ -156,16 +156,16 @@ def test_a_write_the_step_tried_and_failed_is_named(acct, monkeypatch):
 
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
                     reason="a POSIX folder's mode, which root ignores")
-def test_a_folder_that_cant_be_written_fails_with_no_step_run(acct):
-    folder = acct.parent.parent.parent.parent  # the account folder's .local
-    folder.mkdir(parents=True)
-    folder.chmod(0o500)
+def test_a_dir_that_cant_be_written_fails_with_no_step_run(acct):
+    local_dir = acct.parent.parent.parent.parent  # the account folder's .local
+    local_dir.mkdir(parents=True)
+    local_dir.chmod(0o500)
     try:
         got = row()
     finally:
-        folder.chmod(0o700)
+        local_dir.chmod(0o700)
     assert got.state == "fail"
-    assert got.detail.startswith(f"the record at {acct} can't be written ({folder}: ")
+    assert got.detail.startswith(f"the record at {acct} can't be written ({local_dir}: ")
     assert got.fix == f"make {acct.parent} writable by you"
 
 
@@ -235,9 +235,9 @@ CORE_ONLY = textwrap.dedent("""\
 def test_the_row_runs_with_no_module_installed(tmp_path):
     """No module installed, ui and slots included: the row imports none, and a tmux
     server above the run is passed, since no slots server can run there."""
-    folder = tmp_path / "acct"
-    folder.mkdir()
-    done = subprocess.run([sys.executable, "-c", CORE_ONLY, str(folder)],
+    account_dir = tmp_path / "acct"
+    account_dir.mkdir()
+    done = subprocess.run([sys.executable, "-c", CORE_ONLY, str(account_dir)],
                           capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
     got = json.loads(done.stdout)

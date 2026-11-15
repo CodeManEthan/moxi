@@ -7,6 +7,11 @@
 
 ## 0.2.9 (2026-11-10)
 
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_sessions.api`: `sessions_folders` is now
+  `session_dirs`; `moxi_sessions.api.sessions_list`: `folder` is now `work_dir`;
+  `moxi_sessions.api.sessions_more`: `folder` is now `work_dir`;
+  `moxi_sessions.api.sessions_newest`: `folder` is now `work_dir`.
 - A list row's `prompt` is the newest message in the whole session that the record marks
   as typed by a person, and nothing else. It was looked for in the last five turns only.
   A session with no such message has no `prompt`. Codex and OpenCode rows have none:
@@ -91,7 +96,7 @@
   `--text`, redacted when the secrets module is installed.
 - Interface 4, which is interface 3 plus the list: `sessions_list` (the sessions counted
   and cut into the ones active recently, seven days and the rest), `sessions_more`,
-  `sessions_newest`, `sessions_folders` and `session_opened`. Each reads through the
+  `sessions_newest`, `session_dirs` and `session_opened`. Each reads through the
   calling process's own memory and takes no cache from its caller.
 - What a list reads: each root's listing; the first lines of every session of the days
   it returns, shown or not, and of every Codex rollout, once each; and the last turn of

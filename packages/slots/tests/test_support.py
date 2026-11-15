@@ -41,7 +41,7 @@ def test_no_recorded_tmux_is_unsupported_naming_the_install(monkeypatch):
 def test_a_recorded_tmux_is_supported(monkeypatch, fake_tmux):
     monkeypatch.setattr(support, "system", lambda *a: support.MACOS)
     record("tmux", str(fake_tmux()))
-    assert api.supported() == api.Support(True, "")
+    assert api.supported() == api.Support(ok=True, why="")
 
 
 def test_every_verb_exits_3_on_windows(monkeypatch, capsys):

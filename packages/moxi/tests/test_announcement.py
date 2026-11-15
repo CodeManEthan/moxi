@@ -397,9 +397,9 @@ def test_run_time_entries_take_their_own_forms():
     exe = sys.executable  # an absolute path on every system
     here = str(Path(exe).parent)
     unit("daemon", "row", {"argv": [exe, "--all"], "cwd": here, "enabled": False},
-         runtime=True)
-    unit("timer", "row", {"argv": [exe], "every": "1h"}, runtime=True)
-    unit("timer", "row", {"command": "moxi-alpha-x", "at": ["03:00"]}, runtime=True)
+         is_runtime=True)
+    unit("timer", "row", {"argv": [exe], "every": "1h"}, is_runtime=True)
+    unit("timer", "row", {"command": "moxi-alpha-x", "at": ["03:00"]}, is_runtime=True)
     for kind, entry, words in [
         ("daemon", {"argv": ["backup"]}, "absolute path"),
         ("daemon", {"argv": []}, "absolute path"),
@@ -408,7 +408,7 @@ def test_run_time_entries_take_their_own_forms():
         ("daemon", {"argv": [exe], "enabled": "no"}, "enabled"),
     ]:
         with pytest.raises(modules._Bad, match=words):
-            unit(kind, "row", entry, runtime=True)
+            unit(kind, "row", entry, is_runtime=True)
     with pytest.raises(modules._Bad, match="no switch"):
         unit("timer", "row", {"command": "x", "every": "1h"})
 

@@ -57,8 +57,8 @@ def _write(values: dict) -> None:
     temp = STATE / "values.json.tmp"
     temp.write_text(json.dumps(values), encoding="utf-8")
     os.replace(temp, STATE / "values.json")
-    with open(STATE / "acts", "a", encoding="utf-8") as out:
-        out.write(f"{os.getpid()}\n")
+    with open(STATE / "acts", "a", encoding="utf-8") as fh:
+        fh.write(f"{os.getpid()}\n")
 
 
 def _publish(values: dict) -> None:
@@ -88,8 +88,8 @@ def add(call):
 
 def _append(name: str, line: str) -> None:
     STATE.mkdir(parents=True, exist_ok=True)
-    with open(STATE / name, "a", encoding="utf-8") as out:
-        out.write(f"{line}\n")
+    with open(STATE / name, "a", encoding="utf-8") as fh:
+        fh.write(f"{line}\n")
 
 
 def confirm(call):
@@ -145,8 +145,8 @@ def phone_job(call):
 
 def wait(call):
     STATE.mkdir(parents=True, exist_ok=True)
-    with open(STATE / "waiting", "a", encoding="utf-8") as out:
-        out.write(f"{os.getpid()}\n")
+    with open(STATE / "waiting", "a", encoding="utf-8") as fh:
+        fh.write(f"{os.getpid()}\n")
     deadline = time.monotonic() + 20
     while (STATE / "hold").exists() and time.monotonic() < deadline:
         time.sleep(0.02)

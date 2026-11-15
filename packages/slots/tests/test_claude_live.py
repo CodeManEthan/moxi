@@ -32,7 +32,7 @@ import pytest
 
 from moxi_slots import launch, slots, tmux
 from moxi_slots.answer import answer_screen, read_screen
-from moxi_slots.screens import (CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_FOLDER,
+from moxi_slots.screens import (CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR,
                                 SCREENS, plain)
 
 pytestmark = [pytest.mark.live,
@@ -96,11 +96,11 @@ def test_the_trust_warning_on_a_fresh_config(claude_slot, tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     pane = run([], {"HOME": os.environ["HOME"], "CLAUDE_CONFIG_DIR": str(config)}, work)
-    seen = until_shown(CLAUDE_TRUST_FOLDER)
+    seen = until_shown(CLAUDE_TRUST_DIR)
     keep(pane, "claude-trust", tmp_path)
     marked = [r for r in seen.rows if r.lstrip().startswith("❯")]
     assert marked and "No, exit" in marked[0]
-    done = answer_screen(1, CLAUDE_TRUST_FOLDER, wait_s=10)
+    done = answer_screen(1, CLAUDE_TRUST_DIR, wait_s=10)
     assert (done.outcome, done.why, done.keys) == ("gone", "", ("Down", "Enter"))
 
 

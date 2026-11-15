@@ -185,7 +185,7 @@ def test_a_home_whose_own_daemon_listens_reinstalls_with_no_refusal(w, listener)
     w.backend.sockets = "none"
     w.sup.pid = os.getpid()
     w.home(w.tmp / "scratch")
-    config.set("demo", "port", listener, by="test")
+    config.set_value("demo", "port", listener, by="test")
     w.apply()
     w.listening.add(("127.0.0.1", listener))
     assert w.plan()[("shell", "daemon")].action == "keep"
@@ -196,7 +196,7 @@ def test_a_listener_of_another_process_is_refused_with_the_own_daemon_stopped(w,
     w.backend.sockets = "none"
     w.sup.pid = os.getpid()
     w.home(w.tmp / "scratch")
-    config.set("demo", "port", listener, by="test")
+    config.set_value("demo", "port", listener, by="test")
     w.apply()
     [stopped] = units.stop("demo", ["shell"])
     assert stopped.ok
@@ -214,11 +214,11 @@ def test_a_listener_of_another_process_is_refused_with_the_own_daemon_on_another
     w.backend.sockets = "none"
     w.sup.pid = pid
     w.home(w.tmp / "scratch")
-    config.set("demo", "port", its_port, by="test")
+    config.set_value("demo", "port", its_port, by="test")
     w.apply()
     w.listening.update({("127.0.0.1", its_port), ("127.0.0.1", listener)})
     assert w.plan()[("shell", "daemon")].action == "keep"
-    config.set("demo", "port", listener, by="test")
+    config.set_value("demo", "port", listener, by="test")
     assert (f"listens on 127.0.0.1:{listener}, and the running daemon (pid {pid}) doesn't "
             "hold it") in refused(w.plan())
 
@@ -226,7 +226,7 @@ def test_a_listener_of_another_process_is_refused_with_the_own_daemon_on_another
 def test_an_unknown_read_gives_a_line_and_no_refusal(w, listener, capsys):
     w.backend.sockets = "none"
     w.home(w.tmp / "scratch")
-    config.set("demo", "port", listener, by="test")
+    config.set_value("demo", "port", listener, by="test")
     w.apply()
     w.listening.add(("127.0.0.1", listener))
     w.sup.fail[("show", None)] = "Failed to connect to bus"
@@ -246,7 +246,7 @@ def test_a_process_that_cannot_be_read_gives_a_line_and_no_refusal(w, listener, 
 
     w.backend.sockets = "none"
     w.sup.pid = os.getpid()
-    config.set("demo", "port", listener, by="test")
+    config.set_value("demo", "port", listener, by="test")
     w.apply()
     w.listening.add(("127.0.0.1", listener))
 

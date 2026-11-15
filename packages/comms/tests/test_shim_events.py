@@ -154,7 +154,7 @@ def daemon():
 def make_shim(daemon):
     made = []
 
-    def make(start=True, **kw):
+    def make(*, start=True, **kw):
         kw.setdefault("autoreconnect", False)
         s = ClaudeShim(name=NAME, scope=SCOPE, project=SCOPE, socket_path=daemon.path,
                        injector=lambda text: None, session_id=SESSION,

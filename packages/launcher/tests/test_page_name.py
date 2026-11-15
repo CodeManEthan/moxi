@@ -105,7 +105,7 @@ def previewed_name(cwd: str, **values: str) -> str:
     return argv[argv.index("-n") + 1]
 
 
-def test_the_home_folder_is_named_as_a_launch_there_is_named(tmp_path, monkeypatch):
+def test_the_home_dir_is_named_as_a_launch_there_is_named(tmp_path, monkeypatch):
     home = tmp_path / "shell"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -113,13 +113,13 @@ def test_the_home_folder_is_named_as_a_launch_there_is_named(tmp_path, monkeypat
     assert said["name"] == previewed_name("~") == "shell-Nov-08 12:45", said
 
 
-def test_a_folder_inside_a_project_is_named_by_the_projects_key_and_template(proj_a):
+def test_a_dir_inside_a_project_is_named_by_the_projects_key_and_template(proj_a):
     settings_file(f'[name]\ntemplate = "{EVERY}"\n[name.templates]\nproj-a = "<project>-<model>"\n')
-    folder = str(proj_a / "sub")
-    said = name(cwd=folder, model="opus")
+    sub_dir = str(proj_a / "sub")
+    said = name(cwd=sub_dir, model="opus")
     assert said == up(name="proj-a-opus", template="<project>-<model>", project="proj-a",
                       **{"from": "project"})
-    assert previewed_name(folder, model="opus") == "proj-a-opus"
+    assert previewed_name(sub_dir, model="opus") == "proj-a-opus"
     # Outside every project the folder's own name stands in, from the template for every launch.
     assert name(cwd=str(proj_a.parent))["name"] == "Nov-08-2026 12:45"
 
@@ -164,7 +164,7 @@ def test_instance_counts_past_the_live_launches():
     me = proc.identity(os.getpid())
     conn = store.connect()
     try:
-        store.insert(conn, request_id="r1", actor="alice", harness="claude",
+        store.insert(conn, request_id="r1", by="alice", harness="claude",
                      target="terminal", cwd="/work", values={"name": "proj-a-1"},
                      argv=["claude"], env={}, posture="operator", session_id="s1", slot=None)
         store.set_state(conn, "r1", "started", pid=me.pid, pid_started=me.started)

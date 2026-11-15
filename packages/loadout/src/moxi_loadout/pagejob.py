@@ -55,7 +55,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from moxi_loadout.homes import MARKER, PAGE_JOB
+from moxi_loadout.homes import CALLER_ENV, PAGE_JOB
 
 #: The folder of job records, in loadout's state directory.
 JOBS = "jobs"
@@ -180,7 +180,7 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
     except FileExistsError:
         found = _load(path)
         if found is not None and found.get("argv") == argv:
-            return Started(job, False)
+                return Started(job, new=False)
         raise Clash(f"job {job} was started already with other arguments") from None
     try:
         pid = _spawn(command(job, argv), cwd=os.fspath(stores.state_dir(create=True)),
@@ -196,7 +196,7 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
         atomic_write(path, json.dumps(record) + "\n", mode=0o600)
     except Exception:  # noqa: BLE001 - the job reads interrupted until its end lands
         log.exception("page job %s started (pid %s), but its pid wasn't recorded", job, pid)
-    return Started(job, True)
+    return Started(job, new=True)
 
 
 def _create(path: Path, text: str) -> None:
@@ -275,11 +275,11 @@ def _load(path: Path) -> dict | None:
 def prune(now: float | None = None) -> int:
     """Remove the job records (and their logs) older than a day; returns how many files
     went."""
-    folder = jobs_dir()
+    records_dir = jobs_dir()
     cutoff = (time.time() if now is None else now) - KEEP_SECONDS
     gone = 0
     try:
-        found = list(os.scandir(folder))
+        found = list(os.scandir(records_dir))
     except FileNotFoundError:
         return 0
     for entry in found:
@@ -299,7 +299,7 @@ def run(job: str, argv: Sequence[str]) -> int:
     `--json`, and write the end in one write. Returns the exit code written. An error
     anywhere before the end, the log's setup included, is written as exit 1 with its
     line."""
-    os.environ[MARKER] = CALLER
+    os.environ[CALLER_ENV] = CALLER
     try:
         code, outcome, lines = _steps(list(argv))
     except Exception as exc:  # noqa: BLE001 - an error outside the CLI is the job's end

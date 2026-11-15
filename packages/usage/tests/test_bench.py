@@ -110,7 +110,7 @@ def _claude_requests(t: ClaudeTranscript, n: int, rnd: random.Random, ids: Itera
         if m % 4 == 0:
             t.user("Look at the module and say what is left.")
         req = t.request(request_id=request_id, message_id=message_id, model=model,
-                        usage_block=usage(input=rnd.randint(1, 20),
+                        usage_block=usage(input_tokens=rnd.randint(1, 20),
                                           cache_read=rnd.randint(5_000, 150_000),
                                           cache_write=rnd.randint(0, 4_000),
                                           output=rnd.randint(20, 2_000)))
@@ -237,7 +237,7 @@ def build(root: Path, now: float) -> Corpus:
             r.user("Fix the failing test.")
             for _ in range(rnd.randint(1, 8)):
                 five = rnd.uniform(0, 100)
-                spent = token_usage(input=rnd.randint(2_000, 120_000),
+                spent = token_usage(input_tokens=rnd.randint(2_000, 120_000),
                                     cached=rnd.randint(0, 1_900),
                                     output=rnd.randint(20, 3_000))
                 windows = rate_limits(primary=(five, 300, r.clock + 2 * HOUR),
@@ -822,7 +822,7 @@ class LongSession:
                 t.user("Look at the module and say what is left.")
             context = first + (last - first) * m // max(1, n - 1)
             req = t.request(model=HOOK_MODEL,
-                            usage_block=usage(input=3, cache_read=context - 1_003,
+                            usage_block=usage(input_tokens=3, cache_read=context - 1_003,
                                               cache_write=1_000, output=400))
             call = req.tool_use("Read", {"file_path": f"/work/project/src/m{m % 50}.py"})
             t.tool_result(call, tail if m == n - 1 else HOOK_RESULT)
@@ -868,7 +868,7 @@ def test_the_warn_at_listener_takes_under_1_ms_a_call_when_marked(hook):
     from moxi_usage import mark, thresholds
 
     below = LongSession(last=90_000)
-    marked = {mark.WARN_AT: "1x", mark.CROSSING_AT: "1.5x"}
+    marked = {mark.WARN_AT_ENV: "1x", mark.CROSSING_AT_ENV: "1.5x"}
     main, agent = below.event(env=marked), below.event(env=marked, agent_id=HOOK_AGENT)
     assert mark.on_tool(main) is None and mark.on_tool(agent) is None
     armed = per_call_ms(lambda: mark.on_tool(main))
@@ -908,7 +908,7 @@ def test_the_warn_at_listener_takes_under_1_ms_a_call_after_a_large_tool_result(
 
     large = CODE * (LARGE_RESULT_KB * 1024 // len(CODE))
     s = LongSession(last=90_000, tail=large)
-    main = s.event(env={mark.WARN_AT: "1x"})
+    main = s.event(env={mark.WARN_AT_ENV: "1x"})
     assert mark.on_tool(main) is None
     taken = per_call_ms(lambda: mark.on_tool(main))
     source = sessions.Source("claude", str(s.t.path), HOOK_SESSION)
@@ -923,7 +923,7 @@ def test_the_warn_at_listener_with_both_purposes_off_takes_about_10_microseconds
     from moxi_usage import mark
 
     s = LongSession(last=160_000, agent_base=20_000, agent_last=20_000)
-    unstamped, stamped_off = s.event(env={}), s.event(env={mark.WARN_AT: "off"})
+    unstamped, stamped_off = s.event(env={}), s.event(env={mark.WARN_AT_ENV: "off"})
     agent = s.event(env={}, agent_id=HOOK_AGENT)
     for e in (unstamped, stamped_off, agent):
         assert mark.on_tool(e) is None

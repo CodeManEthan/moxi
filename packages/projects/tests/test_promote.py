@@ -44,11 +44,11 @@ def notes() -> Path:
 
 def one_off(slug: str = "sketch", files: int = 2) -> Path:
     """An inbox one-off holding `files` notes."""
-    folder = notes() / "inbox" / slug
-    folder.mkdir(parents=True)
+    one_off_dir = notes() / "inbox" / slug
+    one_off_dir.mkdir(parents=True)
     for n in range(files):
-        (folder / f"note-{n}.md").write_text(f"note {n}\n")
-    return folder
+        (one_off_dir / f"note-{n}.md").write_text(f"note {n}\n")
+    return one_off_dir
 
 
 def run(capsys, *argv):
@@ -57,8 +57,8 @@ def run(capsys, *argv):
     return code, out, err
 
 
-def untouched(folder: Path, files: int = 2) -> bool:
-    return folder.is_dir() and len(os.listdir(folder)) == files
+def untouched(notes_dir: Path, files: int = 2) -> bool:
+    return notes_dir.is_dir() and len(os.listdir(notes_dir)) == files
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def git_ok(tmp_path, monkeypatch):
 # --- the topic arm -----------------------------------------------------------------------
 
 @needs_notes
-def test_a_one_off_promoted_to_a_topic_moves_to_its_topic_folder(capsys):
+def test_a_one_off_promoted_to_a_topic_moves_to_its_topic_dir(capsys):
     source = one_off()
     code, out, err = run(capsys, "promote", "sketch", "gardening")
     assert code == 0, err
@@ -124,7 +124,7 @@ def test_the_row_comes_from_adds_own_path(monkeypatch):
 # --- the project arm ---------------------------------------------------------------------
 
 @needs_notes
-def test_a_one_off_promoted_to_a_project_moves_to_the_folder_notes_computes(capsys):
+def test_a_one_off_promoted_to_a_project_moves_to_the_dir_notes_computes(capsys):
     source = one_off()
     root = Path.home() / "code" / "alpha"
     code, _out, err = run(capsys, "promote", "sketch", "alpha", "--kind", "project",
@@ -151,7 +151,7 @@ def test_a_project_promoted_with_create_mints_its_root_first(git_ok):
 
 
 @needs_notes
-def test_the_project_arm_stores_notes_folder_even_past_another_default():
+def test_the_project_arm_stores_notes_dir_even_past_another_default():
     one_off()
     other = Contribution("beta", "beta", 2, {}, {}, None,
                          lambda fields: {"notes_root": "/srv/elsewhere"})
@@ -224,7 +224,7 @@ def test_a_target_that_exists_is_refused_and_never_merged(topic):
 
 
 @needs_notes
-def test_a_root_notes_gives_no_folder_is_refused(tmp_path):
+def test_a_root_notes_gives_no_dir_is_refused(tmp_path):
     source = one_off()
     with pytest.raises(Refused, match="no notes folder") as caught:
         acts.promote("sketch", "alpha", kind="project", root=str(tmp_path / "off-home"))
@@ -354,7 +354,7 @@ def test_a_key_lost_to_a_race_moves_the_one_off_back_and_leaves_the_minted_root(
 
 
 @needs_notes
-def test_a_move_back_that_fails_names_both_folders_and_the_add(monkeypatch):
+def test_a_move_back_that_fails_names_both_dirs_and_the_add(monkeypatch):
     source = one_off()
     target = notes() / "topics" / "gardening"
     rename = os.rename

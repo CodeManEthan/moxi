@@ -42,7 +42,7 @@ def oc_db(tmp_path, *steps, wal=True, totals=None, **session):
 
 
 def add(s, *steps):
-    """Apply each step (`user`, `request`) to the session `s`, in order."""
+    """Apply each step (`include_user`, `request`) to the session `s`, in order."""
     for step in steps:
         step(s)
     return s
@@ -55,12 +55,12 @@ def user(t, *, model=("opencode", "big-pickle"), raw_model=...):
 
 
 def request(t, provider, model, *, steps=((0.0, 3.0),), agent="build", summary=None,
-            created=None, user=True):
+            created=None, include_user=True):
     """A user message and its assistant reply whose first step starts at `t`, each step
     `(start offset, end offset)` from `t` (end None for a step still open), as a step.
     The reply is created at `created` (default `t`)."""
     def step(s):
-        if user:
+        if include_user:
             s.user("hello", model=(provider, model), at=(created or t) - 0.5)
         reply = s.assistant(model=(provider, model), agent=agent, summary=summary,
                             at=created or t)
@@ -75,9 +75,9 @@ def request(t, provider, model, *, steps=((0.0, 3.0),), agent="build", summary=N
 def change(s, sql):
     """Write the session's database, then run `sql` on it: a column or table taken away."""
     path = s.db.write()
-    with sqlite3.connect(path) as c:
-        c.execute(sql)
-    c.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute(sql)
+    conn.close()
     return path
 
 
@@ -159,8 +159,8 @@ def test_the_stamp_errs_old(tmp_path):
 def test_a_compaction_and_a_child_session_do_not_move_the_clock(tmp_path):
     claude_x = ("anthropic", "claude-x")
     s = oc_db(tmp_path, request(NOW - 400, *claude_x),
-              request(NOW - 10, *claude_x, agent="compaction", user=False),
-              request(NOW - 9, *claude_x, summary=True, user=False), model=claude_x)
+              request(NOW - 10, *claude_x, agent="compaction", include_user=False),
+              request(NOW - 9, *claude_x, summary=True, include_user=False), model=claude_x)
     add(s.child(model=claude_x), request(NOW - 5, *claude_x))
     clock = oc_read(s)
     assert clock.kind == "cold" and clock.age_s == pytest.approx(400, abs=0.01)
@@ -233,15 +233,15 @@ def test_each_witness_that_fails_is_unknown(tmp_path, case):
         source = None
     try:
         if case == "locked-db":
-            holder = sqlite3.connect(path)
-            holder.execute("BEGIN EXCLUSIVE")
+            conn = sqlite3.connect(path)
+            conn.execute("BEGIN EXCLUSIVE")
             try:
                 start = time.monotonic()
                 clock = oc_read(s, turned=False, source=source)
                 assert time.monotonic() - start < 2
             finally:
-                holder.rollback()
-                holder.close()
+                conn.rollback()
+                conn.close()
         else:
             clock = oc_read(s, turned=False, source=source)
     finally:
@@ -303,7 +303,7 @@ def test_the_pairs_under_the_wildcard_row(tmp_path):
     clock = read(agent_model=api.MISSING)
     assert clock.kind == "unknown" and clock.reason == opencode.NO_AGENT
     # No session model and no user model: unknown (no server default is read).
-    s = oc_db(tmp_path / "d", request(NOW - 10, "anthropic", "claude-A", user=False),
+    s = oc_db(tmp_path / "d", request(NOW - 10, "anthropic", "claude-A", include_user=False),
               model=None)
     assert read().kind == "unknown"
     # A session model that will not parse, and a latest user model that will not.

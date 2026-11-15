@@ -197,10 +197,10 @@ def test_a_steer_uses_turn_steer_and_ends_with_that_turn(turns_env):
 
 def test_stopping_the_endpoint_reaps_the_owned_children_and_runtime_dir(turns_env):
     endpoint, harness, _ = _host(turns_env)
-    directory = endpoint.dir
+    endpoint_dir = endpoint.dir
     end_endpoint(endpoint)
     assert not harness.app_server.alive
-    assert not directory.exists()
+    assert not endpoint_dir.exists()
 
 
 def test_a_plain_steer_that_races_the_turn_end_refuses_idle(turns_env):
@@ -1628,7 +1628,7 @@ def test_a_turn_a_load_reports_before_turn_start_answers_does_not_count_as_its_s
 
 # -- the internal sockets' paths ------------------------------------------------------
 
-def test_the_codex_sockets_sit_in_the_endpoint_directory_when_their_paths_are_short(
+def test_the_codex_sockets_sit_in_the_endpoint_dir_when_their_paths_are_short(
         turns_env, short_runtime):
     endpoint, harness, app = _host(turns_env)
     try:

@@ -138,7 +138,7 @@ def test_the_piece_fills_homes_main_spot_and_homes_rows_keep_their_places(page):
 
 # --- the line at load, and its menu ---------------------------------------------------------
 
-def test_home_opens_on_the_newest_place_with_the_home_folder_written_short(page):
+def test_home_opens_on_the_newest_place_with_the_home_dir_written_short(page):
     piece = kit.open_home(page)
     expect(where(piece)).to_have_attribute("data-word", "Folder")
     expect(where(piece).locator(".k")).to_have_text("Folder")
@@ -211,7 +211,7 @@ def test_a_project_picked_from_all_projects_is_the_line_and_the_launch_names_it(
     expect(menu.locator('.places .row[data-current="true"] .name')).to_have_text("proj-b")
 
 
-def test_a_typed_folder_is_taken_only_as_an_absolute_path_or_one_from_home(page, shell):
+def test_a_typed_dir_is_taken_only_as_an_absolute_path_or_one_from_home(page, shell):
     piece = kit.open_home(page)
     menu = open_where(piece)
     find = menu.locator(".find")
@@ -230,7 +230,7 @@ def test_a_typed_folder_is_taken_only_as_an_absolute_path_or_one_from_home(page,
     assert kit.newest_launch(shell).cwd == str(root(shell, "proj-b"))
 
 
-def test_a_long_folder_is_cut_in_its_dim_middle_and_its_name_is_whole(page):
+def test_a_long_dir_is_cut_in_its_dim_middle_and_its_name_is_whole(page):
     piece = kit.open_home(page)
     deep = "/srv/" + "/".join(["a-folder-with-a-long-name"] * 4) + "/the-last-folder-of-them-all"
     menu = open_where(piece)
@@ -289,7 +289,7 @@ def small(ui_shells, tmp_path_factory, on_path):
     return shell
 
 
-def test_without_projects_a_place_is_a_folder_and_a_pick_of_it_launches_in_that_folder(
+def test_without_projects_a_place_is_a_dir_and_a_pick_of_it_launches_in_that_dir(
         small, ui_contexts):
     context = ui_contexts(small)
     context.grant_permissions(["clipboard-read", "clipboard-write"])
@@ -328,7 +328,7 @@ def test_without_slots_the_button_copies_and_offers_the_terminal_and_headless_al
     assert "slot" not in said and "project" not in said, said
 
 
-def test_without_projects_a_home_that_never_launched_opens_on_the_home_folder(
+def test_without_projects_a_home_that_never_launched_opens_on_the_home_dir(
         ui_shells, ui_contexts, tmp_path_factory, on_path):
     fake = kit.FakeSlots(tmp_path_factory.mktemp("fake-slots"))
     fake.script(supported={"ok": False, "why": "tmux is not on PATH"})

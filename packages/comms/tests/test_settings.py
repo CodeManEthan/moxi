@@ -136,7 +136,7 @@ def test_an_env_override_wins_over_the_file(monkeypatch, tmp_path):
     assert cfg.credentials.store == str(tmp_path / "store")
 
 
-def test_a_given_environment_is_read_instead_of_the_process(tmp_path):
+def test_a_given_env_is_read_instead_of_the_process(tmp_path):
     env = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}
     write_config(env, "[threads]\nreply_cap = 5\n")
     assert config.config_path(env) == tmp_path / "cfg" / "comms" / "config.toml"
@@ -256,13 +256,13 @@ def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
     assert tokens.TokenStore().root == paths.tokens_dir()
     write_config(None, f'[credentials]\nstore = "{tmp_path / "a"}"\n')
     assert tokens.TokenStore().root == tmp_path / "a"
-    monkeypatch.setenv(tokens.STORE_ENV_VAR, str(tmp_path / "b"))
+    monkeypatch.setenv(tokens.TOKEN_STORE_ENV, str(tmp_path / "b"))
     assert tokens.TokenStore().root == tmp_path / "b"
     assert tokens.TokenStore(tmp_path / "c").root == tmp_path / "c"
     # A caller's injected env names the override, never the roots.
     assert tokens.TokenStore(env={"MOXI_COMMS_TOKEN_STORE": str(tmp_path / "d")}).root \
         == tmp_path / "d"
-    monkeypatch.delenv(tokens.STORE_ENV_VAR)
+    monkeypatch.delenv(tokens.TOKEN_STORE_ENV)
     assert tokens.TokenStore(env={"MOXI_COMMS_PROJECT": "p"}).root == tmp_path / "a"
 
 
@@ -333,7 +333,7 @@ def test_a_named_file_is_read_in_place(tmp_path, monkeypatch):
     assert config.load().block is False
 
 
-def test_a_named_relative_file_is_read_from_the_working_directory(tmp_path, monkeypatch):
+def test_a_named_relative_file_is_read_from_the_working_dir(tmp_path, monkeypatch):
     (tmp_path / "launch.toml").write_text("block = true\n")
     monkeypatch.chdir(tmp_path)
     assert config.load_file("launch.toml").source == str(tmp_path / "launch.toml")
@@ -418,7 +418,7 @@ def test_the_text_entry_refuses_every_row_its_roster_refuses(text, words):
     assert loaded.value.problem.endswith(caught.value.problem)
 
 
-def test_the_text_entry_reads_no_environment(monkeypatch):
+def test_the_text_entry_reads_no_env(monkeypatch):
     write_config(None, 'backend = "local"\n')
     monkeypatch.setenv("MOXI_COMMS_BACKEND", "bogus")
     with pytest.raises(config.ConfigError):
@@ -524,7 +524,7 @@ def test_config_set_refuses_what_comms_refuses(core_state, capsys, argv, value, 
         if value is None:
             moxi_config.add_item("comms", argv[0], argv[-1], by="ui")
         else:
-            moxi_config.set("comms", argv[0], value, by="ui")
+            moxi_config.set_value("comms", argv[0], value, by="ui")
     assert caught.value.file == str(path) and caught.value.key == key
     assert path.read_text() == "block = true\n"
 

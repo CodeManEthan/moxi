@@ -4,7 +4,7 @@ With `auto` on, a handed delivery enters at once (the re-check, then an only-if-
 delivery's own draft and subagent checks, then the turn starts with the tie); with it off
 the test calls `enter()` itself, so a turn can be typed between the submit and the entry.
 With `auto_steer` on, a handed steer is confirmed at once (`steered`), or refused `idle`
-when no turn is open; with it off the test calls `take()` or `endpoint.refused` itself.
+when no turn is open; with it off the test calls `take()` or `endpoint.on_refused` itself.
 
 Its subagents: `entries` is the harness's own record, read on every `agents()` call; left
 None, the record is made from the counts `live_agents` (None: unreadable) and `shells`.
@@ -50,7 +50,7 @@ class FakeHarness(Harness):
         self.open_turn: str | None = None
         #: What a command's shell stop reports, and the stops made, in order, after the
         #: command took effect.
-        self.stop_report = Shells(("sh1",), (), True)
+        self.stop_report = Shells(("sh1",), (), complete=True)
         self.stops: list[str] = []
         #: With `compact_ready` off a compaction raises no Ready; the test raises it.
         self.compact_ready = True
@@ -65,7 +65,7 @@ class FakeHarness(Harness):
             raise OSError("the prompt box cannot be read")
         try:
             agents = self.agents()
-            return Live.of(agents, self.draft)
+            return Live.of(agents, draft=self.draft)
         except Exception:  # noqa: BLE001 - the box was read; the list is unknown
             return Live(None, self.draft)
 
@@ -75,11 +75,11 @@ class FakeHarness(Harness):
         if self.entries is not None:
             return Agents(tuple(self.entries), self.agents_complete, time.time())
         if self.live_agents is None:
-            return Agents((), False, time.time())
+            return Agents((), complete=False, at=time.time())
         shells = min(self.shells, self.live_agents)
-        made = [Agent(f"a{n}", "subagent", "running", False)
+        made = [Agent(f"a{n}", "subagent", "running", final=False)
                 for n in range(self.live_agents - shells)]
-        made += [Agent(f"sh{n}", "shell", "running", False) for n in range(shells)]
+        made += [Agent(f"sh{n}", "shell", "running", final=False) for n in range(shells)]
         return Agents(tuple(made), self.agents_complete, time.time())
 
     def submit(self, delivery: Delivery) -> None:
@@ -109,7 +109,7 @@ class FakeHarness(Harness):
                 live is None or live.agents is None or live.agents):
             reason = "busy-agents"      # an unknown count never reads as 0
         if reason is not None:
-            self.endpoint.refused(delivery.id, reason)
+            self.endpoint.on_refused(delivery.id, reason)
             return reason
         self.start_turn(delivery.id)
         return None
@@ -120,7 +120,7 @@ class FakeHarness(Harness):
         if self.live_fails:
             return None
         try:
-            return Live.of(self.agents(), self.draft)
+            return Live.of(self.agents(), draft=self.draft)
         except Exception:  # noqa: BLE001 - an unreadable list reads as unknown
             return None
 
@@ -135,9 +135,9 @@ class FakeHarness(Harness):
     def take(self, delivery: Delivery) -> None:
         """The harness's word on a steer: taken into the open turn, else `idle`."""
         if self.open_turn is None:
-            self.endpoint.refused(delivery.id, "idle")
+            self.endpoint.on_refused(delivery.id, "idle")
         else:
-            self.endpoint.steered(delivery.id)
+            self.endpoint.on_steered(delivery.id)
 
     def start_turn(self, delivery_id: str | None = None) -> str:
         turn_id = f"t{next(self._turns)}"

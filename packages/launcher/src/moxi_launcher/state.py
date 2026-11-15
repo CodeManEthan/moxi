@@ -185,24 +185,24 @@ class SessionState:
 
 def state(session_id: str, *, conn: sqlite3.Connection | None = None,
           slots_api: Any = LOOK, cache: Any = LOOK,
-          environ: Mapping[str, str] | None = None) -> SessionState:
+          caller_env: Mapping[str, str] | None = None) -> SessionState:
     """The state of the launched session `session_id`. Raises `target.NotLaunched` when
     no launch holds it."""
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
         row = store.resolve(c, session_id)
         if row is None:
             raise target.NotLaunched()
-        return of_launch(c, row, slots_api=slots_api, cache=cache, environ=env)
+        return of_launch(c, row, slots_api=slots_api, cache=cache, caller_env=env)
 
 
 def of_launch(conn: sqlite3.Connection, row: store.LaunchRow, *, slots_api: Any = LOOK,
-              cache: Any = LOOK, environ: Mapping[str, str] | None = None) -> SessionState:
+              cache: Any = LOOK, caller_env: Mapping[str, str] | None = None) -> SessionState:
     """The state of the launch `row` (`newest_session_id` set when it came from
     `store.resolve`)."""
     from . import job
 
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     api = slots.api() if slots_api is LOOK else slots_api
     gone = lambda j: job.gone(j, slots_api=api)  # noqa: E731
     own = store.runs(conn, request_id=row.request_id)
@@ -302,7 +302,7 @@ def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[sto
                env: Mapping[str, str]) -> KeepWarmState:
     launched_on = row.values.get("keep_warm") == "on"
     if not keepwarm.on(conn, row, sid):
-        return KeepWarmState(False)
+        return KeepWarmState(on=False)
     warm = [r for r in own if r.kind == keepwarm.KIND]
     nudged = next((r for r in warm if r.outcome == "nudged"), None)
     nudges = (len(keepwarm.run_of_nudges(conn, row.request_id, nudged.session_id, None))
@@ -315,8 +315,8 @@ def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[sto
             window = f"no window: lifetime {ttl:g} s"
     # Holds count only with the launch value on; under cover alone none is listed.
     holds = tuple(store.open_holds(conn, row.request_id)) if launched_on else ()
-    return KeepWarmState(True, holds, nudges,
-                         lines[warm[0].run_id] if warm else None, window)
+    return KeepWarmState(on=True, holds=holds, nudges=nudges,
+                         last=lines[warm[0].run_id] if warm else None, window=window)
 
 
 # -- the verb ---------------------------------------------------------------------------
@@ -324,18 +324,18 @@ def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[sto
 
 def show(session_id: str | None = None, *, pid: int | None = None, turns: Any | None = None,
          slots_api: Any = LOOK, cache: Any = LOOK, conn: sqlite3.Connection | None = None,
-         environ: Mapping[str, str] | None = None) -> relaunch.Result:
+         caller_env: Mapping[str, str] | None = None) -> relaunch.Result:
     """`moxi launcher show [SESSION_ID]`: the state of the session named, or with none,
     of the session this process runs in (found through turns). Exits 0 with the state;
     raises a refusal for a session no launch holds."""
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
         if session_id is None:
             found = target.caller(pid=pid, conn=c, turns=turns,
                                   slots_api=None if slots_api is LOOK else slots_api)
             found.close()
             session_id = found.session_id or found.row.session_id or ""
-        got = state(session_id, conn=c, slots_api=slots_api, cache=cache, environ=env)
+        got = state(session_id, conn=c, slots_api=slots_api, cache=cache, caller_env=env)
     return relaunch.Result(codes.OK, got.lines(),
                            data={**got.as_json(), "outcome": got.word or "ok"})
 

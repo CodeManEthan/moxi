@@ -130,14 +130,14 @@ def parse_agents(doc) -> list[Live]:
     return live
 
 
-def claude_binary(environ=None) -> str | None:
+def claude_binary(env=None) -> str | None:
     """`claude` on PATH, else at the installer's place, `~/.local/bin/claude`. A user
     service's PATH often lacks the second."""
-    environ = os.environ if environ is None else environ
-    found = shutil.which("claude", path=environ.get("PATH"))
+    env = os.environ if env is None else env
+    found = shutil.which("claude", path=env.get("PATH"))
     if found:
         return found
-    home = environ.get("HOME") or str(Path.home())
+    home = env.get("HOME") or str(Path.home())
     fallback = Path(home) / ".local" / "bin" / "claude"
     return str(fallback) if os.access(fallback, os.X_OK) else None
 
@@ -152,33 +152,33 @@ def run_agents(timeout: float = AGENTS_TIMEOUT):
                               capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise AgentsUnreadable(f"`claude agents --json` took over {timeout:g}s") from None
-    except OSError as e:
-        raise AgentsUnreadable(f"`claude agents --json` could not run ({e})") from None
+    except OSError as exc:
+        raise AgentsUnreadable(f"`claude agents --json` could not run ({exc})") from None
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().splitlines()
         raise AgentsUnreadable(f"`claude agents --json` exited {proc.returncode}"
                                + (f": {detail[-1]}" if detail else ""))
     try:
         return json.loads(proc.stdout)
-    except ValueError as e:
-        raise AgentsUnreadable(f"`claude agents --json` printed no JSON ({e})") from None
+    except ValueError as exc:
+        raise AgentsUnreadable(f"`claude agents --json` printed no JSON ({exc})") from None
 
 
-def sessions_dir(environ=None) -> Path:
+def sessions_dir(env=None) -> Path:
     """Claude Code's sessions folder, `${CLAUDE_CONFIG_DIR:-~/.claude}/sessions`."""
-    environ = os.environ if environ is None else environ
-    config = environ.get("CLAUDE_CONFIG_DIR")
+    env = os.environ if env is None else env
+    config = env.get("CLAUDE_CONFIG_DIR")
     if config:
         return Path(config) / "sessions"
-    home = environ.get("HOME") or str(Path.home())
+    home = env.get("HOME") or str(Path.home())
     return Path(home) / ".claude" / "sessions"
 
 
-def sessions_stamp(directory: Path):
+def sessions_stamp(sessions_dir: Path):
     """What the sessions folder holds now: each `.json` file's name, size and
     modification time. None when the folder cannot be read."""
     try:
-        with os.scandir(directory) as entries:
+        with os.scandir(sessions_dir) as entries:
             found = []
             for entry in entries:
                 if not entry.name.endswith(".json"):
@@ -215,14 +215,14 @@ def make_record(session: str, seen: Seen, now: float, *, warn_before: float,
             "asks": None if asks is None else list(asks)}
 
 
-def write_record(directory: Path, record: dict) -> Path:
+def write_record(records_dir: Path, record: dict) -> Path:
     """Replace one record whole: a reader sees the old file or the new, never part.
     Raises `ValueError` for a session id the reader would refuse (`records.record_path`),
     so no id names a path outside `directory`."""
-    path = records.record_path(record["session"], directory)
+    path = records.record_path(record["session"], records_dir)
     if path is None:
         raise ValueError(f"session id {record['session']!r} cannot name a record file")
-    tmp = directory / f".{record['session']}.{os.getpid()}.tmp"
+    tmp = records_dir / f".{record['session']}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(record, fh)
         fh.write("\n")
@@ -233,9 +233,9 @@ def write_record(directory: Path, record: dict) -> Path:
 class Watcher:
     """The watcher's state and its tick. Every outside effect can be replaced for tests:
     `agents` (the live list), `read` (the clock), `now`, `projects_root` (where
-    transcripts are found), `directory` (where records go), `sessions` (the folder whose
+    transcripts are found), `records_dir` (where records go), `session_files_dir` (the folder whose
     changes ask for the list again), `reading` (the reading's file; by default
-    `watch.json` beside `directory`, which is `records.reading_path()` for the default
+    `watch.json` beside `records_dir`, which is `records.reading_path()` for the default
     directory) and `asking` (what the timer asks about a session and its pid, written as
     the record's `asks`; `run` sets it to its timer's `Timer.asking`, and by default it
     gives None).
@@ -247,7 +247,7 @@ class Watcher:
                  read: Callable[..., Clock] = api.read,
                  now: Callable[[], float] = time.time,
                  projects_root: Callable[[], str] | None = None,
-                 directory: Path | None = None, sessions: Path | None = None,
+                 records_dir: Path | None = None, session_files_dir: Path | None = None,
                  reading: Path | None = None,
                  asking: Callable[[str, int], Sequence[str] | None] | None = None):
         self.agents = agents
@@ -255,9 +255,9 @@ class Watcher:
         self.read = read
         self.now = now
         self.projects_root = projects_root or (lambda: api.projects_root(None))
-        self.directory = records.record_dir() if directory is None else Path(directory)
-        self.sessions = sessions_dir() if sessions is None else Path(sessions)
-        self.reading = (self.directory.parent / records.READING_NAME if reading is None
+        self.records_dir = records.record_dir() if records_dir is None else Path(records_dir)
+        self.session_files_dir = sessions_dir() if session_files_dir is None else Path(session_files_dir)
+        self.reading = (self.records_dir.parent / records.READING_NAME if reading is None
                         else Path(reading))
         self.warn_before = default("segment.warn_before_s")
         self.stale_after = records.STALE_TICKS * max(MIN_TICK, default("watch.tick_s"))
@@ -299,7 +299,7 @@ class Watcher:
     def _tick(self) -> list[Live]:
         now = self.tick_at = self.now()
         self.current = None
-        stamp = sessions_stamp(self.sessions)
+        stamp = sessions_stamp(self.session_files_dir)
         if self._ask or self.ticks % AGENTS_EVERY == 0 or stamp != self._stamp:
             self._stamp = stamp
             if not self._refresh():
@@ -308,7 +308,7 @@ class Watcher:
         self.ticks += 1
         if self._halted or self.live is None:
             return []
-        self.directory.mkdir(parents=True, exist_ok=True)
+        self.records_dir.mkdir(parents=True, exist_ok=True)
         current: dict[str, dict] = {}
         for live in self.live:
             seen = self._observe(live, now)
@@ -316,10 +316,10 @@ class Watcher:
                 live.session, seen, now, warn_before=self.warn_before,
                 stale_after=self.stale_after, asks=self.asking(live.session, live.pid))
             try:
-                write_record(self.directory, record)
+                write_record(self.records_dir, record)
                 self.say("write", None)
-            except OSError as e:
-                self.say("write", f"cannot write the clock record of {live.session}: {e}")
+            except OSError as exc:
+                self.say("write", f"cannot write the clock record of {live.session}: {exc}")
         self.current = current
         self.listed_at = now
         return list(self.live)
@@ -334,21 +334,21 @@ class Watcher:
         try:
             atomic_write(self.reading, json.dumps(doc) + "\n")
             self.say("reading", None)
-        except OSError as e:
-            self.say("reading", f"cannot write the watcher's reading {self.reading}: {e}")
+        except OSError as exc:
+            self.say("reading", f"cannot write the watcher's reading {self.reading}: {exc}")
 
     def _refresh(self) -> bool:
         """Ask for the live list. False when this tick writes nothing."""
         try:
             listed = parse_agents(self.agents())
-        except AgentsUnreadable as e:
+        except AgentsUnreadable as exc:
             self._ask = True
-            self.say("agents", f"{e}; no clock record is written until it can be read")
+            self.say("agents", f"{exc}; no clock record is written until it can be read")
             return False
-        except ShapeError as e:
+        except ShapeError as exc:
             self._ask = True
             self._halted = True
-            self.say("agents", f"`claude agents --json` printed {e}, a shape the watcher "
+            self.say("agents", f"`claude agents --json` printed {exc}, a shape the watcher "
                                "does not know; it writes no clock record until it does")
             return False
         self._ask = False
@@ -357,7 +357,7 @@ class Watcher:
         unique: dict[str, Live] = {}
         unsafe: list[str] = []
         for live in listed:
-            if records.record_path(live.session, self.directory) is None:
+            if records.record_path(live.session, self.records_dir) is None:
                 unsafe.append(live.session)
                 continue
             unique.setdefault(live.session, live)
@@ -373,11 +373,11 @@ class Watcher:
     def _remove_others(self, keep: set[str]) -> None:
         """Remove the record of every session not in `keep`, and stray temporary files."""
         try:
-            entries = list(self.directory.iterdir())
+            entries = list(self.records_dir.iterdir())
         except FileNotFoundError:
             return
-        except OSError as e:
-            self.say("remove", f"cannot list {self.directory}: {e}")
+        except OSError as exc:
+            self.say("remove", f"cannot list {self.records_dir}: {exc}")
             return
         for path in entries:
             stray = path.name.startswith(".") and path.name.endswith(".tmp")
@@ -387,8 +387,8 @@ class Watcher:
                 path.unlink()
             except FileNotFoundError:
                 pass
-            except OSError as e:
-                self.say("remove", f"cannot remove {path}: {e}")
+            except OSError as exc:
+                self.say("remove", f"cannot remove {path}: {exc}")
 
     def _observe(self, live: Live, now: float) -> Seen:
         """Find and stat one session's transcript; read its clock when it changed."""
@@ -400,8 +400,8 @@ class Watcher:
             try:
                 found = find("claude", live.session, root=self.projects_root())
                 seen.path = Path(found.hits[0].source.path) if found.found else None
-            except (ConfigError, OSError) as e:
-                self.say("root", f"cannot find transcripts: {e}")
+            except (ConfigError, OSError) as exc:
+                self.say("root", f"cannot find transcripts: {exc}")
                 seen.path = None
         stat = None
         if seen.path is not None:
@@ -430,7 +430,7 @@ def _interval(config: Config, watcher: Watcher) -> int:
     return tick
 
 
-def _thresholds(config: Config, watcher: Watcher) -> int:
+def _set_thresholds(config: Config, watcher: Watcher) -> int:
     """Read the config once for this tick: set what the tick writes into every record
     and return the tick it then waits, the same read that set `stale_after`."""
     interval = _interval(config, watcher)
@@ -446,37 +446,37 @@ def run(*, watcher: Watcher | None = None, stop: threading.Event | None = None,
     the watcher writes `Timer.asking` into its records. Returns the exit code: 0 on a stop,
     2 when the config refuses the start."""
     config = config or Config(MODULE, schema(),
-                              report=lambda e: log.warning("cache's config: %s", e))
+                              report=lambda config_exc: log.warning("cache's config: %s", config_exc))
     try:
         config.start()
-    except ConfigError as e:
-        print(f"moxi-cache-watch: cache's config refuses the start: {e}", file=sys.stderr)
+    except ConfigError as exc:
+        print(f"moxi-cache-watch: cache's config refuses the start: {exc}", file=sys.stderr)
         return 2
     watcher = watcher or Watcher()
     timer = timer or _timer.Timer(config_entries=lambda: config.use(_timer.CONFIG_KEY))
     stop = stop or threading.Event()
-    log.info("watching live Claude sessions; records under %s", watcher.directory)
+    log.info("watching live Claude sessions; records under %s", watcher.records_dir)
     watcher.asking = timer.asking
     try:
         try:
             timer.reload()
-        except Exception as e:                                    # noqa: BLE001
+        except Exception as exc:                                    # noqa: BLE001
             watcher.say("timer-error", f"the timer's first load failed "
-                                       f"({type(e).__name__}: {e})")
+                                       f"({type(exc).__name__}: {exc})")
         while not stop.is_set():
-            interval = _thresholds(config, watcher)
+            interval = _set_thresholds(config, watcher)
             try:
                 watcher.tick()
                 watcher.say("tick-error", None)
-            except Exception as e:                                # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 -- one failed tick must not stop the watcher
                 watcher.current = None
-                watcher.say("tick-error", f"a tick failed ({type(e).__name__}: {e})")
+                watcher.say("tick-error", f"a tick failed ({type(exc).__name__}: {exc})")
             try:
                 timer.tick(watcher.current, watcher.tick_at)
                 watcher.say("timer-error", None)
-            except Exception as e:                                # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 -- one timer failure must not stop the watcher
                 watcher.say("timer-error", f"the timer's tick failed "
-                                           f"({type(e).__name__}: {e})")
+                                           f"({type(exc).__name__}: {exc})")
             stop.wait(interval)
     finally:
         timer.close()

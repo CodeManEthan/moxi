@@ -82,7 +82,7 @@ def run():
             return None
     elif how == "switch":
         from moxi import config
-        applied = config.set("demo", "relay.enabled", True, by="setup")
+        applied = config.set_value("demo", "relay.enabled", True, by="setup")
         note("setup", applied=[[a.change.name, a.change.action, a.ok] for a in applied])
     note("setup", end=how)
 """
@@ -406,7 +406,8 @@ def test_a_standalone_core_call_waits_for_a_running_install(box, install_running
                                                             standalone):
     if standalone == "config set":
         box.module(DAEMONS=SWITCHED)
-        fn = lambda: config.set("demo", "relay.enabled", True, by="cli")  # noqa: E731
+        fn = lambda: config.set_value(  # noqa: E731
+            "demo", "relay.enabled", value=True, by="cli")
     elif standalone == "apply":
         box.module(DAEMONS=ONE)
         fn = lambda: units.apply(units.plan("demo"), say=lambda line: None)  # noqa: E731
@@ -791,8 +792,8 @@ def placing(box, monkeypatch):
     box.site.write("moxi_demo/skills/moxi-demo-send/SKILL.md", "# send\n")
     box.site.write("moxi_demo/handback.py", HANDBACK)
     box.place = place
-    box.targets = sorted(str(user / folder / "skills" / "moxi-demo-send")
-                         for folder in (".claude", ".agents"))
+    box.targets = sorted(str(user / harness_dir / "skills" / "moxi-demo-send")
+                         for harness_dir in (".claude", ".agents"))
     return box
 
 

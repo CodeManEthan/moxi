@@ -308,8 +308,8 @@ async def doctor_answer(shell: Any, module: str | None = None) -> dict[str, Any]
                                          env=shell.starters.child_env())
         except TimeoutError:
             return {"rows": [], "error": f"moxi doctor ran past {DOCTOR_TIMEOUT:g} s"}
-        except OSError as err:
-            return {"rows": [], "error": f"moxi doctor could not run: {err}"}
+        except OSError as exc:
+            return {"rows": [], "error": f"moxi doctor could not run: {exc}"}
     try:
         listed = json.loads(out)
         if not isinstance(listed, list):

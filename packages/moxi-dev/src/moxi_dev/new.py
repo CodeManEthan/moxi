@@ -118,12 +118,12 @@ def _header_span(text: str, table: str) -> tuple[int, int] | None:
     return start, nxt.start() if nxt else len(text)
 
 
-def _array_tokens(text: str, at: int) -> tuple[list[tuple[int, int]], list[int], int]:
-    """Scan the array whose `[` is at `at`: its string tokens, comma positions and the
+def _array_tokens(text: str, position: int) -> tuple[list[tuple[int, int]], list[int], int]:
+    """Scan the array whose `[` is at `position`: its string tokens, comma positions and the
     position of its closing `]`."""
     strings: list[tuple[int, int]] = []
     commas: list[int] = []
-    i = at + 1
+    i = position + 1
     while i < len(text):
         c = text[i]
         if c == "#":
@@ -161,8 +161,8 @@ def _add_to_members(text: str, member: str) -> str:
     if not strings:
         inner = text[key.end():close]
         if "\n" in inner:
-            at = text.index("\n", key.end()) + 1
-            return text[:at] + f"{key.group(1)}    {item},\n" + text[at:]
+            position = text.index("\n", key.end()) + 1
+            return text[:position] + f"{key.group(1)}    {item},\n" + text[position:]
         return text[:key.end()] + item + text[close:]
     last_end = strings[-1][1]
     comma = next((c for c in commas if c >= last_end), None)
@@ -173,8 +173,8 @@ def _add_to_members(text: str, member: str) -> str:
     if "\n" in text[anchor:close]:
         line_start = text.rfind("\n", 0, strings[-1][0]) + 1
         indent = re.match(r"[ \t]*", text[line_start:]).group(0)
-        at = text.index("\n", anchor) + 1
-        return text[:at] + f"{indent}{item},\n" + text[at:]
+        position = text.index("\n", anchor) + 1
+        return text[:position] + f"{indent}{item},\n" + text[position:]
     return text[:anchor] + f" {item}" + text[anchor:]
 
 
@@ -189,11 +189,11 @@ def _add_to_sources(text: str, dist: str) -> str:
     if not pairs:
         return text[:span[0]] + line + text[span[0]:]
     end = pairs[-1].end()
-    at = text.find("\n", end)
-    at = len(text) if at < 0 else at + 1
-    if at == len(text) and not text.endswith("\n"):
+    position = text.find("\n", end)
+    position = len(text) if position < 0 else position + 1
+    if position == len(text) and not text.endswith("\n"):
         return text + "\n" + line
-    return text[:at] + line + text[at:]
+    return text[:position] + line + text[position:]
 
 
 def add_member(text: str, module: str) -> str:

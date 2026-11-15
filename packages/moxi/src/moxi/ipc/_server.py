@@ -637,8 +637,8 @@ class _PipeProtocol(asyncio.StreamReaderProtocol):
             self._moxi_server._loop.call_soon(self._moxi_server._pipe_closed)
 
 
-def _socket_dir(directory: str) -> None:
-    """Make ready the directory the socket goes in, `directory`.
+def _socket_dir(socket_dir: str) -> None:
+    """Make ready the directory the socket goes in, `socket_dir`.
 
     A directory that doesn't exist yet is made private (`moxi.files.private_dir`), and
     so is one of the core's own: a module's runtime directory or the short hashed
@@ -646,33 +646,33 @@ def _socket_dir(directory: str) -> None:
     changed: it must be this user's, not a symbolic link, and not writable by group or
     others, or `serve` refuses it with an `OSError` naming it.
     """
-    if not os.path.lexists(directory) or _core_dir(directory):
-        files.private_dir(directory)
+    if not os.path.lexists(socket_dir) or _core_dir(socket_dir):
+        files.private_dir(socket_dir)
         return
-    st = os.lstat(directory)
+    st = os.lstat(socket_dir)
     if stat.S_ISLNK(st.st_mode):
-        raise PermissionError(f"{directory} is a symbolic link; a socket's directory "
+        raise PermissionError(f"{socket_dir} is a symbolic link; a socket's directory "
                               f"must not be")
     if not stat.S_ISDIR(st.st_mode):
-        raise NotADirectoryError(f"{directory} is not a directory")
+        raise NotADirectoryError(f"{socket_dir} is not a directory")
     if st.st_uid != os.getuid():
-        raise PermissionError(f"{directory} belongs to uid {st.st_uid}, not this user; a "
+        raise PermissionError(f"{socket_dir} belongs to uid {st.st_uid}, not this user; a "
                               f"socket's directory must be this user's own")
     if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise PermissionError(f"{directory} is writable by group or others (mode "
+        raise PermissionError(f"{socket_dir} is writable by group or others (mode "
                               f"{stat.S_IMODE(st.st_mode):o}); serve leaves it as it is, so "
                               f"make it 0700 or serve elsewhere")
 
 
-def _core_dir(directory: str) -> bool:
-    """Whether `directory` is one the core makes private: a module's runtime directory,
+def _core_dir(core_dir: str) -> bool:
+    """Whether `core_dir` is one the core makes private: a module's runtime directory,
     a child of its runtime root as `moxi.paths` computes it, or the short hashed
     directory. Decided by comparing resolved paths, never by a name alone."""
-    real = os.path.realpath(directory)
+    real = os.path.realpath(core_dir)
     short = os.path.join(_paths._SHORT_ROOT, f"moxi-{os.getuid()}")
     if real == os.path.realpath(short):
         return True
-    module = os.path.basename(directory)
+    module = os.path.basename(core_dir)
     if not _names.is_module_name(module):
         return False
     return real == os.path.realpath(_paths._layout(module).runtime_dir())

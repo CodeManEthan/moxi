@@ -28,7 +28,7 @@ CAPABILITIES = ("deliver", "only-if-idle", "steer", "stop-handler", "clear", "ex
                 "mcp-token", "environ")
 
 #: The most names one `environ` call may ask.
-ENVIRON_MAX_NAMES = 64
+ENV_MAX_NAMES = 64
 
 #: The deadline over one settle of a Codex host's MCP servers (`mcp.reload`, and at each
 #: ready), in seconds. An `mcp.reload` answers within it, or within twice it when the call
@@ -616,7 +616,7 @@ def from_notification(method: str, params: Any):
         raise ValueError(f"malformed {method} notification: {exc}") from None
 
 
-__all__ = ["CAPABILITIES", "ENVIRON_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
+__all__ = ["CAPABILITIES", "ENV_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
            "DELIVERY_REFUSALS", "COMMAND_REFUSALS",
            "READY_SOURCES", "COMMANDS", "COMMAND_WAIT_S", "STOP_SHELLS_WAIT_S",
            "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",

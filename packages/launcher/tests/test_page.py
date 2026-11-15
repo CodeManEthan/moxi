@@ -159,7 +159,7 @@ def test_the_export_lists_the_built_assets():
                                   "sessions.js", "state.js"]
 
 
-def test_no_answer_declares_an_environment_a_brief_or_a_process():
+def test_no_answer_declares_an_env_a_brief_or_a_process():
     found = declared()
     assert not set(found) & NEVER_SENT
 
@@ -517,23 +517,23 @@ def test_a_failed_form_read_says_only_the_class(monkeypatch):
 # --- /api/launches ------------------------------------------------------------------------
 
 def seed(conn, request_id: str, at: str, **more) -> None:
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target="slot",
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target="slot",
                  cwd="/work", values={"model": "opus"}, argv=["claude", "the brief text"],
                  env={"MOXI_LAUNCHER_REQUEST": "secret-stamp"}, posture="operator",
                  session_id=SID if request_id == "r1" else str(uuid.uuid4()), slot="3",
-                 brief="the brief text", base_env={"HOME": "/home/ann-secret"}, at=at,
+                 brief="the brief text", base_env={"HOME": "/users/ann-secret"}, at=at,
                  **more)
 
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    seed(connection, "r1", "2026-01-01T00:00:00.000000Z")
-    seed(connection, "r2", "2026-01-02T00:00:00.000000Z", preset_kind="seat",
+    conn = store.connect()
+    seed(conn, "r1", "2026-01-01T00:00:00.000000Z")
+    seed(conn, "r2", "2026-01-02T00:00:00.000000Z", preset_kind="seat",
          preset_name="planner")
-    seed(connection, "r3", "2026-01-03T00:00:00.000000Z")
-    yield connection
-    connection.close()
+    seed(conn, "r3", "2026-01-03T00:00:00.000000Z")
+    yield conn
+    conn.close()
 
 
 def test_launches_come_newest_first_cut_to_what_the_page_shows(conn):
@@ -626,7 +626,7 @@ def me() -> str:
 
 def ran(conn, request_id: str = "r1", outcome: str = "nudged"):
     run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id=request_id,
-                           session_id=SID, actor="launcher", state="acting", job=me(),
+                           session_id=SID, by="launcher", state="acting", job=me(),
                            handoff_path="/notes/handoff.md")
     store.add_run_event(conn, run.run_id, "note",
                         {"verdict": "taken", "why": "", "text": "the whole notice"})
@@ -678,7 +678,7 @@ def test_no_launch_log_has_no_runs():
 
 def launched(connection, request_id: str, at: str, **more) -> None:
     """A launch the page server's own actor made, started in a terminal."""
-    args = {"request_id": request_id, "actor": first.actor(), "harness": "codex",
+    args = {"request_id": request_id, "by": first.actor(), "harness": "codex",
             "target": "terminal", "cwd": "/work", "values": {}, "argv": ["codex"],
             "env": {}, "posture": "operator", "at": at}
     store.insert(connection, **{**args, **more})
@@ -686,9 +686,9 @@ def launched(connection, request_id: str, at: str, **more) -> None:
 
 @pytest.fixture
 def log():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def test_places_are_the_actors_own_newest_first_with_the_actor_named(log):
@@ -696,7 +696,7 @@ def test_places_are_the_actors_own_newest_first_with_the_actor_named(log):
     launched(log, "b", "2026-01-01T10:00:00.000000Z", cwd="/src/proj-a/docs",
              project_key="proj-a")
     launched(log, "c", "2026-01-01T11:00:00.000000Z", cwd="/work/one")
-    launched(log, "d", "2026-01-01T12:00:00.000000Z", cwd="/work/theirs", actor="alice")
+    launched(log, "d", "2026-01-01T12:00:00.000000Z", cwd="/work/theirs", by="alice")
     status, said, _ = get("/api/places")
     assert (status, said) == (200, {
         "state": "up", "detail": None, "projects": False, "actor": first.actor(),
@@ -738,8 +738,8 @@ def test_places_say_whether_a_launch_may_name_a_project(monkeypatch):
 def test_a_launch_made_under_a_comms_name_is_that_names_place(log, monkeypatch):
     launched(log, "mine", "2026-01-01T09:00:00.000000Z", cwd="/work/mine")
     launched(log, "theirs", "2026-01-01T10:00:00.000000Z", cwd="/work/theirs",
-             actor="planner")
-    monkeypatch.setenv(first.COMMS_NAME, "planner")
+             by="planner")
+    monkeypatch.setenv(first.comms_name_env(), "planner")
     said = get("/api/places")[1]
     assert said["actor"] == "planner"
     assert [p["cwd"] for p in said["places"]] == ["/work/theirs"]
@@ -766,7 +766,7 @@ def test_a_failed_places_read_says_only_the_class(log, monkeypatch):
     assert b"someone" not in raw
 
 
-def test_places_name_the_home_folder_the_page_server_sees(monkeypatch, tmp_path):
+def test_places_name_the_home_dir_the_page_server_sees(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
     assert get("/api/places")[1]["home"] == str(tmp_path / "elsewhere")
 
@@ -783,17 +783,17 @@ def fake_slots(tmp_path, monkeypatch):
     scripts it, and `fake_slots.calls(name)` lists the calls it got."""
     import launcher_fake_slots as fake
 
-    directory = tmp_path / "fake-slots"
-    directory.mkdir()
-    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
-    monkeypatch.setenv(fake.DIR, str(directory))
+    slots_dir = tmp_path / "fake-slots"
+    slots_dir.mkdir()
+    monkeypatch.setenv(slots.SLOTS_ENV, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(slots_dir))
     installed(monkeypatch, "slots")
     fake.reset()
 
     def plan(**keys):
-        (directory / "script.json").write_text(json.dumps(keys))
+        (slots_dir / "script.json").write_text(json.dumps(keys))
 
-    plan.calls = lambda name=None: fake.calls(directory, name)
+    plan.calls = lambda name=None: fake.calls(slots_dir, name)
     plan.fake = fake
     return plan
 
@@ -819,9 +819,9 @@ def test_targets_list_each_slot_in_number_order_with_its_state_and_hold(fake_slo
                 "holder": holder, "until": until, "taken_by": None}
 
     assert said["slots"] == [
-        slot(1, "occupied", False), slot(2, "ended", True),
-        slot(3, "free", False, "planner", 1900000000.5), slot(4, "missing", False),
-        slot(10, "free", True)]
+        slot(1, "occupied", launchable=False), slot(2, "ended", launchable=True),
+        slot(3, "free", launchable=False, holder="planner", until=1900000000.5),
+        slot(4, "missing", launchable=False), slot(10, "free", launchable=True)]
     assert said["new_slot"] is True
     assert said["default"] == {"target": "slot", "slot": 2}
 

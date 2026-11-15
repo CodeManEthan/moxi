@@ -78,7 +78,7 @@ def merge(found) -> Declarations:
                     continue
                 seen[name] = kind
                 try:
-                    modules._unit(kind, name, entry, runtime=True, label=key)
+                    modules._unit(kind, name, entry, is_runtime=True, label=key)
                 except modules._Bad as exc:
                     rejected[(kind, name)] = f"UNITS_FROM ({found.units_from}) {exc}"
                     continue

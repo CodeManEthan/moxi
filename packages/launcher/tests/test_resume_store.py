@@ -15,13 +15,13 @@ SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 
 @pytest.fixture
 def conn():
-    c = store.connect()
-    yield c
-    c.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def put(conn, rid, *, sid=SID, at, harness="claude", **more):
-    return store.insert(conn, request_id=rid, actor="ann", harness=harness,
+    return store.insert(conn, request_id=rid, by="ann", harness=harness,
                         target="slot", cwd="/w", values={}, argv=["claude"], env={},
                         posture="", session_id=sid, at=at, **more)
 
@@ -83,11 +83,11 @@ def test_a_resume_launch_learns_a_resumed_id_another_launch_holds(conn):
     assert store.learn_session(conn, "c", SID, "resume") is False
 
 
-def test_the_base_environment_is_recorded_and_holds_no_credential(conn):
+def test_the_base_env_is_recorded_and_holds_no_credential(conn):
     child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_RUNTIME_DIR": "/run/u",
              "TZ": "UTC", "CLAUDE_CODE_OAUTH_TOKEN": "s3cr3t", "API_KEY": "k",
              "MOXI_LAUNCHER_REQUEST": "r"}
-    base = common.base_env(child, windows=False)
+    base = common.base_env(child, is_windows=False)
     assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C",
                     "XDG_RUNTIME_DIR": "/run/u", "TZ": "UTC",
                     "CLAUDE_CODE_OAUTH_TOKEN": None}

@@ -154,8 +154,8 @@ def read(session_id, *, now: float, projects_root=None, turned: bool = True,
 
         try:
             root = Path(sessions_projects_root(None))
-        except ConfigError as e:
-            return unknown(_clock.CONFIG_ERROR, f"sessions' config could not be read ({e})")
+        except ConfigError as exc:
+            return unknown(_clock.CONFIG_ERROR, f"sessions' config could not be read ({exc})")
     located = find(HARNESS, session_id, root=root)
     if not located.found:
         readable = located.probes[0].outcome == transcripts.MISS
@@ -167,9 +167,9 @@ def read(session_id, *, now: float, projects_root=None, turned: bool = True,
                                          "request")
     try:
         found = last_request(located.hits[0].source.path)
-    except OSError as e:
+    except OSError as exc:
         return unknown(_clock.UNREADABLE,
-                       f"the transcript could not be read ({e.strerror or e})")
+                       f"the transcript could not be read ({exc.strerror or exc})")
     if found.outcome == "none":
         return Clock(FRESH)              # read whole, and no request in it
     if found.outcome == "limit":
@@ -193,8 +193,8 @@ def read(session_id, *, now: float, projects_root=None, turned: bool = True,
 
         try:
             ttl, source = current()["claude.ttl_s"], TTL_CONFIG
-        except ConfigError as e:
-            return unknown(_clock.CONFIG_ERROR, f"cache's config could not be read ({e})")
+        except ConfigError as exc:
+            return unknown(_clock.CONFIG_ERROR, f"cache's config could not be read ({exc})")
     age = max(0.0, now - found.ts)
     return Clock(COLD if age >= ttl else WARM, age_s=age, ttl_s=ttl,
                  ttl_source=source)

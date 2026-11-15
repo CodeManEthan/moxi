@@ -90,7 +90,7 @@ def tool(tmp_path, offline_uv_env, wheels):
     return Tool()
 
 
-def test_install_in_a_uv_tool_environment(tool):
+def test_install_in_a_uv_tool_env(tool):
     # The core alone: nothing installed yet.
     assert tool.modules() == {}
 
@@ -134,7 +134,7 @@ def test_install_in_a_uv_tool_environment(tool):
     assert "the shortcut" not in tool.moxi("modules")
 
 
-def test_uninstall_in_a_uv_tool_environment_keeps_what_the_module_pulled_in(
+def test_uninstall_in_a_uv_tool_env_keeps_what_the_module_pulled_in(
         tool, tmp_path, uv_env, wheels):
     # A home of its own, so no harness folder of this account's is read or written.
     uv_env["HOME"] = str(tmp_path / "home")
@@ -170,7 +170,7 @@ def test_install_names_the_closure_when_a_member_is_left_out(tool):
     assert tool.modules() == {}
 
 
-def test_install_in_a_plain_environment(tool, tmp_path, offline_uv_env):
+def test_install_in_a_plain_env(tool, tmp_path, offline_uv_env):
     venv = tmp_path / "venv"
     index = tmp_path / "index"
     for args in (["venv", str(venv)],

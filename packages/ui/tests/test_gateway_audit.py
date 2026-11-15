@@ -89,9 +89,9 @@ def test_an_act_body_is_checked_against_its_declared_fields() -> None:
             check_body(body, route)
 
 
-def _rows(folder: Path) -> list[dict]:
+def _rows(audit_dir: Path) -> list[dict]:
     rows = []
-    for path in sorted(folder.glob("*.jsonl")):
+    for path in sorted(audit_dir.glob("*.jsonl")):
         rows += [json.loads(line) for line in path.read_text().splitlines()]
     return rows
 
@@ -117,9 +117,9 @@ def test_a_class_past_ten_rows_a_minute_becomes_one_summary(tmp_path: Path) -> N
     assert sum(1 for row in rows if row["kind"] == "origin") == 10
     assert [row["count"] for row in rows if row["kind"] == "summary"] == [15]
     assert sum(1 for row in rows if row["kind"] == "request") == 3
-    folder = audit_mod.audit_dir(tmp_path)
-    assert oct(os.stat(folder).st_mode & 0o777) == "0o700"
-    assert all(oct(os.stat(p).st_mode & 0o777) == "0o600" for p in folder.glob("*.jsonl"))
+    audit_dir = audit_mod.audit_dir(tmp_path)
+    assert oct(os.stat(audit_dir).st_mode & 0o777) == "0o700"
+    assert all(oct(os.stat(p).st_mode & 0o777) == "0o600" for p in audit_dir.glob("*.jsonl"))
 
 
 def test_past_the_day_cap_a_class_writes_one_summary_an_hour(tmp_path: Path, monkeypatch) -> None:
@@ -142,11 +142,11 @@ def test_a_day_file_past_two_mib_keeps_every_row_and_retention_deletes_old_days(
     writer = audit_mod.Audit(tmp_path, clock=lambda: now[0])
     for index in range(2200):
         writer.request({"path": "/m/ui/", "n": index, "pad": "x" * 1000}, signed_in=True)
-    folder = audit_mod.audit_dir(tmp_path)
-    (only,) = folder.glob("*.jsonl")
-    assert only.stat().st_size > 2 * 1024 * 1024 and not list(folder.glob("*.1"))
+    audit_dir = audit_mod.audit_dir(tmp_path)
+    (only,) = audit_dir.glob("*.jsonl")
+    assert only.stat().st_size > 2 * 1024 * 1024 and not list(audit_dir.glob("*.1"))
     assert len(only.read_text().splitlines()) == 2200
-    old = folder / "1970-01-01.jsonl"
+    old = audit_dir / "1970-01-01.jsonl"
     old.write_text("{}\n")
     now[0] += 40 * 86400
     writer.prune()

@@ -92,7 +92,7 @@ def seed(env: dict[str, str]) -> None:
     changed_at(rollout.write(), noon(4).timestamp())
 
     db = OpenCodeDb(Path(env["XDG_DATA_HOME"]) / "opencode")
-    db.session(title="a title the harness made", directory="/work/proj-c", at=noon(5).timestamp())
+    db.session(title="a title the harness made", work_dir="/work/proj-c", at=noon(5).timestamp())
     db.write()
 
 

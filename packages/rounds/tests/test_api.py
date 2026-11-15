@@ -34,8 +34,8 @@ CALLS = {
     "the open rounds": lambda: api.rounds(),
     "the open rounds of one project": lambda: api.rounds("proj-a"),
     "the ended rounds": lambda: api.rounds(status="closed"),
-    "one round": lambda: api.round(A),
-    "a round that has ended": lambda: api.round(D),
+    "one round": lambda: api.round_data(A),
+    "a round that has ended": lambda: api.round_data(D),
     "what waits": lambda: api.waiting(),
     "a round's questions": lambda: api.questions(A),
     "a round's docket": lambda: api.questions(A, view="docket"),
@@ -65,13 +65,13 @@ def rounds(tmp_path, add_project, capsys, monkeypatch):
     add_project("proj-a", notes_root=tmp_path / "notes-a")
     add_project("proj-b", notes_root=tmp_path / "notes-b")
     for name in (A, B, C, D):
-        opening.open_round(name, description="a placeholder round", actor="planner",
+        opening.open_round(name, description="a placeholder round", by="planner",
                            flow="fix", at=T1)
-    folder = tmp_path / "notes-a" / "rounds"
+    rounds_dir = tmp_path / "notes-a" / "rounds"
     for stage in ("B1", "B2"):
-        log.append(log.round_log(folder / "a-round"), "stage.declared",
+        log.append(log.round_log(rounds_dir / "a-round"), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     ask(options=["a=prose yes, parsed rows no", "b=both follow the settings"])
     ask(text=OTHER, at=T2)
     ask(text=THIRD, at=T3)
@@ -81,20 +81,20 @@ def rounds(tmp_path, add_project, capsys, monkeypatch):
     rule(item="Q3", text="It does.", at=T4)
     rule(text=RULED, at=T5)
     rule("proj-a", text=RULED, at=T5)
-    dropping.drop(D, by="operator", record="comms:30", actor="planner", at=T6)
+    dropping.drop(D, by="operator", record="comms:30", run_by="planner", at=T6)
     capsys.readouterr()
     real = log.stamp
     monkeypatch.setattr(log, "stamp", lambda when_s=None: NOW if when_s is None
                         else real(when_s))
-    return folder
+    return rounds_dir
 
 
 def ask(target=A, text=SAID, *, at=T1, **more):
-    return asking.ask(target, text, actor="scout", origin="comms:11", at=at, **more)
+    return asking.ask(target, text, by="scout", origin="comms:11", at=at, **more)
 
 
 def rule(target=A, *, at=T5, **more):
-    return ruling.rule(target, record="comms:12", actor="planner", at=at, **more)
+    return ruling.rule(target, record="comms:12", by="planner", at=at, **more)
 
 
 def printed(capsys, argv):
@@ -107,27 +107,27 @@ def everything(tmp_path):
     """Every file the test's rounds, projects and settings are kept in, with its bytes
     and the time it was last written."""
     return {str(path): (path.read_bytes(), path.stat().st_mtime_ns)
-            for folder in {tmp_path, Path.home(), paths.data_dir(), paths.state_dir()}
-            for path in sorted(folder.rglob("*")) if path.is_file()}
+            for root_dir in {tmp_path, Path.home(), paths.data_dir(), paths.state_dir()}
+            for path in sorted(root_dir.rglob("*")) if path.is_file()}
 
 
 def elsewhere(rounds):
     """A line another machine's verb appended, which the index here has not seen."""
     log.append(log.round_log(rounds / "a-round"), "question.asked",
                {"id": "Q4", "text": OTHER, "from": "comms:13", "blocks": "all",
-                "state": "open", "asked_by": "helper", "asked_at": T2}, actor="helper")
+                "state": "open", "asked_by": "helper", "asked_at": T2}, by="helper")
 
 
 def spoil(rounds, slug="a-round"):
     """Make a round's log one that can't be read."""
-    with log.round_log(rounds / slug).open("ab") as file:
-        file.write(b"not an event\n")
+    with log.round_log(rounds / slug).open("ab") as fh:
+        fh.write(b"not an event\n")
 
 
 # -- each call is its command's data -----------------------------------------------------
 
 def test_the_api_has_its_four_calls_and_no_other():
-    assert api.__all__ == ["rounds", "round", "waiting", "questions"]
+    assert api.__all__ == ["rounds", "round_data", "waiting", "questions"]
     assert modules.load("rounds", interface=1).api is api
 
 
@@ -153,7 +153,7 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
     assert (ended["name"], ended["status"]) == (D, "dropped")
     assert [one["name"] for one in api.rounds("proj-b")["rounds"]] == [C]
 
-    one = api.round(A)
+    one = api.round_data(A)
     assert (one["name"], one["status"], one["flow"]) == (A, "open", "fix")
     assert [question["id"] for question in one["questions"]] == ["Q1", "Q2", "Q3"]
     assert [made["id"] for made in one["rulings"]] == ["C1", "C2", "C3"]
@@ -174,7 +174,7 @@ def test_the_calls_say_what_step_a_round_is_at(rounds):
         {"step": "commission", "stage": None, "state": "not-built"},
         {"step": "commission", "stage": None, "state": "not-built"}]
     assert api.rounds(status="closed")["rounds"][0]["step"] is None
-    at = api.round(A)["step"]
+    at = api.round_data(A)["step"]
     assert (at["step"], at["stage"], at["state"]) == ("commission", "B1", "not-built")
 
 
@@ -182,7 +182,7 @@ def test_a_line_the_index_has_not_seen_is_in_what_every_call_gives(rounds, capsy
     elsewhere(rounds)
 
     assert api.rounds()["rounds"][0]["counts"]["open"] == 2
-    assert [one["id"] for one in api.round(A)["questions"]] == ["Q1", "Q2", "Q3", "Q4"]
+    assert [one["id"] for one in api.round_data(A)["questions"]] == ["Q1", "Q2", "Q3", "Q4"]
     assert (A, "Q4") in [(one["holder"], one["id"]) for one in api.waiting()["open"]]
     assert [one["id"] for one in api.questions(A)["entries"]] == ["Q1", "Q4", "Q2"]
     for call in sorted(CALLS):
@@ -220,12 +220,12 @@ def test_a_call_that_is_refused_changes_nothing_either(rounds, tmp_path):
     spoil(rounds, "b-round")
     before = everything(tmp_path)
 
-    for refused in (lambda: api.round("proj-a"), lambda: api.round("proj-a/no-round"),
+    for refused in (lambda: api.round_data("proj-a"), lambda: api.round_data("proj-a/no-round"),
                     lambda: api.rounds("no-project"), lambda: api.questions(B),
                     lambda: api.rounds(status="dormant")):
         with pytest.raises(errors.RoundsError):
             refused()
-    api.round(B)
+    api.round_data(B)
     api.rounds()
     api.waiting()
     assert everything(tmp_path) == before
@@ -237,7 +237,7 @@ def test_a_round_that_cant_be_read_is_returned_as_unreadable(rounds, capsys):
     spoil(rounds)
     file = str(log.round_log(rounds / "a-round"))
 
-    one = api.round(A)
+    one = api.round_data(A)
     assert set(one) == {"name", "project", "slug", "folder", "notice", "unreadable"}
     assert one["unreadable"]["file"] == file and one["unreadable"]["line"] == 10
     assert one == printed(capsys, ["show", A])
@@ -264,7 +264,7 @@ def test_a_log_that_opened_no_round_is_returned_as_unreadable(rounds, content):
     file.write_bytes(content)
     name = "proj-a/e-round"
 
-    one = api.round(name)
+    one = api.round_data(name)
     assert set(one) == {"name", "project", "slug", "folder", "notice", "unreadable"}
     assert (one["unreadable"]["file"], one["unreadable"]["line"]) == (str(file), 1)
     for status in ("open", "closed"):
@@ -292,9 +292,9 @@ def test_the_questions_of_a_round_that_cant_be_read_are_refused_as_its_command_i
 
 def test_a_call_raises_what_its_command_refuses(rounds):
     with pytest.raises(errors.Refused):
-        api.round("proj-a")
+        api.round_data("proj-a")
     with pytest.raises(errors.NoRound):
-        api.round("proj-a/no-round")
+        api.round_data("proj-a/no-round")
     with pytest.raises(errors.UnknownProject):
         api.rounds("no-project")
     with pytest.raises(errors.Refused):

@@ -62,7 +62,7 @@ def _log_once(err: BaseException, what: str) -> None:
 
 
 def _problem(err: Exception, what: str) -> str:
-    """The line a read gives for `err`: the verb's own words for a manifest, ledger or
+    """The line a read gives for `exc`: the verb's own words for a manifest, ledger or
     config that can't be read, else a fixed line naming only the class (logged once)."""
     from moxi.config import ConfigError
 
@@ -96,8 +96,8 @@ def status(call: Any) -> dict[str, Any]:
     """`GET /api/status`: what `moxi loadout status --json` prints."""
     try:
         outcome = _status()
-    except Exception as err:  # noqa: BLE001 - a read says what failed, it never raises
-        return {"problem": _problem(err, "the status"), "rows": [], "lines": [],
+    except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
+        return {"problem": _problem(exc, "the status"), "rows": [], "lines": [],
                 "notes": [], "counts": {}, "exit": 1}
     return {"problem": None, **outcome.as_json()}
 
@@ -112,8 +112,8 @@ def listing(call: Any) -> dict[str, Any]:
         source = settings.read().source
         found = manifest.load(source)
         items = listing_mod.entries(source)
-    except Exception as err:  # noqa: BLE001
-        return {"problem": _problem(err, "the manifest"), "manifest": None, "sections": [],
+    except Exception as exc:  # noqa: BLE001
+        return {"problem": _problem(exc, "the manifest"), "manifest": None, "sections": [],
                 "items": []}
     return {
         "problem": None,
@@ -133,8 +133,8 @@ def global_preview(call: Any) -> dict[str, Any]:
     try:
         preview = install.global_preview(git_seconds=doctor.PLACE_GIT_SECONDS)
         chosen = manifest.load(settings.read().source).mode is not None
-    except Exception as err:  # noqa: BLE001
-        return {"problem": _problem(err, "the global file"), "mode": "off", "chosen": False,
+    except Exception as exc:  # noqa: BLE001
+        return {"problem": _problem(exc, "the global file"), "mode": "off", "chosen": False,
                 "files": []}
     return {
         "problem": None,
@@ -159,11 +159,11 @@ def projects(call: Any) -> dict[str, Any]:
         found = link.list_projects()
     except link.Busy:
         return {"projects": [], "reason": "projects is busy; try again"}
-    except link.Unreadable as err:
-        return {"projects": [], "reason": f"projects can't be read: {err}"}
-    except Exception as err:  # noqa: BLE001 - the picker says why, it never fails
-        _log_once(err, "loadout's page couldn't list the projects")
-        return {"projects": [], "reason": f"projects couldn't be listed ({type(err).__name__})"}
+    except link.Unreadable as exc:
+        return {"projects": [], "reason": f"projects can't be read: {exc}"}
+    except Exception as exc:  # noqa: BLE001 - the picker says why, it never fails
+        _log_once(exc, "loadout's page couldn't list the projects")
+        return {"projects": [], "reason": f"projects couldn't be listed ({type(exc).__name__})"}
     return {"projects": [{"key": str(p.key), "root": os.fspath(p.root)} for p in found],
             "reason": None}
 
@@ -179,8 +179,8 @@ def drift(call: Any) -> dict[str, Any]:
         outcome = _status()
         with homes.as_page():
             note = homes.note()
-    except Exception as err:  # noqa: BLE001
-        return {"problem": _problem(err, "the status"), "count": 0, "note": None}
+    except Exception as exc:  # noqa: BLE001
+        return {"problem": _problem(exc, "the status"), "count": 0, "note": None}
     items = {(r.scope, r.kind, r.name) for r in outcome.rows if r.state not in FINE}
     return {"problem": None, "count": len(items), "note": note}
 
@@ -205,11 +205,11 @@ def _start(argv: Sequence[str], *, key: str | None = None) -> Any:
     path, or a refusal."""
     try:
         started = pagejob.start(argv, job=key)
-    except (pagejob.Clash, ValueError) as err:
-        raise lb.Refused(f"loadout: {err}") from None
-    except Exception as err:  # noqa: BLE001 - a job that didn't start is the act's refusal
-        _log_once(err, "a page job didn't start")
-        raise lb.Refused(f"loadout: the job didn't start ({type(err).__name__}); try again, "
+    except (pagejob.Clash, ValueError) as exc:
+        raise lb.Refused(f"loadout: {exc}") from None
+    except Exception as exc:  # noqa: BLE001 - a job that didn't start is the act's refusal
+        _log_once(exc, "a page job didn't start")
+        raise lb.Refused(f"loadout: the job didn't start ({type(exc).__name__}); try again, "
                          "or run the command in a terminal") from None
     return lb.Accepted(f"{JOB_ROUTE}?job={started.job}")
 
@@ -226,8 +226,8 @@ def _section(name: str) -> str:
     if manifest.is_path_name(name) and not os.path.isabs(name):
         try:
             found = manifest.load(settings.read().source)
-        except Exception as err:  # noqa: BLE001 - the job would refuse it the same way
-            raise lb.Refused(_problem(err, "the manifest")) from None
+        except Exception as exc:  # noqa: BLE001 - the job would refuse it the same way
+            raise lb.Refused(_problem(exc, "the manifest")) from None
         named = next((s for s in found.projects if s.name == name and s.root), None)
         if named is None:
             raise lb.Refused(f"loadout: project section {name}: name it as the manifest "
@@ -258,8 +258,8 @@ def _toggle(verb: str, body: Mapping[str, Any]) -> Any:
     ident = body["id"]
     try:
         manifest.parse_id(ident)
-    except ValueError as err:
-        raise lb.Refused(f"loadout: {err}") from None
+    except ValueError as exc:
+        raise lb.Refused(f"loadout: {exc}") from None
     project = body.get("project")
     if body.get("user") and project is not None:
         raise lb.Refused("loadout: name the user section or a project section, not both")

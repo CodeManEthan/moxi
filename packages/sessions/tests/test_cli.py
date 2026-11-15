@@ -297,7 +297,7 @@ def test_list_prints_what_was_said_only_with_text(listed, capsys):
     assert first.endswith(sid(1)) and second == "    agent: All fixed. Nothing else."
 
 
-def test_list_narrows_by_harness_since_folder_and_limit(listed, capsys):
+def test_list_narrows_by_harness_since_work_dir_and_limit(listed, capsys):
     now = time.time()
     for n in range(1, 5):
         claude_session(listed, n, now - n * HOUR, cwd=f"/work/proj-{'ab'[n % 2]}")

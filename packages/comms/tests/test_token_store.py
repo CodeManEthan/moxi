@@ -13,7 +13,7 @@ import tomllib
 import pytest
 
 from moxi_comms.paths import tokens_dir
-from moxi_comms.tokens import (NOT_A_MAP, OPERATOR_SECRET_ID, STORE_ENV_VAR, TokenStore,
+from moxi_comms.tokens import (NOT_A_MAP, OPERATOR_SECRET_ID, TOKEN_STORE_ENV, TokenStore,
                                TokenStoreError, owner_for_role)
 
 POSTING_KEY = OPERATOR_SECRET_ID
@@ -31,7 +31,7 @@ def test_the_default_location_is_the_device_keyed_state_root():
 def test_the_explicit_override_beats_the_default_state_path(tmp_path):
     """`MOXI_COMMS_HOME` collapses every root, so an alternate-home recipe needs a
     deliberate way to still name the operator's real store."""
-    store = TokenStore(env={STORE_ENV_VAR: str(tmp_path / "elsewhere")})
+    store = TokenStore(env={TOKEN_STORE_ENV: str(tmp_path / "elsewhere")})
     assert store.root == tmp_path / "elsewhere"
 
     store.write_secret(owner_for_role("operator"), POSTING_KEY, "OPERATOR-TOKEN")
@@ -67,7 +67,7 @@ def test_the_stores_door_is_the_declared_pair():
 
 # --------------------------------------------------------------------- permissions
 
-def test_the_store_is_written_0600_in_a_0700_directory(tmp_path):
+def test_the_store_is_written_0600_in_a_0700_dir(tmp_path):
     store = TokenStore(tmp_path / "tokens")
     path = store.write_secret(owner_for_role("operator"), POSTING_KEY, "OPERATOR-TOKEN")
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -75,7 +75,7 @@ def test_the_store_is_written_0600_in_a_0700_directory(tmp_path):
     assert stat.S_IMODE(store.root.stat().st_mode) == 0o700
 
 
-def test_a_loose_file_is_REFUSED_not_warned_about(tmp_path):
+def test_a_loose_file_is_refused_not_warned_about(tmp_path):
     """Decided here: 0600 is the whole mechanism. A store that reads a
     world-readable credential anyway has a comment where its rule was."""
     store = TokenStore(tmp_path)
@@ -88,7 +88,7 @@ def test_a_loose_file_is_REFUSED_not_warned_about(tmp_path):
     assert str(path) not in str(e.value)      # the path goes to the log, not to an agent
 
 
-def test_a_loose_store_directory_is_refused_too(tmp_path):
+def test_a_loose_store_dir_is_refused_too(tmp_path):
     store = TokenStore(tmp_path / "tokens")
     owner = owner_for_role("operator")
     store.write_secret(owner, POSTING_KEY, "OPERATOR-TOKEN")

@@ -85,10 +85,10 @@ def projects(site, tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def lo(folder):
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    return folder
+def lo(loadout_dir):
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    return loadout_dir
 
 
 def root(tmp_path, name):

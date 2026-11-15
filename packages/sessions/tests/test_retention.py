@@ -22,8 +22,8 @@ def home(tmp_path, monkeypatch):
     return home
 
 
-def by_harness(environ=None) -> dict[str, kept.Retention]:
-    return {item.harness: item for item in retention(environ)}
+def by_harness(env=None) -> dict[str, kept.Retention]:
+    return {item.harness: item for item in retention(env)}
 
 
 def claude_settings(home, data) -> str:
@@ -81,7 +81,7 @@ def test_claude_reads_under_claude_config_dir(home, monkeypatch, tmp_path):
     assert item.file == str(config / "settings.json") and item.value == 90
 
 
-def test_claude_reads_the_environment_handed_in(home, tmp_path):
+def test_claude_reads_the_env_handed_in(home, tmp_path):
     other = tmp_path / "other-home"
     claude_settings(other, {"cleanupPeriodDays": 7})
     assert by_harness({"HOME": str(other)})["claude"].value == 7

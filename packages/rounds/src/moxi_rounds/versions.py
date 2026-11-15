@@ -63,9 +63,9 @@ from .errors import Unmet
 DESIGN_FILE = "design.md"
 
 
-def file(folder: Path | str, n: int) -> Path:
-    """Where version `n` of the design of the round in `folder` is frozen."""
-    return Path(folder) / states.FROZEN_FILE.format(n=n)
+def file(round_dir: Path | str, n: int) -> Path:
+    """Where version `n` of the design of the round in `round_dir` is frozen."""
+    return Path(round_dir) / states.FROZEN_FILE.format(n=n)
 
 
 def current(state: states.State) -> states.Version | None:
@@ -435,16 +435,16 @@ def waiting(state: states.State):
             "said": said(one)}
 
 
-def unchanged(state: states.State, folder: Path | str, name: str) -> Unmet | None:
+def unchanged(state: states.State, round_dir: Path | str, name: str) -> Unmet | None:
     """The unmet condition of a design that is not the one frozen last, or None when
-    `design.md` in `folder`, the folder of the round `name`, has the bytes the current
+    `design.md` in `round_dir`, the folder of the round `name`, has the bytes the current
     version was frozen from."""
     again = f"moxi rounds fold {name}"
     version = current(state)
     if version is None:
         return Unmet(f"the design of {name} was never frozen", again)
     try:
-        now = hashlib.sha256((Path(folder) / DESIGN_FILE).read_bytes()).hexdigest()
+        now = hashlib.sha256((Path(round_dir) / DESIGN_FILE).read_bytes()).hexdigest()
     except OSError:
         now = None
     if now == version.digest:

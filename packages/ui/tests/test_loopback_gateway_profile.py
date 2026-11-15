@@ -48,7 +48,7 @@ def phone(session=cookie, host=HOST, port=PORT, fallback=None):
 
 
 def req(method="GET", path=b"/m/usage/api/summary", extra=(), host=HOST.encode() + b":8443",
-        signed_in=True, transport="unix"):
+        *, signed_in=True, transport="unix"):
     headers = [] if host is None else [(b"host", host)]
     if signed_in:
         headers.append((b"cookie", b"gw=ok"))

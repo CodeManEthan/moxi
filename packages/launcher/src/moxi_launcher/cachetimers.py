@@ -14,7 +14,7 @@ act.
   session whose launch set `recycle_on_expiry` (the stamp `MOXI_LAUNCHER_RECYCLE_ON_EXPIRY`
   in its environment), `moxi-launcher-job expiry <session>` clears or compacts it once it
   is idle.
-- `launcher.keep-warm` (`KEEP_WARM`): from 900 s before the session's cache expires until
+- `launcher.keep-warm` (`KEEP_WARM_ENV`): from 900 s before the session's cache expires until
   360 s before, every 120 s, for every session the launcher started (the stamp
   `MOXI_LAUNCHER_REQUEST`), `moxi-launcher-job keep-warm <session>` nudges it when
   keep-warm is on for its launch and it waits on work it handed out. An ask about a launch

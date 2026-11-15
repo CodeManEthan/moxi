@@ -112,7 +112,7 @@ class Rollout:
             "thread_id": self.tid if thread is ... else thread, "turn_id": turn,
             "session_id": self.tid if session is ... else session,
             "response_id": rid or f"resp_{turn}_{int(t)}",
-            "usage": token_usage(input=inp, cached=cached, output=5, reasoning=0)})
+            "usage": token_usage(input_tokens=inp, cached=cached, output=5, reasoning=0)})
 
     def turn(self, turn, t, *, model="gpt-5.6-terra", length=5.0, inp=20_000,
              cached=19_500, records=1):
@@ -805,7 +805,7 @@ def test_a_rejected_entry_holds_every_measured_read(tmp_path, bad):
     never as the longer shipped number."""
     seconds = measured_seconds()
     e = {"unrecognised": {"what": "is this"}, "above": entry(seconds + 60),
-         "below": entry(1799), "not-int": entry(2400.5), "bool": entry(True)}[bad]
+         "below": entry(1799), "not-int": entry(2400.5), "bool": entry(lifetime=True)}[bad]
     view = view_of(e)
     root = sessions_root(tmp_path)
     one_turn(60, "gpt-5.6-sol").write(root)

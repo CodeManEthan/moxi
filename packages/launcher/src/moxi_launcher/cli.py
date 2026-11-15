@@ -460,10 +460,10 @@ def _handoff(args: argparse.Namespace, prog: str) -> int:
 
     here = handoffs.current()
     if args.json:
-        print(_dump({"key": here.key, "folder": str(here.folder),
+        print(_dump({"key": here.key, "folder": str(here.handoff_dir),
                      "request_id": here.request_id}))
     else:
-        print(here.folder)
+        print(here.handoff_dir)
     return codes.OK
 
 
@@ -476,15 +476,15 @@ def _handoffs(args: argparse.Namespace, prog: str) -> int:
             print(f"{prog} handoffs: {args.key!r} can't be a handoff key; a key is "
                   "letters, digits, '.', '_' and '-'", file=sys.stderr)
             return codes.USAGE
-        read = handoffs.folder_of_key(key)
-        folder, launch = read.folder, read.launch
+        read = handoffs.handoff_dir_of_key(key)
+        handoff_dir, launch = read.handoff_dir, read.launch
     else:
         here = handoffs.current(create=False)
-        key, folder, launch = here.key, here.folder, None
-    found = handoffs.handoffs(folder, key)
-    waiting = {h.path for h in handoffs.unpicked(folder, key, _picked(key))}
+        key, handoff_dir, launch = here.key, here.handoff_dir, None
+    found = handoffs.handoffs(handoff_dir, key)
+    waiting = {h.path for h in handoffs.unpicked(handoff_dir, key, _picked(key))}
     if args.json:
-        shown = {"key": key, "folder": str(folder)}
+        shown = {"key": key, "folder": str(handoff_dir)}
         if args.key is not None:
             shown["launch"] = launch.request_id if launch is not None else None
         shown["handoffs"] = [{"path": str(h.path), "date": h.date,
@@ -493,13 +493,13 @@ def _handoffs(args: argparse.Namespace, prog: str) -> int:
         return codes.OK
     if args.key is not None:
         if launch is not None:
-            print(f"reading {folder}, the handoff folder of {key}'s newest launch "
+            print(f"reading {handoff_dir}, the handoff folder of {key}'s newest launch "
                   f"({launch.cwd})", file=sys.stderr)
         else:
-            print(f"reading {folder}: {key} has no launch, so this directory's folder",
+            print(f"reading {handoff_dir}: {key} has no launch, so this directory's folder",
                   file=sys.stderr)
     if not found:
-        print(f"no handoffs of {key} in {folder}", file=sys.stderr)
+        print(f"no handoffs of {key} in {handoff_dir}", file=sys.stderr)
         return codes.OK
     for handoff in found:
         mark = "waiting" if handoff.path in waiting else "picked"
@@ -850,8 +850,8 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi launcher") -> i
     args = parse(argv, prog=prog)
     try:
         return VERBS[args.verb](args, prog)
-    except _errors() as error:
-        return _refuse(prog, args.verb, error)
+    except _errors() as exc:
+        return _refuse(prog, args.verb, exc)
 
 
 __all__ = ["LAUNCH_VERBS", "PRESET_ACTIONS", "TABLES", "VERBS", "NoPreset", "build_parser",

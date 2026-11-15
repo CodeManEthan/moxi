@@ -42,10 +42,11 @@ from dataclasses import dataclass
 
 #: Seconds one supervisor call may take.
 TIMEOUT = 30.0
-#: The variable that lets a test run a real supervisor.
-REAL_SUPERVISOR = "MOXI_TEST_REAL_SUPERVISOR"
 #: The variable that carries task refs to the PowerShell read.
-TASK_REFS = "MOXI_TASK_REFS"
+TASK_REFS_ENV = "MOXI_TASK_REFS"
+#: The variable that lets a test run a real supervisor. moxi-dev owns it, but a user
+#: install has no moxi-dev, so the core keeps its own copy.
+REAL_SUPERVISOR_ENV = "MOXI_TEST_REAL_SUPERVISOR"  # noqa: MX2 -- the core cannot import moxi-dev
 #: The most characters one environment variable holds on Windows; a longer ref list is
 #: split over more than one call.
 TASK_REFS_MAX = 32_767
@@ -144,12 +145,12 @@ def task_refs_env(refs: Sequence[tuple[str, str]]) -> list[dict[str, str]]:
     """The `MOXI_TASK_REFS` values for `refs` (each `(folder, name)`), split so no one
     value passes `TASK_REFS_MAX` characters. Each becomes one PowerShell call."""
     chunks: list[list[dict]] = [[]]
-    for folder, name in refs:
-        item = {"path": folder, "name": name}
+    for refs_dir, name in refs:
+        item = {"path": refs_dir, "name": name}
         if chunks[-1] and len(json.dumps(chunks[-1] + [item])) > TASK_REFS_MAX:
             chunks.append([])
         chunks[-1].append(item)
-    return [{TASK_REFS: json.dumps(chunk)} for chunk in chunks if chunk]
+    return [{TASK_REFS_ENV: json.dumps(chunk)} for chunk in chunks if chunk]
 
 
 class Fence:
@@ -171,9 +172,11 @@ class Fence:
         try:
             proc = runner(cmd, env=dict(env) if env else None, timeout=TIMEOUT)
         except subprocess.TimeoutExpired:
-            return Ran(False, None, "", "", tuple(cmd), f"timed out after {TIMEOUT:g} s")
+            return Ran(ok=False, returncode=None, stdout="", stderr="", argv=tuple(cmd),
+                       reason=f"timed out after {TIMEOUT:g} s")
         except OSError as exc:
-            return Ran(False, None, "", "", tuple(cmd), f"did not run: {exc}")
+            return Ran(ok=False, returncode=None, stdout="", stderr="", argv=tuple(cmd),
+                       reason=f"did not run: {exc}")
         out, err = _text(getattr(proc, "stdout", "")), _text(getattr(proc, "stderr", ""))
         code = proc.returncode
         return Ran(code == 0, code, out, err, tuple(cmd))
@@ -186,10 +189,10 @@ def under_pytest() -> bool:
 def default_runner() -> Runner:
     """The runner that starts the real program, through `moxi.proc.run` (its own process
     group, stdin closed, the whole group ended at the time limit)."""
-    if under_pytest() and os.environ.get(REAL_SUPERVISOR) != "1":
+    if under_pytest() and os.environ.get(REAL_SUPERVISOR_ENV) != "1":
         raise SupervisorRefused(
             "a real supervisor call under pytest; pass a fake runner, or set "
-            f"{REAL_SUPERVISOR}=1 for a proof row")
+            f"{REAL_SUPERVISOR_ENV}=1 for a proof row")
 
     def run(cmd: list[str], *, env: Mapping[str, str] | None, timeout: float):
         from .. import proc

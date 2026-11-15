@@ -73,7 +73,7 @@ for spec in json.loads(sys.argv[1]):
                            project="-work-" + spec["project"], cwd=cwd, start=start)
     for m in range(3):
         t.user("Fix the failing test.")
-        t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),
+        t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000 + m * 500),
                     request_id=f"req_{spec['session'][-2:]}{m}", model=spec["model"])
     t.write()
 """
@@ -401,7 +401,7 @@ def test_project_offers_all_alone_when_no_session_has_a_project(page):
     expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*all$")])
 
 
-def test_without_projects_the_filter_is_folder_and_filters_by_the_whole_path(small, ui_contexts):
+def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small, ui_contexts):
     page = ui_contexts(small).pages[0]
     panel = open_page(page)
     box = filter_of(panel, "place")

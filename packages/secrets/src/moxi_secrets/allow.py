@@ -74,7 +74,7 @@ class _Line:
             normalise_text(text[hit.start:hit.end]) == self.value
 
 
-def _parse(raw: str, where: str, n: int, public: bool) -> _Line | None:
+def _parse(raw: str, where: str, n: int, *, public: bool) -> _Line | None:
     line = raw.rstrip("\r\n")
     if not line.strip() or line.lstrip().startswith("#"):
         return None

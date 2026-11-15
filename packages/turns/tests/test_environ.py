@@ -1,4 +1,4 @@
-"""`environ` and `Session.environ`: the named variables of the session's own environment,
+"""`environ` and `Session.env`: the named variables of the session's own environment,
 read from its endpoint, asked of the Claude endpoint, the Codex host and the OpenCode host
 started from one launch environment."""
 
@@ -19,7 +19,7 @@ from moxi_turns.client import Session, TurnsError
 from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.listeners import Registry
-from moxi_turns.results import ENVIRON_MAX_NAMES, ERROR_CAPABILITY
+from moxi_turns.results import ENV_MAX_NAMES, ERROR_CAPABILITY
 from test_codex_host import FakeAppServer, FakeClient
 from test_opencode_host import World
 
@@ -94,16 +94,16 @@ def test_the_three_hosts_answer_the_same_from_one_launch_env(hosts):
     for harness, s in hosts.items():
         assert s.harness == harness
         assert "environ" in s.capabilities
-        answers[harness] = s.environ(ASKED)
+        answers[harness] = s.env(ASKED)
     assert answers == {"claude": WANT, "codex": WANT, "opencode": WANT}
-    names = [f"MOXI_T_ENV_{n}" for n in range(ENVIRON_MAX_NAMES)]
+    names = [f"MOXI_T_ENV_{n}" for n in range(ENV_MAX_NAMES)]
     for s in hosts.values():
-        assert s.environ(names) == dict.fromkeys(names)
-        assert s.environ([]) == {}
+        assert s.env(names) == dict.fromkeys(names)
+        assert s.env([]) == {}
 
 
 @pytest.mark.parametrize("names", [
-    [f"MOXI_T_ENV_{n}" for n in range(ENVIRON_MAX_NAMES + 1)],
+    [f"MOXI_T_ENV_{n}" for n in range(ENV_MAX_NAMES + 1)],
     ["MOXI_T_ENV_ONE", "NOT-A-NAME"],
     ["1ST"],
     [""],
@@ -112,19 +112,19 @@ def test_the_three_hosts_answer_the_same_from_one_launch_env(hosts):
 def test_too_many_names_or_a_bad_name_is_invalid_params_on_every_host(hosts, names):
     for s in hosts.values():
         with pytest.raises(TurnsError) as caught:
-            s.environ(names)
+            s.env(names)
         assert caught.value.code == -32602
 
 
 def test_one_string_is_not_a_list_of_names(hosts):
     with pytest.raises(TypeError):
-        hosts["claude"].environ("HOME")
+        hosts["claude"].env("HOME")
 
 
 def test_the_host_answers_its_own_copy_not_a_later_change(hosts, monkeypatch):
     monkeypatch.setenv("MOXI_T_ENV_ONE", "changed after the start")
     for s in hosts.values():
-        assert s.environ(["MOXI_T_ENV_ONE"]) == {"MOXI_T_ENV_ONE": "one"}
+        assert s.env(["MOXI_T_ENV_ONE"]) == {"MOXI_T_ENV_ONE": "one"}
 
 
 def test_a_launch_env_given_to_a_host_is_what_it_answers(launch_env, tmp_path):
@@ -135,7 +135,7 @@ def test_a_launch_env_given_to_a_host_is_what_it_answers(launch_env, tmp_path):
                                   env={"MOXI_T_ENV_ONE": "given"})
     s = opencode._run(oc)
     try:
-        assert s.environ(["MOXI_T_ENV_ONE", "OPENCODE_SERVER_PASSWORD"]) == {
+        assert s.env(["MOXI_T_ENV_ONE", "OPENCODE_SERVER_PASSWORD"]) == {
             "MOXI_T_ENV_ONE": "given", "OPENCODE_SERVER_PASSWORD": None}
     finally:
         s.close()
@@ -150,7 +150,7 @@ def test_a_session_without_the_capability_gets_the_capability_error(make_endpoin
     try:
         assert "environ" not in s.capabilities
         with pytest.raises(TurnsError) as caught:
-            s.environ(["HOME"])
+            s.env(["HOME"])
         assert caught.value.code == ERROR_CAPABILITY
         assert caught.value.data == {"capability": "environ"}
     finally:

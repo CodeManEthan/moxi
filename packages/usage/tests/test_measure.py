@@ -71,7 +71,7 @@ def session(n, *, calls=6, entrypoint="cli", model=MODEL, start=NOW - DAY, root=
         write = context_of(k) - read - 2
         t.user("go")
         t.assistant("ok", model=model, request_id=f"req_{n}_{k}",
-                    usage=usage(input=2, cache_read=read, cache_write=write,
+                    usage=usage(input_tokens=2, cache_read=read, cache_write=write,
                                 cache_write_1h=write, output=100))
         if synthetic and k == 2:
             t.synthetic()
@@ -81,7 +81,7 @@ def session(n, *, calls=6, entrypoint="cli", model=MODEL, start=NOW - DAY, root=
             read = PREFIX if k == 1 else 2 * context_of(k - 1)
             child.user("look")
             child.assistant("found", model=model, request_id=f"req_{n}_{a}_{k}",
-                            usage=usage(input=2, cache_read=read,
+                            usage=usage(input_tokens=2, cache_read=read,
                                         cache_write=2 * context_of(k) - read - 2,
                                         cache_write_1h=0, output=50))
     t.write()
@@ -179,7 +179,7 @@ def test_a_pair_after_a_compaction_or_an_expired_cache_is_no_growth():
                                              (12_000, 11_000), (13_000, 12_000),
                                              (5_000, 4_000), (6_000, 100))):
             t.user("go")
-            t.assistant("ok", request_id=f"req_{n}_{k}", usage=usage(input=2, cache_read=read,
+            t.assistant("ok", request_id=f"req_{n}_{k}", usage=usage(input_tokens=2, cache_read=read,
                                           cache_write=context - read - 2,
                                           cache_write_1h=context - read - 2))
         t.write()
@@ -289,7 +289,7 @@ def rollout(n, *, model=CODEX_MODEL):
     r.turn(model)
     for k in range(1, 6):
         r.user("go")
-        r.request(sessions.testing.token_usage(input=context_of(k),
+        r.request(sessions.testing.token_usage(input_tokens=context_of(k),
                                                cached=PREFIX if k == 1
                                                else context_of(k - 1)),
                   response_id=f"resp_{n}_{k}")
@@ -332,7 +332,7 @@ def test_an_opencode_only_sample_gets_its_rows_when_main_is_widened():
             each.user("go")
             reply = each.assistant(model=("opencode", OPENCODE_MODEL))
             read = PREFIX if k == 1 else context_of(k - 1)
-            reply.step(input=context_of(k) - read, cache_read=read, output=10)
+            reply.step(input_tokens=context_of(k) - read, cache_read=read, output=10)
             reply.complete()
     db.write()
     found = measured(interactive_only=False)

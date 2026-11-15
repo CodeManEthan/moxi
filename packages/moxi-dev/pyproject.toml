@@ -23,7 +23,7 @@ classifiers = [
 # reads the requirements and versions the release step compares. moxi-publishing owns
 # the release tag scheme and the CHANGELOG heading reader the release step uses.
 dependencies = ["moxi>=0.1.6,<0.2", "pytest", "pytest-xdist", "pytest-timeout", "import-linter", "deptry",
-                "packaging", "moxi-publishing>=0.1,<0.2"]
+                "packaging", "ruff>=0.17,<0.18", "moxi-publishing>=0.1,<0.2"]
 
 [project.scripts]
 moxi-dev = "moxi_dev.cli:main"

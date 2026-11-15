@@ -160,7 +160,7 @@ def test_rescan_still_pends_for_a_message_past_the_cursor(rig):
     assert queued(rig.daemon, "curator@proj-a") == {second.id}
 
 
-def test_a_cursor_folder_an_earlier_build_left_beside_the_store_is_not_read(rig):
+def test_a_cursor_dir_an_earlier_build_left_beside_the_store_is_not_read(rig):
     """A build that still wrote cursor files left `cursors/` beside a store it made. The
     folder isn't comms 0.2's (no move fingerprinted it), so the gate leaves it where it
     is, the daemon boots past it, and nothing in it moves a cursor."""
@@ -407,7 +407,7 @@ def test_a_partial_ack_re_pends_only_what_it_did_not_handle(rig):
 
 # ------------------------------------------------------- no cursor files are written
 
-def test_a_full_delivery_writes_nothing_under_the_cursor_folder(rig):
+def test_a_full_delivery_writes_nothing_under_the_cursor_dir(rig):
     """Delivery, ack, rescan, rebind and restart: the daemon keeps the cursor in its
     books, and nothing makes `STATE/comms/cursors/`."""
     curator = rig.shim(name="curator", scope="proj-a", autoreconnect=True,
@@ -424,7 +424,7 @@ def test_a_full_delivery_writes_nothing_under_the_cursor_folder(rig):
     assert not cursors_dir().exists()
 
 
-def test_no_comms_source_names_the_cursor_folder_but_the_move():
+def test_no_comms_source_names_the_cursor_dir_but_the_move():
     """Only the gate and the move of comms 0.2's files name the cursor folder, which
     they look for, read and rename. No adapter or daemon code writes there."""
     import re

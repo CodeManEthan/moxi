@@ -188,15 +188,15 @@ def socket_row() -> Row:
 
 
 def launch_files_row() -> Row:
-    directory = places.launch_dir()
-    removed = server.sweep_launch_files(directory, older_than=STALE_LAUNCH)
-    problem = _private(str(directory))
+    launch_dir = places.launch_dir()
+    removed = server.sweep_launch_files(launch_dir, older_than=STALE_LAUNCH)
+    problem = _private(str(launch_dir))
     if problem:
-        return _row("launch files", "fail", problem, f"chmod 700 {directory}")
+        return _row("launch files", "fail", problem, f"chmod 700 {launch_dir}")
     if removed:
         return _row("launch files", "warn",
                     f"removed {len(removed)} launch file(s) older than a minute from "
-                    f"{directory}; each held a launch's environment, and a start removes "
+                    f"{launch_dir}; each held a launch's environment, and a start removes "
                     "its own, so one was left by a start that did not finish")
     return _row("launch files", "ok", "none older than a minute")
 
@@ -212,14 +212,14 @@ def trampoline_row() -> Row:
 
 
 def mismatches_row() -> Row:
-    directory = places.mismatches_dir()
+    mismatches_dir = places.mismatches_dir()
     try:
-        count = sum(1 for e in os.scandir(directory) if e.is_file(follow_symlinks=False))
+        count = sum(1 for e in os.scandir(mismatches_dir) if e.is_file(follow_symlinks=False))
     except FileNotFoundError:
         count = 0
     except OSError as exc:
-        return _row("mismatches", "warn", f"{directory} cannot be read: {exc}")
-    return _row("mismatches", "ok", f"{count} saved in {directory}")
+        return _row("mismatches", "warn", f"{mismatches_dir} cannot be read: {exc}")
+    return _row("mismatches", "ok", f"{count} saved in {mismatches_dir}")
 
 
 def registry_rows() -> list[Row]:

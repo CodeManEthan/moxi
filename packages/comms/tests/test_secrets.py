@@ -225,7 +225,7 @@ def test_the_operator_credential_reads_the_store_through_the_default_chain(tmp_p
         db.close()
 
 
-def test_the_operator_credential_takes_the_environment_step_first(tmp_path):
+def test_the_operator_credential_takes_the_env_step_first(tmp_path):
     from moxi_comms import directory
 
     db = directory.init(tmp_path / "directory.db")
@@ -239,7 +239,7 @@ def test_the_operator_credential_takes_the_environment_step_first(tmp_path):
         db.close()
 
 
-def test_the_operator_credential_store_only_chain_ignores_the_environment(tmp_path):
+def test_the_operator_credential_store_only_chain_ignores_the_env(tmp_path):
     from moxi_comms import directory
 
     write_config(None, '[credentials]\nchain = ["store"]\n')

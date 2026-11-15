@@ -137,7 +137,7 @@ class FakeRunner:
         return self.report(leg.R_TURN_START, turn_id=turn_id)
 
     def turn_complete(self, turn_id: str, reason: str = "answer",
-                      is_aborted: bool = False) -> dict:
+                      *, is_aborted: bool = False) -> dict:
         return self.report(leg.R_TURN_COMPLETE, turn_id=turn_id, reason=reason,
                            is_aborted=is_aborted)
 

@@ -148,9 +148,9 @@ class Rig:
             clear=lambda key: self.records.append(("clear", key)))
         self.runner.reload()
 
-    def call(self, *, tool="Bash", agent=None, input=None, prompts=()) -> ToolCall:
+    def call(self, *, tool="Bash", agent=None, tool_input=None, prompts=()) -> ToolCall:
         return ToolCall("claude", "s-1", agent, tool, "tu-1",
-                        {"command": "x"} if input is None else input, "/w", None,
+                        {"command": "x"} if tool_input is None else tool_input, "/w", None,
                         {"HOME": "/h"}, tuple(prompts))
 
     def ask(self, *ids: str, **kw) -> Answer:
@@ -611,7 +611,7 @@ def test_ask_guard_builds_the_call_from_the_leg_and_the_endpoint(leg_rig):
     (7, "/work"),
     (["/x"], "/work"),
 ], ids=["absolute", "root", "none", "empty", "relative", "dot-relative", "number", "list"])
-def test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_directory(
+def test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_dir(
         leg_rig, given, want):
     seen = {}
 

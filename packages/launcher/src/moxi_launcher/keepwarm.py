@@ -149,17 +149,17 @@ ASK_EVERY_S = float(next(t["every"] for t in cachetimers.TIMERS
 def ask(session_id: str, *, conn: sqlite3.Connection | None = None, turns: Any | None = None,
         slots_api: Any = LOOK, cache: Any = LOOK, comms: Any = LOOK,
         settings: Mapping[str, Any] | None = None,
-        environ: Mapping[str, str] | None = None) -> Verdict:
+        caller_env: Mapping[str, str] | None = None) -> Verdict:
     """One keep-warm ask of the session `session_id`, to its end. Never raises for what it
-    reads; a fault after its run was written ends the run `error`. `comms` stands in for
+    reads; a fault after its run was written ends the run `exc`. `comms` stands in for
     comms' API (None for comms not installed); it is loaded only for a session under
     cover."""
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     try:
         opened = conn if conn is not None else store.connect(create=False)
-    except Exception as error:  # noqa: BLE001  (no launch log: nothing was launched)
+    except Exception as exc:  # noqa: BLE001  (no launch log: nothing was launched)
         return Verdict(None, "not-launched", f"the launch log could not be opened: "
-                                             f"{_words(error)}")
+                                             f"{_words(exc)}")
     try:
         return _ask(opened, session_id, turns, slots_api, cache, comms, settings, env)
     finally:
@@ -183,8 +183,8 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
         return Verdict(None, "run-open", f"run {current.run_id} is open on the launch")
     try:
         found = target.find(session_id, conn=conn, turns=turns, slots_api=api)
-    except catalog.Refused as refused:
-        return Verdict(None, getattr(refused, "code", None) or "refused", refused.problem)
+    except catalog.Refused as refused_exc:
+        return Verdict(None, getattr(refused_exc, "code", None) or "refused", refused_exc.problem)
     try:
         if not found.live or found.session is None:
             return Verdict(None, "not-live", f"session {session_id} is not live")
@@ -195,9 +195,9 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
             return shut
         try:
             facts = session.facts()
-        except Exception as error:  # noqa: BLE001  (the next ask reads again)
+        except Exception as exc:  # noqa: BLE001  (the next ask reads again)
             return Verdict(None, "unreadable", f"turns' facts could not be read: "
-                                               f"{_words(error)}")
+                                               f"{_words(exc)}")
         if getattr(facts, "turn_open", False):
             return Verdict(None, "busy", "a turn is open")
         sid = getattr(facts, "session_id", None) or sid
@@ -224,11 +224,11 @@ def _ask(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: Any, 
         recycle._prune(conn, current_settings)
         try:
             run = store.insert_run(conn, kind=KIND, mode=MODE, request_id=row.request_id,
-                                   session_id=sid, actor=store.LAUNCHER, state="acting",
+                                   session_id=sid, by=store.LAUNCHER, state="acting",
                                    slot=row.slot, pane_id=row.pane_id, turn_number=number,
                                    job=exits.own_job(), gone=gone)
-        except store.RunOpen as open_run:
-            return Verdict(None, "run-open", str(open_run))
+        except store.RunOpen as open_run_exc:
+            return Verdict(None, "run-open", str(open_run_exc))
         if len(nudges) >= cap:
             since = "the press" if held is not None else "the last turn no nudge opened"
             return recycle.end(conn, run, Verdict(
@@ -289,8 +289,8 @@ def _signal(conn: sqlite3.Connection, row: store.LaunchRow, session: Any,
     named, dropped = _run_record(conn, nudges)
     try:
         listed = session.agents()
-    except Exception as error:  # noqa: BLE001  (no subagent case without a list)
-        listed, failed = None, _words(error)
+    except Exception as exc:  # noqa: BLE001  (no subagent case without a list)
+        listed, failed = None, _words(exc)
     else:
         failed = None
     held = _holds(conn, row)
@@ -464,8 +464,8 @@ def _nudge(conn: sqlite3.Connection, run: store.Run, session: Any, number: int |
     try:
         try:
             again = session.facts()
-        except Exception as error:  # noqa: BLE001  (the next ask reads again)
-            return recycle.end(conn, run, Verdict(None, "unreadable", _words(error)))
+        except Exception as exc:  # noqa: BLE001  (the next ask reads again)
+            return recycle.end(conn, run, Verdict(None, "unreadable", _words(exc)))
         if getattr(again, "turn_open", False) or getattr(again, "turn_number", None) != number:
             return recycle.end(conn, run, Verdict(None, "busy", "a turn started meanwhile"))
         if not store.advance_run(conn, run.run_id, "acting", leaving=("acting",)):
@@ -483,15 +483,15 @@ def _nudge(conn: sqlite3.Connection, run: store.Run, session: Any, number: int |
         if verdict.outcome == "nudged":
             return _nudged(conn, run, verdict, signal, number)
         return recycle.end(conn, run, verdict)
-    except BaseException as error:  # a run never stays open on a fault
-        if store.end_run(conn, run.run_id, "error", word=type(error).__name__,
-                         detail=_words(error)):
+    except BaseException as exc:  # a run never stays open on a fault
+        if store.end_run(conn, run.run_id, "error", word=type(exc).__name__,
+                         detail=_words(exc)):
             store.add_run_event(conn, run.run_id, "ended", {"outcome": "error",
-                                                            "detail": _words(error)})
-        if not isinstance(error, Exception):
+                                                            "detail": _words(exc)})
+        if not isinstance(exc, Exception):
             raise
         log.exception("keep-warm run %s stopped on a fault", run.run_id)
-        return Verdict("error", type(error).__name__, _words(error), run.run_id)
+        return Verdict("error", type(exc).__name__, _words(exc), run.run_id)
 
 
 def _nudged(conn: sqlite3.Connection, run: store.Run, verdict: Verdict, signal: Signal,
@@ -519,9 +519,9 @@ def delivered(session: Any, text: str, number: int | None, *, ref: str,
     except TimeoutError:
         return Verdict("unconfirmed", "timeout", f"turns did not say within {wait_s:g} s "
                                                  "whether the nudge went in")
-    except Exception as error:  # noqa: BLE001  (turns' error is the verdict)
+    except Exception as exc:  # noqa: BLE001  (turns' error is the verdict)
         return Verdict("failed", "failed", f"turns could not deliver the nudge: "
-                                           f"{_words(error)}")
+                                           f"{_words(exc)}")
     kind = getattr(value, "KIND", type(value).__name__.lower())
     reason = getattr(value, "reason", None)
     if kind == "started":

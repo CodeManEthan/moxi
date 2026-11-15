@@ -171,7 +171,7 @@ def _starts() -> str | None:
     return units.starts(found).get("shell")
 
 
-def read_facts(*, environ: Any = None) -> Facts:
+def read_facts(*, env: Any = None) -> Facts:
     """Read what the rows need, from files and settings only."""
     from .. import config
     from .audit import last_held
@@ -184,15 +184,15 @@ def read_facts(*, environ: Any = None) -> Facts:
     layout = Layout(MODULE)
     system = endpoint.system()
     facts = Facts(system=system, kind=endpoint.resolve_kind(system),
-                  runtime_dir=str(layout.runtime_dir(environ)),
-                  state_dir=str(layout.state_dir(environ)))
+                  runtime_dir=str(layout.runtime_dir(env)),
+                  state_dir=str(layout.state_dir(env)))
     try:
         settings = config.current()
         facts.switch = settings["gateway.enabled"] is True
         facts.port, facts.gateway_port = settings["port"], settings["gateway.port"]
     except Exception:  # noqa: BLE001 - the core's settings row reports a bad file
         facts.switch = None
-    facts.moved = endpoint.runtime_problem(environ)
+    facts.moved = endpoint.runtime_problem(env)
     facts.extra = extra_installed()
     facts.tunnel, facts.tunnel_reason = tunnel_state()
     if facts.tunnel != "absent":
@@ -202,13 +202,13 @@ def read_facts(*, environ: Any = None) -> Facts:
             facts.tunnel_reason = read.reason
     if facts.kind == "unix":
         try:
-            endpoint.check_socket_path(endpoint.socket_path(layout, environ))
-        except endpoint.PathRefused as err:
-            facts.path_problem = str(err)
+            endpoint.check_socket_path(endpoint.socket_path(layout, env))
+        except endpoint.PathRefused as exc:
+            facts.path_problem = str(exc)
     try:
         read_retired(facts.state_dir)
-    except (OSError, ValueError) as err:
-        facts.retired_problem = f"{retired_path(facts.state_dir)} can't be read ({err})"
+    except (OSError, ValueError) as exc:
+        facts.retired_problem = f"{retired_path(facts.state_dir)} can't be read ({exc})"
     facts.shell_running, started = _shell()
     acts = read_acts(facts.runtime_dir)
     facts.acts = acts if acts is not None and _running(acts.get("pid")) else None
@@ -391,8 +391,8 @@ def login_row(facts: Facts) -> Row:
 def _bad(path: Path, want: int, uid: int) -> str | None:
     try:
         st = path.stat()
-    except OSError as err:
-        return f"{path} can't be read: {err.strerror}"
+    except OSError as exc:
+        return f"{path} can't be read: {exc.strerror}"
     if st.st_uid != uid:
         return f"{path} isn't yours (uid {st.st_uid})"
     if stat.S_IMODE(st.st_mode) & 0o077:
@@ -405,23 +405,23 @@ def audit_row(facts: Facts, *, uid: int | None = None) -> Row:
     user's."""
     from .audit import audit_dir
 
-    folder = audit_dir(facts.state_dir)
-    found = sorted(folder.iterdir()) if folder.is_dir() else []
-    if not found and not folder.is_dir():
+    audit_files_dir = audit_dir(facts.state_dir)
+    found = sorted(audit_files_dir.iterdir()) if audit_files_dir.is_dir() else []
+    if not found and not audit_files_dir.is_dir():
         if not facts.switch:
             return Row(MODULE, "gateway audit", "off", "the gateway is off and has no audit log")
-        return Row(MODULE, "gateway audit", "ok", f"{folder}: no rows written yet")
+        return Row(MODULE, "gateway audit", "ok", f"{audit_files_dir}: no rows written yet")
     if facts.system == "win32":
-        return Row(MODULE, "gateway audit", "ok", f"{folder}, {len(found)} files")
+        return Row(MODULE, "gateway audit", "ok", f"{audit_files_dir}, {len(found)} files")
     uid = os.getuid() if uid is None else uid
-    problem = _bad(folder, 0o700, uid)
+    problem = _bad(audit_files_dir, 0o700, uid)
     if problem is None:
         problem = next((p for p in (_bad(f, 0o600, uid) for f in found if f.is_file()) if p),
                        None)
     if problem is not None:
         return Row(MODULE, "gateway audit", "fail", problem,
-                   f"chmod 700 {folder}, and chmod 600 each file in it")
-    return Row(MODULE, "gateway audit", "ok", f"{folder}, {len(found)} files, private")
+                   f"chmod 700 {audit_files_dir}, and chmod 600 each file in it")
+    return Row(MODULE, "gateway audit", "ok", f"{audit_files_dir}, {len(found)} files, private")
 
 
 def rows(facts: Facts | None = None) -> Iterable[Row]:

@@ -93,9 +93,9 @@ exit 1
 """
 
 
-def _version(directory: Path) -> str:
-    with (directory / "pyproject.toml").open("rb") as f:
-        return tomllib.load(f)["project"]["version"]
+def _version(package_dir: Path) -> str:
+    with (package_dir / "pyproject.toml").open("rb") as fh:
+        return tomllib.load(fh)["project"]["version"]
 
 
 class Box:
@@ -138,9 +138,9 @@ class Box:
         assert done.returncode == 0, done.stderr
 
     def build(self) -> None:
-        for name, directory in (("moxi", PACKAGES / "moxi"), ("moxi-tunnel", PACKAGE)):
+        for name, package_dir in (("moxi", PACKAGES / "moxi"), ("moxi-tunnel", PACKAGE)):
             out = self.base / "dist" / name
-            self.uv("build", "--wheel", "--out-dir", str(out), str(directory))
+            self.uv("build", "--wheel", "--out-dir", str(out), str(package_dir))
             [self.wheels[name]] = out.glob("*.whl")
         self.uv("venv", "--python", sys.executable, str(self.venv), timeout=120)
         self.uv("pip", "install", "--python", str(self.py),

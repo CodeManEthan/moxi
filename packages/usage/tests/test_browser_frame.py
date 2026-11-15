@@ -49,7 +49,7 @@ for spec in json.loads(sys.argv[1]):
                            start=now - spec["hours_ago"] * 3600)
     for m in range(3):
         t.user("Fix the failing test.")
-        t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),
+        t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000 + m * 500),
                     request_id=f"req_{spec['session'][-2:]}{m}", model=sys.argv[2])
     t.write()
 """

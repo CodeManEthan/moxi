@@ -887,7 +887,7 @@ def _config_json(module: str, found, schema) -> int:
             named, unavailable = names[0]
             item["switch_table"] = True
             item["entries"] = _switch_entries(key.name, settings, named,
-                                              unavailable is None)
+                                              with_named=unavailable is None)
             if unavailable is not None:
                 item["declarations"] = "unavailable"
                 item["reason"] = unavailable
@@ -939,7 +939,7 @@ def _switch_names(module: str, found) -> tuple[dict[str, list[str]], str | None]
 
 
 def _switch_entries(table: str, settings, named: dict[str, list[str]],
-                    with_named: bool) -> list[dict]:
+                    *, with_named: bool) -> list[dict]:
     """A switch table's entries: each in the file, then each a switch names that the file
     lacks (false, from the default); by entry name."""
     in_file = {}
@@ -1181,21 +1181,21 @@ def _paths_of(module: str) -> dict:
         if found.state != modules.PRESENT:
             raise LookupError(found.reason)
         layout, stores = paths.Layout(module), found.stores
-    directories = {"data": layout.data_dir(), "state": layout.state_dir(),
+    store_dirs = {"data": layout.data_dir(), "state": layout.state_dir(),
                    "cache": layout.cache_dir(), "config": layout.config_dir(),
                    "runtime": layout.runtime_dir()}
     notes = [f"{kind} is read where it is, under a host folder; a later release of "
              "moxi moves it"
              for kind, root in (("state", layout.state_root()), ("cache", layout.cache_root()))
-             if directories[kind] != root / module]
+             if store_dirs[kind] != root / module]
     listed = []
     for name, entry in stores.items():
-        path = directories[entry["root"]] / entry["path"]
+        path = store_dirs[entry["root"]] / entry["path"]
         listed.append({"name": name, "path": str(path), "root": entry["root"],
                        "kind": entry["kind"], "lazy": bool(entry.get("lazy", False)),
                        **_store_facts(path, entry["kind"])})
     info = {"module": module,
-            "directories": {kind: str(path) for kind, path in directories.items()},
+            "directories": {kind: str(path) for kind, path in store_dirs.items()},
             "config_file": str(layout.config_file()), "notes": notes, "stores": listed}
     if module == names.HARNESS:
         # The core's record of the terminal's environment, in the anchor no variable

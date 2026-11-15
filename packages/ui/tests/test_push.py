@@ -179,8 +179,8 @@ class FakeClient:
         self.fail: list = []
         self.delay = 0.0
 
-    async def request(self, module, method, target, *, headers=(), stream=False, **kw):
-        assert method == "GET" and stream and (b"accept", b"text/event-stream") in headers
+    async def request(self, module, method, target, *, headers=(), streaming=False, **kw):
+        assert method == "GET" and streaming and (b"accept", b"text/event-stream") in headers
         self.requests.append((module, target))
         await asyncio.sleep(self.delay)
         if self.fail:

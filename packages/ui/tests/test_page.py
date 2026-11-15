@@ -77,9 +77,9 @@ def test_the_doctor_route_runs_moxi_doctor_from_the_runtime_dir_without_the_log_
         tmp_path, monkeypatch):
     from moxi.paths import Layout
 
-    from moxi_ui.starter import LOG_FILE_VARIABLE, Starters
+    from moxi_ui.starter import LOG_FILE_ENV, Starters
 
-    monkeypatch.setenv(LOG_FILE_VARIABLE, str(tmp_path / "shell.log"))
+    monkeypatch.setenv(LOG_FILE_ENV, str(tmp_path / "shell.log"))
     layout = Layout("ui")
     starters = Starters(runtime_dir=layout.runtime_dir(create=True),
                         state_dir=layout.state_dir(), log=tmp_path / "shell.log")
@@ -106,7 +106,7 @@ def test_the_doctor_route_runs_moxi_doctor_from_the_runtime_dir_without_the_log_
     assert argv == [str(python()), "-P", "-m", "moxi", "doctor", "ui", "--json"]
     assert argv == page.doctor_argv("ui") and page.doctor_argv() == argv[:5] + ["--json"]
     assert cwd == str(layout.runtime_dir()) and timeout == page.DOCTOR_TIMEOUT
-    assert LOG_FILE_VARIABLE not in env and env == starters.child_env()
+    assert LOG_FILE_ENV not in env and env == starters.child_env()
     assert asyncio.run(ask(module="Not A Name")) == {"rows": [], "error": "not a module name"}
     assert runs == []
 

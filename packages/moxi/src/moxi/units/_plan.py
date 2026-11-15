@@ -160,14 +160,14 @@ def _refuse_all(module, declared, marked, wanted, cause, reason) -> list[UnitCha
 class _Planner:
     """The per-unit half of `plan`, holding what one module's units share."""
 
-    def __init__(self, found, impl, env, environ=None, own=frozenset()):
+    def __init__(self, found, impl, env, unit_env=None, own=frozenset()):
         self.found = found
         #: The files `marked()` gives this module here: this home's own.
         self.own = frozenset(own)
         self.module = found.name
         self.impl = impl
         self.env = env
-        self.environment = tuple(sorted((environ or {}).items()))
+        self.unit_env = tuple(sorted((unit_env or {}).items()))
         self._schema: list = []
         self._ipv6: list[bool] = []
         self._socket_files: list = []
@@ -245,7 +245,7 @@ class _Planner:
                     memory_high=entry.get("memory_high"),
                     memory_swap_max=entry.get("memory_swap_max"),
                     schedule=_schedule(entry) if kind == "timer" else None, socket=socket,
-                    environment=self.environment)
+                    env=self.unit_env)
         try:
             rendered = self.impl.render(spec)
         except RenderError as exc:

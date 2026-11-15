@@ -41,8 +41,8 @@ def run(capsys, *argv):
 def test_list_groups_by_project_and_marks_session_timers(fake, no_modules, capsys):
     add(**written("web", project="studio", enabled=True))
     add(**written("nightly", kind="timer", every="1h", launches_session=True))
-    fake.written["web"] = Unit("daemon", True, active=True)
-    fake.written["nightly"] = Unit("timer", False)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
+    fake.written["nightly"] = Unit("timer", enabled=False)
     code, out, _ = run(capsys, "list")
     assert code == 0
     lines = out.splitlines()
@@ -66,7 +66,7 @@ def test_list_filters_by_project_ignoring_case_and_by_kind(fake, no_modules, cap
 
 def test_list_json_shape(fake, no_modules, capsys):
     add(**written("web", enabled=True))
-    fake.written["web"] = Unit("daemon", True, active=True)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
     code, out, _ = run(capsys, "list", "--json")
     found = json.loads(out)
     assert code == 0 and set(found[0]) == ROW_KEYS
@@ -77,7 +77,7 @@ def test_list_json_shape(fake, no_modules, capsys):
 
 def test_list_with_health_runs_the_checks(fake, no_modules, capsys):
     add(**written("web", enabled=True, health=[PY, "-c", "print('down'); raise SystemExit(1)"]))
-    fake.written["web"] = Unit("daemon", True, active=True)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
     code, out, _ = run(capsys, "list", "--health", "--json")
     found = json.loads(out)[0]
     assert found["health"] == {"state": "fail", "detail": "down"}
@@ -94,7 +94,7 @@ def test_list_shows_module_rows(fake, site, capsys):
         DAEMONS = {"sync": {"command": "moxi-jotter-sync", "doc": "sync the notes",
                             "stop": "group", "upgrade": "restart"}}
         ''')
-    fake.modules[("jotter", "sync")] = Unit("daemon", True, active=False)
+    fake.modules[("jotter", "sync")] = Unit("daemon", enabled=True, active=False)
     code, out, _ = run(capsys, "list", "--json")
     found = {r["id"]: r for r in json.loads(out)}
     assert found["jotter/sync"]["verdict"]["reason"] == "not running"
@@ -114,7 +114,7 @@ def test_a_busy_store_exits_75(fake, no_modules, capsys, monkeypatch):
 
 def test_show_a_running_daemon(fake, no_modules, capsys):
     add(**written("web", enabled=True, health=[PY, "-c", "print('fine')"]))
-    fake.written["web"] = Unit("daemon", True, active=True)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
     code, out, _ = run(capsys, "show", "web")
     assert code == 0
     assert out.splitlines()[0] == "services/web"
@@ -133,7 +133,7 @@ def test_show_a_running_daemon_reads_its_process_fields(fake, no_modules, capsys
     assert set(process) == {"pid", "uptime_s", "rss_bytes", "cpu_s"}
     monkeypatch.setattr(cli, "_process", lambda pid: process)
     add(**written("web", enabled=True))
-    fake.written["web"] = Unit("daemon", True, active=True)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
     code, out, _ = run(capsys, "show", "web")
     assert code == 0
     [line] = [line for line in out.splitlines() if line.startswith("  process")]
@@ -156,7 +156,7 @@ def windows_timer(fake, no_modules, monkeypatch):
     fake.supervisor = "schtasks"
     ref = "\\Vendor\\agent"
     add(**adopted("agent", unit=ref, enabled=True, platform="win32"))
-    fake.foreign[ref] = Unit("timer", True, last={"supervisor": {
+    fake.foreign[ref] = Unit("timer", enabled=True, last={"supervisor": {
         "last_run": "2026-11-07T09:30:00", "last_result": 1}})
     return ref
 
@@ -184,14 +184,14 @@ def test_list_says_a_crashed_windows_timer_is_judged_as_a_timer(windows_timer, c
 
 def test_show_a_timer_elsewhere_says_nothing_of_how_it_is_judged(fake, no_modules, capsys):
     add(**written("nightly", kind="timer", every="1h", enabled=True))
-    fake.written["nightly"] = Unit("timer", True)
+    fake.written["nightly"] = Unit("timer", enabled=True)
     code, out, _ = run(capsys, "show", "nightly")
     assert code == 0 and "judged" not in out
 
 
 def test_show_json_has_the_row_and_its_runs(fake, no_modules, capsys, monkeypatch):
     add(**written("job", kind="timer", every="5m"))
-    fake.written["job"] = Unit("timer", False)
+    fake.written["job"] = Unit("timer", enabled=False)
     monkeypatch.setattr(fake, "last_runs", lambda module, timer, n=1: [
         {"unit": "services/job", "at": "2026-10-30T09:00:00Z", "seconds": 1.0,
          "result": "ran", "exit": 0}])
@@ -246,7 +246,7 @@ def test_usage_errors_exit_2(fake, capsys, argv, said):
 
 
 def test_adopting_without_enable_or_disable_exits_2_saying_what_is_there(fake, capsys):
-    fake.foreign["site.service"] = Unit("daemon", True, active=True)
+    fake.foreign["site.service"] = Unit("daemon", enabled=True, active=True)
     code, _, err = run(capsys, "add", "site", "--unit", "site.service")
     assert code == 2
     assert "site.service: starts at login, running; adopt it with --enable" in err
@@ -254,7 +254,7 @@ def test_adopting_without_enable_or_disable_exits_2_saying_what_is_there(fake, c
 
 
 def test_adopting_with_enable(fake, capsys):
-    fake.foreign["site.service"] = Unit("daemon", True, active=True)
+    fake.foreign["site.service"] = Unit("daemon", enabled=True, active=True)
     code, out, err = run(capsys, "add", "site", "--unit", "site.service", "--enable")
     assert code == 0, err
     assert store.get("site").unit == "site.service"
@@ -265,8 +265,8 @@ def test_adopting_with_enable(fake, capsys):
 def test_several_ids_act_on_each_and_exit_with_the_worst(fake, capsys):
     add(**written("web"))
     add(**written("api"))
-    fake.written["web"] = Unit("daemon", False)
-    fake.written["api"] = Unit("daemon", False)
+    fake.written["web"] = Unit("daemon", enabled=False)
+    fake.written["api"] = Unit("daemon", enabled=False)
     code, out, err = run(capsys, "start", "web", "nope", "api")
     assert code == 3
     assert fake.written["web"].active and fake.written["api"].active
@@ -285,7 +285,7 @@ def test_an_act_on_a_row_of_another_system_exits_3(fake, capsys):
 
 def test_remove(fake, capsys):
     add(**written("web"))
-    fake.written["web"] = Unit("daemon", False)
+    fake.written["web"] = Unit("daemon", enabled=False)
     code, out, _ = run(capsys, "remove", "web")
     assert code == 0 and "services/web removed" in out and store.get("web") is None
 
@@ -303,9 +303,9 @@ def test_a_module_switch_prints_the_cores_unit_lines_once(fake, site, capsys,
 
     def config_set(module, key, value, *, by):
         print("jotter/sync: written and started")  # the core says it as it applies
-        return [Applied(change, True, ("jotter/sync: written and started",))]
+        return [Applied(change, ok=True, lines=("jotter/sync: written and started",))]
 
-    monkeypatch.setattr(moxi.config, "set", config_set)
+    monkeypatch.setattr(moxi.config, "set_value", config_set)
     code, out, _ = run(capsys, "enable", "jotter/sync")
     assert code == 0
     assert out.count("jotter/sync: written and started") == 1
@@ -326,7 +326,7 @@ def test_the_worst_code():
     ("check 'two words' \"and more\"", ["check", "two words", "and more"]),
 ])
 def test_health_splits_as_posix_does(text, argv):
-    assert cli.split_command(text, windows=False) == argv
+    assert cli.split_command(text, is_windows=False) == argv
 
 
 @pytest.mark.parametrize("text, argv", [
@@ -339,7 +339,7 @@ def test_health_splits_as_posix_does(text, argv):
     (r'x.exe ""', ["x.exe", ""]),
 ])
 def test_health_splits_as_windows_does(text, argv):
-    assert cli.split_command(text, windows=True) == argv
+    assert cli.split_command(text, is_windows=True) == argv
 
 
 # --- watch ------------------------------------------------------------------------------
@@ -360,7 +360,7 @@ def rounds(monkeypatch, n, between=None):
 
 def test_watch_prints_a_line_when_a_verdict_changes(fake, no_modules, capsys, monkeypatch):
     add(**written("web", enabled=True))
-    fake.written["web"] = Unit("daemon", True, active=True)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
 
     def between(i):
         if i == 2:
@@ -382,7 +382,7 @@ def test_watch_refuses_the_old_every_flag(capsys):
 
 def test_watch_json_and_a_row_that_goes(fake, no_modules, capsys, monkeypatch):
     add(**written("web"))
-    fake.written["web"] = Unit("daemon", False)
+    fake.written["web"] = Unit("daemon", enabled=False)
 
     def between(i):
         if i == 1:
@@ -398,7 +398,7 @@ def test_watch_json_and_a_row_that_goes(fake, no_modules, capsys, monkeypatch):
 
 def test_watch_runs_health_every_30_seconds(fake, no_modules, capsys, monkeypatch):
     add(**written("web", enabled=True, health=[PY, "-c", "pass"]))
-    fake.written["web"] = Unit("daemon", True, active=True)
+    fake.written["web"] = Unit("daemon", enabled=True, active=True)
     from moxi_services import state
 
     ran = []

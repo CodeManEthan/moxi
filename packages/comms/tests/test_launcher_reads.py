@@ -52,7 +52,7 @@ def test_no_socket_named_is_none(env):
     assert api.caller_identity({}) is None
 
 
-def test_a_socket_outside_the_runtime_directory_is_none(env, tmp_path):
+def test_a_socket_outside_the_runtime_dir_is_none(env, tmp_path):
     assert api.caller_identity({CLAIM_SOCKET_ENV: str(tmp_path / "claim.sock")}) is None
 
 

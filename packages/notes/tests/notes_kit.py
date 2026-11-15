@@ -24,7 +24,7 @@ def home() -> Path:
 def configure(**values) -> None:
     """Set notes' settings, by key (dots spelled `__`)."""
     for key, value in values.items():
-        moxi.config.set("notes", key.replace("__", "."), value, by="test")
+        moxi.config.set_value("notes", key.replace("__", "."), value, by="test")
 
 
 def git_env(tmp_path: Path, monkeypatch) -> None:

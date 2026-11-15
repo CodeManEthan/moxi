@@ -177,7 +177,7 @@ def test_offline_the_listener_gives_the_block_and_the_offline_line(rig, capsys):
     {"error": "unknown query"},
     [],
 ])
-def test_a_roster_response_this_build_cannot_RENDER_is_treated_as_offline(
+def test_a_roster_response_this_build_cannot_render_is_treated_as_offline(
         rig, monkeypatch, partial):
     """A version-skewed daemon answers. A response we cannot render is a roster we did
     not get: the offline line, with the block."""
@@ -347,7 +347,7 @@ def test_the_native_address_renders_a_project_scope_with_at():
     assert p.env(base={})["MOXI_COMMS_PROJECT"] == "proj-b"
 
 
-def test_two_scopes_of_one_name_stay_DISTINCT_natively():
+def test_two_scopes_of_one_name_stay_distinct_natively():
     """The cross-scope collision, pinned as a test: the label is
     the only thing a sender types, so two identities that differ must differ here too. A
     render that dropped the scope -- or truncated it -- would silently merge `main@proj-a`
@@ -376,7 +376,7 @@ def test_the_wrappers_label_is_what_n_carries(tmp_path, monkeypatch):
     assert plain.claude_argv()[-1] == "reviewer-at-proj-a"
 
 
-def test_a_GLOBAL_identity_renders_BARE_in_the_native_address():
+def test_a_global_identity_renders_bare_in_the_native_address():
     """A global identity renders bare, so the native label of a global session is the
     bare name and gains no uniqueness from qualification -- exactly the ambiguity the
     one-way rule already names."""
@@ -388,7 +388,7 @@ def test_a_GLOBAL_identity_renders_BARE_in_the_native_address():
     assert "herald-at-global" not in argv
 
 
-def test_the_x_at_y_ambiguity_is_DECLARED_not_defended(capsys):
+def test_the_x_at_y_ambiguity_is_declared_not_defended(capsys):
     """A GLOBAL identity literally named `x-at-y` renders the
     same native label as project-scoped `x@y`. Both spellings pass NAME_RE, so neither is
     refused, and this pins that comms builds NO machinery against the collision: the
@@ -407,7 +407,7 @@ def test_the_x_at_y_ambiguity_is_DECLARED_not_defended(capsys):
     assert "-n x-at-y" in capsys.readouterr().out
 
 
-def test_nothing_parses_a_native_label_BACK_into_an_identity():
+def test_nothing_parses_a_native_label_back_into_an_identity():
     """The one-way rule as what comms refuses to build: `-at-` is WRITTEN in exactly one
     place and read
     nowhere. A reverse index would begin with a second module that knows the separator."""
@@ -445,7 +445,7 @@ def test_nothing_parses_a_native_label_BACK_into_an_identity():
         "one native-label symbol pair, both write-side"
 
 
-def test_the_comms_render_sits_AFTER_the_passthrough_so_a_stale_n_is_overridden():
+def test_the_comms_render_sits_after_the_passthrough_so_a_stale_n_is_overridden():
     """The position is the mechanism. A wrapper that has not yet dropped its own
     `-n` puts it in the passthrough; comms' render lands later in the argv and wins,
     because a repeated `-n` is last-wins (measured at 2.1.235: `-n probeA -n
@@ -460,7 +460,7 @@ def test_the_comms_render_sits_AFTER_the_passthrough_so_a_stale_n_is_overridden(
     assert "stale-wrapper-label" in argv
 
 
-def test_a_nameless_Session_renders_no_native_address():
+def test_a_nameless_session_renders_no_native_address():
     """`main()` refuses a nameless launch (twice test-pinned below), so this arm is
     CLI-unreachable -- but `Session.__init__` accepts name=None and `claude_argv` is
     public, and without the fence a direct construction hands `os.execve` either
@@ -510,7 +510,7 @@ def test_the_shim_refuses_the_retired_comm_slot_before_serving(monkeypatch, caps
 
 
 @pytest.mark.parametrize("name", ["bad name@x!", "planner@proj-a", "has space", "sl/ash"])
-def test_a_name_outside_the_grammar_is_refused_at_the_WRAPPER(capsys, name):
+def test_a_name_outside_the_grammar_is_refused_at_the_wrapper(capsys, name):
     """`--name 'bad name@x!'` must not be accepted in full, rendered into `-n` and then
     fail at register time inside the session where nobody reads the log. The check
     belongs here, at the wrapper, against comms' own NAME_RE -- and it catches the

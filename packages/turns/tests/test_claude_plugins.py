@@ -21,7 +21,7 @@ PLUGINS = ("moxi-turns", "moxi-turns-gate")
 needs_claude = pytest.mark.skipif(shutil.which("claude") is None, reason="Claude Code is not on PATH")
 
 
-def test_the_folder_marketplace_lists_both_plugins_by_relative_path():
+def test_the_local_marketplace_lists_both_plugins_by_relative_path():
     doc = json.loads((CLAUDE_DIR / ".claude-plugin" / "marketplace.json").read_text())
     assert doc["name"] == "moxi-turns"
     assert [(p["name"], p["source"]) for p in doc["plugins"]] == [
@@ -67,9 +67,9 @@ def _claude(*args: str, timeout: int = 240) -> subprocess.CompletedProcess:
 
 
 @needs_claude
-@pytest.mark.parametrize("folder", ["", *PLUGINS])
-def test_claude_plugin_validate_passes(folder):
-    out = _claude("validate", str(CLAUDE_DIR / folder))
+@pytest.mark.parametrize("plugin_dir", ["", *PLUGINS])
+def test_claude_plugin_validate_passes(plugin_dir):
+    out = _claude("validate", str(CLAUDE_DIR / plugin_dir))
     assert out.returncode == 0, out.stdout + out.stderr
     assert "Validation passed" in out.stdout
 

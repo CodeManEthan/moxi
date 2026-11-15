@@ -86,7 +86,7 @@ LOADER_FILES = ("tsconfig.json", ".claude-plugin/types")
 SKIPPED = ("Claude Code not found; skipped its plugin. Run moxi install turns again "
            "after installing it.")
 #: The two last parts of a package's own marketplace folder, which SETUP moves from.
-PACKAGE_FOLDER = ("moxi_turns", "claude")
+PACKAGE_DIR = ("moxi_turns", "claude")
 #: The doctor row that compares the placed copy with the package.
 PLACED_ROW = "claude placed copy"
 
@@ -189,8 +189,8 @@ def write_endpoint_file(root: Path | None = None, env: dict[str, str] | None = N
     except OSError as exc:
         raise SetupError(f"cannot write {target}: {exc}") from None
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            out.write(data)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(data)
         os.chmod(tmp, 0o644)
         os.replace(tmp, target)
     except OSError as exc:
@@ -349,7 +349,7 @@ def _must(claude: str, *args: str) -> None:
                          f"(exit {done.returncode}): {done.stderr.strip()}")
 
 
-def _market_folder(claude: str) -> str | None:
+def _marketplace_dir(claude: str) -> str | None:
     """The folder Claude Code's `moxi-turns` marketplace was added from, "" for one it
     names no folder for, or None when there is none."""
     markets = {m.get("name"): m for m in _json_list(claude, "marketplace", "list")
@@ -360,7 +360,7 @@ def _market_folder(claude: str) -> str | None:
     return have.get("path") or have.get("installLocation") or ""
 
 
-def _same_folder(a: str, b: Path) -> bool:
+def _same_dir(a: str, b: Path) -> bool:
     try:
         return Path(a).resolve() == b.resolve()
     except (OSError, RuntimeError):
@@ -377,22 +377,22 @@ def install_plugins(root: Path | None = None) -> list[str]:
     if claude is None:
         return [SKIPPED]
     lines = []
-    folder = str(root.resolve())
-    where = _market_folder(claude)
+    marketplace_dir = str(root.resolve())
+    where = _marketplace_dir(claude)
     moved = False
     if where is None:
-        _must(claude, "marketplace", "add", folder)
-        lines.append(f"added the marketplace {MARKETPLACE} from {folder}")
-    elif where and not _same_folder(where, root):
-        if Path(where).parts[-2:] != PACKAGE_FOLDER:
+        _must(claude, "marketplace", "add", marketplace_dir)
+        lines.append(f"added the marketplace {MARKETPLACE} from {marketplace_dir}")
+    elif where and not _same_dir(where, root):
+        if Path(where).parts[-2:] != PACKAGE_DIR:
             raise SetupError(
                 f"a marketplace named {MARKETPLACE} is already added from {where}, not "
-                f"{folder}; remove it with `claude plugin marketplace remove "
+                f"{marketplace_dir}; remove it with `claude plugin marketplace remove "
                 f"{MARKETPLACE}` and run `moxi install turns` again")
         _must(claude, "marketplace", "remove", MARKETPLACE)
-        _must(claude, "marketplace", "add", folder)
+        _must(claude, "marketplace", "add", marketplace_dir)
         moved = True
-        lines.append(f"moved the marketplace {MARKETPLACE} from {where} to {folder}")
+        lines.append(f"moved the marketplace {MARKETPLACE} from {where} to {marketplace_dir}")
     else:
         lines.append(f"the marketplace {MARKETPLACE} is already added")
     installed = {} if moved else {
@@ -413,10 +413,10 @@ def install_plugins(root: Path | None = None) -> list[str]:
     return lines
 
 
-def _manifest_version(folder: Path) -> str | None:
+def _manifest_version(plugin_dir: Path) -> str | None:
     """The version a plugin folder's manifest names, or None when it names none."""
     try:
-        version = json.loads((folder / ".claude-plugin" / "plugin.json")
+        version = json.loads((plugin_dir / ".claude-plugin" / "plugin.json")
                              .read_text("utf-8")).get("version")
     except (OSError, ValueError, AttributeError):
         return None
@@ -466,8 +466,8 @@ def teardown() -> int:
     claude = _claude()
     if claude is not None:
         try:
-            where = _market_folder(claude)
-            if where and _same_folder(where, root):
+            where = _marketplace_dir(claude)
+            if where and _same_dir(where, root):
                 _must(claude, "marketplace", "remove", MARKETPLACE)
                 print(f"turns: removed the marketplace {MARKETPLACE} from Claude Code")
         except (SetupError, OSError, subprocess.TimeoutExpired) as exc:
@@ -509,15 +509,15 @@ def rows() -> list:
     root = placed_root() if state == "current" else claude_root()
     where = "the placed copy" if state == "current" else "the package"
     for plugin in (RUNNER, GATE):
-        folder = plugin_dir(plugin, root)
+        plugin_root_dir = plugin_dir(plugin, root)
         try:
-            manifest = json.loads((folder / ".claude-plugin" / "plugin.json")
+            manifest = json.loads((plugin_root_dir / ".claude-plugin" / "plugin.json")
                                   .read_text("utf-8"))
             out.append(Row(MODULE, f"claude plugin {plugin}", "ok",
-                           f"version {manifest.get('version', '?')} at {folder}"))
+                           f"version {manifest.get('version', '?')} at {plugin_root_dir}"))
         except (OSError, ValueError) as exc:
             out.append(Row(MODULE, f"claude plugin {plugin}", "fail",
-                           f"missing from {where} at {folder}: {exc}",
+                           f"missing from {where} at {plugin_root_dir}: {exc}",
                            "reinstall turns" if state != "current"
                            else "moxi install turns"))
     out.append(Row(MODULE, PLACED_ROW, {"none": "off", "current": "ok"}.get(state, "warn"),
@@ -567,7 +567,7 @@ def _user_scope_runner() -> bool | None:
 _LEG_LINE = re.compile(r"^const LEG = (\d+)\s*$", re.MULTILINE)
 
 
-def _installed_runner_rows(Row, module) -> list:
+def _installed_runner_rows(row_type, module) -> list:
     """The runner Claude Code runs at user scope is its cached copy, not the placed one:
     one row comparing that copy's leg with the endpoint's. No row when the runner is not
     installed at user scope or Claude Code cannot say."""
@@ -579,7 +579,7 @@ def _installed_runner_rows(Row, module) -> list:
     name = "claude installed runner"
     where = entry.get("installPath")
     if not isinstance(where, str) or not where:
-        return [Row(module, name, "warn",
+        return [row_type(module, name, "warn",
                     f"Claude Code names no folder for {RUNNER}@{MARKETPLACE}, so its leg "
                     "cannot be read")]
     try:
@@ -589,45 +589,45 @@ def _installed_runner_rows(Row, module) -> list:
     else:
         why = "names no leg"
     if found is None:
-        return [Row(module, name, "warn", f"the runner at {where} {why}")]
+        return [row_type(module, name, "warn", f"the runner at {where} {why}")]
     have = int(found.group(1))
     if have == LEG:
-        return [Row(module, name, "ok",
+        return [row_type(module, name, "ok",
                     f"version {entry.get('version', '?')} at {where}, leg {have} as the "
                     "endpoint")]
-    return [Row(module, name, "fail",
+    return [row_type(module, name, "fail",
                 f"version {entry.get('version', '?')} at {where} speaks leg {have}, the "
                 f"endpoint leg {LEG}: every session it loads in runs without turns",
                 "moxi install turns")]
 
 
-def _endpoint_file_row(Row, module, problem: str):
+def _endpoint_file_row(row_type, module, problem: str):
     installed = _user_scope_runner()
     if installed:
-        return Row(module, "claude endpoint.json", "fail",
+        return row_type(module, "claude endpoint.json", "fail",
                    f"{problem}: {RUNNER}@{MARKETPLACE} is installed at user scope, so "
                    "every session it loads in runs without turns until the file is "
                    "rewritten", "moxi install turns")
     why = ("no user-scope install of the runner reads it" if installed is False else
            "only a user-scope install of the runner reads it, and `claude plugin list` "
            "could not say whether there is one")
-    return Row(module, "claude endpoint.json", "warn",
+    return row_type(module, "claude endpoint.json", "warn",
                f"{problem}; {why}. A launch through launch_additions names its endpoint "
                f"in {ENDPOINT_ENV} and needs no file", "moxi install turns")
 
 
-def _version_row(Row, module):
+def _version_row(row_type, module):
     claude = _claude()
     if claude is None:
-        return Row(module, "claude code", "off", "`claude` is not on PATH")
+        return row_type(module, "claude code", "off", "`claude` is not on PATH")
     try:
         done = _run([claude, "--version"])
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return Row(module, "claude code", "fail", f"`claude --version` failed: {exc}")
+        return row_type(module, "claude code", "fail", f"`claude --version` failed: {exc}")
     version = (done.stdout.split() or ["?"])[0]
     if version in PASSED_VERSIONS:
-        return Row(module, "claude code", "ok", f"{version}, which the probes passed")
-    return Row(module, "claude code", "warn",
+        return row_type(module, "claude code", "ok", f"{version}, which the probes passed")
+    return row_type(module, "claude code", "warn",
                f"{version}, which the probes have not seen (passed: "
                f"{', '.join(PASSED_VERSIONS)})")
 

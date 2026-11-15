@@ -188,9 +188,9 @@ def test_keyword_calls_give_todays_bytes_and_a_positional_one_fails():
     # Every parameter after `recipients` (and `text`) is keyword-only: a positional
     # call fails instead of binding to the wrong parameter.
     with pytest.raises(TypeError):
-        machine_line.format_line(["a", "b"], False, "123")
+        machine_line.format_line(["a", "b"], False, "123")  # noqa: FBT003 -- verifies positional booleans are refused
     with pytest.raises(TypeError):
-        machine_line.compose(["a"], "t", False, "5")
+        machine_line.compose(["a"], "t", False, "5")  # noqa: FBT003 -- verifies positional booleans are refused
 
 
 def test_bodies_with_a_text_only_namespace_gives_one_plain_body():
@@ -428,7 +428,7 @@ def test_a_failed_record_read_lets_the_send_through_naming_the_ask(rig, pair, wh
 
 
 @pytest.mark.parametrize("seam", ["db", "room"])
-def test_a_failed_directory_read_lets_the_single_reply_check_through(rig, pair,
+def test_a_failed_dir_read_lets_the_single_reply_check_through(rig, pair,
                                                                      monkeypatch, seam):
     ask = open_ask(rig)
     ctx = cli.Context(record=rig.record, db_path=comms_db(), clock=rig.clock)

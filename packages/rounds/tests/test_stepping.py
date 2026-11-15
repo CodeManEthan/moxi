@@ -35,11 +35,11 @@ def rounds(tmp_path, add_project, capsys):
 
 def opened(rounds, flow="small", name=ROUND):
     """Open a round on `flow` with the stage B1 declared, and return its log."""
-    opening.open_round(name, description="a placeholder round", actor="planner",
+    opening.open_round(name, description="a placeholder round", by="planner",
                        flow=flow)
     path = log.round_log(rounds / name.partition("/")[2])
     log.append(path, "stage.declared",
-               {"id": "B1", "repo": "proj-a", "branch": "branch-b1"}, actor="planner")
+               {"id": "B1", "repo": "proj-a", "branch": "branch-b1"}, by="planner")
     return path
 
 
@@ -53,11 +53,11 @@ def last(path):
 
 
 def rule(item, record="comms:12", **more):
-    return ruling.rule(ROUND, item=item, record=record, actor="planner", **more)
+    return ruling.rule(ROUND, item=item, record=record, by="planner", **more)
 
 
 def up(flow):
-    return stepping.step_up(ROUND, flow, actor="planner")
+    return stepping.step_up(ROUND, flow, by="planner")
 
 
 # -- the flow a round follows ------------------------------------------------------------
@@ -124,7 +124,7 @@ def test_the_lead_moves_a_round_up_to_a_later_tier(rounds, capsys):
 
 def test_a_step_up_is_one_event_and_changes_no_other_record(rounds):
     path = opened(rounds, "fix")
-    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
     before = folded(path)
 
     stepped = up("full")
@@ -138,7 +138,7 @@ def test_a_step_up_is_one_event_and_changes_no_other_record(rounds):
 
 def test_a_step_up_while_a_question_holds_a_stage_lifts_no_hold(rounds):
     path = opened(rounds, "fix")
-    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
     assert [one.id for one in holds.on_stage(folded(path), "B1")] == ["Q1"]
 
     up("small")
@@ -240,7 +240,7 @@ def test_a_move_to_a_flow_the_config_does_not_have_is_refused(rounds):
 
 def test_a_round_that_has_ended_is_moved_to_no_flow(rounds):
     path = opened(rounds)
-    dropping.drop(ROUND, by="operator", record="comms:14", actor="planner")
+    dropping.drop(ROUND, by="operator", record="comms:14", run_by="planner")
     before = path.read_bytes()
 
     with pytest.raises(Refused, match="takes a change of flow no longer"):
@@ -286,7 +286,7 @@ def test_the_operators_ruling_moves_a_round_to_any_flow(rounds, start, flow):
 
 def test_a_step_down_lifts_no_hold_and_keeps_every_stage(rounds):
     path = opened(rounds, "full")
-    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
 
     rule("flow:fix")
 
@@ -327,7 +327,7 @@ def test_a_change_of_flow_is_corrected_by_another_and_never_taken_back(rounds):
     with pytest.raises(Refused, match="a ruling of flow:fix is not ruled a second "
                                       "time"):
         ruling.rule(ROUND, text="Back to the small flow.", record="comms:13",
-                    actor="planner", supersedes="C1")
+                    by="planner", supersedes="C1")
     with pytest.raises(BadArgument, match="a change of flow replaces none before it"):
         rule("flow:small", record="comms:13", supersedes="C1")
 
@@ -352,7 +352,7 @@ def test_a_ruling_of_the_flow_that_cant_be_read_is_a_usage_error(
     before = path.read_bytes()
 
     with pytest.raises(BadArgument):
-        ruling.rule(target, item=item, record="comms:12", actor="planner", **more)
+        ruling.rule(target, item=item, record="comms:12", by="planner", **more)
 
     assert path.read_bytes() == before
 

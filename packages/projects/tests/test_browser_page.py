@@ -350,7 +350,7 @@ def test_an_add_with_create_makes_a_git_repository_that_the_list_then_shows(
     expect(row(panel, "minted")).to_have_count(1)
 
 
-def test_a_lost_add_answer_reads_the_list_again_and_says_the_directory_may_exist(
+def test_a_lost_add_answer_reads_the_list_again_and_says_the_dir_may_exist(
         seeded, ui_shell, ui_page):
     panel = open_panel(ui_page)
     reads = reads_of(ui_page, "api/projects")

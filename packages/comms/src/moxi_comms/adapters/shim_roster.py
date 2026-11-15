@@ -77,6 +77,7 @@ import tempfile
 from pathlib import Path
 
 from .. import directors as directors_mod
+from ..constants import GLOBAL_ENV, NAME_ENV, SCOPE_ENV
 from ..context import (BARE_COMMS, COMMAND_ENV, CONTEXT_BLOCK, layer_one, layer_one_form,
                        own_comms)
 from ..roster_view import render_agents
@@ -110,8 +111,8 @@ def fetch(socket_path=None, *, timeout: float = 2.0) -> dict | None:
             return client.call("agents")
         finally:
             client.close()
-    except Exception as e:                                       # noqa: BLE001
-        print(f"comms roster: {e}", file=sys.stderr)
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"comms roster: {exc}", file=sys.stderr)
         return None
 
 
@@ -157,10 +158,10 @@ def self_identity(env=None) -> str | None:
     a claim socket, else the launch stamp, or None."""
     from ..claimhold import claim_overlay
     env = claim_overlay(env if env is not None else os.environ)
-    name = env.get("MOXI_COMMS_NAME")
+    name = env.get(NAME_ENV)
     if not name:
         return None
-    scope = GLOBAL if env.get("MOXI_COMMS_GLOBAL") else (env.get("MOXI_COMMS_SCOPE") or GLOBAL)
+    scope = GLOBAL if env.get(GLOBAL_ENV) else (env.get(SCOPE_ENV) or GLOBAL)
     return qualify(name, scope)
 
 
@@ -186,7 +187,7 @@ def render_snapshot(info: dict | None, *, env=None) -> tuple[str, bool]:
     if not usable(info):
         return with_block(OFFLINE, directors=directors, comms=comms, form=form), False
     lines = [LABEL, render_agents(info)]
-    name = env.get("MOXI_COMMS_NAME")
+    name = env.get(NAME_ENV)
     if name and not info["bindings"]:
         lines.append(OWN_BINDING_RACE.format(name=name))
     return with_block("\n".join(lines), directors=directors, comms=comms, form=form), True
@@ -237,12 +238,12 @@ def write_state(path: Path, roster: dict[str, str]) -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
-        with os.fdopen(fd, "w") as f:
-            json.dump(roster, f, sort_keys=True, separators=(",", ":"))
+        with os.fdopen(fd, "w") as fh:
+            json.dump(roster, fh, sort_keys=True, separators=(",", ":"))
         os.replace(tmp, path)
         return True
-    except OSError as e:
-        print(f"comms roster: state write failed: {e}", file=sys.stderr)
+    except OSError as exc:
+        print(f"comms roster: state write failed: {exc}", file=sys.stderr)
         if tmp is not None:
             try:
                 os.unlink(tmp)
@@ -253,19 +254,19 @@ def write_state(path: Path, roster: dict[str, str]) -> bool:
 
 # ---------------------------------------------------------------------- the delta
 
-def diff(before: dict[str, str], now: dict[str, str],
+def diff(before: dict[str, str], current: dict[str, str],
          self_q: str | None) -> tuple[list[str], list[str]]:
     """(joins, leaves), keyed by qualified name, self filtered from both sides."""
-    joins = sorted(q for q in now if q not in before and q != self_q)
-    leaves = sorted(q for q in before if q not in now and q != self_q)
+    joins = sorted(q for q in current if q not in before and q != self_q)
+    leaves = sorted(q for q in before if q not in current and q != self_q)
     return joins, leaves
 
 
-def render_delta(joins: list[str], leaves: list[str], now: dict) -> str:
+def render_delta(joins: list[str], leaves: list[str], current: dict) -> str:
     """One parenthetical line. A join shows its tier the way the verb shows it;
     a leave is just the name -- the tier of someone gone is not news. The operator's
     join and leave read like any name's."""
-    parts = [f"{q} [{entry_of(now[q])['tier']}] is now reachable" for q in joins]
+    parts = [f"{q} [{entry_of(current[q])['tier']}] is now reachable" for q in joins]
     parts += [f"{q} left" for q in leaves]
     return DELTA_OPEN + "; ".join(parts) + DELTA_CLOSE
 
@@ -316,21 +317,21 @@ def delta(socket_path=None, state_path: Path | str = "", *, env=None,
     info = fetch(socket_path, timeout=timeout)
     if not usable(info):
         return None, False                     # silent skip: the file stays put
-    now = roster_of(info)
+    current = roster_of(info)
     raw = read_state(state_path)
     before = None if raw is None else {q: v for q, v in raw.items() if q != SHOWN_KEY}
     shown_before = list((raw or {}).get(SHOWN_KEY) or [])
     self_q = self_identity(env)
     owed_lines, shown = unanswered_for(info, self_q, shown_before)
-    memory = {**now, SHOWN_KEY: shown} if shown else dict(now)
+    memory = {**current, SHOWN_KEY: shown} if shown else dict(current)
     if before is None:
         # unknown baseline: seed, and announce no roster change
         if not write_state(state_path, memory):
             return None, True
         return ("\n".join(owed_lines) or None), True
-    joins, leaves = diff(before, now, self_q)
-    if (before != now or shown != shown_before) and not write_state(state_path, memory):
+    joins, leaves = diff(before, current, self_q)
+    if (before != current or shown != shown_before) and not write_state(state_path, memory):
         return None, True                      # could not advance -> nothing announced
-    parts = [render_delta(joins, leaves, now)] if joins or leaves else []
+    parts = [render_delta(joins, leaves, current)] if joins or leaves else []
     parts += owed_lines
     return ("\n".join(parts) or None), True

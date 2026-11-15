@@ -209,7 +209,7 @@ def refused(code: str, text: str, **fields) -> CallToolResult:
     return _result(text, {"refusal": code, **fields}, error=True)
 
 
-def _send_result(daemon, result: sending.SendResult, interrupt: bool) -> CallToolResult:
+def _send_result(daemon, result: sending.SendResult, *, interrupt: bool) -> CallToolResult:
     """A send's or a reply's `SendResult` as the tool answers it."""
     text = "\n".join(result.lines())
     if result.outcome not in (sending.OUTCOME_SENT, sending.OUTCOME_UNKNOWN):
@@ -217,7 +217,7 @@ def _send_result(daemon, result: sending.SendResult, interrupt: bool) -> CallToo
         return refused(refusal.code, refusal.text or text, outcome=result.outcome)
     expires_at, marked = None, interrupt
     if result.message_id is not None:
-        expires_at, marked = _marks(daemon, result.message_id, interrupt)
+        expires_at, marked = _marks(daemon, result.message_id, interrupt=interrupt)
     return _result(text, {
         "outcome": result.outcome,
         "message_id": result.message_id,
@@ -229,7 +229,7 @@ def _send_result(daemon, result: sending.SendResult, interrupt: bool) -> CallToo
     })
 
 
-def _marks(daemon, message_id: str, interrupt: bool) -> tuple:
+def _marks(daemon, message_id: str, *, interrupt: bool) -> tuple:
     """(expires_at, interrupt) as the posted message's routing line carries them."""
     try:
         msg = daemon.record.get_message(str(message_id))
@@ -267,9 +267,9 @@ class Tools:
     def _guarded(body, identity, claim, params) -> CallToolResult:
         try:
             return body(identity, claim, params)
-        except Exception as e:  # noqa: BLE001 - a tool answers; it never raises
+        except Exception as exc:  # noqa: BLE001 - a tool answers; it never raises
             log.exception("comms' %s tool failed (%s)", getattr(body, "__name__", "?"),
-                          type(e).__name__)
+                          type(exc).__name__)
             return refused("failed", FAILED)
 
     # ---- on the pool
@@ -288,7 +288,7 @@ class Tools:
         reply_to = params.get("reply_to")
         args = _args(params, reply_to=None if reply_to is None else str(reply_to))
         result = sending.run(self._context(), args, tags=tags, sender=sender)
-        return _send_result(self.daemon, result, bool(params.get("interrupt")))
+        return _send_result(self.daemon, result, interrupt=bool(params.get("interrupt")))
 
     def reply(self, identity, claim, params) -> CallToolResult:
         sender = inprocess.bound_sender(self.daemon, claim, identity)
@@ -296,7 +296,7 @@ class Tools:
             return refused("reconnecting", RECONNECTING)
         args = _args(params, message_id=str(params["message_id"]))
         result = sending.run(self._context(), args, sender=sender)
-        return _send_result(self.daemon, result, bool(params.get("interrupt")))
+        return _send_result(self.daemon, result, interrupt=bool(params.get("interrupt")))
 
     def delete(self, identity, claim, params) -> CallToolResult:
         sender = inprocess.bound_sender(self.daemon, claim, identity)
@@ -314,8 +314,8 @@ class Tools:
     def agents(self, identity, claim, params) -> CallToolResult:
         try:
             info = self._read("agents", {})
-        except DaemonError as e:
-            return _read_refused(e)
+        except DaemonError as exc:
+            return _read_refused(exc)
         rows, seen = [], set()
         for b in info.get("bindings") or ():
             seen.add(b["qualified"])
@@ -334,8 +334,8 @@ class Tools:
         name, scope = split_tag(identity)
         try:
             held = self._read("session", {"identity": identity})
-        except DaemonError as e:
-            return _read_refused(e)
+        except DaemonError as exc:
+            return _read_refused(exc)
         bound = bool(held.get("bound"))
         sid = held.get("session_id") if bound else None
         lines = [f"{identity} ({'bound' if bound else 'reconnecting'})"]
@@ -355,8 +355,8 @@ class Tools:
         try:
             return _history(self.daemon, self._context(), who, limit,
                             self._read)
-        except DaemonError as e:
-            return _read_refused(e)
+        except DaemonError as exc:
+            return _read_refused(exc)
 
     def _read(self, method: str, params: dict) -> dict:
         client = inprocess.InProcessClient(self.daemon)
@@ -386,7 +386,7 @@ class Tools:
         call = self.call
 
         async def send(to: list[str] | str, text: str, posture: Posture,
-                       expires: str | int | None = None, interrupt: bool = False,
+                       expires: str | int | None = None, *, interrupt: bool = False,
                        reply_to: str | int | None = None, new: bool = False,
                        new_name: bool = False) -> CallToolResult:
             return await call(self.send, {
@@ -396,7 +396,7 @@ class Tools:
 
         async def reply(message_id: str | int, text: str, posture: Posture | None = None,
                         expires: str | int | None = None,
-                        interrupt: bool = False) -> CallToolResult:
+                        *, interrupt: bool = False) -> CallToolResult:
             return await call(self.reply, {
                 "message_id": message_id, "text": text, "posture": posture,
                 "expires": expires, "interrupt": interrupt})
@@ -497,7 +497,7 @@ def _history(daemon, ctx: sending.Context, identity: str, limit: int, read):
             "id": str(m.id), "from": author.qualified, "to": list(ml.recipients),
             "text": ml.text, "at": str(m.timestamp),
             "attribution": attribution.rendered(author.attribution),
-            "state": _state(m, gone, str(m.id) in waiting)})
+            "state": _state(m, gone, waiting=str(m.id) in waiting)})
     if window is not None:
         lines.append(f"(time-scoped to the {identity} binding: {window[0]} .. "
                      f"{window[1] if window[1] is not None else 'now'})")
@@ -562,7 +562,7 @@ def _gone(m, dropped: dict) -> str:
     return "".join(f" {bit}" for bit in bits)
 
 
-def _state(m, gone: dict, waiting: bool) -> str:
+def _state(m, gone: dict, *, waiting: bool) -> str:
     if getattr(m, "withdrawn_at", None) or books.WITHDRAWN in gone.values():
         return WITHDRAWN
     if waiting:

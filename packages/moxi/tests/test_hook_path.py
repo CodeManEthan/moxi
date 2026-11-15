@@ -101,7 +101,7 @@ def test_the_direct_read_equals_importlib_metadata_for_the_installed_modules():
 
 
 @pytest.mark.parametrize("order", ["first", "second"])
-def test_of_two_copies_in_two_directories_the_first_on_sys_path_is_read(
+def test_of_two_copies_in_two_dirs_the_first_on_sys_path_is_read(
         tmp_path, monkeypatch, order):
     first, second = tmp_path / "first", tmp_path / "second"
     write_dist(first, "moxi_hptwo-1.0.dist-info", name="moxi-hptwo", version="1.0",
@@ -124,7 +124,7 @@ def test_of_two_copies_in_two_directories_the_first_on_sys_path_is_read(
     # A hyphen left unescaped ends the name: neither reader takes this one.
     ("moxi-hpodd-3.0.dist-info", "moxi-hpodd", False),
 ])
-def test_a_directory_name_in_another_spelling_reads_the_same(tmp_path, monkeypatch, dirname,
+def test_a_dir_name_in_another_spelling_reads_the_same(tmp_path, monkeypatch, dirname,
                                                              name, found):
     write_dist(tmp_path, dirname, name=name, version="3.0",
                entries={"hpodd": "moxi_hpodd.module"})
@@ -146,7 +146,7 @@ def test_an_entry_with_extras_reads_the_same_and_loads(tmp_path, monkeypatch, fr
     assert found.target == "moxi_hpext.module [extra]"
 
 
-def test_the_version_is_metadata_s_when_the_directory_says_otherwise(tmp_path, monkeypatch):
+def test_the_version_is_metadata_s_when_the_dir_says_otherwise(tmp_path, monkeypatch):
     write_dist(tmp_path, "moxi_hpver-1.0.dist-info", name="moxi-hpver", version="1.0.0",
                entries={"hpver": "moxi_hpver.module"})
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -154,7 +154,7 @@ def test_the_version_is_metadata_s_when_the_directory_says_otherwise(tmp_path, m
         "moxi-hpver", "1.0.0", "moxi_hpver.module")
 
 
-def test_an_empty_sys_path_entry_is_the_current_directory(tmp_path, monkeypatch):
+def test_an_empty_sys_path_entry_is_the_current_dir(tmp_path, monkeypatch):
     write_dist(tmp_path, "moxi_hpcwd-1.0.dist-info", name="moxi-hpcwd", version="1.0",
                entries={"hpcwd": "moxi_hpcwd.module"})
     monkeypatch.chdir(tmp_path)
@@ -170,7 +170,7 @@ def test_a_distribution_without_the_entry_reads_the_same(tmp_path, monkeypatch):
     assert fast("hpnothere") is None and reference("hpnothere") is None
 
 
-def test_with_no_metadata_file_the_directory_gives_the_name_and_version(tmp_path,
+def test_with_no_metadata_file_the_dir_gives_the_name_and_version(tmp_path,
                                                                         monkeypatch):
     info = tmp_path / "moxi_hpbare-2.5.dist-info"
     info.mkdir()

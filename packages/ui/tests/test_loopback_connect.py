@@ -81,7 +81,7 @@ class _Handler(BaseHTTPRequestHandler):
         return self._answer(200, [("Content-Type", "application/json")],
                             json.dumps(answer).encode())
 
-    do_GET = do_POST = _handle
+    do_GET = do_POST = _handle  # noqa: N815 -- HTTP handler method names are fixed
 
 
 class _TCP(socketserver.ThreadingMixIn, socketserver.TCPServer):

@@ -180,7 +180,7 @@ class McpSettle:
         answer = run.answer or self._unsettled()
         return {"reloaded": answer["reloaded"], "servers": dict(answer["servers"])}
 
-    def notified(self, params: dict) -> None:
+    def on_notified(self, params: dict) -> None:
         """A `mcpServer/startupStatus/updated` for the session's thread."""
         name, status = params.get("name"), params.get("status")
         if name not in self.names or not isinstance(status, str):

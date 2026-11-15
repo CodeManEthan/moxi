@@ -2,6 +2,11 @@
 
 ## 0.1.8 (unreleased)
 
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi.config`: `set` is now `set_value`; `moxi.place`:
+  `FOLDER_NOTE` is now `DIR_NOTE`; `moxi.place.Harness`: `folder` is now `harness_dir`.
+- Doctor CPU samples now store `cpu_s`. Samples with the older `cpu_seconds` field are
+  not read.
 - The catalogue gains `rounds` (`moxi-rounds`), so `moxi install rounds` and `moxi
   modules --available` know it by name. Its version is 3.
 - `moxi modules --available --refresh` fetches the catalogue a released core shipped,

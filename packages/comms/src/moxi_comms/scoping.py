@@ -9,6 +9,8 @@ its scope.
 
 from __future__ import annotations
 
+from .constants import PROJECT_ENV
+
 import os
 import re
 import subprocess
@@ -26,7 +28,7 @@ AUTO_WORD = "auto"
 def project_key(cwd: str | Path | None = None, env=None) -> str:
     """git-root basename of cwd; MOXI_COMMS_PROJECT wins; `global` when there is no repo."""
     env = env if env is not None else os.environ
-    if override := env.get("MOXI_COMMS_PROJECT"):
+    if override := env.get(PROJECT_ENV):
         return override
     start = Path(cwd) if cwd is not None else Path.cwd()
     try:

@@ -48,7 +48,7 @@ def test_the_link_is_interface_2_with_a_dir_minted_topic():
 
 # --- the topic check --------------------------------------------------------------------
 
-def test_a_topic_under_topics_whose_notes_folder_is_its_root_passes(no_subprocess):
+def test_a_topic_under_topics_whose_notes_dir_is_its_root_passes(no_subprocess):
     root = str(topics() / "gardening")
     assert check_topic({"key": "gardening", "root": root, "notes_root": root}) is None
 
@@ -60,7 +60,7 @@ def test_a_topic_outside_topics_is_refused(no_subprocess):
     assert check_topic({"root": str(topics()), "notes_root": str(topics())}) is not None
 
 
-def test_a_topic_whose_notes_folder_is_not_its_root_is_refused(no_subprocess):
+def test_a_topic_whose_notes_dir_is_not_its_root_is_refused(no_subprocess):
     root = str(topics() / "gardening")
     assert "notes folder is its root" in check_topic(
         {"root": root, "notes_root": str(home() / "notes" / "other")})
@@ -69,7 +69,7 @@ def test_a_topic_whose_notes_folder_is_not_its_root_is_refused(no_subprocess):
 
 # --- prepare ----------------------------------------------------------------------------
 
-def test_prepare_gives_a_topic_its_root_and_notes_folder(no_subprocess):
+def test_prepare_gives_a_topic_its_root_and_notes_dir(no_subprocess):
     said = prepare({"key": "gardening", "kind": "topic"})
     assert said == {"root": str(topics() / "gardening"),
                     "notes_root": str(topics() / "gardening")}
@@ -92,7 +92,7 @@ def test_prepare_follows_the_prefix(no_subprocess):
         home() / "notes" / "team" / "topics" / "g")
 
 
-def test_prepare_pins_a_project_to_its_computed_folder(no_subprocess):
+def test_prepare_pins_a_project_to_its_computed_dir(no_subprocess):
     said = prepare({"key": "alpha", "kind": "project",
                     "root": str(home() / "code" / "alpha")})
     assert said == {"notes_root": str(home() / "notes" / "code" / "alpha")}
@@ -107,16 +107,16 @@ def test_prepare_gives_no_default_where_none_is_computed(tmp_path, no_subprocess
 
 # --- through projects' add --------------------------------------------------------------
 
-def test_add_kind_topic_create_makes_a_plain_folder():
+def test_add_kind_topic_create_makes_a_plain_dir():
     code, out, err = moxi_cmd("projects", "add", "gardening", "--kind", "topic", "--create",
                               "--json")
     assert code == 0, out + err
-    folder = topics() / "gardening"
-    assert folder.is_dir() and not (folder / ".git").exists()
-    assert str(folder) in out
+    notes_dir = topics() / "gardening"
+    assert notes_dir.is_dir() and not (notes_dir / ".git").exists()
+    assert str(notes_dir) in out
 
 
-def test_add_of_a_project_stores_its_computed_notes_folder():
+def test_add_of_a_project_stores_its_computed_notes_dir():
     alpha = home() / "code" / "alpha"
     alpha.mkdir(parents=True)
     add_project("alpha", alpha)
@@ -156,7 +156,7 @@ def test_a_set_notes_root_that_is_empty_or_missing_is_allowed(no_subprocess):
     assert refuse_remove(Project("alpha", alpha, notes_root=kept)) is None
 
 
-def test_a_notes_root_equal_to_the_computed_folder_is_allowed(no_subprocess):
+def test_a_notes_root_equal_to_the_computed_dir_is_allowed(no_subprocess):
     alpha = home() / "code" / "alpha"
     computed = home() / "notes" / "code" / "alpha"
     computed.mkdir(parents=True)
@@ -164,7 +164,7 @@ def test_a_notes_root_equal_to_the_computed_folder_is_allowed(no_subprocess):
     assert refuse_remove(Project("alpha", alpha, notes_root=computed)) is None
 
 
-def test_a_notes_root_spelled_through_a_link_to_the_computed_folder_is_allowed(no_subprocess):
+def test_a_notes_root_spelled_through_a_link_to_the_computed_dir_is_allowed(no_subprocess):
     alpha = home() / "code" / "alpha"
     (alpha / ".git").mkdir(parents=True)
     computed = home() / "notes" / "code" / "alpha"
@@ -179,11 +179,11 @@ def test_a_nested_project_with_files_is_refused_with_its_notes_root_unset():
     outer = repo(home() / "code" / "alpha")
     inner = outer / "tools" / "beta"
     inner.mkdir(parents=True)
-    folder = home() / "notes" / "code" / "alpha" / "tools" / "beta"
-    folder.mkdir(parents=True)
-    (folder / "plan.md").write_text("p\n")
+    notes_dir = home() / "notes" / "code" / "alpha" / "tools" / "beta"
+    notes_dir.mkdir(parents=True)
+    (notes_dir / "plan.md").write_text("p\n")
     said = refuse_remove(Project("beta", inner))
-    assert said == (f"project beta's notes folder {folder} holds 1 file; removing beta "
+    assert said == (f"project beta's notes folder {notes_dir} holds 1 file; removing beta "
                     f"moves its sessions' notes to {home() / 'notes' / 'code' / 'alpha'}; "
                     "move them first")
 
@@ -191,9 +191,9 @@ def test_a_nested_project_with_files_is_refused_with_its_notes_root_unset():
 def test_a_project_at_its_repo_top_with_its_notes_root_unset_is_allowed(no_subprocess):
     alpha = home() / "code" / "alpha"
     (alpha / ".git").mkdir(parents=True)
-    folder = home() / "notes" / "code" / "alpha"
-    folder.mkdir(parents=True)
-    (folder / "plan.md").write_text("p\n")
+    notes_dir = home() / "notes" / "code" / "alpha"
+    notes_dir.mkdir(parents=True)
+    (notes_dir / "plan.md").write_text("p\n")
     assert refuse_remove(Project("alpha", alpha)) is None
 
 
@@ -201,20 +201,20 @@ def test_a_project_at_a_linked_worktree_is_refused_as_its_main_work_tree_would_a
     alpha = repo(home() / "code" / "alpha", commit=True)
     linked = home() / "work" / "alpha-feature"
     git("worktree", "add", "-q", str(linked), "-b", "feature", cwd=alpha)
-    folder = home() / "notes" / "work" / "alpha-feature"
-    folder.mkdir(parents=True)
-    (folder / "plan.md").write_text("p\n")
+    notes_dir = home() / "notes" / "work" / "alpha-feature"
+    notes_dir.mkdir(parents=True)
+    (notes_dir / "plan.md").write_text("p\n")
     said = refuse_remove(Project("feature", linked))
-    assert said == (f"project feature's notes folder {folder} holds 1 file; removing "
+    assert said == (f"project feature's notes folder {notes_dir} holds 1 file; removing "
                     f"feature moves its sessions' notes to "
                     f"{home() / 'notes' / 'code' / 'alpha'}; move them first")
 
 
 def test_a_topic_is_never_refused(no_subprocess):
-    folder = topics() / "gardening"
-    folder.mkdir(parents=True)
-    (folder / "plan.md").write_text("p\n")
-    assert refuse_remove(Project("gardening", folder, "topic", folder)) is None
+    notes_dir = topics() / "gardening"
+    notes_dir.mkdir(parents=True)
+    (notes_dir / "plan.md").write_text("p\n")
+    assert refuse_remove(Project("gardening", notes_dir, "topic", notes_dir)) is None
 
 
 def test_a_project_off_home_with_a_notes_root_says_its_sessions_lose_it(tmp_path,

@@ -59,7 +59,7 @@ def no_projects(monkeypatch):
 @pytest.fixture
 def no_slots(monkeypatch):
     """slots not installed, whatever this environment holds."""
-    monkeypatch.delenv(slots.SEAM, raising=False)
+    monkeypatch.delenv(slots.SLOTS_ENV, raising=False)
     real = modules.available
     monkeypatch.setattr(modules, "available", lambda name: name != "slots" and real(name))
 
@@ -311,7 +311,7 @@ def test_turns_failing_to_give_its_additions_prints_a_refusal_not_a_traceback(
     fake = tmp_path / "fake-turns"
     fake.mkdir()
     (fake / "script.json").write_text(json.dumps({"additions": "error"}))
-    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+    monkeypatch.setenv(first.TURNS_ENV, "launcher_fake_turns")
     monkeypatch.setenv(fake_turns.DIR, str(fake))
     status, out, err = run([verb, "--brief", BRIEF], capsys)
     assert status == codes.REFUSED and out == ""
@@ -341,7 +341,7 @@ def test_run_with_a_presets_file_that_cant_be_read_exits_2(work, harness, capsys
 # -- preview --------------------------------------------------------------------------------
 
 
-def test_preview_prints_the_argv_and_the_stamped_environment(work, monkeypatch, capsys):
+def test_preview_prints_the_argv_and_the_stamped_env(work, monkeypatch, capsys):
     seen = {}
     real = api.preview
 
@@ -369,15 +369,15 @@ def test_preview_json_is_one_object_with_argv_and_env(work, capsys):
     assert (shown["harness"], shown["mode"], shown["target"]) == ("codex", "exec",
                                                                   "headless")
     assert shown["argv"][:2] == ["codex", "exec"]
-    assert set(shown["env"]) == {common.REQUEST}
+    assert set(shown["env"]) == {common.REQUEST_ENV}
     assert shown["first_turn"] is None and shown["values"]["scratch"] is True
-    assert rows() == [] and not common.scratch_dir(shown["env"][common.REQUEST]).exists()
+    assert rows() == [] and not common.scratch_dir(shown["env"][common.REQUEST_ENV]).exists()
 
 
 def test_preview_names_the_first_turn_owed_and_the_rows_not_applied(work, monkeypatch, capsys):
     monkeypatch.setattr(api, "preview", lambda request, **kw: common.Composition(
         harness="claude", mode="interactive", target="terminal", argv=("claude",),
-        env={common.REQUEST: "r-1"}, values={}, first="Brief from launcher\n\nGo.",
+        env={common.REQUEST_ENV: "r-1"}, values={}, first="Brief from launcher\n\nGo.",
         not_applied=("effort",), warnings=("a warning",)))
     code, out, err = run(["preview"], capsys)
     assert code == codes.OK and err == "warning: a warning\n"
@@ -449,9 +449,9 @@ def test_a_row_left_out_that_no_harness_has_harness_or_also_typed_is_refused(
 def stored(rid: str, *, state: str = "started", created: str | None = None) -> None:
     conn = store.connect()
     try:
-        store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
+        store.insert(conn, request_id=rid, by="ann", harness="codex", target="headless",
                      cwd="/work", values={"mode": "exec"}, argv=["codex", "exec", "b"],
-                     env={common.REQUEST: rid}, posture="", preset_kind="seat",
+                     env={common.REQUEST_ENV: rid}, posture="", preset_kind="seat",
                      preset_name="coder", at=created)
         if state != "spawning":
             store.set_state(conn, rid, "started")
@@ -698,13 +698,13 @@ def test_handoff_dir_of_a_session_with_no_key_is_refused(capsys):
     assert code == codes.REFUSED and out == "" and "[no-key]" in err
 
 
-def test_handoff_dir_prints_the_folder_of_this_sessions_key(monkeypatch, capsys):
+def test_handoff_dir_prints_the_dir_of_this_sessions_key(monkeypatch, capsys):
     monkeypatch.setenv("MOXI_COMMS_NAME", "planner@moxi")
     code, out, _ = run(["handoff", "dir"], capsys)
-    assert code == codes.OK and out == f"{handoffs.own_folder(create=False)}\n"
-    assert handoffs.own_folder(create=False).is_dir()
+    assert code == codes.OK and out == f"{handoffs.own_handoffs_dir(create=False)}\n"
+    assert handoffs.own_handoffs_dir(create=False).is_dir()
     shown = json.loads(run(["handoff", "dir", "--json"], capsys)[1])
-    assert shown == {"key": "planner", "folder": str(handoffs.own_folder(create=False)),
+    assert shown == {"key": "planner", "folder": str(handoffs.own_handoffs_dir(create=False)),
                      "request_id": None}
 
 
@@ -716,24 +716,24 @@ def test_handoff_dir_asks_handoffs_for_the_current_session(monkeypatch, capsys):
 
 
 def handoff_files(*names: str) -> Path:
-    folder = handoffs.own_folder()
+    handoffs_dir = handoffs.own_handoffs_dir()
     for name in names:
-        (folder / name).write_text("done; next\n")
-    return folder
+        (handoffs_dir / name).write_text("done; next\n")
+    return handoffs_dir
 
 
 def test_handoffs_lists_a_keys_files_newest_first_and_which_wait(capsys):
-    folder = handoff_files("2026-10-28-lead.md", "2026-10-29-lead.md",
+    handoffs_dir = handoff_files("2026-10-28-lead.md", "2026-10-29-lead.md",
                            "2026-10-29-lead-2.md", "2026-10-29-other.md")
     conn = store.connect()
-    store.add_pick(conn, str(folder / "2026-10-29-lead.md"), "lead", "shown")
+    store.add_pick(conn, str(handoffs_dir / "2026-10-29-lead.md"), "lead", "shown")
     conn.close()
     code, out, _ = run(["handoffs", "--key", "lead"], capsys)
     assert code == codes.OK
     assert [line.split() for line in out.splitlines()] == [
-        ["2026-10-29", "waiting", str(folder / "2026-10-29-lead-2.md")],
-        ["2026-10-29", "picked", str(folder / "2026-10-29-lead.md")],
-        ["2026-10-28", "picked", str(folder / "2026-10-28-lead.md")]]
+        ["2026-10-29", "waiting", str(handoffs_dir / "2026-10-29-lead-2.md")],
+        ["2026-10-29", "picked", str(handoffs_dir / "2026-10-29-lead.md")],
+        ["2026-10-28", "picked", str(handoffs_dir / "2026-10-28-lead.md")]]
     shown = json.loads(run(["handoffs", "--key", "lead", "--json"], capsys)[1])
     assert [h["waiting"] for h in shown["handoffs"]] == [True, False, False]
 
@@ -771,24 +771,26 @@ def project_notes(monkeypatch, tmp_path):
         return found
 
     real = modules.available
-    loaded = SimpleNamespace(state=modules.PRESENT, reason="",
+    real_load = modules.load
+    loaded = SimpleNamespace(state=modules.PRESENT, ok=True, reason="",
                              api=SimpleNamespace(handoffs_dir=handoffs_dir))
     monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
-    monkeypatch.setattr(modules, "load", lambda name, interface=None: loaded)
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        loaded if name == "notes" else real_load(name, interface=interface))
     return lambda name: handoffs_dir(name, create=True)
 
 
 def launched(rid: str, cwd: str, *, at: str, **fields) -> None:
     conn = store.connect()
     try:
-        store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
-                     cwd=cwd, values={}, argv=["codex"], env={common.REQUEST: rid},
+        store.insert(conn, request_id=rid, by="ann", harness="codex", target="headless",
+                     cwd=cwd, values={}, argv=["codex"], env={common.REQUEST_ENV: rid},
                      posture="", at=at, **fields)
     finally:
         conn.close()
 
 
-def test_handoffs_of_a_key_read_the_folder_of_its_newest_launch(work, project_notes,
+def test_handoffs_of_a_key_read_the_dir_of_its_newest_launch(work, project_notes,
                                                                capsys):
     there = project_notes("moxi")
     (there / "2026-11-08-planner.md").write_text("done; next\n")
@@ -807,7 +809,7 @@ def test_handoffs_of_a_key_read_the_folder_of_its_newest_launch(work, project_no
     assert [h["path"] for h in shown["handoffs"]] == [str(there / "2026-11-08-planner.md")]
 
 
-def test_handoffs_of_a_key_with_no_launch_read_this_directorys_folder(work, project_notes,
+def test_handoffs_of_a_key_with_no_launch_read_this_directorys_dir(work, project_notes,
                                                                      capsys):
     here = project_notes("work")
     (here / "2026-11-09-planner.md").write_text("done; next\n")

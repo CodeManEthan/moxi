@@ -27,7 +27,7 @@ def me() -> str:
     return f"{ident.pid}@{ident.started:.6f}"
 
 
-def agent(kind="subagent", state="running", final=False):
+def agent(kind="subagent", state="running", *, final=False):
     return SimpleNamespace(kind=kind, state=state, final=final)
 
 
@@ -73,10 +73,10 @@ class FakeSlots:
     class TryAgain(SlotsError):
         pass
 
-    def __init__(self, *, ok=True, why="", exec="started", exec_line="", start_error=None,
+    def __init__(self, *, ok=True, why="", exec_state="started", exec_line="", start_error=None,
                  alive=(), shown=None, show_error=None, pane=None):
         self.ok, self.why = ok, why
-        self.exec, self.exec_line, self.start_error = exec, exec_line, start_error
+        self.exec, self.exec_line, self.start_error = exec_state, exec_line, start_error
         self.alive, self.shown, self.show_error = set(alive), shown, show_error
         self.pane = pane or SimpleNamespace(pane_id="%9", pane_in_mode=False,
                                             client_activity=None, pane_activity=None)
@@ -175,15 +175,15 @@ def script(monkeypatch):
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection)
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn)
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, scope=None,
              directors=("boss",), relaunch_of=None, base_env=None):
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude",
+    store.insert(conn, request_id=request_id, by="ann", harness="claude",
                  base_env=base_env,
                  target=target_name, cwd="/work",
                  values={"model": "opus", "director": list(directors)}, argv=["claude"],
@@ -202,7 +202,7 @@ def handoff(tmp_path, text="state of the work; next step", name="handoff.md"):
     return path
 
 
-def environ(**extra):
+def test_env(**extra):
     return {**os.environ, **extra}
 
 
@@ -211,7 +211,7 @@ def arm(conn, path, *, session=None, slots_api=None, settings=None, **kw):
     slots_api = slots_api if slots_api is not None else FakeSlots()
     result = relaunch.arm_self(str(path), conn=conn, turns=FakeTurns(session),
                                slots_api=slots_api, settings={**SETTINGS, **(settings or {})},
-                               environ=kw.pop("env", environ()), **kw)
+                               caller_env=kw.pop("env", test_env()), **kw)
     return result
 
 
@@ -221,7 +221,7 @@ def call(conn, which=SID, *, session=None, slots_api=None, comms=None, cache=Non
         which, conn=conn, turns=turns or FakeTurns(session or FakeSession()),
         slots_api=slots_api if slots_api is not None else FakeSlots(),
         comms=comms if comms is not None else FakeComms(), cache=cache,
-        settings={**SETTINGS, **(settings or {})}, environ=environ(), **kw)
+        settings={**SETTINGS, **(settings or {})}, caller_env=test_env(), **kw)
 
 
 def runs(conn):
@@ -236,7 +236,7 @@ def nothing_written(conn, slots_api, before=0):
 def ended(conn, outcome, *, mode="self", word=None, events=(), request_id="r1",
           repair_of=None, slot="3", handoff_path="/work/h.md"):
     run = store.insert_run(conn, kind="relaunch", mode=mode, request_id=request_id,
-                           session_id=SID, actor="planner", handoff_path=handoff_path,
+                           session_id=SID, by="planner", handoff_path=handoff_path,
                            slot=slot, pane_id="%9", turn_number=4, repair_of=repair_of,
                            job="slots:relaunch-x")
     for kind in events:
@@ -251,7 +251,7 @@ def ended(conn, outcome, *, mode="self", word=None, events=(), request_id="r1",
 def test_a_self_arm_writes_its_run_starts_its_job_and_prints_the_armed_text(conn, tmp_path):
     path = handoff(tmp_path)
     session, slots_api = FakeSession(), FakeSlots()
-    env = environ(CLAUDECODE="1", CLAUDE_CODE_ENTRYPOINT="cli", AI_AGENT="claude",
+    env = test_env(CLAUDECODE="1", CLAUDE_CODE_ENTRYPOINT="cli", AI_AGENT="claude",
                   CLAUDE_CONFIG_DIR="/cfg", PATH="/usr/bin", MOXI_LAUNCHER_REQUEST="r0",
                   MOXI_TURNS_COMMANDS="exit")
     result = arm(conn, path, session=session, slots_api=slots_api, env=env)
@@ -283,7 +283,7 @@ def test_a_self_arm_writes_its_run_starts_its_job_and_prints_the_armed_text(conn
 def test_the_self_arm_finds_the_session_above_this_process(conn, tmp_path):
     turns = FakeTurns(FakeSession())
     relaunch.arm_self(str(handoff(tmp_path)), conn=conn, turns=turns, slots_api=FakeSlots(),
-                      settings=SETTINGS, environ=environ(), pid=4321)
+                      settings=SETTINGS, caller_env=test_env(), pid=4321)
     assert turns.asked == [{"session_id": None, "pid": 4321}]
 
 
@@ -310,7 +310,7 @@ def _missing(tmp_path):
     return tmp_path / "nowhere.md"
 
 
-def _folder(tmp_path):
+def _handoff_dir(tmp_path):
     (tmp_path / "dir").mkdir()
     return tmp_path / "dir"
 
@@ -331,7 +331,7 @@ def _fifo(tmp_path):
 
 @pytest.mark.parametrize("make, words", [
     (_missing, "can't be read"),
-    (_folder, "is not a regular file"),
+    (_handoff_dir, "is not a regular file"),
     (_fifo, "is not a regular file"),
     (_empty, "is empty"),
     (_too_big, f"bytes, past the {64 * 1024} a relaunch carries"),
@@ -389,27 +389,27 @@ def test_the_stale_check_reads_the_sessions_current_id(conn, tmp_path):
     assert "stale" in caught.value.problem
 
 
-def test_a_relative_handoff_is_read_from_the_working_folder(conn, tmp_path):
+def test_a_relative_handoff_is_read_from_the_working_dir(conn, tmp_path):
     handoff(tmp_path)
     row = store.get(conn, "r1")
     found = relaunch.check_handoff("handoff.md", conn, row, SID, cwd=str(tmp_path))
     assert found == tmp_path / "handoff.md"
 
 
-def test_with_notes_installed_the_handoff_must_be_in_the_launchs_folder(conn, tmp_path,
+def test_with_notes_installed_the_handoff_must_be_in_the_launchs_dir(conn, tmp_path,
                                                                         monkeypatch):
-    folder = tmp_path / "handoffs"
-    folder.mkdir()
+    handoff_dir = tmp_path / "handoffs"
+    handoff_dir.mkdir()
     available = relaunch.modules.available
     monkeypatch.setattr(relaunch.modules, "available",
                         lambda name: name == "notes" or available(name))
-    monkeypatch.setattr(relaunch.handoffs, "folder_of_row",
-                        lambda row, create=True: folder)
+    monkeypatch.setattr(relaunch.handoffs, "handoff_dir_of_row",
+                        lambda row, create=True: handoff_dir)
     with pytest.raises(relaunch.Refused) as caught:
         arm(conn, handoff(tmp_path))
     assert caught.value.code == "handoff"
     assert "not in this launch's handoff folder" in caught.value.problem
-    assert arm(conn, handoff(folder)).data["outcome"] == "armed"
+    assert arm(conn, handoff(handoff_dir)).data["outcome"] == "armed"
 
 
 # -- subagents ----------------------------------------------------------------------------
@@ -446,7 +446,7 @@ def test_without_slots_relaunch_is_not_offered(conn, tmp_path, monkeypatch):
     monkeypatch.setattr(target.slots, "api", lambda: None)
     with pytest.raises(relaunch.Refused) as caught:
         relaunch.arm_self(str(handoff(tmp_path)), conn=conn, turns=FakeTurns(FakeSession()),
-                          settings=SETTINGS, environ=environ())
+                          settings=SETTINGS, caller_env=test_env())
     assert caught.value.code == "no-slots" and "not installed" in caught.value.problem
 
 
@@ -459,11 +459,11 @@ def test_slots_that_do_not_run_here_refuse(conn, tmp_path):
 
 
 def test_a_launch_not_in_a_slot_is_refused(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection, target_name="terminal")
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, target_name="terminal")
     with pytest.raises(relaunch.Refused) as caught:
-        arm(connection, handoff(tmp_path))
-    connection.close()
+        arm(conn, handoff(tmp_path))
+    conn.close()
     assert caught.value.code == "not-slot" and "runs in its terminal" in caught.value.problem
 
 
@@ -491,7 +491,7 @@ def test_the_target_finders_refusals_pass_through(conn, tmp_path):
 
 def test_an_open_run_whose_job_runs_refuses_naming_it(conn, tmp_path):
     other = store.insert_run(conn, kind="relaunch", mode="director", request_id="r1",
-                             session_id=SID, actor="boss", job="slots:relaunch-live")
+                             session_id=SID, by="boss", job="slots:relaunch-live")
     slots_api = FakeSlots(alive={"relaunch-live"})
     with pytest.raises(store.RunOpen) as caught:
         arm(conn, handoff(tmp_path), slots_api=slots_api)
@@ -502,7 +502,7 @@ def test_an_open_run_whose_job_runs_refuses_naming_it(conn, tmp_path):
 
 def test_an_open_run_whose_job_is_gone_is_ended_and_the_arm_goes_on(conn, tmp_path):
     stale = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                             session_id=SID, actor="planner", job="slots:relaunch-dead",
+                             session_id=SID, by="planner", job="slots:relaunch-dead",
                              at=LONG_AGO)
     result = arm(conn, handoff(tmp_path))
     assert result.data["outcome"] == "armed"
@@ -513,7 +513,7 @@ def test_an_open_run_whose_job_is_gone_is_ended_and_the_arm_goes_on(conn, tmp_pa
 def test_a_run_opened_after_the_early_check_still_loses_at_insert(conn, tmp_path,
                                                                  monkeypatch):
     store.insert_run(conn, kind="exit", mode="director", request_id="r1", session_id=SID,
-                     actor="boss", job="slots:exit-live")
+                     by="boss", job="slots:exit-live")
     monkeypatch.setattr(relaunch, "_no_open_run", lambda *a: None)
     slots_api = FakeSlots(alive={"exit-live"})
     with pytest.raises(store.RunOpen):
@@ -525,7 +525,7 @@ def test_a_run_opened_after_the_early_check_still_loses_at_insert(conn, tmp_path
 
 
 @pytest.mark.parametrize("slots_api, words", [
-    (FakeSlots(exec="failed", exec_line="failed: cwd: no such folder"), "failed: cwd"),
+    (FakeSlots(exec_state="failed", exec_line="failed: cwd: no such folder"), "failed: cwd"),
     (FakeSlots(start_error=FakeSlots.SlotsError("job-running")), "job-running"),
 ])
 def test_a_job_that_does_not_start_ends_the_run_not_started(conn, tmp_path, slots_api,
@@ -552,7 +552,7 @@ def test_a_job_script_not_installed_ends_the_run_not_started(conn, tmp_path, mon
 
 
 def test_an_unconfirmed_start_counts_as_started(conn, tmp_path):
-    result = arm(conn, handoff(tmp_path), slots_api=FakeSlots(exec="unconfirmed"))
+    result = arm(conn, handoff(tmp_path), slots_api=FakeSlots(exec_state="unconfirmed"))
     assert result.exit_code == 0 and result.run.open
 
 
@@ -604,14 +604,14 @@ def test_an_unknown_session_id_is_not_launched_and_comms_is_never_asked(conn, wh
 
 
 def test_a_name_that_is_not_a_session_id_goes_to_comms_even_when_a_launch_holds_it(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection, request_id="r1", session_id="planner")
-    launched(connection, request_id="r2", session_id=SID)
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, request_id="r1", session_id="planner")
+    launched(conn, request_id="r2", session_id=SID)
     try:
-        result = call(connection, "planner", comms=FakeComms(bound={"planner": SID}),
+        result = call(conn, "planner", comms=FakeComms(bound={"planner": SID}),
                       follow=False)
     finally:
-        connection.close()
+        conn.close()
     assert result.run.request_id == "r2" and result.run.session_id == SID
 
 
@@ -644,11 +644,11 @@ def test_a_caller_with_no_proven_identity_is_refused(conn, caller):
     ("work", "planner", "not-director"),
 ])
 def test_the_caller_as_its_own_target_is_refused(tmp_path, scope, caller, code):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection, scope=scope)
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, scope=scope)
     with pytest.raises(relaunch.Refused) as caught:
-        call(connection, comms=FakeComms(caller=caller))
-    connection.close()
+        call(conn, comms=FakeComms(caller=caller))
+    conn.close()
     assert caught.value.code == code
 
 
@@ -668,21 +668,21 @@ def test_the_caller_as_its_own_target_is_refused(tmp_path, scope, caller, code):
     ((), "boss", False),
 ])
 def test_only_a_director_the_launch_named_may_call(tmp_path, directors, caller, allowed):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection, directors=directors)
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, directors=directors)
     slots_api = FakeSlots()
     try:
         if allowed:
-            assert call(connection, comms=FakeComms(caller=caller), slots_api=slots_api,
+            assert call(conn, comms=FakeComms(caller=caller), slots_api=slots_api,
                         follow=False).exit_code == 0
         else:
             with pytest.raises(relaunch.Refused) as caught:
-                call(connection, comms=FakeComms(caller=caller), slots_api=slots_api,
+                call(conn, comms=FakeComms(caller=caller), slots_api=slots_api,
                      follow=False)
             assert caught.value.code == "not-director"
-            nothing_written(connection, slots_api)
+            nothing_written(conn, slots_api)
     finally:
-        connection.close()
+        conn.close()
 
 
 @pytest.mark.parametrize("kind", ["warm", "fresh"])
@@ -706,19 +706,19 @@ def test_the_warm_check_reads_the_cache_under_the_launchs_own_config_dir(tmp_pat
             return super().read(harness, session_id)
 
         @staticmethod
-        def projects_root(environ):
-            return environ["CLAUDE_CONFIG_DIR"] + "/projects"
+        def projects_root(env):
+            return env["CLAUDE_CONFIG_DIR"] + "/projects"
 
-    connection = store.connect(tmp_path / "rooted.db")
+    conn = store.connect(tmp_path / "rooted.db")
     try:
-        launched(connection, base_env={"CLAUDE_CONFIG_DIR": "/seat"})
+        launched(conn, base_env={"CLAUDE_CONFIG_DIR": "/seat"})
         cache = Rooted()
         with pytest.raises(relaunch.Refused) as caught:
-            call(connection, cache=cache, slots_api=FakeSlots())
+            call(conn, cache=cache, slots_api=FakeSlots())
         assert caught.value.code == "warm"
         assert cache.roots == [{"projects_root": "/seat/projects"}]
     finally:
-        connection.close()
+        conn.close()
 
 
 @pytest.mark.parametrize("cache", [FakeCache("cold"), FakeCache(error=OSError("no store"))])
@@ -786,7 +786,7 @@ def test_a_run_still_going_past_the_follow_bound_exits_75_naming_status(conn):
 
 def test_a_job_that_did_not_start_is_not_followed(conn):
     clock = Clock()
-    result = call(conn, slots_api=FakeSlots(exec="failed"), clock=clock, sleep=clock.sleep)
+    result = call(conn, slots_api=FakeSlots(exec_state="failed"), clock=clock, sleep=clock.sleep)
     assert result.exit_code == 1 and result.data["outcome"] == "not-started"
     assert clock.slept == []
 
@@ -796,7 +796,7 @@ def test_a_job_that_did_not_start_is_not_followed(conn):
 
 def test_status_shows_the_run_the_latest_wait_first_then_every_event(conn):
     run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                           session_id=SID, actor="planner", slot="3", job="slots:x")
+                           session_id=SID, by="planner", slot="3", job="slots:x")
     store.add_run_event(conn, run.run_id, "wait", {"word": "turn", "detail": "turn 4 is open"})
     store.add_run_event(conn, run.run_id, "wait", {"word": "person",
                                                    "detail": "a client was active 40 s ago"})
@@ -814,7 +814,7 @@ def test_status_shows_the_run_the_latest_wait_first_then_every_event(conn):
 
 def test_status_of_an_ended_run_names_its_outcome_and_new_launch(conn):
     run = store.insert_run(conn, kind="relaunch", mode="director", request_id="r1",
-                           session_id=SID, actor="boss", slot="3", job="slots:x")
+                           session_id=SID, by="boss", slot="3", job="slots:x")
     store.end_run(conn, run.run_id, "relaunched", word="relaunched", new_request_id="r2")
     result = relaunch.status(run.run_id, conn=conn)
     assert result.lines[0].endswith(": relaunched (relaunched), new launch r2")
@@ -837,7 +837,7 @@ def repair(conn, run_id, *, slots_api=None, **kw):
     return relaunch.from_record(run_id, conn=conn,
                                 slots_api=slots_api if slots_api is not None else FakeSlots(
                                     shown=slot_view()),
-                                settings=SETTINGS, environ=environ(), **kw)
+                                settings=SETTINGS, caller_env=test_env(), **kw)
 
 
 def test_a_repair_writes_its_own_run_and_starts_its_job(conn):
@@ -909,7 +909,7 @@ def test_a_repair_of_a_repair_acts_as_the_original_run(conn):
 def test_a_run_not_started_by_a_repair_leaves_the_original_repairable(conn):
     failed = ended(conn, "relaunch-failed", events=("exit",))
     result = repair(conn, failed.run_id, slots_api=FakeSlots(shown=slot_view(),
-                                                             exec="failed"))
+                                                             exec_state="failed"))
     assert result.exit_code == 1 and result.run.outcome == "not-started"
     assert repair(conn, failed.run_id).exit_code == 0
 
@@ -929,7 +929,7 @@ def test_repairing_no_such_run_is_refused(conn):
 
 def test_a_run_of_another_kind_is_not_repaired(conn):
     run = store.insert_run(conn, kind="exit", mode="director", request_id="r1",
-                           session_id=SID, actor="boss", job="slots:x")
+                           session_id=SID, by="boss", job="slots:x")
     store.end_run(conn, run.run_id, "error")
     with pytest.raises(relaunch.Refused) as caught:
         repair(conn, run.run_id)
@@ -938,7 +938,7 @@ def test_a_run_of_another_kind_is_not_repaired(conn):
 
 def test_an_open_run_is_not_repaired(conn):
     run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                           session_id=SID, actor="planner", job="slots:x")
+                           session_id=SID, by="planner", job="slots:x")
     with pytest.raises(relaunch.Refused) as caught:
         repair(conn, run.run_id)
     assert caught.value.code == "run-open" and f"--status {run.run_id}" in caught.value.hint
@@ -1027,7 +1027,7 @@ def test_a_slot_taken_outside_the_chain_or_missing_still_repairs(conn, view):
 def died(conn, *, events=("exit",)):
     """A run whose job died: still open, its job gone, past the insert's grace."""
     run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                           session_id=SID, actor="planner", handoff_path="/work/h.md",
+                           session_id=SID, by="planner", handoff_path="/work/h.md",
                            slot="3", pane_id="%9", turn_number=4, job="slots:relaunch-dead",
                            at=LONG_AGO)
     for kind in events:
@@ -1073,7 +1073,7 @@ def test_an_open_run_whose_job_still_runs_is_not_repaired(conn):
 def died(conn, *, events=("exit",)):
     """A run whose job died: still open, its job gone, past the insert's grace."""
     run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                           session_id=SID, actor="planner", handoff_path="/work/h.md",
+                           session_id=SID, by="planner", handoff_path="/work/h.md",
                            slot="3", pane_id="%9", turn_number=4, job="slots:relaunch-dead",
                            at=LONG_AGO)
     for kind in events:

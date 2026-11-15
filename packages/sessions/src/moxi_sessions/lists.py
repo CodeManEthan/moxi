@@ -3,10 +3,10 @@ the groups a list is cut into, the next rows of a group, the folders, and one se
 opened; and the names of sessions asked for by key. Plain functions that return plain
 data (dicts, lists, numbers, strings, None).
 
-`list_sessions`, `more_sessions`, `newest_sessions`, `list_folders`, `open_session` and
+`list_sessions`, `more_sessions`, `newest_sessions`, `list_work_dirs`, `open_session` and
 `name_sessions` take the catalog to read through; the page's handlers and `moxi sessions
 list` call the first five. `sessions_list`, `sessions_more`, `sessions_newest`,
-`sessions_folders`, `session_opened` and `session_facts` are the same reads for another
+`session_dirs`, `session_opened` and `session_facts` are the same reads for another
 module (`moxi_sessions.api`): they take no catalog and read through the calling
 process's own.
 
@@ -106,7 +106,7 @@ NEWEST_ROWS = 30
 DAYS = 7
 
 #: The most folders a folders answer lists.
-FOLDERS_MAX = 200
+WORK_DIRS_MAX = 200
 
 #: How many subagents an opened session lists.
 SUBAGENTS_MAX = 8
@@ -138,7 +138,7 @@ class _Filters:
     harness: str | None = None
     since: float | None = None
     until: float | None = None
-    folder: str | None = None
+    work_dir: str | None = None
     find: str | None = None
 
 
@@ -151,21 +151,21 @@ def _number(name: str, value: Any) -> float | None:
 
 
 def _filters(harness: Any = None, since: Any = None, until: Any = None,
-             folder: Any = None, find: Any = None) -> _Filters:
+             work_dir: Any = None, find: Any = None) -> _Filters:
     if harness is not None and harness not in HARNESSES:
         raise ValueError(f"harness is one of {', '.join(HARNESSES)}, not {harness!r}")
-    if folder is not None and not (isinstance(folder, str) and folder.startswith("/")):
-        raise ValueError(f"folder is an absolute path, not {folder!r}")
+    if work_dir is not None and not (isinstance(work_dir, str) and work_dir.startswith("/")):
+        raise ValueError(f"folder is an absolute path, not {work_dir!r}")
     if find is not None:
         if not isinstance(find, str) or len(find.strip()) < FIND_MIN:
             raise ValueError(f"find is text of {FIND_MIN} characters or more, "
                              f"not {find!r}")
         find = find.strip().lower()
     return _Filters(harness, _number("since", since), _number("until", until),
-                    _folder(folder), find)
+                    _work_dir(work_dir), find)
 
 
-def _folder(path: str | None) -> str | None:
+def _work_dir(path: str | None) -> str | None:
     """A folder as it is compared and counted: without the slashes at its end. None for
     no folder."""
     if not path:
@@ -183,28 +183,28 @@ def _in_time(entry: Entry, f: _Filters) -> bool:
             and (f.until is None or changed < f.until))
 
 
-def _found(entry: Entry, folder: str | None, needle: str) -> bool:
+def _found(entry: Entry, work_dir: str | None, needle: str) -> bool:
     if entry.session.lower().startswith(needle):
         return True
-    if not folder:
+    if not work_dir:
         return False
-    return needle in folder.rstrip("/").rsplit("/", 1)[-1].lower()
+    return needle in work_dir.rstrip("/").rsplit("/", 1)[-1].lower()
 
 
 def _pool(cat: Catalog, gathered: Gathered, f: _Filters, *,
-          folder: bool = True) -> list[Entry]:
+          work_dir: bool = True) -> list[Entry]:
     """The entries that pass every filter but the harness (and, with `folder` false, the
     folder), in the list's order."""
     pool = [e for e in gathered.entries if _in_time(e, f)]
-    by_folder = f.folder if folder else None
-    if by_folder is None and f.find is None:
+    by_work_dir = f.work_dir if work_dir else None
+    if by_work_dir is None and f.find is None:
         return pool
     cat.read_heads()
     out = []
     for entry in pool:
         head = cat.kept_head(entry)
-        where = _folder(head.folder) if head is not None else None
-        if by_folder is not None and where != by_folder:
+        where = _work_dir(head.work_dir) if head is not None else None
+        if by_work_dir is not None and where != by_work_dir:
             continue
         if f.find is not None and not _found(entry, where, f.find):
             continue
@@ -310,7 +310,7 @@ def _split_kinds(cat: Catalog, entries: Sequence[Entry]
 
 # --- rows ---------------------------------------------------------------------------------------
 
-def _said(said: Said | None, prompt: bool) -> dict[str, Any] | None:
+def _said(said: Said | None, *, prompt: bool) -> dict[str, Any] | None:
     """A row's `activity` (`{at, who, text}`) or its `prompt` (`{at, text, truncated}`)."""
     if said is None:
         return None
@@ -324,10 +324,10 @@ def _row(cat: Catalog, entry: Entry, cutoff: int) -> dict[str, Any]:
     return {
         "harness": entry.harness, "session": entry.session, "path": entry.path,
         "changed": entry.changed, "size": entry.size, "subagents": entry.subagents,
-        "folder": details.folder, "started": details.started,
+        "folder": details.work_dir, "started": details.started,
         "by_program": details.by_program, "name": details.name, "model": details.model,
-        "activity": _said(details.activity, False),
-        "prompt": _said(details.prompt, True),
+        "activity": _said(details.activity, prompt=False),
+        "prompt": _said(details.prompt, prompt=True),
         "recent": (details.by_program is not True and entry.changed_ns is not None
                    and entry.changed_ns >= cutoff),
     }
@@ -380,7 +380,7 @@ def _counted(cat: Catalog, f: _Filters, now: float
 def list_sessions(cat: Catalog | None = None, *, recent_s: float,
                   now: float | None = None, harness: str | None = None,
                   since: float | None = None, until: float | None = None,
-                  folder: str | None = None, find: str | None = None) -> dict[str, Any]:
+                  work_dir: str | None = None, find: str | None = None) -> dict[str, Any]:
     """The list: its counts and its groups, with the first rows of each (see the module).
 
     `cat` is the catalog to read through (the process's own when None); `now` is the time
@@ -422,7 +422,7 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
 
     Raises ValueError for a filter that is not one."""
     cat = _catalog(cat)
-    f = _filters(harness, since, until, folder, find)
+    f = _filters(harness, since, until, work_dir, find)
     now = _now(now)
     cutoff = _cutoff(now, recent_s)
     answer, entries = _counted(cat, f, now)
@@ -453,19 +453,19 @@ def list_sessions(cat: Catalog | None = None, *, recent_s: float,
 def newest_sessions(cat: Catalog | None = None, *, recent_s: float,
                     now: float | None = None, limit: int = NEWEST_ROWS,
                     harness: str | None = None, since: float | None = None,
-                    until: float | None = None, folder: str | None = None
+                    until: float | None = None, work_dir: str | None = None
                     ) -> dict[str, Any]:
     """The sessions under the filters as one run, of both kinds, newest change first,
     with no groups: what `list_sessions` answers before its groups (`now`, `today`,
     `all`, `total`, `unreadable`, `roots`, `harnesses`), then `rows`, the first `limit`
     of them as a list's rows, and `before`, the place after them, None when `rows` holds
     them all. Beyond the Codex heads every gather reads, it reads the head, the last
-    turn and the prompt of the rows it returns and of no other session, unless `folder`
+    turn and the prompt of the rows it returns and of no other session, unless `work_dir`
     is asked.
 
     Raises ValueError for a filter that is not one, and for a `limit` under 1."""
     cat = _catalog(cat)
-    f = _filters(harness, since, until, folder, None)
+    f = _filters(harness, since, until, work_dir, None)
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError(f"limit is a number of sessions, 1 or more, not {limit!r}")
     now = _now(now)
@@ -479,7 +479,7 @@ def more_sessions(cat: Catalog | None = None, *, group: str, recent_s: float,
                   kind: str | None = None, before: str | None = None,
                   now: float | None = None, harness: str | None = None,
                   since: float | None = None, until: float | None = None,
-                  folder: str | None = None, find: str | None = None) -> dict[str, Any]:
+                  work_dir: str | None = None, find: str | None = None) -> dict[str, Any]:
     """The next rows of a group of the list, under the same filters.
 
     `group` is `recent`, `found`, a day's key (`YYYY-MM-DD`, or `undated`) or `earlier`.
@@ -498,7 +498,7 @@ def more_sessions(cat: Catalog | None = None, *, group: str, recent_s: float,
     Raises ValueError for a `before` that does not parse, a group or kind that is not
     one, `found` without `find`, and any other group with it."""
     cat = _catalog(cat)
-    f = _filters(harness, since, until, folder, find)
+    f = _filters(harness, since, until, work_dir, find)
     if before is not None:
         parse_position(before)
     if kind is not None and kind not in (MAIN, PROGRAM):
@@ -542,9 +542,9 @@ def more_sessions(cat: Catalog | None = None, *, group: str, recent_s: float,
     return {"group": group, "kind": kind, "rows": rows, "before": after}
 
 
-def list_folders(cat: Catalog | None = None, *, harness: str | None = None,
+def list_work_dirs(cat: Catalog | None = None, *, harness: str | None = None,
                  since: float | None = None, until: float | None = None,
-                 find: str | None = None, limit: int = FOLDERS_MAX) -> dict[str, Any]:
+                 find: str | None = None, limit: int = WORK_DIRS_MAX) -> dict[str, Any]:
     """The folders the sessions under the filters ran in: `{folders, more}`.
 
     `folders` is `{folder, count, changed}` per folder, `count` its sessions of both
@@ -558,12 +558,12 @@ def list_folders(cat: Catalog | None = None, *, harness: str | None = None,
     f = _filters(harness, since, until, None, find)
     gathered = cat.gather()
     cat.read_heads()
-    entries = _of(_pool(cat, gathered, f, folder=False), f.harness)
+    entries = _of(_pool(cat, gathered, f, work_dir=False), f.harness)
     counts: Counter[str] = Counter()
     newest: dict[str, int] = {}
     for entry in entries:
         head = cat.kept_head(entry)
-        where = _folder(head.folder) if head is not None else None
+        where = _work_dir(head.work_dir) if head is not None else None
         if not where:
             continue
         counts[where] += 1
@@ -762,7 +762,7 @@ def name_sessions(cat: Catalog | None, keys: Iterable[Sequence[Any]]) -> dict[st
             continue
         facts = cat.facts(entry)
         sessions.append({"harness": entry.harness, "session": entry.session,
-                         "name": facts.name, "folder": facts.folder,
+                         "name": facts.name, "folder": facts.work_dir,
                          "started": facts.started})
     return {"sessions": sessions,
             "roots": [{"harness": r.harness, "root": r.root, "reason": r.reason}
@@ -781,7 +781,7 @@ def _recent(recent_s: float | None) -> float:
 
 def sessions_list(*, recent_s: float | None = None, now: float | None = None,
                   harness: str | None = None, since: float | None = None,
-                  until: float | None = None, folder: str | None = None,
+                  until: float | None = None, work_dir: str | None = None,
                   find: str | None = None) -> dict[str, Any]:
     """The list of sessions as plain data: `list_sessions` says what it answers.
 
@@ -796,40 +796,40 @@ def sessions_list(*, recent_s: float | None = None, now: float | None = None,
     root's listing, every Codex head, and the head, the last turn and the prompt of
     what it answers. Later calls in the same process reuse them."""
     return list_sessions(None, recent_s=_recent(recent_s), now=now, harness=harness,
-                         since=since, until=until, folder=folder, find=find)
+                         since=since, until=until, work_dir=work_dir, find=find)
 
 
 def sessions_more(*, group: str, recent_s: float | None = None, kind: str | None = None,
                   before: str | None = None, now: float | None = None,
                   harness: str | None = None, since: float | None = None,
-                  until: float | None = None, folder: str | None = None,
+                  until: float | None = None, work_dir: str | None = None,
                   find: str | None = None) -> dict[str, Any]:
     """The next rows of one group of the list: `more_sessions` says what it answers.
     `recent_s`, the roots read and the cold reads are as `sessions_list` says. Pass the
     list answer's `now` so the groups are cut where that list cut them."""
     return more_sessions(None, group=group, recent_s=_recent(recent_s), kind=kind,
                          before=before, now=now, harness=harness, since=since,
-                         until=until, folder=folder, find=find)
+                         until=until, work_dir=work_dir, find=find)
 
 
 def sessions_newest(*, recent_s: float | None = None, now: float | None = None,
                     limit: int = NEWEST_ROWS, harness: str | None = None,
                     since: float | None = None, until: float | None = None,
-                    folder: str | None = None) -> dict[str, Any]:
+                    work_dir: str | None = None) -> dict[str, Any]:
     """The sessions as one run, newest change first, with no groups: `newest_sessions`
     says what it answers. `recent_s`, the roots read and the cold reads are as
     `sessions_list` says."""
     return newest_sessions(None, recent_s=_recent(recent_s), now=now, limit=limit,
-                           harness=harness, since=since, until=until, folder=folder)
+                           harness=harness, since=since, until=until, work_dir=work_dir)
 
 
-def sessions_folders(*, harness: str | None = None, since: float | None = None,
+def session_dirs(*, harness: str | None = None, since: float | None = None,
                      until: float | None = None, find: str | None = None,
-                     limit: int = FOLDERS_MAX) -> dict[str, Any]:
-    """The folders the sessions ran in: `list_folders` says what it answers. The roots
+                     limit: int = WORK_DIRS_MAX) -> dict[str, Any]:
+    """The folders the sessions ran in: `list_work_dirs` says what it answers. The roots
     read are as `sessions_list` says; this read's cold cost is the head of every
     session."""
-    return list_folders(None, harness=harness, since=since, until=until, find=find,
+    return list_work_dirs(None, harness=harness, since=since, until=until, find=find,
                         limit=limit)
 
 
@@ -853,9 +853,9 @@ def session_facts(keys: Iterable[Sequence[Any]]) -> dict[str, Any]:
 
 
 __all__ = ["RECENT_ROWS", "DAY_ROWS", "FOUND_ROWS", "MORE_ROWS", "EARLIER_SESSIONS",
-           "NEWEST_ROWS", "DAYS", "FOLDERS_MAX", "SUBAGENTS_MAX", "FACTS_MAX", "FIND_MIN",
+           "NEWEST_ROWS", "DAYS", "WORK_DIRS_MAX", "SUBAGENTS_MAX", "FACTS_MAX", "FIND_MIN",
            "RECENT", "FOUND", "EARLIER", "UNDATED", "MAIN", "PROGRAM", "position",
            "parse_position", "local_day", "list_sessions", "newest_sessions",
-           "more_sessions", "list_folders", "open_session", "name_sessions",
-           "sessions_list", "sessions_more", "sessions_newest", "sessions_folders",
+           "more_sessions", "list_work_dirs", "open_session", "name_sessions",
+           "sessions_list", "sessions_more", "sessions_newest", "session_dirs",
            "session_opened", "session_facts"]

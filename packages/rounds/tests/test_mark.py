@@ -20,24 +20,24 @@ def rounds(tmp_path, add_project, capsys):
     it, its stages B1, B2 and B3 declared."""
     add_project("proj-a", notes_root=tmp_path / "notes")
     opening.open_round("proj-a/a-round", description="a placeholder round",
-                       actor="planner", flow="fix")
-    folder = tmp_path / "notes" / "rounds"
+                       by="planner", flow="fix")
+    rounds_dir = tmp_path / "notes" / "rounds"
     for stage in ("B1", "B2", "B3"):
-        log.append(log.round_log(folder / "a-round"), "stage.declared",
+        log.append(log.round_log(rounds_dir / "a-round"), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     capsys.readouterr()
-    return folder
+    return rounds_dir
 
 
 def ask(blocks=None):
     """Ask a question of `a-round` and return its id."""
     return asking.ask("proj-a/a-round", SAID, origin="comms:12", blocks=blocks,
-                      actor="scout").id
+                      by="scout").id
 
 
 def rule(item, **more):
-    return ruling.rule("proj-a/a-round", item=item, record="comms:13", actor="planner",
+    return ruling.rule("proj-a/a-round", item=item, record="comms:13", by="planner",
                        **more)
 
 
@@ -100,7 +100,7 @@ def test_mark_takes_no_none_for_what_a_question_holds_up(rounds, capsys, old):
     ask(old)
 
     with pytest.raises(Refused, match="narrow:Q1=none --record PTR"):
-        marking.widen("proj-a/a-round", "Q1", "none", actor="coder")
+        marking.widen("proj-a/a-round", "Q1", "none", by="coder")
 
 
 def test_a_widening_then_a_narrowing_by_mark_is_refused(rounds, capsys):
@@ -189,7 +189,7 @@ def test_a_question_whose_wait_is_over_reads_open_and_is_not_reopened(rounds, ca
     ask()
     rule("park:Q1", until="B2")
     log.append(round_log(rounds), "finish.done", {"stage": "B2", "tip": "0" * 40},
-               actor="coder")
+               by="coder")
     before = round_log(rounds).read_bytes()
 
     assert mark("Q1", "--reopen") == 3
@@ -202,7 +202,7 @@ def test_a_reopened_question_is_in_the_index_as_open(rounds):
     ask()
     rule("park:Q1", until="B2")
     [parked] = index.read("proj-a", rounds, "a-round").of("question")
-    marking.reopen("proj-a/a-round", "Q1", actor="coder")
+    marking.reopen("proj-a/a-round", "Q1", by="coder")
     [found] = index.read("proj-a", rounds, "a-round").of("question")
 
     assert (parked.body["state"], parked.body["until"]) == ("parked", "B2")
@@ -247,7 +247,7 @@ def test_a_round_that_was_never_opened_is_refused(rounds, capsys):
 
     assert "moxi rounds open proj-a/c-round" in capsys.readouterr().err
     with pytest.raises(NoRound):
-        marking.widen("proj-a/c-round", "Q1", "all", actor="coder")
+        marking.widen("proj-a/c-round", "Q1", "all", by="coder")
 
 
 def test_help_says_what_mark_does(capsys):

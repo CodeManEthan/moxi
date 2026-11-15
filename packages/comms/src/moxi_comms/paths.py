@@ -99,7 +99,7 @@ def comms_db(env=None) -> Path:
     return state_dir(env) / "comms.db"
 
 
-def directory_db(env=None) -> Path:
+def directory_db(env=None) -> Path:  # noqa: MX3 -- names the legacy address-directory database
     """DATA/comms/directory.db -- comms 0.2's directory, which comms.db replaces. Read
     only by the move of 0.2's files into comms.db."""
     return data_dir(env) / "directory.db"

@@ -433,7 +433,7 @@ def test_a_stop_between_a_rotation_and_the_new_pairs_first_use_keeps_the_grace(d
         client, first = await d.sign_in()
         assert (await d.mcp(first["access_token"])).status == 200      # the first pair used
         assert (await d.refresh(client, first["refresh_token"])).status == 200  # answer lost
-        await d.oauth.stopping(True)
+        await d.oauth.stopping(switch_on=True)
         await d.close()
         gid = d.grant_id()
         grant = d.oauth.store.view()["grants"][gid]
@@ -566,7 +566,7 @@ def test_last_use_is_written_at_most_once_a_minute_and_at_the_stop(door, clock):
         assert len(writes) == 2
         clock.advance(10)
         await d.mcp(tokens["access_token"])
-        await d.oauth.stopping(True)
+        await d.oauth.stopping(switch_on=True)
         assert len(writes) == 3 and d.oauth.store.grant(gid)["used"] == clock()
         await d.close()
     run(main())

@@ -210,7 +210,7 @@ def taken(conn: sqlite3.Connection) -> frozenset[str]:
     return frozenset(str(name) for name in names if name)
 
 
-def folder(cwd: str | None) -> str:
+def dir_name(cwd: str | None) -> str:
     """The name of the folder `cwd`, which stands for a project where a launch has
     none; the path itself when it has no last part, and nothing with no folder."""
     return (Path(cwd).name or str(cwd)) if cwd else ""
@@ -226,9 +226,9 @@ def shown(row: store.LaunchRow) -> str:
     if row.identity:
         return row.identity
     started = store.parse_time(row.created_at).astimezone()
-    return f"{folder(row.cwd)} {started:%H:%M}"
+    return f"{dir_name(row.cwd)} {started:%H:%M}"
 
 
 __all__ = ["DEFAULT", "EMPTY", "GLOBAL", "INSTANCES", "LIMIT", "PIECES", "PROJECT",
            "TEMPLATE", "TEMPLATES", "BadTemplate", "Chosen", "Pieces", "chosen", "clean",
-           "date_format", "folder", "now", "number", "render", "refusal", "shown", "taken"]
+           "date_format", "dir_name", "now", "number", "render", "refusal", "shown", "taken"]

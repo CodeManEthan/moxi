@@ -121,8 +121,8 @@ def load(path) -> Record:
         text = path.read_text()
     except FileNotFoundError:
         return Record(missing=True)
-    except OSError as e:
-        return Record(unreadable=f"{UNREADABLE} ({e.strerror or e})")
+    except OSError as exc:
+        return Record(unreadable=f"{UNREADABLE} ({exc.strerror or exc})")
     try:
         doc = json.loads(text)
     except ValueError:
@@ -184,8 +184,8 @@ def write(path, entries) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".drift.")
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump({"entries": entries}, f, indent=1, sort_keys=True)
+        with os.fdopen(fd, "w") as fh:
+            json.dump({"entries": entries}, fh, indent=1, sort_keys=True)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
     except BaseException:
@@ -229,9 +229,9 @@ class Store:
         try:
             self.lock_path.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-        except OSError as e:
+        except OSError as exc:
             log.warning("cache: could not open %s (%s); this process reads the drift "
-                        "record and does not learn", self.lock_path, e.strerror or e)
+                        "record and does not learn", self.lock_path, exc.strerror or exc)
             return False
         if not _try_lock(fd, shared=False):
             os.close(fd)
@@ -314,9 +314,9 @@ class Store:
         """Write the record from memory. Under the mutex."""
         try:
             write(self.path, self.record.entries)
-        except OSError as e:
+        except OSError as exc:
             log.warning("cache: could not write %s (%s); the lowered models read unknown "
-                        "until a write succeeds", self.path, e.strerror or e)
+                        "until a write succeeds", self.path, exc.strerror or exc)
             return False
         self._unwritten.clear()
         return True

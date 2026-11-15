@@ -169,8 +169,8 @@ def _shipped_text(path: Path):
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             yield n, line
         return
-    with path.open("rb") as f:
-        for tok in tokenize.tokenize(f.readline):
+    with path.open("rb") as fh:
+        for tok in tokenize.tokenize(fh.readline):
             if tok.type in _TEXT_TOKENS:
                 yield tok.start[0], tok.string
 

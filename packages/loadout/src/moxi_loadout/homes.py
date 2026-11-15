@@ -39,7 +39,7 @@ Where ui is needed:
 - `path_fix`, the lasting fix for a program `PATH` doesn't find, names where to set it for
   the browser shell only when ui loads at interface 2.
 
-`MARKER` set to `PAGE_JOB` in a page job's environment, or `as_page` in the page server's
+`CALLER_ENV` set to `PAGE_JOB` in a page job's environment, or `as_page` in the page server's
 own threads, words the lines for the browser page.
 
 Standard library only at import.
@@ -54,7 +54,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 #: The variable a page job sets so its lines are worded for the browser page.
-MARKER = "MOXI_LOADOUT_CALLER"
+CALLER_ENV = "MOXI_LOADOUT_CALLER"
 #: The marker's value in a page job.
 PAGE_JOB = "page-job"
 #: The ui interface whose API holds the check.
@@ -75,7 +75,7 @@ Places = Callable[[Mapping[str, str]], dict[str, Path]]
 def on_page() -> bool:
     """Whether a line said now is read on the browser page: in a page job, or inside
     `as_page` (the page server's reads)."""
-    return os.environ.get(MARKER) == PAGE_JOB or _page.get()
+    return os.environ.get(CALLER_ENV) == PAGE_JOB or _page.get()
 
 
 @contextlib.contextmanager
@@ -232,5 +232,5 @@ def path_fix(program: str) -> str:
             f"login, set it {where.place}, then {where.step}")
 
 
-__all__ = ["MARKER", "PAGE_JOB", "UI_INTERFACE", "PROGRAMS", "READS", "NAMES", "on_page",
+__all__ = ["CALLER_ENV", "PAGE_JOB", "UI_INTERFACE", "PROGRAMS", "READS", "NAMES", "on_page",
            "as_page", "ui", "unloadable", "places", "reads", "check", "note", "path_fix"]

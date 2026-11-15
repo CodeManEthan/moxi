@@ -49,7 +49,7 @@ def box(tmp_path, monkeypatch):
     user = tmp_path / "user-site"
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    environ = {"UV_TOOL_DIR": str(tools), "PATH": str(bindir),
+    env = {"UV_TOOL_DIR": str(tools), "PATH": str(bindir),
                "MOXI_HOME": str(tmp_path / "home")}
     monkeypatch.setattr(strays, "_user_site", lambda: str(user))
     monkeypatch.setattr(strays, "_own_script", lambda: None)
@@ -58,7 +58,7 @@ def box(tmp_path, monkeypatch):
         pass
 
     b = Box()
-    b.tools, b.user, b.bin, b.env, b.root = tools, user, bindir, environ, tmp_path
+    b.tools, b.user, b.bin, b.env, b.root = tools, user, bindir, env, tmp_path
     return b
 
 
@@ -78,7 +78,7 @@ def test_a_uv_tool_holding_a_module_is_a_stray(box):
         "uv tool uninstall moxi-cache")
 
 
-def test_this_environment_s_own_tool_is_not_a_stray(box, monkeypatch):
+def test_this_env_s_own_tool_is_not_a_stray(box, monkeypatch):
     own = box.tools / "moxi"
     env_with(own, "moxi_comms-0.1.0")
     monkeypatch.setattr(sys, "prefix", str(own))
@@ -94,7 +94,7 @@ def test_the_user_site_holding_a_module_is_a_stray(box):
     assert found.line().endswith("python -m pip uninstall moxi-turns")
 
 
-def test_another_moxi_on_path_brings_its_environment_s_modules(box):
+def test_another_moxi_on_path_brings_its_env_s_modules(box):
     other = box.root / "venvs" / "old"
     env_with(other, "moxi_comms-0.1.0", "moxi_turns-0.1.0")
     (other / "bin").mkdir()
@@ -107,7 +107,7 @@ def test_another_moxi_on_path_brings_its_environment_s_modules(box):
     assert found[0].remove_command() == f"{other}/bin/python -m pip uninstall moxi-comms"
 
 
-def test_this_environment_s_moxi_on_path_is_not_a_stray(box, monkeypatch):
+def test_this_env_s_moxi_on_path_is_not_a_stray(box, monkeypatch):
     other = box.root / "venvs" / "mine"
     env_with(other, "moxi_comms-0.1.0")
     (other / "bin").mkdir()
@@ -129,7 +129,7 @@ def test_a_moxi_on_path_inside_a_uv_tool_is_found_once(box):
     assert [(s.module, s.kind, s.tool) for s in found] == [("comms", "tool", "moxi-comms")]
 
 
-def test_the_default_tool_directory_follows_uv(monkeypatch, tmp_path):
+def test_the_default_tool_dir_follows_uv(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
     assert strays.tool_dir({"UV_TOOL_DIR": "/t"}) == "/t"
     assert strays.tool_dir({"XDG_DATA_HOME": "/x", "HOME": "/h"}) == "/x/uv/tools"
@@ -141,7 +141,7 @@ def test_the_default_tool_directory_follows_uv(monkeypatch, tmp_path):
     assert strays.tool_dir({"HOME": "/h"}) == str(tmp_path / "tools")
 
 
-def test_the_windows_tool_directory_is_under_appdata(monkeypatch, tmp_path):
+def test_the_windows_tool_dir_is_under_appdata(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
     monkeypatch.setattr(strays, "_windows", lambda: True)
     assert strays.tool_dir({"APPDATA": "C:/Users/a/AppData/Roaming"}) == os.path.join(
@@ -157,7 +157,7 @@ def test_an_unchanged_key_uses_the_cached_answer(box, monkeypatch):
     assert record["key"] == strays.cache_key(box.env)
     assert record["strays"] == [s.as_json() for s in first]
 
-    monkeypatch.setattr(strays, "scan", lambda environ=None: pytest.fail("scanned again"))
+    monkeypatch.setattr(strays, "scan", lambda env=None: pytest.fail("scanned again"))
     assert strays.find(box.env) == first
 
 
@@ -196,7 +196,7 @@ def test_a_stray_that_goes_and_comes_back_is_told_again(box):
 
 
 
-def test_each_environment_tells_a_stray_once(box, monkeypatch, tmp_path):
+def test_each_env_tells_a_stray_once(box, monkeypatch, tmp_path):
     """Runs that alternate between two environments, each seeing other strays, don't
     wipe each other's record."""
     venv, tool = tmp_path / "venv", box.tools / "moxi"

@@ -450,7 +450,7 @@ print(json.dumps({"import": imported, "first": first}))
 """
 
 
-def child_times(text, hide_re2=False):
+def child_times(text, *, hide_re2=False):
     code = _CHILD
     if hide_re2:
         code = "import sys; sys.modules['re2'] = None\n" + code

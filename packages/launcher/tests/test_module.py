@@ -38,7 +38,7 @@ def test_it_reserves_the_console_name(found):
     assert found.reserved_names == ("console",)
 
 
-def test_it_ships_its_skills_folder(found):
+def test_it_ships_its_skills_dir(found):
     assert found.skills == "skills"
 
 

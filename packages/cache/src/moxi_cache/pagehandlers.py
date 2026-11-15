@@ -126,11 +126,11 @@ def gather() -> dict[str, Any]:
     try:
         rows = [_row(record) for record in api.clock_records()]
         reading = _reading()
-    except Exception as err:
-        _log_once(err, "listing the clock records or the reading failed")
+    except Exception as exc:
+        _log_once(exc, "listing the clock records or the reading failed")
         return {"state": "error",
                 "detail": f"cache's page server hit an unexpected error "
-                          f"({type(err).__name__}); its log has the details",
+                          f"({type(exc).__name__}); its log has the details",
                 "today": today, "reading": None, "clocks": []}
     return {"state": "up", "detail": None, "today": today, "reading": reading,
             "clocks": rows}
@@ -161,9 +161,9 @@ class _Feed:
     async def _poll(self) -> None:
         while True:
             try:
-                await self.snapshot.changed()
-            except Exception as err:
-                _log_once(err, "the clocks poller's gather failed")
+                await self.snapshot.on_changed()
+            except Exception as exc:
+                _log_once(exc, "the clocks poller's gather failed")
             await asyncio.sleep(PERIOD)
 
 
@@ -222,8 +222,8 @@ def names(call: Any) -> dict[str, Any]:
         found = [(record["harness"], record["session"]) for record in api.clock_records()]
         asked = [key for key in found if key[0] in SESSION_HARNESSES]
         facts, unlisted = _facts(asked)
-    except Exception as err:
-        _log_once(err, "naming the sessions with a clock record failed", "names")
+    except Exception as exc:
+        _log_once(exc, "naming the sessions with a clock record failed", "names")
         return {"state": "error", "today": today, "home": home, "sessions": []}
     out = []
     for harness, session in found:
@@ -251,8 +251,8 @@ def session(call: Any) -> dict[str, Any]:
         if harness not in SESSION_HARNESSES:
             return {"model": None}
         opened = sessions.session_opened(harness=harness, session=wanted)
-    except Exception as err:
-        _log_once(err, "reading the model of a session with a clock record failed",
+    except Exception as exc:
+        _log_once(exc, "reading the model of a session with a clock record failed",
                   "session")
         return {"model": None}
     model = opened.get("model") if isinstance(opened, dict) else None

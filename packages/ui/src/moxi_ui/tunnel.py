@@ -57,25 +57,25 @@ def _not_ready(text: str) -> Exception:
     return kind(text) if isinstance(kind, type) else RuntimeError(text)
 
 
-def upstream(*, environ: Mapping[str, str] | None = None, kind: str | None = None,
+def upstream(*, env: Mapping[str, str] | None = None, kind: str | None = None,
              running: Callable[[int], bool] | None = None) -> str:
     """What the provider forwards `ui/gateway` to now. Raises tunnel's `NotReady` with the
     reason when there is nothing the shell holds to forward to."""
     from .gateway import endpoint
 
-    moved = endpoint.runtime_problem(environ)
+    moved = endpoint.runtime_problem(env)
     if moved:
         raise _not_ready(moved)
     layout = Layout(MODULE)
     kind = kind or endpoint.resolve_kind(endpoint.system())
     if kind == "unix":
-        path = endpoint.socket_path(layout, environ)
+        path = endpoint.socket_path(layout, env)
         try:
             endpoint.check_socket_path(path)
-        except endpoint.PathRefused as err:
-            raise _not_ready(str(err)) from None
+        except endpoint.PathRefused as exc:
+            raise _not_ready(str(exc)) from None
         return f"unix:{path}"
-    port = endpoint.hold_port(layout.runtime_dir(environ), running=running)
+    port = endpoint.hold_port(layout.runtime_dir(env), running=running)
     if port is None:
         raise _not_ready("the shell doesn't hold the gateway's port yet; "
                          "run `moxi ui gateway enable`")

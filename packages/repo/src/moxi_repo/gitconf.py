@@ -385,9 +385,9 @@ def register(repo: Repo, piece, state: State) -> bool:
     return new
 
 
-def set_enabled(repo: Repo, piece_id: str, value: bool, state: State) -> None:
-    _set(repo, piece_key(piece_id, "enabled"), "true" if value else "false")
-    state.pieces.setdefault(piece_id, {})["enabled"] = ["true" if value else "false"]
+def set_enabled(repo: Repo, piece_id: str, *, enabled: bool, state: State) -> None:
+    _set(repo, piece_key(piece_id, "enabled"), "true" if enabled else "false")
+    state.pieces.setdefault(piece_id, {})["enabled"] = ["true" if enabled else "false"]
 
 
 def clear_recorded(repo: Repo, piece_id: str, state: State) -> None:
@@ -478,7 +478,7 @@ def chain_state(repo: Repo, event: str) -> tuple[Path, str, bool]:
     add it to; the chain line; whether the line is there)."""
     hooks = chain_hooks(repo, event)
     held = [hook for hook in hooks if holds_chain_line(hook, event)]
-    return (held or hooks)[0], shim.chain_line(event, event in STDIN_EVENTS), bool(held)
+    return (held or hooks)[0], shim.chain_line(event, stdin=event in STDIN_EVENTS), bool(held)
 
 
 def check_shims(repo: Repo, state: State, events) -> list[str]:
@@ -488,7 +488,7 @@ def check_shims(repo: Repo, state: State, events) -> list[str]:
     out = []
     for event in sorted(events):
         try:
-            shim.check_place(repo.hooks_dir, event, event in state.moved)
+            shim.check_place(repo.hooks_dir, event, moved=event in state.moved)
         except shim.ShimRefused as exc:
             out.append(f"{event}: {exc}")
     return out
@@ -509,7 +509,7 @@ def _settle(hooks_dir: Path, moved: set[str], keep: set[str], *,
     for event in sorted((set(ours) | moved) - keep):
         hook, local = hooks_dir / event, hooks_dir / (event + shim.LOCAL)
         if event in ours or (event in moved and _present(local) and not _present(hook)):
-            lines += shim.take_away(hooks_dir, event, event in moved, final=final)
+            lines += shim.take_away(hooks_dir, event, moved=event in moved, final=final)
         elif say_left and event in moved and _present(local):
             lines.append(shim.left_line(local, hook, final=final))
     return lines
@@ -579,9 +579,9 @@ def sync(repo: Repo, state: State) -> Sync:
     moved = _still_moved(repo, moved, keep)
     if inside:
         for event, code in sorted(events.items()):
-            text = shim.shim_text(event, python, runner, root, code, event in STDIN_EVENTS)
+            text = shim.shim_text(event, python, runner, root, code, stdin=event in STDIN_EVENTS)
             try:
-                done = shim.place(repo.hooks_dir, event, text, event in moved)
+                done = shim.place(repo.hooks_dir, event, text, moved=event in moved)
             except shim.ShimRefused as exc:
                 out.problems.append(f"{event}: {exc}")
                 continue

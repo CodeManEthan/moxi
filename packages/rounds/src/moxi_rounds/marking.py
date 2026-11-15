@@ -3,10 +3,10 @@
 Two are here, both to a question of a round and neither the operator's, so neither
 carries a pointer:
 
-- `widen(round, id, blocks, actor=...)` makes the question hold up more: every stage, or
+- `widen(round, id, blocks, by=...)` makes the question hold up more: every stage, or
   a longer list. The result must hold up every stage the old value did. Anything that
   would let a stage go is a narrowing, which only the operator rules.
-- `reopen(round, id, actor=...)` makes a parked question open again.
+- `reopen(round, id, by=...)` makes a parked question open again.
 
 Each appends one `question.changed` event through the write path and returns the
 question as the log then has it.
@@ -34,7 +34,7 @@ class Marked:
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
-def widen(target: str, question_id: str, blocks: str, *, actor: str, settings=None,
+def widen(target: str, question_id: str, blocks: str, *, by: str, settings=None,
           wait_s: float = write.WAIT_S, at: str | None = None) -> Marked:
     """Make the question `question_id` of the round `target` hold up `blocks`: `all`, or
     stage ids as `B2,B3`.
@@ -78,10 +78,10 @@ def widen(target: str, question_id: str, blocks: str, *, actor: str, settings=No
         return [still_asked, names_stages_of_the_round, holds_what_it_held]
 
     return _mark(target, question_id, {"blocks": questions.stored(wanted)}, gates,
-                 actor=actor, settings=settings, wait_s=wait_s, at=at)
+                 by=by, settings=settings, wait_s=wait_s, at=at)
 
 
-def reopen(target: str, question_id: str, *, actor: str, settings=None,
+def reopen(target: str, question_id: str, *, by: str, settings=None,
            wait_s: float = write.WAIT_S, at: str | None = None) -> Marked:
     """Make the parked question `question_id` of the round `target` open again.
 
@@ -105,11 +105,11 @@ def reopen(target: str, question_id: str, *, actor: str, settings=None,
 
         return [is_parked]
 
-    return _mark(target, question_id, {"state": questions.OPEN}, gates, actor=actor,
+    return _mark(target, question_id, {"state": questions.OPEN}, gates, by=by,
                  settings=settings, wait_s=wait_s, at=at)
 
 
-def _mark(target: str, question_id: str, change: dict, gates, *, actor: str, settings,
+def _mark(target: str, question_id: str, change: dict, gates, *, by: str, settings,
           wait_s: float, at: str | None) -> Marked:
     """Append one change to a question of a round. `gates(name)` gives the form's own
     gates, which run after the one that the question exists."""
@@ -133,7 +133,7 @@ def _mark(target: str, question_id: str, change: dict, gates, *, actor: str, set
         return write.Entry("question.changed", {"id": question_id, **change})
 
     try:
-        written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
+        written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
                                gates=[ending.takes_new_work(name, "a mark"), exists,
                                       *gates(name)], event=changed,
                                wait_s=wait_s, at=at)

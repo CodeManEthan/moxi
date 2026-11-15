@@ -224,7 +224,7 @@ Filters: `harness`, `since` and `until` on the last change, `folder` (the folder
 session's own record names, with or without a slash at its end) and `find` (the start of an id, or part of the folder's last
 segment). `sessions_more` answers the next rows of a group from the place an answer gave,
 `sessions_newest` the same sessions as one run with no groups (what `moxi sessions list`
-prints), `sessions_folders` the folders with how many sessions each holds, and
+prints), `session_dirs` the folders with how many sessions each holds, and
 `session_opened` one session's row with its last reply, the eight subagents that changed last and the
 harness's command for picking it up again. Claude Code's and OpenCode's commands work
 only in the session's folder, so they come with that folder, and no command is given when
@@ -512,7 +512,7 @@ extra `turns` adds `moxi-turns`, which enforces the transcript-read guard.
 `moxi_sessions.api` offers interfaces 2, 3, 4 and 5. Interface 3 is interface 2 plus
 `retention()` and `Retention`; a module that calls them loads sessions with
 `interface=3`. Interface 4 is interface 3 plus the list's reads: `sessions_list`,
-`sessions_more`, `sessions_newest`, `sessions_folders` and `session_opened`; a module
+`sessions_more`, `sessions_newest`, `session_dirs` and `session_opened`; a module
 that calls them loads sessions with `interface=4`. Interface 5 is interface 4 plus
 `session_facts`; a module that calls it loads sessions with `interface=5`.
 

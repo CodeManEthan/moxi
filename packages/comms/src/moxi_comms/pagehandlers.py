@@ -113,13 +113,13 @@ def gather() -> dict[str, Any]:
         rows = [_row(row) for row in api.roster_rows(timeout_s=DEADLINE)]
     except api.DaemonOffline:
         return {"state": "offline", "detail": None, "rows": []}
-    except api.DaemonError as err:
-        _log_once(err, "the comms daemon answered the roster read with an error")
-        return {"state": "error", "detail": DAEMON_ERROR.format(type(err).__name__),
+    except api.DaemonError as exc:
+        _log_once(exc, "the comms daemon answered the roster read with an error")
+        return {"state": "error", "detail": DAEMON_ERROR.format(type(exc).__name__),
                 "rows": []}
-    except Exception as err:
-        _log_once(err, "reading the roster failed")
-        return {"state": "error", "detail": UNEXPECTED.format(type(err).__name__),
+    except Exception as exc:
+        _log_once(exc, "reading the roster failed")
+        return {"state": "error", "detail": UNEXPECTED.format(type(exc).__name__),
                 "rows": []}
     return {"state": "up", "detail": None, "rows": rows}
 
@@ -155,13 +155,13 @@ def mail(call: Any) -> dict[str, Any]:
         waiting = _waiting(api.roster(timeout_s=DEADLINE))
     except api.DaemonOffline:
         return {"state": "offline", "detail": None, "waiting": []}
-    except api.DaemonError as err:
-        _log_once(err, "the comms daemon answered the mail read with an error")
-        return {"state": "error", "detail": DAEMON_ERROR.format(type(err).__name__),
+    except api.DaemonError as exc:
+        _log_once(exc, "the comms daemon answered the mail read with an error")
+        return {"state": "error", "detail": DAEMON_ERROR.format(type(exc).__name__),
                 "waiting": []}
-    except Exception as err:
-        _log_once(err, "reading the mail failed")
-        return {"state": "error", "detail": UNEXPECTED.format(type(err).__name__),
+    except Exception as exc:
+        _log_once(exc, "reading the mail failed")
+        return {"state": "error", "detail": UNEXPECTED.format(type(exc).__name__),
                 "waiting": []}
     return {"state": "up", "detail": None, "waiting": waiting}
 
@@ -191,9 +191,9 @@ class _Feed:
     async def _poll(self) -> None:
         while True:
             try:
-                await self.snapshot.changed()
-            except Exception as err:
-                _log_once(err, "the roster poller's gather failed")
+                await self.snapshot.on_changed()
+            except Exception as exc:
+                _log_once(exc, "the roster poller's gather failed")
             await asyncio.sleep(PERIOD)
 
 

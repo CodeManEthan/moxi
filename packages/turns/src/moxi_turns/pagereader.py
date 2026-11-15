@@ -210,8 +210,8 @@ class _Held:
         while not self.stopped.is_set():
             try:
                 watch = self.session.watch()
-            except Exception as err:  # noqa: BLE001 - any failure is the endpoint's
-                self.reader._failed(self, "watch", err)
+            except Exception as exc:  # noqa: BLE001 - any failure is the endpoint's
+                self.reader._on_failed(self, "watch", exc)
                 if self.stopped.wait(self.reader.retry_s):
                     return
                 continue
@@ -230,15 +230,15 @@ class _Held:
                         gone = True
                         break
                     self.dirty.set()
-            except Exception as err:  # noqa: BLE001 - a broken stream ends the watch
-                log.info("the watch of %s failed: %s", self.key, err)
+            except Exception as exc:  # noqa: BLE001 - a broken stream ends the watch
+                log.info("the watch of %s failed: %s", self.key, exc)
             finally:
                 watch.close()
                 with self.reader._lock:
                     self.watching = False
                     self.watch = None
             if not self.stopped.is_set():
-                self.reader._gone(self, gone)
+                self.reader._gone(self, said=gone)
             return
 
     # -- the reads thread ----------------------------------------------------------------
@@ -258,9 +258,9 @@ class _Held:
     def _read(self, name: str, call: Callable[[], Any], row: Callable[[Any], dict]) -> None:
         try:
             value = row(call())
-        except Exception as err:  # noqa: BLE001 - any failure is the endpoint's
+        except Exception as exc:  # noqa: BLE001 - any failure is the endpoint's
             if not self.stopped.is_set():
-                self.reader._failed(self, name, err)
+                self.reader._on_failed(self, name, exc)
             return
         self.reader._read_ok(self, name, value)
 
@@ -359,10 +359,10 @@ class Reader:
 
         try:
             found = client.sessions()
-        except Exception as err:  # noqa: BLE001 - the scan runs again next period
-            log.warning("listing turns' sessions failed: %s", err, exc_info=err)
+        except Exception as exc:  # noqa: BLE001 - the scan runs again next period
+            log.warning("listing turns' sessions failed: %s", exc, exc_info=exc)
             detail = (f"turns' page server could not list the sessions "
-                      f"({type(err).__name__}); its log has the details")
+                      f"({type(exc).__name__}); its log has the details")
             with self._lock:
                 changed = detail != self._detail
                 self._detail = detail
@@ -422,7 +422,7 @@ class Reader:
 
     # -- what the session threads report --------------------------------------------------
 
-    def _failed(self, held: _Held, name: str, err: BaseException) -> None:
+    def _on_failed(self, held: _Held, name: str, err: BaseException) -> None:
         with self._lock:
             if self._held.get(held.key) is not held:
                 return
@@ -444,7 +444,7 @@ class Reader:
         if changed:
             self._notify()
 
-    def _gone(self, held: _Held, said: bool) -> None:
+    def _gone(self, held: _Held, *, said: bool) -> None:
         with self._lock:
             if self._held.get(held.key) is not held:
                 return
@@ -461,8 +461,8 @@ class Reader:
         for fn in listeners:
             try:
                 fn()
-            except Exception as err:  # noqa: BLE001 - one listener never stops the rest
-                log.warning("a listener of turns' page failed: %s", err, exc_info=err)
+            except Exception as exc:  # noqa: BLE001 - one listener never stops the rest
+                log.warning("a listener of turns' page failed: %s", exc, exc_info=exc)
 
 
 __all__ = ["HOLD_S", "RESCAN_S", "RETRY_S", "Reader", "agents_row", "facts_row", "info_row",

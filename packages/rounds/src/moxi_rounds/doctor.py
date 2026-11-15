@@ -49,13 +49,13 @@ def rows() -> Iterator[Row]:
     yield _git()
     try:
         homes, unresolved = folders.homes()
-    except (RoundsError, config.ConfigError) as error:
+    except (RoundsError, config.ConfigError) as exc:
         # With no settings or no projects list, no folder is known to look in.
         yield Row(MODULE, "rounds folders", "fail",
-                  f"the projects and their rounds folders can't be read: {error}",
-                  getattr(error, "fix", None))
+                  f"the projects and their rounds folders can't be read: {exc}",
+                  getattr(exc, "fix", None))
         return
-    yield from _folders(len(homes), unresolved)
+    yield from _round_dirs(len(homes), unresolved)
     yield from _logs(homes)
     yield _index(homes)
 
@@ -78,8 +78,8 @@ def git_version() -> tuple[tuple[int, ...] | None, str]:
                         env=env)
     except FileNotFoundError:
         return None, "no git is on PATH"
-    except OSError as error:
-        return None, f"the git on PATH can't be run: {error}"
+    except OSError as exc:
+        return None, f"the git on PATH can't be run: {exc}"
     except subprocess.TimeoutExpired:
         return None, f"`git version` gave no answer in {GIT_TIMEOUT_S:g} seconds"
     said = " ".join((done.stdout or "").split())
@@ -106,7 +106,7 @@ def _git() -> Row:
 
 # -- the rounds folders ----------------------------------------------------------------------
 
-def _folders(resolved: int, unresolved: list) -> Iterator[Row]:
+def _round_dirs(resolved: int, unresolved: list) -> Iterator[Row]:
     if not unresolved:
         yield Row(MODULE, "rounds folders", "ok",
                   f"the rounds folder of each of {resolved} "
@@ -123,13 +123,13 @@ def _logs(homes: list[folders.Home]) -> Iterator[Row]:
     count, bad = 0, False
     for home in homes:
         try:
-            found = [index.read(home.project, home.folder),
-                     *index.rounds(home.project, home.folder)]
-        except OSError as error:
+            found = [index.read(home.project, home.rounds_dir),
+                     *index.rounds(home.project, home.rounds_dir)]
+        except OSError as exc:
             bad = True
             yield Row(MODULE, f"log {home.project}", "fail",
-                      f"the logs of {home.project} in {home.folder} can't be read: "
-                      f"{error}", "give your user read access to the folder and its "
+                      f"the logs of {home.project} in {home.rounds_dir} can't be read: "
+                      f"{exc}", "give your user read access to the folder and its "
                       "files")
             continue
         for summary in found:
@@ -166,9 +166,9 @@ def _index(homes: list[folders.Home]) -> Row:
                    "a newer moxi-rounds wrote, upgrade moxi-rounds here")
     try:
         differ = index.disagreements(homes)
-    except (OSError, sqlite3.Error, store.StoreError) as error:
+    except (OSError, sqlite3.Error, store.StoreError) as exc:
         return Row(MODULE, "index", "warn",
-                   f"the index can't be held against the logs: {error}", rebuilt)
+                   f"the index can't be held against the logs: {exc}", rebuilt)
     if not differ:
         return Row(MODULE, "index", "ok", f"{where} says what the logs say")
     named = "; ".join(f"{one.name} {one.problem}" for one in differ[:_NAMED])

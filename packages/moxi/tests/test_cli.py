@@ -269,7 +269,7 @@ def test_modules_json_shows_what_starts_each_socket_daemon_now(site, capsys, mon
     assert item["daemons"]["shell"]["socket"]["start"] == {"login": "door.enabled"}
     assert item["starts"] == {"shell": "connection", "web": "login"}
     monkeypatch.setattr(config, "apply_units", lambda *a, **k: [])
-    config.set("demo", "door.enabled", True, by="test")
+    config.set_value("demo", "door.enabled", value=True, by="test")
     assert demo()["starts"] == {"shell": "login", "web": "login"}
 
 
@@ -576,7 +576,7 @@ def stored(site, tmp_path, monkeypatch):
     return tmp_path / "home"
 
 
-def test_paths_gives_the_directories_and_each_store(stored, capsys):
+def test_paths_gives_the_dirs_and_each_store(stored, capsys):
     db = stored / "state" / "alpha" / "record.db"
     db.parent.mkdir(parents=True)
     db.write_bytes(b"x" * 2048)
@@ -611,7 +611,7 @@ def test_paths_gives_the_directories_and_each_store(stored, capsys):
     assert any(line.startswith("  later ") and "not created yet" in line for line in lines)
 
 
-def test_paths_names_a_directory_read_under_a_host_folder(stored, monkeypatch, capsys):
+def test_paths_names_a_dir_read_under_a_host_dir(stored, monkeypatch, capsys):
     from moxi import paths
 
     monkeypatch.setattr(paths, "_host_name", lambda: "thishost")

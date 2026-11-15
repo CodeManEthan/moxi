@@ -30,7 +30,7 @@ def test_a_version_that_cannot_be_run_fails_with_why(fence):
     assert not seen.ok and "could not be run" in seen.text
 
 
-def test_the_client_environment_drops_the_tmux_variables():
+def test_the_client_env_drops_the_tmux_variables():
     env = tmux.client_env({"TMUX": "/x,1,0", "TMUX_PANE": "%3", "PATH": "/bin", "A": "1"})
     assert env == {"PATH": "/bin", "A": "1"}
 

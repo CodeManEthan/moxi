@@ -46,7 +46,7 @@ from .rules import absolutize
 _PARSERS: dict[str, argparse.ArgumentParser] = {}
 
 
-def _directory(text: str) -> str:
+def _dir_text(text: str) -> str:
     """A directory as typed; empty is a usage error, not the working directory."""
     if not text:
         raise argparse.ArgumentTypeError("is empty; name a directory")
@@ -63,32 +63,32 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    def verb(name: str, help: str) -> argparse.ArgumentParser:
-        p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".")
+    def verb(name: str, help_text: str) -> argparse.ArgumentParser:
+        p = verbs.add_parser(name, help=help_text, description=help_text[0].upper() + help_text[1:] + ".")
         p.add_argument("--json", action="store_true", help="print JSON")
         return p
 
     p = verb("add", "add a project")
     p.add_argument("key", metavar="KEY")
-    p.add_argument("--root", metavar="DIR", type=_directory,
+    p.add_argument("--root", metavar="DIR", type=_dir_text,
                    help="its directory (needed unless an installed module supplies it)")
     p.add_argument("--create", action="store_true",
                    help="make the root first (for most kinds, a directory and git init)")
     p.add_argument("--kind", default=DEFAULT_KIND, metavar="KIND",
                    help=f"its kind (default: {DEFAULT_KIND}; `kinds` lists them)")
     p.add_argument("--lead", metavar="NAME", help="its lead agent")
-    p.add_argument("--notes-root", metavar="DIR", type=_directory,
+    p.add_argument("--notes-root", metavar="DIR", type=_dir_text,
                    help="its notes directory (only while notes is installed)")
 
     p = verb("set", "change a project's fields")
     p.add_argument("key", metavar="KEY")
-    p.add_argument("--root", metavar="DIR", type=_directory, help="a new directory")
+    p.add_argument("--root", metavar="DIR", type=_dir_text, help="a new directory")
     p.add_argument("--kind", metavar="KIND", help="a new kind")
     lead = p.add_mutually_exclusive_group()
     lead.add_argument("--lead", metavar="NAME", help="a new lead agent")
     lead.add_argument("--no-lead", action="store_true", help="clear the lead")
     notes = p.add_mutually_exclusive_group()
-    notes.add_argument("--notes-root", metavar="DIR", type=_directory,
+    notes.add_argument("--notes-root", metavar="DIR", type=_dir_text,
                        help="a new notes directory (only while notes is installed)")
     notes.add_argument("--no-notes-root", action="store_true", help="clear the notes root")
 
@@ -101,7 +101,7 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("key", metavar="KEY")
     p.add_argument("--kind", default=acts.TOPIC, metavar="KIND",
                    help=f"its kind (default: {acts.TOPIC}, whose folder is the one-off)")
-    p.add_argument("--root", metavar="DIR", type=_directory,
+    p.add_argument("--root", metavar="DIR", type=_dir_text,
                    help="its directory (needed for any kind but a topic)")
     p.add_argument("--create", action="store_true",
                    help="make the root first (not for a topic)")
@@ -124,9 +124,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                           "The lead is set with `set --lead`.")
     pair = agents.add_subparsers(dest="action", metavar="ACTION")
     pair.required = True
-    for action, help in (("add", "add an associated agent"),
+    for action, action_help in (("add", "add an associated agent"),
                          ("remove", "remove an associated agent")):
-        p = pair.add_parser(action, help=help, description=help[0].upper() + help[1:] + ".")
+        p = pair.add_parser(action, help=action_help, description=action_help[0].upper() + action_help[1:] + ".")
         p.add_argument("key", metavar="KEY")
         p.add_argument("name", metavar="NAME")
         p.add_argument("--json", action="store_true", help="print JSON")
@@ -160,7 +160,7 @@ def _path(text: str | None) -> str | None:
 def _add(args, out) -> int:
     added = acts.add(args.key, root=_path(args.root), kind=args.kind, lead=args.lead,
                      notes_root=_path(args.notes_root), create=args.create)
-    _print_added(added, args.json, out)
+    _print_added(added, as_json=args.json, out=out)
     return codes.OK
 
 
@@ -183,7 +183,7 @@ def _set(args, out) -> int:
         note = acts.root_note(project.root)
         if note:
             print(f"note: {note}", file=sys.stderr)
-    _print(project, args.json, out)
+    _print(project, as_json=args.json, out=out)
     return codes.OK
 
 
@@ -199,7 +199,7 @@ def _remove(args, out) -> int:
 def _promote(args, out) -> int:
     added = acts.promote(args.slug, args.key, kind=args.kind, root=_path(args.root),
                          create=args.create)
-    _print_added(added, args.json, out)
+    _print_added(added, as_json=args.json, out=out)
     return codes.OK
 
 
@@ -222,7 +222,7 @@ def _list(args, out) -> int:
 
 
 def _show(args, out) -> int:
-    _print(api.get(args.key), args.json, out)
+    _print(api.get(args.key), as_json=args.json, out=out)
     return codes.OK
 
 
@@ -255,7 +255,7 @@ def _kinds(args, out) -> int:
 
 def _agents(args, out) -> int:
     act = acts.add_agent if args.action == "add" else acts.remove_agent
-    _print(act(args.key, args.name), args.json, out)
+    _print(act(args.key, args.name), as_json=args.json, out=out)
     return codes.OK
 
 
@@ -272,7 +272,7 @@ def _kinds_dict(found: Kinds) -> dict:
                        for module, reason in found.broken]}
 
 
-def _print_added(added: acts.Added, as_json: bool, out) -> None:
+def _print_added(added: acts.Added, *, as_json: bool, out) -> None:
     """An add's notes and warnings on stderr, then the project; with `as_json`, a warning
     is also in the project's JSON, as `warnings`, present only when there is one."""
     for note in added.notes:
@@ -283,10 +283,10 @@ def _print_added(added: acts.Added, as_json: bool, out) -> None:
         print(json.dumps({**added.project.as_dict(), "warnings": added.warnings}, indent=2),
               file=out)
         return
-    _print(added.project, as_json, out)
+    _print(added.project, as_json=as_json, out=out)
 
 
-def _print(project: Project, as_json: bool, out) -> None:
+def _print(project: Project, *, as_json: bool, out) -> None:
     if as_json:
         print(json.dumps(project.as_dict(), indent=2), file=out)
         return

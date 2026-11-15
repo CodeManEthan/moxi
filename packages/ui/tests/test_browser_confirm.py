@@ -202,7 +202,7 @@ def test_a_page_server_that_fails_to_start_or_dies_and_a_shell_that_is_gone(
             shell.kill("fixture")
         assert _confirmed(page, {"by": 1}) == {"outcome": "refused", "code": 502, "text": NOT_SENT}
     finally:
-        fixture_kit.fail_start(shell, on=False)
+        fixture_kit.fail_start(shell, enabled=False)
     # The shell itself gone: no answer at all.
     shell.stop()
     assert _confirmed(page, {"by": 1}) == {"outcome": "unknown", "text": MAY_HAVE_ACTED}

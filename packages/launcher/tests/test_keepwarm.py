@@ -48,12 +48,12 @@ class FakeDelivery:
         return self.value
 
 
-def agent(id, kind="subagent", state="running", final=False, description=None):
-    return SimpleNamespace(id=id, kind=kind, state=state, final=final,
+def agent(agent_id, kind="subagent", state="running", *, final=False, description=None):
+    return SimpleNamespace(id=agent_id, kind=kind, state=state, final=final,
                            description=description)
 
 
-def facts(turn_open=False, number=4, session_id=SID):
+def facts(*, turn_open=False, number=4, session_id=SID):
     return SimpleNamespace(turn_open=turn_open, turn=None, turn_number=number, draft=False,
                            stale=False, session_id=session_id)
 
@@ -122,15 +122,15 @@ class FakeCache:
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection)
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn)
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, request_id="r1", values=None, session_id=SID, claimed=True,
              relaunch_of=None, resume_of=None):
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target="slot",
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target="slot",
                  cwd="/work", values={"model": "opus", "keep_warm": "on", **(values or {})},
                  argv=["claude"], env={}, posture="operator", session_id=session_id,
                  slot="3", relaunch_of=relaunch_of, resume_of=resume_of)
@@ -156,7 +156,7 @@ def events(conn, run_id):
 def nudged(conn, *, session_id=SID, number=4, agents=(), request_id="r1"):
     """A `nudged` run as an ask leaves it: the turn it opened is `number + 1`."""
     run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id=request_id,
-                           session_id=session_id, actor="launcher", state="acting",
+                           session_id=session_id, by="launcher", state="acting",
                            turn_number=number, job=f"proc:{me()}")
     store.add_run_event(conn, run.run_id, "nudge", {"agents": list(agents)})
     store.end_run(conn, run.run_id, "nudged", word="subagents", turn_number=number + 1)
@@ -188,8 +188,8 @@ def test_cache_s_timer_asks_by_the_request_stamp_alone():
     if found.api.asking({}) is None:
         pytest.skip("a process's environment can't be read on this system")
     assert cachetimers.KEEP_WARM in found.api.asking({"MOXI_LAUNCHER_REQUEST": "r-1"})
-    for environ in ({"MOXI_LAUNCHER_KEEP_WARM": "on"}, {"MOXI_LAUNCHER_REQUEST": ""}, {}):
-        assert cachetimers.KEEP_WARM not in found.api.asking(environ)
+    for env in ({"MOXI_LAUNCHER_KEEP_WARM": "on"}, {"MOXI_LAUNCHER_REQUEST": ""}, {}):
+        assert cachetimers.KEEP_WARM not in found.api.asking(env)
 
 
 def test_the_job_takes_the_keep_warm_kind_and_runs_the_ask(monkeypatch, capsys):
@@ -430,7 +430,7 @@ def test_a_turn_started_after_the_insert_drops_the_run(conn):
 
 def test_another_open_run_makes_the_ask_lose(conn):
     exit_run = store.insert_run(conn, kind="exit", mode="verb", request_id="r1",
-                                session_id=SID, actor="ann", state="acting",
+                                session_id=SID, by="ann", state="acting",
                                 job=f"proc:{me()}")
     got = ask(conn)
     assert (got.verdict.outcome, got.verdict.word) == (None, "run-open")
@@ -440,7 +440,7 @@ def test_another_open_run_makes_the_ask_lose(conn):
 
 def test_a_stale_open_run_is_ended_job_gone_and_the_ask_goes_on(conn):
     stale = store.insert_run(conn, kind="clear", mode="expiry", request_id="r1",
-                             session_id=SID, actor="launcher", state="acting",
+                             session_id=SID, by="launcher", state="acting",
                              job="proc:999999999@1.0", at="2020-01-01T00:00:00.000000Z")
     got = ask(conn)
     assert got.verdict.outcome == "nudged"

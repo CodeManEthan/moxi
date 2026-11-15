@@ -72,7 +72,7 @@ def _teardown(say) -> int | str:
     except ledger.LedgerError as exc:
         raise modules.Refused(f"uninstall refused; nothing was removed: {exc}") from None
     machine = _machine()
-    folders = _folders(data, machine)
+    loadout_dirs = _loadout_dirs(data, machine)
     run = _plan(data, machine)
 
     problems = (_changed(run) + _crossed(run) + _unreadable(run) + _ignore_files(data)
@@ -89,10 +89,10 @@ def _teardown(say) -> int | str:
         if a.op in ("add", "update", "remove") and not a.done:
             failed.append(f"loadout: {_label(a.record)} was not removed from "
                           f"{a.record.get('file')}")
-        elif a.op == "end" and a.record.get("prior") and _runs_from(a.record, folders):
+        elif a.op == "end" and a.record.get("prior") and _runs_from(a.record, loadout_dirs):
             how = "reads" if a.record.get("kind") in _GLOBAL_KINDS else "runs from"
             say(f"loadout: {_label(a.record)} stays in {a.record.get('file')}, as it was "
-                f"there before loadout; it {how} {_runs_from(a.record, folders)}")
+                f"there before loadout; it {how} {_runs_from(a.record, loadout_dirs)}")
 
     try:
         _hand_back(data, say)
@@ -134,7 +134,7 @@ def _keep(machine) -> int:
     return 10 if machine is None else machine.backups_keep
 
 
-def _folders(data: dict, machine) -> list[str]:
+def _loadout_dirs(data: dict, machine) -> list[str]:
     """The loadout folders a harness entry may run from: the one the last install read,
     and the configured one."""
     out = []
@@ -149,8 +149,8 @@ def _plan(data: dict, machine):
     (the user's first, or gone already), or left as changed or unreadable."""
     from moxi_loadout import entries, manifest, stores
 
-    folder = stores.default_source() if machine is None else machine.source
-    run = entries.plan(manifest.empty(stores.manifest_path(folder)), folder, data)
+    loadout_dir = stores.default_source() if machine is None else machine.source
+    run = entries.plan(manifest.empty(stores.manifest_path(loadout_dir)), loadout_dir, data)
     for a in run.actions:
         if a.op == "stand" and a.record is not None and a.record.get("kind") == "mcp" \
                 and a.reason.startswith("no ") and entries.mcp_there(a.record) is False:
@@ -264,13 +264,13 @@ def _ident(record: dict) -> str | None:
 _GLOBAL_KINDS = ("global-line", "instructions", "global-block")
 
 
-def _runs_from(record: dict, folders: list[str]) -> str | None:
+def _runs_from(record: dict, loadout_dirs: list[str]) -> str | None:
     """The loadout folder a kept entry names (a hook's script, an MCP server's, the
     global file a global entry brings in), or None."""
     if record.get("kind") not in ("hook", "mcp", "opencode-mcp") + _GLOBAL_KINDS:
         return None
     texts = list(_strings(record.get("written")))
-    return next((f for f in folders if any(f in t for t in texts)), None)
+    return next((f for f in loadout_dirs if any(f in t for t in texts)), None)
 
 
 def _strings(value):

@@ -48,14 +48,14 @@ class FakeCache:
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection)
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn)
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, request_id="r1", values=None, session_id=SID, relaunch_of=None):
-    store.insert(conn, request_id=request_id, actor="ann", harness="claude", target="slot",
+    store.insert(conn, request_id=request_id, by="ann", harness="claude", target="slot",
                  cwd="/work", values={"model": "opus", **(values or {})}, argv=["claude"],
                  env={}, posture="operator", session_id=session_id, slot="3",
                  relaunch_of=relaunch_of)
@@ -64,7 +64,7 @@ def launched(conn, *, request_id="r1", values=None, session_id=SID, relaunch_of=
 def ran(conn, outcome, *, kind="keep-warm", mode="ask", word=None, detail=None,
         request_id="r1", at=None, **values):
     run = store.insert_run(conn, kind=kind, mode=mode, request_id=request_id,
-                           session_id=SID, actor="launcher", state="acting",
+                           session_id=SID, by="launcher", state="acting",
                            job=me(), at=at)
     store.end_run(conn, run.run_id, outcome, word=word, detail=detail, **values)
     return store.get_run(conn, run.run_id)
@@ -102,7 +102,7 @@ def test_a_blocked_run_is_red_blocked_since_the_block_began(conn):
 def test_a_repeated_block_keeps_its_first_start_as_since(conn):
     first = ran(conn, "blocked", kind="clear", mode="expiry", word="draft", at=OLD)
     run = store.insert_run(conn, kind="clear", mode="expiry", request_id="r1",
-                           session_id=SID, actor="launcher", state="acting", job=me())
+                           session_id=SID, by="launcher", state="acting", job=me())
     assert store.end_blocked(conn, run.run_id, "draft") == first.run_id
     got = read(conn)
     assert got.red and got.since == OLD
@@ -145,7 +145,7 @@ def test_a_later_run_that_ended_held_takes_the_place_of_red(conn):
 def test_an_open_run_after_a_failed_one_leaves_it_red(conn):
     ran(conn, "relaunch-failed", kind="relaunch", mode="self", at=OLD)
     store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1", session_id=SID,
-                     actor="launcher", state="acting", job=me())
+                     by="launcher", state="acting", job=me())
     got = read(conn)
     assert got.red and got.why == "relaunch-failed"
 
@@ -192,7 +192,7 @@ def test_a_run_of_the_new_launch_that_ended_well_clears_the_making_run(conn):
 
 def test_an_open_relaunch_shows_armed_then_its_latest_wait(conn):
     run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
-                           session_id=SID, actor="ann", job="slots:relaunch-x")
+                           session_id=SID, by="ann", job="slots:relaunch-x")
     assert read(conn).relaunch.state == "armed"
     store.advance_run(conn, run.run_id, "waiting")
     store.add_run_event(conn, run.run_id, "wait", {"word": "turn", "detail": "open"})
@@ -202,7 +202,7 @@ def test_an_open_relaunch_shows_armed_then_its_latest_wait(conn):
 
 def test_an_open_run_whose_job_is_gone_shows_stale(conn):
     store.insert_run(conn, kind="relaunch", mode="self", request_id="r1", session_id=SID,
-                     actor="ann", job="proc:999999999@1.0", at=OLD)
+                     by="ann", job="proc:999999999@1.0", at=OLD)
     got = read(conn)
     assert got.relaunch.state == "stale" and got.relaunch.run.state == "stale"
 

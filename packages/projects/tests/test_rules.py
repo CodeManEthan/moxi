@@ -37,7 +37,7 @@ def test_a_key_that_is_not_a_string_is_refused():
         rules.check_key(None)
 
 
-def test_absolutize_expands_home_and_joins_the_working_directory(tmp_path):
+def test_absolutize_expands_home_and_joins_the_working_dir(tmp_path):
     assert rules.absolutize("~/x/../y") == os.path.join(os.path.expanduser("~"), "y")
     assert rules.absolutize("a/./b", cwd=str(tmp_path)) == str(tmp_path / "a" / "b")
 

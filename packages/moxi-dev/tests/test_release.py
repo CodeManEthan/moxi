@@ -32,10 +32,10 @@ def catalogue(*lines: tuple[str, str]) -> str:
         for name, dist in lines)
 
 
-def member(root: Path, directory: str, name: str, version: str = "0.1.0", *,
+def member(root: Path, member_dir: str, name: str, version: str = "0.1.0", *,
            extra: str = "", module: str | None = None) -> Path:
     """A member that passes the release step; `extra` goes in its [project] table."""
-    package = root / "packages" / directory
+    package = root / "packages" / member_dir
     release_files(package, version)
     text = f'[project]\nname = "{name}"\nversion = "{version}"\n{METADATA}{extra}'
     if module:

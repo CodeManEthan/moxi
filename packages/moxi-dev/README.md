@@ -4,7 +4,7 @@ The contributor tools for the Moxi repository. It is a development package: the
 repository's `uv sync` installs it, and no Moxi module depends on it at run time.
 
 - `moxi-dev check` runs the checks a change must pass before it merges: the lock, the
-  tag, comment-reference and public-name checks, the release step (see below), the
+  tag, comment-reference, naming and Ruff checks, the release step (see below), the
   contract's import rules (import-linter and deptry) and the tests of the packages the
   change reaches. A test in the `slow`, `browser` or `build` tier runs
   when a path its `touches` mark names changed; `--full` runs every package and every
@@ -49,14 +49,35 @@ The naming step reads every live numeric key in each `settings.toml`, each argpa
 and CLI verbs table in `src/`, and the parameters of every exported module API. MX1
 refuses numeric durations or sizes without the house unit suffix. MX4 refuses the verbs
 and switch-key words listed in `CONTRIBUTING.md`, an `enabled` key that is not a bool,
-and one key leaf used with different types. Retired keys are skipped. A valid MX mark
-with a reason suppresses that rule on its line. The step refuses a bare `# noqa` and an
-MX mark without ` -- <why>`; put a parameter exception on its function definition line
-and a settings exception on the key's table line.
+and one key leaf used with different types. Retired keys are skipped.
+
+MX2 reads `MOXI_` variable-name literals in `src/`, except docstrings and module
+announcements. A literal in code must use a module-level constant. That constant ends
+in `_ENV`, is the variable's only constant, and belongs to the package named by the
+variable's module prefix. `MOXI_TEST_` belongs to moxi-dev; variables with no module
+prefix belong to the core. Tests and announcements may write the literal directly.
+
+MX3 reads Python bindings under every package's `src/`, `tests/` and other tracked
+paths. It holds environment mappings to `env`, caught exceptions to `exc`, directories
+to `<what>_dir`, database connections to `conn` or `<what>_conn`, open files to `fh` or
+`<what>_fh`, print callbacks to `say`, and actor parameters to `by`. It does not treat
+`urlopen` or `popen` results as files, non-database `connect` calls as database
+connections, or stored `actor` fields as parameters.
+
+Ruff runs from the repository root as `ruff check --no-cache .`. The root
+`pyproject.toml` selects N, A and FBT, ignores N818, excludes the core's vendored code,
+and declares MX as an external code so MX marks are valid. Ruff reports PEP 8 naming,
+builtin shadowing and boolean traps in the same check summary as the other steps.
+
+A valid MX mark with a reason suppresses that naming rule on its line. The naming step
+refuses a bare `# noqa` and an MX, N, A or FBT mark without ` -- <why>`; put a parameter
+exception on its function definition line and a settings exception on the key's table
+line.
 
 Run one step without the lock, release, package, lint or test steps with
-`moxi-dev check --only refs [PATH...]` or `moxi-dev check --only names [PATH...]`. Each
-step still reads the whole tree, but paths limit the findings it prints.
+`moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]` or
+`moxi-dev check --only ruff [PATH...]`. Each step still reads the whole tree, but paths
+limit the findings it prints.
 
 `moxi-dev rename [--table PATH] [--dry-run] [--main REF] [ROOT]` reads tab-separated
 rows of `<package> TAB <path> TAB <scope> TAB <kind> TAB <old> TAB <new>` from

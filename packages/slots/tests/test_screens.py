@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from moxi_slots import api, screens
-from moxi_slots.screens import (CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_FOLDER,
+from moxi_slots.screens import (CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR,
                                 SCREENS, Items, Screen, bare, find, match, plain, region)
 
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/screens*")
@@ -36,12 +36,12 @@ def width_of(name: str) -> int:
 
 #: name -> (screen expected present or None, full, the marked row's text, its why's start)
 EXPECTED = {
-    "claude-2.1.314-trust-120x40.plain.txt": (CLAUDE_TRUST_FOLDER, True, "No, exit", ""),
-    "claude-2.1.314-trust-120x40.ansi.txt": (CLAUDE_TRUST_FOLDER, True, "No, exit", ""),
+    "claude-2.1.314-trust-120x40.plain.txt": (CLAUDE_TRUST_DIR, True, "No, exit", ""),
+    "claude-2.1.314-trust-120x40.ansi.txt": (CLAUDE_TRUST_DIR, True, "No, exit", ""),
     "claude-2.1.314-trust-on-option-120x40.plain.txt":
-        (CLAUDE_TRUST_FOLDER, True, "Yes, I trust this folder", ""),
+        (CLAUDE_TRUST_DIR, True, "Yes, I trust this folder", ""),
     "claude-2.1.314-trust-on-option-120x40.ansi.txt":
-        (CLAUDE_TRUST_FOLDER, True, "Yes, I trust this folder", ""),
+        (CLAUDE_TRUST_DIR, True, "Yes, I trust this folder", ""),
     "claude-2.1.314-dev-channels-120x40.plain.txt":
         (CLAUDE_DEV_CHANNELS, True, "I am using this for local development", ""),
     "claude-2.1.314-dev-channels-120x40.ansi.txt":
@@ -85,7 +85,7 @@ def test_the_matcher_over_each_fixture(name):
 
 
 def test_the_trust_capture_needs_one_down():
-    held = match(CLAUDE_TRUST_FOLDER, fixture("claude-2.1.314-trust-120x40.plain.txt"), 120)
+    held = match(CLAUDE_TRUST_DIR, fixture("claude-2.1.314-trust-120x40.plain.txt"), 120)
     assert held.option - held.marked == 1
 
 
@@ -124,49 +124,49 @@ TRUST_ROWS = (" Accessing workspace:", "", " ❯ No, exit", "   Yes, I trust thi
 
 
 def test_the_marker_position_is_not_part_of_the_match():
-    held = match(CLAUDE_TRUST_FOLDER, dialog(*TRUST_ROWS), 40)
+    held = match(CLAUDE_TRUST_DIR, dialog(*TRUST_ROWS), 40)
     assert held.full and (held.marked, held.option) == (2, 3)
 
 
 def test_copy_mode_is_never_a_full_match():
-    held = match(CLAUDE_TRUST_FOLDER, dialog(*TRUST_ROWS), 40, in_mode=True)
+    held = match(CLAUDE_TRUST_DIR, dialog(*TRUST_ROWS), 40, in_mode=True)
     assert held.present and not held.full and "copy mode" in held.why
 
 
 def test_two_marked_rows_or_none_is_not_a_full_match():
     two = [r.replace("   Yes", " ❯ Yes") for r in TRUST_ROWS]
-    assert "2 rows are marked" in match(CLAUDE_TRUST_FOLDER, dialog(*two), 40).why
+    assert "2 rows are marked" in match(CLAUDE_TRUST_DIR, dialog(*two), 40).why
     none = [r.replace("❯", " ") for r in TRUST_ROWS]
-    assert "0 rows are marked" in match(CLAUDE_TRUST_FOLDER, dialog(*none), 40).why
+    assert "0 rows are marked" in match(CLAUDE_TRUST_DIR, dialog(*none), 40).why
 
 
 def test_a_missing_option_row_is_not_a_full_match():
     rows = [r.replace("Yes, I trust this folder", "Yes, trust it") for r in TRUST_ROWS]
-    held = match(CLAUDE_TRUST_FOLDER, dialog(*rows), 40)
+    held = match(CLAUDE_TRUST_DIR, dialog(*rows), 40)
     assert held.present and not held.full and "no row is the option" in held.why
 
 
 def test_an_option_row_with_extra_words_is_not_the_option():
     rows = [r.replace("Yes, I trust this folder", "Yes, I trust this folder and its parent")
             for r in TRUST_ROWS]
-    assert not match(CLAUDE_TRUST_FOLDER, dialog(*rows), 40).full
+    assert not match(CLAUDE_TRUST_DIR, dialog(*rows), 40).full
 
 
 def test_phrases_out_of_order_are_not_present():
     rows = (" Enter to confirm · Esc to cancel", " Accessing workspace:", " ❯ No, exit",
             "   Yes, I trust this folder")
-    held = match(CLAUDE_TRUST_FOLDER, dialog(*rows), 40)
+    held = match(CLAUDE_TRUST_DIR, dialog(*rows), 40)
     assert not held.present and "'Enter to confirm'" in held.why
 
 
 def test_no_rule_no_region():
-    held = match(CLAUDE_TRUST_FOLDER, "\n".join(TRUST_ROWS), 40)
+    held = match(CLAUDE_TRUST_DIR, "\n".join(TRUST_ROWS), 40)
     assert not held.present and held.why == "no full-width rule on screen"
 
 
 def test_a_no_break_space_reads_as_a_space():
     rows = [r.replace("❯ No", "❯ No") for r in TRUST_ROWS]
-    held = match(CLAUDE_TRUST_FOLDER, dialog(*rows), 40)
+    held = match(CLAUDE_TRUST_DIR, dialog(*rows), 40)
     assert held.full and bare(held.rows[held.marked]) == "No, exit"
 
 
@@ -203,13 +203,13 @@ def test_the_index_is_dropped_from_an_option_row():
 def test_the_three_screens():
     assert CLAUDE_EXIT_DIALOG.move is False and CLAUDE_EXIT_DIALOG.then == "ended"
     assert CLAUDE_EXIT_DIALOG.items == Items("will stop when you exit", ("shell", "monitor"))
-    assert CLAUDE_TRUST_FOLDER.move and CLAUDE_TRUST_FOLDER.then == "gone"
+    assert CLAUDE_TRUST_DIR.move and CLAUDE_TRUST_DIR.then == "gone"
     assert CLAUDE_DEV_CHANNELS.move and CLAUDE_DEV_CHANNELS.then == "gone"
     assert {s.marker for s in SCREENS} == {"❯"}
 
 
 def test_the_api_re_exports_the_screens():
-    assert api.CLAUDE_TRUST_FOLDER is CLAUDE_TRUST_FOLDER
+    assert api.CLAUDE_TRUST_DIR is CLAUDE_TRUST_DIR
     assert api.CLAUDE_DEV_CHANNELS is CLAUDE_DEV_CHANNELS
     assert api.CLAUDE_EXIT_DIALOG is CLAUDE_EXIT_DIALOG
     assert api.Screen is Screen
@@ -224,7 +224,7 @@ def test_a_screen_checks_its_then():
 
 def test_the_first_present_screen_is_returned():
     text = fixture("claude-2.1.314-trust-120x40.plain.txt")
-    assert find([CLAUDE_DEV_CHANNELS, CLAUDE_TRUST_FOLDER], text, 120).screen \
-        is CLAUDE_TRUST_FOLDER
+    assert find([CLAUDE_DEV_CHANNELS, CLAUDE_TRUST_DIR], text, 120).screen \
+        is CLAUDE_TRUST_DIR
     assert find([CLAUDE_DEV_CHANNELS], text, 120) is None
     assert screens.find([], text, 120) is None

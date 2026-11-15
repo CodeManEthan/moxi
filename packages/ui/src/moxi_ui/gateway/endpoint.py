@@ -77,7 +77,7 @@ def resolve_kind(name: str, passed: Iterable[str] = UNIX_PASSED) -> str:
 # --- the runtime directory ------------------------------------------------------------
 
 
-def runtime_problem(environ: Mapping[str, str] | None = None, *,
+def runtime_problem(env: Mapping[str, str] | None = None, *,
                     stored: Mapping[str, str] | None = None,
                     platform: str | None = None) -> str | None:
     """The locator text when `environ` gives the ui a runtime directory other than the one
@@ -91,14 +91,14 @@ def runtime_problem(environ: Mapping[str, str] | None = None, *,
     """
     from .. import cli
 
-    environ = os.environ if environ is None else environ
+    env = os.environ if env is None else env
     platform = sys.platform if platform is None else platform
     if stored is None and platform == "win32":
         try:
-            stored = cli._stored_environment()
+            stored = cli._stored_env()
         except OSError:
             stored = {}
-    named = cli.locator_problem(environ, cli._unit_environ(environ, stored))
+    named = cli.locator_problem(env, cli._unit_env(env, stored))
     if not named:
         return None
     variables = ", ".join(named)
@@ -110,12 +110,12 @@ def runtime_problem(environ: Mapping[str, str] | None = None, *,
 
 
 class PathRefused(PermissionError):
-    """The gateway's socket path fails the check; `directory` is the first that failed
+    """The gateway's socket path fails the check; `failed_dir` is the first that failed
     (None for a path that is only too long), and the text holds the fix."""
 
-    def __init__(self, text: str, directory: str | None = None):
+    def __init__(self, text: str, failed_dir: str | None = None):
         super().__init__(text)
-        self.directory = directory
+        self.failed_dir = failed_dir
 
 
 def socket_path(layout: Layout | None = None, env: Mapping[str, str] | None = None) -> str:
@@ -138,13 +138,13 @@ def _owner_name(uid: int) -> str:
         return f"uid {uid}"
 
 
-def _refuse(directory: str, why: str, uid: int, owner: int) -> PathRefused:
+def _refuse(failed_dir: str, why: str, uid: int, owner: int) -> PathRefused:
     if owner == uid:
-        fix = f"chmod g-w,o-w {directory}"
+        fix = f"chmod g-w,o-w {failed_dir}"
     else:
         fix = f"ask {_owner_name(owner)}, who owns it, to make it writable by its owner only"
-    return PathRefused(f"the gateway's socket can't live under {directory}: {why}; {fix}",
-                       directory)
+    return PathRefused(f"the gateway's socket can't live under {failed_dir}: {why}; {fix}",
+                       failed_dir)
 
 
 def _walk(path: str, uid: int, lstat: Callable[[str], os.stat_result]) -> None:
@@ -154,9 +154,9 @@ def _walk(path: str, uid: int, lstat: Callable[[str], os.stat_result]) -> None:
     for part in (*parts[1:], None):
         try:
             st = lstat(current)
-        except OSError as err:
+        except OSError as exc:
             raise PathRefused(f"the gateway's socket path can't be checked at {current}: "
-                              f"{err.strerror}", current) from None
+                              f"{exc.strerror}", current) from None
         if st.st_uid not in (0, uid):
             raise _refuse(current, f"it is owned by {_owner_name(st.st_uid)}", uid, st.st_uid)
         if not stat.S_ISLNK(st.st_mode) and st.st_mode & 0o022:
@@ -186,10 +186,10 @@ def check_socket_path(path: str, *, uid: int | None = None, platform: str | None
         raise PathRefused(f"the gateway's socket path {path} is {size} bytes, past this "
                           f"system's limit of {limit}; a shorter home or XDG_RUNTIME_DIR "
                           "fixes it")
-    directory = os.path.dirname(path) or "."
-    _walk(os.path.abspath(directory), uid, lstat)
-    resolved = realpath(directory)
-    if resolved != os.path.abspath(directory):
+    parent_dir = os.path.dirname(path) or "."
+    _walk(os.path.abspath(parent_dir), uid, lstat)
+    resolved = realpath(parent_dir)
+    if resolved != os.path.abspath(parent_dir):
         _walk(resolved, uid, lstat)
 
 

@@ -63,7 +63,7 @@ class App:
         def send():
             if then is not None:
                 self.status[name] = then
-            self.settle.notified({"threadId": "t", "name": name, "status": status,
+            self.settle.on_notified({"threadId": "t", "name": name, "status": status,
                                   "error": None, "failureReason": None})
         if after:
             threading.Timer(after, send).start()

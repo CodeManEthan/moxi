@@ -43,7 +43,7 @@ from moxi_loadout.manifest import MODES
 #: The example manifest the package ships, a resource of `moxi_loadout`.
 EXAMPLE = "example/loadout.toml"
 #: The folders the example's comments name, made empty beside it.
-EXAMPLE_FOLDERS = ("skills", "agents")
+EXAMPLE_DIRS = ("skills", "agents")
 
 MODE_QUESTION = """\
 loadout: the global instruction file, global.md in your loadout folder, can reach every
@@ -78,11 +78,11 @@ def setup(*, say: Callable[[str], object] = print,
         machine = settings.read()
     except ConfigError as exc:
         return f"loadout: its settings don't read: {exc}"
-    folder = machine.source
+    loadout_dir = machine.source
     try:
-        if write_example(folder):
+        if write_example(loadout_dir):
             say(f"loadout: wrote an example manifest, every item commented out: "
-                f"{stores.manifest_path(folder)}")
+                f"{stores.manifest_path(loadout_dir)}")
     except (OSError, LockTimeout) as exc:
         failed.append(f"loadout: the example manifest wasn't written: {exc}")
     try:
@@ -91,25 +91,25 @@ def setup(*, say: Callable[[str], object] = print,
         failed.append(f"loadout: the opencode row wasn't added: {exc}")
     manifest_ok = True
     try:
-        for t in adoption.take(folder=folder, say=say):
+        for t in adoption.take(loadout_dir=loadout_dir, say=say):
             say(f"loadout: took over {t.module}/{t.placed.name} for {t.placed.harness}")
     except (ManifestError, LockTimeout) as exc:
         manifest_ok = False
         failed.append(f"loadout: no module skill was taken over: {_one_line(exc)}")
     if manifest_ok:
         try:
-            ask_mode(folder, say=say, ask=ask)
+            ask_mode(loadout_dir, say=say, ask=ask)
         except (ManifestError, LockTimeout) as exc:
             failed.append(f"loadout: the global mode wasn't written: {_one_line(exc)}")
     from moxi_loadout import repo_link
 
-    repo_link.sync(folder, machine.reinstall_on_commit, say=lambda line: say(
+    repo_link.sync(loadout_dir, enabled=machine.reinstall_on_commit, say=lambda line: say(
         f"loadout: {line}"))
     return "\n".join(failed) if failed else 0
 
 
-def write_example(folder: str | os.PathLike) -> bool:
-    """Write the example manifest into `folder` when the folder is missing or empty.
+def write_example(loadout_dir: str | os.PathLike) -> bool:
+    """Write the example manifest into `loadout_dir` when the folder is missing or empty.
     Returns whether it wrote. Holds the manifest's lock, so it never writes over a
     manifest another writer has just made."""
     import importlib.resources
@@ -118,36 +118,36 @@ def write_example(folder: str | os.PathLike) -> bool:
 
     from moxi_loadout import stores
 
-    folder = Path(folder)
-    if not _empty(folder):
+    loadout_dir = Path(loadout_dir)
+    if not _empty(loadout_dir):
         return False
     text = importlib.resources.files("moxi_loadout").joinpath(EXAMPLE).read_text(
         encoding="utf-8")
     with lock(stores.manifest_lock(), timeout_s=10.0):
-        if not _empty(folder):
+        if not _empty(loadout_dir):
             return False
-        os.makedirs(folder, exist_ok=True)
-        atomic_write(stores.manifest_path(folder), text, mode=0o644)
-        for name in EXAMPLE_FOLDERS:
-            os.makedirs(folder / name, exist_ok=True)
+        os.makedirs(loadout_dir, exist_ok=True)
+        atomic_write(stores.manifest_path(loadout_dir), text, mode=0o644)
+        for name in EXAMPLE_DIRS:
+            os.makedirs(loadout_dir / name, exist_ok=True)
     return True
 
 
-def _empty(folder: Path) -> bool:
-    if not os.path.lexists(folder):
+def _empty(loadout_dir: Path) -> bool:
+    if not os.path.lexists(loadout_dir):
         return True
-    with os.scandir(folder) as found:
+    with os.scandir(loadout_dir) as found:
         return next(found, None) is None
 
 
-def ask_mode(folder, *, say: Callable[[str], object] = print,
+def ask_mode(loadout_dir, *, say: Callable[[str], object] = print,
              ask: Callable[[str], str] | None = None) -> str | None:
     """The install question for the global mode, asked only when the manifest in
-    `folder` has no `[global] mode`. Returns the mode written, or None when nothing was
+    `loadout_dir` has no `[global] mode`. Returns the mode written, or None when nothing was
     written (a mode set already, nobody at the keyboard, or no answer)."""
     from moxi_loadout import manifest, writes
 
-    found = manifest.load(folder)
+    found = manifest.load(loadout_dir)
     if found.mode is not None:
         return None
     if not interactive():
@@ -157,7 +157,7 @@ def ask_mode(folder, *, say: Callable[[str], object] = print,
     if answer is None:
         say(NO_ANSWER)
         return None
-    writes.set_mode(answer, folder=folder)
+    writes.set_mode(answer, loadout_dir=loadout_dir)
     say(f"loadout: global mode {answer}, written to {found.path}; moxi loadout global "
         f"mode MODE changes it")
     if answer != "off":

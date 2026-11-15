@@ -61,10 +61,12 @@ def write_workspace(root: Path, layout: dict) -> None:
     """The layout's packages, each ready for the release step; the core's catalogue lists
     no module, as no package here declares one."""
     members = toml_list(f"packages/{d}" for d in layout)
-    (root / "pyproject.toml").write_text(f"[tool.uv.workspace]\nmembers = {members}\n")
+    (root / "pyproject.toml").write_text(
+        f"[tool.uv.workspace]\nmembers = {members}\n"
+        '[tool.ruff.lint]\nselect = ["N", "A", "FBT"]\nignore = ["N818"]\n')
     (root / "README.md").write_text("root\n")
-    for directory, (dist, deps, extras, groups) in layout.items():
-        package = root / "packages" / directory
+    for workspace_dir, (dist, deps, extras, groups) in layout.items():
+        package = root / "packages" / workspace_dir
         (package / "tests").mkdir(parents=True)
         release_files(package)
         if dist == "moxi":
@@ -108,17 +110,17 @@ def picked(root: Path, base: str = "main") -> list[str]:
     return [p.dir for p in check.pick(packages, check.changed_paths(root, base))]
 
 
-def program_path(directory: Path, name: str) -> Path:
+def program_path(bin_dir: Path, name: str) -> Path:
     """Where `program` writes `name`: as it is, or as `name.cmd` on Windows."""
-    return directory / (f"{name}.cmd" if os.name == "nt" else name)
+    return bin_dir / (f"{name}.cmd" if os.name == "nt" else name)
 
 
-def program(directory: Path, name: str, *, code: int = 0, stderr: tuple[str, ...] = ()
+def program(bin_dir: Path, name: str, *, code: int = 0, stderr: tuple[str, ...] = ()
             ) -> Path:
     """A stand-in program that prints `stderr`'s lines there and exits `code`: a shell
     script, or on Windows a batch file, which `shutil.which` finds by PATHEXT and a
     child process starts by its path."""
-    path = program_path(directory, name)
+    path = program_path(bin_dir, name)
     if os.name == "nt":
         path.write_text("".join(["@echo off\n", *(f">&2 echo {line}\n" for line in stderr),
                                  f"exit /b {code}\n"]), newline="\r\n")
@@ -264,20 +266,23 @@ def test_the_real_workspace_picks_by_the_same_rule():
 # --- the steps -------------------------------------------------------------------------
 
 def run_check(repo, runs, **kw):
-    kw.setdefault("environ", {"PATH": "/usr/bin", "VIRTUAL_ENV": str(repo / ".venv")})
+    kw.setdefault("env", {"PATH": "/usr/bin", "VIRTUAL_ENV": str(repo / ".venv")})
     kw.setdefault("plan", lambda package, work, members: [])
     return check.check(repo, run=runs, **kw)
 
 
-def test_reference_and_name_failures_are_recorded_and_later_steps_run(repo, monkeypatch):
+def test_code_check_failures_are_recorded_and_later_steps_run(repo, monkeypatch):
     commit_file(repo, "packages/sessions/x.py")
     monkeypatch.setattr(check.refs, "scan", lambda root: [
         check.refs.Hit("packages/sessions/x.py", 1, "Gone")])
     monkeypatch.setattr(check.naming, "scan", lambda root: [
         check.naming.Hit("packages/sessions/x.py", 1, "MX1", "unit", "bad", "fix")])
+    monkeypatch.setattr(check.ruff_check, "scan", lambda root: [
+        check.ruff_check.Hit("packages/sessions/x.py", 1, 1, "N802", "bad name")])
     runs = Runs()
     result = run_check(repo, runs)
-    assert result.code == 1 and result.refs == "fail" and result.names == "fail"
+    assert (result.code == 1 and result.refs == "fail" and result.names == "fail"
+            and result.ruff == "fail")
     assert runs.suites(), "the package suites still run after whole-tree findings"
 
 
@@ -295,6 +300,28 @@ def test_only_runs_one_scanner_reads_the_whole_tree_and_filters_printing(tmp_pat
     out = capsys.readouterr().out
     assert "packages/a/x.py" in out and "packages/b/y.py" not in out
     assert seen == [root]
+
+
+def test_only_ruff_runs_the_real_binary_and_filters_printing(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "ruff"
+    root.mkdir()
+    git(root, "init", "-q")
+    (root / "pyproject.toml").write_text('''
+[tool.ruff.lint]
+select = ["N", "A", "FBT"]
+ignore = ["N818"]
+external = ["MX"]
+''')
+    for package in ("a", "b"):
+        path = root / "packages" / package
+        path.mkdir(parents=True)
+        (path / "one.py").write_text("def choose(flag: bool):\n    return flag\n")
+    git(root, "add", "-A")
+    monkeypatch.chdir(root)
+    assert check.main(["--only", "ruff", "packages/a"]) == 1
+    out = capsys.readouterr().out
+    assert "packages/a/one.py:1: FBT001: ruff:" in out
+    assert "packages/b/one.py" not in out
 
 
 def test_steps_run_in_order_from_the_right_places(repo):
@@ -321,7 +348,7 @@ def test_steps_run_in_order_from_the_right_places(repo):
 def test_no_step_sets_a_pytest_tmp_root_or_basetemp(repo):
     commit_file(repo, "packages/sessions/x.py")
     runs = Runs()
-    run_check(repo, runs, environ={"PATH": "/usr/bin", "PYTEST_DEBUG_TEMPROOT": "/var/tmp"})
+    run_check(repo, runs, env={"PATH": "/usr/bin", "PYTEST_DEBUG_TEMPROOT": "/var/tmp"})
     for cmd, _, env in runs.calls:
         assert not any(arg.startswith("--basetemp") for arg in cmd)
         assert env.get("PYTEST_DEBUG_TEMPROOT") == "/var/tmp"
@@ -340,7 +367,7 @@ def test_every_suite_runs_under_an_explicit_worker_count(repo, monkeypatch):
 def test_the_worker_count_is_capped_by_the_variable(repo, monkeypatch):
     monkeypatch.setattr(check, "cpu_count", lambda: 6)
     runs = Runs()
-    run_check(repo, runs, full=True, environ={"PATH": "/usr/bin", "MOXI_TEST_WORKERS": "3"})
+    run_check(repo, runs, full=True, env={"PATH": "/usr/bin", "MOXI_TEST_WORKERS": "3"})
     for _, cmd in runs.suites():
         assert cmd[3:] == ["-n", "3"]
 
@@ -348,8 +375,8 @@ def test_the_worker_count_is_capped_by_the_variable(repo, monkeypatch):
 @pytest.mark.parametrize("cpus, cap, want", [(0, "", "1"), (1, "", "1"), (2, "9", "2"),
                                              (8, "1", "1")])
 def test_the_worker_count_is_never_zero(cpus, cap, want):
-    environ = {"MOXI_TEST_WORKERS": cap} if cap else {}
-    assert check.worker_args(environ, cpus=cpus) == ["-n", want]
+    env = {"MOXI_TEST_WORKERS": cap} if cap else {}
+    assert check.worker_args(env, cpus=cpus) == ["-n", want]
 
 
 def test_the_cpu_count_is_a_whole_number_of_one_or_more():
@@ -358,9 +385,9 @@ def test_the_cpu_count_is_a_whole_number_of_one_or_more():
 
 def test_the_suites_drop_what_could_make_them_serial(repo):
     runs = Runs()
-    environ = {"PATH": "/usr/bin", "PYTEST_XDIST_AUTO_NUM_WORKERS": "0",
+    given_env = {"PATH": "/usr/bin", "PYTEST_XDIST_AUTO_NUM_WORKERS": "0",
                "PYTEST_ADDOPTS": "--pdb", "PYTEST_DEBUG_TEMPROOT": "/var/tmp"}
-    run_check(repo, runs, full=True, environ=environ)
+    run_check(repo, runs, full=True, env=given_env)
     lock, sync, *suites = runs.calls
     assert suites
     for _, _, env in suites:
@@ -371,7 +398,7 @@ def test_the_suites_drop_what_could_make_them_serial(repo):
 @pytest.mark.parametrize("value", ["0", "-2", "two", "1.5"])
 def test_a_bad_worker_cap_stops_the_check(repo, value, capsys):
     runs = Runs()
-    result = run_check(repo, runs, full=True, environ={"MOXI_TEST_WORKERS": value})
+    result = run_check(repo, runs, full=True, env={"MOXI_TEST_WORKERS": value})
     assert result.code == 2 and runs.calls == []
     assert "MOXI_TEST_WORKERS" in capsys.readouterr().err
 
@@ -403,7 +430,8 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "lock"]: 1})
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
-    assert ("lock fail | tags not run | refs not run | names not run | release not run | "
+    assert ("lock fail | tags not run | refs not run | names not run | ruff not run | "
+            "release not run | "
             "stamps not run | web not run | sync not run | lint not run") in result.line()
 
 
@@ -418,7 +446,8 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     result = run_check(repo, runs)
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
-    assert ("packages: none | lock pass | tags pass | refs pass | names pass | release pass "
+    assert ("packages: none | lock pass | tags pass | refs pass | names pass | ruff pass | "
+            "release pass "
             "| stamps skipped | web skipped | sync skipped | lint not run | no suites run") \
         in result.line()
 
@@ -442,7 +471,7 @@ def test_the_release_step_runs_whatever_the_change_picks(repo, capsys):
     runs = Runs()
     result = run_check(repo, runs, base="HEAD")
     assert result.code == 1 and result.release == "fail"
-    assert ("| packages: none | lock pass | tags pass | refs pass | names pass | "
+    assert ("| packages: none | lock pass | tags pass | refs pass | names pass | ruff pass | "
             "release fail |") in result.line()
     assert ("moxi-dev check: packages/turns: CHANGELOG.md: its first version heading is "
             "0.0.9, but project.version is 0.1.0;") in capsys.readouterr().out
@@ -456,7 +485,7 @@ def test_a_release_problem_fails_the_check_and_the_rest_still_run(repo, capsys):
     assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
     assert "packages/sessions: README.md:1: links to docs/guide.md" in capsys.readouterr().out
 
-def test_each_lint_command_runs_in_the_check_s_environment(repo):
+def test_each_lint_command_runs_in_the_check_s_env(repo):
     commit_file(repo, "packages/sessions/x.py")
     seen = []
 
@@ -467,7 +496,7 @@ def test_each_lint_command_runs_in_the_check_s_environment(repo):
 
     runs = Runs()
     result = run_check(repo, runs, plan=plan,
-                       environ={"PATH": "/usr/bin", "PYTHONPATH": "/stray"})
+                       env={"PATH": "/usr/bin", "PYTHONPATH": "/stray"})
     assert result.code == 0 and "| lint pass |" in result.line()
     env_dir = repo / ".moxi-dev" / "env-3.12"
     members = [repo / "packages" / d for d in LAYOUT]
@@ -517,7 +546,7 @@ def test_the_real_plan_runs_over_the_real_layout(repo):
     """Without a stand-in plan, each package whose required module has no announcement
     fails its lint with a reason, and the rest still lint."""
     commit_file(repo, "packages/sessions/x.py")
-    result = check.check(repo, run=Runs(), environ={"PATH": "/usr/bin"})
+    result = check.check(repo, run=Runs(), env={"PATH": "/usr/bin"})
     assert "| lint fail (cache, comms) |" in result.line()
     assert (repo / ".moxi-dev" / "lint" / "sessions" / "importlinter.toml").is_file()
 
@@ -669,7 +698,7 @@ def test_with_node_and_node_modules_the_built_files_are_compared(repo, monkeypat
     _with_page(repo, monkeypatch)
     (repo / "node_modules").mkdir()
     runs = Runs()
-    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    result = run_check(repo, runs, full=True, env={"PATH": _tools(tmp_path, "node", "npm")})
     assert result.code == 0 and "| web pass |" in result.line()
     lock, web, sync, *_ = runs.calls
     # The npm `which` found, so Windows's npm.cmd starts too.
@@ -682,7 +711,7 @@ def test_a_built_file_that_differs_fails_before_the_sync(repo, monkeypatch, tmp_
     _with_page(repo, monkeypatch)
     (repo / "node_modules").mkdir()
     runs = Runs({lambda cmd, cwd: Path(cmd[0]).stem == "npm" and cmd[1] == "run": 1})
-    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    result = run_check(repo, runs, full=True, env={"PATH": _tools(tmp_path, "node", "npm")})
     assert result.code == 1 and runs.suites() == []
     assert "| web fail | sync not run |" in result.line()
 
@@ -696,7 +725,7 @@ def test_without_node_the_compare_is_left_out_with_a_line(repo, monkeypatch, tmp
     if modules:
         (repo / "node_modules").mkdir()
     runs = Runs()
-    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, *tools)})
+    result = run_check(repo, runs, full=True, env={"PATH": _tools(tmp_path, *tools)})
     assert result.code == 0 and "| web skipped |" in result.line()
     assert not any(Path(cmd[0]).stem == "npm" for cmd, _, _ in runs.calls)
     assert ("moxi-dev check: the built web files were not compared with their sources: "
@@ -707,7 +736,7 @@ def test_no_page_picked_runs_no_compare(repo, monkeypatch, tmp_path):
     _with_page(repo, monkeypatch, stamps="none")
     (repo / "node_modules").mkdir()
     runs = Runs()
-    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    result = run_check(repo, runs, full=True, env={"PATH": _tools(tmp_path, "node", "npm")})
     assert "| web none |" in result.line()
     assert not any(Path(cmd[0]).stem == "npm" for cmd, _, _ in runs.calls)
 
@@ -749,6 +778,7 @@ LINE = re.compile(
     r"tags (pass|fail|not run) \| "
     r"refs (pass|fail|not run) \| "
     r"names (pass|fail|not run) \| "
+    r"ruff (pass|fail|not run) \| "
     r"release (pass|fail|not run) \| "
     r"stamps (pass|fail|none|skipped|not run) \| "
     r"web (pass|fail|none|skipped|not run) \| "
@@ -842,9 +872,9 @@ def test_a_picked_run_hands_the_suites_the_changed_paths(repo):
     commit_file(repo, "packages/sessions/x.py")
     (repo / "packages/cache/new file.py").write_text("x\n")
     runs = Runs()
-    environ = {"PATH": "/usr/bin", testing.TIERS_ENV: "all", testing.FINDING_ENV: "L1",
+    given_env = {"PATH": "/usr/bin", testing.TIERS_ENV: "all", testing.FINDING_ENV: "L1",
                testing.CHANGED_ENV: "/elsewhere", testing.DURATIONS_ENV: "/elsewhere"}
-    run_check(repo, runs, environ=environ)
+    run_check(repo, runs, env=given_env)
     envs = suite_envs(runs)
     assert list(envs) == ["sessions", "cache", "comms"]
     for name, env in envs.items():
@@ -873,7 +903,7 @@ class Timed(Runs):
     shape: the parallel pass (`MOXI_TEST_TIMED=hold`) names them held, and the serial
     pass (`only`) runs them and nothing else."""
 
-    def __init__(self, seconds, codes=None, write=True, held=None):
+    def __init__(self, seconds, codes=None, *, write=True, held=None):
         super().__init__(codes)
         self.seconds = seconds
         self.write = write
@@ -978,7 +1008,7 @@ def test_a_dirty_tree_or_a_finding_keeps_no_record(ignoring):
     assert result.kept is None and not records(ignoring).exists()
 
 
-def on_main(repo, rel, seconds, full=True):
+def on_main(repo, rel, seconds, *, full=True):
     """Commit `rel` on main and keep a record for it there (a plain run, picked by that
     commit, when not `full`)."""
     git(repo, "switch", "-q", "main")
@@ -1067,7 +1097,7 @@ def test_a_record_the_disk_refuses_is_said_and_the_line_still_prints(
     assert list(where.iterdir()) == []
 
 
-def test_the_records_are_in_git_s_own_directory_whatever_its_name(tmp_path):
+def test_the_records_are_in_git_s_own_dir_whatever_its_name(tmp_path):
     from moxi_dev import durations
     root = tmp_path / "dépôt"
     root.mkdir()
@@ -1293,14 +1323,14 @@ def test_a_finding_only_timed_tests_carry_passes_in_the_serial_pass(ignoring):
 def test_the_suites_drop_a_caller_s_timed_setting(repo):
     runs = Runs()
     run_check(repo, runs, full=True,
-              environ={"PATH": "/usr/bin", testing.TIMED_ENV: "only"})
+              env={"PATH": "/usr/bin", testing.TIMED_ENV: "only"})
     assert {env[testing.TIMED_ENV] for _, _, _, env in pytest_calls(runs)} == {"hold"}
 
 
 def test_the_suites_drop_a_caller_s_left_out_tiers(repo):
     runs = Runs()
     run_check(repo, runs, full=True,
-              environ={"PATH": "/usr/bin", testing.LEAVE_OUT_ENV: "slow"})
+              env={"PATH": "/usr/bin", testing.LEAVE_OUT_ENV: "slow"})
     assert all(testing.LEAVE_OUT_ENV not in env for _, _, _, env in pytest_calls(runs))
 
 

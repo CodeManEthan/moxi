@@ -155,7 +155,7 @@ def test_a_named_session_has_the_way_back_its_name_and_its_facts_on_two_lines(se
     expect(texts(panel)).to_have_text([f"turn {n}" for n in range(TURNS - 5, TURNS)])
 
 
-def test_an_unnamed_session_is_named_by_its_folder_and_when_it_started(seeded, ui_page):
+def test_an_unnamed_session_is_named_by_its_dir_and_when_it_started(seeded, ui_page):
     panel = open_route(ui_page, f"claude/{sid(2)}")
     top = head(panel)
     expect(top.locator('[data-line="name"]')).to_have_text(re.compile(r"^proj-b · started (?:today|yesterday) \d"))
@@ -226,7 +226,7 @@ def test_the_way_back_goes_to_the_list(seeded, ui_page):
     expect(panel.locator('[data-part="head"]')).to_have_count(0)
 
 
-def test_a_folder_under_the_home_folder_is_written_with_a_tilde_in_the_list(seeded, ui_page):
+def test_a_dir_under_the_home_dir_is_written_with_a_tilde_in_the_list(seeded, ui_page):
     view = open_route(ui_page, "").locator("moxi-sessions-list")
     one = view.locator(f'moxi-ui-row[data-key="claude/{sid(1)}"]')
     one.get_by_role("button", name="Open").click()

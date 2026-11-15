@@ -283,15 +283,15 @@ def test_a_range_with_nothing_under_the_filters_says_so_in_the_charts_place(inst
     expect(panel.locator("[data-part=foot]")).to_be_visible()
 
 
-def test_without_projects_folders_and_the_folder_menu_fit_a_phone(installs, ui_contexts, ui_width_check):
+def test_without_projects_dirs_and_the_dir_menu_fit_a_phone(installs, ui_contexts, ui_width_check):
     shell = installs["small"]
     page = ui_contexts(shell).pages[0]
     ui_width_check(page, module="usage", route="folders")
     panel = page.locator(PANEL)
-    folders = section(panel, "folders")
-    expect(folders.locator("[data-part=rows] .tr2 .nm").first).to_have_text("~/work/proj-a")
-    folders.locator("[data-part=table-toggle]").click()
-    expect(folders.locator("table[data-part=table]")).to_be_visible()
+    dirs_section = section(panel, "folders")
+    expect(dirs_section.locator("[data-part=rows] .tr2 .nm").first).to_have_text("~/work/proj-a")
+    dirs_section.locator("[data-part=table-toggle]").click()
+    expect(dirs_section.locator("table[data-part=table]")).to_be_visible()
     ui_width_check(page)
     filter_of(panel, "place").locator("button.pick").click()
     expect(filter_of(panel, "place").get_by_role("menuitemradio", name="~/work/scratch")).to_be_visible()
@@ -311,7 +311,7 @@ conn.close()
 """
 
 #: Puts a file where Codex's sessions folder belongs, so a pass cannot list it.
-NOT_A_FOLDER = """
+NOT_A_DIR = """
 from pathlib import Path
 from moxi_sessions import api as sessions
 root = Path(sessions.root("codex"))
@@ -347,7 +347,7 @@ def test_an_index_another_version_wrote_gives_the_command_and_keeps_the_limits(u
 def test_a_harness_the_last_pass_could_not_read_is_said_at_the_foot(ui_shells, ui_contexts):
     shell = ui_shells()
     write(shell, [WEEK[0]], time.time())
-    run(shell, sys.executable, "-c", NOT_A_FOLDER)
+    run(shell, sys.executable, "-c", NOT_A_DIR)
     run(shell, sys.executable, "-m", "moxi", "usage", "index")
     page = ui_contexts(shell).pages[0]
     page.goto("/m/usage/")

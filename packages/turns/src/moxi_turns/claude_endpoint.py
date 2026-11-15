@@ -297,7 +297,7 @@ class ClaudeHarness(Harness):
             self._pending.append(delivery)
         self._hand_next()
 
-    def expired(self, delivery_id: str) -> None:
+    def on_expired(self, delivery_id: str) -> None:
         """The core expired the delivery (`PENDING_TTL_S`): its window closes now, admitted
         or not, so it holds no turn and no later submit (the liveness bound, above)."""
         with self._lock:
@@ -378,7 +378,7 @@ class ClaudeHarness(Harness):
                 # drop, `dropped`.
                 refused_by_gate = w.delivery in self._gate_refused
                 if not refused_by_gate:
-                    ep.refused(w.delivery, reason if reason in leg.GATE_CODES
+                    ep.on_refused(w.delivery, reason if reason in leg.GATE_CODES
                                else "dropped")
                 log.info("submit %s dropped%s: %s", w.delivery,
                          " by the gate" if refused_by_gate else "", reason)
@@ -447,11 +447,11 @@ class ClaudeHarness(Harness):
         elif kind == leg.R_APPEND_DONE:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
-                ep.steered(delivery)
+                ep.on_steered(delivery)
         elif kind == leg.R_APPEND_FAILED:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
-                ep.refused(delivery, "idle")
+                ep.on_refused(delivery, "idle")
         elif kind == leg.R_COMMAND_DONE:
             self._command_done(body)
 
@@ -574,7 +574,7 @@ class ClaudeHarness(Harness):
                 elif spec.refuse_agents and _busy_agents(body.get("agents")):
                     reason = "busy-agents"
                 if reason is not None:
-                    ep.refused(w.delivery, reason)
+                    ep.on_refused(w.delivery, reason)
             if reason is not None:
                 self._gate_refused.add(w.delivery)
                 log.info("entry of %s refused: %s", w.delivery, reason)
@@ -696,7 +696,7 @@ def _shells(value: Any) -> Shells:
             entries.append(LeftShell(e.get("id"), e["why"]))
     except ValueError as exc:
         log.warning("the runner's shell report cannot be read (%s): %r", exc, value)
-        return Shells((), (unnamed,), False)
+        return Shells((), (unnamed,), complete=False)
     if not complete and unnamed not in entries:
         entries.append(unnamed)
     return Shells(tuple(stopped), tuple(entries), complete)
@@ -715,7 +715,7 @@ def agents_from_runner(entries: Any, at: float) -> Agents:
     could not read; an entry with no id makes the list not complete, never shorter. A
     status turns does not know reads `unknown`, with no notice to call final."""
     if not isinstance(entries, list):
-        return Agents((), False, at)
+        return Agents((), complete=False, at=at)
     out: list[Agent] = []
     complete = True
     for raw in entries:

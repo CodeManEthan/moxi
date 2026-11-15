@@ -73,9 +73,9 @@ def test_nothing_is_delivered_while_catch_up_is_still_arriving():
 def test_the_turn_ledger_lives_in_the_shared_base():
     """The pending-injection ledger stays in comms for each adapter's owed ids."""
     ledger = harness.TurnLedger()
-    ledger.injected("prompt-1", "12")
+    ledger.on_injected("prompt-1", "12")
     assert ledger.completed({"id": "prompt-1", "status": harness.TURN_COMPLETED}) == "12"
-    ledger.injected("prompt-2", "13")
+    ledger.on_injected("prompt-2", "13")
     assert ledger.completed({"id": "prompt-2", "status": "error"}) is None
     assert not ledger.tracks("prompt-2")
 
@@ -92,7 +92,7 @@ class TurnPort(RecordingPort):
 
     def deliver(self, text, high, identity, count):
         turn = f"turn-{next(self._turn_numbers)}"
-        self.ledger.injected(turn, high, self.digest_ids(high))
+        self.ledger.on_injected(turn, high, self.digest_ids(high))
         self.delivered_batches.append((high, count))
         return turn
 
@@ -208,9 +208,9 @@ def test_a_digests_turn_end_releases_exactly_its_ids():
 
 def test_the_ledger_keeps_each_turns_ids():
     ledger = TurnLedger()
-    ledger.injected("turn-1", "7", ("5", "7"))
-    ledger.injected("turn-1", "9", ("8", "9"))     # a second digest steered in
-    ledger.injected("turn-2", "4", ("4",))
+    ledger.on_injected("turn-1", "7", ("5", "7"))
+    ledger.on_injected("turn-1", "9", ("8", "9"))     # a second digest steered in
+    ledger.on_injected("turn-2", "4", ("4",))
     assert ledger.ids("turn-1") == ("5", "7", "8", "9")
     assert ledger.pending("turn-1") == "9"
     assert ledger.end({"id": "turn-1", "status": "failed"}) == (None, ("5", "7", "8", "9"))
@@ -263,7 +263,7 @@ def test_a_dropped_batch_and_a_returned_delivery_hold_nothing():
 class FakeDaemon:
     """The binding's connection, as far as the turn end and `notify_activity` need it."""
 
-    def __init__(self, connected=True):
+    def __init__(self, *, connected=True):
         self.connected = connected
         self.frames: list = []
 
@@ -281,10 +281,10 @@ class FakeDaemon:
         return {"cursor": None}
 
 
-def bound_port(connected=True):
+def bound_port(*, connected=True):
     port = online_port()
     port.offline = False
-    port._daemon = FakeDaemon(connected)
+    port._daemon = FakeDaemon(connected=connected)
     return port
 
 

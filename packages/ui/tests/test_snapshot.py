@@ -52,7 +52,7 @@ def _ok(**extra):
      "required attribute"),
 ])
 def test_a_component_breaking_a_rule_is_refused_with_the_reason(name, decl, reason):
-    placed, refused = check_components("usage", {name: decl}, page=True, assets=ASSETS)
+    placed, refused = check_components("usage", {name: decl}, has_page=True, assets=ASSETS)
     assert placed == [] and reason in refused[0]["reason"]
 
 
@@ -60,17 +60,17 @@ def test_good_components_are_placed_and_a_module_without_a_page_places_none():
     decl = {"page": _ok(script="page.js", place="page"),
             "today": _ok(home=True, future_field=1,
                          attributes={"day": {"type": "enum", "values": ["a", "b"]}})}
-    placed, refused = check_components("usage", decl, page=True, assets=ASSETS)
+    placed, refused = check_components("usage", decl, has_page=True, assets=ASSETS)
     assert refused == [] and [c["element"] for c in placed] == ["moxi-usage-page",
                                                                  "moxi-usage-today"]
     assert placed[1]["url"] == "/m/usage/today.js" and placed[1]["attributes"][0]["values"] == ["a", "b"]
-    assert check_components("usage", decl, page=True, assets=None)[0] == []
-    placed, refused = check_components("usage", decl, page=False, assets=ASSETS)
+    assert check_components("usage", decl, has_page=True, assets=None)[0] == []
+    placed, refused = check_components("usage", decl, has_page=False, assets=ASSETS)
     assert placed == [] and "declares no PAGE" in refused[0]["reason"]
 
 
 def _one(decl, name="today"):
-    placed, refused = check_components("usage", {name: decl}, page=True, assets=ASSETS)
+    placed, refused = check_components("usage", {name: decl}, has_page=True, assets=ASSETS)
     assert refused == []
     return placed[0]
 
@@ -113,7 +113,7 @@ def test_a_component_the_fields_do_not_apply_to_carries_none():
     (_ok(home=True, home_as="row", place="inline"), "not a block placed at home"),
 ])
 def test_a_home_as_that_does_not_fit_refuses_the_component(decl, reason):
-    placed, refused = check_components("usage", {"today": decl}, page=True, assets=ASSETS)
+    placed, refused = check_components("usage", {"today": decl}, has_page=True, assets=ASSETS)
     assert placed == [] and reason in refused[0]["reason"]
 
 
@@ -460,7 +460,7 @@ def test_the_announcement_declares_the_shell_its_page_and_components():
     shell = found.daemons["shell"]
     assert "win32" in shell["platforms"] and shell["socket"]["setting"] == "port"
     assert found.health == {"shell": "moxi_ui.health:check"} and not found.budgets
-    placed, refused = check_components("ui", found.components, page=True,
+    placed, refused = check_components("ui", found.components, has_page=True,
                                        assets=["page.js", "servers.js", "health.js"])
     assert refused == [] and {c["element"] for c in placed} == {
         "moxi-ui-page", "moxi-ui-servers", "moxi-ui-health"}

@@ -71,8 +71,8 @@ import _thread
 import os
 
 #: The launcher's stamps.
-WARN_AT = "MOXI_USAGE_WARN_AT"
-CROSSING_AT = "MOXI_USAGE_CROSSING_AT"
+WARN_AT_ENV = "MOXI_USAGE_WARN_AT"
+CROSSING_AT_ENV = "MOXI_USAGE_CROSSING_AT"
 #: The selectable marks (`moxi_usage.thresholds.MARKS`, repeated so the off path imports
 #: nothing), and the absence of one.
 MARKS = ("1x", "1.5x", "2x")
@@ -118,10 +118,10 @@ def _env(event) -> dict:
 def selected(env) -> tuple[str | None, str | None]:
     """The notice's mark and the crossing's, each None for off, from a session's
     environment and, for a notice nothing stamped, config `marks.default`."""
-    notice = _stamped(env.get(WARN_AT))
+    notice = _stamped(env.get(WARN_AT_ENV))
     if notice is _UNSTAMPED:
         notice = config_default()
-    crossing = _stamped(env.get(CROSSING_AT))
+    crossing = _stamped(env.get(CROSSING_AT_ENV))
     if crossing is _UNSTAMPED:
         crossing = None
     return notice, crossing
@@ -774,7 +774,7 @@ def _warn(message: str) -> None:
     logging.getLogger(LOGGER).warning(message)
 
 
-__all__ = ["WARN_AT", "CROSSING_AT", "MARKS", "OFF", "NOTICE", "CROSSING", "PURPOSES",
+__all__ = ["WARN_AT_ENV", "CROSSING_AT_ENV", "MARKS", "OFF", "NOTICE", "CROSSING", "PURPOSES",
            "GROUP", "STATE_DIR", "SCHEMA", "NEVER", "MAIN_READER", "Crossing", "selected",
            "config_default", "on_tool", "observe", "floor", "gone", "handlers",
            "handler_wait", "run_handlers", "notice_line", "agent_label", "safe_id",

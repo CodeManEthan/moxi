@@ -231,8 +231,8 @@ def run(steps, *, now=time.time, sleep=time.sleep, slice_s: float = 30.0):
                         break
                     sleep(min(left, slice_s))
             step = steps.send(None)
-    except StopIteration as stop:
-        return stop.value
+    except StopIteration as exc:
+        return exc.value
 
 
 __all__ = ["NOT_COVERING", "HELD", "RETRY", "GIVE_UP", "REQUESTS", "LOCK", "RECORD",

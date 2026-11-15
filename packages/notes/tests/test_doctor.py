@@ -44,14 +44,14 @@ def set_up(**values) -> Path:
 
 # -- root ---------------------------------------------------------------------------------
 
-def _setup_ran(monkeypatch, ran: bool) -> list[str]:
+def _setup_ran(monkeypatch, *, ran: bool) -> list[str]:
     asked = []
     monkeypatch.setattr(moxi.modules, "setup_ran", lambda m: asked.append(m) or ran)
     return asked
 
 
-def test_root_fails_when_the_folder_is_missing_after_setup_ran(monkeypatch):
-    asked = _setup_ran(monkeypatch, True)
+def test_root_fails_when_the_dir_is_missing_after_setup_ran(monkeypatch):
+    asked = _setup_ran(monkeypatch, ran=True)
     row = rows()["root"]
     assert row.state == "fail" and "missing" in row.detail
     assert "moxi notes setup" in row.fix
@@ -71,13 +71,13 @@ def test_a_missing_root_before_setup_ran_warns_and_names_the_install():
 
 
 def test_the_setup_record_is_read_only_for_a_missing_root(monkeypatch):
-    asked = _setup_ran(monkeypatch, False)
+    asked = _setup_ran(monkeypatch, ran=False)
     (home() / "notes").mkdir()
     assert rows()["root"].state == "warn"
     assert asked == []
 
 
-def test_root_warns_when_the_folder_is_no_git_repo_and_the_rest_is_off():
+def test_root_warns_when_the_dir_is_no_git_repo_and_the_rest_is_off():
     (home() / "notes").mkdir()
     found = rows()
     assert found["root"].state == "warn" and found["root"].fix == "moxi notes setup"
@@ -267,7 +267,7 @@ def test_topics_is_off_without_projects(monkeypatch):
     assert row.state == "off" and row.fix == "moxi install projects"
 
 
-def test_topics_warns_on_a_missing_folder_and_on_a_git_inside():
+def test_topics_warns_on_a_missing_dir_and_on_a_git_inside():
     for key in ("gardening", "baking"):
         code, out, err = moxi_cmd("projects", "add", key, "--kind", "topic", "--create")
         assert code == 0, out + err

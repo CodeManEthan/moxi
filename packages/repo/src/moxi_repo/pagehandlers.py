@@ -111,9 +111,9 @@ def _repo(listed: dict, found: Any) -> dict[str, Any]:
                 specs += [_spec(root, item) for item in repo["specs"]]
         except api.Failure as exc:
             specs_problem = str(exc)
-        except Exception as err:
-            _log_once(err, "listing a repo's specs failed")
-            specs_problem = (f"an unexpected error ({type(err).__name__}); the page "
+        except Exception as unexpected_exc:
+            _log_once(unexpected_exc, "listing a repo's specs failed")
+            specs_problem = (f"an unexpected error ({type(unexpected_exc).__name__}); the page "
                              "server's log has the details")
     path = quote_arg(root)
     return {
@@ -137,11 +137,11 @@ def gather() -> dict[str, Any]:
         repos = [_repo(listed, found) for listed in api.status()]
     except api.Failure as exc:
         return {"state": "error", "detail": str(exc), "repos": []}
-    except Exception as err:
-        _log_once(err, "listing the repos failed")
+    except Exception as unexpected_exc:
+        _log_once(unexpected_exc, "listing the repos failed")
         return {"state": "error",
                 "detail": f"repo's page server hit an unexpected error "
-                          f"({type(err).__name__}); its log has the details",
+                          f"({type(unexpected_exc).__name__}); its log has the details",
                 "repos": []}
     return {"state": "up", "detail": None, "repos": repos}
 

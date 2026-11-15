@@ -45,7 +45,7 @@ IDENTITY = f"{TARGET}@{SCOPE}"
 results = []
 
 
-def check(ok: bool, line: str) -> bool:
+def check(*, ok: bool, line: str) -> bool:
     results.append((bool(ok), line))
     print(f"{'PASS' if ok else 'FAIL'}  {line}", flush=True)
     return bool(ok)
@@ -73,13 +73,13 @@ def report() -> int:
     return 1 if failed else 0
 
 
-def clean_environ() -> dict:
+def clean_env() -> dict:
     return {key: value for key, value in os.environ.items()
             if not key.startswith("MOXI_COMMS_")}
 
 
 def build_env(root: Path, home: Path, runtime: Path, store: Path, binary_dir: Path) -> dict:
-    env = clean_environ()
+    env = clean_env()
     env.update({
         "MOXI_HOME": str(root / "moxi"),
         "MOXI_COMMS_BACKEND": "mock",
@@ -293,64 +293,64 @@ def dry_run() -> int:
             [str(BIN / "moxi-comms-codex"), "stranger@nowhere", "--dry-run",
              "--config", str(roster)], env=env, capture_output=True, text=True,
         )
-        check(unknown.returncode == 2 and "stranger@nowhere" in unknown.stderr,
-              "the roster form refuses an identity its roster does not name (exit 2)")
+        check(ok=unknown.returncode == 2 and "stranger@nowhere" in unknown.stderr,
+              line="the roster form refuses an identity its roster does not name (exit 2)")
         plan = subprocess.run(
             [str(BIN / "moxi-comms-codex"), IDENTITY, "--dry-run", "--config",
              str(roster)], env=env, capture_output=True, text=True,
         )
-        check(plan.returncode == 0 and "moxi-turns-codex-host" in plan.stdout
+        check(ok=plan.returncode == 0 and "moxi-turns-codex-host" in plan.stdout
               and "agents.enabled=false" in plan.stdout,
-              "the dry run prints the host line, multi-agent off")
+              line="the dry run prints the host line, multi-agent off")
 
         daemon = start_daemon(env, runtime, store, root / "daemon.log")
         adapter = launch(env, roster, root / "wrapper.log")
-        check(bool(wait_until(lambda: IDENTITY in comms(env, ["agents"]).stdout, 20)),
-              "the wrapper bound the name on the daemon socket")
+        check(ok=bool(wait_until(lambda: IDENTITY in comms(env, ["agents"]).stdout, 20)),
+              line="the wrapper bound the name on the daemon socket")
         starts = wait_until(lambda: fake_codex.calls(records, "thread/start"), 20) or []
-        check(bool(starts), "the host spawned the fake app-server and started a thread")
+        check(ok=bool(starts), line="the host spawned the fake app-server and started a thread")
         params = starts[0]["params"] if starts else {}
         settings = params.get("config", {}).get("sandbox_workspace_write", {})
-        check(params.get("approvalPolicy") == "never"
+        check(ok=params.get("approvalPolicy") == "never"
               and params.get("sandbox") == "workspace-write"
               and params.get("model") == "gpt-sample",
-              "the start carries the host's approval policy and the roster's model and "
+              line="the start carries the host's approval policy and the roster's model and "
               "sandbox")
-        check(settings.get("network_access") is True
+        check(ok=settings.get("network_access") is True
               and str(work) in settings.get("writable_roots", [])
               and params.get("config", {}).get("agents") == {"enabled": False},
-              "the start carries network, writable roots and the disabled agents switch")
+              line="the start carries network, writable roots and the disabled agents switch")
 
         session = hosted_session(20)
-        check(session is not None, "turns published the hosted session through its API")
-        check(session is not None and bool(wait_until(lambda: opened(session), 20)),
-              "the launch opened its thread")
-        check(bool(fake_codex.calls(records, "thread/inject_items"))
+        check(ok=session is not None, line="turns published the hosted session through its API")
+        check(ok=session is not None and bool(wait_until(lambda: opened(session), 20)),
+              line="the launch opened its thread")
+        check(ok=bool(fake_codex.calls(records, "thread/inject_items"))
               and not fake_codex.calls(records, "turn/start"),
-              "the thread was opened with an injected item, not a turn")
-        check(bool(wait_until(lambda: thread_id_of(IDENTITY), 10)),
-              "the adapter recorded the hosted thread id")
+              line="the thread was opened with an injected item, not a turn")
+        check(ok=bool(wait_until(lambda: thread_id_of(IDENTITY), 10)),
+              line="the adapter recorded the hosted thread id")
 
         # comms' own path: moxi comms send -> daemon -> adapter -> turns -> app-server.
         write_rollout(root / "codex-home" / "sessions", thread_id_of(IDENTITY))
         sender = sender_session()
-        check(bool(wait_until(lambda: bound(sender), 10)), "the sender holds its binding")
+        check(ok=bool(wait_until(lambda: bound(sender), 10)), line="the sender holds its binding")
         mail = send(env, sender, "codex smoke through the daemon")
-        check(bool(wait_until(lambda: digest_with(records, mail), 20)),
-              f"the digest for msg {mail} reached the thread through the daemon")
-        check(cursor_of(IDENTITY) != mail, "the cursor waits for the digest's turn to end")
+        check(ok=bool(wait_until(lambda: digest_with(records, mail), 20)),
+              line=f"the digest for msg {mail} reached the thread through the daemon")
+        check(ok=cursor_of(IDENTITY) != mail, line="the cursor waits for the digest's turn to end")
         fake_codex.control_call(records, {"op": "complete"})
-        check(bool(wait_until(lambda: cursor_of(IDENTITY) == mail, 15)),
-              f"the turn's end advanced the cursor to {mail}")
+        check(ok=bool(wait_until(lambda: cursor_of(IDENTITY) == mail, 15)),
+              line=f"the turn's end advanced the cursor to {mail}")
 
         app_pid = fake_codex.events(records)[0]["pid"]
         stop(adapter)
         adapter = None
-        check(wait_until(lambda: any(row["event"] == "app-server-exit"
+        check(ok=wait_until(lambda: any(row["event"] == "app-server-exit"
                                      for row in fake_codex.events(records)), 10),
-              f"stopping the host ended the app-server process {app_pid}")
-        check(bool(wait_until(lambda: IDENTITY not in comms(env, ["agents"]).stdout, 10)),
-              "the name is unbound once the host has gone")
+              line=f"stopping the host ended the app-server process {app_pid}")
+        check(ok=bool(wait_until(lambda: IDENTITY not in comms(env, ["agents"]).stdout, 10)),
+              line="the name is unbound once the host has gone")
         return report()
     finally:
         if sender is not None:
@@ -391,12 +391,12 @@ def live_run(binary: str) -> int:
     try:
         daemon = start_daemon(env, runtime, store, root / "daemon.log")
         adapter = launch(env, roster, root / "wrapper.log")
-        check(bool(wait_until(lambda: IDENTITY in comms(env, ["agents"]).stdout, 60)),
-              "the live wrapper registered after turns loaded the real app-server")
+        check(ok=bool(wait_until(lambda: IDENTITY in comms(env, ["agents"]).stdout, 60)),
+              line="the live wrapper registered after turns loaded the real app-server")
         import moxi_turns as turns
 
         session = hosted_session(60)
-        check(session is not None, "turns published the hosted session through its API")
+        check(ok=session is not None, line="turns published the hosted session through its API")
         if session is None:
             return report()
         wait_until(lambda: opened(session), 60)
@@ -404,9 +404,9 @@ def live_run(binary: str) -> int:
                                    ref="smoke-live")
         started = delivery.wait_started(60)
         ended = delivery.wait_ended(300)
-        check(isinstance(started, turns.Started) and bool(started.turn_id)
+        check(ok=isinstance(started, turns.Started) and bool(started.turn_id)
               and isinstance(ended, turns.Ended) and ended.outcome == "answer",
-              f"the real Codex turn {getattr(started, 'turn_id', started)} completed "
+              line=f"the real Codex turn {getattr(started, 'turn_id', started)} completed "
               "and settled")
         return report()
     finally:

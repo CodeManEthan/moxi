@@ -129,30 +129,30 @@ class Layout:
     def device(self, env: Mapping[str, str] | None = None, *,
                create: bool = True) -> str | None:
         """This device's label for the module (`device_label`, with its `create`)."""
-        return _label(self.prefix, _environ(env), create)
+        return _label(self.prefix, _env(env), create=create)
 
     # -- the roots ---------------------------------------------------------------------
 
-    def _own(self, environ: Mapping[str, str], suffix: str) -> str | None:
-        return environ.get(f"{self.prefix}{suffix}") or None if self.prefix else None
+    def _own(self, env: Mapping[str, str], suffix: str) -> str | None:
+        return env.get(f"{self.prefix}{suffix}") or None if self.prefix else None
 
     def _root(self, kind: str, env: Mapping[str, str] | None) -> Path:
-        environ = _environ(env)
-        if per_root := self._own(environ, "RUNTIME_DIR" if kind == "runtime"
+        effective_env = _env(env)
+        if per_root := self._own(effective_env, "RUNTIME_DIR" if kind == "runtime"
                                  else f"{kind.upper()}_HOME"):
             return Path(per_root)
-        if home := self._own(environ, "HOME") or environ.get(HOME_ENV):
+        if home := self._own(effective_env, "HOME") or effective_env.get(HOME_ENV):
             return Path(home) / kind
         if _WINDOWS:
-            roaming, local = _windows_folders(environ)
+            roaming, local = _windows_dirs(effective_env)
             return Path(roaming if kind == "config" else local) / self.namespace / kind
         if kind == "runtime":
-            if xdg := environ.get("XDG_RUNTIME_DIR"):
+            if xdg := effective_env.get("XDG_RUNTIME_DIR"):
                 return Path(xdg) / self.namespace
             # No login runtime directory (some containers): under the state root instead.
-            return self._root("state", environ) / "runtime"
+            return self._root("state", effective_env) / "runtime"
         variable, default = _XDG[kind]
-        xdg = environ.get(variable) or _expanduser(default, environ)
+        xdg = effective_env.get(variable) or _expanduser(default, effective_env)
         return Path(xdg) / self.namespace
 
     def data_root(self, env: Mapping[str, str] | None = None) -> Path:
@@ -177,13 +177,13 @@ class Layout:
 
     def state_dir(self, env: Mapping[str, str] | None = None) -> Path:
         """The module's state directory, or its old one under a host folder until moved."""
-        environ = _environ(env)
-        return self._in_place(self.state_root(environ), environ)
+        effective_env = _env(env)
+        return self._in_place(self.state_root(effective_env), effective_env)
 
     def cache_dir(self, env: Mapping[str, str] | None = None) -> Path:
         """The module's cache directory, or its old one under a host folder until moved."""
-        environ = _environ(env)
-        return self._in_place(self.cache_root(environ), environ)
+        effective_env = _env(env)
+        return self._in_place(self.cache_root(effective_env), effective_env)
 
     def config_dir(self, env: Mapping[str, str] | None = None) -> Path:
         return self.config_root(env) / self.module
@@ -208,13 +208,13 @@ class Layout:
         """The module's one config file."""
         return self.config_dir(env) / CONFIG_FILE
 
-    def _in_place(self, root: Path, environ: Mapping[str, str]) -> Path:
+    def _in_place(self, root: Path, env: Mapping[str, str]) -> Path:
         new = root / self.module
         if os.path.exists(new):
             return new
-        return self._legacy(root, environ) or new
+        return self._legacy(root, env) or new
 
-    def _legacy(self, root: Path, environ: Mapping[str, str]) -> Path | None:
+    def _legacy(self, root: Path, env: Mapping[str, str]) -> Path | None:
         """The module's old directory under a host folder in `root`, or None.
 
         This is the one test for it: the read in place above, the home move
@@ -224,7 +224,7 @@ class Layout:
         variable, then the host name) where that path is a directory, a symbolic link to
         a directory counting as one.
         """
-        for label in _legacy_labels(self.prefix, environ):
+        for label in _legacy_labels(self.prefix, env):
             old = root / label / self.module
             if os.path.isdir(old):
                 return old
@@ -284,16 +284,16 @@ def device_label(module: str | None = None, env: Mapping[str, str] | None = None
     `OSError`.
     """
     prefix = names.env_prefix(module) if module is not None else ""
-    return _label(prefix, _environ(env), create)
+    return _label(prefix, _env(env), create=create)
 
 
-def _label(prefix: str, environ: Mapping[str, str], create: bool = True) -> str | None:
-    own = environ.get(f"{prefix}DEVICE") if prefix else None
-    if label := own or environ.get(DEVICE_ENV):
+def _label(prefix: str, env: Mapping[str, str], *, create: bool = True) -> str | None:
+    own = env.get(f"{prefix}DEVICE") if prefix else None
+    if label := own or env.get(DEVICE_ENV):
         return label
     if create:
-        return device_id(environ)
-    return _read_id(core().state_dir(environ) / DEVICE_ID)
+        return device_id(env)
+    return _read_id(core().state_dir(env) / DEVICE_ID)
 
 
 def _read_id(path: Path) -> str | None:
@@ -304,11 +304,11 @@ def _read_id(path: Path) -> str | None:
     return text or None
 
 
-def _legacy_labels(prefix: str, environ: Mapping[str, str]) -> list[str]:
+def _legacy_labels(prefix: str, env: Mapping[str, str]) -> list[str]:
     """The host-folder names the old layout used: the module's device variable, then the
     host name."""
     labels = []
-    if prefix and (own := environ.get(f"{prefix}DEVICE")):
+    if prefix and (own := env.get(f"{prefix}DEVICE")):
         labels.append(own)
     labels.append(_host_name())
     return [label for label in labels
@@ -409,11 +409,11 @@ def _layout(module: str) -> Layout:
     return core() if module == names.HARNESS else Layout(module)
 
 
-def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
+def _env(env: Mapping[str, str] | None) -> Mapping[str, str]:
     return os.environ if env is None else env
 
 
-def _expanduser(path: str, environ: Mapping[str, str]) -> str:
+def _expanduser(path: str, env: Mapping[str, str]) -> str:
     """`path` with a leading `~` expanded from `environ` alone.
 
     A bare `~` or a `~/` start (also `~\\` on Windows) becomes `home(environ)`; the
@@ -424,7 +424,7 @@ def _expanduser(path: str, environ: Mapping[str, str]) -> str:
     """
     seps = ("/", "\\") if _WINDOWS else ("/",)
     if path == "~" or path.startswith(tuple("~" + sep for sep in seps)):
-        found = _home(environ)
+        found = _home(env)
         return path if found is None else found + path[1:]
     return os.path.expanduser(path)
 
@@ -437,26 +437,26 @@ def home(env: Mapping[str, str] | None = None) -> Path:
     the shell gives. An empty variable reads as unset. Raises `LookupError` when nothing
     places one: no variable, and no user-database entry or profile folder.
     """
-    found = _home(_environ(env))
+    found = _home(_env(env))
     if found is None:
         raise LookupError("nothing places the home folder: no HOME is set and this "
                           "account has no home of its own")
     return Path(found)
 
 
-def _home(environ: Mapping[str, str]) -> str | None:
+def _home(env: Mapping[str, str]) -> str | None:
     if _WINDOWS:
-        if profile := environ.get("USERPROFILE"):
+        if profile := env.get("USERPROFILE"):
             return profile
-        if folder := environ.get("HOMEPATH"):
-            return (environ.get("HOMEDRIVE") or "") + folder
+        if home_dir := env.get("HOMEPATH"):
+            return (env.get("HOMEDRIVE") or "") + home_dir
         try:
             from . import _win
 
             return _win.known_folder("profile")
         except OSError:
             return None
-    if given := environ.get("HOME"):
+    if given := env.get("HOME"):
         return given
     return _account_home()
 
@@ -472,7 +472,7 @@ def _account_home() -> str | None:
         return None
 
 
-def _windows_folders(env: Mapping[str, str] | None = None) -> tuple[str, str]:
+def _windows_dirs(env: Mapping[str, str] | None = None) -> tuple[str, str]:
     """The user's roaming and local application data folders (Windows only), placed by
     `env` alone.
 
@@ -482,17 +482,17 @@ def _windows_folders(env: Mapping[str, str] | None = None) -> tuple[str, str]:
     user. `APPDATA` and `LOCALAPPDATA` are never read. Raises `OSError` when the shell
     gives none.
     """
-    environ = _environ(env)
-    folders = []
+    effective_env = _env(env)
+    result_dirs = []
     for name, variable in (("roaming", "WIN_PD_OVERRIDE_APPDATA"),
                            ("local", "WIN_PD_OVERRIDE_LOCAL_APPDATA")):
-        if override := (environ.get(variable) or "").strip():
-            folders.append(override)
+        if override := (effective_env.get(variable) or "").strip():
+            result_dirs.append(override)
         else:
             from . import _win
 
-            folders.append(_win.known_folder(name))
-    return folders[0], folders[1]
+            result_dirs.append(_win.known_folder(name))
+    return result_dirs[0], result_dirs[1]
 
 
 def which(name: str, env: Mapping[str, str] | None = None) -> str | None:
@@ -505,10 +505,10 @@ def which(name: str, env: Mapping[str, str] | None = None) -> str | None:
     mapping's `PATH` are searched: not the working directory, which is no part of an
     environment, and nothing when the mapping has no `PATH`.
     """
-    environ = _environ(env)
-    search = environ.get("PATH")
+    effective_env = _env(env)
+    search = effective_env.get("PATH")
     if _WINDOWS:
-        return _which_windows(name, search or "", environ.get("PATHEXT"))
+        return _which_windows(name, search or "", effective_env.get("PATHEXT"))
     import shutil
 
     if search is None:
@@ -535,12 +535,12 @@ def _which_windows(name: str, search: str, pathext: str | None) -> str | None:
 
     if os.path.dirname(name):
         return next((n for n in names if found(n)), None)
-    for folder in search.split(";"):
-        folder = folder.strip().strip('"')
-        if not folder:
+    for search_dir in search.split(";"):
+        search_dir = search_dir.strip().strip('"')
+        if not search_dir:
             continue
         for candidate in names:
-            path = os.path.join(folder, candidate)
+            path = os.path.join(search_dir, candidate)
             if found(path):
                 return path
     return None
@@ -585,8 +585,8 @@ def anchor_dir(env: Mapping[str, str] | None = None) -> Path:
     the user database, or no local folder from the shell. It never falls back to `HOME`.
     A `MOXI_ANCHOR_HOME` that isn't a full path raises `NoAnchor` too.
     """
-    environ = _environ(env)
-    if given := environ.get(ANCHOR_HOME_ENV):
+    effective_env = _env(env)
+    if given := effective_env.get(ANCHOR_HOME_ENV):
         if not os.path.isabs(given):
             raise NoAnchor(f"{ANCHOR_HOME_ENV} is {given!r}, not a full path",
                            f"take {ANCHOR_HOME_ENV} out of this environment")
