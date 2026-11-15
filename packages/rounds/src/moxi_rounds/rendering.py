@@ -232,7 +232,8 @@ def _questions_by_state(listed: list, heading: str) -> list[str]:
         for one in group:
             lines += _item(f"{one['id']}: {one['text']}")
             said = [f"from: {one['from']}", f"blocks: {_listed(one['blocks'])}",
-                    f"by: {one['by']}", f"at: {one['at']}"]
+                    f"by: {asked.asker(one['by'], one.get('builder'))}",
+                    f"at: {one['at']}"]
             if "left_as" in one:
                 said.append(f"reads as {one['left_as']}, and the round has ended")
             if "recorded" in one:

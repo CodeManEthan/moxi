@@ -154,6 +154,8 @@ def _questions(found: Shown) -> list:
                 "blocks": (None if question.blocks is None
                            else questions.stored(question.blocks)),
                 "state": state, "by": question.by, "at": question.at}
+        if question.builder is not None:
+            data["builder"] = question.builder
         if state != reads:
             # What its record reads as, in a round that has ended.
             data["left_as"] = reads
@@ -185,7 +187,8 @@ def _question_lines(listed: list) -> list[str]:
     for state in states_found:
         for one in (one for one in listed if one["state"] == state):
             said = [f"from: {one['from']}", f"blocks: {_blocks(one['blocks'])}",
-                    f"state: {questions.called(state)}", f"by: {one['by']}",
+                    f"state: {questions.called(state)}",
+                    f"by: {questions.asker(one['by'], one.get('builder'))}",
                     f"at: {one['at']}"]
             if "left_as" in one:
                 said.append(f"reads as {one['left_as']}, and the round has ended")

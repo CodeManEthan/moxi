@@ -257,7 +257,8 @@ def _question_lines(entries: Sequence, now: str) -> list[str]:
     lines = []
     for entry in entries:
         said = [f"from: {entry.origin}", f"blocks: {questions.said(entry.blocks)}",
-                f"state: {entry.state}", f"by: {entry.by}", f"at: {entry.at}"]
+                f"state: {entry.state}",
+                f"by: {questions.asker(entry.by, entry.builder)}", f"at: {entry.at}"]
         if entry.state == questions.PARKED:
             said.append(f"until: {entry.until or 'nothing named'}")
         else:

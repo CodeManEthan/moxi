@@ -16,6 +16,9 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
   step that is not waiting), and for the
   step that verifies the design the `pass` asked for, `why`, the two frozen `files` a
   re-check compares, and `instead`, what is done in place of a pass.
+- `changed`: in the group of a stage with an open build, each ruling recorded since
+  the build's block was printed that reaches the stage (`commission_block.changed`),
+  so a correction reaches a build already commissioned.
 - `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
   is printed for a round at no step, where nothing else says why it is still open.
 - `warnings`: what the lead should know beside the steps: a ruling that holds a stage
@@ -40,8 +43,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import (brake, closing, model_tiers, report_block, showing, stages, steps,
-               tracing, versions)
+from . import (brake, closing, commission_block, model_tiers, report_block, showing,
+               stages, steps, tracing, versions)
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -163,6 +166,10 @@ def _group(found: showing.Shown, step: steps.Step, models) -> dict:
     if group["built"] and lines is not None:
         group.update(lines(found, step))
     group["model"] = model_of(models, group["tier"])
+    if (step.stage is not None
+            and stages.build_of(found.state, step.stage) == stages.BUILDING):
+        group["changed"] = [one.data() for one in commission_block.changed(
+            found.state, found.register, step.stage)]
     return group
 
 
@@ -295,6 +302,7 @@ def _pass_line(group: dict) -> str:
 
 def _group_lines(said: dict, group: dict) -> list[str]:
     lines = [_head(said, group)]
+    lines += [commission_block.line(one) for one in group.get("changed", ())]
     if group["built"]:
         if "pass" in group:
             lines.append(_pass_line(group))

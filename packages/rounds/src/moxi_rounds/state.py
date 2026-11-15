@@ -208,6 +208,8 @@ class Question:
     held: str | tuple[str, ...] | None = None
     #: The record it became in the log it was moved to, or None while it is here.
     moved_to: str | None = None
+    #: The builder of the build it came up in, whom `by` asked it for, or None.
+    builder: str | None = None
 
 
 @dataclass(frozen=True)
@@ -624,7 +626,8 @@ def _question_asked(state: State, event: dict) -> None:
         until=event.get("until"), options=_offered(event.get("options")),
         # A key retired where the question was before stays retired here.
         retired=tuple(event.get("retired") or ()),
-        moved_from=event.get("moved_from"), held=_blocks(event.get("held"))))
+        moved_from=event.get("moved_from"), held=_blocks(event.get("held")),
+        builder=event.get("builder")))
 
 
 def _question_changed(state: State, event: dict) -> None:

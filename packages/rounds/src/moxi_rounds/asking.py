@@ -9,7 +9,13 @@ is `P<n>` in the project's log. Each log numbers its own from 1.
 `pointers` knows (a message, a moment in a session, a page, or a place in a file of the
 round's folder, such as a section of its design). A question that is the operator's own
 is given with `record`, the pointer to where he asked it, and that pointer is its origin.
-A question with neither is refused: nothing else can stand in for an origin.
+A question that came up in a build is given with `build`, the stage whose open build it
+came up in: a builder tells its lead, and the lead asks it. Its origin is that stage
+and the tip of the build's branch when it is asked (`pointers.build_origin`), and the
+build's builder is kept with it as `builder`, so a listing says whom the lead asked it
+for. A question with none of the three is refused: nothing else can stand in for an
+origin. Once the build has ended the lead asks with `origin` and names the build in
+the sentence.
 
 **What it holds up.** A round's question holds up every stage unless it says otherwise:
 the stages it names, which the round must have, or none. A project's question holds up
@@ -28,10 +34,11 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from . import ending, folders, log, pointers, questions, write
+from . import builds, ending, folders, log, pointers, questions, stages, write
 from . import options as choices
 from . import settings as own
-from .errors import BadArgument, NoLog, NoRound, Unmet
+from .errors import BadArgument, NoLog, NoRound, RoundsError, Unmet
+from .gitreads import Git
 
 
 @dataclass(frozen=True)
@@ -48,11 +55,15 @@ class Asked:
     event: dict
     failed: tuple[tuple[Callable, Exception], ...] = ()
     options: tuple[tuple[str, str], ...] = ()
+    #: The builder whose build the question came up in, None for any other.
+    builder: str | None = None
+    #: Who asked it.
+    by: str | None = None
 
 
 def ask(target: str, text: str, *, actor: str, origin: str | None = None,
-        record: str | None = None, blocks: str | None = None,
-        options: Sequence[str] = (), settings=None,
+        record: str | None = None, build: str | None = None,
+        blocks: str | None = None, options: Sequence[str] = (), settings=None,
         wait_s: float = write.WAIT_S, at: str | None = None) -> Asked:
     """Record one question on `target`, a round `<project>/<slug>` or a project's key,
     and return it as recorded.
@@ -62,6 +73,8 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
     - `origin`: the pointer to where the question came from.
     - `record`: the pointer to where the operator asked it, for a question that is his
       own, in place of `origin`.
+    - `build`: the stage of the round whose open build the question came up in, in
+      place of `origin`.
     - `blocks`: what a round's question holds up, `B2,B3`, `all` or `none`; every stage
       when left out. A project's question takes only `none`.
     - `options`: the choices the question offers, each `K=TEXT`, a key and its one
@@ -73,8 +86,9 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject` or
     `NoFolder` for a project with no rounds folder, `NoRound` for a round that was never
     opened, and `Refused` when the question has no origin, its pointer has no shape a
-    pointer has, it names a stage the round does not have, or it has one option or
-    more than four. A refusal leaves the log as it was.
+    pointer has, its `build` stage has no open build or a branch git can't read, it
+    names a stage the round does not have, or it has one option or more than four. A
+    refusal leaves the log as it was.
     """
     if not isinstance(target, str) or not target.strip():
         raise BadArgument("nothing says what the question is asked of",
@@ -91,6 +105,16 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
         raise BadArgument("--from and --record each say where the question came from",
                           "give --record alone for a question that is the operator's "
                           "own, and --from alone for any other")
+    if build is not None:
+        if origin is not None or record is not None:
+            raise BadArgument("--build says where the question came from, as --from "
+                              "and --record do",
+                              "give --build alone for a question that came up in a "
+                              "build")
+        if slug is None:
+            raise BadArgument("--build names a stage of a round, and a project has none",
+                              f"ask it of the round: moxi rounds ask <project>/<slug> "
+                              f"TEXT --build {build}")
     held = None if blocks is None else questions.parse_blocks(blocks)
     if slug is None:
         if held not in (None, questions.NONE):
@@ -108,8 +132,17 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
     again = f"moxi rounds ask {name} TEXT --from PTR"
     # One time for the event and for the question, so the two never differ by a second.
     at = log.stamp() if at is None else at
+    looked: dict[int, _InBuild] = {}
+
+    def in_build(view) -> _InBuild:
+        # One reading of git for one reading of the log: the gate and the event agree.
+        if id(view) not in looked:
+            looked[id(view)] = _in_build(view.state, build, name=name, again=again)
+        return looked[id(view)]
 
     def has_an_origin(view):
+        if build is not None:
+            return in_build(view).unmet
         if record is not None:
             return pointers.unmet(record, f"moxi rounds ask {name} TEXT --record PTR")
         if origin is None:
@@ -139,12 +172,16 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
 
     def asked(view, result):
         mine = view.state if slug is not None else view.project_state
+        came = in_build(view) if build is not None else None
         fields = {"id": questions.next_id("Q" if slug is not None else "P", mine),
-                  "text": text, "from": record if record is not None else origin,
+                  "text": text, "from": (came.origin if came is not None else
+                                         record if record is not None else origin),
                   "blocks": questions.stored(held), "state": questions.OPEN,
                   "asked_by": actor, "asked_at": at}
         if record is not None:
             fields["record"] = record
+        if came is not None:
+            fields["builder"] = came.builder
         if offered:
             fields["options"] = dict(offered)
         return write.Entry("question.asked", fields,
@@ -162,7 +199,46 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
     event = written.events[0]
     return Asked(id=event["id"], name=name, text=event["text"], blocks=held,
                  origin=event["from"], event=event, failed=written.failed,
-                 options=tuple(event.get("options", {}).items()))
+                 options=tuple(event.get("options", {}).items()),
+                 builder=event.get("builder"), by=event["asked_by"])
+
+
+@dataclass(frozen=True)
+class _InBuild:
+    """What the build a question came up in gives it: the `origin` and the `builder`,
+    or the `unmet` condition when it can give none."""
+
+    unmet: Unmet | None = None
+    origin: str | None = None
+    builder: str | None = None
+
+
+def _in_build(state, stage: str, *, name: str, again: str) -> _InBuild:
+    """The origin and builder of a question that came up in the open build of
+    `stage`: the stage and its branch's tip read from git now, and the builder its
+    commission names."""
+    later = f"{again}, naming the build in the sentence"
+    if stages.find(state, stage) is None:
+        return _InBuild(Unmet(f"{stage} is not a stage of {name}: "
+                              f"{questions.stages_said(state)}",
+                              f"moxi rounds show {name}"))
+    found = builds.current(state, stage)
+    if found is None or stages.build_of(state, stage) != stages.BUILDING:
+        return _InBuild(Unmet(f"{stage} of {name} has no open build for the question "
+                              "to have come up in; one that came up in a build that "
+                              "has ended is asked with --from", later))
+    commissioned = next(event for event in state.history if event["n"] == found.n)
+    try:
+        _repo, root = folders.root(found.repo)
+        tip = Git(root).branch(found.branch)
+    except RoundsError as error:
+        return _InBuild(Unmet(error.reason, error.fix or later))
+    if tip is None:
+        return _InBuild(Unmet(f"the branch {found.branch} of the build of {stage} is not "
+                              f"in {found.repo}, so the tip the question came up at "
+                              "can't be read", later))
+    return _InBuild(origin=pointers.build_origin(stage, tip),
+                    builder=commissioned.get("builder"))
 
 
 __all__ = ["Asked", "ask"]

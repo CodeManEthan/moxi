@@ -40,8 +40,17 @@ does not yet build.
   `open --inherits` names the standing rulings a round starts from.
 - `commission` builds a stage once its step waits for nothing: the branch cut from the
   target, its worktree and scratch folder each with a marker, the build recorded with
-  its id and host; a rerun keeps only its own stopped run's worktree. `show`, the round
-  note and `list --waiting` give each build with its state read from git.
+  its id and host; a rerun keeps only its own stopped run's worktree and the base its
+  branch was cut from. `show`, the round note and `list --waiting` give each build with
+  its state read from git.
+- `commission` prints the commission block for the builder's brief, with the rulings the
+  design cites for the stage as they stand now, then tells the lead which of them the
+  operator has not been shown and which standing rulings in the repo's scope no row
+  cites. `next` tells an open build each ruling recorded since its block that reaches
+  its stage.
+- `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
+  comes from the build at its branch's tip, and is listed as asked by the lead for the
+  builder.
 - `next` says the step a round is at, who does it and at which tier, what they read,
   the command that completes it and what it waits for; `next --schema` prints the empty
   data block of a report.

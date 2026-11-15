@@ -312,14 +312,14 @@ def holding(state: states.State, stage: str,
         if one is None:
             continue
         if ruling_id.startswith(_STANDING):
-            if _scope_reaches(one, state, stage):
+            if scope_reaches(one, state, stage):
                 found.append(one)
         elif applies_to(one, stage):
             found.append(one)
     return tuple(found)
 
 
-def _scope_reaches(one: states.Ruling, state: states.State, stage: str) -> bool:
+def scope_reaches(one: states.Ruling, state: states.State, stage: str) -> bool:
     """Whether the repos of the scope of `one`, a standing ruling, name the repo the
     stage builds in: always, for a ruling with no scope."""
     if not one.scope:
@@ -424,9 +424,9 @@ def _reaches(one: states.Ruling, state: states.State, stage: str) -> bool:
     """Whether the scope of `one`, a ruling that replaced a cited one, names `stage`."""
     if one.stages is not None:
         return applies_to(one, stage)
-    return _scope_reaches(one, state, stage)
+    return scope_reaches(one, state, stage)
 
 
 __all__ = ["Stale", "Result", "Given", "NOT_ASKED", "trace_set", "rows", "check",
            "stale", "stale_data", "recorded", "passes", "is_asked", "applies_to",
-           "unrowed", "holding", "given", "shown", "lines", "stale_line"]
+           "unrowed", "holding", "scope_reaches", "given", "shown", "lines", "stale_line"]

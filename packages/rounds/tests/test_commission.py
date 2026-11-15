@@ -90,8 +90,8 @@ def test_a_commission_cuts_the_branch_from_the_target_and_records_the_build(
     assert scratch == places.scratch_root() / "proj-a" / "work" / event["build"]
     assert os.listdir(scratch) == [places.SCRATCH_MARKER]
     said = capsys.readouterr().out
-    assert "commissioned proj-a/a-round B1   builder coder" in said
-    assert f"build {event['build']}" in said
+    assert f"round {ROUND}   stage B1   flow fix\n" in said
+    assert f"commissioned for coder   build {event['build']}" in said
 
 
 def test_each_folder_carries_a_marker_naming_the_build(repo, opened):

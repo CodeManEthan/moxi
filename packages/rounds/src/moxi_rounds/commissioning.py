@@ -32,10 +32,10 @@ repo and branch and a build id no `build.commissioned` of the round records: its
 stopped run. It keeps that id, and makes the scratch folder under it when it is
 missing. Its base is the merge base of the branch's tip and the target, the commit the
 stopped run cut the branch from: a build's base never moves, even when the target did
-between the runs. Any other folder at either place is refused, naming it: one with no marker (a
-stop between its create and its marker), and a worktree whose marker names a recorded
-build. rounds never adopts or removes a folder it can't tell it made; the user looks at
-it, removes it, and runs `commission` again.
+between the runs. Any other folder at either place is refused, naming it: one with no
+marker (a stop between its create and its marker), and a worktree whose marker names a
+recorded build. rounds never adopts or removes a folder it can't tell it made; the user
+looks at it, removes it, and runs `commission` again.
 """
 
 from __future__ import annotations
@@ -48,8 +48,8 @@ from pathlib import Path
 
 from moxi import proc
 
-from . import (builds, ending, folders, gitreads, index, open_builds, paths, places,
-               pointers, skips, stages, stepping, steps, versions, write)
+from . import (builds, commission_block, ending, folders, gitreads, index, open_builds,
+               paths, places, pointers, skips, stages, stepping, steps, versions, write)
 from . import settings as own
 from .errors import BadArgument, RoundsError, Unmet
 from .gitreads import Git, GitError
@@ -64,8 +64,9 @@ class Commissioned:
     (the key as the projects list stores it), `branch`, `base` and `target`, its
     `worktree` and `scratch` folders, its `build` id, the `host` that made them, its
     `builder` and the go pointer `record`. `adopted` is true when the worktree was
-    left by a stopped run of this commission. `event` is the event written; `failed`
-    pairs each after-append callback that raised with what it raised."""
+    left by a stopped run of this commission. `event` is the event written; `block`
+    is the commission block, read from the logs as they stood under the lock;
+    `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
     stage: str
@@ -81,6 +82,7 @@ class Commissioned:
     record: str | None
     adopted: bool
     event: dict
+    block: commission_block.Block | None = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
@@ -180,12 +182,16 @@ def commission(name: str, stage_id: str, *, builder: str, actor: str,
         gates=[ending.takes_new_work(name, "a new build"), ready, has_a_pointer],
         act=make, event=event, wait_s=wait_s, at=at)
     one = written.events[0]
+    made = commission_block.block(
+        written.view.state, written.view.project_state, name=name, stage=stage_id,
+        repo=one["repo"], branch=one["branch"], base=one["base"], target=one["target"],
+        worktree=Path(one["worktree"]), scratch=Path(one["scratch"]), settings=settings)
     return Commissioned(
         name=name, stage=stage_id, repo=one["repo"], branch=one["branch"],
         base=one["base"], target=one["target"], worktree=Path(one["worktree"]),
         scratch=Path(one["scratch"]), build=one["build"], host=one["host"],
         builder=builder, record=record, adopted=written.result[2], event=one,
-        failed=written.failed)
+        block=made, failed=written.failed)
 
 
 # -- what is read under the lock ---------------------------------------------------------

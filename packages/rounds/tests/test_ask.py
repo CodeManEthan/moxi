@@ -3,6 +3,8 @@ recorded with, and what is refused."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from moxi import cli
 
@@ -175,10 +177,106 @@ def test_an_origin_and_the_operators_pointer_together_are_a_usage_error(rounds, 
     assert logs(rounds) == before
 
 
-def test_ask_takes_no_build(rounds, capsys):
-    assert main(["ask", "proj-a/a-round", SAID, "--build", "B1"]) == 2
+def test_build_of_a_stage_with_no_open_build_is_refused_and_writes_nothing(
+        rounds, capsys):
+    before = logs(rounds)
 
-    assert "unrecognized arguments" in capsys.readouterr().err
+    assert run("proj-a/a-round", "--build", "B1", origin=None) == 3
+
+    said = capsys.readouterr().err
+    assert "B1 of proj-a/a-round has no open build" in said
+    assert "--from PTR, naming the build in the sentence" in said
+    assert logs(rounds) == before
+
+
+def test_build_with_from_or_record_is_a_bad_argument(rounds, capsys):
+    assert run("proj-a/a-round", "--build", "B1") == 2
+    assert run("proj-a/a-round", "--build", "B1", "--record", "comms:12",
+               origin=None) == 2
+
+    assert "--build says where the question came from" in capsys.readouterr().err
+
+
+def test_build_on_a_project_is_a_bad_argument(rounds, capsys):
+    assert run("proj-a", "--build", "B1", origin=None) == 2
+
+    assert "a project has none" in capsys.readouterr().err
+
+
+# -- a question that came up in a build -------------------------------------------------
+
+@pytest.fixture
+def building(git_repo, tmp_path, capsys):
+    """The round `proj-b/a-round`, whose stage B1 has an open build of the builder
+    `coder` on the branch `work` of the test's git repo. Returns the round's log."""
+    assert cli.main(["projects", "add", "proj-b", "--root", str(git_repo.root)]) == 0
+    assert cli.main(["projects", "set", "proj-b", "--notes-root",
+                     str(tmp_path / "notes-b")]) == 0
+    opening.open_round("proj-b/a-round", description="a placeholder round",
+                       actor="planner", flow="fix")
+    path = log.round_log(tmp_path / "notes-b" / "rounds" / "a-round")
+    log.append(path, "stage.declared", {"id": "B1", "repo": "proj-b", "branch": "work"},
+               actor="planner")
+    git_repo.git("branch", "work")
+    log.append(path, "build.commissioned",
+               {"stage": "B1", "repo": "proj-b", "branch": "work",
+                "base": git_repo.rev("main"), "target": "main",
+                "worktree": "placeholder-worktree", "scratch": "placeholder-scratch",
+                "builder": "coder", "host": "box-1", "build": "0123456789abcdef"},
+               actor="planner")
+    capsys.readouterr()
+    return path
+
+
+def test_build_records_the_stage_and_its_tip_as_the_origin_and_the_builder(
+        building, git_repo, capsys):
+    tip = git_repo.commit("work.txt")
+    git_repo.git("branch", "-f", "work", tip)
+
+    assert main(["ask", "proj-b/a-round", SAID, "--build", "B1", "--as",
+                 "planner"]) == 0
+
+    [event] = asked(building)
+    assert event["from"] == f"build:B1@{tip}"
+    assert (event["asked_by"], event["builder"]) == ("planner", "coder")
+    assert "by: planner for coder\n" in capsys.readouterr().out
+    [question] = state.fold(log.read(building)).questions
+    assert (question.origin, question.by, question.builder) == (
+        f"build:B1@{tip}", "planner", "coder")
+
+
+def test_a_question_from_a_build_is_listed_as_asked_by_the_lead_for_the_builder(
+        building, capsys):
+    assert main(["ask", "proj-b/a-round", SAID, "--build", "B1", "--as",
+                 "planner"]) == 0
+    capsys.readouterr()
+
+    for argv in (["show", "proj-b/a-round"], ["list", "--waiting"],
+                 ["list", "proj-b/a-round", "--questions"]):
+        assert main(argv) == 0
+        assert "by: planner for coder" in capsys.readouterr().out, argv
+    assert main(["show", "proj-b/a-round", "--json"]) == 0
+    [found] = json.loads(capsys.readouterr().out)["questions"]
+    assert (found["by"], found["builder"]) == ("planner", "coder")
+
+
+def test_build_whose_branch_is_gone_is_refused(building, git_repo, capsys):
+    git_repo.git("branch", "-D", "work")
+
+    assert main(["ask", "proj-b/a-round", SAID, "--build", "B1"]) == 3
+
+    assert "the branch work of the build of B1 is not in proj-b" in (
+        capsys.readouterr().err)
+    assert asked(building) == []
+
+
+def test_build_of_a_stage_whose_build_ended_is_refused(building, capsys):
+    log.append(building, "build.dropped", {"stage": "B1", "by": "lead",
+                                           "record": "comms:1234567"}, actor="planner")
+
+    assert main(["ask", "proj-b/a-round", SAID, "--build", "B1"]) == 3
+
+    assert "B1 of proj-b/a-round has no open build" in capsys.readouterr().err
 
 
 # -- the sentence ------------------------------------------------------------------------

@@ -95,6 +95,8 @@ class Entry:
     held: str | tuple[str, ...] | None = None
     #: What the record of a `left` question reads as, `open` or `parked`, or None.
     left_as: str | None = None
+    #: The builder of the build it came up in, whom `by` asked it for, or None.
+    builder: str | None = None
 
     def data(self) -> dict:
         """The entry as data: the fields every question has, then each further one only
@@ -103,6 +105,8 @@ class Entry:
                 "from": self.origin,
                 "blocks": None if self.blocks is None else questions.stored(self.blocks),
                 "state": self.state, "by": self.by, "at": self.at}
+        if self.builder is not None:
+            data["builder"] = self.builder
         if self.left_as is not None:
             data["left_as"] = self.left_as
         if self.until is not None:
@@ -189,7 +193,7 @@ def _question(holder: str, item: index.Item, closed: Callable[[str], bool]) -> E
         holder=holder, id=item.id, text=body.get("text"), origin=body.get("from"),
         blocks=_blocks(body.get("blocks")),
         state=questions.listed(body, closed=closed), by=body.get("by"),
-        at=body.get("at"),
+        at=body.get("at"), builder=body.get("builder"),
         until=body.get("until"),
         options=tuple(Option(one["key"], one["text"])
                       for one in body.get("options", ())),
@@ -385,7 +389,7 @@ def _entry_lines(entry: Entry) -> list[str]:
              f"- state: {questions.called(entry.state)}"
              + ("" if entry.left_as is None
                 else f" (reads as {entry.left_as}, and the round has ended)"),
-             f"- by: {entry.by}",
+             f"- by: {questions.asker(entry.by, entry.builder)}",
              f"- at: {entry.at}"]
     if entry.until is not None:
         lines.append(f"- until: {entry.until}")

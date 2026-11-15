@@ -7,6 +7,8 @@
                            [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
+    moxi rounds ask ROUND TEXT --build B<n> [--blocks LIST|none] [--option K=TEXT]...
+                    [--as NAME]
     moxi rounds ask ROUND|PROJECT ID [--option K=TEXT]... [--retire K]... [--as NAME]
     moxi rounds ask ROUND --adopt P<n> [--blocks LIST [--record PTR]] [--as NAME]
     moxi rounds ask PROJECT --move ROUND:Q<n> [--record PTR] [--as NAME]
@@ -86,7 +88,14 @@ marker naming the build in each, and records the build. A `/` or `%` in a branch
 written `%2F` or `%25` in a path. `--existing` builds on a branch that is there, and
 is refused when it shares commits with another open build. A commission stopped before
 it recorded the build is run again: it keeps the worktree whose marker names its own
-stopped run, and refuses any other folder at either place, naming it.
+stopped run, and refuses any other folder at either place, naming it. It prints the
+commission block, which goes first in the builder's brief: the build's folders, the
+commands the builder runs, who finishes and after what, what the build step reads, the
+rulings the design cites for the stage as they stand now, the slices, the operator's
+skips and the repo's `brief` lines. Then it tells the lead which of those rulings the
+operator has not been shown, with the `mark --shown` line, and which standing rulings
+name the repo in their scope and are cited by no row. `next` prints, with a stage whose
+build is open, each ruling recorded since its block that reaches the stage.
 `mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no
@@ -103,6 +112,9 @@ prints them, to be adopted by the round that takes the work up. A round that was
 or closed takes no new question, no change to a question and no new ruling; a
 correction of one of its rulings is still recorded, and `mark --shown` still marks
 its rulings.
+A builder with a question for the operator tells its lead, and the lead asks it with
+`--build B<n>` in place of `--from`: its origin is that stage's open build at its
+branch's tip, and every listing says the lead asked it for the build's builder.
 `ID` is a question on record, `Q<n>` in a round and `P<n>` on a project: `ask` with an
 id adds options to it or retires them. `ask --adopt` brings a question of the project's
 list into a round, and `ask --move` puts a round's question on its project's list; the
@@ -256,7 +268,8 @@ def _left(opened) -> list[str]:
     for one in opened.left:
         found = one.question
         said = [f"from: {found.origin}", f"blocks: {questions.said(found.blocks)}",
-                f"state: {one.state}", f"by: {found.by}", f"at: {found.at}"]
+                f"state: {one.state}", f"by: {questions.asker(found.by, found.builder)}",
+                f"at: {found.at}"]
         if one.state == questions.PARKED and found.until is not None:
             said.append(f"until: {found.until}")
         said.append(f"moved from: {found.moved_from}")
@@ -429,6 +442,11 @@ def _declare_ask(verbs) -> None:
                              "operator's own: a pointer to where he asked it; with "
                              "--move, or with --adopt and a list, a pointer to where "
                              "he said so")
+    parser.add_argument("--build", metavar="B<n>",
+                        help="in place of --from, for a question that came up in the "
+                             "open build of this stage: its builder told you, and you "
+                             "ask it; it is recorded as from that build at its branch's "
+                             "tip now, asked by you for the builder")
     parser.add_argument("--blocks", metavar="LIST|none",
                         help="the stages the question holds up, as B2,B3, or none "
                              "(default: all, every stage the round has or gains); an "
@@ -473,9 +491,12 @@ def _ask(args, out) -> int:
                           "name the question by its id in place of a sentence: "
                           f"{args.prog} ask {args.target} ID --retire K")
     asked = asking.ask(args.target, args.text, actor=_actor(args), origin=args.origin,
-                       record=args.record, blocks=args.blocks, options=args.options)
+                       record=args.record, build=args.build, blocks=args.blocks,
+                       options=args.options)
     print(f"{asked.id}: {asked.text}", file=out)
     print(f"blocks: {questions.said(asked.blocks)}   from: {asked.origin}", file=out)
+    if asked.builder is not None:
+        print(f"by: {questions.asker(asked.by, asked.builder)}", file=out)
     for key, line in asked.options:
         print(f"{key}: {line}", file=out)
     _warn_of(asked.failed, args.prog, args.verb)
@@ -487,7 +508,7 @@ def _fill(args, out) -> int:
     from . import options as choices
 
     for flag, given in (("--from", args.origin), ("--record", args.record),
-                        ("--blocks", args.blocks)):
+                        ("--build", args.build), ("--blocks", args.blocks)):
         if given is not None:
             raise BadArgument(f"{flag} is given when a question is asked, and "
                               f"{args.text} is a question on record",
@@ -514,6 +535,7 @@ def _carry(args, out) -> int:
         raise BadArgument("--adopt brings a question into a round and --move takes "
                           "one out", "give one of the two")
     for other, given in (("the sentence", args.text), ("--from", args.origin),
+                         ("--build", args.build),
                          ("--option", args.options or None),
                          ("--retire", args.retire or None),
                          ("--blocks", args.blocks if args.move is not None else None)):
@@ -861,17 +883,17 @@ def _commission(args, out) -> int:
     made = commissioning.commission(args.round, args.stage, builder=args.builder,
                                     actor=_actor(args), record=args.record,
                                     existing=args.existing)
-    print(f"commissioned {made.name} {made.stage}   builder {made.builder}", file=out)
-    print(f"repo {made.repo}   branch {made.branch}   base {made.base[:7]}   "
-          f"target {made.target}", file=out)
-    print(f"worktree {made.worktree}", file=out)
-    print(f"scratch  {made.scratch}", file=out)
-    print("         (logs and probes only: removed when the build ends)", file=out)
-    print(f"build {made.build}   host {made.host}", file=out)
+    for line in made.block.lines:
+        print(line, file=out)
+    print("", file=out)
+    print(f"commissioned for {made.builder}   build {made.build}   host {made.host}",
+          file=out)
     if made.adopted:
         print("kept: the worktree a stopped run of this commission left", file=out)
     if made.record is not None:
         print(f"go: {made.record}", file=out)
+    for line in made.block.lead_lines():
+        print(line, file=out)
     _warn_of(made.failed, args.prog, args.verb)
     return codes.OK
 

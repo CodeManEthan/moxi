@@ -76,10 +76,12 @@ TYPES = _types(
     # `options` are the choices it offers, each key with its one line. A question
     # brought here from another log also says the record it was there (`moved_from`),
     # what it held up in the round it left (`held`), what a parked one waits for
-    # (`until`) and the keys that were `retired` from it.
+    # (`until`) and the keys that were `retired` from it. A question that came up in
+    # a build names that build's `builder`, whom the asker asked it for.
     EventType("question.asked",
               ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",
-               "options", "prepared", "until", "retired", "moved_from", "held"),
+               "options", "prepared", "until", "retired", "moved_from", "held",
+               "builder"),
               required=("id", "text", "from", "blocks", "state", "asked_by", "asked_at")),
     # A question changed by something that is no ruling: its state or what it holds
     # up, with who changed it and the operator's pointer when the change needs one;
