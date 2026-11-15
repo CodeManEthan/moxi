@@ -365,6 +365,7 @@ def _builds(shown_as: dict) -> list[str]:
             said.append(showing.build_verdict_line(one["verdict"]))
         if one.get("drift") is not None:
             said.append(showing.drift_line(one["stage"], one["drift"]))
+        said += [showing.finish_action_line(action) for action in one.get("finish", ())]
         said += [showing.finding_line(finding) for finding in one.get("findings", ())]
         if one["ended"] is None:
             said += showing.briefs_lines(one)

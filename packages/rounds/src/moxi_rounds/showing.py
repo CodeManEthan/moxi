@@ -52,7 +52,8 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (builds, checking, ci, closing, decisions, drift, findings, folders,
+from . import (builds, checking, ci, closing, decisions, drift, findings, finish_actions,
+               folders,
                index, log, numbers,
                open_builds, questions, shown, sizing, skips, steps, tracing, versions,
                waits)
@@ -297,6 +298,10 @@ def history_of(event: dict) -> str | None:
         of = f"{event.get('thread')}, {event.get('decision')}"
     if event.get("type") == "repair":
         of = repair_of(event)
+    if event.get("type") == finish_actions.ACTION:
+        landed = ("" if event.get("landing") is None
+                  else f", landing {str(event.get('landing'))[:12]}")
+        of = (f"{event.get('stage')} {event.get('id')}: {event.get('state')}{landed}")
     if event.get("type") == "lock.cleared":
         of = f"{event.get('ref')}, held by {event.get('holder')}"
     if event.get("type") == sizing.SIZED:
@@ -436,7 +441,7 @@ def _builds(found: Shown) -> list:
                             for finding in findings.of_build(found.state, one)],
                "slices": sizing.slices_of(found.state, one),
                "briefs": sizing.verifications_of(found.state, one),
-               "drift": None}
+               "drift": None, "finish": []}
         now = read.get(one.stage) if one.ended is None else None
         if now is not None and now.build.n == one.n:
             data = now.data()
@@ -448,11 +453,31 @@ def _builds(found: Shown) -> list:
                 row["credit"] = (f"moxi rounds rule {found.name} {builds.CREDIT}"
                                  f"{one.stage} --record PTR")
             row["drift"] = _drift(found, one, now.status)
+            row["finish"] = _finish_actions(found.state, one, data["head"])
         elif one.ended is None:
             row["problem"] = {"reason": f"the repo {one.repo} could not be read",
                               "fix": "moxi projects list"}
         listed.append(row)
     return listed
+
+
+def _finish_actions(state: states.State, build: builds.Build,
+                    head: str | None) -> list[dict]:
+    """For a build not finished, the newest record of each of its finish actions at
+    its head, as `{"id", "kind", "state", "landing", "n", "at"}`: what a finish did so
+    far, and a failed action, which the build's state from git does not show."""
+    if build.ended is not None or head is None:
+        return []
+    return [{"id": event["id"], "kind": event.get("kind"), "state": event.get("state"),
+             "landing": event.get("landing"), "n": event["n"], "at": event.get("at")}
+            for event in finish_actions.records(state, build, head).values()]
+
+
+def finish_action_line(one: dict) -> str:
+    """A finish action's newest record in words: `finish: merge ok, landing 1a2b3c4d5e6f
+    (line 12)`."""
+    landed = "" if one["landing"] is None else f", landing {str(one['landing'])[:12]}"
+    return f"finish: {one['id']} {one['state']}{landed} (line {one['n']})"
 
 
 def _drift(found: Shown, build: builds.Build, status: builds.Status | None) -> dict | None:
@@ -597,6 +622,7 @@ def _build_lines(listed: list) -> list[str]:
             lines.append(f"      report: {one['verdict']['report']}")
         if one.get("drift") is not None:
             lines.append(f"    {drift_line(one['stage'], one['drift'])}")
+        lines += [f"    {finish_action_line(action)}" for action in one.get("finish", ())]
         lines += [f"    {finding_line(finding)}" for finding in one.get("findings", ())]
         if one["ended"] is None:
             lines += [f"    {line}" for line in briefs_lines(one)]

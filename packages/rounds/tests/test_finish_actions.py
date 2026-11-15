@@ -153,6 +153,37 @@ def test_a_push_git_refuses_is_recorded_failed(ready, repo, configure):
     assert "done before it, recorded: merge (merge): ok" in failed.value.reason
 
 
+def test_show_names_each_finish_action_s_state_until_the_build_is_finished(
+        ready, repo, configure, capsys):
+    from moxi_rounds import api
+    from moxi_rounds.cli import main
+
+    path, _tree = ready
+    configure('{ do = "merge" }', '{ do = "push", remote = "nowhere" }')
+    with pytest.raises(finishing.ActionFailed):
+        finishing.finish(ROUND, "B1", by="coder")
+    landing = repo.rev("main")
+    capsys.readouterr()
+
+    assert main(["show", ROUND]) == 0
+
+    out = capsys.readouterr().out
+    merged, pushed = (one["n"] for one in log.read_round(path)
+                      if one["type"] == "finish.action")
+    assert f"finish: merge ok, landing {landing[:12]} (line {merged})" in out
+    assert f"finish: push failed (line {pushed})" in out
+    assert f"finish.action  B1 merge: ok, landing {landing[:12]}" in out
+    assert "finish.action  B1 push: failed" in out
+    (row,) = api.round_data(ROUND)["builds"]
+    assert [(one["id"], one["state"], one["landing"]) for one in row["finish"]] == [
+        ("merge", "ok", landing), ("push", "failed", None)]
+
+    configure('{ do = "merge" }')
+    finishing.finish(ROUND, "B1", by="coder")
+    (row,) = api.round_data(ROUND)["builds"]
+    assert row["finish"] == []
+
+
 def _remote_away(repo):
     """Take the remote away, so a push to it fails; gives a function that brings it
     back."""
