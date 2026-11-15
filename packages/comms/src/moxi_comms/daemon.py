@@ -86,17 +86,17 @@ from pathlib import Path
 from moxi import ipc
 
 from . import (attribution, bindings, cache, claimfile, config, constants, directory,
-               membership, wire)
+               membership, replies, wire)
 from .store import books as books_mod
 from .mcp import tokens as mcp_tokens_mod
 from .attribution import Author
-from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
-                           POSTURE_ONCE, parse as parse_machine_line)
+from .machine_line import COLD_AT_LIVE, POSTURE_ONCE, parse as parse_machine_line
 from .record import AUTHOR_IDENTITY, AUTHOR_OPERATOR, Message
 from . import kinds as kinds_mod
 from . import reserved as reserved_mod
 from .paths import comms_db, daemon_socket
 from .record import Forbidden
+from .replies import SentEntry
 from .provision import NAMES
 from .scoping import (GLOBAL, NAME_RE, OPERATOR_NAME, is_auto_name, qualify, split_tag,
                       tag_matches)
@@ -233,23 +233,6 @@ CASE_REASONS = {
         "name. Nobody receives mail under a reserved name, so it was dropped undelivered, "
         "and its sender was not told."),
 }
-
-
-@dataclass
-class SentEntry:
-    """One `#names` message in the sent index.
-
-    `tags` are the recipient tags exactly as written on line zero: the index keys on
-    nothing `resolve` computes, because a bare tag qualifies differently live and at boot.
-    """
-
-    id: str
-    author: str
-    tags: tuple
-    posture: str
-    reply_to: str | None
-    at: float
-    verified: bool
 
 
 @dataclass(eq=False)
@@ -2603,36 +2586,23 @@ class Daemon:
     def _awaiting(self, identity: str, mine, now: float) -> list[str]:
         """The names `identity` awaits. Under the lock.
 
-        An ask is `identity`'s own `[reply-once]` entry, verified, within `ASK_TTL`;
-        nothing else is. For each of its tags, the live binding the tag
-        names (by the one rule) is awaited until it answers: its entry to
-        `identity` threaded to the ask, of any posture, or its first entry to `identity`
-        after the ask not marked `[no reply]`. A name that is not bound is not awaited.
+        An ask is `identity`'s own entry that `replies.is_ask` takes; nothing else is.
+        For each of its tags, the live binding the tag names (by the one rule) is
+        awaited until its own entries in the index answer the ask, by
+        `replies.answered`. A name that is not bound is not awaited.
         """
         names: list[str] = []
         for ask in mine:
-            if (ask.posture != POSTURE_ONCE or not ask.verified
-                    or now - ask.at > constants.ASK_TTL):
+            if not replies.is_ask(ask, now):
                 continue
             for tag in ask.tags:
                 for b in self.bindings.values():
                     q = b.qualified
                     if q == identity or q in names or not tag_matches(tag, q):
                         continue
-                    if not self._answered(ask, q, identity):
+                    if not replies.answered(ask.id, identity, self.sent.get(q, ())):
                         names.append(q)
         return sorted(names)
-
-    def _answered(self, ask: SentEntry, answerer: str, asker: str) -> bool:
-        """Has `answerer` answered `ask` (by `asker`) in the index? Under the lock."""
-        for e in self.sent.get(answerer, ()):
-            if _as_id(e.id) <= _as_id(ask.id):
-                continue
-            if not any(tag_matches(t, asker) for t in e.tags):
-                continue
-            if e.reply_to == ask.id or e.posture != POSTURE_NONE:
-                return True
-        return False
 
     def _queue_unbound(self, b: Binding) -> None:
         """At unbind, the release: every row the binding held, handed or in a digest,
