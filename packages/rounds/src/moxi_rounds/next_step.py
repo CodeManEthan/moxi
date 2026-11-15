@@ -11,7 +11,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 (`as_json`); the lines are made from the dict and hold nothing it lacks.
 
 - `groups`: one for the step the round is at, then one for each stage of the plan
-  whose own first step that is not done is another step. A group holds the step, its
+  whose own first step that is not done is another step, then one for each other
+  step of the round's own (under no stage) that is ready. A group holds the step, its
   stage and state, `by`, `tier` and `model`, `reads`, `write`, `then` (each a command
   that completes the step), `waits` (each with the command that meets it; the lines
   leave out the one `instead` already says, and say `waits: nothing` only for a built
@@ -327,6 +328,12 @@ def _groups(found: showing.Shown, models, seen) -> list[dict]:
                       if step.stage == stage.id and not step.settled), None)
         if first is not None and (first.step, first.stage) != (at.step, at.stage):
             groups.append(_group(found, first, models, seen))
+    # A step of the round's own that is ready gets its group too, though a stage's
+    # step comes before it in the flow: ratifying can go on while a stage builds.
+    for step in every:
+        if (step.stage is None and step.state == steps.READY
+                and (step.step, step.stage) != (at.step, at.stage)):
+            groups.append(_group(found, step, models, seen))
     return groups
 
 

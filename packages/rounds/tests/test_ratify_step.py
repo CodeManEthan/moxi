@@ -160,3 +160,17 @@ def test_next_gives_ratify_as_the_operator_s_step_with_the_command_that_rules(
     assert group["waits"] == [
         {"reason": "decision B1.M1, major and not yet ruled: a choice",
          "fix": f"moxi rounds rule {ROUND} B1.M1=accept|reject --record PTR"}]
+
+
+def test_next_gives_ratify_its_group_while_a_later_stage_builds(round_dir, capsys):
+    built(round_dir, decisions=[("M1", "major")])
+    built(round_dir, "B2", finished=False)
+    assert ratify(round_dir).state == steps.READY
+    capsys.readouterr()
+
+    assert main(["next", ROUND, "--json"]) == 0
+    said = json.loads(capsys.readouterr().out)
+
+    assert said["groups"][0]["stage"] == "B2"
+    (group,) = [one for one in said["groups"] if one["step"] == "ratify"]
+    assert (group["stage"], group["state"], group["by"]) == (None, "ready", "operator")

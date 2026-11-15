@@ -205,7 +205,15 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
         "waits: the design is not verified: it stands at none",
         f"  fix: moxi rounds next {ROUND}",
         f"waits: Q1 holds B1: {ASKED}",
-        f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR"]
+        f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR",
+        "",
+        # The docket is ready too, and is the round's own: the operator may rule while
+        # the design is verified.
+        f"round {ROUND}   flow full   step docket   by operator",
+        "questions: Q1",
+        f"export: moxi rounds list {ROUND} --questions --view docket",
+        f"then:  moxi rounds rule {ROUND} Q1 --text TEXT --record PTR",
+        "waits: nothing"]
     do(capsys, said(printed, "then:")[0],
        **{"<your report>": str(report(round_dir, "fold-first"))})
 

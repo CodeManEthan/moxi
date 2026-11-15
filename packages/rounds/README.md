@@ -69,7 +69,7 @@ lower-case letters, digits and `-`.
 | Command | Does |
 |---|---|
 | `moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--inherits S<n>[,...]]` | open a round: make its folder and record what it is for and its flow; `--record` points to where the operator gave the go, and `--inherits` names the standing rulings it starts from |
-| `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
+| `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, then the first step not done of each other stage and each other step of the round's own that is ready, each with who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
 | `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
 | `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, on a build or on a build for a report step of your own, or a majors or retro report, run by whoever wrote the report |
