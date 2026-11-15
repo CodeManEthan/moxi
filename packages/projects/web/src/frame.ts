@@ -27,6 +27,20 @@ export function factsModules(value: unknown, declares: (module: string) => boole
   return [...present].filter((name) => listed.get(name) === 1 && declares(name)).sort();
 }
 
+/** The modules the shell's list (`ui.modules`' value) gives as present, for the opened
+ * project's links. A value that holds no list gives none. */
+export function presentModules(value: unknown): Set<string> {
+  const modules = typeof value === "object" && value !== null ? (value as { modules?: unknown }).modules : null;
+  const present = new Set<string>();
+  if (!Array.isArray(modules)) return present;
+  for (const item of modules) {
+    if (typeof item !== "object" || item === null) continue;
+    const { name, state } = item as { name?: unknown; state?: unknown };
+    if (typeof name === "string" && name !== "" && state === "present") present.add(name);
+  }
+  return present;
+}
+
 /** The `projects` attribute's list: every project the page holds, roots absolute. */
 export function givenOf(projects: readonly Listed[]): Given[] {
   return projects.map(({ key, root, lead, associated }) => ({ key, root, lead, associated: [...associated] }));

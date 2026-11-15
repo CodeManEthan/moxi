@@ -170,6 +170,24 @@ def open_row(panel, key: str):
     return item
 
 
+def edit_row(panel, key: str):
+    """Opens `key`'s row and presses `Edit` in its foot, and gives the row."""
+    item = open_row(panel, key)
+    item.locator('[data-part="foot"] [data-action="edit"]').click()
+    expect(item.locator('form[data-part="edit"]')).to_be_visible()
+    return item
+
+
+def root_row(item):
+    """The opened project's `Folder` row's words."""
+    return item.locator('[data-part="opened"] [data-label="Folder"] .ol')
+
+
+def tilde(shell, path: str) -> str:
+    """`path` as the page shows a folder under the shell's home."""
+    return "~/" + Path(path).relative_to(shell.env["HOME"]).as_posix()
+
+
 def changed(page) -> None:
     """Sends the event after which every projects component reads again."""
     page.evaluate("name => document.dispatchEvent(new Event(name))", CHANGED)
@@ -346,7 +364,7 @@ def test_the_edit_form_changes_the_root_and_kind_and_refuses_a_relative_root(
         seeded, ui_shell, ui_page):
     add(ui_shell, "editable")
     panel = open_panel(ui_page)
-    item = open_row(panel, "editable")
+    item = edit_row(panel, "editable")
     edit = item.locator('form[data-part="edit"]')
     save = edit.get_by_role("button", name="Save")
     expect(save).to_be_disabled()
@@ -358,8 +376,8 @@ def test_the_edit_form_changes_the_root_and_kind_and_refuses_a_relative_root(
     expect(said).to_have_attribute("data-tone", "ok")
     expect(said).to_contain_text("Saved editable.")
     expect(said).to_contain_text("doesn't exist yet")
-    expect(item.locator('[data-field="root"]')).to_have_text(moved)
-    expect(item.locator('[data-field="kind"]')).to_have_text("agent")
+    # The new folder doesn't exist yet, so the Folder row says so rather than the kind.
+    expect(root_row(item)).to_contain_text(f"{tilde(ui_shell, moved)} doesn't exist")
     after = shown(ui_shell, "editable")
     assert (after["root"], after["kind"]) == (moved, "agent"), after
 
@@ -377,7 +395,7 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
     Path(second).mkdir(parents=True)
     panel = open_panel(ui_page)
     sets = posts_to(ui_page, "api/set")
-    item = open_row(panel, "edited")
+    item = edit_row(panel, "edited")
     edit = item.locator('form[data-part="edit"]')
     save = edit.get_by_role("button", name="Save")
     root_field = edit.get_by_label(re.compile(r"^Root"))
@@ -389,7 +407,7 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
     # nothing to save.
     moxi(ui_shell, "projects", "set", "edited", "--root", second)
     changed(ui_page)
-    expect(item.locator('[data-field="root"]')).to_have_text(second)
+    expect(root_row(item)).to_have_text(f"{tilde(ui_shell, second)} · a code project")
     expect(root_field).to_have_value(second)
     expect(save).to_be_disabled()
     expect(stale).to_have_count(0)
@@ -397,7 +415,7 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
     # Only the kind is changed, so only the kind is sent, and the terminal's root stands.
     edit.get_by_role("combobox", name="Kind").select_option("agent")
     save.click()
-    expect(item.locator('[data-field="kind"]')).to_have_text("agent")
+    expect(root_row(item)).to_have_text(f"{tilde(ui_shell, second)} · an agent's home")
     assert [json.loads(request.post_data) for request in sets] == [
         {"key": "edited", "kind": "agent"}]
     after = shown(ui_shell, "edited")
@@ -409,11 +427,11 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
     root_field.fill(third)
     moxi(ui_shell, "projects", "set", "edited", "--kind", "project")
     changed(ui_page)
-    expect(item.locator('[data-field="kind"]')).to_have_text("project")
+    expect(root_row(item)).to_contain_text("a code project")
     expect(stale).to_contain_text("This project has changed since you opened the form.")
     expect(root_field).to_have_value(third)
     save.click()
-    expect(item.locator('[data-field="root"]')).to_have_text(third)
+    expect(root_row(item)).to_contain_text(tilde(ui_shell, third))
     expect(stale).to_have_count(0)
     assert json.loads(sets[-1].post_data) == {"key": "edited", "root": third}
     after = shown(ui_shell, "edited")
@@ -425,7 +443,7 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
 def test_the_lead_and_the_agents_are_set_added_removed_and_cleared(seeded, ui_shell, ui_page):
     add(ui_shell, "crewed")
     panel = open_panel(ui_page)
-    item = open_row(panel, "crewed")
+    item = edit_row(panel, "crewed")
     agents = item.locator('[data-part="agents"]')
     said = item.locator('[data-line="said"]')
     expect(agents.locator('[data-line="lead"]')).to_have_text("none")

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { factsModules, FirstOrder, givenOf, HeldReports } from "../src/frame.ts";
+import { factsModules, FirstOrder, givenOf, HeldReports, presentModules } from "../src/frame.ts";
 import { HOLD_MS } from "../src/list-model.ts";
 
 const listed = (key, over = {}) => ({
@@ -35,6 +35,14 @@ test("the modules placed: present, declaring the component, by name, a module li
   assert.deepEqual(factsModules(null, declares), []);
   assert.deepEqual(factsModules({ modules: "no" }, declares), []);
   assert.deepEqual(factsModules({ modules: [null, { name: "" }, { name: 3, state: "present" }] }, declares), []);
+});
+
+test("the modules present, for the opened project's links", () => {
+  const value = { modules: [{ name: "usage", state: "present" }, { name: "repo", state: "missing" }, null,
+                            { name: "", state: "present" }, { name: "fixture", state: "present" }] };
+  assert.deepEqual([...presentModules(value)].sort(), ["fixture", "usage"]);
+  assert.deepEqual([...presentModules(undefined)], []);
+  assert.deepEqual([...presentModules({ modules: "no" })], []);
 });
 
 test("the projects attribute: key, absolute root, lead and associated agents of each project", () => {

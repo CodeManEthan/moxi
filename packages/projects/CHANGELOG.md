@@ -45,6 +45,11 @@
   isn't answering the last list stays, dim and with no acts; a store that refuses shows
   its reason and fix. The heading, the lede, "Where this page acts" and `Read again` are
   gone: the shell's top line names the page.
+- An opened project shows one labelled row each: the facts modules' sections with a rank
+  first, `Folder` (its folder in `~` form and its kind, or that it doesn't exist, with
+  `Change folder`), `Agents` (who leads, what the facts modules say of them, and who also
+  works there), the other sections, and `Notes`; each section's link shows that module's
+  page. Its foot holds `Edit` and `Remove`, which replace its old field list.
 
 ## 0.1.4 (2026-11-08)
 

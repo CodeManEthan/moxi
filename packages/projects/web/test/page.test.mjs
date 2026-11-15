@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   actedOf, actSaid, agentBody, clearLeadBody, editBody, editForm, editing, kindChoices, leadBody,
-  MAY_HAVE_ACTED, projectFields, removedSaid, removeSheet, removeStatusPath, reread, touched,
+  MAY_HAVE_ACTED, removedSaid, removeSheet, removeStatusPath, reread, touched,
 } from "../src/views.ts";
 import { parseOne, parseWritten } from "../src/feed.ts";
 
@@ -21,12 +21,6 @@ test("the edit form's kinds keep the project's own kind", () => {
   assert.deepEqual(kindChoices(KINDS, "project").map((choice) => choice.value), ["agent", "project", "topic"]);
   assert.deepEqual(kindChoices(KINDS, "shelf-gone").map((choice) => choice.value),
                    ["agent", "project", "topic", "shelf-gone"]);
-});
-
-test("a project's fields are the card's, with its notes root when it has one", () => {
-  assert.deepEqual(projectFields(PROJECT).map((field) => field.name), ["kind", "root", "lead", "agents"]);
-  const fields = projectFields({ ...PROJECT, notes_root: "/n/alpha" });
-  assert.deepEqual(fields.at(-1), { name: "notes_root", label: "Notes root", value: "/n/alpha" });
 });
 
 // -- the edit form --------------------------------------------------------------------------------

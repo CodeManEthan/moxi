@@ -285,13 +285,6 @@ export function kindChoices(kinds: Kinds | null, current: string): KindChoice[] 
   return choices;
 }
 
-/** The fields the page shows for `project`: the card's, and its notes root when it has one. */
-export function projectFields(project: Project): Field[] {
-  const fields = cardFields(project);
-  if (project.notes_root !== null) fields.push({ name: "notes_root", label: "Notes root", value: project.notes_root });
-  return fields;
-}
-
 /** The edit form, as typed. */
 export interface EditForm {
   root: string;
