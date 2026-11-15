@@ -741,9 +741,9 @@ def _shortcut(argv: list[str]) -> int:
 
 _CONFIG_USAGE = """\
 usage: moxi config <module> [show [--json]|path|check|init]
-       moxi config set <module> <key> <value> [--by WHO]
-       moxi config set <module> <key> (--add VALUE | --remove VALUE) [--by WHO]
-       moxi config unset <module> <key> [--by WHO]
+       moxi config set <module> <key> <value> [--by WHO] [--json]
+       moxi config set <module> <key> (--add VALUE | --remove VALUE) [--by WHO] [--json]
+       moxi config unset <module> <key> [--by WHO] [--json]
 """
 
 
@@ -858,8 +858,12 @@ def _config_json(module: str, found, schema) -> int:
     """`moxi config <module> show --json`: one JSON list, one object per live key.
 
     Each object holds the key's schema fields (`name`, `type`, `default`, `doc`,
-    `values`, `read`, `env`, `needs`, `items`), its `value` and its `source` (`default`,
-    `file` or `env`). A switch table also holds `switch_table: true` and `entries`, one
+    `values`, `read`, `env`, `needs`, `items`), its page fields, its `value` and its
+    `source` (`default`, `file` or `env`). The page fields are `label`, `line`, `group`,
+    `unit` and `elsewhere` (a string or null), `common` and `pick` (a bool, false when not
+    given), `choices` (one `{value, words}` per value it names, in the enum's order, or
+    null), `hurts` (`{when, says, confirm, stays}` or null) and `terminal` (`{on, off}` or
+    null). A switch table also holds `switch_table: true` and `entries`, one
     `{name, value, source, named_by}` per entry in the file and per entry the module's
     units, wraps and questions name as a switch (see `_switch_names`). When the file
     cannot be read the output is one `{"error", "fix"}` object instead, and the exit 1.
@@ -879,6 +883,7 @@ def _config_json(module: str, found, schema) -> int:
         item = {field: _plain_json(getattr(key, field))
                 for field in ("name", "type", "default", "doc", "values", "read", "env",
                               "needs", "items")}
+        item.update(_page_json(key))
         item["value"] = _plain_json(settings[key.name])
         item["source"] = settings.source(key.name)
         if config.is_switch_table(key):
@@ -894,6 +899,18 @@ def _config_json(module: str, found, schema) -> int:
         out.append(item)
     print(json.dumps(out, indent=2))
     return 0
+
+
+def _page_json(key) -> dict:
+    """Key `key`'s page fields as `show --json` prints them, each always present."""
+    choices = None
+    if key.choices is not None:
+        choices = [{"value": value, "words": key.choices[value]}
+                   for value in key.values if value in key.choices]
+    return {"label": key.label, "line": key.line, "common": bool(key.common),
+            "group": key.group, "unit": key.unit, "choices": choices,
+            "pick": bool(key.pick), "hurts": _plain_json(key.hurts),
+            "terminal": _plain_json(key.terminal), "elsewhere": key.elsewhere}
 
 
 def _plain_json(value):
@@ -992,6 +1009,9 @@ def _config_change(op: str, argv: list[str]) -> int:
                            help="remove one item from a list")
     parser.add_argument("--by", default="cli", metavar="WHO",
                         help="who makes the change, for the history (default: cli)")
+    parser.add_argument("--json", action="store_true",
+                        help="print one JSON object, {changed, problem, fix, units}, and "
+                             "nothing else on stdout; the exit code is the same")
     args = parser.parse_args(argv)
     if op == "set":
         given = [v is not None for v in (args.value, args.add, args.remove)]
@@ -1010,8 +1030,18 @@ def _config_change(op: str, argv: list[str]) -> int:
     try:
         changed = config._change(args.module, args.key, op, value, by=args.by, text=True)
     except config.ConfigError as exc:
-        _error(str(exc))
+        if args.json:
+            _change_json(changed=False, problem=_json_problem(exc, args.module, args.key),
+                         fix=exc.fix, units=[])
+        else:
+            _error(str(exc))
         return exc.exit_code
+    if args.json:
+        units: list[str] = []
+        failed = op in ("set", "unset") and any(
+            not a.ok for a in config.apply_units(args.module, args.key, say=units.append))
+        _change_json(changed=changed, problem=None, fix=None, units=units)
+        return 1 if failed else 0
     if not changed and op == "unset":
         print(f"{args.module}: {args.key} is not set in the file; nothing changed")
     elif not changed:
@@ -1026,6 +1056,30 @@ def _config_change(op: str, argv: list[str]) -> int:
         if any(not a.ok for a in applied):
             return 1
     return 0
+
+
+def _json_problem(exc, module: str, key: str) -> str:
+    """`set --json`'s and `unset --json`'s `problem` for the refusal `exc` of a change of
+    `module`'s `key`: its bare predicate when it is about that key's value; else the whole
+    sentence, naming what it is about (the config file, another key in it, the module, or
+    the module's settings schema)."""
+    from . import config
+
+    if not isinstance(exc, config.SchemaError) and exc.exit_code == 2 and exc.key == key:
+        return exc.problem
+    whole = str(exc).removesuffix(f"; fix: {exc.fix}")
+    if isinstance(exc, config.SchemaError):
+        return f"{module}'s settings schema cannot be read: {whole}"
+    return whole
+
+
+def _change_json(*, changed: bool, problem, fix, units: list[str]) -> None:
+    """The one object `moxi config set --json` and `unset --json` print: whether the file
+    changed, the refusal's `problem` and `fix` (null when there was none), and the lines
+    applying the module's units said (`units`; empty when the key switches nothing)."""
+    import json
+
+    print(json.dumps({"changed": changed, "problem": problem, "fix": fix, "units": units}))
 
 
 def config_template(module: str, schema) -> str:

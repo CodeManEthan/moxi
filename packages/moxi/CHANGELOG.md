@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.9 (unreleased)
+
+- A settings key may carry page fields, which say how a settings page shows it: `label`,
+  `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal` and
+  `elsewhere`. They change nothing a key is or how it is read. The schema reader checks
+  each, refuses them on a retired key, and refuses a schema that marks more than seven
+  keys `common`. A module that fills them needs `moxi>=0.1.9`: an older core refuses its
+  schema for the unknown fields. `moxi.config` names them in `PAGE_FIELDS` and the cap in
+  `COMMON_MAX`; `moxi.config.Key` takes them by keyword only.
+- `moxi config <module> show --json` carries each key's page fields: strings or null,
+  `common` and `pick` as bools, `choices` as `{value, words}` rows in the enum's order,
+  `hurts` and `terminal` as tables or null.
+- `moxi config set` and `moxi config unset` take `--json`: the command prints one object,
+  `{changed, problem, fix, units}`, and nothing else on stdout, with a refusal's problem
+  and fix apart and the lines applying the module's units said in `units`. The exit codes
+  are unchanged. `problem` is the bare predicate (`is not a setting of demo`) when the
+  refusal is about the value of the key being set, and otherwise the whole sentence naming
+  what it is about: the config file (locked, not valid TOML), another key in it, the
+  module, or the module's settings schema.
+- A change refused because the module's settings schema cannot be read raises the
+  schema's own `SchemaError`, naming the key at fault, in place of a `ConfigError` that
+  named only the schema's file. The exit code is still 3.
+- The core's own keys carry their page fields.
+
 ## 0.1.8 (unreleased)
 
 - `moxi.proc.run` takes `output`, a file path: the child's stdout and stderr both go
