@@ -10,6 +10,8 @@
     GET /api/mail-state  what the agent rows need beyond the roster: each address's
                       rows in the books, the asks that wait for the operator's reply,
                       the open asks between agents, and each address's newest message
+    GET /api/queue    one address's messages in the books' queue, oldest first, each
+                      with that address's row first
 
 The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
 --json` prints, and the `Roster` it was joined from; the mail read from one
@@ -184,6 +186,17 @@ MAIL_STATE = {
     })),
 }
 
+#: `/api/queue?name=`: the messages the address `name` has a row for in the books'
+#: `queue` (waiting, or in its session), oldest first, at most fifty, each with that
+#: address's row first in `rows`; `more`, how many rows are past the last one sent.
+#: `state` and `detail` are as `MESSAGES`'; an error answers no message.
+QUEUE = {
+    "state": lb.Out("string"),
+    "detail": lb.Out("string", nullable=True),
+    "messages": lb.Out("list", items=MESSAGE),
+    "more": lb.Out("int"),
+}
+
 PAGE = lb.Page(
     routes=(
         lb.Route("/api/roster", "read", "moxi_comms.pagehandlers:roster",
@@ -199,8 +212,12 @@ PAGE = lb.Page(
                  returns=MESSAGES),
         lb.Route("/api/mail-state", "read", "moxi_comms.pagereads:mail_state",
                  returns=MAIL_STATE),
+        lb.Route("/api/queue", "read", "moxi_comms.pagereads:queue",
+                 query={"name": lb.Field("string", max=200)},
+                 returns=QUEUE),
     ),
     assets="web",
 )
 
-__all__ = ["DELIVERY", "MAIL", "MAIL_STATE", "MESSAGE", "MESSAGES", "PAGE", "ROSTER", "ROW"]
+__all__ = ["DELIVERY", "MAIL", "MAIL_STATE", "MESSAGE", "MESSAGES", "PAGE", "QUEUE", "ROSTER",
+           "ROW"]

@@ -53,6 +53,10 @@
   and `last`, each name's newest message. An ask is answered by the rule the daemon's
   `awaiting` uses, now one shared function: a later message to the asker threaded to the
   ask, or with any posture but `[no reply]`.
+- comms' page server has a new read, `GET /api/queue?name=`: the messages one name has
+  a row for in the delivery books' queue, waiting or in its session, oldest first, at
+  most 50, each in `/api/messages`' shape with that name's row first; `more`, how many
+  rows are left. It asks the daemon nothing.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the

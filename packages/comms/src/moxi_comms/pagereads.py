@@ -20,7 +20,8 @@ Which store answers what:
   browser.
 
 A query value the page never sends (an id that is not all digits, a day that is not a
-date, a limit under one) answers `error` with a fixed sentence, and opens nothing.
+date, a limit under one, an empty address) answers `error` with a fixed sentence, and
+opens nothing.
 
 A message is listed only when its line zero is a machine line: a prose message, which
 no list shows, is left out and not counted. Its rows come from one query of the books'
@@ -62,6 +63,8 @@ from .store import open_read
 LIMIT = 12
 #: How many messages each step back reads when an earlier day is read whole.
 DAY_PAGE = 200
+#: How many of one address's rows `/api/queue` sends.
+QUEUE_CAP = 50
 
 #: The record's one time spelling, UTC.
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
@@ -176,6 +179,13 @@ def _day(raw: str | None, today: dt.date) -> dt.date:
         return dt.date.fromisoformat(raw)
     except ValueError:
         raise _Refused(BAD_QUERY) from None
+
+
+def _address(raw: str | None) -> str:
+    """A query's address: any string but the empty one, which the page never sends."""
+    if not raw:
+        raise _Refused(BAD_QUERY)
+    return raw
 
 
 def _limit(raw: int | None, default: int) -> int:
@@ -486,7 +496,46 @@ def _last(items) -> list[dict[str, Any]]:
     return [{"qualified": q, "at": last[q]} for q in sorted(last)]
 
 
-__all__ = ["BAD_QUERY", "DAY_PAGE", "LIMIT", "NO_CURSOR", "READ_ERROR", "Authored", "Read",
-           "Store", "answer", "authored", "book_rows", "day_bounds", "earlier", "local_day",
-           "mail_state", "messages", "opened", "query_id", "readable", "sent_entry", "shaped",
-           "stamp"]
+# --- /api/queue ---------------------------------------------------------------------------
+
+
+def queue(call: Any) -> dict[str, Any]:
+    """`GET /api/queue?name=`: the messages one address has a row for in the books'
+    `queue`, oldest first, at most `QUEUE_CAP`, each with that address's row first in
+    its rows; `more`, how many rows are past the last one sent. A failure is a 200 with
+    `state` `error`, never a 500."""
+    query = call.query
+    empty = {"messages": [], "more": 0}
+
+    def read() -> dict[str, Any]:
+        name = _address(query.get("name"))
+        out = dict(empty)
+        with opened() as store:
+            if store is None:
+                return out
+            mids = [str(mid) for (mid,) in store.conn.execute(
+                "SELECT message_id FROM queue WHERE name = ? ORDER BY message_id",
+                (name,))]
+            found: list[Read] = []
+            taken = 0
+            for mid in mids:
+                if len(found) == QUEUE_CAP:
+                    break
+                taken += 1
+                msg = store.record.get_message(mid)
+                if msg is not None:
+                    found.extend(readable([msg]))
+            sent = shaped(store, found)
+            for m in sent:
+                m["rows"].sort(key=lambda row: row["qualified"] != name)
+            out["messages"] = sent
+            out["more"] = len(mids) - taken
+        return out
+
+    return answer(empty, read)
+
+
+__all__ = ["BAD_QUERY", "DAY_PAGE", "LIMIT", "NO_CURSOR", "QUEUE_CAP", "READ_ERROR",
+           "Authored", "Read", "Store", "answer", "authored", "book_rows", "day_bounds",
+           "earlier", "local_day", "mail_state", "messages", "opened", "query_id", "queue",
+           "readable", "sent_entry", "shaped", "stamp"]
