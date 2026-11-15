@@ -170,7 +170,7 @@ def test_a_flow_may_hold_both_shapes_and_a_command_needs_no_time_limit():
     ('{ step = "staging", does = "report", before = "finish", reads = "the diff" }',
      "reads", "is not a list of strings"),
     ('{ step = "staging", does = "report", before = "finish", by = 3 }', "by",
-     "is not a name"),
+     "is an int, not a name"),
 ])
 def test_a_malformed_step_of_the_users_own_is_refused(entry, key, words):
     error = refusal(built(entry))
@@ -255,8 +255,8 @@ def test_a_flow_that_is_not_a_list_of_step_tables_is_refused(text, key, words):
     ('{ step = "design", does = "report" }', "does", "is not a key of the step 'design'"),
     ('{ step = "ratify", by = "lead" }', "by", "is not a key of the step 'ratify'"),
     ('{ step = "docket", by = "lead" }', "by", "is not a key of the step 'docket'"),
-    ('{ step = "design", by = "" }', "by", "is not a name"),
-    ('{ step = "design", model = 2 }', "model", "is not a name"),
+    ('{ step = "design", by = "" }', "by", "is empty"),
+    ('{ step = "design", model = 2 }', "model", "is an int, not a name"),
     ('{ step = "design", reads = ["the brief", 2] }', "reads",
      "is not a list of strings"),
 ])
@@ -264,6 +264,23 @@ def test_a_key_one_of_the_ten_steps_does_not_take_is_refused(entry, key, words):
     error = refusal(built(entry))
     assert error.key == f"flows.mine.steps[0].{key}"
     assert words in error.problem
+
+
+@pytest.mark.parametrize("entry, key, problem, fix", [
+    ('{ step = "design", by = "" }', "by", "is empty",
+     "give the name of who does it, or leave the key out"),
+    ('{ step = "design", model = "" }', "model", "is empty",
+     "give a tier's name, or leave the key out"),
+    ('{ step = "verify-design", recheck_model = "" }', "recheck_model", "is empty",
+     "give a tier's name, or leave the key out"),
+    ('{ step = "design", model = 2 }', "model", "is an int, not a name",
+     "give a tier's name, or leave the key out"),
+])
+def test_a_step_s_name_left_empty_is_refused_with_the_name_it_wants(
+        entry, key, problem, fix):
+    error = refusal(built(entry))
+    assert (error.key, error.problem, error.fix) == (
+        f"flows.mine.steps[0].{key}", problem, fix)
 
 
 def test_a_flow_may_list_a_step_it_would_have_unlisted():
