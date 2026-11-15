@@ -330,6 +330,24 @@ test("an owed row whose lead is bound and awaiting: the awaiting case on line th
   assert.equal(noteText(got), "warm until 20:04 · waiting on builder-1's reply since 18:28 · builder-1 hasn't read it yet");
 });
 
+test("the address an open box sent to is kept as a row: no case until a read gives it one", () => {
+  const empty = roster([]);
+  assert.deepEqual(agents(empty, mail()).rows, []);
+  const got = only(empty, mail(), { keep: "critic" });
+  assert.deepEqual([got.name, got.lead, got.case, got.second, got.fact, got.line, noteText(got), got.acts],
+                   ["critic", "critic", null, null, null, { lead: "", heavy: false, more: null }, null,
+                    [{ kind: "message", to: "critic" }]]);
+  // The books already hold the message for it: that is its case.
+  const books = only(empty, mail({ queued: [queued("critic", 1, ["operator"])] }), { keep: "critic" });
+  assert.equal(books.case, "mail");
+  assert.deepEqual(books.fact, { text: "1 message waiting", heavy: true });
+  // A standing scoped address kept is under its row, not in Other names.
+  const scoped = agents(roster([row("critic@a")]), mail(), { keep: "critic@a" });
+  assert.deepEqual([scoped.rows.map((x) => x.lead), scoped.others], [["critic@a"], []]);
+  // The operator is never a row.
+  assert.deepEqual(agents(empty, mail(), { keep: "operator" }).rows, []);
+});
+
 // --- Home and the page name the same mail by the same name -----------------------------------
 
 test("Home names an address in full when another unbound one shares its name, and so does the page", () => {

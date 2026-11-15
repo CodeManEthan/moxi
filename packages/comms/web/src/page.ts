@@ -543,6 +543,8 @@ export class CommsPage extends LitElement {
       hasLauncher: installed("launcher"), waitedMs: Date.now() - this.#openedAt, at: this.#at, placed: this.#placed,
       launched: installed("launcher") ? joinRunning(this.#running, this.#kept?.value.rows ?? [], this.#when) : null,
       presses: this.#presses, runningLine: installed("launcher") ? this.#runningLine : null,
+      // The box that sent keeps its row, and so its answer, until the next act in it.
+      keep: this.#box !== null && this.#box.lineFrom === "send" ? this.#box.to : null,
       messagesRead: this.#messages !== null && !this.#messages.loading,
       authorOf: (id) => authorIn([this.#todayRead, ...this.#days], id),
     });

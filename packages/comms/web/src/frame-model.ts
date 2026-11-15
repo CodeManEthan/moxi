@@ -80,6 +80,8 @@ export interface FrameFacts {
   hasLauncher: boolean;
   /** Each bound address's running launch, with launcher installed; null without it. */
   launched?: ReadonlyMap<string, Launched> | null;
+  /** The address the open box writes to while it holds a Send's answer: its row stays. */
+  keep?: string | null;
   /** The presses of `Keep warm` waiting, and the notes refused ones leave. */
   presses?: Presses;
   /** The line of launcher's read that failed, or null. */
@@ -259,7 +261,8 @@ export function frameModel(facts: FrameFacts, clock: Clock = LOCAL): Frame {
   const stale = !up;
   const mailValue = mail.value;
   const agents = shown === null || facts.now === null ? { rows: [], others: [] }
-    : agentsOf(shown, mailValue, { now: facts.now, when, hasCache: facts.hasCache, launched: facts.launched ?? null });
+    : agentsOf(shown, mailValue, { now: facts.now, when, hasCache: facts.hasCache, launched: facts.launched ?? null,
+                                       keep: facts.keep ?? null });
 
   let down: Down | null = null;
   if (value.state === "offline") down = { what: DOWN_WHAT, line: DOWN_LINE, copy: DOCTOR };

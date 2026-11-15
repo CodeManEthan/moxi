@@ -189,6 +189,21 @@ test("reply/<id> opens the asker's row, written to the asker, set to answer it",
   assert.deepEqual([waiting.opened, waiting.placed, waiting.lines], [{ kind: "pending" }, null, []]);
 });
 
+test("the row a box sent from stays open when the refresh leaves its name nothing", () => {
+  // He replied to critic, who has no session: its ask is answered, and the roster has not
+  // yet counted the reply waiting for it.
+  const ask = owed("critic", "18:42", "1000000000000000011");
+  const asked = frame({ mail: mail({ owed: [ask] }), at: { piece: "reply", message_id: ask.message_id } });
+  assert.deepEqual(asked.opened, { kind: "agent", name: "critic", to: "critic", reply: ask });
+  const placed = { opened: { ...asked.placed.opened, reply: null }, line: null };
+  const gone = frame({ at: { piece: "agent", qualified: "critic" }, placed });
+  assert.equal(gone.rows.find((item) => item.row.name === "critic"), undefined);
+  const kept = frame({ at: { piece: "agent", qualified: "critic" }, placed, keep: "critic" });
+  const item = kept.rows.find((one) => one.row.name === "critic");
+  assert.deepEqual([item.open, item.to, item.row.case, item.row.fact, item.row.line.lead], [true, "critic", null, null, ""]);
+  assert.deepEqual(kept.lines, []);
+});
+
 test("reply/<id> no longer owed: the line, and the author's row when the page knows the author", () => {
   const at_ = { piece: "reply", message_id: "1000000000000000009" };
   const unknown = frame({ at: at_ });

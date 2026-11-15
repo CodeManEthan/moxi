@@ -233,7 +233,8 @@ export interface AgentRow {
   lead: string;
   /** Every address of the name, by qualified name. */
   addresses: Address[];
-  case: Case;
+  /** Null only for a row kept for its open box (`Options.keep`) that meets no case yet. */
+  case: Case | null;
   /** The second-highest case the name meets, or null. */
   second: Case | null;
   where: string | null;
@@ -272,6 +273,9 @@ export interface Options {
   hasCache: boolean;
   /** Each address's running launch, with launcher installed; null without it. */
   launched?: ReadonlyMap<string, Launched> | null;
+  /** The address the open box writes to while it holds a Send's answer: its name stays a
+   * row whatever its case, so the box and its answer stay drawn. */
+  keep?: string | null;
 }
 
 const nameOf = (qualified: string): string => qualified.split("@")[0];
@@ -309,8 +313,8 @@ function factOf(address: Address, now: number, when: (at: number) => string): Fa
 }
 
 /** The addresses of every name the page knows, by name, but the operator's. */
-function gather(roster: PageRoster, mail: MailState | null, launched: ReadonlyMap<string, Launched> | null)
-  : Map<string, Address[]> {
+function gather(roster: PageRoster, mail: MailState | null, launched: ReadonlyMap<string, Launched> | null,
+                keep: string | null): Map<string, Address[]> {
   const him = operatorAddresses(mail);
   const addresses = new Map<string, Address>();
   const address = (qualified: string): Address => {
@@ -331,6 +335,7 @@ function gather(roster: PageRoster, mail: MailState | null, launched: ReadonlyMa
     address(entry.qualified).waiting = entry;
   }
   for (const entry of (mail?.owed ?? []).filter((owed) => !him.has(owed.author))) address(entry.author).owed.push(entry);
+  if (keep !== null && !him.has(keep)) address(keep);
   const known = (qualified: string): Address | undefined => addresses.get(qualified);
   for (const entry of mail?.queued ?? []) {
     const found = known(entry.qualified);
@@ -512,7 +517,7 @@ function linesOf(addresses: readonly Address[], lead: Address, full: ReadonlySet
 }
 
 /** The acts of a row, in the order they are drawn. */
-function actsOf(kind: Case, addresses: readonly Address[], lead: Address): Act[] {
+function actsOf(kind: Case | null, addresses: readonly Address[], lead: Address): Act[] {
   const message: Act = { kind: "message", to: lead.qualified };
   if (kind === "owed") {
     const oldest = addresses.flatMap((address) => address.owed).sort((a, b) => a.at - b.at)[0];
@@ -527,10 +532,12 @@ function actsOf(kind: Case, addresses: readonly Address[], lead: Address): Act[]
 function rowOf(name: string, addresses: Address[], full: ReadonlySet<string>, asks: readonly Ask[], words: Words)
   : AgentRow {
   const lead = leadOf(addresses);
-  const [first, second = null] = casesOf(addresses, lead);
+  const [first = null, second = null] = casesOf(addresses, lead);
   const lines = linesOf(addresses, lead, full, words);
   const lined = new Set(lines.map((line) => line.qualified));
-  const top = wordsOf(first, addresses, lead, lined, asks, words);
+  // A row kept for its open box that meets no case claims nothing yet.
+  const top = first === null ? { fact: null, line: { lead: "", heavy: false, more: null } }
+    : wordsOf(first, addresses, lead, lined, asks, words);
   let note: string | null = null;
   if (second !== null) {
     const carried = second === "mail"
@@ -592,12 +599,14 @@ export function order(rows: readonly AgentRow[]): AgentRow[] {
  * The agent rows and `Other names` for a roster that is up and, once read, the mail state.
  * A name none of whose addresses has a session, mail or an `owed` message is no row: its
  * roster addresses go to `Other names`, as does a scoped address with neither mail nor a
- * session whose name has a row. A send-only name is always in `Other names`.
+ * session whose name has a row. A send-only name is always in `Other names`. The name of
+ * `options.keep` is a row whatever it meets.
  */
 export function agentsOf(roster: PageRoster, mail: MailState | null, options: Options): Agents {
   const words: Words = { now: options.now, when: options.when ?? LOCAL.time, hasCache: options.hasCache };
   const kept = mail !== null && mail.state === "up" ? mail : null;
-  const names = gather(roster, kept, options.launched ?? null);
+  const keep = options.keep ?? null;
+  const names = gather(roster, kept, options.launched ?? null, keep);
   const full = namedInFull(roster);
   const rows: AgentRow[] = [];
   const others: OtherName[] = [];
@@ -608,18 +617,19 @@ export function agentsOf(roster: PageRoster, mail: MailState | null, options: Op
   };
   for (const [name, all] of names) {
     const sendOnly = all.filter((address) => address.row?.kind === "send-only" && !address.bound
-      && !holdsMail(address) && address.owed.length === 0);
+      && !holdsMail(address) && address.owed.length === 0 && address.qualified !== keep);
     const addresses = all.filter((address) => !sendOnly.includes(address));
     sendOnly.forEach(other);
     if (addresses.length === 0) continue;
-    const isRow = addresses.some((address) => address.bound || holdsMail(address) || address.owed.length > 0);
+    const isRow = addresses.some((address) => address.bound || holdsMail(address) || address.owed.length > 0
+      || address.qualified === keep);
     if (!isRow) {
       addresses.filter((address) => address.row !== null).forEach(other);
       continue;
     }
     const idle = addresses.filter((address) =>
       !isBare(address.qualified) && address.row !== null && !address.bound && !holdsMail(address)
-      && address.owed.length === 0);
+      && address.owed.length === 0 && address.qualified !== keep);
     const lead = leadOf(addresses);
     const under = addresses.filter((address) => address === lead || !idle.includes(address));
     idle.filter((address) => address !== lead).forEach(other);

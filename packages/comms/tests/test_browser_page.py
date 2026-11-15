@@ -528,6 +528,33 @@ def test_reply_answers_the_address_that_asked_with_the_ask_quoted(page_shell, ri
     assert address(page) == "agent/planner@proj-b"
 
 
+def test_a_reply_to_an_asker_with_no_session_keeps_its_sent_line(page_shell, rig, ui_contexts):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    asked = ask_him(rig, "critic", "Is the review done?")
+    shell = page_shell()
+    roster_kit.current(shell, holding([P]))
+    page, root, _ = open_page(shell, ui_contexts, [])
+    row = agent(root, "critic")
+    expect(row).to_have_attribute("fact", "waiting for your reply")
+    row.locator('[data-action="reply"]').click()
+    assert address(page) == f"reply/{asked.id}"
+    box = root.locator('[data-part="box"][data-to="critic"]')
+    box.locator("textarea").fill("Done; two notes on the parser.")
+    box.locator('[data-action="send"]').click()
+    dry = root.locator('[data-line="dry"]')
+    expect(dry.locator(".k")).to_have_text(re.compile(rf"^Sent {T}$"))
+    assert machine_line.parse(last(rig).content).reply_to == str(asked.id)
+    # The ask is answered and the reply waits for critic: whatever each read brings first,
+    # the row stays open with the box that sent and its answer.
+    expect(row).to_have_attribute("fact", "1 message waiting")
+    expect(row).to_have_attribute("open", "")
+    expect(dry.locator(".k")).to_have_text(re.compile(rf"^Sent {T}$"))
+    expect(dry).to_contain_text("critic isn't running")
+    assert address(page) == "agent/critic"
+    expect(root.locator('[data-line="foot-address"]')).to_have_count(0)
+
+
 def test_a_cache_comms_cannot_read_refuses_the_check_until_check_again(
         page_shell, rig, ui_contexts):
     # A session that has had a turn but has no transcript: comms can't tell whether a
