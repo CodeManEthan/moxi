@@ -63,6 +63,21 @@ def resolve(path: str | os.PathLike) -> str:
         raise Failure(f"no git work tree at {exc}", 2) from None
 
 
+def work_tree(path: str | os.PathLike) -> str:
+    """The top of the work tree `path` is in (a linked worktree's own), where `path` may
+    be a project key where repo resolves one. Raises `Failure`."""
+    from moxi_repo import projects
+
+    try:
+        where = projects.resolve(os.fspath(path))
+    except projects.Unavailable as exc:
+        raise Failure(exc.text, exc.code) from None
+    done = _git(where, "rev-parse", "--show-toplevel")
+    if done.returncode != 0 or not done.stdout.strip():
+        raise Failure(f"no git work tree at {where}", 2)
+    return done.stdout.strip()
+
+
 def _git(root: str, *args: str):
     from moxi_repo.api import git
 
@@ -285,4 +300,5 @@ def listing() -> list[dict]:
 
 
 __all__ = ["FLAG", "GITHUB", "INTERPRETER", "PIECES", "Failure", "config_get", "disable",
-           "enable", "free_ref_problem", "is_public", "listing", "registered", "resolve"]
+           "enable", "free_ref_problem", "is_public", "listing", "registered", "resolve",
+           "work_tree"]

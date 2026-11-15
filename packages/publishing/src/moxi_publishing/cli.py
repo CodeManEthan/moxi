@@ -3,6 +3,7 @@
     moxi publishing enable PATH [--github OWNER/REPO] [--set KEY=VALUE]...
     moxi publishing disable PATH
     moxi publishing list [--json]
+    moxi publishing scan [PATH] [--rev REV] [--ci]
 
 PATH is a path inside the repo; with the projects module installed it may also be a
 project key. Exit codes: 0 done, 1 failed, 2 usage, 3 refused.
@@ -50,7 +51,42 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                          description="Every repo repo has indexed that is marked public, "
                                      "with each piece's state and settings.")
     p.add_argument("--json", action="store_true", help="print JSON")
+    p = verbs.add_parser(
+        "scan", help="scan a commit's whole tree for text a public repo can't hold",
+        description="Read every file of the tree at REV as git stores it, whatever "
+                    "attributes say, and every path name, through secrets' credentials "
+                    "and private names sets and the provenance rules, with the "
+                    "allowlists of that tree. Prints one line per hit; exits 3 when "
+                    "there is one.")
+    p.add_argument("path", metavar="PATH", nargs="?", default=".",
+                   help="a path inside the repo, or a project key (default: here)")
+    p.add_argument("--rev", default="HEAD", help="the commit or tree (default: HEAD)")
+    p.add_argument("--ci", action="store_true",
+                   help="leave out the private names list and the private allowlist, "
+                        "which only your machine has")
     return parser
+
+
+def _scan(args, prog: str) -> int:
+    from moxi_secrets import AllowlistError, SetUnavailable
+
+    from moxi_publishing import content, flag
+
+    try:
+        root = flag.work_tree(args.path)
+        refused = content.scan_tree(root, args.rev, ci=args.ci)
+    except flag.Failure as exc:
+        print(f"{prog}: {exc.text}", file=sys.stderr)
+        return exc.code
+    except (content.ScanError, SetUnavailable, AllowlistError, OSError) as exc:
+        print(f"{prog}: the tree can't be scanned: {exc}", file=sys.stderr)
+        return codes.ERROR
+    for line in refused:
+        print(line)
+    if refused:
+        print(f"{prog}: {len(refused)} hit(s) a public repo can't hold", file=sys.stderr)
+        return codes.REFUSED
+    return codes.OK
 
 
 def _print_listing(repos: list[dict]) -> None:
@@ -73,6 +109,8 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
     from moxi_publishing import flag
 
     args = _parser(prog).parse_args(argv)
+    if args.verb == "scan":
+        return _scan(args, prog)
     try:
         if args.verb == "enable":
             lines = flag.enable(args.path, github=args.github, sets=args.sets)

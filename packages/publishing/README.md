@@ -8,6 +8,7 @@ module's.
 ```sh
 moxi publishing enable ~/src/app --github alice/app
 moxi publishing list
+moxi publishing scan ~/src/app
 moxi publishing disable ~/src/app
 ```
 
@@ -66,6 +67,40 @@ git's scissors line, comment lines included. It drops each trailer line on `drop
 a line holding a hit of secrets' `credentials` or `private-names` set, or of a provenance
 rule. A refusal names each line as `line N, <rule>: <text>`; a secrets hit is named by its
 rule only, so a credential never prints.
+
+## The content piece
+
+On every commit, the piece reads what the commit adds as git stores it: every added line,
+whatever `.gitattributes`, diff drivers, text conversion or colour config say, a moved
+file whole (renames are off), and each new path's name. Each goes through secrets'
+`credentials` and `private-names` sets and the provenance rules for files. A refusal names
+`path:line: set/rule`; a provenance hit shows its line too, a secrets hit never does. A hit
+in a new path's name prints the path with the hit replaced by its rule.
+
+A merge is judged by its own lines only: a line counts when it is added against every
+parent, and a path when no parent has it. Lines a merge brings in from its other parents
+were judged when those commits were made, and are judged again when they are pushed.
+
+Every tracked path is scanned. A hit someone has judged and kept goes in an allowlist,
+read from the index, so an allowance counts only once it is staged:
+
+- `.secrets-allow` at the repo's root: credentials lines in secrets' format.
+- `.residue-allow` at the repo's root: `path TAB exact text TAB why`, letting that
+  provenance text stand in that file (`@path` for a path name). The provenance rules skip
+  this file itself, since it spells what it lets stand; the secrets sets still read it.
+- `secrets-allow-private` in the repo's common git directory: lines of every set, private
+  names among them, where git never tracks them.
+
+A malformed allowlist, a secrets set that can't run or a failed git read refuses the
+commit, naming why.
+
+## Scanning a whole tree
+
+`moxi publishing scan [PATH] [--rev REV] [--ci]` reads every file of the tree at `REV`
+(default `HEAD`) as git stores it, and every path name, as the content piece reads what a
+commit adds, with the allowlists of that tree. It prints one line per hit and exits 3 when
+there is one, 1 when the tree can't be read. `--ci` leaves out the private names list and
+the private allowlist, which exist only on your machine, for a scan run on a server.
 
 ## Provenance rules
 

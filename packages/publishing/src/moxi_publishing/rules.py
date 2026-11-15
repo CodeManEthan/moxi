@@ -85,20 +85,25 @@ def _quoted() -> re.Pattern[str]:
     return re.compile(_QUOTED)
 
 
-def hits(line: str, where: str, names=NAMES) -> list[tuple[str, str]]:
+def hits(line: str, where: str, names=NAMES, *, every: bool = False
+         ) -> list[tuple[str, str]]:
     """Each rule among `names` that applies to `where` and that `line` breaks, as
-    (rule, the text it matched), in `NAMES` order; empty when none."""
+    (rule, the text it matched), in `NAMES` order; empty when none. With `every`, each
+    match of a rule in the line, so an allowance for one text leaves the others judged;
+    else its first."""
     found = []
     for name in NAMES:
         if name not in names or not applies(name, where):
             continue
-        match = _compiled(name).search(line)
-        if match is None:
+        matches = (_compiled(name).finditer(line) if every
+                   else filter(None, (_compiled(name).search(line),)))
+        texts = [match.group(0) for match in matches]
+        if not texts:
             continue
         if name == "quoted-ruling":
             if _quoted().search(line) is None:
                 continue
-        found.append((name, match.group(0)))
+        found += [(name, text) for text in texts]
     return found
 
 

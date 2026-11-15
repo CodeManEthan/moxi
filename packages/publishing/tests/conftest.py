@@ -104,6 +104,7 @@ def commit(repo: Path, message: str, *, name: str = "note.md", text: str = "a li
     """Append `text` to `name`, stage it and commit with `message` (from a file, so every
     line reaches the git hook as written); returns the finished process."""
     path = repo / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(text)
     git(repo, "add", "--", name)
