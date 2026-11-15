@@ -14,7 +14,8 @@ Nothing leaves unless every ref the push moves follows these rules:
 - a branch is created, or moved forward: the remote's tip is an ancestor of the new one;
 - a branch is deleted only when it is not `main` or protected, and the remote's tip, read
   locally, is an ancestor of the tracking ref of `main`; a tip not here, or no tracking
-  ref, refuses with "fetch first";
+  ref, refuses with "fetch first" (for a push to a bare URL, which no fetch gives tracking
+  refs, with "push through a named remote");
 - a tag shaped like a release tag is never moved or deleted; one created must be a release
   tag of a member at its commit and pass the tag gate (`moxi_publishing.tags.gate`), read
   against `<remote>/<main>`;
@@ -234,6 +235,16 @@ class _Push(_Reader):
         self.word = os.environ.get(WORD_ENV)
         self.commits: list[str] = []
 
+    def fetch_fix(self) -> str:
+        """How to bring the remote's refs here. git passes a push to a bare URL the URL as
+        the remote too, and no fetch makes tracking refs under a URL, so the fix there is a
+        named remote."""
+        if self.remote == self.url:
+            return (f"push through a named remote instead (git remote add NAME "
+                    f"{self.shown_url}, git fetch NAME, then git push NAME ...), since no "
+                    "fetch makes tracking refs for a bare URL")
+        return f"fetch first (git fetch {self.shown_remote})"
+
     def git(self, *args, stdin_data=None, timeout_s=None):
         from moxi_publishing.content import NO_REPLACE
 
@@ -383,16 +394,17 @@ class _Push(_Reader):
             if u.remote_sha not in here or main is None:
                 self.reasons.append(
                     f"{ref}: can't tell whether {branch} is merged into {self.main}; "
-                    f"fetch first (git fetch {self.shown_remote})")
+                    f"{self.fetch_fix()}")
             elif not self.is_ancestor(u.remote_sha, main):
-                self.reasons.append(f"{ref}: {branch} is not merged into {self.main}; "
-                                    "a branch is deleted only once merged")
+                self.reasons.append(
+                    f"{ref}: {branch} is not merged into {self.main} as last fetched; a "
+                    f"branch is deleted only once merged (if it was merged on the remote "
+                    f"since, {self.fetch_fix()})")
             return
         if creating:
             return
         if u.remote_sha not in here:
-            self.reasons.append(f"{ref}: the remote's tip isn't here; fetch first "
-                                f"(git fetch {self.shown_remote})")
+            self.reasons.append(f"{ref}: the remote's tip isn't here; {self.fetch_fix()}")
         elif not self.is_ancestor(u.remote_sha, u.local_sha):
             self.reasons.append(f"{ref}: the push would rewrite {branch}; a public branch "
                                 "is never rewritten")
@@ -430,7 +442,8 @@ class _Push(_Reader):
             if done.stdout.strip():
                 self.reasons.append(
                     f"there are no tracking refs for {self.shown_remote} here, and the "
-                    "remote isn't empty, so what is new to it can't be told; fetch first")
+                    "remote isn't empty, so what is new to it can't be told; "
+                    + self.fetch_fix())
                 return None
         tips = [u.remote_sha for u in self.updates if not _zero(u.remote_sha)]
         return sorted(set(tracking) | self.present(tips))

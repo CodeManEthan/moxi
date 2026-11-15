@@ -110,7 +110,7 @@ Nothing leaves a public repo unless every ref the push moves follows these rules
 | what is pushed | allowed when |
 |---|---|
 | a branch created or moved | the remote's tip is an ancestor of the new one: a public branch is never rewritten |
-| a branch deleted | it is not `main` or on `protected`, and the remote's tip, as this repo has it, is in the tracking ref of `main`; otherwise "fetch first" |
+| a branch deleted | it is not `main` or on `protected`, and the remote's tip, as this repo has it, is in the tracking ref of `main`; otherwise "fetch first" (for a push to a bare URL, which no fetch gives tracking refs: push through a named remote) |
 | a tag shaped like a release tag (`<package>-v<version>`) | never moved or deleted; created only when it is a release tag of a member at its commit and passes the tag gate ([Releases](#releases)), read against the tracking ref of `main` |
 | any other tag or ref | a `free-ref` pattern names it; then it is created, moved or deleted freely |
 

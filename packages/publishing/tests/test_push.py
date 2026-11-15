@@ -102,7 +102,8 @@ def test_a_branch_is_deleted_only_once_merged_into_main(pub):
     git(pub, "switch", "-q", "-c", "topic")
     commit(pub, "Topic")
     passed(push(pub, "origin", "topic"))
-    refused(push(pub, "origin", ":topic"), "not merged into main")
+    refused(push(pub, "origin", ":topic"), "not merged into main as last fetched",
+            "if it was merged on the remote since, fetch first (git fetch origin)")
     git(pub, "switch", "-q", "main")
     git(pub, "merge", "-q", "--no-ff", "-m", "Merge topic", "topic")
     passed(push(pub, "origin", "main"))
@@ -186,7 +187,10 @@ def test_a_ref_name_holding_a_private_name_is_refused(pub):
 def test_a_remote_with_no_tracking_refs(repo, names, remote, tmp_path):
     public_repo(repo, PIECE, sets=("main=main",))
     commit(repo, "Add")
-    refused(push(repo, str(remote), "main"), "fetch first")
+    done = push(repo, str(remote), "main")
+    # A bare URL never gets tracking refs, so the fix named is a named remote, not a fetch.
+    refused(done, f"push through a named remote instead (git remote add NAME {remote},")
+    assert "fetch first" not in done.stderr
     empty = tmp_path / "empty.git"
     git(tmp_path, "init", "-q", "--bare", str(empty))
     commit(repo, "A name", text="bobsecret\n")
