@@ -53,7 +53,9 @@ exit, a missing or non-executable path, or output that is not UTF-8 adds nothing
 logged once per endpoint. It runs inside the same `listen.wait_ms` bound as the other
 entries: when the bound passes first, turns stops waiting and kills the program's process
 group. A program with work past the bound starts that work in a session of its own and
-exits. The total is `start.limit_chars`, at most the harness's ceiling. Each entry on the
+exits, and gives it other output than its own stdout: turns reads stdout until it closes,
+so a program that exits while a process it started holds stdout open adds nothing, and the
+log says so. The total is `start.limit_chars`, at most the harness's ceiling. Each entry on the
 effective list gets an equal share; in list order, an answer shorter than what it holds
 passes the rest on to the entries after it, and one longer is cut on a line boundary,
 with a last line `[turns: <entry> cut at <n> characters]`. `start_plan` reads the list
@@ -686,7 +688,7 @@ def _run(registry: Registry, e: Entry, event: SessionEvent, wait_s: float,
         out, _ = proc.communicate(stdin, timeout=max(0.0, wait_s))
     except subprocess.TimeoutExpired:
         _kill_group(proc)
-        _log_once(registry, e.entry, f"it ran past {int(wait_s * 1000)} ms and was stopped")
+        _log_once(registry, e.entry, _past_bound(proc.returncode, wait_s))
         return
     if proc.returncode != 0:
         _log_once(registry, e.entry, f"it exited with {proc.returncode}")
@@ -697,6 +699,20 @@ def _run(registry: Registry, e: Entry, event: SessionEvent, wait_s: float,
         _log_once(registry, e.entry, "its output is not UTF-8")
         return
     ran[e.entry] = text or None
+
+
+def _past_bound(code: int | None, wait_s: float) -> str:
+    """Why a run entry still read at the bound adds nothing, from its exit code after the
+    kill. A program can exit while a process it started still holds its stdout open: turns
+    never sees the output close, and the entry's text is dropped."""
+    ms = int(wait_s * 1000)
+    if code == 0:
+        return (f"it exited, but its output stayed open past {ms} ms "
+                "(a process it started still holds it)")
+    if os.name == "posix" and code is not None and code > 0:
+        return (f"it exited with {code}, and its output stayed open past {ms} ms "
+                "(a process it started still holds it)")
+    return f"it ran past {ms} ms and was stopped"
 
 
 def _kill_group(proc: subprocess.Popen) -> None:

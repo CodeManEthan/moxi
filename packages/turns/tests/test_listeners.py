@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import signal
 import time
 import types
 
@@ -654,6 +655,50 @@ def test_a_detached_child_outlives_the_bound(tmp_path):
     while not done.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert done.read_text() == "ran"
+
+
+def test_a_program_that_exits_while_its_child_holds_stdout_is_logged_as_exited(
+        tmp_path, caplog):
+    pids = tmp_path / "pids"
+
+    def holder(name, code):
+        # Prints, starts a detached child that inherits stdout, and exits with `code`.
+        return _program(tmp_path, name, (
+            "print('kept?', flush=True)\n"
+            "child = subprocess.Popen(['sleep', '30'], start_new_session=True)\n"
+            f"open({str(pids)!r}, 'a').write(f'{{child.pid}}\\n')\n"
+            f"sys.exit({code})"))
+
+    clean, failed = holder("clean", 0), holder("failed", 3)
+    running = _program(tmp_path, "running", "print('x', flush=True); time.sleep(30)")
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
+                   order=(f"run:{clean}", f"run:{failed}", f"run:{running}", "comms"))
+    ev = event("start", source="startup")
+    ev = dataclasses.replace(ev, env={**ev.env, "PATH": os.environ["PATH"]})
+    try:
+        assert listeners.ask(reg, ev, 0.6) == "comms at start"
+
+        def logged():
+            return dict(m.removeprefix("start list entry ").split(" adds nothing: ", 1)
+                        for m in (r.message for r in caplog.records) if "adds nothing" in m)
+
+        deadline = time.monotonic() + 3
+        while len(logged()) < 3 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert logged() == {
+            f"run:{clean}": "it exited, but its output stayed open past 600 ms "
+                            "(a process it started still holds it)",
+            f"run:{failed}": "it exited with 3, and its output stayed open past 600 ms "
+                             "(a process it started still holds it)",
+            f"run:{running}": "it ran past 600 ms and was stopped"}
+        children = [int(p) for p in pids.read_text().split()]
+        assert len(children) == 2 and all(_alive(c) for c in children)  # left to live on
+    finally:
+        for c in (int(p) for p in pids.read_text().split()) if pids.exists() else ():
+            try:
+                os.kill(c, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_the_start_plan_lists_a_run_entry_and_runs_none(installed, turns_env, tmp_path):
