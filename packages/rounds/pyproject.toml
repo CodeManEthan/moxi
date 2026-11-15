@@ -25,6 +25,9 @@ dependencies = ["moxi>=0.1.7,<0.2", "moxi-projects>=0.1.4,<0.2", "psutil>=5.9"]
 # notes: with it, a project that names no notes folder gets notes' default one, so its
 # rounds folder may be relative.
 notes = ["moxi-notes>=0.1,<0.2"]
+# turns: with it, a session's start runs the sweep of leftover folders when
+# sweep.at_start is on.
+turns = ["moxi-turns>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
