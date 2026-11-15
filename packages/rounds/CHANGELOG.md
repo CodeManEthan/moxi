@@ -134,7 +134,11 @@ does not yet build.
   fast-forward of the target or by a finish that stopped before recording it, is
   recorded `found` with where it landed and the target before it, and is not made
   again; a hand merge is printed as `found hand merge <commit>:` with what it put on
-  the target. It runs the `merge` action alone.
+  the target. A `push` action pushes the target at the merge's landing, or with no
+  merge before it the build's branch at the tip, both by commit id; a `command` action
+  runs in the build's worktree with its placeholders filled and its output the
+  caller's, `started` recorded before it runs. A command that started and has no
+  result is refused and not run again.
 - The finish lock: one finish at a time per repo and target, held as the ref
   `refs/rounds/finishing/<into>` (or the repo's `lock_ref`) pointing at a blob with the
   holder's line. A holder on this machine whose process has ended is cleared in one

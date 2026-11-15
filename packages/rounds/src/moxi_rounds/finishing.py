@@ -46,12 +46,21 @@ print. That covers a merge made by hand, and one a stopped finish made and did n
 record. A build merged by a landing of its own on record at another tip is refused:
 recording that landing again would give the build two landings no head tells apart.
 
-This version runs the `merge` action; a repo whose finish names an action of another
-kind is refused before anything is run.
+**A push** is `git push <remote>` of the target, at the landing a merge action before
+it recorded, or with no merge action before it, of the build's branch at `T`; both by
+commit id, so nothing the gates did not read is pushed. It runs in the repo's root.
+
+**A command** runs its argv, placeholders filled as for a check, with no shell, in the
+build's worktree, its output going to the caller's terminal, for at most its
+`timeout_s` (no limit without one). `started` is recorded before it runs, so a finish
+that dies while it runs leaves a record saying so. A command whose newest record at `T`
+is `started` with no result may have done its work: this version refuses it, naming
+when it started, and runs nothing.
 """
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -60,8 +69,8 @@ from pathlib import Path
 from moxi import exit as exits
 from moxi import proc
 
-from . import (builds, checking, finish_gates, finish_lock, folders, open_builds, places,
-               questions, write)
+from . import (builds, checking, finish_gates, finish_lock, folders, gitreads, open_builds,
+               places, questions, write)
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, Refused, Unmet
@@ -73,6 +82,8 @@ DONE = "finish.done"
 #: The states of a finish action's record: run and passed, run and failed, or a merge
 #: found already on the target.
 OK, FAILED, FOUND = "ok", "failed", "found"
+#: The state of a command's record appended before it runs.
+STARTED = "started"
 #: The states of a record that mean the action is not run again.
 SETTLED = (OK, FOUND)
 #: The gates read again under the finish lock before any action is run: those another
@@ -82,13 +93,13 @@ UNDER_LOCK = (finish_gates.DRIFT, finish_gates.TARGET, finish_gates.WORK,
 #: The gates read again on the log after the actions, before `finish.done`.
 AFTER = (finish_gates.VERIFIED, finish_gates.FINDINGS, finish_gates.CHECKED,
          finish_gates.QUESTIONS, finish_gates.USER_STEPS)
-#: The kinds of finish action this version runs.
-RUNS = (own.MERGE,)
 #: The folder name, in `<worktree_dir>/<repo>`, of the checkout of a target that no
 #: worktree has checked out, before the target's encoded name.
 CHECKOUT_PREFIX = ".finish-"
 #: How long the merge may take, hooks included, in seconds.
 MERGE_TIMEOUT_S = 3600.0
+#: How long a push may take, in seconds.
+PUSH_TIMEOUT_S = 600.0
 
 
 class ActionFailed(RoundsError):
@@ -167,7 +178,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
     at_tip = None if seen.tip is None else {stage: tip}
     found = [one.unmet for one in _gates(view, name, stage, seen, tip, settings)]
     actions = own.finish_actions(own.build_setting(settings, build.repo, "finish"))
-    found += _not_run(actions, build.repo)
+    found += _commands_blocked(view.state, build, tip, actions, name=name)
     if found:
         raise Refused(found)
 
@@ -203,17 +214,28 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                                    landing=last.get("landing"),
                                    target_before=last.get("target_before")))
                 continue
-            result = _found(status, root, tip, action_id=action["id"], name=name,
-                            stage=stage)
-            if result is None:
-                result = _merge(root, build, tip, target_head, settings=settings,
-                                action_id=action["id"], again=again)
-            write.record(where, actor=actor, event=lambda _view, _result, result=result: (
-                write.Entry(ACTION, {"stage": stage, "tip": tip, "id": result.id,
-                                     "kind": result.kind, "state": result.state,
-                                     "landing": result.landing,
-                                     "target_before": result.target_before})),
-                wait_s=wait_s, at=at, env=env)
+            def append(result: Action) -> None:
+                write.record(where, actor=actor, event=lambda _view, _result: (
+                    write.Entry(ACTION, {"stage": stage, "tip": tip, "id": result.id,
+                                         "kind": result.kind, "state": result.state,
+                                         "landing": result.landing,
+                                         "target_before": result.target_before})),
+                    wait_s=wait_s, at=at, env=env)
+
+            if action["do"] == own.MERGE:
+                result = _found(status, root, tip, action_id=action["id"], name=name,
+                                stage=stage)
+                if result is None:
+                    result = _merge(root, build, tip, target_head, settings=settings,
+                                    action_id=action["id"], again=again)
+            elif action["do"] == own.PUSH:
+                landing = next((one.landing for one in done if one.kind == own.MERGE),
+                               None)
+                result = _push(root, build, tip, action, landing=landing)
+            else:
+                append(Action(action["id"], own.COMMAND, STARTED))
+                result = _command(view.state, name, build, root, tip, action)
+            append(result)
             done.append(result)
             if on_action is not None:
                 on_action(result)
@@ -290,15 +312,28 @@ def _gates(view, name: str, stage: str, seen, tip: str, settings) -> tuple:
         closed=lambda round_name: questions.is_closed(round_name, settings))
 
 
-def _not_run(actions: list[dict], repo: str) -> list[Unmet]:
-    other = [action["id"] for action in actions if action["do"] not in RUNS]
-    if not other:
-        return []
-    return [Unmet(f"the finish of {repo} names the action"
-                  f"{'' if len(other) == 1 else 's'} {', '.join(other)}, of a kind this "
-                  "version of moxi-rounds does not run",
-                  f"set [projects.{repo}] finish to the merge action alone, or leave it "
-                  "out")]
+def _commands_blocked(state: states.State, build: builds.Build, tip: str,
+                      actions: list[dict], *, name: str) -> list[Unmet]:
+    """Why a command action due at `tip` can't be run: it started and has no result,
+    or the build's worktree it runs in is gone."""
+    records = _records(state, build, tip)
+    worktree = checking.commission_of(state, build).get("worktree")
+    found = []
+    for action in actions:
+        last = records.get(action["id"])
+        if action["do"] != own.COMMAND or (last is not None
+                                           and last.get("state") in SETTLED):
+            continue
+        if last is not None and last.get("state") == STARTED:
+            found.append(Unmet(
+                f"the finish action {action['id']} of {build.stage} started at "
+                f"{last.get('at')} and has no result: it may have done its work, so it "
+                "is not run again", f"look at what it did; moxi rounds show {name}"))
+        elif not (worktree and Path(str(worktree)).is_dir()):
+            found.append(Unmet(
+                f"the finish action {action['id']} runs in {build.stage}'s worktree, "
+                f"which is gone from {worktree}", f"moxi rounds show {name}"))
+    return found
 
 
 def _moved(seen, tip: str, *, name: str, stage: str) -> list[Unmet]:
@@ -342,6 +377,50 @@ def _found(status: builds.Status, root: Path, tip: str, *, action_id: str, name:
         "merge again would leave the build's landings telling no head apart",
         f"move {stage}'s branch back to the tip its finish merged, then moxi rounds "
         f"finish {name} {stage}")])
+
+
+# -- a push and a command ----------------------------------------------------------------
+
+def _push(root: Path, build: builds.Build, tip: str, action: Mapping, *,
+          landing: str | None) -> Action:
+    """Push the target at `landing` when a merge action came before, else the build's
+    branch at `tip`."""
+    ref = (f"{landing}:refs/heads/{build.target}" if landing is not None
+           else f"{tip}:refs/heads/{build.branch}")
+    argv = ["git", "-C", str(root), "push", str(action["remote"]), ref]
+    try:
+        done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.environment(),
+                        stdin_data="")
+    except subprocess.TimeoutExpired:
+        return Action(action["id"], own.PUSH, FAILED,
+                      output=f"the push gave no answer in {PUSH_TIMEOUT_S:g} seconds")
+    except OSError as error:
+        return Action(action["id"], own.PUSH, FAILED, output=f"git could not run: {error}")
+    said = "\n".join(part.strip() for part in (done.stdout or "", done.stderr or "")
+                     if part.strip())
+    return Action(action["id"], own.PUSH, OK if done.returncode == 0 else FAILED,
+                  output=said)
+
+
+def _command(state: states.State, name: str, build: builds.Build, root: Path, tip: str,
+             action: Mapping) -> Action:
+    """Run a command action in the build's worktree, its output the caller's own."""
+    worktree = Path(str(checking.commission_of(state, build).get("worktree")))
+    argv = checking.fill(action["argv"], checking.values(name, build, root=root, tip=tip))
+    timeout_s = action.get("timeout_s")
+    try:
+        done = proc.run(argv, timeout_s=timeout_s, env=gitreads.environment(),
+                        cwd=worktree, capture=False)
+    except subprocess.TimeoutExpired:
+        return Action(action["id"], own.COMMAND, FAILED,
+                      output=f"{shlex.join(argv)} ran past {timeout_s:g} seconds")
+    except OSError as error:
+        return Action(action["id"], own.COMMAND, FAILED,
+                      output=f"{shlex.join(argv)} could not be started: {error}")
+    if done.returncode == 0:
+        return Action(action["id"], own.COMMAND, OK)
+    return Action(action["id"], own.COMMAND, FAILED,
+                  output=f"{shlex.join(argv)} exited {done.returncode}")
 
 
 # -- the merge ---------------------------------------------------------------------------
@@ -454,6 +533,6 @@ class _MergeGit(Git):
         return done.returncode, said
 
 
-__all__ = ["ACTION", "DONE", "OK", "FAILED", "FOUND", "SETTLED", "UNDER_LOCK",
-           "AFTER", "RUNS", "CHECKOUT_PREFIX", "MERGE_TIMEOUT_S", "ActionFailed",
+__all__ = ["ACTION", "DONE", "OK", "FAILED", "FOUND", "STARTED", "SETTLED", "UNDER_LOCK",
+           "AFTER", "CHECKOUT_PREFIX", "MERGE_TIMEOUT_S", "PUSH_TIMEOUT_S", "ActionFailed",
            "Action", "Finished", "finish"]

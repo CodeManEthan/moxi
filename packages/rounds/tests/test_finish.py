@@ -295,17 +295,6 @@ def test_a_target_checkout_with_changes_is_refused_and_kept(ready, repo):
     assert (repo.root / "README").read_text() == "changed by hand\n"
 
 
-def test_an_action_of_a_kind_not_run_here_is_refused_before_anything(ready, repo,
-                                                                      configure):
-    path, _tree = ready
-    configure('finish = [ { do = "merge" }, { do = "push", remote = "origin" } ]')
-    before = events(path)
-    with pytest.raises(Refused) as refused:
-        finishing.finish(ROUND, "B1", actor="coder")
-    assert "push" in refused.value.unmet[0].reason
-    assert events(path) == before and lock_ref(repo) is None
-
-
 # -- a failed merge, and the gates after it ------------------------------------------------
 
 def hook(repo, name: str, code: int) -> None:
