@@ -269,3 +269,139 @@ def test_a_link_to_the_shared_file_or_the_own_part_is_left_with_a_line(lo, to):
     assert (lo / "global.md").read_text() == TEXT
     assert (lo / "global.codex.md").read_text() == "Codex only.\n"
     assert sum(f"{codex} links to" in line for line in out.lines) == 1
+
+
+# -- managed: Claude's lines and the Codex block -------------------------------------------
+
+def test_claude_gets_the_shared_line_then_its_part_line(lo):
+    claude = harness.global_file("claude")
+    claude.parent.mkdir(parents=True)
+    mine = "# Mine\n"
+    claude.write_text(mine)
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    (lo / "global.codex.md").write_text("Codex only.\n")
+    mode(lo, "managed")
+    assert install.install().code == 0
+    shared, part = f"@{lo / 'global.md'}", f"@{lo / 'global.claude.md'}"
+    assert claude.read_text() == f"{mine}{shared}\n{part}\n"
+    assert "codex" not in claude.read_text()
+    # A line the user moved still reads ok; a deleted shared line comes back at the end.
+    claude.write_text(f"{part}\n{mine}{shared}\n")
+    assert install.status().code == 0
+    claude.write_text(f"{mine}{part}\n")
+    assert install.install().code == 0
+    assert claude.read_text() == f"{mine}{part}\n{shared}\n"
+    # The part deleted: its line goes, the shared line stays.
+    (lo / "global.claude.md").unlink()
+    assert install.install().code == 0
+    assert claude.read_text() == f"{mine}{shared}\n"
+    assert cli.main(["global", "remove"]) == 0
+    assert claude.read_text() == mine
+
+
+def test_the_codex_block_holds_the_shared_text_then_its_part(lo):
+    (lo / "global.codex.md").write_text("Codex only.\n\n")
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    mode(lo, "managed")
+    assert install.install().code == 0
+    codex = harness.global_file("codex")
+    shared, part = lo / "global.md", lo / "global.codex.md"
+    assert codex.read_text() == (f"<!-- moxi loadout: from {shared} and {part}; edit there "
+                                 "-->\nBe brief.\n\nCodex only.\n<!-- moxi loadout end -->\n")
+    # The part edited: the block follows.
+    part.write_text("Codex, changed.\n")
+    assert install.install().code == 0
+    assert "Codex, changed." in codex.read_text()
+    # An empty part is named and adds nothing.
+    part.write_text("")
+    assert install.install().code == 0
+    assert codex.read_text() == (f"<!-- moxi loadout: from {shared} and {part}; edit there "
+                                 "-->\nBe brief.\n<!-- moxi loadout end -->\n")
+    # Edited by hand: modified, then --replace rewrites it.
+    codex.write_text(codex.read_text().replace("Be brief.", "Be long."))
+    out = install.install()
+    assert out.code == 3 and _rows(out, "modified") == {"codex"}
+    assert install.install(replace=["global:global@codex"]).code == 0
+    assert "Be brief." in codex.read_text()
+
+
+def test_no_harness_file_names_or_holds_another_harness_part(lo):
+    for h in ("claude", "codex", "opencode"):
+        (lo / f"global.{h}.md").write_text(f"SENTINEL-{h}\n")
+    mode(lo, "managed")
+    assert install.install().code == 0
+    for h in ("claude", "codex"):
+        text = harness.global_file(h).read_text()
+        if h == "codex":
+            assert "SENTINEL-codex" in text
+        for other in ("claude", "codex", "opencode"):
+            if other != h:
+                assert f"SENTINEL-{other}" not in text
+                assert f"global.{other}.md" not in text
+    opencode = harness.settings_file("opencode").read_text()
+    assert "global.claude.md" not in opencode and "global.codex.md" not in opencode
+
+
+def test_the_assembled_text_drops_empty_files(lo):
+    from moxi_loadout.globalfile import assemble, block
+
+    assert assemble(["", "Part.\n\n"]) == "Part."
+    assert assemble(["\n", "  \n"]) == ""
+    assert assemble(["Shared.\n", "Part.\n"]) == "Shared.\n\nPart."
+    assert block(["/a", "/b"], "") == ("<!-- moxi loadout: from /a and /b; edit there -->\n"
+                                       "<!-- moxi loadout end -->")
+    (lo / "global.md").write_text("")
+    (lo / "global.codex.md").write_text("Codex only.\n")
+    mode(lo, "managed")
+    assert install.install().code == 0
+    text = harness.global_file("codex").read_text()
+    assert text.endswith("edit there -->\nCodex only.\n<!-- moxi loadout end -->\n")
+
+
+def test_a_built_block_of_an_empty_shared_text_is_updated_once(lo):
+    (lo / "global.md").write_text("")
+    mode(lo, "managed")
+    codex = harness.global_file("codex")
+    codex.parent.mkdir(parents=True)
+    built = (f"<!-- moxi loadout: from {lo / 'global.md'}; edit there -->\n\n"
+             "<!-- moxi loadout end -->")
+    codex.write_text(built + "\n")
+    from moxi_loadout import ledger
+
+    data = ledger.read()
+    data["entries"].append({"item": "global:global", "harness": "codex", "file": str(codex),
+                            "kind": "global-block", "key": ["block"], "written": built,
+                            "prior": False})
+    ledger.write(data)
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert any("updated global global for codex" in line for line in out.lines)
+    assert codex.read_text() == built.replace("-->\n\n", "-->\n") + "\n"
+    assert not any("codex" in line for line in install.install().lines)
+
+
+def test_an_unreadable_part_stands_only_its_harness(lo):
+    mode(lo, "managed")
+    assert install.install().code == 0
+    before = harness.global_file("codex").read_bytes()
+    (lo / "global.codex.md").mkdir()
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    out = install.install()
+    assert out.code == 1
+    assert _rows(out, "bad-source") == {"codex"}
+    assert harness.global_file("codex").read_bytes() == before
+    assert "global.claude.md" in harness.global_file("claude").read_text()
+
+
+@pytest.mark.parametrize("start", [None, ""])
+def test_an_absent_or_empty_harness_file_is_written_then_removed(lo, start):
+    claude = harness.global_file("claude")
+    if start is not None:
+        claude.parent.mkdir(parents=True)
+        claude.write_text(start)
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    mode(lo, "managed")
+    assert install.install().code == 0
+    assert claude.read_text().count("@") == 2
+    assert cli.main(["global", "remove"]) == 0
+    assert not claude.exists()
