@@ -594,6 +594,7 @@ def _ask(args, out) -> int:
                           f"{args.target} TEXT --from PTR")
     if choices.QUESTION_ID.fullmatch(args.text):
         return _fill(args, out)
+    asking.not_a_decision(args.text, args.target)
     if args.retire:
         raise BadArgument("--retire takes an option out of a question on record",
                           "name the question by its id in place of a sentence: "

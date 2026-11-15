@@ -24,6 +24,10 @@ no stage.
 **Options.** A question may be asked with the choices it offers, a line each under a
 short key: two to four, or none. `options` says how they are given and kept.
 
+**A decision is not a question.** A report's decision, `B<n>.M<k>`, offers `accept` and
+`reject` and nothing else; `ask` given its id refuses, so its options are never changed
+and its id is never read as a new question's sentence.
+
 **Who and when.** The one who runs the verb asked it, at the time it is recorded. Both
 are fields of the question, apart from the event's own, so they stay with it when it is
 later carried to another log.
@@ -34,7 +38,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from . import builds, ending, folders, log, pointers, questions, stages, write
+from . import builds, decisions, ending, folders, log, pointers, questions, stages, write
 from . import options as choices
 from . import settings as own
 from .errors import BadArgument, NoLog, NoRound, RoundsError, Unmet
@@ -97,6 +101,7 @@ def ask(target: str, text: str, *, by: str, origin: str | None = None,
     if not isinstance(text, str) or not text.strip():
         raise BadArgument("a question needs its sentence",
                           "give the question as one sentence, in quotes")
+    not_a_decision(text, target)
     if "\n" in text or "\r" in text:
         raise BadArgument("a question is one sentence on one line, and this one has a "
                           "line break", "give it on one line; ask a second question "
@@ -213,6 +218,17 @@ class _InBuild:
     builder: str | None = None
 
 
+def not_a_decision(text: str, target: str) -> None:
+    """Refuse `text` when it is a decision's id: a decision's options are `accept` and
+    `reject`, and no question is asked or changed under its id."""
+    if decisions.KEY.fullmatch(text.strip()):
+        raise BadArgument(
+            f"{text.strip()} is a decision of a report: its options are "
+            f"{decisions.ACCEPT} and {decisions.REJECT}, and they are not changed",
+            f"rule it: moxi rounds rule {target} {text.strip()}={decisions.ACCEPT}|"
+            f"{decisions.REJECT} --record PTR")
+
+
 def _in_build(state, stage: str, *, name: str, again: str) -> _InBuild:
     """The origin and builder of a question that came up in the open build of
     `stage`: the stage and its branch's tip read from git now, and the builder its
@@ -241,4 +257,4 @@ def _in_build(state, stage: str, *, name: str, again: str) -> _InBuild:
                     builder=commissioned.get("builder"))
 
 
-__all__ = ["Asked", "ask"]
+__all__ = ["Asked", "ask", "not_a_decision"]

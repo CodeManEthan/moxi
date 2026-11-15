@@ -451,3 +451,23 @@ def test_a_projects_question_takes_only_the_projects_lock(rounds, holder, capsys
     holder(write.round_lock("proj-a", "a-round"))
 
     assert run("proj-a") == 0
+
+
+# -- a decision's id ---------------------------------------------------------------------
+
+def test_a_decisions_id_is_refused_whether_options_are_added_or_retired(rounds, capsys):
+    before = logs(rounds)
+
+    added = run("proj-a/a-round", "--option", "c=something else", text="B1.M1")
+    added_said = capsys.readouterr().err
+    retired = main(["ask", "proj-a/a-round", "B1.M1", "--retire", "accept"])
+    retired_said = capsys.readouterr().err
+
+    assert added == retired == 2
+    for said in (added_said, retired_said):
+        assert ("B1.M1 is a decision of a report: its options are accept and reject, "
+                "and they are not changed") in said
+        assert "moxi rounds rule proj-a/a-round B1.M1=accept|reject --record PTR" in said
+    assert logs(rounds) == before
+    with pytest.raises(BadArgument):
+        asking.ask("proj-a/a-round", "B1.M1", by="planner", origin="comms:12")
