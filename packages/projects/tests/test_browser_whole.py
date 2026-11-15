@@ -152,7 +152,7 @@ def test_a_part_over_the_texts_length_is_left_out_and_the_rest_drawn(fixture_she
 # --- widths -----------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("width", [1280, 400])
-def test_the_busy_list_an_opened_project_and_its_remove_fit_the_width(
+def test_the_list_with_every_fact_an_opened_project_and_its_remove_fit_the_width(
         fixture_shell, fixture_page, ui_width_check, width):
     fixture_page.set_viewport_size({"width": width, "height": 800})
     kit.say(fixture_shell, kit.full_report(fixture_shell))

@@ -217,7 +217,7 @@ test("an activity source is a report that gives some project an at", () => {
                true);
 });
 
-test("the drawing's busy rows", () => {
+test("rows with facts from four components", () => {
   const launcher = report(10, { "atlas-api": { at: at("2026-11-15T19:09:00Z"), parts: [running(["claude/a", "claude/b"])] } },
                           { activity: "window" });
   const sessions = report(20, {

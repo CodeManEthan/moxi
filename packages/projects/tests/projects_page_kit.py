@@ -1,6 +1,6 @@
-"""The Projects page's browser tests: the two installs they run on, the data sheet's seven
-projects seeded into a shell's store, and the `fixture` module whose `project-facts`
-reports what a test tells it to (tests/fixture/moxi_fixture).
+"""The Projects page's browser tests: the two installs they run on, seven projects seeded
+into a shell's store, and the `fixture` module whose `project-facts` reports what a test
+tells it to (tests/fixture/moxi_fixture).
 
 Two installs, each a test shell over a site of its own:
 
@@ -52,7 +52,8 @@ class Row(NamedTuple):
     notes_root: str
 
 
-#: The data sheet's seven projects, in key order.
+#: Seven projects of every shape the list draws (a lead and agents, a missing folder, an
+#: agent's home), in key order.
 SEVEN = (
     Row("atlas-api", "code/atlas-api", "project", "builder-1", ("planner", "reviewer"),
         "notes/code/atlas-api"),
@@ -254,11 +255,11 @@ def _link(key: str) -> dict[str, str]:
 
 
 def full_report(shell: Any, now: float | None = None) -> dict[str, Any]:
-    """A report with a fact of every kind the contract carries, for the seven projects as
-    the drawing's busy list shows them: `at`, heavy ranked parts, warnings, counted parts
-    with claims, plain parts, ranked and plain sections with links and a count after
-    lines, agents that run and that don't, Remove's lines, a loose folder, `activity`
-    `all` and `gathers`. quill-mobile has nothing."""
+    """A report with a fact of every kind the contract carries, for the seven projects:
+    `at`, heavy ranked parts, warnings, counted parts with claims, plain parts, ranked and
+    plain sections with links and a count after lines, agents that run and that don't,
+    Remove's lines, a loose folder, `activity` `all` and `gathers`. quill-mobile has
+    nothing."""
     now = time.time() if now is None else now
     at = {key: int(now - ago) for key, ago in AGO_S.items()}
     week = {"text": "", "claims": ["claude/t1", "claude/t2", "claude/e6"],

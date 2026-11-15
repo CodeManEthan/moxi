@@ -20,7 +20,7 @@ const listed = (key, over = {}) => ({
   key, root: `${HOME}/code/${key}`, kind: "project", lead: null, associated: [], agents: [],
   notes_root: null, created: "2026-01-02T03:04:05Z", exists: true, ...over,
 });
-/** The seven projects of the busy list. */
+/** Seven projects, quill-mobile's folder missing. */
 const SEVEN = ["atlas-api", "harbor-infra", "kestrel-web", "lumen-docs", "orbit-cli", "quill-mobile",
                "reviewer-home"].map((key) => listed(key, key === "quill-mobile" ? { exists: false } : {}));
 const givenOf = (projects) => projects.map(({ key, root, lead, associated }) => ({ key, root, lead, associated }));
@@ -35,7 +35,7 @@ const view = (projects, reports = [], ask = {}, over = {}) =>
   listView(projects, { home: HOME, reports, open: null, now: NOW, clock: UTC, ...over }, { ...ASK, ...ask });
 const keys = (rows) => rows.map((row) => row.key);
 
-/** The busy list's facts: launcher's what-runs-now, sessions' all activity, services' and repo's bad news. */
+/** Four components' facts: launcher's what-runs-now, sessions' all activity, services' and repo's bad news. */
 function busy(projects = SEVEN) {
   const launcher = reportOf(projects, 10, {
     "atlas-api": { at: at("2026-11-15T19:09:00Z") }, "kestrel-web": { at: at("2026-11-15T19:09:00Z") },
