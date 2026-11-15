@@ -278,9 +278,11 @@ def masked(text: str, sets=SETS) -> str:
     beside it."""
     if not sets:
         return text
-    from moxi_secrets import scan
+    # The module, not `from moxi_secrets import scan`: secrets has a submodule of that
+    # name, and the import lint reads the `from` form as reaching into it.
+    import moxi_secrets
 
-    return _masked(text, scan(text, sets))
+    return _masked(text, moxi_secrets.scan(text, sets))
 
 
 def judge(lines, names=(), *, sets=SETS, allow=None, residue=frozenset(), rules=None
