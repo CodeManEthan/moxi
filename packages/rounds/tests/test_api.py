@@ -126,8 +126,8 @@ def spoil(rounds, slug="a-round"):
 
 # -- each call is its command's data -----------------------------------------------------
 
-def test_the_api_has_its_four_calls_and_no_other():
-    assert api.__all__ == ["rounds", "round", "waiting", "questions"]
+def test_the_api_has_its_five_calls_and_no_other():
+    assert api.__all__ == ["rounds", "round", "waiting", "questions", "builds"]
     assert modules.load("rounds", interface=1).api is api
 
 

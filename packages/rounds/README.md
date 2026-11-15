@@ -507,7 +507,8 @@ When a log's earlier lines changed outside this machine, it is read as it stands
 | `tiers` | `["fix", "small", "full"]` | the flows from lightest to heaviest; each must be a flow |
 | `models` | `{}` | the model each tier names, per harness or one for all; see below |
 | `defaults.trace` | `false` | run the trace check when a design is frozen |
-| `projects` | `{}` | per-project tables, `[projects.<key>]`, which may set `dir`, `flow` and `trace` for that project |
+| `defaults.idle_days` | `14` | days a build's head may go without a commit before the read API's `builds` gives the build as idle |
+| `projects` | `{}` | per-project tables, `[projects.<key>]`, which may set `dir`, `flow`, `trace` and `idle_days` for that project |
 
 ```toml
 [projects.alpha]
@@ -522,7 +523,7 @@ moves no folder: rounds looks in the new place, and the rounds stay where they w
 you move them.
 
 The file also takes `worktree_dir`, `defaults.ratify`, `defaults.check_on`,
-`defaults.idle_days`, `defaults.dormant_days`, `defaults.slice_minutes` and
+`defaults.dormant_days`, `defaults.slice_minutes` and
 `defaults.sitting_at`, and in a project's table `into`,
 `check`, `finish`, `shared_paths`, `keep_branch`, `lock_ref` and `brief`. They are
 checked when the file is read, and nothing in this version acts on them.
@@ -557,8 +558,8 @@ rounds reads no environment variable but the ones that place its directories,
 ## The read API
 
 Other modules read rounds in process through interface 1, reached with
-`moxi.modules.load("rounds", interface=1)`. Each call gives the data its command prints
-with `--json`:
+`moxi.modules.load("rounds", interface=1)`. Each of the first four calls gives the data
+its command prints with `--json`:
 
 | Call | Gives |
 |---|---|
@@ -566,6 +567,7 @@ with `--json`:
 | `round(name)` | one round's whole state: `moxi rounds show ROUND --json` |
 | `waiting()` | what waits on the operator: `moxi rounds list --waiting --json` |
 | `questions(name, view=None)` | the questions of a round or a project: `moxi rounds list NAME --questions --json` |
+| `builds(repo=None)` | the open builds of every project or of one repo, each with its state read from git now, whether it is idle, and the builds it shares commits with; no command prints it |
 
 A call never writes, the index included. A round whose log can't be read is returned as
 unreadable, with the file and the line, and is never left out. What a command refuses,

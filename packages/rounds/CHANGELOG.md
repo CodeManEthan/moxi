@@ -45,10 +45,11 @@ does not yet build.
   step done or skipped, no question open or parked and no stage in its plan. The verb
   whose write closes it says so in its last line. `show` says what an open round's
   close waits for, and `list --closed` lists a closed round with when it closed.
-- The read API, interface 1: `rounds`, `round`, `waiting`, `questions`.
+- The read API, interface 1: `rounds`, `round`, `waiting`, `questions`, and `builds`,
+  each open build with its state read from git.
 - Doctor rows for git, each project's rounds folder, each log and the index.
-- Config: `defaults.dir`, `defaults.flow`, `defaults.trace`, `flows`, `tiers`, `models`
-  and per-project tables. The keys of the parts not built yet are declared and checked,
+- Config: `defaults.dir`, `defaults.flow`, `defaults.trace`, `defaults.idle_days`, `flows`,
+  `tiers`, `models` and per-project tables. The keys of the parts not built yet are declared and checked,
   and nothing reads them.
 - Not in this version: builds, checks, verifying and finishing a build, decisions, the
   retrospective and a round's numbers, prepared answers and parent rounds. A round

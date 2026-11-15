@@ -1,11 +1,11 @@
 """Reads of a repo's git, as the build states ask them.
 
 `Git(root)` runs plain git in the repo at `root` and answers one question per method:
-which commit a branch is, which of some commits git still has, a commit's tree and
-parents, whether one commit is an ancestor of another, the merge bases of two, the one
-commit of several that has the others as ancestors, the merge that brought a commit onto
-a branch's first-parent line, the commits of a range, and whether a range holds a
-commit that is not a merge. It writes nothing.
+which commit a branch is, which of some commits git still has, a commit's tree,
+parents and commit date, whether one commit is an ancestor of another, the merge bases
+of two, the one commit of several that has the others as ancestors, the merge that
+brought a commit onto a branch's first-parent line, the commits of a range, and whether
+a range holds a commit that is not a merge. It writes nothing.
 
 git runs with the caller's environment less every `GIT_` variable, so a variable meant
 for another repo or another git never steers what is read here.
@@ -107,6 +107,10 @@ class Git:
     def tree(self, commit: str) -> str:
         """The tree of `commit`."""
         return self._run("rev-parse", "--verify", f"{commit}^{{tree}}")[1].strip()
+
+    def committed_at(self, commit: str) -> int:
+        """When `commit` was committed: its committer date, in seconds since the epoch."""
+        return int(self._run("show", "-s", "--format=%ct", commit)[1].strip())
 
     def parents(self, commit: str) -> tuple[str, ...]:
         """The parents of `commit`, the first first."""

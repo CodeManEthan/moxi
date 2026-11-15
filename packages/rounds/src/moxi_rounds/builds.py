@@ -77,12 +77,21 @@ in any rounds, share when their ranges have a commit in common (`sharing`). git 
 not say which branch a commit was made on, so sharing is read from both sides alike:
 no order of records, commissions or reads changes it, and neither build is given the
 shared commits or loses them. A build that ended has no range.
+
+**Idle** qualifies `building`: a build reads idle when the commit date of its head is
+older than the `idle_days` of its round's project (`idle`).
+
+**Open builds.** A build is open while no end is on record for it, it is the last
+build of its stage, and its round is open: the builds still open when a round ends end
+with it. `opened(state)` lists them for the index, and `from_item` makes a `Build`
+again from what the index keeps.
 """
 
 from __future__ import annotations
 
 from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 
 from . import state as states
@@ -262,6 +271,37 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
             one["ended"] = DROPPED if kind == "build.dropped" else FINISHED
             del open_by_stage[stage]
     return tuple(_build(one) for one in found)
+
+
+def opened(round_state: states.State):
+    """Each open build of the round, as `(stage, body)` for the index, in the order
+    commissioned. The body holds the build's commission and its readings and finish
+    tips; its landings are in the index apart, with the build's line."""
+    if round_state.status != states.OPEN:
+        return
+    last = {one.stage: one for one in builds(round_state)}
+    for one in sorted(last.values(), key=lambda one: one.n):
+        if one.ended is None:
+            yield one.stage, {
+                "stage": one.stage, "n": one.n, "repo": one.repo, "branch": one.branch,
+                "base": one.base, "target": one.target,
+                "readings": [{"type": reading.type, "n": reading.n,
+                              "commit": reading.commit,
+                              "merge_base": reading.merge_base}
+                             for reading in one.readings],
+                "tips": list(one.tips)}
+
+
+def from_item(body: Mapping, landed: Iterable[Landing]) -> Build:
+    """The open build an index item's `body` holds, as `opened` wrote it, with those of
+    the round's landings `landed` that are its own."""
+    return Build(stage=body["stage"], repo=body["repo"], branch=body["branch"],
+                 base=body["base"], target=body["target"], n=body["n"],
+                 readings=tuple(Reading(one["type"], one["n"], one["commit"],
+                                        one["merge_base"]) for one in body["readings"]),
+                 tips=tuple(body["tips"]),
+                 landings=tuple(one for one in landed
+                                if one.build == body["n"] and one.stage == body["stage"]))
 
 
 def landings(round_state: states.State) -> tuple[Landing, ...]:
@@ -505,6 +545,15 @@ RANGED = (BUILDING, MERGED)
 _Key = TypeVar("_Key", bound=Hashable)
 
 
+def idle(git: Git, status: Status, *, idle_days: int, now: datetime) -> bool:
+    """Whether a build read as `status` is idle at `now`: it reads `building` and the
+    commit date of its head is more than `idle_days` days before `now`."""
+    if status.state != BUILDING or status.head is None:
+        return False
+    committed = datetime.fromtimestamp(git.committed_at(status.head), timezone.utc)
+    return now - committed > timedelta(days=idle_days)
+
+
 def span(git: Git, status: Status) -> frozenset[str]:
     """The range of a build read as `status`: the commits reachable from its head `H`
     and not from `P`, the target before its landing. Empty for a build in a state
@@ -533,5 +582,5 @@ __all__ = ["DROPPED", "FINISHED", "GONE", "EMPTY", "BUILDING", "UNCLEAR", "MERGE
            "ENDED", "NO_HEAD", "OFF_TARGET", "NO_ANSWER", "PARTED", "NO_LANDING",
            "OWN_LANDING", "NOTHING_OWN", "HAND_MERGE", "FAST_FORWARD", "READINGS",
            "TIPS", "MERGE", "LANDED", "Reading", "Landing", "Build", "Status",
-           "NoTarget", "RANGED", "builds", "landings", "current", "shows_work", "read",
-           "span", "sharing"]
+           "NoTarget", "RANGED", "builds", "opened", "from_item", "landings", "current",
+           "shows_work", "read", "idle", "span", "sharing"]

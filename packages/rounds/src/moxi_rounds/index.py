@@ -10,7 +10,8 @@ loses no record, and `rebuild` makes the same rows from the logs again. Four tab
             known to have changed outside this machine
     rounds  one row per round: its folder, its status, the name of the flow it
             follows now, and how it ended once it has
-    items   what each log holds open, one row per item, by kind
+    items   what each log holds open, one row per item, by kind: its open questions
+            and builds among them
     landings  each merge a finish recorded in a round's log, with its build's repo
             and target, kept whatever became of the build since
 
@@ -108,7 +109,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 14
+DERIVED = 15
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -129,6 +130,9 @@ VERDICT = "verdict"
 THREAD = "thread"
 #: And the step the round is at.
 STEP = "step"
+#: And each build that is open, under its stage: its commission, readings and finish
+#: tips, which with the round's landings make the build again (`builds.from_item`).
+BUILD = "build"
 
 
 def _step(folded: state.State):
@@ -142,7 +146,7 @@ ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
     QUESTION: questions.waiting, RULING: readback.unmarked,
     READ_BACK: readback.read_backs, STAGE: versions.stages, VERSION: versions.newest,
     PENDING: versions.waiting, VERDICT: versions.verdicts,
-    THREAD: versions.threads, STEP: _step}
+    THREAD: versions.threads, STEP: _step, BUILD: builds.opened}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""
@@ -586,6 +590,7 @@ def _drop(conn, project: str, slug: str) -> None:
 
 
 __all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "STAGE", "VERSION", "VERDICT", "THREAD", "STEP",
+           "BUILD",
            "PENDING", "ITEMS", "Item", "Summary", "Landed", "Disagreement", "on_append",
            "refresh", "rebuild", "read", "rounds", "landings", "usable",
            "disagreements"]

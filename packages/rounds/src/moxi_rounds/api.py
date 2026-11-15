@@ -9,8 +9,8 @@ first and `load()` only on yes:
         ...  # the feature is off
     listing = found.api.rounds()
 
-Four calls, each giving the data its command prints with `--json`, computed by the
-same functions:
+Five calls. The first four each give the data its command prints with `--json`,
+computed by the same functions:
 
 - `rounds(project=None, status="open")`: the rounds of every project, or of one, as
   `moxi rounds list [PROJECT] [--closed] --json` gives them.
@@ -19,6 +19,11 @@ same functions:
   --waiting --json` gives it.
 - `questions(name, view=None)`: the questions of one round or one project written
   out, as `moxi rounds list ROUND|PROJECT --questions --json` gives them.
+
+and the fifth has no command of its own:
+
+- `builds(repo=None)`: the open builds of every project, or of one repo, each with its
+  state read from git now.
 
 A read never writes: no log, no generated file, and not the index either. Where the
 index is behind a log, or there is none, the read works the answer out from the log
@@ -33,7 +38,7 @@ command exits with.
 
 from __future__ import annotations
 
-from . import export, listing, showing
+from . import export, listing, open_builds, showing
 from .errors import BadArgument
 
 #: The two listings of rounds, as `status` names them: the rounds that are open, and
@@ -110,4 +115,30 @@ def questions(name: str, view: str | None = None) -> dict:
     return export.questions_of(name, view=view).data()
 
 
-__all__ = ["rounds", "round", "waiting", "questions"]
+def builds(repo: str | None = None) -> dict:
+    """The open builds of every project, or with `repo` (a project's key) those that
+    build in that repo, each with its state read from git now: `{"computed", "repo",
+    "builds", "unreadable", "no_folder"}`.
+
+    Each of `builds` is `{"round", "stage", "repo", "branch", "target", "base",
+    "state", "by", "why", "head", "target_head", "target_before", "merge_base",
+    "own_commits", "hand_merge", "idle", "shares", "problem"}`. `state` is `gone`,
+    `empty`, `building`, `merged` or `unclear`, and `by` and `why` say what gave it.
+    `head` is the build's head, `target_head` the target's, `target_before` what the
+    target was when the build reached it, `merge_base` the merge base of a head off
+    the target, and `hand_merge` the merge that brought a head merged by hand.
+    `own_commits` is true for an `empty` build that holds commits of its own. `idle`
+    is true for a `building` build whose head is older than its round's `idle_days`.
+    `shares` holds `{"round", "stage"}` for each open build of the same repo and
+    target that shares commits with it. A build that can't be read has its
+    `{"reason", "fix"}` in `problem`, and None for each field of its state.
+    `unreadable` names each round whose log can't be read, whose builds are not here,
+    and `no_folder` each project whose rounds folder can't be worked out.
+
+    Raises `BadArgument` for a `repo` with no name and `UnknownProject` for one the
+    projects list does not hold.
+    """
+    return open_builds.read(repo).data()
+
+
+__all__ = ["rounds", "round", "waiting", "questions", "builds"]

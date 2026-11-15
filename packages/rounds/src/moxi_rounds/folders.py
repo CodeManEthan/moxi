@@ -122,6 +122,14 @@ def notes_folder(project: str) -> Path:
     return _notes_folder(_record(_projects().get, project))
 
 
+def root(project: str) -> tuple[str, Path]:
+    """The key of the project `project` (its key, in any case) as the projects list
+    stores it, and the folder its record names as its root: for a build's repo, where
+    git is run. Raises `UnknownProject`."""
+    record = _record(_projects().get, project)
+    return record.key, Path(os.path.expanduser(record.root))
+
+
 def slugs(folder: Path) -> list[str]:
     """The slug of each round in the rounds folder `folder`, sorted: every folder there
     that holds a round's log and whose name is a slug. A rounds folder that does not
@@ -213,5 +221,5 @@ def _notes_folder(record) -> Path:
     return Path(found)
 
 
-__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_folder", "slugs",
-           "names"]
+__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_folder", "root",
+           "slugs", "names"]
