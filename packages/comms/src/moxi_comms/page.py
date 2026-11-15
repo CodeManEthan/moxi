@@ -260,7 +260,7 @@ SEND_BODY = {
 }
 #: The acts' body cap in bytes: 16,000 characters can be 64,000 bytes of UTF-8, and
 #: 96,000 once JSON escapes them.
-SEND_BODY_CAP = 128 * 1024
+SEND_BODY_CAP_BYTES = 128 * 1024
 
 #: What `/api/check` and `/api/send` answer: the verb's `outcome` (`would-send`, `sent`,
 #: `refused`, `cache-unread`, `blocked`, `offline`, `failed` or `unknown`); the posted
@@ -318,9 +318,9 @@ PAGE = lb.Page(
                         "limit": lb.Field("int", required=False, max=100)},
                  returns=THREAD),
         lb.Route("/api/check", "act", "moxi_comms.pageacts:check", body=SEND_BODY,
-                 body_cap=SEND_BODY_CAP, returns=SENT),
+                 body_cap=SEND_BODY_CAP_BYTES, returns=SENT),
         lb.Route("/api/send", "act", "moxi_comms.pageacts:send", body=SEND_BODY,
-                 body_cap=SEND_BODY_CAP, returns=SENT),
+                 body_cap=SEND_BODY_CAP_BYTES, returns=SENT),
         lb.Route("/api/take-back", "act", "moxi_comms.pageacts:take_back",
                  body={"message_id": lb.Field("string", max=20)}, returns=TAKEN),
     ),
@@ -328,4 +328,4 @@ PAGE = lb.Page(
 )
 
 __all__ = ["DELIVERY", "MAIL", "MAIL_STATE", "MESSAGE", "MESSAGES", "PAGE", "QUEUE", "ROSTER",
-           "ROW", "SEND_BODY", "SEND_BODY_CAP", "SENT", "TAKEN", "THREAD"]
+           "ROW", "SEND_BODY", "SEND_BODY_CAP_BYTES", "SENT", "TAKEN", "THREAD"]

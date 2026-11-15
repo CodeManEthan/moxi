@@ -291,7 +291,7 @@ def test_a_body_over_the_cap_is_refused_before_the_handler(rig, monkeypatch):
     called = []
     monkeypatch.setattr(pageacts, "operator_id", lambda: called.append(1))
     raw = json.dumps(body(text="é" * 16_000, extra="y" * 40_000)).encode()
-    assert len(raw) > page.SEND_BODY_CAP
+    assert len(raw) > page.SEND_BODY_CAP_BYTES
     status, _ = run(post_raw("/api/send", raw))
     assert status == 413 and called == []
 
