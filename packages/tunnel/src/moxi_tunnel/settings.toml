@@ -16,7 +16,7 @@ doc = "The cloudflared daemon's switch. Tunnel sets it: on exactly while a Cloud
 read = "use"
 label = "The cloudflared daemon"
 line = "Tunnel sets it: on exactly while a Cloudflare target is recorded."
-elsewhere = "Tunnel sets it: moxi tunnel add TARGET --provider cloudflare turns it on, and moxi tunnel remove of the last Cloudflare target turns it off."
+terminal = { on = "moxi tunnel add <target> --provider cloudflare", off = "moxi tunnel remove <target>" }
 
 [cloudflare.tunnel_id]
 type = "string"
