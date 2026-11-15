@@ -76,10 +76,11 @@ export function saysUnused(reports: readonly Report[]): boolean {
   return reports.some((report) => report.activity === "all");
 }
 
-/** Whether any report is an activity source: it says when a project was last active. */
+/** Whether any report is an activity source now: it gives some project an `at`. A report
+ * that says `activity` but gives no project an `at` (one that knows nothing running) is
+ * none. */
 export function hasActivity(reports: readonly Report[]): boolean {
-  return reports.some((report) => report.activity !== null
-    || [...report.projects.values()].some((facts) => facts.at !== null));
+  return reports.some((report) => [...report.projects.values()].some((facts) => facts.at !== null));
 }
 
 interface Drawn {
@@ -206,9 +207,10 @@ export function orderHeld(placed: number, reported: number, elapsedMs: number): 
 export const isRisen = (row: ProjectRow): boolean => row.rank !== null;
 
 /**
- * The rows in the list's order. With an activity source: the risen rows first, lowest
- * rank first, then every row by its newest `at`, newest first, and rows with no `at` last
- * by key. With none, or while the first order is held: by key, whatever ranks.
+ * The rows in the list's order. With an activity source (a report giving some project an
+ * `at`): the risen rows first, lowest rank first, then every row by its newest `at`, newest
+ * first, and rows with no `at` last by key. With none, or while the first order is held:
+ * by key, whatever ranks.
  */
 export function ordered(rows: readonly ProjectRow[], { active, held }: { active: boolean; held: boolean }): ProjectRow[] {
   const keyed = [...rows].sort((a, b) => byKey(a.key, b.key));

@@ -357,8 +357,9 @@ Say = { runs: boolean; state: string; where?: string }
 
 - **`rank`** is Home's `needs` scale (10 someone is blocked on you, 20 something waits for
   you, 30 something is broken, 40 something will run out). A ranked part leads its row's
-  second line, lower rank first, and lifts the row above the order by activity when some
-  component reports activity; with none the list stays by key and nothing rises. A ranked
+  second line, lower rank first, and lifts the row above the order by activity while some
+  component gives some project an `at`; with none (a component that says `activity` but
+  gives no project an `at` counts as none) the list stays by key and nothing rises. A ranked
   section moves to the top of the opened project. Without a rank, in `order`.
 - **`heavy`** is weight only. **`warn`** is a warning: the text colour at normal weight,
   after the ranked parts and before the rest; it doesn't lift the row.

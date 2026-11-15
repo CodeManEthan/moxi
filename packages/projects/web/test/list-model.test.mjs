@@ -207,11 +207,14 @@ test("not used yet only while a source of all activity has reported", () => {
   assert.equal(saysUnused([window, all]), true);
 });
 
-test("an activity source is a report with an activity or an at", () => {
+test("an activity source is a report that gives some project an at", () => {
   assert.equal(hasActivity([]), false);
   assert.equal(hasActivity([report(10, { "atlas-api": { parts: [{ text: "$1" }] } })]), false);
-  assert.equal(hasActivity([report(10, {}, { activity: "all" })]), true);
+  assert.equal(hasActivity([report(10, {}, { activity: "all" })]), false, "activity with no at is no source");
+  assert.equal(hasActivity([report(10, { "atlas-api": { parts: [{ text: "idle" }] } }, { activity: "window" })]), false);
   assert.equal(hasActivity([report(10, { "atlas-api": { at: 5 } })]), true);
+  assert.equal(hasActivity([report(10, {}, { activity: "window" }), report(20, { "atlas-api": { at: 5 } }, { activity: "all" })]),
+               true);
 });
 
 test("the drawing's busy rows", () => {

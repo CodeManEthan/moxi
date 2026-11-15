@@ -82,6 +82,14 @@ test("a missing folder and a ranked part each rise only with an activity source"
   assert.deepEqual(keys(view(SEVEN, [services, window]).rows).slice(0, 3), ["quill-mobile", "reviewer-home", "kestrel-web"]);
 });
 
+test("a report with activity but no at keeps the list by key, nothing risen", () => {
+  const { services, repo } = busy();
+  const idle = reportOf(SEVEN, 10, { "atlas-api": { parts: [{ text: "nothing running" }] } }, { activity: "window" });
+  assert.deepEqual(keys(view(SEVEN, [idle, services, repo]).rows), SEVEN.map((project) => project.key));
+  const empty = reportOf(SEVEN, 10, {}, { activity: "all" });
+  assert.deepEqual(keys(view(SEVEN, [empty, services, repo]).rows), SEVEN.map((project) => project.key));
+});
+
 test("rows with no at come last, by key", () => {
   const window = reportOf(SEVEN, 10, { "orbit-cli": { at: 5 } }, { activity: "window" });
   const got = keys(view(SEVEN.filter((project) => project.exists), [window]).rows);
