@@ -2,8 +2,8 @@
 test, when a package of the wheel under test imports from anywhere but the venv's
 site-packages, such as the checkout the tests sit in.
 
-It runs where only the wheel, its dependencies and the test tools are installed, so it
-imports nothing beyond the standard library and pytest. `moxi publishing ci siblings`
+It runs where only the wheel, its dependencies, the test tools and the test fence are
+installed, so it imports nothing beyond the standard library and pytest. `moxi publishing ci siblings`
 copies this file beside the run and loads it with `-p`; the names to check are in the
 environment variable below, separated by commas.
 """

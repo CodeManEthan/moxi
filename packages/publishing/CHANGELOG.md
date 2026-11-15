@@ -30,7 +30,9 @@ The first version.
 - `[tool.moxi-publishing]` may keep a `ready` list; then every member must be on exactly
   one of it and `not-ready`, and the gate counts one on neither or both as not ready.
 - `moxi publishing ci siblings`: the release test from a fresh venv, at the newest and
-  the lowest published siblings, with the site-packages check.
+  the lowest published siblings, with the site-packages check. A package whose `dev`
+  group names `moxi-dev` gets it from the checkout without its requirements, so the
+  test fence its conftest loads is there.
 - `moxi publishing workflows write`: the public scan and release workflow files. The
   release workflow's upload job runs only pinned actions, never the repo's code; a
   verify job before it runs the gate with the build's files.

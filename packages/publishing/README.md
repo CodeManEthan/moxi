@@ -265,10 +265,13 @@ The steps the workflow runs:
   the package's whole test suite from a fresh venv that holds only its wheel, its
   published siblings, the extras whose sibling requirements a published version admits,
   and the tools of its own `dev` dependency group at the versions `uv.lock` pins; never
-  another workspace member. It runs once with the newest published siblings each
-  requirement admits and once with the lowest set that resolves, or only at
-  `--resolution`, and reports a sibling the resolver had to raise above its floor, with
-  what raised it. An extra left out is reported, not failed; a required sibling with no
+  another workspace member, save one: when the `dev` group names `moxi-dev`, whose pytest
+  plugin the package's conftest loads, it is installed from the checkout with
+  `--no-deps`, beside pytest, pytest-xdist and pytest-timeout at `uv.lock`'s versions,
+  after the siblings are resolved, so it never moves them. It runs once with the newest
+  published siblings each requirement admits and once with the lowest set that
+  resolves, or only at `--resolution`, and reports a sibling the resolver had to raise
+  above its floor, with what raised it. An extra left out is reported, not failed; a required sibling with no
   published version it admits refuses, naming it. Before any test runs, the run fails if
   the package imports from anywhere but the venv's site-packages.
 

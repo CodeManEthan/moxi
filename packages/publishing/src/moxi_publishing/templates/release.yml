@@ -109,8 +109,10 @@ jobs:
           path: notes
           if-no-files-found: error
       # A fresh venv holding the wheel, the extras whose siblings are published, the
-      # newest published siblings, and the test tools uv.lock pins; never a workspace
-      # member. It first checks the package imports from site-packages.
+      # newest published siblings, and the test tools uv.lock pins. The one workspace
+      # member in it is moxi-dev, installed from this checkout without its requirements,
+      # whose pytest plugin each package's conftest loads. It first checks the package
+      # imports from site-packages.
       - name: the whole test suite against the installed wheel
         run: uv run --locked moxi publishing ci siblings "$TAG" --artifact dist --resolution highest
 

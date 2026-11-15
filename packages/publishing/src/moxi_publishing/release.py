@@ -350,6 +350,13 @@ SUITE_TIMEOUT_S = 3600.0
 SITE_CHECK = "moxi_publishing_site_check"
 #: The lockfile the test tools' versions are read from, at the repo's root.
 LOCK = "uv.lock"
+#: The workspace member whose pytest plugin is the test fence every package's conftest
+#: loads. A package whose dev group names it gets it from the checkout with `--no-deps`,
+#: so the fence loads without its own requirements moving any sibling's resolution.
+FENCE = "moxi-dev"
+#: The test tools the fence runs beside, installed at uv.lock's versions with it, since
+#: `--no-deps` leaves out the ones its own requirements would bring.
+FENCE_TOOLS = ("pytest", "pytest-xdist", "pytest-timeout")
 
 _INSTALLED = ("import json, importlib.metadata as m\n"
               "print(json.dumps({d.metadata['Name']: [d.version, d.requires or []]\n"
@@ -370,6 +377,7 @@ class ReleaseTest:
     extras: list[str]           # the extras installed
     tools: list[str]            # the test tools, pinned
     lines: list[str] = field(default_factory=list)
+    fence: str | None = None    # the test fence member's directory, from the root
 
 
 def wheel_imports(wheel: str) -> list[str]:
@@ -435,8 +443,10 @@ def locked_versions(data: bytes | None) -> dict[str, str]:
     return out
 
 
-def _test_tools(git, ws, member) -> list[str]:
-    """The package's own dev group less workspace members, each pinned to uv.lock."""
+def _test_tools(git, ws, member) -> tuple[list[str], str | None]:
+    """The package's own dev group less workspace members, each pinned to uv.lock, and the
+    test fence member's directory when the dev group names it; the fence's tools are then
+    among the tools."""
     import tomllib
 
     from packaging.requirements import InvalidRequirement, Requirement
@@ -451,7 +461,7 @@ def _test_tools(git, ws, member) -> list[str]:
         groups = {}
     entries = groups.get("dev", []) if isinstance(groups, dict) else []
     locked = locked_versions(tags.read_file(git, ws.commit, LOCK))
-    tools, unpinned = [], []
+    tools, unpinned, named, fence = [], [], set(), None
     for entry in entries if isinstance(entries, list) else []:
         if not isinstance(entry, str):
             continue  # an include-group table
@@ -462,7 +472,10 @@ def _test_tools(git, ws, member) -> list[str]:
                           "can't be read", 1) from None
         name = canonicalize_name(req.name)
         if name in ws.members:
+            if name == FENCE:
+                fence = ws.members[name].path
             continue
+        named.add(name)
         version = locked.get(name)
         if version is None:
             unpinned.append(name)
@@ -473,7 +486,19 @@ def _test_tools(git, ws, member) -> list[str]:
     if unpinned:
         raise Failure(f"{', '.join(unpinned)}, in {member.file('pyproject.toml')}'s dev "
                       f"group, {'is' if len(unpinned) == 1 else 'are'} not in {LOCK}", 1)
-    return tools
+    if fence is not None:
+        for name in FENCE_TOOLS:
+            if name in named:
+                continue
+            if name not in locked:
+                unpinned.append(name)
+            else:
+                tools.append(f"{name}=={locked[name]}")
+        if unpinned:
+            raise Failure(f"{', '.join(unpinned)}, which the test fence ({FENCE}) runs "
+                          f"beside, {'is' if len(unpinned) == 1 else 'are'} not in {LOCK}",
+                          1)
+    return tools, fence
 
 
 def release_test(path: str, name: str, *, artifact: str, web=None) -> ReleaseTest | Result:
@@ -522,8 +547,9 @@ def release_test(path: str, name: str, *, artifact: str, web=None) -> ReleaseTes
     if missing:
         return Result(lines + [f"no published version admits {', '.join(missing)}, which "
                                f"{dist} requires; release those first"], 3)
+    tools, fence = _test_tools(git, ws, member)
     return ReleaseTest(dist, version, root, member.path, wheel, wheel_imports(wheel),
-                       siblings, extras, _test_tools(git, ws, member), lines)
+                       siblings, extras, tools, lines, fence)
 
 
 def _default_run(argv, *, cwd=None, env=None, capture=True, timeout_s):
@@ -599,11 +625,11 @@ def _run_once(plan: ReleaseTest, resolution: str, *, uv: str, run, web) -> tuple
         # The siblings are named as well, so the lowest resolution reaches them: it lowers
         # direct requirements only.
         wanted += [str(req) for req in plan.siblings] + plan.tools
-        argv = [uv, "pip", "install", "--quiet", "--python", python,
-                "--resolution", resolution]
+        argv = [uv, "pip", "install", "--quiet", "--python", python]
         if index:
             argv += ["--default-index", index.rstrip("/") + "/simple"]
-        done = run(argv + wanted, cwd=where, timeout_s=INSTALL_TIMEOUT_S)
+        done = run(argv + ["--resolution", resolution] + wanted, cwd=where,
+                   timeout_s=INSTALL_TIMEOUT_S)
         if done.returncode != 0:
             return False, [f"{resolution}: the install failed: {_err(done)}"]
         done = run([python, "-I", "-c", _INSTALLED], cwd=where, timeout_s=INSTALL_TIMEOUT_S)
@@ -620,6 +646,14 @@ def _run_once(plan: ReleaseTest, resolution: str, *, uv: str, run, web) -> tuple
         if resolution == "lowest-direct":
             published = {n: web.published(n) for n in names}
             lines += floors_raised(plan.siblings, published, installed)
+        if plan.fence is not None:
+            # After the resolution and its reading, alone and without its requirements:
+            # the fence's own requirements never take part in the siblings' resolution.
+            source = os.path.join(plan.root, plan.fence)
+            done = run(argv + ["--no-deps", source], cwd=where, timeout_s=INSTALL_TIMEOUT_S)
+            if done.returncode != 0:
+                return False, lines + [f"{resolution}: the test fence ({FENCE}) can't be "
+                                       f"installed: {_err(done)}"]
         plugin = os.path.join(where, "plugin")
         os.mkdir(plugin)
         shutil.copyfile(site_check.__file__, os.path.join(plugin, SITE_CHECK + ".py"))
@@ -653,9 +687,10 @@ def ci_siblings(path: str, name: str, *, artifact: str, resolution: str | None =
                 web=None, run=None) -> Result:
     """`moxi publishing ci siblings TAG --artifact DIR`: the package's whole suite from a
     fresh venv holding only its wheel, the extras whose siblings are published, the
-    published siblings and its test tools at uv.lock's versions; once at the newest
-    published siblings it admits and once at the lowest set that resolves, or only at
-    `resolution`. Raises `Failure`."""
+    published siblings and its test tools at uv.lock's versions, and the test fence from
+    the checkout without its requirements when its dev group names it; once at the
+    newest published siblings it admits and once at the lowest set that resolves, or only
+    at `resolution`. Raises `Failure`."""
     import shutil
 
     from moxi_publishing import tags
