@@ -101,7 +101,7 @@ class Marker:
     branch: str
     at: str
 
-    def names(self, *, round: str, stage: str, repo: str, branch: str) -> bool:
+    def names(self, *, round: str, stage: str, repo: str, branch: str) -> bool:  # noqa: A002 -- round is the marker file's field name
         """Whether the marker names this round, stage, repo and branch."""
         return (self.round, self.stage, self.repo, self.branch) == (round, stage, repo,
                                                                     branch)
@@ -111,7 +111,7 @@ class Marker:
                           ensure_ascii=False) + "\n"
 
 
-def marker(build: str, *, round: str, stage: str, repo: str, branch: str,
+def marker(build: str, *, round: str, stage: str, repo: str, branch: str,  # noqa: A002 -- round is the marker file's field name
            at: str | None = None) -> Marker:
     """The marker of a build, written now unless `at` says when."""
     return Marker(build=build, round=round, stage=stage, repo=repo, branch=branch,

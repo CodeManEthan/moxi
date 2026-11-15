@@ -331,7 +331,7 @@ def _remove(candidate: Candidate, found: removal.Proven, settings) -> Leftover:
     def on_rename(entry: Path) -> None:
         _log(RENAMED, found.place, names, kind=candidate.kind, entry=entry.name)
 
-    def on_delete(entry: Path, gone: bool) -> None:
+    def on_delete(entry: Path, gone: bool) -> None:  # noqa: FBT001 -- removal.take's callback protocol passes gone positionally
         _log(DELETED, entry, names, kind=candidate.kind, entry=entry.name, gone=gone)
 
     removed = removal.take(found, on_rename=on_rename, on_delete=on_delete)
@@ -362,7 +362,7 @@ def trash_log(name: str, commissioned: Mapping, *, env=None) -> dict:
         _log(RENAMED, place, names, proven=FINISH_PROVEN, env=env,
              kind=removal.SCRATCH, entry=entry.name)
 
-    def on_delete(entry: Path, gone: bool) -> None:
+    def on_delete(entry: Path, gone: bool) -> None:  # noqa: FBT001 -- removal.take's callback protocol passes gone positionally
         try:
             _log(DELETED, entry, names, proven=FINISH_PROVEN, env=env,
                  kind=removal.SCRATCH, entry=entry.name, gone=gone)
