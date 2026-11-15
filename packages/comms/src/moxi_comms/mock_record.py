@@ -256,13 +256,15 @@ class MockRecord:
 
     # ------------------------------------------------------------------ the record
     def history(self, channel_id: str, *, after: str | None = None,
-                limit: int | None = None) -> list[Message]:
+                before: str | None = None, limit: int | None = None) -> list[Message]:
         with self._txn() as st:
             out = [Message.from_dict(m) for m in st.messages if m["channel_id"] == channel_id]
         if after is not None:
             out = [m for m in out if int(m.id) > int(after)]
+        if before is not None:
+            out = [m for m in out if int(m.id) < int(before)]
         if limit is not None:
-            out = out[-limit:]
+            out = out[len(out) - limit:] if limit > 0 else []
         return out
 
     def meta_get(self, key: str) -> str | None:

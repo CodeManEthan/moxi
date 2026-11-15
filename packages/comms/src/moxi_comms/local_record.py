@@ -376,8 +376,9 @@ class LocalRecord:
                        timestamp=row[6], withdrawn_at=row[7])
 
     def history(self, channel_id: str, *, after: str | None = None,
-                limit: int | None = None) -> list[Message]:
-        """Ascending by id. With a limit this takes the TAIL.
+                before: str | None = None, limit: int | None = None) -> list[Message]:
+        """Ascending by id, the ids above `after` and below `before`. With a limit this
+        takes the TAIL, so `before` with `limit` reads the newest `limit` below an id.
 
         The boot rescan is `history(channel, limit=RESCAN_LIMIT)` with no `after`, and a
         literal "first 500 then take the tail" would scan the whole channel every boot.
@@ -388,6 +389,9 @@ class LocalRecord:
         if after is not None:
             sql += " AND id > ?"
             params.append(int(after))
+        if before is not None:
+            sql += " AND id < ?"
+            params.append(int(before))
         if limit is None:
             rows = self._conn().execute(sql + " ORDER BY id", params).fetchall()
         else:

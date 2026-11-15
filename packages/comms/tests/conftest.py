@@ -236,6 +236,7 @@ BOTH_BACKENDS = (
     "test_attributed_read.py",      # the attributed_message read: author and recipients
     "test_send_check.py",           # send --check: send's refusals, nothing posted
     "test_names.py",                # one rule for names; retired identities
+    "test_record_reads.py",         # the seam's reads back from an id or a time
 )
 
 

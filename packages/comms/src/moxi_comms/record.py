@@ -28,7 +28,11 @@ The interface, in full:
                  history_bound -> int | None (attribute: the most messages an
                                               unbounded `history(after=)` returns, or
                                               None when it returns them all)
-    the record   history(channel_id, after=, limit=) -> [Message]   (ascending by id)
+    the record   history(channel_id, after=, before=, limit=) -> [Message]
+                                                           -- ascending by id, the ids
+                                                              between `after` and
+                                                              `before`; with a limit,
+                                                              the newest `limit` of them
                  get_message(message_id) -> Message | None
                  max_message_id(channel_id=None) -> str | None
                  since(channel_id, timestamp) -> [Message]  (the daemon's boot read of
