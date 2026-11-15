@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.9 (unreleased)
+
+- A settings key may carry page fields, which say how a settings page shows it: `label`,
+  `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal` and
+  `elsewhere`. They change nothing a key is or how it is read. The schema reader checks
+  each, refuses them on a retired key, and refuses a schema that marks more than seven
+  keys `common`. A module that fills them needs `moxi>=0.1.9`: an older core refuses its
+  schema for the unknown fields. `moxi.config` names them in `PAGE_FIELDS` and the cap in
+  `COMMON_MAX`; `moxi.config.Key` takes them by keyword only.
+- `moxi config <module> show --json` carries each key's page fields: strings or null,
+  `common` and `pick` as bools, `choices` as `{value, words}` rows in the enum's order,
+  `hurts` and `terminal` as tables or null.
+- `moxi config set` and `moxi config unset` take `--json`: the command prints one object,
+  `{changed, problem, fix, units}`, and nothing else on stdout, with a refusal's problem
+  and fix apart and the lines applying the module's units said in `units`. The exit codes
+  are unchanged.
+- The core's own keys carry their page fields.
+
 ## 0.1.8 (unreleased)
 
 - Public names renamed for the naming rules (callers passing the old keyword or reading

@@ -192,10 +192,15 @@ def test_a_schema_marks_at_most_seven_keys_common():
     assert err.value.key is None
 
 
-def test_the_cores_own_schema_passes():
+def test_the_cores_own_schema_passes_with_its_page_fields():
     config._core.clear()
-    schema = config._core_schema()
-    assert sum(1 for key in schema.live() if key.common) <= config.COMMON_MAX
+    keys = config._core_schema().keys
+    assert [name for name, key in keys.items() if key.common] == ["skills.harnesses"]
+    assert keys["skills.harnesses"].label == "Skills are placed for"
+    assert keys["skills.form"].label == "How skills are placed"
+    assert keys["skills.form"].choices == {"auto": "auto", "link": "link", "copy": "copy"}
+    assert keys["harnesses"].label == "Harness folders"
+    assert all(key.label and key.line for key in keys.values())
 
 
 # -- moxi config <module> show --json ------------------------------------------------------
@@ -254,6 +259,10 @@ def test_show_json_lists_choices_in_the_enums_order(site, tmp_path, monkeypatch,
                                                  {"value": "c", "words": "Sea"}]
 
 
-def test_show_json_of_the_core_carries_the_page_fields(capsys):
+def test_show_json_of_the_core_carries_its_page_fields(capsys):
     keys = show_json(capsys, "moxi")
-    assert keys and all(set(PAGE_NULL) <= set(key) for key in keys.values())
+    assert list(keys) == ["skills.form", "skills.harnesses", "harnesses"]
+    assert keys["skills.harnesses"]["common"] is True
+    assert keys["skills.form"]["choices"] == [{"value": v, "words": v}
+                                              for v in ("auto", "link", "copy")]
+    assert keys["harnesses"]["line"] == "An empty folder means the harness's built-in one."
