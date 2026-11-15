@@ -501,8 +501,8 @@ def join_threads(before: set, timeout: float | None = None) -> None:
     back, and writes there (a shim's reader marking its claim file offline after the
     test's tmp is gone, or under the real runtime directory). So whatever a test
     started ends inside it, while its roots still point into its tmp. `timeout` None
-    is `WAIT`."""
-    timeout = WAIT if timeout is None else timeout
+    is `LIVE_S`: the threads must end, and how fast is not the claim."""
+    timeout = LIVE_S if timeout is None else timeout
     deadline = time.monotonic() + timeout
     while True:
         left = [t for t in _others(before) if t.is_alive()]
@@ -668,6 +668,11 @@ def write_transcript(session_id: str, age: float | None = 0, *, root: Path | Non
 #: costs time only when a test is failing. A wait that expects nothing to happen passes
 #: its own short timeout.
 WAIT = 10.0
+
+#: How long a wait gives something that must happen: a bind after a reconnect, a post,
+#: a frame. The test proves that it happens, not how fast, so the bound is long; it
+#: costs time only when a test is failing.
+LIVE_S = 30.0
 
 
 def wait_until(predicate, timeout: float = WAIT, interval: float = 0.01):

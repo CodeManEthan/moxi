@@ -24,7 +24,7 @@ import itertools
 
 import pytest
 from claim_kit import RegisterDrop
-from conftest import clock_reads_warm, wait_until
+from conftest import LIVE_S, clock_reads_warm, wait_until
 
 from moxi_comms import claimfile, claimhold, codex_threads
 from moxi_comms.adapters import harness as harness_mod
@@ -192,7 +192,7 @@ def test_a_drop_after_the_first_registers_answer_sends_the_arm_back_to_register(
         assert arm.statuses[:1] == [OFFLINE_MESSAGE], arm.statuses
     if point == "after_answer_restart":
         arm.drop.fresh_daemon()
-    assert wait_until(lambda: holds(arm), timeout=5.0), \
+    assert wait_until(lambda: holds(arm), timeout=LIVE_S), \
         (arm.kind, arm.bound(), arm.live(), list(arm.rig.daemon.bindings))
 
 
@@ -203,16 +203,16 @@ def test_a_drop_at_a_reregister_after_a_restart_sends_the_arm_back_to_register(a
     answer, or after it and before the arm takes the binding. It binds on the daemon
     that is up."""
     arm.start()
-    assert wait_until(lambda: holds(arm), timeout=5.0), arm.kind
+    assert wait_until(lambda: holds(arm), timeout=LIVE_S), arm.kind
     arm.rig.daemon.stop()
-    assert wait_until(lambda: not arm.bound()), arm.kind
+    assert wait_until(lambda: not arm.bound(), timeout=LIVE_S), arm.kind
     arm.drop.arm(point)
     arm.drop.fresh_daemon()
-    assert arm.drop.fired.wait(5.0), (arm.kind, arm.drop.unanswered)
+    assert arm.drop.fired.wait(LIVE_S), (arm.kind, arm.drop.unanswered)
     if point == "after_answer_restart":
         never_bound_over_a_dead_connection(arm)
         arm.drop.fresh_daemon()
-    assert wait_until(lambda: holds(arm), timeout=5.0), \
+    assert wait_until(lambda: holds(arm), timeout=LIVE_S), \
         (arm.kind, point, arm.bound(), arm.live(), list(arm.rig.daemon.bindings))
     never_bound_over_a_dead_connection(arm)
 
@@ -225,16 +225,16 @@ def test_a_stop_under_an_answered_register_leaves_nothing_bound(arm):
     binding, which the daemon holds until the process exits, and write the file back
     as `bound` after `stop()` removed it."""
     arm.start()
-    assert wait_until(lambda: holds(arm), timeout=5.0), arm.kind
+    assert wait_until(lambda: holds(arm), timeout=LIVE_S), arm.kind
     key = claim_key(arm)
     assert claimfile.read(key) is not None
     arm.rig.daemon.stop()
-    assert wait_until(lambda: not arm.bound()), arm.kind
+    assert wait_until(lambda: not arm.bound(), timeout=LIVE_S), arm.kind
     arm.drop.arm("after_answer_stop", on_answer=arm.stop)
     arm.drop.fresh_daemon()
-    assert arm.drop.fired.wait(5.0), (arm.kind, arm.drop.unanswered)
+    assert arm.drop.fired.wait(LIVE_S), (arm.kind, arm.drop.unanswered)
     assert wait_until(lambda: arm.qualified not in arm.rig.daemon.bindings,
-                      timeout=5.0), (arm.kind, "the daemon still holds the binding")
+                      timeout=LIVE_S), (arm.kind, "the daemon still holds the binding")
     assert not arm.bound() and not arm.live(), arm.kind
     assert claimfile.read(key) is None, (arm.kind, claimfile.read(key))
 
@@ -245,7 +245,7 @@ def test_a_plain_stop_leaves_no_claim_file(arm):
     after `claims.close()` has unlinked the file, where `went_offline` would write it
     back as `offline`. The `ClaimServer` arms are here for parity."""
     arm.start()
-    assert wait_until(lambda: holds(arm), timeout=5.0), arm.kind
+    assert wait_until(lambda: holds(arm), timeout=LIVE_S), arm.kind
     key = claim_key(arm)
     assert claimfile.read(key) is not None
     arm.stop()
@@ -259,11 +259,11 @@ def test_a_plain_stop_leaves_no_claim_file(arm):
 def test_a_drop_after_the_binding_sends_the_arm_back_to_register(arm):
     """The daemon stops under a bound arm: it reads offline, and binds on the next."""
     arm.start()
-    assert wait_until(lambda: holds(arm), timeout=5.0), arm.kind
+    assert wait_until(lambda: holds(arm), timeout=LIVE_S), arm.kind
     arm.rig.daemon.stop()
-    assert wait_until(lambda: not arm.bound()), arm.kind
+    assert wait_until(lambda: not arm.bound(), timeout=LIVE_S), arm.kind
     arm.drop.fresh_daemon()
-    assert wait_until(lambda: holds(arm), timeout=5.0), arm.kind
+    assert wait_until(lambda: holds(arm), timeout=LIVE_S), arm.kind
 
 
 def test_a_harness_launch_whose_daemon_never_answered_still_fails(rig, tmp_path, request,

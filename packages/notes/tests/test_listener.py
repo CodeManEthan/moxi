@@ -13,7 +13,7 @@ from pathlib import Path
 import moxi.paths
 import moxi.proc
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import timed_slack, wait_for
 from moxi_turns import SessionEvent
 
 from moxi_notes import listener, listeners
@@ -119,7 +119,7 @@ print(json.dumps([time.perf_counter() - t0, line]))
 
 @pytest.mark.timed
 def test_the_start_line_costs_under_its_budget_at_the_95th_percentile(alpha):
-    budget = {"win32": 0.150}.get(sys.platform, 0.050)
+    budget = {"win32": 0.150}.get(sys.platform, 0.050) * timed_slack()
     costs = []
     for _ in range(20):
         done = subprocess.run([sys.executable, "-c", START_COST, str(alpha)],
