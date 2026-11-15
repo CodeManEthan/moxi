@@ -21,6 +21,7 @@
 
 import type { CacheFact, Roster, RosterRow } from "./feed.ts";
 import { parseCacheFact } from "./feed.ts";
+import type { Launched } from "./launched-model.ts";
 import { LOCAL, namesWords } from "./mail-model.ts";
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -169,19 +170,7 @@ export function operatorAddresses(mail: MailState | null): Set<string> {
   return new Set([...mail.operator_names, ...marked]);
 }
 
-/** What launcher says of the launch running at an address, joined by its session: where it
- * runs, its cache fact as launcher words it, whether it is in launcher's uncovered case
- * (`waits` set, the cache warm, not `covered`) with the words that lead its line two, and
- * whether a press of `Keep warm` would cover it. */
-export interface Launched {
-  where: string | null;
-  fact: Fact | null;
-  uncovered: boolean;
-  /** `waiting on <n> agents`, in the uncovered case. */
-  waits: string | null;
-  coverable: boolean;
-  request_id: string;
-}
+export type { Launched };
 
 // --- the rows -----------------------------------------------------------------------------
 
@@ -235,7 +224,7 @@ export interface AddressLine {
 export type Act =
   | { kind: "reply"; to: string; message_id: string }
   | { kind: "message"; to: string }
-  | { kind: "keep-warm"; request_id: string };
+  | { kind: "keep-warm"; request_id: string; title: string };
 
 /** One agent row. */
 export interface AgentRow {
@@ -527,7 +516,7 @@ function actsOf(kind: Case, addresses: readonly Address[], lead: Address): Act[]
     return [{ kind: "reply", to: oldest.author, message_id: oldest.message_id }, message];
   }
   if (kind === "uncovered" && lead.launched?.coverable) {
-    return [{ kind: "keep-warm", request_id: lead.launched.request_id }, message];
+    return [{ kind: "keep-warm", request_id: lead.launched.request_id, title: lead.launched.title ?? "" }, message];
   }
   return [message];
 }

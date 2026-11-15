@@ -1,7 +1,8 @@
 // The Comms page's frame worked out with no DOM: which state the page is in, the first
 // row when the daemon isn't answering, the agent rows and which one is open, the empty
 // state, the foot and the dim lines under it. From the roster's feed, the last roster that
-// was up, `/api/mail-state` and the address. Every string here goes into the page as text.
+// was up, `/api/mail-state`, the address and, with launcher, each bound address's running
+// launch with the presses of `Keep warm`. Every string here goes into the page as text.
 //
 // - A roster that is up draws the rows. One that is `offline` or `error` draws the first
 //   row in their place and keeps the last rows that were up, dim, with no acts and no box.
@@ -12,6 +13,8 @@ import type { Address } from "./address-model.ts";
 import { agentsOf, noteText, operatorAddresses } from "./agents-model.ts";
 import type { AgentRow, Launched, MailState, OtherName, Owed, PageRoster } from "./agents-model.ts";
 import type { Failure } from "./feed.ts";
+import { NO_PRESSES } from "./launched-model.ts";
+import type { Presses } from "./launched-model.ts";
 import { LOCAL, namesWords } from "./mail-model.ts";
 import type { Clock } from "./mail-model.ts";
 import { whenWords } from "./words.ts";
@@ -75,7 +78,12 @@ export interface FrameFacts {
   today: string | null;
   cache: boolean;
   launcher: boolean;
+  /** Each bound address's running launch, with launcher installed; null without it. */
   launched?: ReadonlyMap<string, Launched> | null;
+  /** The presses of `Keep warm` waiting, and the notes refused ones leave. */
+  presses?: Presses;
+  /** The line of launcher's read that failed, or null. */
+  runningLine?: string | null;
   /** How long ago the page opened. */
   waitedMs: number;
   at: Address;
@@ -124,6 +132,8 @@ export interface FrameRow {
   open: boolean;
   /** The address the opened row speaks for and its box writes to; null when closed. */
   to: string | null;
+  /** Its `Keep warm` was pressed and waits for the answer and the next value. */
+  pressing: boolean;
 }
 
 export interface Empty {
@@ -260,6 +270,7 @@ export function frameModel(facts: FrameFacts, clock: Clock = LOCAL): Frame {
   if (rosterLine !== null) lines.push({ key: "roster", text: rosterLine });
   const mailLine = readLine("The agents' mail", mail);
   if (mailLine !== null) lines.push({ key: "mail", text: mailLine });
+  if (facts.runningLine) lines.push({ key: "running", text: facts.runningLine });
 
   const mailRead = mail.gone || mail.failure !== null || mailValue !== null;
   const placed = facts.placed ?? openedOf(facts.at, agents.rows, agents.others,
@@ -274,10 +285,16 @@ export function frameModel(facts: FrameFacts, clock: Clock = LOCAL): Frame {
     ? { line: NO_AGENTS, sentence: WHAT_AN_AGENT_IS, launch: facts.launcher, command: facts.launcher ? null : NAME_COMMAND }
     : null;
   const openName = opened.kind === "agent" || opened.kind === "mail" ? opened.name : null;
+  const presses = facts.presses ?? NO_PRESSES;
   const rows = agents.rows.map((row): FrameRow => {
     const open = row.name === openName;
     const to = !open ? null : opened.kind === "agent" ? opened.to : opened.kind === "mail" ? opened.qualified : null;
-    return { row: stale ? dimmed(row) : row, note: noteText(row), open, to };
+    // A refused press's note leads line three until the next value of `running`.
+    const request = row.addresses.find((address) => address.qualified === row.lead)?.launched?.request_id ?? null;
+    const pressNote = request !== null ? presses.notes[request] ?? null : null;
+    const note = [pressNote, noteText(row)].filter((part): part is string => !!part).join("; ") || null;
+    return { row: stale ? dimmed(row) : row, note, open, to,
+             pressing: request !== null && presses.waiting[request] !== undefined };
   });
   return {
     state: "drawn",

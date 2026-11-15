@@ -37,6 +37,14 @@
 // Today's read takes as many messages as the page shows, so a refresh leaves no gap; each
 // day before today the page added is read again from its cursor, as many as it shows, so
 // every message shown carries its read state as the books hold it now.
+//
+// With launcher installed it reads launcher's `/api/running` when it opens, when the roster
+// changes, when its tab is shown again and every 30 s while the tab is visible, and joins
+// each running launch to its bound address (`launched-model.ts`): where it runs, its cache
+// fact, the `Session` line, and `Keep warm` on a row launcher would let a press cover. A
+// press posts to launcher's `/api/keep-warm` and disables the button until the answer and
+// the next value of `running` have come, or for 20 s; a refusal's note leads line three
+// until the next value.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -58,6 +66,11 @@ import {
 } from "./frame-model.ts";
 import type { Down, Empty, Frame, FrameRow, Placed } from "./frame-model.ts";
 import type { OtherName } from "./agents-model.ts";
+import {
+  answered, expired, joinRunning, KEEP_WARM_PATH, NO_PRESSES, parseRunning, pressBody, pressed, pressNote, PRESS_WAIT_MS,
+  RUNNING_PATH, runningLine, SESSIONS_LINK, valueCame,
+} from "./launched-model.ts";
+import type { Presses, Running } from "./launched-model.ts";
 import { byHim, parseQueue } from "./messages-model.ts";
 import type { Queue } from "./messages-model.ts";
 import { COPY_ID, DETAILS, HELP, openedAgent, SHOW_ALL, THREAD_LINK } from "./opened-model.ts";
@@ -97,6 +110,7 @@ const STYLES = css`
   .grp .gl { grid-column: 2; min-width: 0; }
   moxi-ui-row[open] + moxi-ui-row { border-top: 1px solid var(--moxi-border); padding-top: 3px; }
   .do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  .do:disabled { cursor: default; }
   /* The last rows read while the daemon isn't answering: every word dim. */
   .stale moxi-ui-row { --moxi-text: var(--moxi-text-dim); }
 
@@ -256,6 +270,15 @@ export class CommsPage extends LitElement {
   #menu: "posture" | "deliver" | null = null;
   /** The box takes the focus once it is drawn: the row was opened by `Message` or `Reply`. */
   #focusBox = false;
+  /** Launcher's running launches and the line of its read that failed, with launcher
+   * installed; whether a read of them is out, and whether another is wanted after it. */
+  #running: Running | null = null;
+  #runningLine: string | null = null;
+  #runningOut = false;
+  #runningAgain = false;
+  /** The presses of `Keep warm`, and each press's longest wait, by request id. */
+  #presses: Presses = NO_PRESSES;
+  #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
   /** Which copy act reads `Copied`. */
   #copied: string | null = null;
   #stop: (() => void) | null = null;
@@ -268,6 +291,7 @@ export class CommsPage extends LitElement {
     if (document.visibilityState !== "visible") return;
     void this.#feed?.refresh();
     this.#readMail();
+    void this.#readRunning();
   };
 
   /** Reads the mail state again, with today's messages, the days before today the page
@@ -278,6 +302,51 @@ export class CommsPage extends LitElement {
     void this.#rereadDays();
     void this.#queue?.refresh();
     void this.#thread?.refresh();
+  }
+
+  /** Reads launcher's running launches, with launcher installed; one read at a time, and
+   * one more after it when asked meanwhile. A read that fails leaves no join, so the rows
+   * say what comms knows. */
+  async #readRunning(): Promise<void> {
+    if (!installed("launcher")) return;
+    if (this.#runningOut) {
+      this.#runningAgain = true;
+      return;
+    }
+    this.#runningOut = true;
+    try {
+      do {
+        this.#runningAgain = false;
+        const result = await api("launcher", RUNNING_PATH);
+        if (!this.isConnected) return;
+        const value = result.status === 200 ? parseRunning(result.data) : null;
+        this.#running = value;
+        this.#runningLine = runningLine(result.status, value);
+        if (value !== null) this.#presses = valueCame(this.#presses, value);
+        this.requestUpdate();
+      } while (this.#runningAgain);
+    } finally {
+      this.#runningOut = false;
+    }
+  }
+
+  /** A press of `Keep warm`: posts the launch's request id to launcher and waits, its
+   * button disabled, for the answer and the next value of `running`, or `PRESS_WAIT_MS`. */
+  async #press(request: string): Promise<void> {
+    if (this.#presses.waiting[request] !== undefined) return;
+    this.#presses = pressed(this.#presses, request);
+    clearTimeout(this.#pressWaits.get(request));
+    this.#pressWaits.set(request, setTimeout(() => {
+      this.#pressWaits.delete(request);
+      this.#presses = expired(this.#presses, request);
+      this.requestUpdate();
+    }, PRESS_WAIT_MS));
+    this.requestUpdate();
+    const answer = await api("launcher", KEEP_WARM_PATH, pressBody(request));
+    if (!this.isConnected) return;
+    this.#presses = answered(this.#presses, request, pressNote(answer));
+    this.requestUpdate();
+    void this.#readRunning();
   }
 
   /** Reads again each message the page shows of the days before today, so their read
@@ -332,11 +401,14 @@ export class CommsPage extends LitElement {
     this.#messages = messages;
     void this.#mail.refresh();
     void messages.refresh();
+    void this.#readRunning();
     document.addEventListener("visibilitychange", this.#shown);
     this.#tickTimer = setInterval(() => { this.tick += 1; }, TICK_MS);
     this.#readingTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#mailTimer = setInterval(() => {
-      if (document.visibilityState === "visible") this.#readMail();
+      if (document.visibilityState !== "visible") return;
+      this.#readMail();
+      void this.#readRunning();
     }, MAIL_EVERY_MS);
   }
 
@@ -360,6 +432,9 @@ export class CommsPage extends LitElement {
     clearInterval(this.#mailTimer);
     clearTimeout(this.#copyTimer);
     clearTimeout(this.#readingTimer);
+    for (const wait of this.#pressWaits.values()) clearTimeout(wait);
+    this.#pressWaits.clear();
+    this.#presses = NO_PRESSES;
   }
 
   protected willUpdate(changed: Map<PropertyKey, unknown>): void {
@@ -374,8 +449,9 @@ export class CommsPage extends LitElement {
     }
   }
 
-  /** After every change of the roster's feed: a value that is up is kept with its time, and
-   * the mail state is read again when the waiting mail or the bound names changed. */
+  /** After every change of the roster's feed: a value that is up is kept with its time, the
+   * mail state is read again when the waiting mail or the bound names changed, and
+   * launcher's running launches on every new value. */
   #rosterRead(): void {
     const feed = this.#feed;
     if (feed === null) return;
@@ -384,6 +460,7 @@ export class CommsPage extends LitElement {
     if (value !== null && value !== this.#taken) {
       this.#taken = value;
       this.#today = newestDay(this.#today, value.today);
+      void this.#readRunning();
       if (value.state === "up" && now !== null) {
         this.#kept = { value, at: now };
         const key = mailKey(value);
@@ -456,6 +533,8 @@ export class CommsPage extends LitElement {
     const frame = frameModel({
       roster: feed, kept: this.#kept, mail, now: feed.now(), today: this.#today, cache: installed("cache"),
       launcher: installed("launcher"), waitedMs: Date.now() - this.#openedAt, at: this.#at, placed: this.#placed,
+      launched: installed("launcher") ? joinRunning(this.#running, this.#kept?.value.rows ?? [], this.#when) : null,
+      presses: this.#presses, runningLine: installed("launcher") ? this.#runningLine : null,
       messagesRead: this.#messages !== null && !this.#messages.loading,
       authorOf: (id) => authorIn([this.#todayRead, ...this.#days], id),
     });
@@ -701,8 +780,12 @@ export class CommsPage extends LitElement {
           data-action="message" @click=${() => this.#act({ kind: "message", to: item.to as string })}>${ACT_WORDS.message
           }</button>` : nothing}<button type="button" slot="acts" class="do" data-action="close" aria-expanded="true"
           @click=${toggle}>${CLOSE}</button>`
-        : row.acts.filter((act) => act.kind !== "keep-warm").map((act) => html`<button type="button" slot="acts" class="do"
-          data-action=${act.kind} @click=${() => this.#act(act)}>${ACT_WORDS[act.kind]}</button>`)}
+        : row.acts.map((act) => act.kind === "keep-warm"
+          ? html`<button type="button" slot="acts" class="do" data-action="keep-warm" title=${act.title}
+            aria-description=${act.title} ?disabled=${item.pressing}
+            @click=${() => void this.#press(act.request_id)}>${ACT_WORDS[act.kind]}</button>`
+          : html`<button type="button" slot="acts" class="do" data-action=${act.kind} @click=${() => this.#act(act)}>${
+            ACT_WORDS[act.kind]}</button>`)}
       ${item.open && item.to !== null ? mail ? this.#mailPart() : this.opened(item, item.to) : nothing}
     </moxi-ui-row>`;
   }
@@ -726,7 +809,8 @@ export class CommsPage extends LitElement {
       : { loading: true, gone: false, failure: null, value: null };
     const view = openedAgent({
       row: item.row, to, roster, asks: this.#mail?.value?.asks ?? [], queue, now,
-      when: (at) => whenWords(at, this.#today), cache: installed("cache"), details: this.#details,
+      when: (at) => whenWords(at, this.#today), cache: installed("cache"), sessions: installed("sessions"),
+      details: this.#details,
     });
     const sessionId = view.sessionId;
     return html`<div class="det" data-part="opened" data-to=${to}>
@@ -843,6 +927,7 @@ export class CommsPage extends LitElement {
     const link = line.link;
     let end: unknown = html`<span></span>`;
     if (link?.kind === "cache") end = this.#link("cache", "", line.label, { cls: "x", action: "cache" });
+    else if (link?.kind === "sessions") end = this.#link("sessions", link.route, SESSIONS_LINK, { cls: "x", action: "sessions" });
     else if (link?.kind === "thread") {
       end = html`<button type="button" class="x" data-action="thread"
         @click=${() => this.open(threadAddress(link.a, link.b))}>${THREAD_LINK}</button>`;

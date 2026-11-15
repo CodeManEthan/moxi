@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { agentsOf } from "../src/agents-model.ts";
+import { joinRunning } from "../src/launched-model.ts";
 import { parseMessage, parseQueue } from "../src/messages-model.ts";
 import { COLD_TAIL, HELP, openedAgent, READING } from "../src/opened-model.ts";
 
@@ -28,8 +29,8 @@ const message = (id, fields = {}) => ({
 const read = (value, fields = {}) => ({ loading: false, gone: false, failure: null, value, ...fields });
 const queue = (messages, more = 0) => read({ state: "up", detail: null, messages, more });
 
-function opened(r, m, name, fields = {}) {
-  const { rows } = agentsOf(r, m, { now: NOW, when, cache: true });
+function opened(r, m, name, fields = {}, launched = null) {
+  const { rows } = agentsOf(r, m, { now: NOW, when, cache: true, launched });
   const agent = rows.find((x) => x.name === name);
   return openedAgent({ row: agent, to: agent.lead, roster: r.rows, asks: m.asks, queue: queue([]), now: NOW, when,
                        cache: true, details: false, ...fields });
@@ -128,4 +129,45 @@ test("details: the address, adapter, tier, bound at, the session, and the help s
     to: "scout", roster: [], asks: [], queue: queue([]), now: NOW, when, cache: true, details: true });
   assert.deepEqual(asker.details.map((line) => line.label), ["Address"]);
   assert.equal(asker.sessionId, null);
+});
+
+// --- with launcher ------------------------------------------------------------------------------
+
+const iso = (hhmm) => `2026-11-12T${hhmm}:00Z`;
+const entry = (identity, fields = {}) => ({
+  request_id: `r-${identity}`, harness: "claude", session_id: `s-${identity}`, name: "planner's session", identity,
+  where: { target: "slot", slot: "3", project_key: "atlas-api", folder: "atlas-api" }, started_at: iso("12:00"),
+  cache: { state: "warm", until: iso("20:04"), estimated: false }, waits: null, covered: false, coverable: null,
+  activity: null, ...fields,
+});
+const join = (r, entries) => joinRunning({ state: "up", detail: null, count: entries.length, sessions: entries }, r.rows, when);
+
+test("with launcher: Session leads, linked to its transcript with sessions; launcher's cache wins", () => {
+  const r = roster([bound("planner", { cache: { kind: "warm", until: at("19:50") } })]);
+  const launched = join(r, [entry("planner", { waits: { kind: "agents", count: 1 }, covered: true })]);
+  const got = opened(r, mail(), "planner", { sessions: true }, launched);
+  assert.deepEqual(got.before, [
+    { key: "session", label: "Session", value: "planner's session · claude", tail: null,
+      link: { kind: "sessions", route: "claude/s-planner" } },
+    { key: "cache", label: "Cache", value: "warm until 20:04", tail: "kept warm while 1 agent works", link: { kind: "cache" } },
+  ]);
+  // Without sessions: no link.
+  assert.equal(opened(r, mail(), "planner", { sessions: false }, launched).before[0].link, null);
+});
+
+test("with launcher: an estimated time says est.; a cold one since when; no cache read keeps comms'", () => {
+  const r = roster([bound("planner", { cache: { kind: "cold", until: at("18:35") } })]);
+  const est = join(r, [entry("planner", { cache: { state: "warm", until: iso("20:04"), estimated: true } })]);
+  assert.equal(opened(r, mail(), "planner", {}, est).before[1].value, "warm until 20:04, est.");
+  const cold = join(r, [entry("planner", { cache: { state: "cold", until: iso("18:40"), estimated: false } })]);
+  assert.deepEqual(opened(r, mail(), "planner", { cache: false }, cold).before[1],
+                   { key: "cache", label: "Cache", value: "cold since 18:40", tail: COLD_TAIL, link: null });
+  const unread = join(r, [entry("planner", { cache: null })]);
+  assert.deepEqual(opened(r, mail(), "planner", {}, unread).before.map((line) => [line.key, line.value]),
+                   [["session", "planner's session · claude"], ["cache", "cold since 18:35"]]);
+});
+
+test("without launcher: no Session line", () => {
+  const r = roster([bound("planner")]);
+  assert.deepEqual(opened(r, mail(), "planner", { sessions: true }).before, []);
 });

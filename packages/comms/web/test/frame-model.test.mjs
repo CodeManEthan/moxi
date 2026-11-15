@@ -5,6 +5,7 @@ import {
   agentsLabel, ANSWERING, DOCTOR, DOWN_LINE, DOWN_WHAT, frameModel, NAME_COMMAND, NO_AGENTS, NO_LONGER_OWED,
   NO_SUCH_VIEW, otherNamesWords, otherWhere, READING, SERVER_ERROR,
 } from "../src/frame-model.ts";
+import { answered, joinRunning, pressed, NO_PRESSES } from "../src/launched-model.ts";
 
 // Times in UTC, so the words are the same in any zone.
 const CLOCK = { time: (at) => new Date(at * 1000).toISOString().slice(11, 16),
@@ -212,4 +213,34 @@ test("a placement kept stays open after the ask it answered is gone", () => {
   const later = frame({ mail: mail(), at: { piece: "reply", message_id: ask.message_id }, placed: first.placed });
   assert.deepEqual(later.opened, first.opened);
   assert.deepEqual(later.lines, []);
+});
+
+// --- with launcher ------------------------------------------------------------------------------
+
+test("with launcher: a coverable loud row draws Keep warm; a press disables it and a refusal leads line three", () => {
+  const value = roster([bound("builder-1", { cache: { kind: "warm", until: at("19:22") } })],
+                       [{ qualified: "builder-1", count: 1, since: at("18:28") }]);
+  const sessions = [{
+    request_id: "r1", harness: "claude", session_id: "s-builder-1", name: "b1", identity: null,
+    where: { target: "slot", slot: "4", project_key: "atlas-api", folder: "atlas-api" }, started_at: "",
+    cache: { state: "warm", until: "2026-11-12T19:22:00Z", estimated: false }, waits: { kind: "agents", count: 2 },
+    covered: false, coverable: { cap: 3 }, activity: null,
+  }];
+  const launched = joinRunning({ state: "up", detail: null, sessions }, value.rows, CLOCK.time);
+  const base = { rosterValue: value, roster: read(value), kept: { value, at: NOW }, launcher: true, launched };
+  const idle = frame({ ...base, presses: NO_PRESSES }).rows[0];
+  assert.deepEqual([idle.row.case, idle.row.where, idle.row.fact.text, idle.row.line.lead, idle.pressing],
+                   ["uncovered", "slot 4 · atlas-api", "goes cold at 19:22", "waiting on 2 agents", false]);
+  assert.deepEqual(idle.row.acts.map((act) => act.kind), ["keep-warm", "message"]);
+  assert.equal(idle.note, "goes cold at 19:22 · 1 message held until its next turn · since 18:28");
+  const waiting = frame({ ...base, presses: pressed(NO_PRESSES, "r1") }).rows[0];
+  assert.equal(waiting.pressing, true);
+  const refused = frame({ ...base, presses: answered(pressed(NO_PRESSES, "r1"), "r1", "Not kept warm: it is not waiting") });
+  assert.equal(refused.rows[0].note,
+               "Not kept warm: it is not waiting; goes cold at 19:22 · 1 message held until its next turn · since 18:28");
+});
+
+test("with launcher: its read that failed is a foot line", () => {
+  const got = frame({ launcher: true, runningLine: "The running sessions can't be read: no answer from the shell." });
+  assert.deepEqual(got.lines, [{ key: "running", text: "The running sessions can't be read: no answer from the shell." }]);
 });

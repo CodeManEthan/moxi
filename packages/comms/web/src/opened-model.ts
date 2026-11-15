@@ -1,12 +1,15 @@
 // What an opened agent row shows under its lines, worked out with no DOM. The lines that
-// speak for one address (`Cache`, `Held`, `Waiting`, `Unread`, `Waits on`, `Details`) speak
+// speak for one address (`Session`, `Cache`, `Held`, `Waiting`, `Unread`, `Waits on`, `Details`) speak
 // for the address the box writes to: the row's lead, or the address pressed. `Directs` and
-// `Directed by` gather the name's addresses. Each line is there only when its fact is.
+// `Directed by` gather the name's addresses. Each line is there only when its fact is:
+// `Session` comes with launcher's join (`launched-model.ts`), whose cache read wins over
+// comms' on the `Cache` line as it does on the row.
 // Every string here goes into the page as text.
 
 import type { AgentRow, Ask } from "./agents-model.ts";
 import type { RosterRow } from "./feed.ts";
 import type { Read } from "./frame-model.ts";
+import { SESSION_LABEL } from "./launched-model.ts";
 import { namesWords } from "./mail-model.ts";
 import { byHim } from "./messages-model.ts";
 import type { Queue } from "./messages-model.ts";
@@ -27,7 +30,7 @@ export const COPY_ID = "Copy id";
 export const READING = "Reading…";
 
 /** A link at a line's right end. */
-export type Link = { kind: "cache" } | { kind: "thread"; a: string; b: string };
+export type Link = { kind: "cache" } | { kind: "thread"; a: string; b: string } | { kind: "sessions"; route: string };
 
 /** One line: a dim label, its value, a dim tail and a link at the right. */
 export interface Line {
@@ -65,7 +68,7 @@ export interface Choice {
 export interface OpenedAgent {
   /** The row's addresses with mail or a session, when there is more than one. */
   choices: Choice[];
-  /** `Cache`, before the queue. */
+  /** `Session` and `Cache`, before the queue. */
   before: Line[];
   queue: QueueGroup[];
   /** `<n> more`, past the queue's cap. */
@@ -91,6 +94,8 @@ export interface OpenedFacts {
   when: (at: number) => string;
   /** The cache module is installed. */
   cache: boolean;
+  /** The sessions module is installed: `Session` links to the session's transcript. */
+  sessions?: boolean;
   details: boolean;
 }
 
@@ -105,11 +110,24 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
 
   const choices = unique([row.lead, ...row.note.lines.map((line) => line.qualified), to]);
   const before: Line[] = [];
+  const launched = bound ? address?.launched ?? null : null;
+  if (launched !== null) {
+    const { name, harness, route } = launched.session;
+    before.push({ key: "session", label: SESSION_LABEL, value: [name, harness].filter(Boolean).join(" · "), tail: null,
+                  link: facts.sessions && route !== null ? { kind: "sessions", route } : null });
+  }
+  const cacheLink: Link | null = facts.cache ? { kind: "cache" } : null;
   const cache = rosterRow?.cache ?? null;
-  if (bound && cache !== null) {
+  const theirs = launched?.cache ?? null;
+  if (theirs !== null) {
+    const est = theirs.estimated ? ", est." : "";
+    const at = theirs.until !== null ? ` ${when(theirs.until)}` : "";
+    const value = theirs.warm ? `warm${at !== "" ? ` until${at}` : ""}${est}` : `cold${at !== "" ? ` since${at}` : ""}`;
+    before.push({ key: "cache", label: CACHE_LABEL, value, tail: theirs.warm ? theirs.kept : COLD_TAIL, link: cacheLink });
+  } else if (bound && cache !== null) {
     const warm = cache.kind === "warm" && cache.until > facts.now;
     before.push({ key: "cache", label: CACHE_LABEL, value: `${warm ? "warm until" : "cold since"} ${when(cache.until)}`,
-                  tail: warm ? null : COLD_TAIL, link: facts.cache ? { kind: "cache" } : null });
+                  tail: warm ? null : COLD_TAIL, link: cacheLink });
   }
 
   const queue: QueueGroup[] = [];

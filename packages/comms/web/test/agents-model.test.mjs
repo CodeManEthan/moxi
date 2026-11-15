@@ -37,8 +37,9 @@ const only = (r, m, options) => {
   return rows[0];
 };
 const launched = (fields = {}) => ({ where: "slot 4 · atlas-api", fact: { text: "goes cold at 19:22", heavy: true },
-                                     uncovered: true, waits: "waiting on 2 agents", coverable: false,
-                                     request_id: "r1", ...fields });
+                                     uncovered: true, waits: "waiting on 2 agents", coverable: false, title: null,
+                                     request_id: "r1", session: { name: "builder one", harness: "claude", route: null },
+                                     cache: null, ...fields });
 
 // --- the reads ------------------------------------------------------------------------------
 
@@ -336,8 +337,9 @@ test("the uncovered case rises with coverable false and draws no Keep warm", () 
   assert.equal(got.second, "held");
   assert.equal(noteText(got), "goes cold at 19:22 · 1 message held until its next turn · since 18:28");
   assert.deepEqual(got.acts, [{ kind: "message", to: "builder-1" }]);
-  const coverable = only(r, mail(), { launched: new Map([["builder-1", launched({ coverable: true })]]) });
-  assert.deepEqual(coverable.acts, [{ kind: "keep-warm", request_id: "r1" }, { kind: "message", to: "builder-1" }]);
+  const coverable = only(r, mail(), { launched: new Map([["builder-1", launched({ coverable: true, title: "T" })]]) });
+  assert.deepEqual(coverable.acts,
+                   [{ kind: "keep-warm", request_id: "r1", title: "T" }, { kind: "message", to: "builder-1" }]);
 });
 
 test("launcher's fact wins over comms'; covered is no loud case", () => {
