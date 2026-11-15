@@ -31,7 +31,8 @@ whether it is idle, the builds it shares commits with, or what kept it from bein
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
 its key, what it reads from a `Shown`, and how that reads as lines. What a round is
-doing now, its current step, is in the head as `steps.current` gives it.
+doing now, its current step, is in the head as `steps.current` gives it, with each open
+build read from git for the steps whose state git says.
 """
 
 from __future__ import annotations
@@ -443,8 +444,10 @@ def _head(found: Shown) -> dict:
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
     state = found.state
+    settings = own.load() if found.settings is None else found.settings
     at = steps.current(state, name=found.name, closed=found.closed,
-                       register=found.register)
+                       register=found.register,
+                       seen=checking.seen_of(state, found.name, settings=settings))
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "inherits": list(state.inherits),

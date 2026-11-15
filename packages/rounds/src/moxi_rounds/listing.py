@@ -34,7 +34,8 @@ from datetime import datetime
 
 from moxi import store
 
-from . import builds, export, folders, index, log, open_builds, questions, shown, steps
+from . import (builds, checking, export, folders, index, log, open_builds, questions,
+               shown, steps)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet, Unreadable
@@ -85,12 +86,14 @@ COUNTS: tuple[tuple[str, str, Callable[[index.Summary, Project], int | None]], .
     ("not_shown", "rulings not shown", _not_shown))
 
 
-def _step(summary: index.Summary, project: Project) -> dict | None:
+def _step(summary: index.Summary, project: Project,
+          opened: Callable[[], open_builds.OpenBuilds]) -> dict | None:
     """The step the round is at, as `{"step", "stage", "state"}`, or None for a round
-    at no step. The index keeps it as the round's own log gives it. Where a question
-    of the round is parked until another round closes and that round has, the log is
-    read again: the question reads as open from then on, and may hold the round at
-    an earlier step."""
+    at no step. The index keeps it as the round's own log gives it. The log is read
+    again where that is not the answer: where the step is one whose state git says,
+    which is read then with the open builds `opened` gives; and where a question of
+    the round is parked until another round closes and that round has, since the
+    question reads as open from then on and may hold the round at an earlier step."""
     kept = next((item.body for item in summary.of(index.STEP)), None)
     if kept is None:
         return None
@@ -98,12 +101,16 @@ def _step(summary: index.Summary, project: Project) -> dict | None:
     def closed(name: str) -> bool:
         return questions.is_closed(name, project.settings)
 
-    if any(closed(name) for name in kept.get("until", ())):
+    if kept.get("git") or any(closed(name) for name in kept.get("until", ())):
         try:
             folded = states.fold(log.read_round(log.round_log(summary.folder)))
         except RoundsError:
             return None
-        at = steps.current(folded, name=summary.name, closed=closed)
+        read = {one.build.stage: one for one in opened().builds
+                if one.round == summary.name}
+        seen = checking.seen_of(folded, summary.name, settings=project.settings,
+                                read=read)
+        at = steps.current(folded, name=summary.name, closed=closed, seen=seen)
         kept = {} if at is None else {"step": at.step, "stage": at.stage,
                                       "state": at.state}
     if kept.get("step") is None:
@@ -178,6 +185,15 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
     for a project with no rounds folder."""
     now = log.stamp() if now is None else now
     found, no_folder = _projects(project, settings, now, refresh=refresh)
+    looked: list[open_builds.OpenBuilds] = []
+
+    def opened() -> open_builds.OpenBuilds:
+        # Read once, the first time a round's step is one git says.
+        if not looked:
+            looked.append(open_builds.read(
+                settings=found[0].settings if found else settings, now=now))
+        return looked[0]
+
     listed = []
     for one in found:
         for summary in one.rounds:
@@ -188,7 +204,7 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
                 listed.append(Round(
                     summary.name, summary.project, str(summary.folder),
                     status=summary.status, flow=summary.flow, ended=summary.ended,
-                    step=_step(summary, one),
+                    step=_step(summary, one, opened),
                     standing=next((item.body.get("standing")
                                    for item in summary.of(index.VERSION)), None),
                     counts=tuple((key, count(summary, one))

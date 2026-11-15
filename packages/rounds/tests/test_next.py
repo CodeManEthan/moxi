@@ -437,6 +437,8 @@ def test_a_built_step_that_does_not_wait_says_it_waits_for_nothing(
     verdict(folder, "publishable")
     monkeypatch.setitem(steps.ROWS, "commission", lambda _state, about: steps.Step(
         "commission", state, stage=about.stage))
+    # Past a done step, the next is printed: one that is not built says no waits.
+    monkeypatch.delitem(steps.ROWS, "build")
 
     assert said(lines(capsys), "waits:") == (["nothing"] if state != "done" else [])
 

@@ -177,17 +177,20 @@ def read_tip(worktree: Path, branch: str) -> Tip:
     return Tip(git.branch(branch), clean)
 
 
-def seen_of(state: states.State, name: str, *, settings) -> dict:
+def seen_of(state: states.State, name: str, *, settings,
+            read: Mapping[str, open_builds.OpenBuild] | None = None) -> dict:
     """What git and the settings say now of each open build of the round `name`, by
-    stage, as the step function reads it (`steps.Seen`). A build that can't be read
-    is given with its problem. Nothing is written."""
+    stage, as the step function reads it (`steps.Seen`). `read` is the round's open
+    builds by stage as `open_builds` read them, read here when left out. A build that
+    can't be read is given with its problem. Nothing is written."""
     from . import steps
 
     opened = [one for one in builds.builds(state) if one.ended is None
               and builds.current(state, one.stage) == one]
     if not opened or state.status != states.OPEN:
         return {}
-    read = open_builds.of_round(name, [one.repo for one in opened], settings=settings)
+    if read is None:
+        read = open_builds.of_round(name, [one.repo for one in opened], settings=settings)
     found = {}
     for build in opened:
         now = read.get(build.stage)

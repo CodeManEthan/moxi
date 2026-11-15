@@ -41,10 +41,12 @@ It does not yet do the rest of a round:
 - answers prepared ahead for a sitting with the operator;
 - parent rounds.
 
-So a round moves through its design, the design's verification and its questions, and
-stops where its first build would start: `next` prints each later step as not built. A
-stage is planned and never built. A round whose flow has no `build` step closes itself
-(see Closing); any other ends only by `drop`. Config keys that belong to the parts
+So a round moves through its design, the design's verification and its questions, has
+each stage commissioned, built and checked, and stops there: `next` prints each later
+step as not built. A stage's `build` step is ready once it is commissioned and done once
+git reads its branch as holding work (`building`) or merged; `next`, `show` and `list`
+read git for it. A round whose flow has no `build` step closes itself (see Closing); any
+other ends only by `drop`. Config keys that belong to the parts
 above are declared and checked, and nothing reads them yet (see Config).
 
 ## Commands

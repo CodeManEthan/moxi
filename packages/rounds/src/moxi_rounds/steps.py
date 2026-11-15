@@ -53,12 +53,22 @@ other, so its row says when the stage reads as skipped.
   flow has a design step and for no question that would hold the stage
   (`held_unbuilt`).
 
+- `build` of a stage: not due until the stage has a build that is open or finished;
+  then ready until the build has work, which is when git reads it `building` or
+  `merged`, and done from then on, and once the build is finished. It is read from
+  what `Asked.seen` says of the stage's build.
 - `check` of a stage: done once the newest run of the repo's check passed at the
   build's tip, with the argv the check gives now (`checking.passes`), and once the
   build is finished. Until then it waits for the build to have work and for its
   worktree to be clean. It is read from what `Asked.seen` says of the stage's build;
   where that is not given the step waits on a read of git. A stage whose repo declares
   no check has no `check` step, where `Asked.seen` says so.
+
+**What git says.** The `build` and `check` rows read a stage's open build as the
+caller read it from git (`Asked.seen`, which `checking.seen_of` gives). Every reader
+of a step passes it. A caller that read nothing of git gets such a step as `WAITING`
+on that read, with `Step.unread` set, and is to read git before it says the step: the
+index keeps the step the log alone gives, and marks it so (`at`).
 
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
@@ -154,6 +164,8 @@ class Step:
     - `asked`: for the step that verifies the design, which pass is asked for.
     - `entry`: the step's entry in the flow, which says who does it, at which tier
       and what they read; None for a step the flow has without listing it.
+    - `unread`: its state is read from git, which the caller did not read, so the
+      state given is no answer.
     """
 
     step: str
@@ -163,6 +175,7 @@ class Step:
     questions: tuple[str, ...] = ()
     asked: brake.Asked | None = None
     entry: Mapping | None = None
+    unread: bool = False
 
     @property
     def settled(self) -> bool:
@@ -286,11 +299,38 @@ def _declaring(state: states.State, about: Asked) -> Step:
     return Step(COMMISSION, WAITING if waits else READY, waits=tuple(waits))
 
 
+BUILD = "build"
+
+
+def _not_read(step: str, stage: str, what: str, name: str) -> Step:
+    return Step(step, WAITING, stage=stage, unread=True, waits=(Unmet(
+        f"{what} is read from git, which was not read here", f"moxi rounds next {name}"),))
+
+
+def _build(state: states.State, about: Asked) -> Step:
+    stage = about.stage
+    planned = None if stage is None else stages.find(state, stage)
+    if planned is not None and planned.round is not None:
+        # A stage that stands for a child round has no build: it is not built here.
+        return Step(BUILD, NOT_BUILT, stage=stage)
+    built = None if stage is None else stages.build_of(state, stage)
+    if built is None:
+        return Step(BUILD, NOT_DUE, stage=stage)
+    if built == stages.FINISHED:
+        return Step(BUILD, DONE, stage=stage)
+    seen = (about.seen or {}).get(stage)
+    if seen is None:
+        return _not_read(BUILD, stage, f"whether {stage} has work", about.name)
+    if seen.problem is not None:
+        return Step(BUILD, WAITING, stage=stage, waits=(seen.problem,))
+    return Step(BUILD, DONE if seen.state in checking.WITH_WORK else READY, stage=stage)
+
+
 CHECK = checking.CHECK
 
 
 def _check(state: states.State, about: Asked) -> Step:
-    stage, name = about.stage, about.name
+    stage = about.stage
     built = None if stage is None else stages.build_of(state, stage)
     if built is None:
         return Step(CHECK, NOT_DUE, stage=stage)
@@ -298,9 +338,8 @@ def _check(state: states.State, about: Asked) -> Step:
         return Step(CHECK, DONE, stage=stage)
     seen = (about.seen or {}).get(stage)
     if seen is None:
-        return Step(CHECK, WAITING, stage=stage, waits=(Unmet(
-            f"whether {stage}'s check passed at its tip is read from git, which was "
-            "not read here", f"moxi rounds next {name}"),))
+        return _not_read(CHECK, stage, f"whether {stage}'s check passed at its tip",
+                         about.name)
     if seen.problem is not None:
         return Step(CHECK, WAITING, stage=stage, waits=(seen.problem,))
     if seen.tip is not None and seen.check is not None and checking.passes(
@@ -320,7 +359,7 @@ def _check(state: states.State, about: Asked) -> Step:
 #: The function that says each step's state. A step with no row reads `NOT_BUILT`,
 #: and a skipped step is read before its row is asked.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
-                        COMMISSION: _commission, CHECK: _check}
+                        COMMISSION: _commission, BUILD: _build, CHECK: _check}
 
 
 # -- a hold on a stage -------------------------------------------------------------------
@@ -476,6 +515,9 @@ def at(state: states.State):
     """The step the round is at, as one `(id, body)` for the index: the step, its
     stage and its state, or nothing for a round at no step.
 
+    Git is not read here. Where the step is one whose state git says, the body has
+    `git` true: whoever lists the row reads the step again, with git read.
+
     Only the round's own log is read, so a question parked until another round
     closes is read as parked. The body then names those rounds in `until`: once one
     of them is closed, whoever lists the row reads the step from the log again."""
@@ -488,6 +530,8 @@ def at(state: states.State):
     body = {"step": None, "stage": None, "state": None}
     if found is not None:
         body = {"step": found.step, "stage": found.stage, "state": found.state}
+        if found.unread:
+            body["git"] = True
     if until:
         body["until"] = until
     yield "step", body
@@ -503,7 +547,7 @@ def said(step: Mapping | None) -> str:
 
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
-           "SETTLED", "HELD", "COMMISSION", "CHECK", "Seen", "Asked", "Step", "Row",
+           "SETTLED", "HELD", "COMMISSION", "BUILD", "CHECK", "Seen", "Asked", "Step", "Row",
            "ROWS", "answer",
            "held_by", "held_unbuilt", "order", "of", "one", "is_settled", "current", "at",
            "said"]

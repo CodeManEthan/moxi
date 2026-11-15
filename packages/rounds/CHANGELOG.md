@@ -60,6 +60,10 @@ does not yet build.
   worktree changed meanwhile records nothing. A check counts only at the tip it ran at
   and with the command the repo declares now; `show` and the round note give each
   build's newest run.
+- A stage's `build` step is not due until it is commissioned, ready until git reads its
+  build as holding work or merged, and done from then on. `next`, `show`, `list` and the
+  read API read git for it, so a round moves from `commission` through `build` to
+  `check`.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

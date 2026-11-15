@@ -47,7 +47,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import (brake, checking, closing, commission_block, flows, model_tiers,
+from . import (brake, builds, checking, closing, commission_block, flows, model_tiers,
                report_block, showing, stages, steps, tracing, versions)
 from . import settings as own
 from . import shown as showings
@@ -150,17 +150,26 @@ def _commission(found: showing.Shown, step: steps.Step) -> dict:
                      "--builder NAME [--slice ID=TEXT --minutes N]..."]}
 
 
-#: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
-#: and `then`, and any key of its own.
+def _build(found: showing.Shown, step: steps.Step) -> dict:
+    build = builds.current(found.state, step.stage)
+    if build is None or build.ended is not None:
+        return {"reads": _named(step)}
+    worktree = checking.commission_of(found.state, build).get("worktree")
+    return {"reads": _named(step),
+            "write": f"the work, committed on {build.branch} in {worktree}"}
+
+
 def _check(found: showing.Shown, step: steps.Step) -> dict:
     return {"reads": _named(step),
             "then": [f"moxi rounds check {found.name} {step.stage}, or moxi rounds check "
                      "in the build's worktree"]}
 
 
+#: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
+#: and `then`, and any key of its own.
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
     steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket,
-    steps.COMMISSION: _commission, steps.CHECK: _check}
+    steps.COMMISSION: _commission, steps.BUILD: _build, steps.CHECK: _check}
 
 
 def _waits(step: steps.Step) -> list[dict]:
