@@ -150,6 +150,8 @@ def cost_figures(panel) -> list[str]:
 
 def test_the_filter_line_sits_under_cost_and_opens_on_the_last_30_days_by_cost(page):
     panel = open_page(page)
+    # The part under the filter line is drawn once the chart's or a section's read answers.
+    expect(panel.locator("[data-part=below]")).to_have_count(1)
     order = panel.evaluate("""el => [...el.shadowRoot.children]
         .filter((node) => node.dataset && node.dataset.part).map((node) => node.dataset.part)""")
     assert order[:3] == ["top", "filters", "below"], order
