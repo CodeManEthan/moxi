@@ -25,7 +25,13 @@ date, a limit under one) answers `error` with a fixed sentence, and opens nothin
 A message is listed only when its line zero is a machine line: a prose message, which
 no list shows, is left out and not counted. Its rows come from one query of the books'
 `queue` and one of `dropped` for every message an answer carries, and its author from
-`attribution.from_record`, run only on the messages the answer carries.
+`attribution.from_record`, run only on the messages the answer carries. A read that
+weighs every message of a window (`/api/mail-state`) names an agent's or a module's
+post by its `author_id`, with no directory query (`authored`).
+
+`/api/mail-state` decides whether an ask was answered by `replies`, the rule the
+daemon's `awaiting` uses, applied over the record: with the operator as the answerer for
+the asks to him (`owed`), and with each awaited agent for the asks between agents.
 
 Like `page`, this module is imported only by the page server and loopback's export.
 """
@@ -43,11 +49,13 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from . import attribution, directory, machine_line
+from . import attribution, constants, directory, machine_line, replies
 from .owed import epoch_of
 from .paths import comms_db
 from .provision import NAMES
-from .record import open_record
+from .record import AUTHOR_IDENTITY, AUTHOR_RESERVED, open_record
+from .replies import SentEntry
+from .scoping import GLOBAL, OPERATOR_NAME, identity_of, qualify, split_tag, tag_matches
 from .store import open_read
 
 #: `/api/messages`' `limit` when the query names none.
@@ -342,6 +350,143 @@ def earlier(store: Store, start: str) -> dict[str, Any] | None:
             "before": str(int(last_id) + 1)}
 
 
-__all__ = ["BAD_QUERY", "DAY_PAGE", "LIMIT", "NO_CURSOR", "READ_ERROR", "Read", "Store",
-           "answer", "book_rows", "day_bounds", "earlier", "local_day",
-           "messages", "opened", "query_id", "readable", "shaped", "stamp"]
+# --- who wrote it ------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Authored:
+    """What the reply rule needs of a message's author: its qualified name, whether its
+    attribution is `verified`, and whether it is the operator (tier `operator`, whatever
+    name the directory gives him)."""
+
+    qualified: str
+    verified: bool
+    is_operator: bool
+
+
+def authored(conn: sqlite3.Connection, msg) -> Authored:
+    """`attribution.from_record`'s answer in short. An agent's or a module's post is
+    named by its `author_id` and is always verified, so it needs no directory query;
+    any other kind is attributed in full."""
+    if msg.author_kind in (AUTHOR_IDENTITY, AUTHOR_RESERVED):
+        name, scope = split_tag(msg.author_id)
+        return Authored(qualify(name, scope or GLOBAL), verified=True, is_operator=False)
+    author = attribution.from_record(conn, msg)
+    return Authored(author.qualified, verified=author.attribution == attribution.VERIFIED,
+                    is_operator=author.tier == attribution.TIER_OPERATOR)
+
+
+def sent_entry(r: Read, who: Authored) -> SentEntry:
+    """One read message as the reply rule reads it (`replies`)."""
+    return SentEntry(id=str(r.msg.id), author=who.qualified, tags=tuple(r.line.recipients),
+                     posture=r.line.posture, reply_to=r.line.reply_to, at=r.at,
+                     verified=who.verified)
+
+
+# --- /api/mail-state ---------------------------------------------------------------------
+
+
+def mail_state(call: Any) -> dict[str, Any]:
+    """`GET /api/mail-state`: `queued`, `owed`, `asks` and `last` (`page.MAIL_STATE`),
+    from the books and one read of the record's last `ASK_TTL`. It asks the daemon
+    nothing. A failure is a 200 with `state` `error`, never a 500."""
+    empty = {"today": _today().isoformat(), "queued": [], "owed": [], "asks": [],
+             "last": []}
+
+    def read() -> dict[str, Any]:
+        out = dict(empty)
+        with opened() as store:
+            if store is None:
+                return out
+            now = time.time()
+            found = readable(store.record.since(store.room,
+                                                stamp(now - constants.ASK_TTL)))
+            found.sort(key=lambda r: r.number)
+            items = []
+            for r in found:
+                who = authored(store.conn, r.msg)
+                items.append((r, who, sent_entry(r, who)))
+            rows = store.conn.execute(
+                "SELECT name, message_id, state FROM queue ORDER BY name, message_id"
+            ).fetchall()
+            out["queued"] = _queued(store, rows, {e.id: who for _, who, e in items})
+            out["owed"] = _owed(items, now)
+            out["asks"] = _asks(items, now, {(name, str(mid)) for name, mid, _ in rows})
+            out["last"] = _last(items)
+        return out
+
+    return answer(empty, read)
+
+
+def _queued(store: Store, rows, known: dict[str, Authored]) -> list[dict[str, Any]]:
+    # Per address, its waiting and in-session rows, and the waiting rows' authors in
+    # message order, each once. An author outside the read is looked up by id.
+    out: dict[str, dict[str, Any]] = {}
+    for name, mid, state in rows:
+        entry = out.setdefault(name, {"qualified": name, "waiting": 0, "handed": 0,
+                                      "from": []})
+        if state != "waiting":
+            entry["handed"] += 1
+            continue
+        entry["waiting"] += 1
+        who = known.get(str(mid))
+        if who is None:
+            msg = store.record.get_message(str(mid))
+            if msg is None:
+                continue
+            who = known[str(mid)] = authored(store.conn, msg)
+        if who.qualified not in entry["from"]:
+            entry["from"].append(who.qualified)
+    return [out[name] for name in sorted(out)]
+
+
+def _owed(items, now: float) -> list[dict[str, Any]]:
+    # The asks to him, oldest first, that no message of his answers by the shared rule.
+    his = [e for _, who, e in items if who.is_operator]
+    out = []
+    for r, who, ask in items:
+        if who.is_operator or not replies.is_ask(ask, now):
+            continue
+        if not any(tag_matches(tag, OPERATOR_NAME) for tag in ask.tags):
+            continue
+        if replies.answered(ask.id, ask.author, his):
+            continue
+        out.append({"message_id": ask.id, "author": ask.author, "at": float(ask.at),
+                    "text": r.line.text})
+    return out
+
+
+def _asks(items, now: float, held: set[tuple[str, str]]) -> list[dict[str, Any]]:
+    # Each agent's open asks to another agent, the newest per pair. `held` is every
+    # (name, message id) the books hold a row for.
+    by_author: dict[str, list[SentEntry]] = {}
+    for _, _, e in items:
+        by_author.setdefault(e.author, []).append(e)
+    pairs: dict[tuple[str, str], SentEntry] = {}
+    for _, who, ask in items:
+        if who.is_operator or not replies.is_ask(ask, now):
+            continue
+        for tag in ask.tags:
+            awaited = identity_of(tag)
+            if awaited in (ask.author, OPERATOR_NAME):
+                continue
+            if not replies.answered(ask.id, ask.author, by_author.get(awaited, ())):
+                pairs[(ask.author, awaited)] = ask
+    return [{"asker": asker, "awaited": awaited, "message_id": ask.id,
+             "at": float(ask.at), "read": False if (awaited, ask.id) in held else None}
+            for (asker, awaited), ask in sorted(pairs.items())]
+
+
+def _last(items) -> list[dict[str, Any]]:
+    # Each address's newest message by id, by it or to it.
+    last: dict[str, float] = {}
+    for _, _, e in items:
+        for qualified in (e.author, *(identity_of(tag) for tag in e.tags)):
+            last[qualified] = float(e.at)
+    return [{"qualified": q, "at": last[q]} for q in sorted(last)]
+
+
+__all__ = ["BAD_QUERY", "DAY_PAGE", "LIMIT", "NO_CURSOR", "READ_ERROR", "Authored", "Read",
+           "Store", "answer", "authored", "book_rows", "day_bounds", "earlier", "local_day",
+           "mail_state", "messages", "opened", "query_id", "readable", "sent_entry", "shaped",
+           "stamp"]

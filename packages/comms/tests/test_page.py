@@ -183,7 +183,8 @@ def test_the_gate_matrix_passes():
 def test_the_page_declares_its_reads():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
-    assert list(routes) == ["/api/roster", "/api/mail", "/api/events", "/api/messages"]
+    assert list(routes) == ["/api/roster", "/api/mail", "/api/events", "/api/messages",
+                           "/api/mail-state"]
     assert all(r["kind"] == "read" and not r["confirmed"] for r in routes.values())
     assert not routes["/api/mail"]["query"] and not routes["/api/mail"]["stream"]
     assert routes["/api/events"]["stream"] and list(routes["/api/events"]["topics"]) == ["roster"]

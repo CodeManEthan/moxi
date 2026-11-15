@@ -7,6 +7,9 @@
     GET /api/mail     Home's Comms row: the names with mail waiting that no session holds
     GET /api/messages one day's messages, newest first, each with its rows in the books,
                       and how many messages came before that day
+    GET /api/mail-state  what the agent rows need beyond the roster: each address's
+                      rows in the books, the asks that wait for the operator's reply,
+                      the open asks between agents, and each address's newest message
 
 The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
 --json` prints, and the `Roster` it was joined from; the mail read from one
@@ -144,6 +147,43 @@ MESSAGES = {
     }),
 }
 
+#: `/api/mail-state`, read from the books and the record's last `ASK_TTL` (a day).
+#: `queued`: each address with a row in the books, by qualified name: how many rows wait,
+#: how many are in its session (`handed` or `in_digest`), and the authors of the waiting
+#: ones, oldest message first, each once. `owed`: the verified `[reply-once]` asks to the
+#: operator that no later message of his answers, oldest first. `asks`: each open ask
+#: between two agents, the newest per pair; `read` is false while the books hold the
+#: awaited name's row for it, else null. `last`: each address's newest message, by it or
+#: to it. `state` and `detail` are as `MESSAGES`'; an error answers empty lists.
+MAIL_STATE = {
+    "state": lb.Out("string"),
+    "detail": lb.Out("string", nullable=True),
+    "today": lb.Out("string"),
+    "queued": lb.Out("list", items=lb.Out("table", items={
+        "qualified": lb.Out("string"),
+        "waiting": lb.Out("int"),
+        "handed": lb.Out("int"),
+        "from": lb.Out("list", items=lb.Out("string")),
+    })),
+    "owed": lb.Out("list", items=lb.Out("table", items={
+        "message_id": lb.Out("string"),
+        "author": lb.Out("string"),
+        "at": lb.Out("float"),
+        "text": lb.Out("string", mark="redact"),
+    })),
+    "asks": lb.Out("list", items=lb.Out("table", items={
+        "asker": lb.Out("string"),
+        "awaited": lb.Out("string"),
+        "message_id": lb.Out("string"),
+        "at": lb.Out("float"),
+        "read": lb.Out("bool", nullable=True),
+    })),
+    "last": lb.Out("list", items=lb.Out("table", items={
+        "qualified": lb.Out("string"),
+        "at": lb.Out("float"),
+    })),
+}
+
 PAGE = lb.Page(
     routes=(
         lb.Route("/api/roster", "read", "moxi_comms.pagehandlers:roster",
@@ -157,8 +197,10 @@ PAGE = lb.Page(
                         "before": lb.Field("string", required=False, max=20),
                         "limit": lb.Field("int", required=False, max=500)},
                  returns=MESSAGES),
+        lb.Route("/api/mail-state", "read", "moxi_comms.pagereads:mail_state",
+                 returns=MAIL_STATE),
     ),
     assets="web",
 )
 
-__all__ = ["DELIVERY", "MAIL", "MESSAGE", "MESSAGES", "PAGE", "ROSTER", "ROW"]
+__all__ = ["DELIVERY", "MAIL", "MAIL_STATE", "MESSAGE", "MESSAGES", "PAGE", "ROSTER", "ROW"]

@@ -45,6 +45,14 @@
   can't write and asks the daemon nothing, so it answers with the daemon down; a store
   comms' daemon has not yet moved or migrated answers `state` `error`. The phone's
   gateway does not reach it.
+- comms' page server has a new read, `GET /api/mail-state`, from the delivery books and
+  the record's last day, asking the daemon nothing: `queued`, each name's waiting and
+  in-session rows with the authors of the waiting ones; `owed`, the verified
+  `[reply-once]` asks to the operator that no later message of his answers; `asks`, the
+  open `[reply-once]` asks between agents, with whether the awaited name has read it;
+  and `last`, each name's newest message. An ask is answered by the rule the daemon's
+  `awaiting` uses, now one shared function: a later message to the asker threaded to the
+  ask, or with any posture but `[no reply]`.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the
