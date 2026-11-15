@@ -728,10 +728,13 @@ class CodexAdapter(HarnessAdapter):
     def flush(self) -> str | None:
         """Plain mail goes only at a boundary: no turn runs and no plain digest waits
         for its turn. While a turn runs, interrupt mail goes into it by `steer` when the
-        session offers it (`flush_interrupt`); the rest waits for the turn's end."""
+        session offers it (`flush_interrupt`); the rest waits for the turn's end. A steer
+        holds, as the base's flush does, while catch-up is arriving or the adapter is
+        offline (a new binding's client is not installed yet)."""
         with self._lock:
             if self.turn_open:
-                steer = (not self.replaying and self.can_inject() and self._can_steer()
+                steer = (not self.replaying and not self.offline and self.can_inject()
+                         and self._can_steer()
                          and any(self._steerable(p) for p in self.queue))
                 if not steer:
                     return None

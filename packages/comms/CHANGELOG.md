@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Waiting mail is no longer skipped when an OpenCode or Codex adapter reconnects to the
+  daemon. The daemon hands mail that waited for the agent as soon as it answers the
+  reconnect, and the adapter could try to deliver it before it had switched to the new
+  connection. It then dropped the message, which did not arrive until the agent's next
+  reconnect or relaunch while newer mail went through. The adapter now holds delivery
+  until the new connection is in place. The same applies to interrupt mail that reaches
+  a Codex agent mid turn while it reconnects: it is no longer dropped, and goes into the
+  running turn once the new connection is in place.
+- An OpenCode or Codex adapter no longer gives up its own name while it reconnects to
+  the daemon. When an attempt failed after connecting, that attempt's connection could
+  report its close after the next attempt had bound. The adapter then said comms was
+  offline, tried to bind the name it already held, was refused, and stopped delivering
+  mail to its agent. A close from a connection the adapter has already replaced now
+  changes nothing.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
 - comms has a row on Home in the browser UI shell, the `mail` component
