@@ -431,7 +431,8 @@ def mail_state(call: Any) -> dict[str, Any]:
             rows = store.conn.execute(
                 "SELECT name, message_id, state FROM queue ORDER BY name, message_id"
             ).fetchall()
-            out["queued"] = _queued(store, rows, {e.id: who for _, who, e in items})
+            him = _him(store.conn)
+            out["queued"] = _queued(store, rows, {e.id: who for _, who, e in items}, him)
             out["owed"] = _owed(items, now)
             out["asks"] = _asks(items, now, {(name, str(mid)) for name, mid, _ in rows})
             out["last"] = _last(items)
@@ -440,9 +441,17 @@ def mail_state(call: Any) -> dict[str, Any]:
     return answer(empty, read)
 
 
-def _queued(store: Store, rows, known: dict[str, Authored]) -> list[dict[str, Any]]:
+def _him(conn: sqlite3.Connection) -> frozenset[str]:
+    # The names that are the operator: `operator` and each name the directory gives him.
+    return frozenset({OPERATOR_NAME,
+                      *(str(row[0]) for row in conn.execute("SELECT name FROM operators"))})
+
+
+def _queued(store: Store, rows, known: dict[str, Authored],
+            him: frozenset[str]) -> list[dict[str, Any]]:
     # Per address, its waiting and in-session rows, and the waiting rows' authors in
-    # message order, each once. An author outside the read is looked up by id.
+    # message order, each once, each marked when it is the operator. An author outside
+    # the read is looked up by id.
     out: dict[str, dict[str, Any]] = {}
     for name, mid, state in rows:
         entry = out.setdefault(name, {"qualified": name, "waiting": 0, "handed": 0,
@@ -457,8 +466,9 @@ def _queued(store: Store, rows, known: dict[str, Authored]) -> list[dict[str, An
             if msg is None:
                 continue
             who = known[str(mid)] = authored(store.conn, msg)
-        if who.qualified not in entry["from"]:
-            entry["from"].append(who.qualified)
+        if all(author["qualified"] != who.qualified for author in entry["from"]):
+            entry["from"].append({"qualified": who.qualified,
+                                  "operator": who.qualified in him})
     return [out[name] for name in sorted(out)]
 
 
@@ -564,8 +574,7 @@ class _Pair:
     def __init__(self, conn: sqlite3.Connection, a: str, b: str | None) -> None:
         self.conn = conn
         self.a, self.b = a, b
-        names = {str(row[0]) for row in conn.execute("SELECT name FROM operators")}
-        self.him = frozenset({OPERATOR_NAME, *names})
+        self.him = _him(conn)
         # A tag naming either side spells that side's name, so a line zero without it
         # is passed over before it is parsed.
         self.spelled = {side: (split_tag(side)[0], *((OPERATOR_NAME,) if side in self.him

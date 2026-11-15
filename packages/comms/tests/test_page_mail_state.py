@@ -56,6 +56,11 @@ def his(rig, to, text="noted", **kw):
                                    token=rig.operator_token)
 
 
+def agent(qualified: str) -> dict:
+    """A `queued` author that is not the operator."""
+    return {"qualified": qualified, "operator": False}
+
+
 def owed_ids(body) -> list[str]:
     return [o["message_id"] for o in body["owed"]]
 
@@ -228,11 +233,11 @@ def test_queued_counts_rows_and_names_the_waiting_rows_authors_in_order(rig, tod
         assert wait_until(lambda m=m: queued(m.id))
     body = read()
     assert body["queued"] == [{"qualified": MAIN, "waiting": 3, "handed": 0,
-                               "from": ["planner@proj-a", OTHER]}]
+                               "from": [agent("planner@proj-a"), agent(OTHER)]}]
     set_row(one.id, state="handed")
     set_row(two.id, state="in_digest", digested_once=1)
     assert read()["queued"] == [{"qualified": MAIN, "waiting": 1, "handed": 2,
-                                 "from": ["planner@proj-a"]}]
+                                 "from": [agent("planner@proj-a")]}]
 
 
 def test_queued_names_an_author_from_before_the_read(rig, today):
@@ -241,8 +246,21 @@ def test_queued_names_an_author_from_before_the_read(rig, today):
     assert wait_until(lambda: queued(old.id))
     body = read()
     assert body["queued"] == [{"qualified": MAIN, "waiting": 1, "handed": 0,
-                               "from": ["planner@proj-a"]}]
+                               "from": [agent("planner@proj-a")]}]
     assert body["last"] == []
+
+
+@pytest.mark.parametrize("name", ["operator", "the-desk"])
+def test_queued_marks_his_own_waiting_message_as_the_operators(rig, today, name):
+    if name != "operator":
+        rename_operator(name)
+    first = post(rig, "a", by="planner@proj-a", ago_s=30)
+    mine = his(rig, [MAIN], "from the desk")
+    for m in (first, mine):
+        assert wait_until(lambda m=m: queued(m.id))
+    assert read()["queued"] == [{"qualified": MAIN, "waiting": 2, "handed": 0,
+                                 "from": [agent("planner@proj-a"),
+                                          {"qualified": name, "operator": True}]}]
 
 
 def test_last_is_each_addresss_newest_message_by_it_or_to_it(rig, today):

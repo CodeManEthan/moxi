@@ -164,7 +164,8 @@ MESSAGES = {
 #: `/api/mail-state`, read from the books and the record's last `ASK_TTL` (a day).
 #: `queued`: each address with a row in the books, by qualified name: how many rows wait,
 #: how many are in its session (`handed` or `in_digest`), and the authors of the waiting
-#: ones, oldest message first, each once. `owed`: the verified `[reply-once]` asks to the
+#: ones, oldest message first, each once, `operator` true for the operator (`operator`
+#: or a name the directory gives him). `owed`: the verified `[reply-once]` asks to the
 #: operator that no later message of his answers, oldest first. `asks`: each open ask
 #: between two agents, the newest per pair; `read` is false while the books hold the
 #: awaited name's row for it, else null. `last`: each address's newest message, by it or
@@ -177,7 +178,10 @@ MAIL_STATE = {
         "qualified": lb.Out("string"),
         "waiting": lb.Out("int"),
         "handed": lb.Out("int"),
-        "from": lb.Out("list", items=lb.Out("string")),
+        "from": lb.Out("list", items=lb.Out("table", items={
+            "qualified": lb.Out("string"),
+            "operator": lb.Out("bool"),
+        })),
     })),
     "owed": lb.Out("list", items=lb.Out("table", items={
         "message_id": lb.Out("string"),

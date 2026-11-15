@@ -70,13 +70,20 @@ export function parsePageRoster(data: unknown, parse: (data: unknown) => Roster 
   };
 }
 
+/** An author of waiting mail; `operator` is the server's mark for the operator, whatever
+ * name the directory gives him. */
+export interface Author {
+  qualified: string;
+  operator: boolean;
+}
+
 /** An address with a row in the books: how many rows wait, how many are in its session,
  * and the authors of the waiting ones, oldest first. */
 export interface Queued {
   qualified: string;
   waiting: number;
   handed: number;
-  from: string[];
+  from: Author[];
 }
 
 /** A message to the operator that waits for his reply. */
@@ -121,6 +128,10 @@ function keep<T>(data: unknown, parse: (item: Record<string, unknown>) => T | nu
   return data.map((item) => (isTable(item) ? parse(item) : null)).filter((item): item is T => item !== null);
 }
 
+function parseAuthor({ qualified, operator }: Record<string, unknown>): Author | null {
+  return isString(qualified) && typeof operator === "boolean" ? { qualified, operator } : null;
+}
+
 /** The answer of `/api/mail-state`, or null when it isn't one. An entry that is not one is
  * left out. */
 export function parseMailState(data: unknown): MailState | null {
@@ -134,7 +145,7 @@ export function parseMailState(data: unknown): MailState | null {
     ...empty,
     queued: keep(data.queued, ({ qualified, waiting, handed, from }) =>
       (isString(qualified) && count(waiting) && count(handed) && Array.isArray(from)
-        ? { qualified, waiting, handed, from: from.filter(isString) } : null)),
+        ? { qualified, waiting, handed, from: keep(from, parseAuthor) } : null)),
     owed: keep(data.owed, ({ message_id, author, at, text }) =>
       (isId(message_id) && isString(author) && finite(at) && isString(text) ? { message_id, author, at, text } : null))
       .sort((a, b) => a.at - b.at),
@@ -259,12 +270,7 @@ export interface Options {
   cache: boolean;
   /** Each address's running launch, with launcher installed; null without it. */
   launched?: ReadonlyMap<string, Launched> | null;
-  /** The names that are the operator's own, which `from` words as `you`. */
-  you?: ReadonlySet<string>;
 }
-
-/** The name the daemon keeps for the operator. */
-export const OPERATOR = "operator";
 
 const nameOf = (qualified: string): string => qualified.split("@")[0];
 const isBare = (qualified: string): boolean => !qualified.includes("@");
@@ -275,15 +281,14 @@ export function messages(n: number): string {
   return n === 1 ? "1 message" : `${n} messages`;
 }
 
-/** Authors as a line names them: the operator as `you`, each other by the part before `@`
- * unless two share it, then in full. */
-export function authorsWords(authors: readonly string[], you: ReadonlySet<string>): string {
-  const own = (author: string): boolean => author === OPERATOR || you.has(author);
-  const shorts = authors.filter((author) => !own(author)).map(nameOf);
+/** Authors as a line names them: the one the server marks the operator as `you`, each
+ * other by the part before `@` unless two share it, then in full. */
+export function authorsWords(authors: readonly Author[]): string {
+  const shorts = authors.filter((author) => !author.operator).map((author) => nameOf(author.qualified));
   const named = authors.map((author) => {
-    if (own(author)) return "you";
-    const short = nameOf(author);
-    return shorts.filter((other) => other === short).length === 1 ? short : author;
+    if (author.operator) return "you";
+    const short = nameOf(author.qualified);
+    return shorts.filter((other) => other === short).length === 1 ? short : author.qualified;
   });
   return namesWords([...new Set(named)]);
 }
@@ -389,25 +394,28 @@ function casesOf(addresses: readonly Address[], lead: Address): Case[] {
 
 /** The authors `from` names for some addresses: each one's authors only when the books'
  * waiting rows number the roster's count there, oldest first, each once. */
-function fromOf(addresses: readonly Address[]): string[] {
+function fromOf(addresses: readonly Address[]): Author[] {
   const kept = addresses.filter((address) =>
     address.queued !== null && address.waiting !== null && address.queued.waiting === address.waiting.count);
   const ordered = [...kept].sort((a, b) => (a.waiting as Waiting).since - (b.waiting as Waiting).since);
-  return [...new Set(ordered.flatMap((address) => (address.queued as Queued).from))];
+  const seen = new Map<string, Author>();
+  for (const author of ordered.flatMap((address) => (address.queued as Queued).from)) {
+    if (!seen.has(author.qualified)) seen.set(author.qualified, author);
+  }
+  return [...seen.values()];
 }
 
 interface Words {
   now: number;
   when: (at: number) => string;
   cache: boolean;
-  you: ReadonlySet<string>;
 }
 
 /** A case's fact and line two, for a name whose addresses are `addresses`, whose lead is
  * `lead`, and whose addresses with their own line three are `lined`. */
 function wordsOf(kind: Case, addresses: readonly Address[], lead: Address, lined: ReadonlySet<string>,
                  asks: readonly Ask[], words: Words): { fact: Fact | null; line: Line } {
-  const { when, you } = words;
+  const { when } = words;
   const cacheFact = (): Fact | null => factOf(lead, words.now, when);
   switch (kind) {
     case "owed": {
@@ -425,7 +433,7 @@ function wordsOf(kind: Case, addresses: readonly Address[], lead: Address, lined
       const sinces = unlined.flatMap((address) => (address.waiting !== null ? [address.waiting.since] : []));
       const from = fromOf(unlined);
       const parts = [...(sinces.length > 0 ? [`since ${when(Math.min(...sinces))}`] : []),
-                     ...(from.length > 0 ? [`from ${authorsWords(from, you)}`] : [])];
+                     ...(from.length > 0 ? [`from ${authorsWords(from)}`] : [])];
       const more = parts.length > 0 ? parts.join(", ") : null;
       return { fact: { text: `${messages(n)} waiting`, heavy: true }, line: { lead, heavy: true, more } };
     }
@@ -439,7 +447,7 @@ function wordsOf(kind: Case, addresses: readonly Address[], lead: Address, lined
         ? lead.queued.from : [];
       const since = lead.waiting?.since ?? null;
       let more: string | null = null;
-      if (from.length > 0) more = `from ${authorsWords(from, you)}${since !== null ? ` ${when(since)}` : ""}`;
+      if (from.length > 0) more = `from ${authorsWords(from)}${since !== null ? ` ${when(since)}` : ""}`;
       else if (since !== null) more = `since ${when(since)}`;
       const held = words.cache ? "held until its next turn" : "not read yet";
       return { fact: cacheFact(), line: { lead: `${messages(n)} ${held}`, heavy: false, more } };
@@ -469,7 +477,7 @@ function joined(fact: Fact | null, line: Line): string {
 /** The address lines of a row: unbound ones oldest mail first, then bound ones by name. */
 function linesOf(addresses: readonly Address[], lead: Address, full: ReadonlySet<string>, words: Words)
   : AddressLine[] {
-  const { when, you } = words;
+  const { when } = words;
   const lined = addresses.filter((address) =>
     (address !== lead && (address.bound || holdsMail(address))) || (!address.bound && full.has(address.qualified)));
   const unbound = lined.filter((address) => !address.bound)
@@ -481,7 +489,7 @@ function linesOf(addresses: readonly Address[], lead: Address, full: ReadonlySet
     const from = fromOf([address]);
     let text = `${address.qualified} · ${messages(n)}`;
     if (address.waiting !== null) text += ` since ${when(address.waiting.since)}`;
-    if (from.length > 0) text += `${address.waiting !== null ? "," : ""} from ${authorsWords(from, you)}`;
+    if (from.length > 0) text += `${address.waiting !== null ? "," : ""} from ${authorsWords(from)}`;
     out.push({ qualified: address.qualified, text });
   }
   for (const address of bound) {
@@ -579,8 +587,7 @@ export function order(rows: readonly AgentRow[]): AgentRow[] {
  * session whose name has a row. A send-only name is always in `Other names`.
  */
 export function agentsOf(roster: PageRoster, mail: MailState | null, options: Options): Agents {
-  const words: Words = { now: options.now, when: options.when ?? LOCAL.time, cache: options.cache,
-                         you: options.you ?? new Set() };
+  const words: Words = { now: options.now, when: options.when ?? LOCAL.time, cache: options.cache };
   const kept = mail !== null && mail.state === "up" ? mail : null;
   const names = gather(roster, kept, options.launched ?? null);
   const full = namedInFull(roster);

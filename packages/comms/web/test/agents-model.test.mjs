@@ -20,7 +20,10 @@ const bound = (qualified, fields = {}) =>
                    bound_at: at("12:00"), ...fields });
 const waiting = (qualified, count, since) => ({ qualified, count, since: at(since) });
 const roster = (rows, waits = []) => ({ state: "up", detail: null, rows, waiting: waits, today: "2026-11-12" });
-const queued = (qualified, waiting, from = [], handed = 0) => ({ qualified, waiting, handed, from });
+// An author as the server marks it: the fixtures' operator is the name `operator`.
+const author = (qualified, operator = qualified === "operator") => ({ qualified, operator });
+const queued = (qualified, waiting, from = [], handed = 0) =>
+  ({ qualified, waiting, handed, from: from.map((who) => (typeof who === "string" ? author(who) : who)) });
 const mail = (fields = {}) => ({ state: "up", detail: null, today: "2026-11-12", queued: [], owed: [], asks: [],
                                  last: [], ...fields });
 const owed = (author, hhmm, id = "1000000000000000001") =>
@@ -54,7 +57,9 @@ test("the roster's value gains waiting and today; a bad waiting entry is left ou
 test("the mail state: what is not one is left out, owed oldest first", () => {
   const got = parseMailState({
     state: "up", detail: null, today: "2026-11-12",
-    queued: [queued("a", 1, ["b", 3]), { qualified: "x", waiting: -1, handed: 0, from: [] }],
+    queued: [{ qualified: "a", waiting: 1, handed: 0,
+               from: [author("b"), 3, "c", { qualified: "d" }, { qualified: "e", operator: "yes" }] },
+             { qualified: "x", waiting: -1, handed: 0, from: [] }],
     owed: [owed("b", "18:00", "2"), owed("c", "17:00", "3"), { ...owed("d", "17:00"), message_id: 12 }],
     asks: [{ asker: "a", awaited: "b", message_id: "4", at: 1, read: false },
            { asker: "a", awaited: "c", message_id: "5", at: 1, read: true }],
@@ -220,12 +225,12 @@ test("from drops only the disagreeing address's authors", () => {
                    ["x@a · 1 message since 10:00, from planner", "x@b · 2 messages since 11:00"]);
 });
 
-test("authors: the operator as you, short names unless two share one", () => {
-  const you = new Set(["the-desk"]);
-  assert.equal(authorsWords(["operator"], you), "you");
-  assert.equal(authorsWords(["the-desk", "planner@a"], you), "you and planner");
-  assert.equal(authorsWords(["x@a", "x@b", "y"], you), "x@a, x@b and y");
-  assert.equal(authorsWords(["a", "b", "c", "d"], you), "a, b and 2 more");
+test("authors: the one the server marks the operator as you, short names unless two share one", () => {
+  const words = (...names) => authorsWords(names.map((name) => author(name)));
+  assert.equal(words("operator"), "you");
+  assert.equal(authorsWords([author("the-desk", true), author("planner@a")]), "you and planner");
+  assert.equal(words("x@a", "x@b", "y"), "x@a, x@b and y");
+  assert.equal(words("a", "b", "c", "d"), "a, b and 2 more");
 });
 
 test("the cache fact: warm until, cold, a warm read past its time cold, none", () => {
@@ -352,6 +357,12 @@ test("without launcher: no where, comms' cache fact, no loud case", () => {
   assert.equal(got.where, null);
   assert.deepEqual(got.fact, { text: "warm until 19:22", heavy: false });
   assert.equal(got.case, "idle");
+});
+
+test("from you: the server's mark decides, not the author's name", () => {
+  const r = roster([bound("reviewer")], [waiting("reviewer", 2, "18:50")]);
+  const got = only(r, mail({ queued: [queued("reviewer", 2, [author("the-desk", true), author("operator", false)])] }));
+  assert.equal(got.line.more, "from you and operator 18:50");
 });
 
 test("without cache: no fact, and held mail reads not read yet", () => {
