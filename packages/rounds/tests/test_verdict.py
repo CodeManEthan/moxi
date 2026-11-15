@@ -76,9 +76,7 @@ def report(folder, verdict="publishable", *, design=1, pass_="full", name="repor
 
 def other(folder, kind) -> str:
     """A report of another kind, whole and well formed."""
-    keys = {"build": ['verdict = "publishable"', 'pass = "full"', 'stage = "B1"',
-                      f'head = "{"0" * 40}"'],
-            "step": ['verdict = "publishable"', 'pass = "full"', 'stage = "B1"',
+    keys = {"step": ['verdict = "publishable"', 'pass = "full"', 'stage = "B1"',
                      f'head = "{"0" * 40}"', 'step = "a-step"'],
             "majors": ['stages = ["B1"]'], "retro": []}[kind]
     path = folder / f"{kind}.md"
@@ -289,7 +287,7 @@ def test_a_copied_report_with_new_content_is_a_new_report(folder):
     assert len({one.sha256 for one in found}) == 3
 
 
-@pytest.mark.parametrize("kind", ["build", "step", "majors", "retro"])
+@pytest.mark.parametrize("kind", ["step", "majors", "retro"])
 def test_a_report_of_another_kind_is_refused_as_not_recorded_yet(folder, kind):
     fold(folder, question("Q1"), stage("B1"))
     path = other(folder, kind)
@@ -299,8 +297,8 @@ def test_a_report_of_another_kind_is_refused_as_not_recorded_yet(folder, kind):
         record(path)
 
     [unmet] = refused.value.unmet
-    assert f"is a {kind} report, and only a report of a design is recorded" in (
-        unmet.reason)
+    assert (f"is a {kind} report, and only a report of a design or of a build is "
+            "recorded") in unmet.reason
     assert raw(folder) == before
 
 
@@ -944,3 +942,236 @@ def test_the_flag_for_a_weaker_model_is_shown_and_in_the_note(
     assert "model model-three   flags: model-below-tier\n" in shown
     assert data["verdicts"][0]["flags"] == ["model-below-tier"]
     assert "  - flags: model-below-tier\n" in note
+
+
+# -- a report of a build -----------------------------------------------------------------
+
+@pytest.fixture
+def built(git_repo, tmp_path, capsys):
+    """The project `proj-a` rooted at the test's git repo, its round in the `fix` flow,
+    and B1 on the branch `work` commissioned to `coder` with one commit made on it.
+    Returns `(round folder, the repo, the worktree's repo)`."""
+    from moxi import cli
+    from moxi_rounds import commissioning
+
+    assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
+    assert cli.main(["projects", "set", "proj-a", "--notes-root",
+                     str(tmp_path / "notes")]) == 0
+    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+                       flow="fix")
+    folder = tmp_path / "notes" / "rounds" / "a-round"
+    log.append(log.round_log(folder), "stage.declared",
+               {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+               actor="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    tree = type(git_repo)(made.worktree)
+    tree.commit("work.txt", "the work")
+    capsys.readouterr()
+    return folder, git_repo, tree
+
+
+def of_build(folder, head, verdict="fold-first", *, findings=(), by="critic",
+             name="build-report.md", pass_="full", model="a-model", more=(),
+             prose="What the pass found in the build."):
+    """Write a report of B1 read at `head` in the round's folder and return its path."""
+    keys = ['kind = "build"', f'verdict = "{verdict}"', f'pass = "{pass_}"',
+            f'by = "{by}"', f'model = "{model}"', 'stage = "B1"', f'head = "{head}"']
+    text = (f"# A report\n\n{prose}\n\n```toml rounds\n" + "\n".join(keys)
+            + "".join(f"\n\n{one}" for one in (*findings, *more)) + "\n```\n")
+    path = folder / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def refusal(path) -> str:
+    with pytest.raises(Refused) as refused:
+        record(path)
+    return str(refused.value)
+
+
+def test_a_build_report_is_recorded_against_the_head_it_read(built):
+    folder, repo, tree = built
+    path = of_build(folder, tree.rev(), findings=[finding("L1", "major")])
+
+    done = record(path)
+
+    [event] = [one for one in events(folder) if one["type"] == "verdict.recorded"]
+    assert {key: event[key] for key in ("kind", "verdict", "pass", "stage", "head",
+                                        "merge_base", "by", "report")} == {
+        "kind": "build", "verdict": "fold-first", "pass": "full", "stage": "B1",
+        "head": tree.rev(), "merge_base": repo.rev("main"), "by": "critic",
+        "report": "build-report.md"}
+    assert event["findings"] == [{"id": "L1", "severity": "major", "state": "open",
+                                  "text": "a line is unclear"}]
+    assert [one.key for one in done.findings] == ["B1.L1"]
+    assert "finding B1.L1: major, open: a line is unclear" in done.waits
+
+
+def test_a_head_under_the_tip_is_recorded_after_the_branch_moved(built):
+    folder, _repo, tree = built
+    read = tree.rev()
+    tree.commit("fix.txt", "a fix made while the pass was written")
+
+    done = record(of_build(folder, read))
+
+    assert done.verdict.head == read
+
+
+def test_a_head_that_is_not_a_commit_of_the_build_is_refused(built):
+    folder, repo, _tree = built
+    repo.switch("elsewhere", new_from="main")
+    stray = repo.commit("stray.txt")
+    repo.switch("main")
+    before = raw(folder)
+
+    said = refusal(of_build(folder, stray))
+
+    assert f"the report read {stray[:12]}, which is neither the tip of work" in said
+    assert "which proj-a does not hold" in refusal(of_build(folder, "f" * 40,
+                                                            name="other.md"))
+    assert raw(folder) == before
+
+
+def test_the_builder_s_own_report_is_refused(built):
+    folder, _repo, tree = built
+
+    said = refusal(of_build(folder, tree.rev(), by="coder"))
+
+    assert "the report is by coder, who built B1" in said
+
+
+def test_a_report_of_a_stage_with_no_open_build_is_refused(built):
+    folder, _repo, tree = built
+    path = of_build(folder, tree.rev())
+    text = path.read_text(encoding="utf-8").replace('stage = "B1"', 'stage = "B2"')
+    path.write_text(text, encoding="utf-8")
+
+    assert "B2 of proj-a/a-round was never commissioned" in refusal(path)
+
+
+def test_waits_and_decisions_in_a_build_report_are_refused_until_recorded(built):
+    folder, _repo, tree = built
+    more = ('[[wait]]\nid = "W1"\ntext = "check the page on a phone"',
+            ('[[decision]]\nid = "M1"\nweight = "minor"\nforecloses = false\n'
+             'text = "a search is retried twice"'))
+
+    said = refusal(of_build(folder, tree.rev(), more=more))
+
+    assert "declares waiting items and decisions, and nothing records those" in said
+
+
+def test_a_build_report_lists_every_open_finding_and_sets_its_state(built):
+    folder, _repo, tree = built
+    record(of_build(folder, tree.rev(), findings=[finding("L1", "major"),
+                                                  finding("L2", "minor")]))
+    tree.commit("fix.txt", "the fix")
+
+    left_out = of_build(folder, tree.rev(), "publishable", pass_="re-check",
+                        findings=[finding("L1", "major", "fixed")], name="second.md")
+    assert "the finding B1.L2 is open on B1's record and the report does not list it" in (
+        refusal(left_out))
+
+    done = record(of_build(folder, tree.rev(), "publishable", pass_="re-check",
+                           findings=[finding("L1", "major", "fixed"),
+                                     finding("L2", "minor", "no-action")],
+                           name="third.md"))
+
+    assert [(one.key, one.state, one.step) for one in done.findings] == [
+        ("B1.L1", "fixed", "verify-build"), ("B1.L2", "no-action", "verify-build")]
+    assert not [line for line in done.waits if line.startswith("finding")]
+
+
+def test_a_finding_closed_by_a_report_may_be_left_out_of_the_next(built):
+    folder, _repo, tree = built
+    record(of_build(folder, tree.rev(), findings=[finding("L1", "minor", "fixed")]))
+
+    done = record(of_build(folder, tree.rev(), "publishable", pass_="re-check",
+                           name="second.md"))
+
+    assert [(one.key, one.state) for one in done.findings] == [("B1.L1", "fixed")]
+
+
+def test_an_id_a_dropped_build_s_report_used_is_refused_for_a_new_finding(built):
+    from moxi_rounds import commissioning
+
+    folder, repo, tree = built
+    record(of_build(folder, tree.rev(), findings=[finding("L1", "major")]))
+    log.append(log.round_log(folder), "build.dropped", {"stage": "B1"}, actor="planner")
+    repo.git("worktree", "remove", "--force", str(tree.root))
+    repo.git("branch", "-D", "work")
+    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    again = type(repo)(made.worktree)
+    again.commit("work.txt", "the work again")
+
+    said = refusal(of_build(folder, again.rev(), findings=[finding("L1", "minor")],
+                            name="second.md"))
+    done = record(of_build(folder, again.rev(), findings=[finding("L2", "minor")],
+                           name="third.md"))
+
+    assert "the finding L1 is new to B1's build, and an earlier report of B1 used" in said
+    # The dropped build's open finding is not the new build's to list.
+    assert [one.key for one in done.findings] == ["B1.L2"]
+
+
+def test_a_build_report_with_the_same_bytes_is_refused(built):
+    folder, _repo, tree = built
+    path = of_build(folder, tree.rev())
+    record(path)
+
+    assert "a report with these bytes was recorded already" in refusal(path)
+
+
+def test_a_verdict_on_a_build_merged_by_hand_reads_the_target_before_the_merge(built):
+    folder, repo, tree = built
+    before = repo.rev("main")
+    repo.merge("work")
+
+    done = record(of_build(folder, tree.rev()))
+
+    # Against the target's head the tip would read as on the target; against the
+    # target as it was before the merge it is the build's work.
+    assert done.verdict.merge_base == before
+
+
+def test_a_build_report_below_its_step_s_tier_is_flagged(built, write_config):
+    write_config(TIERS)
+    folder, _repo, tree = built
+
+    done = record(of_build(folder, tree.rev(), model="model-four"))
+
+    assert done.verdict.flags == ("model-below-tier",)
+
+
+def test_the_verb_prints_the_verdict_and_what_finish_waits_for(built, capsys):
+    folder, _repo, tree = built
+    path = of_build(folder, tree.rev(), findings=[finding("L1", "major")])
+
+    assert main(["verdict", ROUND, str(path), "--as", "critic"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"recorded for {ROUND}: fold-first for B1 at {tree.rev()[:12]}" in out
+    assert "finding B1.L1: major, open: a line is unclear" in out
+    assert "finish of B1 waits for:\n" in out
+    assert "  finding B1.L1: major, open: a line is unclear\n" in out
+
+
+def test_show_and_the_round_note_give_a_build_s_verdict_and_findings(built, capsys):
+    from moxi_rounds import showing
+
+    folder, _repo, tree = built
+    record(of_build(folder, tree.rev(), findings=[finding("L1", "major")]))
+
+    shown = showing.show(ROUND)
+    [row] = showing.data(shown)["builds"]
+    text = showing.as_text(shown)
+    note = (folder / "round-note.md").read_text(encoding="utf-8")
+
+    assert row["verdict"]["head"] == tree.rev()
+    assert row["findings"] == [{"id": "B1.L1", "severity": "major", "state": "open",
+                                "text": "a line is unclear", "step": "verify-build",
+                                "raised": row["verdict"]["n"],
+                                "set_by": row["verdict"]["n"]}]
+    line = f"verdict fold-first at {tree.rev()[:7]}, full pass by critic, model a-model"
+    assert line in text and line in note
+    assert "finding B1.L1: major, open: a line is unclear" in text
+    assert "finding B1.L1: major, open: a line is unclear" in note

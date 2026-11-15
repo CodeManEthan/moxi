@@ -318,6 +318,12 @@ class Verdict:
     verdict: str | None
     #: The version of the design it read, for a design report.
     design: int | None
+    #: For a report of a build: the stage, the head the pass read, and the merge-base
+    #: of that head and the target before the build reached it, None when git gave
+    #: none or several.
+    stage: str | None
+    head: str | None
+    merge_base: str | None
     #: The model the report says wrote it, and who it says wrote it.
     model: str | None
     by: str | None
@@ -774,6 +780,8 @@ def _verdict_recorded(state: State, event: dict) -> None:
     state.verdicts.append(Verdict(
         n=event.get("n"), kind=event.get("kind"), pass_=event.get("pass"),
         verdict=event.get("verdict"), design=event.get("design"),
+        stage=event.get("stage"), head=event.get("head"),
+        merge_base=event.get("merge_base"),
         model=event.get("model"), by=event.get("by"), report=event.get("report"),
         sha256=event.get("sha256"),
         findings=tuple(copy.deepcopy(one) for one in event.get("findings") or ()

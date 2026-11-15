@@ -75,6 +75,13 @@ does not yet build.
   build as holding work or merged, and done from then on. `next`, `show`, `list` and the
   read API read git for it, so a round moves from `commission` through `build` to
   `check`.
+- `verdict` records a build report against the head it read, the tip of the build's
+  branch or an ancestor of it, and refuses the builder's own. Its findings become the
+  build's, and the newest report that lists one sets its state; a report lists every
+  open finding, and a new one takes an id no earlier report of the stage used. The
+  verb prints what the build's finish still waits for, and `show` and the round note
+  give each build's newest verdict and findings.
+- A user command step waits, as `check` does, for a clean worktree.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

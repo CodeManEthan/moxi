@@ -74,14 +74,18 @@ the version before. A question since ruled or withdrawn that the block leaves ou
 no difference.
 `verdict` records the verdict of a report, run by whoever wrote it: it reads the
 report's data block and records it against the version of the design the report says
-its pass read, whatever was frozen or edited since. A report of a design is the kind
-recorded. A verdict that finds its version publishable takes out of the round what
-that version's block took away; one that sends the design back takes out nothing. The
-design's standing is the newest verdict of its current version, and `none` after a
-design is frozen again. One full pass reads a design; a second report of a full pass
-is recorded with the flag `extra-full-pass`. A report whose model is in a weaker tier
+its pass read, whatever was frozen or edited since. A report of a design and a report
+of a build are the kinds recorded. A verdict that finds its version publishable takes
+out of the round what that version's block took away; one that sends the design back
+takes out nothing. The design's standing is the newest verdict of its current version,
+and `none` after a design is frozen again. One full pass reads a design; a second
+report of a full pass is recorded with the flag `extra-full-pass`. A report whose model is in a weaker tier
 of the `models` setting than its pass is held to is recorded with the flag
-`model-below-tier`.
+`model-below-tier`. A report of a build is recorded against the head it read, the tip
+of the build's branch or an ancestor of it, and not from the build's builder. It lists
+every finding the build holds as open, in some state, and the newest report that lists
+a finding sets its state: `open`, `fixed` or `no-action`. A finding new to the build
+takes an id no earlier report of the stage used.
 `commission` authorizes the build of a stage of the plan once its step waits for
 nothing: it reads the target (the repo's `into` setting, else the branch checked out
 at the project's root) and takes the target's head as the build's base, cuts the
@@ -851,7 +855,9 @@ def _declare_verdict(verbs) -> None:
     said = ("Record the verdict of a report, from its data block: for a report of a "
             "design, against the frozen version it says its pass read. A verdict "
             "that finds that version publishable takes out of the round what the "
-            "version's block took away. The report's file is not changed.")
+            "version's block took away. For a report of a build, against the head it "
+            "read, with its findings; it prints what the build's finish still waits "
+            "for. The report's file is not changed.")
     parser = verbs.add_parser("verdict", help=said, description=said)
     parser.add_argument("round", metavar="ROUND",
                         help="the round's name, <project>/<slug>")
@@ -865,12 +871,32 @@ def _verdict(args, out) -> int:
 
     done = verdicts.record(args.round, args.report, actor=_actor(args))
     one = done.verdict
-    print(f"recorded for {done.name}: {one.verdict} for v{one.design} of its design, "
-          f"{one.pass_} pass by {one.by}, model {one.model}", file=out)
+    if one.stage is not None:
+        base = "none" if one.merge_base is None else one.merge_base[:12]
+        print(f"recorded for {done.name}: {one.verdict} for {one.stage} at "
+              f"{one.head[:12]}, {one.pass_} pass by {one.by}, model {one.model}",
+              file=out)
+        print(f"merge-base with the target: {base}", file=out)
+    else:
+        print(f"recorded for {done.name}: {one.verdict} for v{one.design} of its "
+              f"design, {one.pass_} pass by {one.by}, model {one.model}", file=out)
     print(f"report: {one.report}", file=out)
     print(f"sha256: {one.sha256}", file=out)
     if one.flags:
         print(f"flags: {', '.join(one.flags)}", file=out)
+    if one.stage is not None:
+        for finding in done.findings:
+            print(f"finding {finding.key}: {finding.severity}, {finding.state}: "
+                  f"{finding.text}", file=out)
+        if done.waits:
+            print(f"finish of {one.stage} waits for:", file=out)
+            for line in done.waits:
+                print(f"  {line}", file=out)
+        else:
+            print(f"finish of {one.stage} waits for none of its steps or findings",
+                  file=out)
+        _warn_of(done.failed, args.prog, args.verb)
+        return codes.OK
     for taken in one.applied:
         print(f"applied: {versions.said(taken)}", file=out)
     for taken, why in one.not_applied:

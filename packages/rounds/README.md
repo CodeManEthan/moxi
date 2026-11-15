@@ -60,7 +60,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
 | `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
-| `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, run by whoever wrote the report |
+| `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design or on a build, run by whoever wrote the report |
 | `moxi rounds ask ROUND TEXT --from PTR [--blocks B<n>[,...]\|none] [--option K=TEXT ...]` | put a question to the operator in a round, as `Q<n>`; it holds up every stage unless `--blocks` names the ones it holds up, or `none` |
 | `moxi rounds ask ROUND TEXT --build B<n> [--blocks B<n>[,...]\|none]` | put a question that came up in the open build of a stage: a builder tells you, and you ask it; it comes from that build at its branch's tip, and is listed as asked by you for the builder |
 | `moxi rounds ask PROJECT TEXT --from PTR [--option K=TEXT ...]` | put a question on the project's list, as `P<n>`, where it holds up nothing |
@@ -374,6 +374,19 @@ Once a round has stages, a question may hold up some of them (`ask --blocks B1,B
 `narrow:Q<n>=B2`), be parked until one is finished (`park:Q<n> --until B2`), and a
 ruling may apply to some (`rule --stages B1`). `next` prints a stage's steps this
 version does not build as not built, with the questions that hold the stage.
+
+### Verifying a build
+
+A checker reads a build and records a report of `kind = "build"` with `verdict`. Its
+block names the `stage` and the `head` it read, the tip of the build's branch or an
+ancestor of it, so a fix committed while the report was written does not make it
+unrecordable. A report by the build's builder is refused. Each `[[finding]]` becomes a
+finding of the build, `B1.L1` outside the report, and the newest report that lists a
+finding sets its state: `open`, `fixed` or `no-action`. A report lists every finding
+the build holds as open, so none is dropped by being left out, and a finding new to the
+build takes an id no earlier report of the stage used, a dropped build's included.
+`verdict` prints the build's findings and what its finish still waits for; `show` and
+the round note give each build's newest verdict and its findings.
 
 ## Questions
 

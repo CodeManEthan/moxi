@@ -46,8 +46,8 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (builds, checking, ci, closing, folders, index, log, open_builds,
-               questions, shown, skips, steps, tracing, versions)
+from . import (builds, checking, ci, closing, findings, folders, index, log,
+               open_builds, questions, shown, skips, steps, tracing, versions)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -287,6 +287,9 @@ def history_of(event: dict) -> str | None:
         of = f"{event.get('thread')}, {event.get('decision')}"
     if event.get("type") == "verdict.recorded" and event.get("design") is not None:
         of = f"{event.get('verdict')} for v{event.get('design')}"
+    if event.get("type") == "verdict.recorded" and event.get("stage") is not None:
+        of = (f"{event.get('verdict')} for {event.get('stage')} at "
+              f"{str(event.get('head'))[:7]}")
     return of if isinstance(of, str) and of else None
 
 
@@ -361,7 +364,10 @@ def _builds(found: Shown) -> list:
                    _check_run(found.state, one, step)
                    for step in [*_command_steps(found.state), ci.LOCAL])
                    if run is not None],
-               "ci": _ci_read(found.state, one)}
+               "ci": _ci_read(found.state, one),
+               "verdict": _build_verdict(found.state, one),
+               "findings": [finding.data()
+                            for finding in findings.of_build(found.state, one)]}
         now = read.get(one.stage) if one.ended is None else None
         if now is not None and now.build.n == one.n:
             data = now.data()
@@ -372,6 +378,34 @@ def _builds(found: Shown) -> list:
                               "fix": "moxi projects list"}
         listed.append(row)
     return listed
+
+
+def _build_verdict(state: states.State, build: builds.Build) -> dict | None:
+    """The newest verdict recorded for `build`, as data: its word, the pass, the head
+    it read and that head's merge-base with the target, who wrote the report with
+    which model, the report's file and digest, what is noted of it, and when it was
+    recorded; None with none."""
+    listed = findings.verdicts_of(state, build)
+    if not listed:
+        return None
+    one = listed[-1]
+    return {"n": one.n, "verdict": one.verdict, "pass": one.pass_, "head": one.head,
+            "merge_base": one.merge_base, "by": one.by, "model": one.model,
+            "report": one.report, "sha256": one.sha256, "flags": list(one.flags),
+            "at": one.at}
+
+
+def build_verdict_line(one: dict) -> str:
+    """A build's newest verdict in words: `verdict fold-first at 81c7f5b, full pass by
+    critic, model opus`."""
+    flags = f", flags: {', '.join(one['flags'])}" if one["flags"] else ""
+    return (f"verdict {one['verdict']} at {str(one['head'])[:7]}, {one['pass']} pass by "
+            f"{one['by']}, model {one['model']}{flags}")
+
+
+def finding_line(one: dict) -> str:
+    """A finding in words: `finding B1.L1: major, open: the text`."""
+    return f"finding {one['id']}: {one['severity']}, {one['state']}: {one['text']}"
 
 
 def _ci_read(state: states.State, build: builds.Build) -> dict | None:
@@ -462,6 +496,10 @@ def _build_lines(listed: list) -> list[str]:
             lines += [f"      {flow['path']}: {flow['reading']}"
                       + ("" if flow.get("url") is None else f"   {flow['url']}")
                       for flow in one["ci"]["workflows"] or ()]
+        if one.get("verdict") is not None:
+            lines.append(f"    {build_verdict_line(one['verdict'])}")
+            lines.append(f"      report: {one['verdict']['report']}")
+        lines += [f"    {finding_line(finding)}" for finding in one.get("findings", ())]
         if one["record"] is not None:
             lines.append(f"    go: {one['record']}")
     return lines
@@ -706,4 +744,6 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "skip_line", "stage_line", "build_line", "step_lines", "version_lines", "thread_line", "verdict_lines", "history_of"]
+           "ended_line", "skip_line", "stage_line", "build_line", "build_verdict_line",
+           "finding_line", "step_lines", "version_lines", "thread_line", "verdict_lines",
+           "history_of"]

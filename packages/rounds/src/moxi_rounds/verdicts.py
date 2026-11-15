@@ -7,9 +7,24 @@ design the pass read, the model and the author the report names, the report's fi
 and the SHA-256 of its bytes, every finding of its block, and what the verdict takes
 out of the record. The report's file is read and never written.
 
-Only a report of a design is recorded here. A report of a build, of a step of the
+A report of a design or of a build is recorded here. A report of a step of the
 user's own, of a round's major decisions or a retrospective is refused, since nothing
 here records one.
+
+**A report of a build** reads one build, the stage's open one, at a head that is the
+tip of its branch or an ancestor of it. The verdict is recorded against the head it
+read, even when the branch moved since: whether later commits are covered is the
+finish's question, so a fix committed before the verdict is recorded does not make the
+report unrecordable. The event holds that head and its merge-base with the target as
+it was before the build reached it (the target's head while the build is off it),
+None when git gives none or several: a reading of the build. A report by the build's
+builder is refused; the name is the report's own word, so this catches a mistake, not
+bad faith. The report lists every finding the build holds as open, in some state, and
+a finding new to the build takes an id no earlier report of the stage used
+(`findings`). Waiting items and decisions in a build's report are refused: nothing
+records them yet. A report whose model the `models` setting places in a weaker tier
+than the `verify-build` step names for its pass is recorded with
+`model_tiers.BELOW_TIER`.
 
 **Against the version it read.** A report names the frozen version its pass read, and
 its verdict is recorded for that version, whether or not a later one was frozen since
@@ -47,11 +62,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import (brake, ending, folders, model_tiers, questions, report_block, stages,
-               stepping, versions, write)
+from . import (brake, builds, checking, ending, findings, folders, model_tiers,
+               open_builds, questions, report_block, stages, stepping, versions, write)
 from . import settings as own
 from . import state as states
-from .errors import BadBlock, NoLog, NoRound, Problem, Refused, Unmet
+from .errors import BadBlock, NoLog, NoRound, Problem, Refused, RoundsError, Unmet
+from .gitreads import Git
 
 #: The step a round's flow must have for a pass to verify its design.
 VERIFIES = stages.VERIFIES
@@ -68,6 +84,10 @@ class Recorded:
     standing: versions.Standing
     event: dict
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    #: For a report of a build: each finding of the build after it, and what the
+    #: build's finish still waits for, a line each.
+    findings: tuple[findings.Finding, ...] = ()
+    waits: tuple[str, ...] = ()
 
 
 @dataclass
@@ -174,6 +194,112 @@ def _path(report: Path, folder: Path) -> str:
         return str(whole)
 
 
+def _again(state: states.State, block: report_block.ReportBlock,
+           shown: str) -> list[Unmet]:
+    """The refusal of a report whose bytes were recorded already: it says nothing new."""
+    again = next((one for one in state.verdicts if one.sha256 == block.sha256), None)
+    if again is None:
+        return []
+    return [Unmet(f"a report with these bytes was recorded already, at {again.at} by "
+                  f"{again.actor} as {again.report}: its verdict is in the record and "
+                  "is not recorded twice", shown)]
+
+
+def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str,
+              settings, report: str) -> dict:
+    """The fields of the verdict on a report of a build, read from git now; refused
+    with every unmet rule when it can't be recorded."""
+    shown = f"moxi rounds show {name}"
+    stage = block.stage
+    build = builds.current(state, stage)
+    if build is None or build.ended is not None:
+        how = ("was never commissioned" if build is None
+               else f"has no open build: its last one is {build.ended}")
+        raise Refused([Unmet(f"{stage} of {name} {how}, so there is no build for the "
+                             "report to have read", shown)])
+    unmet = []
+    if block.waits or block.decisions:
+        kinds = [what for what, listed in (("waiting items", block.waits),
+                                           ("decisions", block.decisions)) if listed]
+        unmet.append(Unmet(
+            f"the report declares {' and '.join(kinds)}, and nothing records those of "
+            "a build's report yet", "take them out of the block and say them in the "
+            "report's prose, then record it"))
+    builder = checking.commission_of(state, build).get("builder")
+    if block.by == builder:
+        unmet.append(Unmet(
+            f"the report is by {block.by}, who built {stage}: a builder's own report "
+            "does not verify the build", "have a checker who did not build it read "
+            "the build and write the report"))
+    held = findings.of_build(state, build)
+    listed = {one.id for one in block.findings}
+    for one in held:
+        if one.open and one.id not in listed:
+            unmet.append(Unmet(
+                f"the finding {one.key} is open on {stage}'s record and the report "
+                "does not list it: a report can't drop a finding by leaving it out",
+                f'list {one.id} with the state it has at the head the pass read: '
+                f'"{report_block.OPEN}", "{report_block.FIXED}" or '
+                f'"{report_block.NO_ACTION}"'))
+    own_ids = {one.id for one in held}
+    used = findings.taken(state, stage) - own_ids
+    for one in block.findings:
+        if one.id in used:
+            unmet.append(Unmet(
+                f"the finding {one.id} is new to {stage}'s build, and an earlier report "
+                f"of {stage} used the id {one.id}: an old id never names a new finding",
+                "give it an id no report of the stage used"))
+    unmet += _again(state, block, shown)
+    merge_base = None
+    try:
+        _key, root = folders.root(build.repo)
+        git = Git(root)
+        now = open_builds.of_round(name, [build.repo], settings=settings).get(stage)
+        if now is None or now.build.n != build.n or now.status is None:
+            why = (now.problem.reason if now is not None and now.problem is not None
+                   else "its state can't be read")
+            unmet.append(Unmet(f"{stage} can't be read from git: {why}", shown))
+        else:
+            tip = git.branch(build.branch)
+            reads = tip if tip is not None else now.status.head
+            if reads is None:
+                unmet.append(Unmet(
+                    f"{stage} has no head to read: its branch {build.branch} is gone "
+                    "and git holds no commit of it", shown))
+            elif not git.present([block.head]):
+                unmet.append(Unmet(
+                    f"the report read {block.head[:12]}, which {build.repo} does not "
+                    "hold", "give head the whole hash of the commit the pass read"))
+            elif block.head != reads and not git.is_ancestor(block.head, reads):
+                where = (f"the tip of {build.branch}, {reads[:12]}" if tip is not None
+                         else f"{stage}'s head {reads[:12]}")
+                unmet.append(Unmet(
+                    f"the report read {block.head[:12]}, which is neither {where} nor "
+                    "an ancestor of it: it is not a commit of the build",
+                    "give head the commit of the build the pass read"))
+            else:
+                # The target before the build reached it: its head while the build is
+                # off it, else what it was just before the merge.
+                bases = git.merge_bases(block.head, now.status.target_before)
+                merge_base = bases[0] if len(bases) == 1 else None
+    except RoundsError as error:
+        unmet.append(Unmet(error.reason, error.fix or shown))
+    if unmet:
+        raise Refused(unmet)
+    fields: dict[str, object] = {
+        "kind": block.kind, "pass": block.pass_, "verdict": block.verdict,
+        "stage": stage, "head": block.head, "merge_base": merge_base,
+        "model": block.model, "by": block.by,
+        "report": report, "sha256": block.sha256,
+        "findings": [{"id": one.id, "severity": one.severity, "state": one.state,
+                      "text": one.text} for one in block.findings]}
+    noted = model_tiers.flags(settings["models"], state.steps, findings.VERIFY_BUILD,
+                              pass_=block.pass_, model=block.model)
+    if noted:
+        fields["flags"] = noted
+    return fields
+
+
 def record(name: str, report: Path | str, *, actor: str, settings=None,
            wait_s: float = write.WAIT_S, at: str | None = None) -> Recorded:
     """Record the verdict of the report file `report` on the round `name`,
@@ -188,8 +314,9 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
     `NoRound` for a round that can't be found, `BadBlock` when the report's block
     can't be read or names a version of the design that was never frozen, and
     `Refused` when the round has ended, the report is of a kind that is not recorded
-    here, the round's flow has no step that verifies its design, or a report with
-    these bytes was recorded already. A refusal leaves the log as it was.
+    here, the round's flow has no step that verifies its design, a report with these
+    bytes was recorded already, or a report of a build breaks a rule above. A refusal
+    leaves the log as it was.
     """
     project, slug = folders.split(name)
     settings = own.load() if settings is None else settings
@@ -210,10 +337,14 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
             raise view.facts.error
         block = view.facts.block
         state = view.state
+        if block.kind == report_block.BUILD:
+            return write.Entry("verdict.recorded", _of_build(
+                state, block, name=name, settings=settings,
+                report=_path(report, folder)))
         if block.kind != report_block.DESIGN:
             raise Refused([Unmet(
                 f"{report} is a {block.kind} report, and only a report of a design "
-                "is recorded: nothing records this one yet", shown)])
+                "or of a build is recorded: nothing records this one yet", shown)])
         unmet = []
         if not stepping.has_step(state, VERIFIES):
             flow = stepping.current(state).name
@@ -231,12 +362,7 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
                 f"the report read version {block.design} of the design of {name}, "
                 f"which was never frozen: {frozen}",
                 "give design the number of the frozen version the pass read")])
-        again = next((one for one in state.verdicts if one.sha256 == block.sha256), None)
-        if again is not None:
-            unmet.append(Unmet(
-                f"a report with these bytes was recorded already, at {again.at} by "
-                f"{again.actor} as {again.report}: its verdict is in the record and "
-                "is not recorded twice", shown))
+        unmet += _again(state, block, shown)
         if unmet:
             raise Refused(unmet)
         fields: dict[str, object] = {
@@ -264,9 +390,37 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
     except NoLog:
         raise NoRound(name) from None
     after = states.fold(written.round_events)
-    return Recorded(name=name, verdict=after.verdicts[-1],
-                    standing=versions.standing(after), event=written.events[0],
-                    failed=written.failed)
+    one = after.verdicts[-1]
+    held, waits = (), ()
+    if one.kind == report_block.BUILD:
+        held = findings.of_stage(after, one.stage)
+        waits = finish_waits(after, one.stage, name=name, settings=settings)
+    return Recorded(name=name, verdict=one, standing=versions.standing(after),
+                    event=written.events[0], failed=written.failed, findings=held,
+                    waits=waits)
 
 
-__all__ = ["VERIFIES", "Recorded", "applies", "record"]
+def finish_waits(state: states.State, stage: str, *, name: str,
+                 settings) -> tuple[str, ...]:
+    """What the finish of `stage` still waits for, of what the round's steps and
+    findings say, a line each: every step of the stage before its finish that is
+    neither done nor skipped, and every open finding of its build. Reads git for the
+    steps that need it."""
+    from . import steps
+
+    seen = checking.seen_of(state, name, settings=settings)
+    lines = []
+    for one in steps.of(state, name=name, seen=seen):
+        if one.stage != stage:
+            continue
+        if one.step == findings.FINISH:
+            break
+        if not one.settled:
+            why = "; ".join(wait.reason for wait in one.waits)
+            lines.append(f"{one.step}: {one.state}" + (f" ({why})" if why else ""))
+    lines += [f"finding {one.key}: {one.severity}, open: {one.text}"
+              for one in findings.of_stage(state, stage) if one.open]
+    return tuple(lines)
+
+
+__all__ = ["VERIFIES", "Recorded", "applies", "finish_waits", "record"]
