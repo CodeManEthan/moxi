@@ -10,6 +10,9 @@
   on turning on either startup-screen answer (the folder-trust one stays marked while on)
   and on adding a name to `relaunch.pass_env` or `relaunch.director_pass_env`. The
   launcher needs moxi 0.1.9 or later.
+- The prompt's menus open inside the page: each one that would pass 16 px from an edge
+  is shifted back, after it opens and when the window is resized. On a narrow page the
+  plus, the chip and the options word wrap, so no button passes the edge either.
 - The handoff lines answer at a resume as at a startup, and a resume of a launch the
   endpoint holds marks the handoff it shows as picked. After the seat's own pointer, one
   line per other seat's waiting handoff in the same folder, newest first, at most 5, then

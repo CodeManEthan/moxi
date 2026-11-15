@@ -42,7 +42,10 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     page on the shell's document at `/m/ui/`. A shell is signed in once, through its
     sign-in page; each context after that starts from the cookie and key that sign-in
     stored, and a fresh sign-in replaces them once the shell refuses them. A trace is kept
-    for a failed test, in `--ui-traces` (`<pytest's temp root>/ui-traces` by default).
+    for a failed test, in `--ui-traces` (`<pytest's temp root>/ui-traces` by default). A
+    relative `--ui-traces` is taken from the directory pytest started in, and the plugin
+    makes that directory when the run starts, before any test is fenced in, so it may lie
+    outside every test's tmp (a directory in the repository, as CI keeps them).
     Each context closes when the test ends.
 `ui_context`, `ui_page`
     One `ui_contexts()` context, and its first page, signed in on `ui_shell`.
@@ -50,7 +53,8 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False)`:
     the contract check on one component (see `moxi_ui.testing.browser.check_component`).
     The shell places it, it renders into an open shadow root, adds no style sheet to the
-    document, takes each of `tokens` as a colour, and requests only under `/m/<module>/`.
+    document, takes each of `tokens` as a colour (waiting up to 5 s for a part drawn from
+    data), and requests only under `/m/<module>/`.
 `ui_width_check`
     `check(page, *, module=None, name="page", attrs=None, route="", width=360)`: the
     document has no horizontal scroll at 360 CSS px, with the module's panel open or its
@@ -88,6 +92,8 @@ import pytest
 WAIT_MS = 5000
 
 _REPORTS = pytest.StashKey[dict[str, Any]]()
+#: The `--ui-traces` directory this run was given, made when the run started.
+_TRACES_DIR = pytest.StashKey[Path]()
 #: Each test shell's stored sign-in: the browser state (cookie and key) one sign-in left.
 _SIGNED_IN: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakKeyDictionary()
 KEY_ITEM = "moxi-ui-key"
@@ -105,6 +111,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--ui-traces", default=None, metavar="DIR",
                     help="where a failed browser test's Playwright trace goes (default "
                          "<pytest's temp root>/ui-traces)")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    given = config.getoption("--ui-traces")
+    if given:
+        traces_dir = config.invocation_params.dir / given
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        config.stash[_TRACES_DIR] = traces_dir
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
@@ -216,7 +230,14 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
                 tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[..., Any]]:
     """`ui_contexts(shell=None, *, sign_in=True, **context_args)`: a fresh browser context
     on `shell` (`ui_shell` by default), signed in unless `sign_in` is false. Closed when
-    the test ends, its trace kept when the test failed."""
+    the test ends, its trace kept when the test failed.
+
+    When `context_args` names `color_scheme`, the signed-in page also takes it through
+    `page.emulate_media`, which holds across its later navigations: in Firefox a
+    context's scheme never reaches a document the shell serves, as each is sent with
+    `Cross-Origin-Opener-Policy: same-origin`. A page a test opens itself takes
+    `page.emulate_media(color_scheme=...)` after its first navigation, as
+    `test_browser_settings.py` does."""
     opened: list[Any] = []
 
     def open_context(shell: Any = None, *, sign_in: bool = True, **context_args: Any) -> Any:
@@ -228,7 +249,10 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
         context.tracing.start(screenshots=True, snapshots=True)
         opened.append(context)
         if sign_in:
-            _open_settled(context.new_page(), "/m/ui/")
+            page = context.new_page()
+            _open_settled(page, "/m/ui/")
+            if "color_scheme" in context_args:
+                page.emulate_media(color_scheme=context_args["color_scheme"])
         return context
 
     try:
@@ -240,10 +264,13 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
         for n, context in enumerate(opened):
             try:
                 if failed:
-                    given = request.config.getoption("--ui-traces")
-                    where = Path(given) if given else tmp_path_factory.getbasetemp() / "ui-traces"
-                    os.makedirs(where, exist_ok=True)
-                    context.tracing.stop(path=str(where / f"{name}-{n}.zip"))
+                    # A test's fence refuses even a makedirs that would find the directory
+                    # there, so it is called only for the default one, in pytest's temp root.
+                    traces_dir = request.config.stash.get(_TRACES_DIR, None) \
+                        or tmp_path_factory.getbasetemp() / "ui-traces"
+                    if not traces_dir.is_dir():
+                        os.makedirs(traces_dir, exist_ok=True)
+                    context.tracing.stop(path=str(traces_dir / f"{name}-{n}.zip"))
                 else:
                     context.tracing.stop()
             finally:

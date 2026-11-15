@@ -55,6 +55,7 @@ def test_nothing_is_delivered_while_catch_up_is_still_arriving():
     replay's end releases it, and the whole backlog then goes as one digest."""
     port = RecordingPort()
     port.identity = IDENTITY
+    port.offline = False                  # bound: its catch-up is what holds the flush
     port.replaying = True
     port._on_push("deliver", {"payload": payload(7)})
     port._on_push("deliver", {"payload": payload(5)})
@@ -116,8 +117,10 @@ def held(port):
 
 
 def online_port(cls=TurnPort):
+    """A port bound to the daemon, its catch-up complete: a flush may deliver."""
     port = cls()
     port.identity = IDENTITY
+    port.offline = False
     port._on_push("replay_complete", {"identity": IDENTITY, "cursor": None})
     return port
 

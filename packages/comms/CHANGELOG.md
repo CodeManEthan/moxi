@@ -6,6 +6,20 @@
   the settings page draws: a plain label, a line where the label can't carry it, and
   the unit of each wait, age and replay limit. No setting is shown first and none is
   grouped, so the page lists them all. comms needs moxi 0.1.9 or later.
+- Waiting mail is no longer skipped when an OpenCode or Codex adapter reconnects to the
+  daemon. The daemon hands mail that waited for the agent as soon as it answers the
+  reconnect, and the adapter could try to deliver it before it had switched to the new
+  connection. It then dropped the message, which did not arrive until the agent's next
+  reconnect or relaunch while newer mail went through. The adapter now holds delivery
+  until the new connection is in place. The same applies to interrupt mail that reaches
+  a Codex agent mid turn while it reconnects: it is no longer dropped, and goes into the
+  running turn once the new connection is in place.
+- An OpenCode or Codex adapter no longer gives up its own name while it reconnects to
+  the daemon. When an attempt failed after connecting, that attempt's connection could
+  report its close after the next attempt had bound. The adapter then said comms was
+  offline, tried to bind the name it already held, was refused, and stopped delivering
+  mail to its agent. A close from a connection the adapter has already replaced now
+  changes nothing.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
 - comms has a row on Home in the browser UI shell, the `mail` component
@@ -31,6 +45,20 @@
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the
   binding's own connection now changes the link's state when it closes.
+- Waiting mail is no longer skipped when a Claude session's comms shim reconnects to the
+  daemon. The daemon hands mail that waited for the session as soon as it answers the
+  reconnect, and a turn ending, the idle tick, or interrupt mail steered into a running
+  turn could make the shim inject it before it had switched to the new connection. The
+  shim then dropped the message, which did not arrive until the session's next
+  reconnect or relaunch while newer mail went through. The shim now holds that mail
+  until the new connection is in place, and injects it at the next idle tick or turn
+  end.
+- A Claude session's comms shim no longer gives up its own name while it reconnects to
+  the daemon. When an attempt failed after connecting, that attempt's connection could
+  report its close after the next attempt had bound. The shim then said comms was
+  offline, tried to bind the name it already held, read the refusal as another session
+  holding it, and stayed offline for the rest of the session. A close from a connection
+  the shim has already replaced now changes nothing.
 
 ## 0.3.0 (2026-11-08)
 

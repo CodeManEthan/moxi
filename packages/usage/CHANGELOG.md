@@ -9,6 +9,10 @@
   the weekly restart-point measure and the price table's age), the rest under Prices,
   Reading, Limits, Marks, Restart point and Worker ceiling, and a can-hurt mark on
   turning the worker ceiling off. usage needs moxi 0.1.9 or later.
+- The opened session's chart measures the words it places after the plot (`a request`,
+  `window` and the last context) in the face the page draws them in, and ends the plot
+  where the widest still fits, so they stay inside the chart in any font. A compaction's
+  word turns to end at its line by the same measure.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_usage.api.report`: `folder` is now `work_dir`. The
   CLI flag `--folder`, the page's query parameter and the report's JSON filter key stay

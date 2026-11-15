@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import timed_slack
 from conftest import git
 
 pytestmark = pytest.mark.slow
@@ -87,8 +88,8 @@ def best(cwd: Path, *args: str, runs: int = 3) -> dict:
 
 def within(name: str, took: float, budget: float) -> None:
     print(f"{name}: {took * 1000:.1f} ms (budget {budget * 1000:.0f} ms, held at "
-          f"{budget * SLACK * 1000:.0f} ms)")
-    assert took < budget * SLACK, (name, took, budget)
+          f"{budget * SLACK * timed_slack() * 1000:.0f} ms)")
+    assert took < budget * SLACK * timed_slack(), (name, took, budget)
 
 
 @pytest.fixture

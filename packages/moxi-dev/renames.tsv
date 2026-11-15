@@ -611,6 +611,7 @@ comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	self.held_ids = set(
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	self.held_ids: set[str] = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	self.injected.append(text)	keep	injected	injected
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	self.injected: list = []          # every digest text injected (test visibility)	keep	injected	injected
+comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	if self._client is not None and self._client.connected:	keep	_client	_client
 comms	packages/comms/src/moxi_comms/adapters/codex.py	#: The claim's root. None in a test that hands in its own `find`.	keep	find	find
 comms	packages/comms/src/moxi_comms/adapters/codex.py	CodexAdapter	name	delivered	on_delivered
 comms	packages/comms/src/moxi_comms/adapters/codex.py	CodexAdapter._fall_back	name	e	exc
@@ -1428,6 +1429,7 @@ comms	packages/comms/tests/claim_kit.py	self.closed = threading.Event()	keep	clo
 comms	packages/comms/tests/claim_kit.py	self.closed.set()	keep	set	set
 comms	packages/comms/tests/claim_kit.py	self.sessions.append(s)	keep	sessions	sessions
 comms	packages/comms/tests/claim_kit.py	self.sessions: list = []	keep	sessions	sessions
+comms	packages/comms/tests/claim_kit.py	assert self.closed.wait(LIVE_S), "the close handler never ran"	keep	closed	closed
 comms	packages/comms/tests/conftest.py	"""Every file under `folder`, with its size and modification time."""	keep	folder	folder
 comms	packages/comms/tests/conftest.py	Rig._run_cli	name	environ	env
 comms	packages/comms/tests/conftest.py	Rig.cli	name	environ	cli_env
@@ -2267,6 +2269,8 @@ comms	packages/comms/tests/test_opencode_adapter.py	high = max(int(m.id) for m i
 comms	packages/comms/tests/test_opencode_adapter.py	keys = set(keys_of(config))	keep	set	set
 comms	packages/comms/tests/test_opencode_adapter.py	rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,	keep	record	record
 comms	packages/comms/tests/test_opencode_adapter.py	send(rig, "refused")	keep	refused	refused
+comms	packages/comms/tests/test_opencode_adapter.py	assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), LIVE_S)	keep	any	any
+comms	packages/comms/tests/test_opencode_adapter.py	assert wait_until(lambda: first.closed.is_set(), LIVE_S)	keep	closed	closed
 comms	packages/comms/tests/test_opencode_home_check.py	assert any(pid == proc.pid for pid, _ in check.other_opencode())	keep	any	any
 comms	packages/comms/tests/test_opencode_home_check.py	assert set(removed) == set(remove)	keep	set	set
 comms	packages/comms/tests/test_opencode_home_check.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -2446,6 +2450,19 @@ comms	packages/comms/tests/test_queue.py	shim._client.call("max_id")	keep	_clien
 comms	packages/comms/tests/test_queue.py	shim.on_turn_boundary(idle=True)	keep	idle	idle
 comms	packages/comms/tests/test_queue.py	with rig.record._txn(write=True) as st:	keep	record	record
 comms	packages/comms/tests/test_queue.py	with rig.record._write() as conn:	keep	record	record
+comms	packages/comms/tests/test_reconnect_mail.py	"""An OpenCode adapter over a fake server, and how many of its posts carry `MARK`."""	keep	MARK	MARK
+comms	packages/comms/tests/test_reconnect_mail.py	"""A Codex adapter over a fake hosted session, and how many hand-ins carry `MARK`."""	keep	MARK	MARK
+comms	packages/comms/tests/test_reconnect_mail.py	return sum(MARK in handed.text for handed in session.delivered)	keep	delivered	delivered
+comms	packages/comms/tests/test_reconnect_mail.py	self.holding.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	code, out = rig.send(qualified, MARK, sender=dict(name="main", scope="proj-a"))	keep	fail	fail
+comms	packages/comms/tests/test_reconnect_mail.py	gate.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	hold.armed.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,	keep	record	record
+comms	packages/comms/tests/test_reconnect_mail.py	return [handed for handed in session.delivered if MARK in handed.text]	keep	delivered	delivered
+comms	packages/comms/tests/test_reconnect_mail.py	code, out = rig.send(qualified, MARK, "--interrupt",	keep	fail	fail
+comms	packages/comms/tests/test_reconnect_mail.py	hold.go.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	late.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	decline.armed.set()	keep	set	set
 comms	packages/comms/tests/test_register_concurrency.py	calls = instrument(rig.record)	keep	record	record
 comms	packages/comms/tests/test_register_concurrency.py	entered.set()	keep	set	set
 comms	packages/comms/tests/test_register_concurrency.py	f"{[round(s, 3) for s in contended]} against a {HOLD:.2f}s round trip -- the "	keep	round	round
@@ -2610,6 +2627,17 @@ comms	packages/comms/tests/test_shim_events.py	shim = rig.shim(start=False,  nam
 comms	packages/comms/tests/test_shim_events.py	shim = rig.shim(start=False, name="reviewer", scope="proj-a",	keep	start	start
 comms	packages/comms/tests/test_shim_events.py	shim._on_close = lambda: (inner(), closed.set())	keep	set	set
 comms	packages/comms/tests/test_shim_events.py	shim._supervisor.join(timeout=5.0)	keep	timeout	timeout
+comms	packages/comms/tests/test_shim_reconnect_mail.py	return shim.on_turn_boundary(idle=True)	keep	idle	idle
+comms	packages/comms/tests/test_shim_reconnect_mail.py	armed. While held, once `MARK` is queued, it runs `flush` on another thread.	keep	MARK	MARK
+comms	packages/comms/tests/test_shim_reconnect_mail.py	lambda: any(MARK in str(p) for p in list(shim.queue)), HOLD_S)	keep	any	any
+comms	packages/comms/tests/test_shim_reconnect_mail.py	code, out = rig.send("reviewer@proj-a", MARK, *flags,	keep	fail	fail
+comms	packages/comms/tests/test_shim_reconnect_mail.py	code, out = rig.send("reviewer@proj-a", MARK, *flags,	keep	interrupt	interrupt
+comms	packages/comms/tests/test_shim_reconnect_mail.py	hold.armed.set()	keep	set	set
+comms	packages/comms/tests/test_shim_reconnect_mail.py	rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,	keep	record	record
+comms	packages/comms/tests/test_shim_reconnect_mail.py	client = shim._client	keep	_client	_client
+comms	packages/comms/tests/test_shim_reconnect_mail.py	late.set()	keep	set	set
+comms	packages/comms/tests/test_shim_reconnect_mail.py	decline.armed.set()	keep	set	set
+comms	packages/comms/tests/test_shim_reconnect_mail.py	code, out = rig.send("reviewer@proj-a", MARK, sender=dict(name="main", scope="proj-a"))	keep	fail	fail
 comms	packages/comms/tests/test_shutdown.py	assert reviewer.held_ids == set()	keep	set	set
 comms	packages/comms/tests/test_shutdown.py	out, _ = proc.communicate(timeout=20)	keep	timeout	timeout
 comms	packages/comms/tests/test_smoke_scripts.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
@@ -13295,6 +13323,8 @@ turns	packages/turns/tests/test_page.py	return next((row for row in data["sessio
 turns	packages/turns/tests/test_page.py	self._gone.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	self.dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_page.py	self.held.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	super().set()	keep	set	set
+turns	packages/turns/tests/test_page.py	self.dirty.set()	keep	set	set
 turns	packages/turns/tests/test_settings.py	assert cli.main(["config", "turns", "show", "--json"]) == 0	keep	show	show
 turns	packages/turns/tests/test_settings.py	assert len(runs) == len(set(runs)), runs	keep	set	set
 turns	packages/turns/tests/test_settings.py	assert not any(hurt["stays"] for hurt in hurts.values())	keep	any	any
@@ -13865,6 +13895,7 @@ ui	packages/ui/src/moxi_ui/testing/__init__.py	group.addoption("--ui-traces", de
 ui	packages/ui/src/moxi_ui/testing/__init__.py	help="the browser moxi_ui.testing's browser fixtures run (default chromium)")	keep	help	help
 ui	packages/ui/src/moxi_ui/testing/__init__.py	help="where a failed browser test's Playwright trace goes (default "	keep	help	help
 ui	packages/ui/src/moxi_ui/testing/__init__.py	pending: set[Any] = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/testing/__init__.py	traces_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/src/moxi_ui/testing/__init__.py	ui_browser	name	err	exc
 ui	packages/ui/src/moxi_ui/testing/browser.py	"?.shadowRoot?.querySelector('*') != null", timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	check_component	name	err	exc

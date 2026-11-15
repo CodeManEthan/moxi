@@ -347,13 +347,23 @@ export function placedRow(report: Report<AgentRow> | null, requests: RequestRow[
 // --- the chart --------------------------------------------------------------------------------
 
 /** The chart's sizes, in px, as drawn: the request bars above, the context below, on one
- * time axis, with the words for each band's top at the left and its name at the right. */
-export const SESSION_CHART = { height: 158, left: 46, right: 58, barTop: 8, barBase: 50, contextTop: 78,
-                               contextBase: 136, labels: 152, barWidth: 3 };
+ * time axis, with the words for each band's top at the left and its name at the right.
+ * `right` is the least room the band names take after the plot; `gap` is their distance
+ * from it, and `margin` what is left after the widest. */
+export const SESSION_CHART = { height: 158, left: 46, right: 58, gap: 6, margin: 2, barTop: 8, barBase: 50,
+                               contextTop: 78, contextBase: 136, labels: 152, barWidth: 3 };
+
+/** The band name under the bars' axis. */
+export const BARS_NAME = "a request";
+/** The band name at the window's level. */
+export const WINDOW_NAME = "window";
+
+/** The width in px a word of the chart's text takes, as the page draws it. */
+export type TextWidth = (text: string) => number;
 
 export interface SessionChart {
   width: number;
-  /** Where the plot ends; the band names sit after it. */
+  /** Where the plot ends; the band names sit `SESSION_CHART.gap` after it. */
   end: number;
   aria: string;
   /** The tallest bar's value, at the top of the bars. */
@@ -377,15 +387,27 @@ export interface SessionChart {
  * The opened session's chart: a bar per request, its cost or its tokens as the page's
  * measure says, the dearest in the text colour; under it the context each request sent
  * against the window. Requests sit at their times, or one per column when a time is
- * missing. Null with no request.
+ * missing. Null with no request. `textWidth` measures the words placed after the plot,
+ * so the plot ends where the widest of them still fits, and a compaction's word turns to
+ * end at its line where it would pass the plot's end.
  */
 export function sessionChart(report: Report<RequestRow, RequestsTotal>, measure: "cost" | "tokens", width: number,
-                             today: string | null, clock: Clock = LOCAL): SessionChart | null {
+                             textWidth: TextWidth, today: string | null, clock: Clock = LOCAL): SessionChart | null {
   const rows = report.rows;
   if (rows.length === 0) return null;
   const S = SESSION_CHART;
   const left = S.left;
-  const end = Math.max(left + 40, width - S.right);
+  // The context band reaches the window, or the largest context when that is over it.
+  const shown = rows.map((row) => (row.context !== null && !row.synthetic ? row.context : null));
+  const levels = rows.map((row) => (row.window !== null && row.window > 0 ? row.window : null));
+  const windows = levels.filter((w): w is number => w !== null);
+  const windowSize = windows.length ? windows[windows.length - 1] : null;
+  let lastShown = -1;
+  shown.forEach((c, i) => { if (c !== null) lastShown = i; });
+  const lastWords = lastShown < 0 ? null : kWords(shown[lastShown] as number);
+  const after = [BARS_NAME, ...(windowSize === null ? [] : [WINDOW_NAME]), ...(lastWords === null ? [] : [lastWords])];
+  const right = Math.max(S.right, S.gap + Math.max(...after.map(textWidth)) + S.margin);
+  const end = Math.max(left + 40, width - right);
   const span = end - left;
   const times = rows.map((row) => row.ts);
   const t0 = Math.min(...times.map((ts) => ts ?? Infinity));
@@ -405,11 +427,6 @@ export function sessionChart(report: Report<RequestRow, RequestsTotal>, measure:
   });
   const gap = rows.length > 1 ? Math.max(4, Math.min(24, span / rows.length)) : 24;
   const hits = rows.map((row, i) => ({ n: row.n, x: xs[i] - gap / 2, width: gap, title: readout(row) }));
-  // The context band reaches the window, or the largest context when that is over it.
-  const shown = rows.map((row) => (row.context !== null && !row.synthetic ? row.context : null));
-  const levels = rows.map((row) => (row.window !== null && row.window > 0 ? row.window : null));
-  const windows = levels.filter((w): w is number => w !== null);
-  const windowSize = windows.length ? windows[windows.length - 1] : null;
   const most = Math.max(...windows, ...shown.map((c) => c ?? 0));
   const cy = (tokens: number): number => S.contextBase - (most > 0 ? (tokens / most) : 0) * (S.contextBase - S.contextTop);
   let windowLine = "";
@@ -436,10 +453,7 @@ export function sessionChart(report: Report<RequestRow, RequestsTotal>, measure:
     line += `${drawing ? "L" : "M"}${round(xs[i])},${round(cy(c))}`;
     drawing = true;
   });
-  let lastShown = -1;
-  shown.forEach((c, i) => { if (c !== null) lastShown = i; });
-  const dot = lastShown < 0 ? null
-    : { x: xs[lastShown], y: cy(shown[lastShown] as number), words: kWords(shown[lastShown] as number) };
+  const dot = lastWords === null ? null : { x: xs[lastShown], y: cy(shown[lastShown] as number), words: lastWords };
   const turns = (report.total.turns ?? 0) >= 2
     ? rows.flatMap((row, i) => (row.turn_start && i > 0 ? [round((xs[i - 1] + xs[i]) / 2)] : [])) : [];
   const at = (n: number): number => {
@@ -451,7 +465,7 @@ export function sessionChart(report: Report<RequestRow, RequestsTotal>, measure:
     const label = mark.trigger ? `compaction (${mark.trigger})` : "compaction";
     const x = round(mark.after <= 0 ? left : at(mark.after));
     const before = mark.pre_tokens === null ? "" : `, ${mark.pre_tokens.toLocaleString("en-US")} tokens before`;
-    const fits = x + 3 + label.length * 6.5 <= end;
+    const fits = x + 3 + textWidth(label) <= end;
     return { x, label, title: `${label}${before}${mark.ts === null ? "" : ` at ${whenWord(mark.ts, today, clock)}`}`,
              anchor: fits ? "start" as const : "end" as const, labelX: fits ? x + 3 : x - 3 };
   });
