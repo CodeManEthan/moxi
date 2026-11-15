@@ -5,6 +5,10 @@ and 20) read the message before it, and the repo's existing git hook reads it af
 every branch, detached HEAD, merges and replays alike, it reads every line above git's
 scissors line, comment lines included, and:
 
+(The hook can't see git's cleanup mode, and git drops the lines below that line only for
+an edited message. The push piece and `scan` read a made commit or tag whole.)
+
+
 - drops each trailer line whose key is on the repo's `drop-trailer` setting, with the
   lines that continue its value, and rewrites the message file. It removes whole lines
   only, and prints one line per key it dropped;
@@ -88,19 +92,21 @@ class Judged:
 
 
 def judge(text: str, *, drop=(), passed=(), comment: str = "#", rules=None,
-          sets=SETS) -> Judged:
+          sets=SETS, whole: bool = False) -> Judged:
     """Judge a commit message as the piece does. `drop` and `passed` are the trailer keys
     of the repo's `drop-trailer` and `pass-trailer` settings; `rules`, the provenance rules
     that run (None: publishing's config); `sets`, the secrets sets to scan with. Line
-    numbers count the message as git gave it. Raises `moxi_secrets.SetUnavailable` when a
-    set can't run."""
+    numbers count the message as git gave it. With `whole`, every line is read, scissors
+    line or not: a message already made into a commit or tag object keeps whatever git's
+    cleanup left below that line (`-m`, `-F` and verbatim cleanup leave it all). Raises
+    `moxi_secrets.SetUnavailable` when a set can't run."""
     from moxi_publishing import rules as _rules
 
     passed_keys = _keys(passed)
     drop_keys = _keys(drop) - passed_keys
     names = _rules.enabled_rules() if rules is None else tuple(rules)
     lines = text.split("\n")
-    above = len(above_scissors(text, comment))
+    above = len(lines) if whole else len(above_scissors(text, comment))
     kept: list[tuple[int, str]] = []
     gone: set[int] = set()
     dropped: list[str] = []

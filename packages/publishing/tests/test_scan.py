@@ -151,3 +151,18 @@ def test_a_tag_named_as_rev_has_its_message_and_tagger_read(repo, names, capsys)
     assert "tag docs-1 tagger header: private-names/" in out
     assert "tag docs-1 message line 3, session-pointer" in out
     assert scan(capsys, str(repo), "--rev", "docs-1")[0] == 3
+
+
+SCISSORS = "# " + "-" * 24 + " >8 " + "-" * 24
+
+
+def test_text_below_a_scissors_line_is_read(repo, names, capsys):
+    base = git(repo, "rev-parse", "HEAD").stdout.strip()
+    git(repo, "commit", "-q", "--allow-empty", "-m", "Add", "-m", SCISSORS,
+        "-m", f"key {token(5)}")
+    code, out, _ = scan(capsys, str(repo), "--rev", "HEAD", "--since", base, "--ci")
+    assert code == 3 and "message line 5, credentials/github-pat" in out
+    git(repo, "tag", "-a", "--cleanup=verbatim", "-m", f"Docs\n{SCISSORS}\nkey {token(5)}",
+        "docs-1", base)
+    code, out, _ = scan(capsys, str(repo), "--rev", "refs/tags/docs-1", "--ci")
+    assert code == 3 and "tag refs/tags/docs-1 message line 3, credentials/" in out

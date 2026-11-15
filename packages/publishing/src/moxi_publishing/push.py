@@ -162,7 +162,7 @@ class _Reader:
 
         headers, text = _headers(data)
         self.judge_headers(where, headers, skip=("object", "type"))
-        judged = message.judge(text, sets=self.sets)
+        judged = message.judge(text, sets=self.sets, whole=True)
         self.reasons += [f"{where} message {line}" for _, line in judged.refusals]
 
 
@@ -200,7 +200,7 @@ def judge_history(git, rev: str, since: str | None, *, sets=None) -> list[str]:
             continue
         headers, text = _headers(data)
         reader.judge_headers(sha[:12], headers, skip=("tree", "parent"))
-        judged = message.judge(text, sets=reader.sets)
+        judged = message.judge(text, sets=reader.sets, whole=True)
         reader.reasons += [f"{sha[:12]} message {line}" for _, line in judged.refusals]
     return reader.reasons
 
@@ -450,7 +450,7 @@ class _Push(_Reader):
             headers, text = _headers(data)
             committer = _identity(dict(headers).get("committer", ""))
             self.judge_headers(short, headers, skip=("tree", "parent"))
-            judged = message.judge(text, passed=passed)
+            judged = message.judge(text, passed=passed, whole=True)
             self.reasons += [f"{short} message {line}" for _, line in judged.refusals]
             if own is None or _same(committer, own):
                 for n, line in enumerate(text.split("\n"), 1):

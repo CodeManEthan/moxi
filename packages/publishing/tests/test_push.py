@@ -320,6 +320,26 @@ def test_the_repos_own_author_email_is_not_a_hit(pub):
     passed(push(pub, "origin", "main"))
 
 
+SCISSORS = "# " + "-" * 24 + " >8 " + "-" * 24
+
+
+def test_text_below_a_scissors_line_is_read_at_push(repo, names, remote):
+    public_repo(repo, PIECE, sets=("main=main", "free-ref=refs/tags/docs/*"))
+    # Only an edited message is cut there; -F, -m and a verbatim tag keep every line.
+    commit(repo, f"Add\n\n{SCISSORS}\nnamed for bobsecret\nkey {token(3)}\n")
+    refused(push(repo, "origin", "main"), "message line 4, private-names/",
+            "message line 5, credentials/")
+    git(repo, "reset", "-q", "--hard", "HEAD~1")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "Add", "-m", SCISSORS,
+        "-m", f"named for bobsecret, key {token(3)}")
+    refused(push(repo, "origin", "main"), "message line 5, private-names/",
+            "message line 5, credentials/")
+    git(repo, "reset", "-q", "--hard", "HEAD~1")
+    git(repo, "tag", "-a", "--cleanup=verbatim", "-m", f"Docs\n{SCISSORS}\nkey {token(3)}",
+        "docs/a")
+    refused(push(repo, "origin", "docs/a"), "tag refs/tags/docs/a message line 3, credentials/")
+
+
 def test_tag_objects_are_read_down_the_chain(repo, names, remote):
     public_repo(repo, PIECE, sets=("main=main", "free-ref=refs/tags/docs/*"))
     git(repo, "tag", "-a", "-m", "fine", "docs/a")
