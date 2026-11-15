@@ -169,6 +169,28 @@ def test_the_command_marks_a_finding_and_says_what_it_needs(built, capsys):
         capsys.readouterr().out)
 
 
+def test_a_mark_run_again_finds_its_first_and_writes_nothing(built, capsys):
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
+    made = tree.commit("fix.txt", "the fix")
+    first = fix(made)
+    before = raw(round_dir)
+    capsys.readouterr()
+
+    again = fix(made[:8])
+    assert main(["mark", ROUND, "B1.L1", "--fixed", "--commit", made,
+                 "--no-behaviour-change"]) == 0
+
+    assert raw(round_dir) == before
+    assert again.found and again.event == first.event
+    assert (f"finding B1.L1: minor, fixed   commits: {made[:12]}   (fixed already by "
+            f"the mark on line {first.event['n']}: nothing was written)") in (
+        capsys.readouterr().out)
+    other = tree.commit("more.txt", "more of the fix")
+    widened = fix(made, other)
+    assert not widened.found and widened.event["commits"] == [made, other]
+
+
 def test_a_later_report_sets_a_marked_finding_again(built):
     round_dir, _repo, tree = built
     verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])

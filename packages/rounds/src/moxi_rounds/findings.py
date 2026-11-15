@@ -16,7 +16,7 @@ a report that may speak for it said so, not because of where it sits on a page.
 - `no-action`: the checker judged it needs none.
 
 **The lead's mark.** The lead may mark a `minor` or `note` finding fixed without a
-re-check, naming every commit of the fix (`marking.fix`). A mark sets the finding's state
+re-check, naming every commit of the fix (`fixes.fix`). A mark sets the finding's state
 as a report would, and the newest of the reports and marks that speak of a finding
 decides. The commits a mark names are the build's lead-marked commits.
 

@@ -854,8 +854,10 @@ def _mark_fixed(args, out) -> int:
     done = fixes.fix(args.target, args.id, args.commit,
                      no_behaviour_change=args.no_behaviour_change, by=_actor(args))
     found = done.finding
+    already = (f"   (fixed already by the mark on line {done.event['n']}: nothing was "
+               "written)" if done.found else "")
     print(f"finding {found.key}: {found.severity}, {found.state}   commits: "
-          f"{', '.join(one[:12] for one in done.event['commits'])}", file=out)
+          f"{', '.join(one[:12] for one in done.event['commits'])}{already}", file=out)
     _warn_of(done.failed, args.prog, args.verb)
     return codes.OK
 

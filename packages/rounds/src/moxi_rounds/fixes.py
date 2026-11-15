@@ -19,7 +19,9 @@ It is refused:
   branch, or under its head where the branch is gone, and not under the base it was
   cut from.
 
-A mark takes no finding away without a fix: only a report sets `no-action`.
+A mark takes no finding away without a fix: only a report sets `no-action`. A mark run
+again, of a finding a mark already left fixed by the same commits, finds that mark and
+writes nothing, so a rerun after a stop does not add a second.
 """
 
 from __future__ import annotations
@@ -43,13 +45,15 @@ MARKABLE = (report_block.MINOR, report_block.NOTE)
 @dataclass(frozen=True)
 class Fixed:
     """A finding after the lead's mark: the round's `name`, the `finding` as the log now
-    gives it, and the `event` written. `failed` pairs each after-append callback that
-    raised with what it raised."""
+    gives it, and the `event` of the mark: the one written, or the one found when the
+    finding was fixed already by the same commits and nothing was written (`found`).
+    `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
     finding: findings.Finding
     event: dict
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    found: bool = False
 
 
 def fix(target: str, key: str, commits: Sequence[str], *, no_behaviour_change: bool,
@@ -110,9 +114,11 @@ def fix(target: str, key: str, commits: Sequence[str], *, no_behaviour_change: b
 
     def marked(view, result):
         build = build_of(view.state)
+        commits = _resolved(name, build, named, settings=settings)
+        if _same_mark(view.state, build, finding_id, commits) is not None:
+            return None
         return write.Entry(findings.MARKED, {
-            "id": key, "state": report_block.FIXED,
-            "commits": _resolved(name, build, named, settings=settings)})
+            "id": key, "state": report_block.FIXED, "commits": commits})
 
     try:
         written = write.record(
@@ -124,8 +130,28 @@ def fix(target: str, key: str, commits: Sequence[str], *, no_behaviour_change: b
     after = states.fold(written.round_events)
     build = builds.current(after, stage)
     finding = next(one for one in findings.of_build(after, build) if one.id == finding_id)
+    if not written.events:
+        return Fixed(name=name, finding=finding,
+                     event=_same_mark(after, build, finding_id, None),
+                     failed=written.failed, found=True)
     return Fixed(name=name, finding=finding, event=written.events[0],
                  failed=written.failed)
+
+
+def _same_mark(state: states.State, build: builds.Build, finding_id: str,
+               commits: list[str] | None) -> dict | None:
+    """The mark that last set the finding, when it left it fixed by `commits` (by any
+    commits when None) and nothing has spoken of it since; else None."""
+    finding = next((one for one in findings.of_build(state, build)
+                    if one.id == finding_id), None)
+    if finding is None or finding.state != report_block.FIXED:
+        return None
+    mark = next((one for one in findings.marks_of(state, build)
+                 if one["n"] == finding.set_by), None)
+    if mark is None or (commits is not None
+                        and set(mark.get("commits") or ()) != set(commits)):
+        return None
+    return mark
 
 
 def _resolved(name: str, build: builds.Build, named: list[str], *,
