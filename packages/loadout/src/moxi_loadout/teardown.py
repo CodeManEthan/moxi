@@ -258,8 +258,9 @@ def _ident(record: dict) -> str | None:
     return text
 
 
-#: The kinds of entry that bring the global file into a harness: Claude's `@` line,
-#: OpenCode's `instructions` path, the Codex block.
+#: The kinds of entry that bring the global file into a harness: Claude's `@` line, the
+#: Codex and OpenCode block, and OpenCode's `instructions` path, which an older install
+#: wrote and a record may still hold.
 _GLOBAL_KINDS = ("global-line", "instructions", "global-block")
 
 

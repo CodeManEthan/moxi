@@ -43,16 +43,18 @@ def test_managed_adds_each_part_and_off_takes_exactly_it_out(lo):
     codex = harness.global_file("codex").read_text()
     assert codex.startswith(f"<!-- moxi loadout: from {lo / 'global.md'}; edit there -->\n")
     assert "Be brief." in codex and codex.rstrip().endswith("<!-- moxi loadout end -->")
-    opencode = json.loads(harness.settings_file("opencode").read_text())
-    assert opencode["instructions"] == [str(lo / "global.md")]
-    # The global text changes: the Codex block follows; an edited block is left.
+    # OpenCode gets the same block in its own AGENTS.md, and nothing in opencode.json.
+    assert harness.global_file("opencode").read_text() == codex
+    assert not harness.settings_file("opencode").exists()
+    # The global text changes: both blocks follow.
     (lo / "global.md").write_text("Be briefer.\n")
     assert install.install().code == 0
     assert "Be briefer." in harness.global_file("codex").read_text()
+    assert "Be briefer." in harness.global_file("opencode").read_text()
     assert cli.main(["global", "remove"]) == 0
     assert claude.read_text() == mine
     assert not harness.global_file("codex").exists()    # nothing else was in it
-    assert "instructions" not in json.loads(harness.settings_file("opencode").read_text())
+    assert not harness.global_file("opencode").exists()
 
 
 def test_an_edited_codex_block_is_modified(lo):
@@ -299,30 +301,31 @@ def test_claude_gets_the_shared_line_then_its_part_line(lo):
     assert claude.read_text() == mine
 
 
-def test_the_codex_block_holds_the_shared_text_then_its_part(lo):
-    (lo / "global.codex.md").write_text("Codex only.\n\n")
+@pytest.mark.parametrize("h", ["codex", "opencode"])
+def test_the_block_holds_the_shared_text_then_its_part(lo, h):
+    (lo / f"global.{h}.md").write_text("Only mine.\n\n")
     (lo / "global.claude.md").write_text("Claude only.\n")
     mode(lo, "managed")
     assert install.install().code == 0
-    codex = harness.global_file("codex")
-    shared, part = lo / "global.md", lo / "global.codex.md"
-    assert codex.read_text() == (f"<!-- moxi loadout: from {shared} and {part}; edit there "
-                                 "-->\nBe brief.\n\nCodex only.\n<!-- moxi loadout end -->\n")
+    path = harness.global_file(h)
+    shared, part = lo / "global.md", lo / f"global.{h}.md"
+    assert path.read_text() == (f"<!-- moxi loadout: from {shared} and {part}; edit there "
+                                "-->\nBe brief.\n\nOnly mine.\n<!-- moxi loadout end -->\n")
     # The part edited: the block follows.
-    part.write_text("Codex, changed.\n")
+    part.write_text("Mine, changed.\n")
     assert install.install().code == 0
-    assert "Codex, changed." in codex.read_text()
+    assert "Mine, changed." in path.read_text()
     # An empty part is named and adds nothing.
     part.write_text("")
     assert install.install().code == 0
-    assert codex.read_text() == (f"<!-- moxi loadout: from {shared} and {part}; edit there "
-                                 "-->\nBe brief.\n<!-- moxi loadout end -->\n")
+    assert path.read_text() == (f"<!-- moxi loadout: from {shared} and {part}; edit there "
+                                "-->\nBe brief.\n<!-- moxi loadout end -->\n")
     # Edited by hand: modified, then --replace rewrites it.
-    codex.write_text(codex.read_text().replace("Be brief.", "Be long."))
+    path.write_text(path.read_text().replace("Be brief.", "Be long."))
     out = install.install()
-    assert out.code == 3 and _rows(out, "modified") == {"codex"}
-    assert install.install(replace=["global:global@codex"]).code == 0
-    assert "Be brief." in codex.read_text()
+    assert out.code == 3 and _rows(out, "modified") == {h}
+    assert install.install(replace=[f"global:global@{h}"]).code == 0
+    assert "Be brief." in path.read_text()
 
 
 def test_no_harness_file_names_or_holds_another_harness_part(lo):
@@ -330,16 +333,16 @@ def test_no_harness_file_names_or_holds_another_harness_part(lo):
         (lo / f"global.{h}.md").write_text(f"SENTINEL-{h}\n")
     mode(lo, "managed")
     assert install.install().code == 0
-    for h in ("claude", "codex"):
+    for h in ("claude", "codex", "opencode"):
         text = harness.global_file(h).read_text()
-        if h == "codex":
-            assert "SENTINEL-codex" in text
+        assert f"global.{h}.md" in text
+        if h != "claude":
+            assert f"SENTINEL-{h}" in text
         for other in ("claude", "codex", "opencode"):
             if other != h:
                 assert f"SENTINEL-{other}" not in text
                 assert f"global.{other}.md" not in text
-    opencode = harness.settings_file("opencode").read_text()
-    assert "global.claude.md" not in opencode and "global.codex.md" not in opencode
+    assert not harness.settings_file("opencode").exists()
 
 
 def test_the_assembled_text_drops_empty_files(lo):
@@ -634,16 +637,72 @@ def test_a_relative_instructions_entry_resolves_against_the_opencode_home(lo):
     assert _instructions_notes(install.status()) == []
 
 
-def test_an_instructions_entry_loadout_recorded_is_not_noted(lo):
-    # The built managed form records the shared path in instructions; leaving managed
-    # removes it, with no note to delete it by hand.
+def _built(lo, *, prior=False):
+    """The files and ledger an install before the per-harness parts left in managed
+    mode: Claude's line, the Codex block, and OpenCode's `instructions` entry recorded
+    (no OpenCode block). Returns OpenCode's `opencode.json`."""
+    from moxi_loadout import ledger
+
     mode(lo, "managed")
-    install.install()
-    mode(lo, "if-absent")
+    assert install.install().code == 0
+    harness.global_file("opencode").unlink()
+    config = harness.settings_file("opencode")
+    shared = str(lo / "global.md")
+    config.write_text(json.dumps({"instructions": [shared]}, indent=2) + "\n")
+    data = ledger.read()
+    data["entries"] = [r for r in data["entries"] if r.get("harness") != "opencode"
+                       or r.get("item") != "global:global"]
+    data["entries"].append({"item": "global:global", "harness": "opencode",
+                            "file": str(config), "kind": "instructions",
+                            "key": ["instructions", shared], "written": shared,
+                            "prior": prior})
+    ledger.write(data)
+    return config
+
+
+def test_an_install_moves_the_built_form_to_the_parts(lo):
+    from moxi_loadout import globalfile
+
+    claude = harness.global_file("claude")
+    claude.parent.mkdir(parents=True)
+    claude.write_text("# Mine\n")
+    config = _built(lo)
+    # Before the next install, status reads the old entry stale and the block missing.
+    out = install.status()
+    assert {(r.harness, r.state) for r in out.rows if r.kind == "global"
+            and r.harness == "opencode"} == {("opencode", "stale"), ("opencode", "missing")}
+    for h in ("claude", "codex", "opencode"):
+        (lo / f"global.{h}.md").write_text(f"Only {h}.\n")
     out = install.install()
     assert out.code == 0, out.text()
     assert _instructions_notes(out) == []
-    assert "instructions" not in json.loads(harness.settings_file("opencode").read_text())
+    shared = str(lo / "global.md")
+    assert claude.read_text() == f"# Mine\n@{shared}\n@{lo / 'global.claude.md'}\n"
+    for h in ("codex", "opencode"):
+        part = str(lo / f"global.{h}.md")
+        want = globalfile.block([shared, part], f"Be brief.\n\nOnly {h}.")
+        assert harness.global_file(h).read_text() == want + ("" if want.endswith("\n")
+                                                             else "\n")
+    assert json.loads(config.read_text()) == {}
+    assert install.status().code == 0
+
+
+def test_a_prior_instructions_entry_is_left_and_noted(lo):
+    config = _built(lo, prior=True)
+    out = install.install()
+    assert out.code == 0, out.text()
+    notes = _instructions_notes(out)
+    assert len(notes) == 1 and str(config) in notes[0], notes
+    assert json.loads(config.read_text()) == {"instructions": [str(lo / "global.md")]}
+    assert harness.global_file("opencode").exists()
+    assert len(_instructions_notes(install.status())) == 1
+
+
+def test_global_remove_takes_out_a_recorded_old_instructions_entry(lo):
+    config = _built(lo)
+    assert cli.main(["global", "remove"]) == 0
+    assert json.loads(config.read_text()) == {}
+    assert not harness.global_file("opencode").exists()
 
 
 def test_the_built_claude_and_codex_forms_take_their_parts_in_one_install(lo):
@@ -702,6 +761,7 @@ def test_show_names_the_files_each_harness_reads(lo, capsys):
 
 def test_the_doctor_row_names_each_harness_state_and_parts(lo):
     (lo / "global.claude.md").write_text("Claude only.\n")
+    (lo / "global.opencode.md").write_text("OpenCode only.\n")
     (lo / "global.claud.md").write_text("Never read.\n")
     (lo / "global.old.md").write_text("Kept aside.\n")
     mode(lo, "managed")
@@ -709,7 +769,8 @@ def test_the_doctor_row_names_each_harness_state_and_parts(lo):
     row = _doctor_global()
     assert row.state == "ok", row.detail
     assert row.detail.startswith("mode managed: claude ok (global.md, global.claude.md), "
-                                 "codex ok (global.md), opencode ok (global.md)")
+                                 "codex ok (global.md), opencode ok (global.md, "
+                                 "global.opencode.md)")
     assert "global.claud.md" in row.detail and "global.old.md" not in row.detail
 
 
@@ -742,3 +803,64 @@ def test_harness_files_that_are_one_file_warn_in_the_doctor_row(lo):
     row = _doctor_global()
     assert row.state == "warn" and "are one file" in row.detail
     assert str(claude) in row.detail and str(codex) in row.detail
+
+
+# -- OpenCode's home and its reading of Claude's file -----------------------------------------
+
+def test_opencode_config_dir_moves_the_block_but_not_the_skills_row(lo, tmp_path, monkeypatch):
+    from moxi_loadout import harness_row, homes
+
+    elsewhere = tmp_path / "opencode-config"
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(elsewhere))
+    mode(lo, "managed")
+    assert install.install().code == 0
+    assert "Be brief." in (elsewhere / "AGENTS.md").read_text()
+    assert harness.settings_file("opencode") == elsewhere / "opencode.json"
+    assert not (harness.opencode_xdg_home() / "AGENTS.md").exists()
+    # The page's comparison reads OpenCode's home in its XDG form: the core's record of a
+    # terminal holds no OPENCODE_CONFIG_DIR to compare with.
+    assert homes.places()(os.environ)["OpenCode's home"] == harness.opencode_xdg_home()
+    # The row's skills and agents folders keep the XDG form.
+    assert harness_row.wanted()["skills"] == "~/.config/opencode/skills"
+
+
+def _reads_claude(out):
+    return [line for level, line in out.global_lines
+            if level == "warn" and "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT" in line]
+
+
+@pytest.mark.parametrize("name", ["managed", "if-absent"])
+def test_opencode_reading_claudes_part_is_warned(lo, tmp_path, monkeypatch, name):
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    (lo / "global.opencode.md").mkdir()    # unreadable as a text
+    harness.opencode_home().mkdir(parents=True, exist_ok=True)
+    mode(lo, name)
+    out = install.install()
+    assert not harness.global_file("opencode").exists()
+    warns = _reads_claude(out)
+    assert len(warns) == 1 and warns[0] in out.lines, out.text()
+    assert str(harness.global_file("claude")) in warns[0]
+    assert str(lo / "global.claude.md") in warns[0] and "global.opencode.md" in warns[0]
+    assert len(_reads_claude(install.status())) == 1
+    row = _doctor_global()
+    assert row.state == "warn" and "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT" in row.detail
+    # Fixed: the block is written, and nothing is said.
+    (lo / "global.opencode.md").rmdir()
+    out = install.install()
+    assert out.code == 0 and _reads_claude(out) == [], out.text()
+    # With Claude's home elsewhere, OpenCode's ~/.claude/CLAUDE.md isn't loadout's.
+    (lo / "global.opencode.md").mkdir()
+    harness.global_file("opencode").unlink()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-elsewhere"))
+    assert _reads_claude(install.install()) == []
+    assert _reads_claude(install.status()) == []
+
+
+def test_no_warn_while_opencode_has_no_home_or_claude_no_part(lo):
+    (lo / "global.opencode.md").mkdir()
+    mode(lo, "managed")
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    assert _reads_claude(install.install()) == []    # no OpenCode home folder
+    harness.opencode_home().mkdir(parents=True, exist_ok=True)
+    (lo / "global.claude.md").unlink()
+    assert _reads_claude(install.install()) == []    # no part for Claude

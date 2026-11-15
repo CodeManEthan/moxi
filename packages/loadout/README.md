@@ -37,8 +37,11 @@ and `moxi loadout status` says what has drifted.
    only where a harness has none). Text for one harness goes beside it in
    `global.claude.md`, `global.codex.md` or `global.opencode.md`: each harness reads
    `global.md` and its own part, never another's. Claude gets an `@` line per file; Codex
-   gets one marked block in its `AGENTS.md`, rewritten by each install; in
-   `if-absent` a harness with a part gets a generated file of both. Use absolute paths for
+   and OpenCode get one marked block in their `AGENTS.md`, rewritten by each install; in
+   `if-absent` a harness with a part gets a generated file of both. OpenCode's `AGENTS.md`
+   is under `OPENCODE_CONFIG_DIR` when that is set, else `XDG_CONFIG_HOME/opencode` or
+   `~/.config/opencode`; while it exists OpenCode doesn't read Claude's
+   `~/.claude/CLAUDE.md`, so text for OpenCode goes in `global.md` or its part. Use absolute paths for
    `@` imports in the global text, since a relative one resolves against the file Claude
    reads. `global show --diff` previews the next install and names each harness's parts.
 6. No placement lands where git would commit it. In a project tree it writes a

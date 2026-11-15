@@ -16,7 +16,10 @@ writes it uses, from the environment it is given:
 - each harness row's skills and agents folders, as the placer resolves them
   (`moxi.place.harness_dirs`);
 - Claude Code's, Codex's and OpenCode's homes (`moxi_loadout.harness`), which place the
-  harness files loadout writes;
+  harness files loadout writes; OpenCode's in its XDG form (`harness.opencode_xdg_home`),
+  since the core's record doesn't hold `OPENCODE_CONFIG_DIR` and ui's check refuses a
+  resolver that reads a variable outside it. A page and a terminal that differ only in
+  `OPENCODE_CONFIG_DIR` are not told apart until the core records it;
 - projects' data, state and config folders when the act reads a project section named by
   key, and repo's when the act registers or removes the git hook pieces with repo;
 - the home folder (`moxi.paths.home`).
@@ -135,7 +138,8 @@ def places(*, reads: Sequence[str] = ()) -> Places:
                  "Moxi's state folder": core().state_dir(env),
                  "Moxi's settings file": core().config_file(env)}
         found.update(place.harness_dirs(env))
-        found.update({f"{NAMES[h]}'s home": harness.home(h, env)
+        found.update({f"{NAMES[h]}'s home": harness.opencode_xdg_home(env)
+                      if h == "opencode" else harness.home(h, env)
                       for h in harness.HARNESSES})
         for m in modules:
             theirs, whose = Layout(m), m + ("'" if m.endswith("s") else "'s")

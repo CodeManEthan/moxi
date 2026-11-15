@@ -10,6 +10,15 @@
 - Managed mode: Claude's `CLAUDE.md` gets a second `@` line for its part; the Codex block
   holds the shared text, a blank line and the part's text, and its marker names both
   files. A block of an empty shared text loses its blank line, an update made once.
+- Managed mode, OpenCode: loadout writes a marked block in OpenCode's own `AGENTS.md`, as
+  for Codex, instead of an `instructions` entry in `opencode.json`. The first install
+  after the upgrade takes the old entry out (an emptied `opencode.json` stays as `{}`).
+  OpenCode reads Claude's `~/.claude/CLAUDE.md` only while its own `AGENTS.md` is absent,
+  so with the block there OpenCode stops reading Claude's text: text for OpenCode goes in
+  `global.md` or `global.opencode.md`.
+- OpenCode's home is resolved as OpenCode does: `OPENCODE_CONFIG_DIR` when set, else
+  `XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`, for its `AGENTS.md` and
+  `opencode.json`.
 - If-absent mode: a harness with a part gets a generated file of the shared text and its
   part, under loadout's state folder, placed where its global file is absent; a harness
   with no part still gets a link to `global.md`. The generated file's first line names
@@ -21,7 +30,9 @@
 - `global show` and its `--json` name the files each harness reads (`harness`, `parts`);
   the page's global view lists them under each file. The doctor's global row names each
   harness's state and parts, and warns on Codex's `AGENTS.override.md`, harness files
-  that are one file, and an OpenCode `instructions` entry naming the global text. A file named like a mistyped part is noted.
+  that are one file, an OpenCode `instructions` entry naming the global text, and
+  OpenCode reading Claude's file while loadout's block isn't in its `AGENTS.md`. A file
+  named like a mistyped part is noted.
 - The page's confirmed act is `POST /api/global-remove` (was `/api/global-off`), with no
   old route.
 

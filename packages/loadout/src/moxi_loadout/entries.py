@@ -3,9 +3,10 @@
 Rule: an entry is loadout's when its ledger record locates it, and loadout removes only
 what it added. Each entry is found, whatever its content, by its identity: the harness's
 own key where one exists (an MCP server's name, an OpenCode permission's key path, the
-Codex rules file, the Codex global block's markers), the entry itself where it is a string
-(a Claude permission string, an OpenCode `instructions` path, each of Claude's `@` lines:
-one for the shared global file, one for Claude's part while it is in use), else a
+Codex rules file, the Codex and OpenCode global blocks' markers), the entry itself where it
+is a string (a Claude permission string, an OpenCode `instructions` path, which only an
+older install wrote, each of Claude's `@` lines: one for the shared global file, one for
+Claude's part while it is in use), else a
 sidecar, the record of exactly what was written (a hook group, found by its event, matcher
 and command). A record in the ledger's `entries` is
 `{item, harness, file, kind, key, written, prior}` (an MCP server sent through a CLI also
@@ -78,7 +79,8 @@ UNCONFIRMED = {
              "rules/loadout.rules as loadout writes them, and how codex asks you to trust "
              "a new hook",
     "opencode": "not yet confirmed by a run: the opencode.json shapes loadout writes "
-                "(permission, mcp, instructions), which follow OpenCode's published schema",
+                "(permission, mcp), which follow OpenCode's published schema, and where "
+                "OpenCode reads its AGENTS.md",
 }
 
 
@@ -137,6 +139,9 @@ class Run:
     #: The global file's notes and warns, `(level, line)` with level `note` or `warn`, for
     #: the doctor's global row; each line is also among `notes` or `lines`.
     global_lines: list = field(default_factory=list)
+    #: Whether Claude's part line is wanted (`managed`), which the warn about OpenCode
+    #: reading Claude's file reads (`moxi_loadout.install`).
+    claude_part: bool = False
 
 
 # -- what the manifest wants ---------------------------------------------------------------
@@ -291,11 +296,8 @@ def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
             _say(run, "warn", f"Codex reads {override} instead of AGENTS.md, so loadout's "
                  "global text doesn't reach it")
     recorded = {r.get("harness") for r in records if r.get("item") == "global:global"}
-    # OpenCode's global entry is its `instructions` path in `opencode.json`, not a line in
-    # its `AGENTS.md`, so that file is never edited here.
-    edited = [h for h in every if h != "opencode"]
     standing = {}
-    for h, c in (globalfile.crossed(path, edited).items() if path is not None else ()):
+    for h, c in (globalfile.crossed(path, every).items() if path is not None else ()):
         if mode != "managed" and h not in recorded:
             continue
         standing[h] = c
@@ -323,7 +325,7 @@ def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
             continue
         files, texts = [os.path.abspath(path)], [text]
         part = globalfile.part_path(path, h)
-        if h != "opencode" and os.path.lexists(part):
+        if os.path.lexists(part):
             try:
                 texts.append(globalfile.read(part))
             except (OSError, UnicodeDecodeError) as exc:
@@ -338,13 +340,12 @@ def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
             # One `@` line per file, the shared one first: each is its own entry.
             out += [Entry("global:global", h, target, "global-line", [f"@{f}"], f"@{f}")
                     for f in files]
-        elif h == "codex":
+            run.claude_part = len(files) > 1
+        else:
+            # Codex and OpenCode read no imports: one block of the assembled text in their
+            # own `AGENTS.md`. OpenCode's ends its reading of Claude's `CLAUDE.md`.
             block = globalfile.block(files, globalfile.assemble(texts))
             out.append(Entry("global:global", h, target, "global-block", ["block"], block))
-        else:
-            out.append(Entry("global:global", h, str(hz.settings_file("opencode")),
-                             "instructions", ["instructions", os.path.abspath(path)],
-                             os.path.abspath(path)))
     return out
 
 

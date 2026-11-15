@@ -38,6 +38,11 @@ Locks are always taken in one order: `install.lock`, the core lock, the manifest
 `status` builds the same plan and applies nothing; it takes no lock. `install --dry-run`
 is `status` over the run's scope.
 
+Both warn when OpenCode would read Claude's text (`opencode_reads_claude`): OpenCode
+reads `~/.claude/CLAUDE.md` while its own `AGENTS.md` is absent, so while loadout's
+block isn't there and Claude's file brings in Claude's part, OpenCode reads that part.
+`status` reads the file as an install would leave it, `install` as it left it.
+
 Exit codes: `status` 0 when every item is `ok` or `off`, else 1. `install` 0 when every
 item in scope is `ok` or `off` afterwards; 1 an error (a bad source, a failed write, a
 state still missing after the write); 3 refused (`blocked`, `modified` or `would-commit`
@@ -113,6 +118,9 @@ def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
     placer's own 10 seconds a call when None)."""
     plan, run = _plan(folder, resolver, git_seconds)
     notes = _check_placed(plan, ignores.Git() if git is None else git)
+    for level, line in opencode_reads_claude(plan, run, after=False):
+        run.global_lines.append((level, line))
+        run.lines.append(line)
     rows = [r for r in planner.rows(plan) + entries.rows(run) + _ignore_rows(plan.ledger)
             if _shown(scope, r)]
     code = 0 if all(r.state in FINE for r in rows) else ERROR
@@ -122,6 +130,52 @@ def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
     return Outcome(rows, list(plan.lines) + run.lines,
                    list(dict.fromkeys(plan.notes + run.notes + notes)), code,
                    orphans(plan, plan.ledger), run.global_lines)
+
+
+def opencode_reads_claude(plan: planner.Plan, run: entries.Run, *,
+                          after: bool) -> list[tuple[str, str]]:
+    """The warn, as `(level, line)`, when OpenCode reads Claude's part through its
+    fallback, else none. It holds when Claude's file is `~/.claude/CLAUDE.md` (under the
+    home folder, not `CLAUDE_CONFIG_DIR`) and brings in Claude's part (`managed`: its part
+    line is wanted; `if-absent`: it is loadout's placement of the generated file), and
+    OpenCode's home folder exists while its `AGENTS.md` doesn't, a dangling link counted
+    absent as OpenCode reads it. With `after` false, a file the run would write counts as
+    there. The line names why the block isn't there and the fixes."""
+    from moxi_loadout import globalfile
+    from moxi_loadout import harness as hz
+
+    found = plan.manifest
+    mode, source = found.global_mode, found.global_file
+    if mode not in ("managed", "if-absent") or source is None:
+        return []
+    if mode == "managed":
+        brings = run.claude_part
+    else:
+        brings = any(w.kind == planner.GLOBAL_KIND and w.harness == "claude"
+                     and w.generated is not None and w.state is None for w in plan.wants)
+    try:
+        user_home = hz._home(None)
+    except LookupError:
+        return []
+    claude, target = hz.global_file("claude"), hz.global_file("opencode")
+    if not brings or os.path.abspath(claude) != os.path.abspath(
+            user_home / ".claude" / "CLAUDE.md"):
+        return []
+    if not hz.opencode_home().is_dir() or os.path.exists(target):
+        return []
+    theirs = [r for r in planner.rows(plan) + entries.rows(run)
+              if r.kind == "global" and r.harness == "opencode"]
+    if not after and any(r.state == "missing" for r in theirs):
+        return []
+    why = next((r.reason for r in theirs if r.state not in FINE + ("missing",)
+                and r.reason), None)
+    if why is None:
+        why = ("OpenCode has no row in the core's harness table" if not theirs
+               else "loadout hasn't written it")
+    part = globalfile.part_path(source, "claude")
+    return [("warn", f"OpenCode reads {claude}, which brings in Claude's part {part}, "
+             f"because loadout's block isn't in {target}: {why}; correct that, or set "
+             "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 for OpenCode")]
 
 
 def _check_placed(plan: planner.Plan, git: ignores.Git) -> list[str]:
@@ -314,9 +368,11 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     written: list[Row] = []
     notes: list[str] = []
     said: list[tuple[str, str]] = []
+    ran: list[entries.Run] = []
 
     def harness_entries() -> None:
         run = entries.plan(found, machine.source, data, claims=claims)
+        ran.append(run)
         said.extend(run.global_lines)
         # The entries and their records land together: an interrupt waits for the ledger
         # write, so an entry loadout wrote is never left unrecorded (the next run would
@@ -429,6 +485,9 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
             continue
         rows.append(Row(name, "section", name, "*", "blocked", res.line, None, res.code))
     codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
+    for level, line in opencode_reads_claude(plan, ran[0], after=True):
+        said.append((level, line))
+        lines.append(line)
     repo_link.sync(machine.source, machine.reinstall_on_commit, say=say)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
                    planner.exit_code(codes), global_lines=said)

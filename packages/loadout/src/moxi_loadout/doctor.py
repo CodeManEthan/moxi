@@ -12,7 +12,8 @@ The core's own rows already show every loadout placement that isn't ok. These ad
   one as it was generated, and leaves one edited by hand for the user to delete.
 - global: the global mode, and its state per harness with the files it reads; the
   global file's notes (a mistyped part) and warns (Codex's `AGENTS.override.md`, harness
-  files that are one file, an OpenCode `instructions` entry naming the global text).
+  files that are one file, an OpenCode `instructions` entry naming the global text,
+  OpenCode reading Claude's file while loadout's block isn't in its `AGENTS.md`).
 - hooks: each hook's program resolves (`warn` when one doesn't).
 - projects: a section named by key while projects is absent (`warn`); else the link,
   `off` without projects.
