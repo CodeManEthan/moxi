@@ -24,7 +24,7 @@
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
                      [--as NAME]
-    moxi rounds next ROUND [--json]
+    moxi rounds next [ROUND] [--json]
     moxi rounds next --schema design|build|step|majors|retro
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
@@ -132,7 +132,9 @@ which pass is asked for, a full pass or a re-check with the two frozen files to
 compare, or what is done in place of a pass; for the questions step, the command that
 writes the questions out and the `rule` line of each open one. A step this version
 does not have is printed as not built. `next --schema KIND` prints the empty data
-block of a report of that kind, a comment on each key. `next` records nothing.
+block of a report of that kind, a comment on each key. Run with no round in a
+build's worktree, `next` finds the open build on the branch checked out there and
+prints its round's next step. `next` records nothing.
 `show` shows one round: what it is for, its flow, the step it is at, what its close
 waits for, its questions by state, its rulings and whether each was shown to him, and
 its history. `list` with no flag lists the open
@@ -156,6 +158,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
 import sys
 from collections.abc import Callable, Sequence
 
@@ -963,7 +966,9 @@ def _declare_next(verbs) -> None:
             "empty data block of a report of that kind. Nothing is recorded.")
     parser = verbs.add_parser("next", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", nargs="?",
-                        help="the round, <project>/<slug>")
+                        help="the round, <project>/<slug>; left out in a build's "
+                             "worktree, the round of the open build on the branch "
+                             "checked out there")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="print the same as data, not as lines")
     parser.add_argument("--schema", metavar="KIND",
@@ -977,10 +982,12 @@ def _next(args, out) -> int:
     if args.schema is not None:
         out.write(next_step.schema(args.schema))
         return codes.OK
-    if args.round is None:
-        raise BadArgument("a round is needed: nothing says which round's next step "
-                          "to print", "moxi rounds next <project>/<slug>")
-    found = next_step.read(args.round)
+    name = args.round
+    if name is None:
+        from . import by_branch
+
+        name = by_branch.find(os.getcwd(), verb="next").round
+    found = next_step.read(name)
     out.write(next_step.as_json(found) if args.as_json else next_step.as_text(found))
     return codes.OK
 

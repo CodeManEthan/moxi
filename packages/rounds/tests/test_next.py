@@ -727,11 +727,14 @@ def test_a_word_that_is_no_kind_of_block_is_bad_arguments(capsys):
 
 # -- which round -------------------------------------------------------------------------
 
-def test_with_no_round_it_says_a_round_is_needed(capsys):
+def test_with_no_round_outside_a_build_s_worktree_it_names_the_round_to_give(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
     assert main(["next"]) == 2
 
     err = capsys.readouterr().err
-    assert "a round is needed" in err
+    assert "no round is named" in err
     assert "moxi rounds next <project>/<slug>" in err
 
 

@@ -130,6 +130,17 @@ def root(project: str) -> tuple[str, Path]:
     return record.key, Path(os.path.expanduser(record.root))
 
 
+def project_at(path: str | os.PathLike) -> str | None:
+    """The key of the project the folder `path` is in, or None when it is in none. A
+    linked git worktree is in the project of the work tree it was added from."""
+    api = _projects()
+    try:
+        found = api.for_path(os.fspath(path))
+    except api.ProjectsError as error:
+        raise RoundsError(f"the projects list can't be read: {error}") from None
+    return None if found is None else found.key
+
+
 def slugs(folder: Path) -> list[str]:
     """The slug of each round in the rounds folder `folder`, sorted: every folder there
     that holds a round's log and whose name is a slug. A rounds folder that does not

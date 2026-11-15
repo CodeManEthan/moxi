@@ -56,7 +56,7 @@ lower-case letters, digits and `-`.
 | Command | Does |
 |---|---|
 | `moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--inherits S<n>[,...]]` | open a round: make its folder and record what it is for and its flow; `--record` points to where the operator gave the go, and `--inherits` names the standing rulings it starts from |
-| `moxi rounds next ROUND [--json]` | what is done next: the step the round is at, who does it, what they read, the command that completes it and what it waits for |
+| `moxi rounds next [ROUND] [--json]` | what is done next: the step the round is at, who does it, what they read, the command that completes it and what it waits for; with no round, in a build's worktree, the round of the open build on the branch checked out there |
 | `moxi rounds next --schema design\|build\|step\|majors\|retro` | the empty data block of a report of that kind, a comment on each key |
 | `moxi rounds fold ROUND [--records-only --record PTR]` | freeze `design.md` as the next version and record what its data block declares |
 | `moxi rounds verdict ROUND REPORT.md` | record the verdict of a report on the design, run by whoever wrote the report |
@@ -179,6 +179,9 @@ setting gives it: the one name, or each harness with its model where they differ
 command that meets it. After the step come warnings, which hold up nothing: a design
 edited since it was frozen, a ruling not yet shown to the operator, a trace row gone
 stale. `next` records nothing, and `next --json` gives the same as data.
+A builder runs `moxi rounds next` with no round from the build's worktree: the open
+build on the branch checked out there, in the project the folder is in, names the
+round.
 
 ## The design
 

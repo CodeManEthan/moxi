@@ -1,7 +1,7 @@
 """Reads of a repo's git, as the build states ask them.
 
 `Git(root)` runs plain git in the repo at `root` and answers one question per method:
-which branch is checked out at the root, whether a name is one git takes for a branch,
+the top of the work tree `root` is in, which branch is checked out at the root, whether a name is one git takes for a branch,
 which commit a branch is, which of some commits git still has, a commit's tree,
 parents and commit date, whether one commit is an ancestor of another, the merge bases
 of two, the one commit of several that has the others as ancestors, the merge that
@@ -85,6 +85,12 @@ class Git:
         """The commit the local branch `name` points at, or None when there is no such
         branch."""
         return self._commit(f"refs/heads/{name}")
+
+    def top(self) -> Path | None:
+        """The top folder of the work tree the root is in, or None when the root is in
+        no work tree (or is not a folder git can enter)."""
+        code, out = self._run("rev-parse", "--show-toplevel", ok=(0, 128))
+        return Path(out.strip()) if code == 0 and out.strip() else None
 
     def checked_out(self) -> str | None:
         """The branch checked out at the root, or None when its head is detached."""

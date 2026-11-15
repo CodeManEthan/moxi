@@ -54,6 +54,8 @@ does not yet build.
 - `next` says the step a round is at, who does it and at which tier, what they read,
   the command that completes it and what it waits for; `next --schema` prints the empty
   data block of a report.
+- `next` with no round, run in a build's worktree, finds the open build by its repo
+  and branch and says its round's next step.
 - A round whose flow has no `build` step closes itself, on the write that leaves every
   step done or skipped, no question open or parked and no stage in its plan. The verb
   whose write closes it says so in its last line. `show` says what an open round's
