@@ -661,7 +661,7 @@ def test_a_stop_hook_that_hangs_is_given_up_on(rig, monkeypatch):
     host.stop_hook = hook
     started = time.monotonic()
     host._run_stop_hook()
-    assert time.monotonic() - started < 5 * timed_slack()
+    assert time.monotonic() - started < 5
 
 
 def test_run_on_loop_refuses_from_the_loop_and_without_one(rig):
@@ -695,7 +695,7 @@ def test_a_request_in_flight_at_the_stop_gets_a_graceful_bound(serving, sessions
     assert entered.wait(10)
     started = time.monotonic()
     daemon.stop()
-    assert time.monotonic() - started < 5
+    assert time.monotonic() - started < 5 * timed_slack()
     caller.join(10)
 
 
