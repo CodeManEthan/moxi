@@ -331,7 +331,8 @@ export class CommsPage extends LitElement {
   }
 
   /** A press of `Keep warm`: posts the launch's request id to launcher and waits, its
-   * button disabled, for the answer and the next value of `running`, or `PRESS_WAIT_MS`. */
+   * button disabled, for the answer and the next value of `running`, or `PRESS_WAIT_MS`;
+   * a press that went reads that value at once. */
   async #press(request: string): Promise<void> {
     if (this.#presses.waiting[request] !== undefined) return;
     this.#presses = pressed(this.#presses, request);
@@ -344,9 +345,12 @@ export class CommsPage extends LitElement {
     this.requestUpdate();
     const answer = await api("launcher", KEEP_WARM_PATH, pressBody(request));
     if (!this.isConnected) return;
-    this.#presses = answered(this.#presses, request, pressNote(answer));
+    const note = pressNote(answer);
+    this.#presses = answered(this.#presses, request, note);
     this.requestUpdate();
-    void this.#readRunning();
+    // A press that went reads the next value at once; a refusal's note stays until the next
+    // read brings one.
+    if (note === null) void this.#readRunning();
   }
 
   /** Reads again each message the page shows of the days before today, so their read
