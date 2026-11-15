@@ -93,13 +93,13 @@ def iso_in(seconds: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + seconds))
 
 
-def running_entry(request_id: str, session_id: str, name: str, *, slot: str, project: str,
+def running_entry(request_id: str, session_id: str, name: str, *, slot_number: str, project: str,
                   waits: int = 0, covered: bool = False, coverable: bool = False) -> dict:
     """One running launch in launcher's declared shape (`RUNNING_LAUNCH`), warm for 20
     minutes, waiting on `waits` agents."""
     return {
         "request_id": request_id, "harness": "claude", "session_id": session_id, "name": name,
-        "identity": None, "where": {"target": "slot", "slot": slot, "project_key": project,
+        "identity": None, "where": {"target": "slot", "slot": slot_number, "project_key": project,
                                     "folder": project},
         "started_at": iso_in(-3600),
         "cache": {"state": "warm", "until": iso_in(20 * 60), "estimated": False},
@@ -156,8 +156,8 @@ def test_who_can_be_messaged_and_in_which_session(page_shell, rig, ui_contexts):
     shell = page_shell()
     roster_kit.current(shell, holding([P, R]))
     page, root, _ = open_page(shell, ui_contexts, [
-        running_entry("r-planner", planner.session_id, "planner's session", slot="3", project="atlas-api"),
-        running_entry("r-reviewer", reviewer.session_id, "review pass", slot="4", project="kestrel-web"),
+        running_entry("r-planner", planner.session_id, "planner's session", slot_number="3", project="atlas-api"),
+        running_entry("r-reviewer", reviewer.session_id, "review pass", slot_number="4", project="kestrel-web"),
     ])
     # The page server reads the rig's record: the message the rig posted is today's.
     today = root.locator('[data-group="today"] moxi-ui-row')
@@ -253,7 +253,7 @@ def test_keep_warm_presses_launcher_and_a_refusal_leads_line_three(page_shell, r
     bound(rig, P)
     shell = page_shell()
     roster_kit.current(shell, holding([P]))
-    loud = running_entry("r-planner", planner.session_id, "planner's session", slot="3",
+    loud = running_entry("r-planner", planner.session_id, "planner's session", slot_number="3",
                          project="atlas-api", waits=2, coverable=True)
     page, root, stub = open_page(shell, ui_contexts, [loud])
     row = agent(root, P)
