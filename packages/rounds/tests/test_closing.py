@@ -620,7 +620,7 @@ def test_a_closed_round_is_shown_as_closed_with_when(closed, capsys):
     assert found["ended"] == {"how": "closed", "by": None, "record": None,
                               "actor": "planner", "at": at, "questions": {},
                               "numbers": events(closed)[-1]["numbers"]}
-    assert "\nnumbers:\n  design: passes 0, fold-first 0, folds 1 (records only 0)" in shown
+    assert "\nnumbers:\n  design: passes 0, folds 1 (records only 0)" in shown
     assert shown.splitlines()[-1].endswith("  planner  round.closed")
 
 

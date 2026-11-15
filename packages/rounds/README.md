@@ -634,15 +634,19 @@ finished build is unruled, `next`, `show` and `list` give the round's `ratify` s
 ready and the operator's, with the command that rules each.
 
 The event that ends a round, its close or its drop, holds the round's numbers, counted
-from its log: design passes, `fold-first` verdicts, folds and records-only folds, the
-lead's decisions on a thread, the time spent at each step, findings by severity,
-re-checks and drift re-checks,
-failed check runs, questions by where they came from, decisions accepted and rejected,
-skips, step-ups, repairs, corrections, dropped builds, cleared locks, and reports
-flagged `extra-full-pass` or `model-below-tier`. The time at each step is in whole
-seconds, under the step's name or `<step> B<n>` for a stage's: the log is read once at
-the end, and the time from each event to the next goes to the step the round was at
-then, as read from the log alone. `show` gives them under the line that says how the
+from its log: design passes, `fold-first` verdicts of any kind, folds and records-only
+folds, the lead's decisions (on a thread, or a records-only fold that made a design
+sent back stand at `lead-decision`), the time spent at each step, findings by
+severity, re-checks and drift re-checks, failed check runs, questions by where they
+came from, decisions accepted and rejected, skips, step-ups, repairs, corrections,
+dropped builds, cleared locks, and reports flagged `extra-full-pass` or
+`model-below-tier`. The time at each step is in whole seconds, under the step's name
+or `<step> B<n>` for a stage's: the log is read once at the end, and the time from
+each event to the next goes to every step that was ready or waiting then, so steps
+due side by side each get it. The steps are read from the log alone: a build has work
+once a record names a commit of it, its check is done when its newest run passed at
+the newest commit the log names, and its verification when a publishable report, or
+a lead's mark of what came after it, covers the commits named since. `show` gives them under the line that says how the
 round ended, `retro.md` beside the round's note holds them, and `list --numbers` sums
 those of the closed rounds (a dropped round's stay with it).
 

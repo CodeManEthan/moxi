@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 from moxi import cli
+from moxi_rounds import log, numbers
 
 CHECK = shlex.join([sys.executable, "-c", "print('the check passed')"])
 LEAD = "planner"
@@ -302,6 +303,19 @@ def test_a_full_round_runs_from_open_to_its_close_on_what_next_names(script):
     s.read("proj-a/scripted")
     s.names(f"round {FULL}   flow full   step none: the round is closed")
     assert "proj-a/scripted   closed at " in s.run(["list", "--closed"])
+
+    # The round's own log, each event ten seconds after the one before: a build's
+    # verification and finish get their time, and the docket none once Q1 is ruled,
+    # though B2 was still to be built.
+    events = [{**one, "at": log.stamp(1_000_000 + 10 * n)}
+              for n, one in enumerate(log.read(log.round_log(round_dir)))]
+    spent = numbers.step_time_s(events)
+    assert spent["verify-build B1"] > 0 and spent["finish B1"] > 0
+    assert spent["verify-build B2"] > 0 and spent["finish B2"] > 0
+    ruled = next(n for n, one in enumerate(events)
+                 if one["type"] == "ruling.recorded" and one.get("question") == "Q1")
+    assert 0 < spent["docket"] == numbers.step_time_s(events[:ruled + 1])["docket"]
+    assert spent["build B2"] > 0
     s.print()
 
 

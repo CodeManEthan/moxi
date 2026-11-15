@@ -133,6 +133,22 @@ def test_the_folds_and_the_lead_s_decisions_on_the_design_are_counted(round_dir)
         2, 1, 1)
 
 
+def test_a_records_only_fold_of_a_design_sent_back_is_a_lead_decision(round_dir):
+    append(round_dir, "design.frozen", {"version": 1, "digest": "a" * 64})
+    append(round_dir, "verdict.recorded",
+           {"kind": "design", "verdict": "fold-first", "pass": "full", "design": 1,
+            "by": "critic"}, by="critic")
+    append(round_dir, "design.frozen",
+           {"version": 2, "digest": "b" * 64, "records_only": True, "record": PTR})
+    append(round_dir, "design.frozen",
+           {"version": 3, "digest": "c" * 64, "records_only": True, "record": PTR})
+
+    found = counted(round_dir)
+
+    # The second fold of records only carries the lead's decision; it makes none.
+    assert (found["records_only_folds"], found["lead_decisions"]) == (2, 1)
+
+
 def test_a_dropped_round_holds_its_numbers_in_its_drop(round_dir):
     append(round_dir, "design.frozen", {"version": 1, "digest": "a" * 64})
     before = counted(round_dir)
@@ -156,10 +172,52 @@ def test_each_step_s_time_runs_from_the_event_that_reached_it_to_the_next(built)
 
     found = numbers.step_time_s(events, ended_at=log.stamp(1_000_000 + 100))
 
-    # Opened with no stage, the round is at the commission that declares one; once
-    # B1 is declared, at B1's; once commissioned, at its build, which git would read.
-    assert found == {"commission": 10, "commission B1": 20, "build B1": 70}
-    assert list(found) == ["commission", "commission B1", "build B1"]
+    # Opened with no stage, the commission that declares one is due; once B1 is
+    # declared, B1's; once commissioned, its build, its verification and its finish,
+    # side by side, while the log names no commit of it.
+    assert found == {"commission": 10, "commission B1": 20, "build B1": 70,
+                     "verify-build B1": 70, "finish B1": 70}
+    assert list(found) == ["commission", "commission B1", "build B1", "verify-build B1",
+                           "finish B1"]
+
+
+def check_ran(commit, code=0):
+    return ("check.ran", {"stage": "B1", "step": "check", "commit": commit,
+                          "argv": ["make", "check"], "exit_code": code,
+                          "duration_s": 1.0, "output": None})
+
+
+def test_a_build_s_steps_settle_as_the_log_shows_them_done(built):
+    for kind, body in (check_ran(TIP),
+                       ("verdict.recorded", build_report(word="publishable")),
+                       ("finish.done", {"stage": "B1", "tip": TIP})):
+        append(built, kind, body)
+    events = timed(log.read(log.round_log(built)), 0, 10, 30, 40, 60, 90)
+
+    found = numbers.step_time_s(events, ended_at=log.stamp(1_000_000 + 90))
+
+    # The check run names B1's first commit, so its build has work; the run passed
+    # there, so its check is done as soon as it has one; the report settles its
+    # verification and the finish its finish, with no read of git.
+    assert found == {"commission": 10, "commission B1": 20, "build B1": 10,
+                     "verify-build B1": 30, "finish B1": 60}
+
+
+def test_a_commit_after_the_verdict_owes_verification_until_a_mark_names_it(built):
+    later = "2" * 40
+    for kind, body in (
+            check_ran(TIP),
+            ("verdict.recorded", build_report(word="publishable",
+                                              found=[finding("L1", "minor")])),
+            check_ran(later),
+            ("finding.marked", {"id": "B1.L1", "state": "fixed", "commits": [later]})):
+        append(built, kind, body)
+    events = timed(log.read(log.round_log(built)), 0, 10, 30, 40, 50, 70, 100)
+
+    found = numbers.step_time_s(events)
+
+    assert found["verify-build B1"] == 20 + 30
+    assert "check B1" not in found
 
 
 def test_with_no_ending_time_the_count_stops_at_the_last_event(built):
@@ -173,7 +231,7 @@ def test_a_stretch_that_runs_backwards_or_has_no_time_counts_nothing(built):
 
     found = numbers.step_time_s(events, ended_at=log.stamp(1_000_000 + 25))
 
-    assert found == {"build B1": 20}
+    assert found == {"build B1": 20, "verify-build B1": 20, "finish B1": 20}
 
 
 def test_a_round_that_has_ended_is_at_no_step_after_its_ending(round_dir):
@@ -208,7 +266,8 @@ def test_the_numbers_read_as_one_line_a_group():
         "a_later_count": 4})
 
     assert found == [
-        "design: passes 2, fold-first 1, folds 3 (records only 1), lead decisions 1",
+        "design: passes 2, folds 3 (records only 1), lead decisions 1",
+        "reports sent back (fold-first, of any kind): 1",
         "time in steps: design 1h 2m 5s, build B1 0s",
         "findings: blocker 0, major 2, minor 1, note 0; re-checks 1, drift re-checks 0; "
         "check runs failed 1",
@@ -220,8 +279,9 @@ def test_the_numbers_read_as_one_line_a_group():
 
 
 def test_numbers_missing_a_key_read_as_none_counted():
-    assert numbers.lines({})[:2] == [
-        "design: passes 0, fold-first 0, folds 0 (records only 0), lead decisions 0",
+    assert numbers.lines({})[:3] == [
+        "design: passes 0, folds 0 (records only 0), lead decisions 0",
+        "reports sent back (fold-first, of any kind): 0",
         "time in steps: none"]
 
 
