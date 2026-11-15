@@ -326,6 +326,24 @@ def test_a_rerun_after_a_stop_keeps_its_own_worktree_and_records_one_build(
     assert os.listdir(Path(event["scratch"])) == [places.SCRATCH_MARKER]
 
 
+def test_a_rerun_keeps_the_base_its_stopped_run_cut_the_branch_from_when_the_target_moved(
+        repo, opened, monkeypatch):
+    path = opened()
+    cut_from = repo.rev("main")
+    real = _stop_before_the_append(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    monkeypatch.setattr(write, "_append", real)
+    moved_to = repo.commit("later.txt")
+    assert moved_to != cut_from and repo.rev("main") == moved_to
+
+    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+
+    assert made.adopted
+    [event] = events(path, "build.commissioned")
+    assert event["base"] == cut_from and event["target"] == "main"
+
+
 def test_a_rerun_makes_the_scratch_folder_a_stop_left_missing(repo, opened, monkeypatch):
     path = opened()
     real = commissioning._make_scratch

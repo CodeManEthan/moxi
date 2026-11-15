@@ -30,7 +30,9 @@ both paths (`places.encode`).
 rerun adopts the worktree at the place only when its marker names this round, stage,
 repo and branch and a build id no `build.commissioned` of the round records: its own
 stopped run. It keeps that id, and makes the scratch folder under it when it is
-missing. Any other folder at either place is refused, naming it: one with no marker (a
+missing. Its base is the merge base of the branch's tip and the target, the commit the
+stopped run cut the branch from: a build's base never moves, even when the target did
+between the runs. Any other folder at either place is refused, naming it: one with no marker (a
 stop between its create and its marker), and a worktree whose marker names a recorded
 build. rounds never adopts or removes a folder it can't tell it made; the user looks at
 it, removes it, and runs `commission` again.
@@ -291,6 +293,10 @@ def _read_git(found: _Look, git: Git, view, *, name: str, stage, existing: bool,
     found.worktree = places.worktree_place(settings, repo, branch, env)
     unmet += _at_the_place(found, view, name=name, stage=stage, again=again, env=env)
     tip = git.branch(branch)
+    if found.adopt is not None:
+        moved = _adopted_base(found, git, tip, again=again)
+        if moved is not None:
+            return [*unmet, moved]
     if found.adopt is None and not found.unmet_place:
         if tip is not None and not existing:
             unmet.append(Unmet(
@@ -343,6 +349,25 @@ def _at_the_place(found: _Look, view, *, name: str, stage, again: str,
     return [Unmet(f"{place} holds a worktree marked for the build {marker.build} of "
                   f"{marker.round} {marker.stage}, which is not this commission's own "
                   "stopped run", fix)]
+
+
+def _adopted_base(found: _Look, git: Git, tip: str | None, *, again: str) -> Unmet | None:
+    """Set the base of an adopted rerun to the merge base of its branch's tip and the
+    target, the commit the stopped run cut the branch from. The target's head now
+    would move the base when the target moved between the runs. Returns the unmet
+    condition when there is no single such commit."""
+    fix = f"look at {found.worktree}, remove it and its branch, then: {again}"
+    if tip is None:
+        return Unmet(f"the worktree at {found.worktree} was left by a stopped run of "
+                     f"this commission, and its branch {found.branch} is gone", fix)
+    bases = git.merge_bases(tip, found.base)
+    if len(bases) != 1:
+        said = "no commit" if not bases else f"{len(bases)} merge bases"
+        return Unmet(f"the branch {found.branch}, left by a stopped run of this "
+                     f"commission, has {said} in common with the target "
+                     f"{found.target}, so the commit it was cut from can't be read", fix)
+    found.base = bases[0]
+    return None
 
 
 def _shares(found: _Look, git: Git, *, name: str, stage, opened,
