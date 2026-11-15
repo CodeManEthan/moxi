@@ -655,7 +655,7 @@ def wait_line(one: dict) -> str:
 def wait_facts(one: dict) -> list[str]:
     """What is known of a waiting item beyond its line: the report that declared it,
     and how it was marked done or the command that marks it."""
-    said = [f"from: {one['report']}   by: {one['by']}   at: {one['at']}"]
+    said = [waits.origin_line(one)]
     if one["state"] == waits.DONE:
         said.append(f"done: {one['done_at']} by {one['done_by']}   record: "
                     f"{one['record']}")

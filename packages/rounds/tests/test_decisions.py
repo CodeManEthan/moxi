@@ -237,6 +237,24 @@ def test_a_rejected_decision_owes_a_fix_until_it_is_marked_done(built, capsys):
     assert [one.key for one in waits.open_of(folded(round_dir))] == ["B1.M1"]
 
 
+def test_a_fix_owed_on_a_rejection_is_shown_with_no_report_it_came_from(built, capsys):
+    round_dir, tree = built
+    verify(round_dir, tree.rev(), decision())
+    rule("B1.M1=reject")
+    capsys.readouterr()
+
+    assert main(["show", ROUND]) == 0
+    shown = capsys.readouterr().out
+    assert main(["list", "--waiting"]) == 0
+    listed = capsys.readouterr().out
+    note = (round_dir / rendering.NOTE_FILE).read_text(encoding="utf-8")
+
+    for said in (shown, listed, note):
+        assert "B1.M1 rejected: fix owed" in said
+        assert "None" not in said
+    assert "  by: planner   at: " in shown
+
+
 # -- listed -------------------------------------------------------------------------------
 
 def test_list_waiting_and_the_project_export_hold_each_unruled_major(built, capsys):

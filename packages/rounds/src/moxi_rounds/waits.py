@@ -162,6 +162,14 @@ def items(state: states.State) -> Iterator[tuple[str, Mapping]]:
                         "by": one.by, "at": one.at}
 
 
+def origin_line(one: Mapping) -> str:
+    """Where a waiting item, as its data gives it, came from: `from: report.md   by:
+    critic   at: TIME`. A fix owed on a rejected decision came from a ruling, not a
+    report, so its line has no `from:`."""
+    said = [] if one.get("report") is None else [f"from: {one['report']}"]
+    return "   ".join([*said, f"by: {one.get('by')}", f"at: {one.get('at')}"])
+
+
 def mark_line(name: str, key: str) -> str:
     """The command that marks a waiting item done."""
     return f"moxi rounds mark {name} {key} --done --record PTR"
@@ -263,4 +271,4 @@ def _commit(state: states.State, key: str, given: str) -> str | Unmet:
 
 
 __all__ = ["MARKED", "OPEN", "DONE", "COMMIT", "KEY", "Wait", "of_round", "of_build",
-           "open_of", "items", "mark_line", "Done", "done"]
+           "open_of", "items", "origin_line", "mark_line", "Done", "done"]

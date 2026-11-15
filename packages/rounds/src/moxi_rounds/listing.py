@@ -363,8 +363,7 @@ def _wait_lines(rows: Sequence, now: str) -> list[str]:
     for row in rows:
         body = row.body
         lines += [f"  {row.round} {row.id}: {body.get('text')}",
-                  f"    from: {body.get('report')}   by: {body.get('by')}   at: "
-                  f"{body.get('at')}   age: {age(body.get('at'), now)}",
+                  f"    {waits.origin_line(body)}   age: {age(body.get('at'), now)}",
                   f"    once done: {waits.mark_line(row.round, row.id)}"]
     return lines
 
