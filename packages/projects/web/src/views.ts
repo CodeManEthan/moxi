@@ -2,6 +2,7 @@
 // no DOM so the Node tests can read it. Every string here goes into the page as text.
 
 import { saidOf } from "./feed.ts";
+import { kindName } from "./words.ts";
 import type { Added, Failure, Kind, Kinds, One, Project, Projects } from "./feed.ts";
 
 /** A component's data as its `Feed` holds it. */
@@ -271,13 +272,13 @@ export interface KindChoice {
 
 /** A kind a project has that no installed module declares: kept as a label. */
 function undeclared(name: string): KindChoice {
-  return { value: name, label: `${name} (no installed module declares it)` };
+  return { value: name, label: `${kindName(name)} (no installed module declares it)` };
 }
 
-/** The Edit panel's kind menu for a project of kind `current`: each kind listed, and the
- * project's own when no module declares it. */
+/** The Projects page's kind menus for a project of kind `current`: each kind listed, in
+ * the page's kind words, and the project's own when no module declares it. */
 export function kindChoices(kinds: Kinds | null, current: string): KindChoice[] {
-  const choices = (kinds?.found ?? []).map((kind) => ({ value: kind.name, label: kindLabel(kind) }));
+  const choices = (kinds?.found ?? []).map((kind) => ({ value: kind.name, label: kindName(kind.name) }));
   if (!choices.some((choice) => choice.value === current)) choices.push(undeclared(current));
   return choices;
 }

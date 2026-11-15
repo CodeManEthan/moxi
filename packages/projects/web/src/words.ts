@@ -99,6 +99,12 @@ export function kindWord(kind: string): string | null {
   return kind;
 }
 
+/** The kind as a kind menu names it: `code project`, `agent's home`, else its name. */
+export function kindName(kind: string): string {
+  if (kind === "project") return "code project";
+  return kindWord(kind) as string;
+}
+
 /** The kind as the opened project's `Folder` row names it. */
 export function kindPhrase(kind: string): string {
   if (kind === "project") return "a code project";

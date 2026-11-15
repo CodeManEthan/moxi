@@ -106,7 +106,10 @@ def test_forty_projects_have_the_find_field_the_kind_filter_and_the_earlier_fold
     expect_keys(listed, [row.key for row in kit.SEVEN + RECENT])
 
     kind = panel.locator('[data-action="kind"]')
-    assert kind.locator("option").all_inner_texts() == ["all", "agent", "project"]
+    # In the page's kind words, with the house arrow in place of the browser's own.
+    assert kind.locator("option").all_inner_texts() == ["all", "agent's home", "code project"]
+    assert kind.evaluate("el => getComputedStyle(el).appearance") == "none"
+    expect(panel.locator('[data-part="filters"] .sel .v')).to_have_text("▾")
     kind.select_option("agent")
     expect_keys(listed, ["reviewer-home"])
     expect(panel.locator('[data-line="shown"]')).to_have_text("1 of 40 projects")

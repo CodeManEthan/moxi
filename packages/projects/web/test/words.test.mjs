@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { dateWord, dayWord, homeForm, kindPhrase, kindWord, lastActive, whenWord } from "../src/words.ts";
+import { dateWord, dayWord, homeForm, kindName, kindPhrase, kindWord, lastActive, whenWord } from "../src/words.ts";
 
 /** The clock in UTC, so the words are the same in any zone. */
 const UTC = {
@@ -90,4 +90,7 @@ test("kind words", () => {
   assert.equal(kindPhrase("project"), "a code project");
   assert.equal(kindPhrase("agent"), "an agent's home");
   assert.equal(kindPhrase("topic"), "topic");
+  assert.equal(kindName("project"), "code project");
+  assert.equal(kindName("agent"), "agent's home");
+  assert.equal(kindName("topic"), "topic");
 });

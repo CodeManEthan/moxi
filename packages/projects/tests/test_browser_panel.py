@@ -304,7 +304,11 @@ def test_an_agent_is_taken_off_and_the_lead_moved_onto_it_in_an_order_the_lead_r
         field = aside.get_by_label("Folder", exact=True)
         expect(field).to_be_focused()
         expect(field).to_have_value("~/code/atlas-api")
-        expect(aside.get_by_label("Kind", exact=True)).to_have_value("project")
+        kind = aside.get_by_label("Kind", exact=True)
+        expect(kind).to_have_value("project")
+        assert kind.locator("option").all_inner_texts() == ["agent's home", "code project"]
+        assert kind.evaluate("el => getComputedStyle(el).appearance") == "none"
+        expect(aside.locator(".sel .v")).to_have_text("▾")
         expect(aside.get_by_label("Lead", exact=True)).to_have_value("builder-1")
         assert also_here(aside) == ["planner", "reviewer"]
         expect(aside.locator('[data-line="key"]')).to_have_text("atlas-api")

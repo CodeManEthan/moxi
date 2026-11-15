@@ -77,6 +77,7 @@ import type { PanelAsk } from "./panel.ts";
 import { BASE } from "./styles.ts";
 import { MAY_BE_ADDED } from "./panel-model.ts";
 import { actedOf } from "./views.ts";
+import { kindName } from "./words.ts";
 
 const TAG = "moxi-projects-page";
 
@@ -154,7 +155,11 @@ const STYLES = [BASE, css`
   .filt { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 14px; margin-top: 12px;
           padding: 0 2px; color: var(--moxi-text-dim); white-space: nowrap; }
   .filt .k { margin-right: 8px; }
-  .filt select { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); font: inherit; }
+  /* The kind menu in the page's words, with the house arrow in place of the browser's. */
+  .filt .sel { position: relative; display: inline-block; }
+  .filt select { appearance: none; padding: 0 16px 0 0; border: 0; background: none; color: var(--moxi-text-dim);
+                 font: inherit; cursor: pointer; }
+  .filt .sel .v { position: absolute; right: 0; top: 0; color: var(--moxi-text-dim); pointer-events: none; }
   .filt select.set { color: var(--moxi-text); }
   .filt .n { margin-left: auto; font-variant-numeric: tabular-nums; }
   .grps { margin-top: 16px; border-top: 1px solid var(--moxi-border); }
@@ -791,13 +796,14 @@ export class ProjectsPage extends LitElement {
           @click=${() => { this.#typed = ""; this.requestUpdate(); }}>${CLEAR}</button>` : nothing}
       </div>
       ${view.kinds.length > 0 || view.shownOf !== null ? html`<div class="filt" data-part="filters">
-        ${view.kinds.length > 0 ? html`<label><span class="k">${KIND}</span><select class=${this.#kind !== null ? "set" : ""}
+        ${view.kinds.length > 0 ? html`<label><span class="k">${KIND}</span><span class="sel"><select class=${this.#kind !== null ? "set" : ""}
           data-action="kind" .value=${live(this.#kind ?? "")} @change=${(event: Event) => {
             const value = (event.target as HTMLSelectElement).value;
             this.#kind = value === "" ? null : value;
             this.requestUpdate();
           }}><option value="">${ALL}</option>${view.kinds.map((kind) => html`<option value=${kind}
-            ?selected=${kind === this.#kind}>${kind}</option>`)}</select></label>` : nothing}
+            ?selected=${kind === this.#kind}>${kindName(kind)}</option>`)}</select><span class="v" aria-hidden="true">▾</span></span></label>`
+          : nothing}
         ${view.shownOf !== null ? html`<span class="n" data-line="shown">${view.shownOf}</span>` : nothing}
       </div>` : nothing}`;
   }

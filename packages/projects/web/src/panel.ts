@@ -43,9 +43,13 @@ import {
 } from "./panel-model.ts";
 import type { AddPanel, Asked, EditPanel, PanelSaid } from "./panel-model.ts";
 import { BASE } from "./styles.ts";
-import { actedOf, brokenLines, kindChoices, kindLabel, startKind } from "./views.ts";
+import { actedOf, brokenLines, kindChoices, startKind } from "./views.ts";
+import { kindName } from "./words.ts";
 
 const TAG = "moxi-projects-panel";
+
+/** The house arrow a menu draws at its right. */
+const ARROW = html`<span class="v" aria-hidden="true">▾</span>`;
 
 /** The event the panel asks to be closed with; it carries no detail. */
 export const PANEL_CLOSE = "moxi-projects-panel-close";
@@ -76,6 +80,12 @@ const STYLES = [BASE, css`
   input[type=text], select { display: block; width: 100%; padding: 6px 10px; border: 1px solid var(--moxi-border);
                              border-radius: 7px; background: none; color: var(--moxi-text); font: inherit; }
   input[type=text]:focus { border-color: var(--moxi-border-strong); }
+  /* A menu draws the house arrow, dim at its right, in place of the browser's own. */
+  .sel { position: relative; display: block; }
+  .sel select { appearance: none; padding-right: 30px; cursor: pointer; }
+  .sel select:focus { border-color: var(--moxi-border-strong); outline: none; }
+  .sel .v { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--moxi-text-dim);
+            font-size: 13px; pointer-events: none; }
   .hint { margin-top: 5px; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
   label.check { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; font-size: 14px; }
   button.fold { display: flex; justify-content: space-between; gap: 12px; width: 100%; margin-top: 16px; padding: 12px 0 0;
@@ -335,9 +345,9 @@ export class ProjectsPanel extends LitElement {
   }
 
   #moreFields(form: AddPanel, kinds: Kinds | null, notesInstalled: boolean, busy: boolean) {
-    return html`<label class="f" for="p-kind">Kind</label><select id="p-kind" name="kind"
+    return html`<label class="f" for="p-kind">Kind</label><span class="sel"><select id="p-kind" name="kind"
         ?disabled=${busy || kinds === null} .value=${live(form.kind)} @change=${this.#field("kind")}>${(kinds?.found ?? []).map((kind) => html`<option
-          value=${kind.name} title=${kind.doc} ?selected=${kind.name === form.kind}>${kindLabel(kind)}</option>`)}</select>
+          value=${kind.name} title=${kind.doc} ?selected=${kind.name === form.kind}>${kindName(kind.name)}</option>`)}</select>${ARROW}</span>
       ${brokenLines(kinds).map((line) => html`<p class="hint" data-line="broken">${line}</p>`)}
       <label class="f" for="p-lead">Lead</label><input id="p-lead" type="text" name="lead" autocomplete="off"
         spellcheck="false" ?disabled=${busy} .value=${live(form.lead)} @input=${this.#field("lead")}>
@@ -425,10 +435,10 @@ export class ProjectsPanel extends LitElement {
       <form @submit=${this.#save} aria-busy=${busy ? "true" : "false"}>
         <label class="f" for="p-folder">Folder</label><input id="p-folder" type="text" name="folder" autocomplete="off"
           spellcheck="false" ?disabled=${busy} .value=${live(form.folder)} @input=${this.#editTyped("folder")}>
-        <label class="f" for="p-kind">Kind</label><select id="p-kind" name="kind" ?disabled=${busy || kinds === null}
-          .value=${live(form.kind)} @change=${this.#editTyped("kind")}>${kindChoices(kinds, form.base.kind).map(
-            (choice) => html`<option value=${choice.value} ?selected=${choice.value === form.kind}>${
-              choice.label}</option>`)}</select>
+        <label class="f" for="p-kind">Kind</label><span class="sel"><select id="p-kind" name="kind"
+          ?disabled=${busy || kinds === null} .value=${live(form.kind)} @change=${this.#editTyped("kind")}>${
+            kindChoices(kinds, form.base.kind).map((choice) => html`<option value=${choice.value}
+              ?selected=${choice.value === form.kind}>${choice.label}</option>`)}</select>${ARROW}</span>
         ${brokenLines(kinds).map((line) => html`<p class="hint" data-line="broken">${line}</p>`)}
         <label class="f" for="p-lead">Lead</label><input id="p-lead" type="text" name="lead" autocomplete="off"
           spellcheck="false" ?disabled=${busy} .value=${live(form.lead)} @input=${this.#editTyped("lead")}>

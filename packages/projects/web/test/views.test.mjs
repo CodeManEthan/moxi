@@ -180,4 +180,6 @@ test("the Edit panel's kinds keep the project's own kind", () => {
   assert.deepEqual(kindChoices(KINDS, "shelf-gone").map((choice) => choice.value),
                    ["agent", "project", "topic", "shelf", "shelf-gone"]);
   assert.equal(kindChoices(KINDS, "shelf-gone").at(-1).label, "shelf-gone (no installed module declares it)");
+  assert.deepEqual(kindChoices(KINDS, "project").map((choice) => choice.label),
+                   ["agent's home", "code project", "topic", "shelf"], "in the page's kind words");
 });
