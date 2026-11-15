@@ -270,6 +270,15 @@ def test_a_message_is_judged_as_at_commit(pub):
     refused(push(pub, "origin", "main"), "message line 3, session-pointer")
 
 
+def test_a_provenance_line_at_push_masks_a_credential(pub):
+    secret = token(12)
+    commit(pub, f"Add\n\nsee {POINTER} key {secret}\n", text=f"see {POINTER} {secret}\n")
+    done = push(pub, "origin", "main")
+    refused(done, f"message line 3, session-pointer: see {POINTER} key [github-pat]",
+            f"note.md:1: session-pointer: see {POINTER} [github-pat]")
+    assert secret not in done.stderr
+
+
 def test_commit_rules_are_applied_at_push(repo, names, remote):
     public_repo(repo, PIECE, "repo/commit-rules",
                 sets=("main=main", "refused-trailer=Round",

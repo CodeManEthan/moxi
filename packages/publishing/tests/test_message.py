@@ -151,6 +151,15 @@ def test_both_secrets_sets_refuse_and_a_credential_never_prints(pub):
     assert secret not in done.stderr and "bobsecret" not in done.stderr
 
 
+def test_a_provenance_line_masks_the_secrets_beside_it(pub):
+    secret = token(12)
+    done = commit(pub, f"Subject\n\nfrom {POINTER} key {secret} bobsecret\n")
+    assert done.returncode != 0
+    assert (f"line 3, session-pointer: from {POINTER} key [github-pat] [private-name]"
+            in done.stderr)
+    assert secret not in done.stderr and "bobsecret" not in done.stderr
+
+
 def test_a_private_email_in_a_trailer_refuses(pub):
     done = commit(pub, "Subject\n\nBody.\n\nReviewed-by: bob <bob@private.example.test>\n")
     assert done.returncode != 0 and "private-names/private-email" in done.stderr

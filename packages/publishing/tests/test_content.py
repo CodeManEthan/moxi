@@ -58,6 +58,29 @@ def test_a_provenance_hit_is_shown_with_its_line(pub):
     assert "Nothing was committed" in done.stderr
 
 
+def test_a_credential_beside_a_provenance_hit_is_masked(pub):
+    value = token(12)
+    done = commit(pub, "Add", text=f"see {POINTER} key {value} bobsecret\n")
+    assert done.returncode != 0
+    assert (f"note.md:1: session-pointer: see {POINTER} key [github-pat] [private-name]"
+            in done.stderr)
+    assert value not in done.stderr and "bobsecret" not in done.stderr
+    # An allowance passes the credential but never prints it.
+    out = content.judge([("a.md", 1, f"see {POINTER} key {value}")], sets=("credentials",),
+                        allow=_allow_all(value))
+    assert out == [f"a.md:1: session-pointer: see {POINTER} key [github-pat]"]
+    out = content.judge([], [f"docs/{POINTER} {value}.md"], sets=("credentials",))
+    assert f"docs/{POINTER} [github-pat].md (path name): session-pointer" in out
+    assert not any(value in line for line in out)
+
+
+def _allow_all(value):
+    from moxi_secrets import Allowlist
+
+    return Allowlist.from_text(allow_line("a.md", "credentials/*", fingerprint(value))
+                               .encode(), None, public_name=".secrets-allow")
+
+
 def test_a_moved_file_is_read_whole(repo, names):
     commit(repo, "Old text", name="old.md", text="bobsecret\n")
     public_repo(repo, PIECE)

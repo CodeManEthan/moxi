@@ -125,13 +125,16 @@ def judge(text: str, *, drop=(), passed=(), comment: str = "#", rules=None,
                 dropped.append(key)
             continue
         kept.append((index + 1, bare))
+    from moxi_publishing.content import masked
+
     refusals: list[tuple[int, str]] = []
     for number, line in kept:
         key = trailer_key(line)
         if key is not None and key.lower() in passed_keys:
             continue
         for rule, _ in _rules.hits(line, _rules.MESSAGES, names):
-            refusals.append((number, f"line {number}, {rule}: {_shown(line)}"))
+            shown = _shown(masked(line, sets))
+            refusals.append((number, f"line {number}, {rule}: {shown}"))
     if sets:
         from moxi_secrets import scan_lines
 

@@ -251,10 +251,30 @@ def _shown(line: str) -> str:
 
 
 def _masked(text: str, hits) -> str:
-    """`text` with each secrets hit's span replaced by its rule's name in brackets."""
-    for hit in sorted(hits, key=lambda h: h.start, reverse=True):
-        text = text[:hit.start] + f"[{hit.rule}]" + text[hit.end:]
+    """`text` with each secrets hit's span replaced by its rule's name in brackets; hits
+    that overlap share one bracket."""
+    spans: list[tuple[int, int, list[str]]] = []
+    for hit in sorted(hits, key=lambda h: h.start):
+        if spans and hit.start < spans[-1][1]:
+            start, end, names = spans[-1]
+            spans[-1] = (start, max(end, hit.end),
+                         names if hit.rule in names else [*names, hit.rule])
+        else:
+            spans.append((hit.start, hit.end, [hit.rule]))
+    for start, end, names in reversed(spans):
+        text = text[:start] + f"[{'/'.join(names)}]" + text[end:]
     return text
+
+
+def masked(text: str, sets=SETS) -> str:
+    """`text` as a provenance refusal prints it: each hit of `sets` masked, whether or
+    not an allowlist passes it, so a line shown for its pointer never shows a credential
+    beside it."""
+    if not sets:
+        return text
+    from moxi_secrets import scan
+
+    return _masked(text, scan(text, sets))
 
 
 def judge(lines, names=(), *, sets=SETS, allow=None, residue=frozenset(), rules=None
@@ -303,9 +323,11 @@ def judge(lines, names=(), *, sets=SETS, allow=None, residue=frozenset(), rules=
             if (path, matched) in residue:
                 continue
             if path == NAME_PATH:
-                found.append(((text, 0, 1), f"{text} (path name): {rule}"))
+                found.append(((text, 0, 1),
+                              f"{masked(text, sets)} (path name): {rule}"))
             else:
-                found.append(((path, number, 1), f"{path}:{number}: {rule}: {_shown(text)}"))
+                found.append(((path, number, 1),
+                              f"{path}:{number}: {rule}: {_shown(masked(text, sets))}"))
     found.sort(key=lambda item: item[0])
     seen, out = set(), []
     for _, line in found:
@@ -439,5 +461,5 @@ def scan_tree(root: str, rev: str = "HEAD", *, ci: bool = False) -> list[str]:
 
 __all__ = ["CONTENT", "PIECE_ID", "SETS", "CI_SETS", "NAME_PATH", "DIFF_FLAGS",
            "NO_REPLACE", "FileChange", "ScanError", "parse_patch", "residue_allowed",
-           "read_objects", "read_blobs", "allowlists", "judge", "staged", "pre_commit",
-           "scan_tree"]
+           "read_objects", "read_blobs", "allowlists", "masked", "judge", "staged",
+           "pre_commit", "scan_tree"]
