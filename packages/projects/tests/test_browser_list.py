@@ -221,6 +221,59 @@ def test_a_row_opened_by_its_address_takes_its_place_once_the_first_order_applie
     expect_order(panel, BY_ACTIVITY)
 
 
+#: Resolves once the shell's module list has reached this document, the page's copy with it.
+MODULES_HEARD = """async () => {
+  const { subscribe } = await import("/m/ui/client.js");
+  await new Promise((heard) => { subscribe("ui", "modules", () => heard()); });
+}"""
+#: Resolves after two frames: what was heard before is drawn.
+TWO_FRAMES = "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())))"
+
+
+def held(page, glob: str):
+    """Hold the page's requests to `glob` until the function given back is called."""
+    waiting: list = []
+    let_go: list[bool] = []
+
+    def hold(route):
+        if let_go:
+            route.continue_()
+        else:
+            waiting.append(route)
+
+    page.route(glob, hold)
+
+    def release() -> None:
+        let_go.append(True)
+        for route in waiting:
+            route.continue_()
+        waiting.clear()
+    return release
+
+
+@pytest.mark.parametrize("route", ["open/kestrel-web", "edit/kestrel-web", "remove/harbor-infra"])
+def test_a_list_read_late_keeps_the_first_order_until_the_fixture_reports(
+        fixture_shell, fixture_page, route):
+    now = time.time()
+    kit.say(fixture_shell, kit.full_report(fixture_shell, now))
+    fixture_page.clock.set_fixed_time(now)
+    list_read = held(fixture_page, "**/m/projects/api/projects")
+    kinds_read = held(fixture_page, "**/m/projects/api/kinds")
+    fixture_page.goto(f"/m/projects/{route}")
+    panel = fixture_page.locator("#moxi-panel > moxi-projects-page")
+    # The page has heard which modules are present and draws again with the kinds read,
+    # while its list is not read yet: it doesn't know which components it places, so the
+    # first order still holds.
+    fixture_page.evaluate(MODULES_HEARD)
+    with fixture_page.expect_response("**/m/projects/api/kinds"):
+        kinds_read()
+    fixture_page.evaluate(TWO_FRAMES)
+    list_read()
+    expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
+    expect(row(panel, route.split("/")[1])).to_have_attribute("open", "")
+    expect_order(panel, BY_ACTIVITY)
+
+
 def test_a_failed_read_draws_the_list_without_the_fixtures_parts(fixture_shell, fixture_page):
     kit.say(fixture_shell, kit.full_report(fixture_shell))
     panel = open_list(fixture_page)

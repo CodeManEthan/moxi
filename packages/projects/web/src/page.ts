@@ -718,7 +718,10 @@ export class ProjectsPage extends LitElement {
     const told = this.#told;
     const listing = state.rows ? list.value : null;
     const reports = this.#reports.reports();
-    const placed = this.#modules === undefined ? null : this.#facts.size + this.#placing.size;
+    // Which components it places is known only once the shell's module list is heard and
+    // the list is read (nothing is placed before); until then the first order holds.
+    const placed = this.#modules === undefined || list.value == null ? null
+      : this.#facts.size + this.#placing.size;
     const held = this.#first.held(placed, this.#reports.reported, Date.now());
     // The open row keeps the place it was drawn at, but not a place by key from before the
     // first order: a row opened by its address takes its place in that order when it applies.

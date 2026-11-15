@@ -250,7 +250,7 @@ ${s.join(`
       ${o!==null?rn(JSON.stringify(o),c`<moxi-projects-panel .ask=${o} .listing=${e.value}
         .kinds=${this.#e?.value??null} ?hidden=${!s.acts}
         @moxi-projects-panel-close=${()=>this.#mt()}></moxi-projects-panel>`):p}
-      ${this.#$}`}#lt(){return this.#i!==null?this.#i:this.#n!==null&&this.#o==="edit"?{mode:"edit",key:this.#n}:null}#at(e,s){let o=this.#x,i=s.rows?e.value:null,r=this.#f.reports(),l=this.#b===void 0?null:this.#u.size+this.#E.size,a=this.#C.held(l,this.#f.reported,Date.now()),u=this.#T?[]:this.#S;this.#T=a;let f=s.acts?this.#n:null,d=Date.now()/1e3,h=i===null?null:Bn(r,{home:i.home,now:d,hasProjects:i.projects.length>0,showAll:this.#_,roots:i.projects.map(m=>m.root)});return c`<section data-part="list" data-state=${s.state}>
+      ${this.#$}`}#lt(){return this.#i!==null?this.#i:this.#n!==null&&this.#o==="edit"?{mode:"edit",key:this.#n}:null}#at(e,s){let o=this.#x,i=s.rows?e.value:null,r=this.#f.reports(),l=this.#b===void 0||e.value==null?null:this.#u.size+this.#E.size,a=this.#C.held(l,this.#f.reported,Date.now()),u=this.#T?[]:this.#S;this.#T=a;let f=s.acts?this.#n:null,d=Date.now()/1e3,h=i===null?null:Bn(r,{home:i.home,now:d,hasProjects:i.projects.length>0,showAll:this.#_,roots:i.projects.map(m=>m.root)});return c`<section data-part="list" data-state=${s.state}>
       ${s.line!==null?c`<p class="state ${s.state==="loading"?"dim":""}"
         data-line=${s.state==="loading"?"reading":"failed"} role="status">${s.line}</p>`:p}
       ${o!==null&&s.acts?c`<p class="said" data-line="said" role="status">${o}</p>`:p}
