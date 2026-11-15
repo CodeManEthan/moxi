@@ -124,6 +124,21 @@ jobs:
       - name: install the browser and the system libraries it needs
         working-directory: packages/${{ matrix.package }}
         run: uv run --locked --all-packages --all-extras playwright install --with-deps ${{ matrix.engine }}
+      # The browser tests run without the theme's first font, Adwaita Sans, in the face the
+      # runner falls back to, DejaVu Sans, so a layout that holds only in Adwaita's widths
+      # fails here. A runner image that gains Adwaita fails the job rather than hide that.
+      - name: the fallback fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fontconfig fonts-dejavu-core
+      - name: the theme's first font is not installed
+        run: |
+          family="$(fc-match -f '%{family}' 'Adwaita Sans')"
+          echo "Adwaita Sans resolves to: ${family:-nothing}"
+          case "$family" in
+            "") echo "fc-match found no font for Adwaita Sans"; exit 1 ;;
+            *Adwaita*) echo "this runner has Adwaita, so the layouts would not meet a fallback face"; exit 1 ;;
+          esac
       - name: the browser tests
         working-directory: packages/${{ matrix.package }}
         run: uv run --locked --all-packages --all-extras pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces

@@ -14,6 +14,9 @@ const UTC = {
 const TODAY = "2026-11-08";
 const at = (text) => Date.parse(`${text.replace(" ", "T")}:00Z`) / 1000;
 const words = (parts) => parts.map((part) => part.text).join("");
+// The chart's words measured at a fixed width per character, as no face draws them.
+const perChar = (px) => (text) => text.length * px;
+const CHAR_5 = perChar(5);
 
 const sums = (extra = {}) => ({ requests: 1, input: 0, fresh_input: 0, cache_read: 0, cache_write: 0,
   cache_write_1h: 0, output: 0, tokens: 0, unpriced_tokens: 0, unknown_rows: 0, cost: 0,
@@ -175,7 +178,7 @@ test("the chart puts requests at their times, the dearest in the text colour, th
   const rows = [request(1, "2026-11-08 12:45", { context: 100_000 }), request(2, "2026-11-08 13:45", { cost: 0.5, context: 200_000 }),
                 request(3, "2026-11-08 14:45", { context: 268_000, window: 1_000_000, turn_start: true, turn: 2 })];
   const chart = sessionChart(report(rows, {}, { total: { ...sums(), ...requestsTotal({ turns: 2,
-    marks: [{ after: 1, ts: null, trigger: null, pre_tokens: null }] }) } }), "cost", 500, TODAY, UTC);
+    marks: [{ after: 1, ts: null, trigger: null, pre_tokens: null }] }) } }), "cost", 500, CHAR_5, TODAY, UTC);
   assert.equal(chart.end, 442);
   assert.deepEqual(chart.bars.map((bar) => Math.round(bar.x + bar.width / 2)), [46, 244, 442]);
   assert.deepEqual(chart.bars.map((bar) => bar.dearest), [false, true, false]);
@@ -192,13 +195,34 @@ test("the chart puts requests at their times, the dearest in the text colour, th
   assert.equal(chart.labels[0].text, "12:45");
   assert.equal(chart.labels[chart.labels.length - 1].text, "14:45");
   assert.match(chart.hits[0].title, /^#1 · /);
-  assert.equal(sessionChart(report(rows, {}, { total: { ...sums(), ...requestsTotal() } }), "tokens", 500, TODAY, UTC).top,
+  assert.equal(sessionChart(report(rows, {}, { total: { ...sums(), ...requestsTotal() } }), "tokens", 500, CHAR_5, TODAY, UTC).top,
                kWords(135));
   // With a request's time missing, requests stand one per column and the axis has no words.
   const untimed = sessionChart(report([request(1, null), request(2, "2026-11-08 13:00")], {},
-                                      { total: { ...sums(), ...requestsTotal() } }), "cost", 500, TODAY, UTC);
+                                      { total: { ...sums(), ...requestsTotal() } }), "cost", 500, CHAR_5, TODAY, UTC);
   assert.deepEqual(untimed.labels, []);
-  assert.equal(sessionChart(report([], {}, { total: { ...sums(), ...requestsTotal() } }), "cost", 500, TODAY, UTC), null);
+  assert.equal(sessionChart(report([], {}, { total: { ...sums(), ...requestsTotal() } }), "cost", 500, CHAR_5, TODAY, UTC), null);
+});
+
+test("the plot ends where the widest word after it still fits, and a compaction's word turns before the end", () => {
+  const rows = [request(1, "2026-11-08 12:45"), request(2, "2026-11-08 13:45"), request(3, "2026-11-08 14:45")];
+  const marked = report(rows, {}, { total: { ...sums(), ...requestsTotal({
+    marks: [{ after: 2, ts: null, trigger: "auto", pre_tokens: null }] }) } });
+  // Narrow words leave the least gutter, 58 px; the compaction's word fits after its line.
+  const narrow = sessionChart(marked, "cost", 500, CHAR_5, TODAY, UTC);
+  assert.equal(narrow.end, 442);
+  assert.deepEqual([narrow.compactions[0].x, narrow.compactions[0].anchor, narrow.compactions[0].labelX], [343, "start", 346]);
+  assert.equal(sessionChart(marked, "cost", 500, perChar(1), TODAY, UTC).end, 442);
+  // `a request` at 72 px takes a gutter of 6 + 72 + 2, and the word no longer fits after its line.
+  const wide = sessionChart(marked, "cost", 500, perChar(8), TODAY, UTC);
+  assert.equal(wide.end, 500 - 80);
+  assert.deepEqual(wide.bars.map((bar) => Math.round(bar.x + bar.width / 2)), [46, 233, 420]);
+  assert.equal(wide.compactions[0].label, "compaction (auto)");
+  assert.deepEqual([wide.compactions[0].x, wide.compactions[0].anchor, wide.compactions[0].labelX], [326.5, "end", 323.5]);
+  // The widest word sets the gutter, whichever it is: here the last context's.
+  const big = (text) => (text === kWords(3000) ? 120 : text.length * 5);
+  assert.equal(sessionChart(marked, "cost", 500, big, TODAY, UTC).end, 500 - 128);
+  assert.equal(sessionChart(marked, "cost", 500, big, TODAY, UTC).dot.words, kWords(3000));
 });
 
 test("an addressed session's row comes from the session answer over its whole life", () => {
