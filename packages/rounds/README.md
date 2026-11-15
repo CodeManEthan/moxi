@@ -392,6 +392,25 @@ build takes an id no earlier report of the stage used, a dropped build's include
 `verdict` prints the build's findings and what its finish still waits for; `show` and
 the round note give each build's newest verdict and its findings.
 
+A build's `finish` waits for ten gates, read at the tip being finished, and names each
+one that does not hold with its number and the command that meets it:
+
+1. its verification counts at the tip, or the operator skipped it, or the flow has none;
+2. no finding of the build is open;
+3. the repo's check passed at the tip, or CI's form of it is met there, or the operator
+   skipped it;
+4. no question holds the stage;
+5. the target moved under the build in no way that owes a re-check;
+6. the tip holds the target, where the repo's `check_on` is `merged` (the default) and
+   wherever the check was met by CI alone;
+7. the worktree, while it is there, holds no change and no untracked path (ignored ones
+   are left), and the branch is still at the tip;
+8. each step of your own is done at the tip, or the operator skipped it;
+9. the build has work: it reads `building` or `merged`;
+10. it shares no commits with another build.
+
+No skip meets gates 9 and 10, and `finish` itself is never skipped.
+
 The lead may mark a `minor` or `note` finding fixed without a re-check: `mark ROUND
 B1.L3 --fixed --commit SHA [--commit SHA]... --no-behaviour-change`, naming every
 commit of the fix, each on the build's branch. The flag is the lead's statement that

@@ -432,10 +432,10 @@ def test_a_flow_with_no_questions_step_shows_the_hold_on_the_stage_it_stops(open
 
 # -- a step with no row ------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["finish", "ratify", "retro"])
+@pytest.mark.parametrize("name", ["ratify", "retro"])
 def test_a_step_with_no_row_is_not_built_and_never_read_as_done(folder, name):
     fold(folder, stage("B1"))
-    found = step(folder, name, "B1" if name not in ("ratify", "retro") else None)
+    found = step(folder, name)
     assert found.state == steps.NOT_BUILT
     assert steps.NOT_BUILT not in steps.STATES
     assert not found.settled

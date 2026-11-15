@@ -103,7 +103,7 @@ def test_a_step_report_is_recorded_under_its_step_and_its_findings_keep_the_step
     assert done.verdict.step == REVIEW
     [found] = findings.of_stage(folded(folder), "B1")
     assert (found.key, found.step, found.state) == ("B1.L1", REVIEW, "open")
-    assert "finding B1.L1: minor, open: a finding of L1" in done.waits
+    assert "gate 2, findings: finding B1.L1: minor, open: a finding of L1" in done.waits
 
 
 def test_a_build_report_has_no_step_field(built):
@@ -244,8 +244,10 @@ def test_verdict_names_the_report_step_among_what_finish_waits_for(built):
 
     done = verify(folder, tree.rev(), step=None, name="build.md")
 
-    assert any(line.startswith("security-review: ready (no report of the step "
-                               "security-review of B1 is recorded)")
+    assert any(line.startswith("gate 8, user steps: the step security-review of B1 is "
+                               "not done at ")
+               and line.endswith(": no report of the step security-review of B1 is "
+                                 "recorded")
                for line in done.waits)
 
 

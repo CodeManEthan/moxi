@@ -1040,7 +1040,7 @@ def _verdict(args, out) -> int:
             for line in done.waits:
                 print(f"  {line}", file=out)
         else:
-            print(f"finish of {one.stage} waits for none of its steps or findings",
+            print(f"finish of {one.stage} waits for nothing: its gates hold",
                   file=out)
         _warn_of(done.failed, args.prog, args.verb)
         return codes.OK

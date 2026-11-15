@@ -232,6 +232,11 @@ def seen_of(state: states.State, name: str, *, settings,
                     and commissioned.get("worktree") and worktree.is_dir())
             clean = bool(here) and read_tip(worktree, build.branch).clean
             head = tip if tip is not None else now.status.head
+            tree = _tree(commissioned, worktree, here=bool(here))
+            before = now.status.target_before
+            holds = (None if before is None or head is None
+                     or set(Git(root).present([before, head])) != {before, head}
+                     else Git(root).is_ancestor(before, head))
             since, moved = _since_verdict(state, build, now.status, Git(root),
                                           head=head, settings=settings)
             reported = {step: _since_verdict(state, build, now.status, Git(root),
@@ -249,8 +254,24 @@ def seen_of(state: states.State, name: str, *, settings,
             else tuple(argv or ()),
             values=None if tip is None else values(name, build, root=root, tip=tip),
             ci=_ci_now(settings, build, name=name, root=root, tip=tip),
-            head=head, since=since, drift=moved, reported=reported)
+            head=head, since=since, drift=moved, reported=reported,
+            target_before=before, holds_target=holds, tree=tree,
+            check_on=own.build_setting(settings, build.repo, "check_on"),
+            shares=tuple(now.shares))
     return found
+
+
+def _tree(commissioned: Mapping, worktree: Path, *, here: bool) -> str | None:
+    """The build's worktree as `finish` reads it: None when it no longer exists,
+    `elsewhere` when it was made on another machine, else whether it is clean. Ignored
+    paths are left out; a tracked change or an untracked path is a change."""
+    from . import finish_gates
+
+    if commissioned.get("host") not in (None, places.host()):
+        return finish_gates.ELSEWHERE
+    if not here:
+        return None
+    return finish_gates.CHANGED if Git(worktree).has_changes() else finish_gates.CLEAN
 
 
 def _since_verdict(state: states.State, build: builds.Build, status: builds.Status,

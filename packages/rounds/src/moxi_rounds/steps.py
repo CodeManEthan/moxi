@@ -73,8 +73,8 @@ other, so its row says when the stage reads as skipped.
   waits for the build to have work, and `Step.owes` says why a re-check is owed, with
   the range to read. It is read from what `Asked.seen` says of the stage's build.
 
-**What git says.** The `build`, `check` and `verify-build` rows, and a step's of the
-user's own, read a stage's open build as the caller read it from git (`Asked.seen`,
+**What git says.** The `build`, `check`, `verify-build` and `finish` rows, and a
+step's of the user's own, read a stage's open build as the caller read it from git (`Asked.seen`,
 which `checking.seen_of` gives). Every reader of a step passes it. A caller that read nothing of git gets such a step as `WAITING`
 on that read, with `Step.unread` set, and is to read git before it says the step: the
 index keeps the step the log alone gives, and marks it so (`at`).
@@ -91,6 +91,13 @@ index keeps the step the log alone gives, and marks it so (`at`).
   step's reports alone (`Seen.reported`), and once the build is finished. Until then
   it waits for the build to have work, and `Step.owes` says why a report is owed.
   (`report_row` gives its row.)
+
+- `finish` of a stage: not due until the stage has a build that is open or finished,
+  though it carries the holds on its stage from the start; done once the build is
+  finished. Until then it waits for every gate of `finish_gates.unmet` that does not
+  hold at the build's tip, each named with its number and the command that meets it
+  (`Step.gates`), and is ready once all hold. It is read from what `Asked.seen` says of
+  the stage's build.
 
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
@@ -110,8 +117,8 @@ import dataclasses
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
-from . import (brake, builds, checking, findings, flows, holds, questions, skips, stages,
-               tracing, versions)
+from . import (brake, builds, checking, findings, finish_gates, flows, holds, questions,
+               skips, stages, tracing, versions)
 from . import ci as ci_reads
 from . import state as states
 from .errors import Unmet
@@ -156,6 +163,12 @@ class Seen:
     when git does not hold that head; `drift`, the build's drift against that verdict
     (`drift.Drift`), None with none; `reported`, for each report step of the user's
     own, its `(since, drift)` read the same way against that step's newest verdict;
+    `target_before`, `P`, the target before the build reached it (its head while the
+    build is off it); `holds_target`, whether `P` is the tip or an ancestor of it, None
+    when that could not be read; `tree`, the worktree as `finish` reads it: None where
+    it no longer exists, else `clean`, `changed` (a tracked change or an untracked path)
+    or `elsewhere` (made on another machine); `check_on`, the repo's setting of that
+    name; `shares`, the `(round, stage)` of each build it shares commits with;
     `problem`, what kept the build from being read, in which case nothing else is
     known."""
 
@@ -169,6 +182,11 @@ class Seen:
     since: tuple[str, ...] | None = None
     drift: object = None
     reported: Mapping[str, tuple] | None = None
+    target_before: str | None = None
+    holds_target: bool | None = None
+    tree: str | None = None
+    check_on: str = "merged"
+    shares: tuple[tuple[str, str], ...] = ()
     problem: Unmet | None = None
 
 
@@ -205,6 +223,7 @@ class Step:
       state given is no answer.
     - `owes`: for a gate that more than one thing meets, what each still owes, in
       words: the `check` of a repo that declares `ci`.
+    - `gates`: for `finish`, the numbers of the gates in `waits`, one for each.
     """
 
     step: str
@@ -216,6 +235,7 @@ class Step:
     entry: Mapping | None = None
     unread: bool = False
     owes: tuple[str, ...] = ()
+    gates: tuple[int, ...] = ()
 
     @property
     def settled(self) -> bool:
@@ -441,6 +461,35 @@ def _before_a_run(stage: str, seen: Seen, what: str) -> tuple[Unmet, ...]:
     return tuple(waits)
 
 
+FINISH = findings.FINISH
+
+
+def _finish(state: states.State, about: Asked) -> Step:
+    stage = about.stage
+    planned = None if stage is None else stages.find(state, stage)
+    built = None if stage is None else stages.build_of(state, stage)
+    if planned is not None and planned.round is not None:
+        # A stage that stands for a child round has no build: it is not built here.
+        return Step(FINISH, NOT_BUILT, stage=stage, waits=held_by(
+            state, stage, name=about.name, closed=about.closed))
+    if built is None:
+        return Step(FINISH, NOT_DUE, stage=stage, waits=() if stage is None else held_by(
+            state, stage, name=about.name, closed=about.closed))
+    if built == stages.FINISHED:
+        return Step(FINISH, DONE, stage=stage)
+    seen = (about.seen or {}).get(stage)
+    if seen is None:
+        return _not_read(FINISH, stage, f"whether the gates of {stage}'s finish hold",
+                         about.name)
+    if seen.problem is not None:
+        return Step(FINISH, WAITING, stage=stage, waits=(seen.problem,))
+    found = finish_gates.unmet(state, stage, seen=seen, name=about.name,
+                               closed=about.closed, register=about.register)
+    return Step(FINISH, WAITING if found else READY, stage=stage,
+                waits=tuple(one.unmet for one in found),
+                gates=tuple(one.number for one in found))
+
+
 def report_row(step: str) -> Row:
     """The row of the report step `step` of the user's own: done at the tip when its
     own newest report is publishable and counts there by the rule the build's
@@ -508,7 +557,7 @@ def command_row(step: str) -> Row:
 #: no row here: `row_of` gives it its own.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
                         COMMISSION: _commission, BUILD: _build, CHECK: _check,
-                        VERIFY_BUILD: _verify_build}
+                        VERIFY_BUILD: _verify_build, FINISH: _finish}
 
 
 def row_of(step: str, entry: Mapping | None) -> Row | None:
@@ -708,7 +757,8 @@ def said(step: Mapping | None) -> str:
 
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
-           "SETTLED", "HELD", "COMMISSION", "BUILD", "CHECK", "Seen", "Asked", "Step", "Row",
+           "SETTLED", "HELD", "COMMISSION", "BUILD", "CHECK", "FINISH", "Seen", "Asked",
+           "Step", "Row",
            "ROWS", "report_row", "command_row", "row_of", "answer",
            "held_by", "held_unbuilt", "order", "of", "one", "is_settled", "current", "at",
            "said"]

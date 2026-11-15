@@ -261,5 +261,8 @@ def test_what_finish_waits_for_names_the_verification_owed(built):
 
     done = verify(folder, tree.rev(), "fold-first")
 
-    assert any(line.startswith("verify-build: ready") for line in done.waits)
+    assert any(line.startswith("gate 1, verification: the verification of B1 does not "
+                               "count at ")
+               and line.endswith("is fold-first: a re-check is owed")
+               for line in done.waits)
     assert not any("not-built" in line for line in done.waits)

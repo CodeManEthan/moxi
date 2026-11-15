@@ -1004,7 +1004,7 @@ def test_a_build_report_is_recorded_against_the_head_it_read(built):
     assert event["findings"] == [{"id": "L1", "severity": "major", "state": "open",
                                   "text": "a line is unclear"}]
     assert [one.key for one in done.findings] == ["B1.L1"]
-    assert "finding B1.L1: major, open: a line is unclear" in done.waits
+    assert "gate 2, findings: finding B1.L1: major, open: a line is unclear" in done.waits
 
 
 def test_a_head_under_the_tip_is_recorded_after_the_branch_moved(built):
@@ -1067,7 +1067,7 @@ def test_a_build_report_lists_every_open_finding_and_sets_its_state(built):
 
     assert [(one.key, one.state, one.step) for one in done.findings] == [
         ("B1.L1", "fixed", "verify-build"), ("B1.L2", "no-action", "verify-build")]
-    assert not [line for line in done.waits if line.startswith("finding")]
+    assert not [line for line in done.waits if line.startswith("gate 2,")]
 
 
 def test_a_finding_closed_by_a_report_may_be_left_out_of_the_next(built):
@@ -1141,7 +1141,7 @@ def test_the_verb_prints_the_verdict_and_what_finish_waits_for(built, capsys):
     assert f"recorded for {ROUND}: fold-first for B1 at {tree.rev()[:12]}" in out
     assert "finding B1.L1: major, open: a line is unclear" in out
     assert "finish of B1 waits for:\n" in out
-    assert "  finding B1.L1: major, open: a line is unclear\n" in out
+    assert "  gate 2, findings: finding B1.L1: major, open: a line is unclear\n" in out
 
 
 def test_show_and_the_round_note_give_a_build_s_verdict_and_findings(built, capsys):

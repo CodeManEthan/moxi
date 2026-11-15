@@ -117,6 +117,13 @@ does not yet build.
   report again at the bytes its verdict recorded and adds the findings, waiting items
   and decisions the record lacks, refused when it would take away or change anything.
   Neither names a ruling, a skip or a verdict word.
+- The `finish` step of a stage reads its ten gates at the build's tip: verification that
+  counts there, no open finding, the check (or CI's form of it), no question holding
+  the stage, no drift re-check owed, the tip holding the target where `check_on` is
+  `merged` or the check was met by CI alone, a clean worktree and a branch still at the
+  tip, every step of your own done, a build with work, and no commits shared with
+  another build. `next`, `show` and `list` read it, and `verdict` prints each gate that
+  does not hold, by number, with the command that meets it.
 - A round's export has two views, both when `--view` is left out: `docket`, its open
   and parked questions, and `ratify`, the unruled decisions of its finished builds,
   which it names under `covers`, as the project's `ratify` setting picks them (`majors`,

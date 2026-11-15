@@ -77,10 +77,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import (brake, builds, checking, decisions, ending, findings, flows, folders,
-               model_tiers,
-               open_builds, questions, report_block, stages, stepping, versions, waits,
-               write)
+from . import (brake, builds, checking, decisions, ending, findings, finish_gates, flows,
+               folders, model_tiers, open_builds, questions, report_block, stages,
+               stepping, versions, waits, write)
 from . import settings as own
 from . import state as states
 from .errors import BadBlock, NoLog, NoRound, Problem, Refused, RoundsError, Unmet
@@ -550,26 +549,19 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
 
 def finish_waits(state: states.State, stage: str, *, name: str,
                  settings) -> tuple[str, ...]:
-    """What the finish of `stage` still waits for, of what the round's steps and
-    findings say, a line each: every step of the stage before its finish that is
-    neither done nor skipped, with what it waits for or owes, and every open finding
-    of its build. Reads git for the
-    steps that need it."""
+    """What the finish of `stage` still waits for, a line each: every gate of
+    `finish_gates` that does not hold at the build's tip, with its number, or what
+    kept the build from being read. Empty once every gate holds. Reads git."""
     from . import steps
 
     seen = checking.seen_of(state, name, settings=settings)
-    lines = []
-    for one in steps.of(state, name=name, seen=seen):
-        if one.stage != stage:
-            continue
-        if one.step == findings.FINISH:
-            break
-        if not one.settled:
-            why = "; ".join([wait.reason for wait in one.waits] + list(one.owes))
-            lines.append(f"{one.step}: {one.state}" + (f" ({why})" if why else ""))
-    lines += [f"finding {one.key}: {one.severity}, open: {one.text}"
-              for one in findings.of_stage(state, stage) if one.open]
-    return tuple(lines)
+    found = steps.one(state, findings.FINISH, stage, name=name, seen=seen)
+    if found is None or found.settled:
+        return ()
+    if not found.gates:
+        return tuple(one.reason for one in found.waits)
+    return tuple(f"gate {number}, {finish_gates.GATES[number]}: {one.reason}"
+                 for number, one in zip(found.gates, found.waits))
 
 
 __all__ = ["VERIFIES", "Recorded", "applies", "finish_waits", "lists", "path", "record"]
