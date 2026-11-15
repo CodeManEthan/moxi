@@ -146,6 +146,28 @@ def test_a_branch_that_moved_once_the_lock_was_taken_is_refused(ready, repo,
     assert of_type(path, "finish.action") == [] and lock_ref(repo) is None
 
 
+def test_a_target_moved_between_the_gates_and_the_lock_is_refused_with_nothing_written(
+        ready, repo, monkeypatch):
+    path, _tree = ready
+    take = finish_lock.take
+    before = path.read_bytes()
+
+    def take_then_move_the_target(*args, **kwargs):
+        taken = take(*args, **kwargs)
+        # Another finish merged into the target while this one waited for the lock.
+        repo.commit("other.txt", "another build's work on the target")
+        return taken
+
+    monkeypatch.setattr(finish_lock, "take", take_then_move_the_target)
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", by="coder")
+
+    assert [one.reason for one in refused.value.unmet if "does not hold the target main"
+            in one.reason]
+    assert refused.value.done == ()
+    assert path.read_bytes() == before and lock_ref(repo) is None
+
+
 def test_a_commit_made_while_the_actions_run_is_not_merged_and_the_finish_is_at_the_tip(
         ready, repo, monkeypatch):
     path, tree = ready
