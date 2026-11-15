@@ -5493,6 +5493,10 @@ moxi	packages/moxi/src/moxi/cli.py	path.parent.mkdir(parents=True, exist_ok=True
 moxi	packages/moxi/src/moxi/cli.py	print(f"    last {_DONE.get(record.get('op'), 'changed')} by "	keep	changed	changed
 moxi	packages/moxi/src/moxi/cli.py	seen = set() if _seen is None else _seen	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	shortcut_text	name	windows	is_windows
+moxi	packages/moxi/src/moxi/cli.py	help="print one JSON object, {changed, problem, fix, units}, and "	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	set	set
+moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	any	any
+moxi	packages/moxi/src/moxi/cli.py	print(json.dumps({"changed": changed, "problem": problem, "fix": fix, "units": units}))	keep	changed	changed
 moxi	packages/moxi/src/moxi/config.py	-	name	set	set_value
 moxi	packages/moxi/src/moxi/config.py	Key.__init__	name	type	value_type
 moxi	packages/moxi/src/moxi/config.py	_change(module, key, "set", value, by=by)	keep	set	set
@@ -5523,6 +5527,28 @@ moxi	packages/moxi/src/moxi/config.py	raise bad(f"has type {kind!r}", f"use one 
 moxi	packages/moxi/src/moxi/config.py	raise bad(f"has unknown field(s) {', '.join(unknown)}",	keep	bad	bad
 moxi	packages/moxi/src/moxi/config.py	raise bad(f"lacks {required}", f"give it a {required}")	keep	bad	bad
 moxi	packages/moxi/src/moxi/config.py	with a `type` (or a `retired`) is a key; any other table groups keys. So the schema	keep	type	type
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"is retired but has {', '.join(shown)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has {field} {text!r}, which is not one line of text",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has a {field} of {len(text)} characters, more than {most}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has unit but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has the unit {found['unit']!r}, more than two words",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has {field} {spec[field]!r}, not a bool",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has pick but is {_a(kind)}", "remove pick; only an enum has a pick list")	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has choices but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad("has choices that are not a table of words",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has choices for {value!r}, which is not one of its values",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has choices {words!r} for {value!r}, which is not one line of "	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad("has hurts that is not a table", f"give hurts as a table of "	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has unknown hurts field(s) {', '.join(unknown)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts.when {hurts.get('when')!r}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts.{field} {hurts.get(field)!r}, which is not one line of "	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts.stays {stays!r}, not a bool",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts.stays but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has terminal but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	if not isinstance(terminal, dict) or set(terminal) != {"on", "off"}:	keep	set	set
+moxi	packages/moxi/src/moxi/config.py	raise bad("has a terminal that is not a table of on and off",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has terminal.{state} {terminal[state]!r}, which is not one line "	keep	bad	bad
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	can call `record`. The doctor's runner and checks live in `moxi.doctor._run`, which the	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/_run.py	"""Why `record` can't be written in place, or None: the file, when it exists, and the	keep	record	record
@@ -5992,6 +6018,7 @@ moxi	packages/moxi/tests/test_config.py	assert s["local.record"] == Path(env["HO
 moxi	packages/moxi/tests/test_config.py	assert set(s.sources.values()) == {"default"}	keep	set	set
 moxi	packages/moxi/tests/test_config.py	env = {"HOME": str(tmp_path), "MOXI_DEMO_CONFIG_HOME": str(tmp_path / "config")}	keep	HOME	HOME
 moxi	packages/moxi/tests/test_config.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_config_page.py	assert cli.main(["config", module, "show", "--json"]) == 0	keep	show	show
 moxi	packages/moxi/tests/test_config_set.py	("demo", "private_names", "set", "ui"),	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	("set", "block", (True,)),	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	("set", "block", (True,)),	use	set	set_value
@@ -6017,6 +6044,26 @@ moxi	packages/moxi/tests/test_config_set.py	run(capsys, "config", "set", "demo",
 moxi	packages/moxi/tests/test_config_set.py	run(capsys, "config", "set", "demo", "tags", "--add", "plain words")	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	run(capsys, "config", "set", "demo", "tags", "--add", '{name = "x"}')	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	s = config.load("demo", schema, path=named, env={"HOME": str(tmp_path)})	keep	HOME	HOME
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "local.retain_days", "7", "--by", "ui") == (	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	0, {"changed": True, "problem": None, "fix": None, "units": []})	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x") == (	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	0, {"changed": False, "problem": None, "fix": None, "units": []})	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is True	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is True	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is False	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is False	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	(("set", "demo", "block", "maybe"), 2, "cannot be 'maybe', which is not a bool",	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	(("set", "demo", "local.retain_dayz", "1"), 2, "is not a setting of demo",	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert out["changed"] is False and out["fix"] == fix and out["units"] == []	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "name", "kept")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert (code, out) == (2, {"changed": False, "problem": "is a name kept back",	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "name", "boom")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "block", "true")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert code == 75 and out["changed"] is False	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	for argv in (("set", "demo", "block", "true"), ("unset", "demo", "block")):	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert code == 2 and out["changed"] is False	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	"changed": False,	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "local.retain_days", "seven")	keep	set	set
 moxi	packages/moxi/tests/test_doctor.py	-	name	test_the_core_s_records_are_in_the_core_s_state_directory	test_the_core_s_records_are_in_the_core_s_state_dir
 moxi	packages/moxi/tests/test_doctor.py	assert set(got) == {"commit:abc", "other"}	keep	set	set
 moxi	packages/moxi/tests/test_doctor.py	assert set(records(home)) == {"a"}	keep	set	set
@@ -6586,6 +6633,11 @@ moxi	packages/moxi/tests/test_units.py	assert set(w.plan(only=["relay"])) == {("
 moxi	packages/moxi/tests/test_units.py	textwrap.dedent(source.format(flag=False, tool=str(tool))))	keep	flag	flag
 moxi	packages/moxi/tests/test_units.py	textwrap.dedent(source.format(flag=True, tool=str(tool))))	keep	flag	flag
 moxi	packages/moxi/tests/test_units.py	w.module(units_from=source.format(flag=False, tool=str(tool)))	keep	flag	flag
+moxi	packages/moxi/tests/test_units.py	assert cli.main(["config", "set", "demo", "relay.enabled", "true", "--json"]) == 1	keep	set	set
+moxi	packages/moxi/tests/test_units.py	assert (done["changed"], done["problem"], done["fix"]) == (True, None, None)	keep	changed	changed
+moxi	packages/moxi/tests/test_units.py	assert any("Access denied." in line for line in done["units"])	keep	any	any
+moxi	packages/moxi/tests/test_units.py	assert any("retries the units" in line for line in done["units"])	keep	any	any
+moxi	packages/moxi/tests/test_units.py	assert done["changed"] is True and done["units"]	keep	changed	changed
 moxi	packages/moxi/tests/test_units_acts.py	"""`off` (here, not on this system) and `nobackend` make no read, and a failed `show`	keep	show	show
 moxi	packages/moxi/tests/test_units_acts.py	"systemctl", "--user", "show", "--property=Version"]	keep	show	show
 moxi	packages/moxi/tests/test_units_acts.py	[acted] = act("services", ["backup.timer"], foreign=True)	keep	foreign	foreign
