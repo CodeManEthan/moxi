@@ -354,10 +354,23 @@ def _builds(shown_as: dict) -> list[str]:
     return lines
 
 
+def _waits(shown_as: dict) -> list[str]:
+    listed = shown_as["waits"]
+    if not listed:
+        return ["No waiting item."]
+    lines = []
+    for one in listed:
+        lines += _item(showing.wait_line(one))
+        for line in showing.wait_facts(one):
+            lines += _item(line, indent="  ")
+    return lines
+
+
 #: The parts of a round's note, in the order they are written.
 PARTS: tuple[Part, ...] = (
     Part("Flow", _flow),
     Part("Builds", _builds),
+    Part("Waiting items", _waits),
     Part("Questions", _questions),
     Part("Rulings", _rulings),
     Part("Verdicts", _verdicts),

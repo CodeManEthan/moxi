@@ -109,7 +109,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 17
+DERIVED = 18
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -133,6 +133,8 @@ STEP = "step"
 #: And each build that is open, under its stage: its commission, readings and finish
 #: tips, which with the round's landings make the build again (`builds.from_item`).
 BUILD = "build"
+#: And each waiting item that is still open.
+WAIT = "wait"
 
 
 def _step(folded: state.State):
@@ -142,11 +144,18 @@ def _step(folded: state.State):
     return steps.at(folded)
 
 
+def _waits(folded: state.State):
+    # The waiting items' module marks one done through the write path, which updates
+    # the index: it too is loaded when a log is first read.
+    from . import waits
+    return waits.items(folded)
+
+
 ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
     QUESTION: questions.waiting, RULING: readback.unmarked,
     READ_BACK: readback.read_backs, STAGE: versions.stages, VERSION: versions.newest,
     PENDING: versions.waiting, VERDICT: versions.verdicts,
-    THREAD: versions.threads, STEP: _step, BUILD: builds.opened}
+    THREAD: versions.threads, STEP: _step, BUILD: builds.opened, WAIT: _waits}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""

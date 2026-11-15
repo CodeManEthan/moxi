@@ -109,6 +109,10 @@ fix: {steps(B)}
 
 No build.
 
+## Waiting items
+
+No waiting item.
+
 ## Questions
 
 No question.
@@ -173,6 +177,10 @@ fix: {steps()}
 ## Builds
 
 No build.
+
+## Waiting items
+
+No waiting item.
 
 ## Questions
 
@@ -288,7 +296,8 @@ def test_a_note_lists_what_showing_the_round_gives(rounds, capsys):
         assert f"- {one['id']}: {one['text']}" in text
         assert f"  {one['id']}: {one['text']}" in printed
     assert [part.title for part in rendering.PARTS] == [
-        "Flow", "Builds", "Questions", "Rulings", "Verdicts", "History"]
+        "Flow", "Builds", "Waiting items", "Questions", "Rulings", "Verdicts",
+        "History"]
     headings = [line[3:] for line in text.splitlines() if line.startswith("## ")]
     assert headings == [part.title for part in rendering.PARTS]
 

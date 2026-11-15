@@ -85,6 +85,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND --flow NAME` | move the round up to a heavier flow, or to its own flow's steps as the config has them now |
 | `moxi rounds mark ROUND B<n> --after B<m>[,...]` | make a stage wait for more stages |
 | `moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA... --no-behaviour-change` | the lead's mark of a minor or note finding fixed, naming every commit of the fix |
+| `moxi rounds mark ROUND B<n>.W<k> --done --record PTR` | a waiting item is done, with a pointer to the report, commit or message that shows it |
 | `moxi rounds mark ROUND thread:NAME --close\|--accept-risk --record PTR` | the lead's decision on a design that was sent back twice in a row |
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
@@ -92,7 +93,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set, runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
-| `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, rulings not yet shown |
+| `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
 | `moxi rounds list ROUND\|PROJECT --questions [--view docket] [--json] [--out DIR]` | the questions written out as markdown; `--out` writes `questions.md` and `questions.json` into DIR |
 | `moxi rounds drop ROUND --by operator\|lead --record PTR [--withdraw-questions]` | end a round short of its work |
 
@@ -398,6 +399,13 @@ gets a re-check of its diff. The build's `verify-build` step is done once its ne
 report is `publishable` and every commit since the head it read is named by a mark or
 is a merge of the target that the drift rule below accepts. Otherwise `next` says a
 re-check is owed, with the range it reads, at the step's re-check tier.
+
+Work that can't be done without the operator, such as a check on his phone, is a
+`[[wait]]` in the report. When the report is recorded each is an open waiting item of
+the round, `B1.W1`, at once. It does not hold the build's finish; it holds the round's
+close, and `list --waiting` lists it, until `mark ROUND B1.W1 --done --record PTR` names
+the report, commit or message that shows it done. Every waiting item a report lists is
+new, and takes an id no earlier report of the stage used.
 
 A verdict records the head it read and that head's merge-base with the target. When the
 target moves on, `show` reads whether the move touches the build: `target moved 4

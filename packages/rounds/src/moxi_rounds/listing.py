@@ -13,10 +13,12 @@ log can't be read is listed as unreadable, in either listing,
 since nothing says which it belongs in.
 
 **What waits on the operator** (`waiting`): across every project, or in one, each open
-question, each parked question with what it waits for, each project's rulings not
-yet shown to him, and each open build of its rounds that is idle, gone, empty or
-unclear, that shares commits with another, or that git could not read. The question rows are the ones a project's questions export holds,
-from the same function, so the two never differ.
+question, each parked question with what it waits for, each open waiting item of an
+open round, each project's rulings not yet shown to him, and each open build of its
+rounds that is idle, gone, empty or unclear, that shares commits with another, or that
+git could not read. The question rows are the ones a project's questions export holds,
+from the same function, so the two never differ. A waiting item is no question, and is
+in no export.
 
 **A later kind of record** joins a listing in one place. A count of the rounds listing
 is a row of `COUNTS`. A kind of row that waits on the operator is a row of `WAITING`:
@@ -35,7 +37,7 @@ from datetime import datetime
 from moxi import store
 
 from . import (builds, checking, export, folders, index, log, open_builds, questions,
-               shown, steps)
+               shown, steps, waits)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet, Unreadable
@@ -315,6 +317,36 @@ def _list_lines(lists: Sequence, now: str) -> list[str]:
     return lines
 
 
+@dataclass(frozen=True)
+class WaitRow:
+    """An open waiting item of an open round, as the index keeps it: the `round` that
+    holds it, its key and the item's body."""
+
+    round: str
+    id: str
+    body: Mapping
+
+    def data(self) -> dict:
+        return {"round": self.round, "id": self.id, **dict(self.body)}
+
+
+def _waits(project: Project) -> Sequence:
+    return [WaitRow(summary.name, item.id, item.body) for summary in project.rounds
+            if summary.unreadable is None and summary.status == states.OPEN
+            for item in summary.of(index.WAIT)]
+
+
+def _wait_lines(rows: Sequence, now: str) -> list[str]:
+    lines = []
+    for row in rows:
+        body = row.body
+        lines += [f"  {row.round} {row.id}: {body.get('text')}",
+                  f"    from: {body.get('report')}   by: {body.get('by')}   at: "
+                  f"{body.get('at')}   age: {age(body.get('at'), now)}",
+                  f"    once done: {waits.mark_line(row.round, row.id)}"]
+    return lines
+
+
 def _builds_to_look_at(project: Project) -> Sequence:
     return project.builds
 
@@ -357,6 +389,7 @@ WAITING: tuple[Kind, ...] = (
          _question_lines),
     Kind("parked", "parked questions, not put to him", _questions_in(questions.PARKED),
          _entries_data, _question_lines),
+    Kind("waits", "open waiting items", _waits, _builds_data, _wait_lines),
     Kind("not_shown", "rulings not yet shown to him", _lists, _lists_data, _list_lines),
     Kind("builds", "builds idle, gone, empty, unclear, sharing or not read",
          _builds_to_look_at, _builds_data, _build_lines))

@@ -49,7 +49,7 @@ from pathlib import Path
 from moxi import store
 
 from . import (builds, checking, ci, closing, drift, findings, folders, index, log,
-               open_builds, questions, shown, skips, steps, tracing, versions)
+               open_builds, questions, shown, skips, steps, tracing, versions, waits)
 from . import settings as own
 from . import state as states
 from .errors import (BadArgument, NoLog, NoRound, Refused, RoundsError, Unmet,
@@ -535,8 +535,42 @@ def _build_lines(listed: list) -> list[str]:
     return lines
 
 
+def _waits(found: Shown) -> list:
+    """Every waiting item of the round, in the order declared, open or done; an open
+    one with `once_done`, the command that marks it done."""
+    return [{**one.data(),
+             "once_done": waits.mark_line(found.name, one.key) if one.open else None}
+            for one in waits.of_round(found.state)]
+
+
+def wait_line(one: dict) -> str:
+    """A waiting item in words: `waiting item B1.W1, open: the text`."""
+    return f"waiting item {one['id']}, {one['state']}: {one['text']}"
+
+
+def wait_facts(one: dict) -> list[str]:
+    """What is known of a waiting item beyond its line: the report that declared it,
+    and how it was marked done or the command that marks it."""
+    said = [f"from: {one['report']}   by: {one['by']}   at: {one['at']}"]
+    if one["state"] == waits.DONE:
+        said.append(f"done: {one['done_at']} by {one['done_by']}   record: "
+                    f"{one['record']}")
+    else:
+        said.append(f"once done: {one['once_done']}")
+    return said
+
+
+def _wait_lines(listed: list) -> list[str]:
+    lines = [f"waiting items: {len(listed) or 'none'}"]
+    for one in listed:
+        lines.append(f"  {wait_line(one)}")
+        lines += [f"    {line}" for line in wait_facts(one)]
+    return lines
+
+
 SECTIONS: tuple[Section, ...] = (
     Section("builds", _builds, _build_lines),
+    Section("waits", _waits, _wait_lines),
     Section("questions", _questions, _question_lines),
     Section("rulings", _rulings, _ruling_lines),
     Section("verdicts", _verdicts, verdict_lines),

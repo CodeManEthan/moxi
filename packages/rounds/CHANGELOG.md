@@ -93,6 +93,10 @@ does not yet build.
   changed a path the build changes, or a lockfile or a path of the repo's
   `shared_paths`, or when a merge of the target into the branch after the verdict
   brought such a change or came with commits of the build's own.
+- Waiting items: each `[[wait]]` of a build's report, work that can't be done without
+  the operator, is an open item of the round, `B<n>.W<k>`, from the moment the report
+  is recorded. It holds the round's close and no finish, shows in `show`, the round
+  note and `list --waiting`, and ends with `mark ROUND B<n>.W<k> --done --record PTR`.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

@@ -24,6 +24,7 @@
     moxi rounds mark ROUND B<n> --after LIST [--as NAME]
     moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
                      --no-behaviour-change [--as NAME]
+    moxi rounds mark ROUND B<n>.W<k> --done --record PTR [--as NAME]
     moxi rounds mark ROUND thread:NAME --close|--accept-risk --record PTR [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
@@ -93,7 +94,10 @@ finding fixed without a re-check, `mark ROUND B<n>.L<k> --fixed --commit SHA...
 behaviour. A build's verification counts at its tip when its newest report is
 `publishable` and every commit since the head it read is named by such a mark or is a
 merge of the target that brought no change to the build's paths; otherwise a re-check
-of the commits since is owed.
+of the commits since is owed. Each `[[wait]]` of a build's report, work that waits on
+the operator, is an open waiting item of the round, `B<n>.W<k>`, from the moment the
+report is recorded. It holds the round's close and is listed by `list --waiting` until
+`mark ROUND B<n>.W<k> --done --record PTR` names what shows it done.
 `commission` authorizes the build of a stage of the plan once its step waits for
 nothing: it reads the target (the repo's `into` setting, else the branch checked out
 at the project's root) and takes the target's head as the build's base, cuts the
@@ -609,8 +613,8 @@ def _carry(args, out) -> int:
 def _declare_mark(verbs) -> None:
     said = ("Change a record in a way that is not the operator's ruling: make a "
             "question of a round hold up more stages, reopen a parked one, make a "
-            "stage wait for more stages, mark a minor finding of a build fixed, move a "
-            "round up to a heavier flow, decide a thread of the design's "
+            "stage wait for more stages, mark a minor finding of a build fixed, mark "
+            "a waiting item done, move a round up to a heavier flow, decide a thread of the design's "
             "verification, or say that rulings were shown to the "
             "operator as recorded, with a pointer to where.")
     parser = verbs.add_parser("mark", help=said, description=said)
@@ -621,7 +625,8 @@ def _declare_mark(verbs) -> None:
     parser.add_argument("id", metavar="ID", nargs="?",
                         help="what is marked: a question, Q<n>; with --after, a "
                              "stage, B<n>; with --fixed, a build's finding, "
-                             "B<n>.L<k>; with --close or --accept-risk, a thread "
+                             "B<n>.L<k>; with --done, a waiting item, "
+                             "B<n>.W<k>; with --close or --accept-risk, a thread "
                              "of the design's verification, thread:NAME, the name "
                              "in letters, digits and . _ -; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
@@ -644,6 +649,9 @@ def _declare_mark(verbs) -> None:
                       help="the lead's mark that a minor or note finding of a build "
                            "is fixed, with no re-check; needs every commit of the fix "
                            "as --commit and --no-behaviour-change")
+    form.add_argument("--done", action="store_true",
+                      help="a waiting item is done: the work a build's report said "
+                           "waits on the operator; needs --record")
     form.add_argument("--flow", metavar="NAME",
                       help="move the round up to this flow: one later in the tiers "
                            "that has every step the round follows, or the round's "
@@ -670,7 +678,9 @@ def _declare_mark(verbs) -> None:
                              "decides, writes, refuses or accepts; a fix that does "
                              "gets a re-check of its diff")
     parser.add_argument("--record", metavar="PTR",
-                        help="with --close or --accept-risk, a pointer to where the "
+                        help="with --done, a pointer to the report, commit or "
+                             "message that shows the waiting item done; "
+                             "with --close or --accept-risk, a pointer to where the "
                              "lead wrote why, one token: comms:<digits>, "
                              "<session>@<UTC time>, an https:// URL, or file:<path "
                              "in the round's folder>#<anchor>; "
@@ -690,14 +700,16 @@ def _mark(args, out) -> int:
     if args.id is None:
         raise BadArgument("nothing says what is marked",
                           "name the question, Q<n>, with --after the stage, B<n>, "
-                          "with --fixed the finding, B<n>.L<k>, or with --shown the "
-                          "rulings")
+                          "with --fixed the finding, B<n>.L<k>, with --done the "
+                          "waiting item, B<n>.W<k>, or with --shown the rulings")
     if not args.fixed and (args.commit or args.no_behaviour_change):
         raise BadArgument("--commit and --no-behaviour-change go with --fixed, the "
                           "lead's mark of a finding", "leave them out, or mark the "
                           "finding with --fixed")
     if args.fixed:
         return _mark_fixed(args, out)
+    if args.done:
+        return _mark_done(args, out)
     if args.shown:
         return _mark_shown(args, out)
     if args.close or args.accept_risk:
@@ -731,6 +743,20 @@ def _mark_fixed(args, out) -> int:
     found = done.finding
     print(f"finding {found.key}: {found.severity}, {found.state}   commits: "
           f"{', '.join(one[:12] for one in done.event['commits'])}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_done(args, out) -> int:
+    """`mark B<n>.W<k> --done`: a waiting item is done."""
+    from . import waits
+
+    done = waits.done(args.target, args.id, record=args.record, actor=_actor(args))
+    one = done.wait
+    already = (f"   (done already, {one.done_at} by {one.done_by}: nothing was written)"
+               if done.found else "")
+    print(f"{done.name} {one.key}: {one.state}   record: {one.record}{already}",
+          file=out)
     _warn_of(done.failed, args.prog, args.verb)
     return codes.OK
 
@@ -911,7 +937,7 @@ def _declare_verdict(verbs) -> None:
 
 
 def _verdict(args, out) -> int:
-    from . import verdicts, versions
+    from . import verdicts, versions, waits
 
     done = verdicts.record(args.round, args.report, actor=_actor(args))
     one = done.verdict
@@ -932,6 +958,10 @@ def _verdict(args, out) -> int:
         for finding in done.findings:
             print(f"finding {finding.key}: {finding.severity}, {finding.state}: "
                   f"{finding.text}", file=out)
+        for wait in done.opened:
+            print(f"waiting item {wait.key}, open: {wait.text}", file=out)
+            print(f"  waits on the operator; once done: "
+                  f"{waits.mark_line(done.name, wait.key)}", file=out)
         if done.waits:
             print(f"finish of {one.stage} waits for:", file=out)
             for line in done.waits:

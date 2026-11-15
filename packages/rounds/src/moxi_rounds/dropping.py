@@ -38,7 +38,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import ending, folders, index, moving, pointers, questions, write
+from . import ending, folders, index, moving, pointers, questions, waits, write
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadName, NoLog, NoRound, Unmet
@@ -53,8 +53,6 @@ WITHDRAWN = questions.WITHDRAWN
 #: The states of a finish action that may have put a build on its target: only one
 #: that failed is known not to have.
 _MAY_HAVE_LANDED = ("started", "ok", "found")
-#: The state a waiting item is marked with when it is done.
-_DONE = "done"
 
 
 @dataclass(frozen=True)
@@ -248,7 +246,6 @@ def _from_builds(round_state: states.State) -> list[str]:
     held += [f"the build of {stage}, whose merge may have reached its target"
              for stage in sorted(may_have)]
     reached = finished | may_have
-    waits: dict[str, bool] = {}
     for event in round_state.history:
         if event["type"] == "verdict.recorded":
             for decision in event.get("decisions") or ():
@@ -256,11 +253,7 @@ def _from_builds(round_state: states.State) -> list[str]:
                 if stage in reached:
                     held.append(f"the decision {stage}.{decision.get('id')}, on a "
                                 "build that reached its target")
-            for wait in event.get("waits") or ():
-                waits.setdefault(f"{event.get('stage')}.{wait.get('id')}", True)
-        elif event["type"] == "wait.marked" and event.get("id") in waits:
-            waits[event["id"]] = event.get("state") != _DONE
-    still = [wait for wait, is_open in waits.items() if is_open]
+    still = [wait.key for wait in waits.open_of(round_state)]
     if still:
         held.append(f"the open waiting item{_s(still)} {', '.join(still)}")
     return held

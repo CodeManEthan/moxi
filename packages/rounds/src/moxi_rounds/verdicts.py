@@ -21,10 +21,11 @@ None when git gives none or several: a reading of the build. A report by the bui
 builder is refused; the name is the report's own word, so this catches a mistake, not
 bad faith. The report lists every finding the build holds as open, in some state, and
 a finding new to the build takes an id no earlier report of the stage used
-(`findings`). Waiting items and decisions in a build's report are refused: nothing
-records them yet. A report whose model the `models` setting places in a weaker tier
-than the `verify-build` step names for its pass is recorded with
-`model_tiers.BELOW_TIER`.
+(`findings`). Each waiting item the report lists is an open waiting item of the round
+from the moment it is recorded, and takes an id no earlier report of the stage used
+(`waits`). Decisions in a build's report are refused: nothing records them yet. A
+report whose model the `models` setting places in a weaker tier than the
+`verify-build` step names for its pass is recorded with `model_tiers.BELOW_TIER`.
 
 **Against the version it read.** A report names the frozen version its pass read, and
 its verdict is recorded for that version, whether or not a later one was frozen since
@@ -63,7 +64,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import (brake, builds, checking, ending, findings, folders, model_tiers,
-               open_builds, questions, report_block, stages, stepping, versions, write)
+               open_builds, questions, report_block, stages, stepping, versions, waits,
+               write)
 from . import settings as own
 from . import state as states
 from .errors import BadBlock, NoLog, NoRound, Problem, Refused, RoundsError, Unmet
@@ -88,6 +90,8 @@ class Recorded:
     #: build's finish still waits for, a line each.
     findings: tuple[findings.Finding, ...] = ()
     waits: tuple[str, ...] = ()
+    #: For a report of a build: the waiting items it declared, open from now on.
+    opened: tuple[waits.Wait, ...] = ()
 
 
 @dataclass
@@ -218,13 +222,11 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
         raise Refused([Unmet(f"{stage} of {name} {how}, so there is no build for the "
                              "report to have read", shown)])
     unmet = []
-    if block.waits or block.decisions:
-        kinds = [what for what, listed in (("waiting items", block.waits),
-                                           ("decisions", block.decisions)) if listed]
+    if block.decisions:
         unmet.append(Unmet(
-            f"the report declares {' and '.join(kinds)}, and nothing records those of "
-            "a build's report yet", "take them out of the block and say them in the "
-            "report's prose, then record it"))
+            "the report declares decisions, and nothing records those of a build's "
+            "report yet", "take them out of the block and say them in the report's "
+            "prose, then record it"))
     builder = checking.commission_of(state, build).get("builder")
     if block.by == builder:
         unmet.append(Unmet(
@@ -249,6 +251,16 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
                 f"the finding {one.id} is new to {stage}'s build, and an earlier report "
                 f"of {stage} used the id {one.id}: an old id never names a new finding",
                 "give it an id no report of the stage used"))
+    # A report declares each waiting item it lists: an item stays the round's until
+    # it is marked done, so a report never lists one again.
+    for one in block.waits:
+        if one.id in used:
+            unmet.append(Unmet(
+                f"the waiting item {one.id} is new, and an earlier report of {stage} "
+                f"used the id {one.id}: an old id never names a new waiting item, and "
+                "one on record stays open until it is marked done",
+                f"give it an id no report of the stage used; a waiting item on record "
+                f"is marked done with {waits.mark_line(name, f'{stage}.{one.id}')}"))
     unmet += _again(state, block, shown)
     merge_base = None
     try:
@@ -293,6 +305,8 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
         "report": report, "sha256": block.sha256,
         "findings": [{"id": one.id, "severity": one.severity, "state": one.state,
                       "text": one.text} for one in block.findings]}
+    if block.waits:
+        fields["waits"] = [{"id": one.id, "text": one.text} for one in block.waits]
     noted = model_tiers.flags(settings["models"], state.steps, findings.VERIFY_BUILD,
                               pass_=block.pass_, model=block.model)
     if noted:
@@ -391,13 +405,14 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
         raise NoRound(name) from None
     after = states.fold(written.round_events)
     one = after.verdicts[-1]
-    held, waits = (), ()
+    held, finish, opened = (), (), ()
     if one.kind == report_block.BUILD:
         held = findings.of_stage(after, one.stage)
-        waits = finish_waits(after, one.stage, name=name, settings=settings)
+        finish = finish_waits(after, one.stage, name=name, settings=settings)
+        opened = tuple(wait for wait in waits.of_round(after) if wait.raised == one.n)
     return Recorded(name=name, verdict=one, standing=versions.standing(after),
                     event=written.events[0], failed=written.failed, findings=held,
-                    waits=waits)
+                    waits=finish, opened=opened)
 
 
 def finish_waits(state: states.State, stage: str, *, name: str,
