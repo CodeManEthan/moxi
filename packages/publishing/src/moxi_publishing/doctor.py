@@ -110,29 +110,11 @@ def _status(root: str) -> dict:
     return found[0] if found else {}
 
 
-def hook_commands(root: str, status: dict) -> dict[str, str | None]:
-    """{event: the text of what git runs for it, as repo wrote it} for the pieces' events:
-    the config entry's command, the shim, or the launcher; None when it can't be read."""
-    from moxi_publishing import flag
-
-    hooks = flag._git(root, "rev-parse", "--path-format=absolute", "--git-path", "hooks")
-    out: dict[str, str | None] = {}
-    for event in EVENTS:
-        via = (status.get("events", {}).get(event) or {}).get("via")
-        text = None
-        if via == "config entry":
-            done = flag._git(root, "config", "--get", f"hook.moxi-repo-{event}.command")
-            text = done.stdout if done.returncode == 0 else None
-        elif via in ("shim", "launcher"):
-            path = (os.path.join(hooks.stdout.strip(), event) if via == "shim" else
-                    os.path.join(status.get("common_dir") or "", "moxi-repo", "hook"))
-            try:
-                with open(path, encoding="utf-8", errors="replace") as fh:
-                    text = fh.read()
-            except OSError:
-                text = None
-        out[event] = text
-    return out
+def hook_commands(status: dict) -> dict[str, str | None]:
+    """{event: the text git runs for it, as repo's status gives it} for the pieces'
+    events; None when it can't be read."""
+    events = status.get("events", {})
+    return {event: (events.get(event) or {}).get("command") for event in EVENTS}
 
 
 def _interpreter_rows(root: str, name: str) -> Iterator[Row]:
@@ -149,7 +131,7 @@ def _interpreter_rows(root: str, name: str) -> Iterator[Row]:
     # repo writes the interpreter into every hook command as one single-quoted sh word
     # with forward slashes.
     word = "'" + recorded.replace("\\", "/").replace("'", "'\\''") + "'"
-    wrong = [event for event, text in hook_commands(root, _status(root)).items()
+    wrong = [event for event, text in hook_commands(_status(root)).items()
              if text is None or word not in text]
     if wrong:
         yield Row(MODULE, name, "fail",
