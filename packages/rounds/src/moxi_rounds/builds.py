@@ -70,12 +70,20 @@ under `H`. A landing is never a candidate.
 
 A commit that is in no landing, reading or base git still has is not read: a landing,
 reading or base whose commits git no longer has counts for nothing.
+
+**Sharing.** A build that reads `building` or `merged` has a range: the commits
+reachable from `H` and not from `P` (`span`). Two such builds of one repo and target,
+in any rounds, share when their ranges have a commit in common (`sharing`). git does
+not say which branch a commit was made on, so sharing is read from both sides alike:
+no order of records, commissions or reads changes it, and neither build is given the
+shared commits or loses them. A build that ended has no range.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass
+from typing import TypeVar
 
 from . import state as states
 from .errors import RoundsError
@@ -491,9 +499,39 @@ class _Seen:
 
 _END_WORD = {DROPPED: "drop", FINISHED: "finish"}
 
+#: The states whose builds have a range, and so may share.
+RANGED = (BUILDING, MERGED)
+
+_Key = TypeVar("_Key", bound=Hashable)
+
+
+def span(git: Git, status: Status) -> frozenset[str]:
+    """The range of a build read as `status`: the commits reachable from its head `H`
+    and not from `P`, the target before its landing. Empty for a build in a state
+    other than `building` or `merged`, which has no range."""
+    if (status.state not in RANGED or status.head is None
+            or status.target_before is None):
+        return frozenset()
+    return frozenset(git.between(status.target_before, status.head))
+
+
+def sharing(git: Git, statuses: Mapping[_Key, Status]) -> dict[_Key, tuple[_Key, ...]]:
+    """Which builds share commits. `statuses` are builds of one repo and one target, in
+    any rounds, each read now and under the key the caller names it by. Gives each key
+    the keys of the other builds whose range has a commit in common with its own,
+    sorted, so the answer is the same in whatever order the builds are given; a build
+    that shares with none, or has no range, gets none."""
+    ranges = {key: span(git, status) for key, status in statuses.items()}
+    found: dict[_Key, tuple[_Key, ...]] = {}
+    for key, own in ranges.items():
+        found[key] = tuple(sorted(other for other, theirs in ranges.items()
+                                  if other != key and own & theirs))
+    return found
+
 
 __all__ = ["DROPPED", "FINISHED", "GONE", "EMPTY", "BUILDING", "UNCLEAR", "MERGED",
            "ENDED", "NO_HEAD", "OFF_TARGET", "NO_ANSWER", "PARTED", "NO_LANDING",
            "OWN_LANDING", "NOTHING_OWN", "HAND_MERGE", "FAST_FORWARD", "READINGS",
            "TIPS", "MERGE", "LANDED", "Reading", "Landing", "Build", "Status",
-           "NoTarget", "builds", "landings", "current", "shows_work", "read"]
+           "NoTarget", "RANGED", "builds", "landings", "current", "shows_work", "read",
+           "span", "sharing"]
