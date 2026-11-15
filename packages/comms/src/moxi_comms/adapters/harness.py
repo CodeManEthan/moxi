@@ -760,8 +760,9 @@ class HarnessAdapter:
     def flush(self) -> str | None:
         """ONE flush path. Backlog coalesces into one digest; live messages arrive one
         at a time and take the same path. Nothing is delivered while catch-up is still
-        arriving, while the port says it can't take a digest, or, for a port that holds
-        one delivery at a time, while a delivery is running.
+        arriving, while the adapter is offline (a new binding's client is not installed
+        yet), while the port says it can't take a digest, or, for a port that holds one
+        delivery at a time, while a delivery is running.
 
         The batch's digest is opened with the daemon first, and only the ids its answer
         keeps are rendered. With the daemon gone the batch is dropped (its rows wait
@@ -773,7 +774,7 @@ class HarnessAdapter:
         under drops it too: an adapter with no claim injects nothing addressed to one,
         and the daemon has re-pended those ids for the name's next holder."""
         with self._lock:
-            if (self.replaying or not self.queue or not self.can_inject()
+            if (self.replaying or self.offline or not self.queue or not self.can_inject()
                     or (self.ONE_AT_A_TIME and self._running)):
                 return None
             # A row released from the queue (`held: true`) never goes into a running

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Waiting mail is no longer skipped when an OpenCode or Codex adapter reconnects to the
+  daemon. The daemon hands mail that waited for the agent as soon as it answers the
+  reconnect, and the adapter could try to deliver it before it had switched to the new
+  connection. It then dropped the message, which did not arrive until the agent's next
+  reconnect or relaunch while newer mail went through. The adapter now holds delivery
+  until the new connection is in place.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
 - comms has a row on Home in the browser UI shell, the `mail` component
