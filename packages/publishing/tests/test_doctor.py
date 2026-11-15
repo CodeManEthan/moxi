@@ -147,3 +147,32 @@ def test_an_empty_names_list_and_an_unwritable_push_log_warn_once(repo, tmp_path
     finally:
         locked.chmod(0o700)
     assert once == [("private names", "warn"), ("push log", "warn")]
+
+
+def test_a_committer_other_than_secrets_author_warns(repo, names):
+    enabled(repo)
+    git(repo, "config", "user.email", "operator@users.example.test")
+    found = states(repo)
+    assert [s for s, _ in found] == ["warn", "ok"]
+    assert found[0][1].startswith("the repo's user.email (operator@users.example.test) "
+                                  "isn't secrets' author.email (operator@example.test)")
+    git(repo, "config", "user.email", "OPERATOR@example.test")
+    assert [s for s, _ in states(repo)] == ["ok"]
+
+
+def test_with_no_author_email_the_committer_name_is_compared(repo):
+    write_config("secrets", '[private_names]\nwords = ["bobsecret"]\n'
+                            '[author]\nname = "operator"\n')
+    enabled(repo)
+    assert [s for s, _ in states(repo)] == ["ok"]
+    git(repo, "config", "user.name", "alice")
+    found = states(repo)
+    assert [s for s, _ in found] == ["warn", "ok"]
+    assert "user.name (alice) isn't secrets' author.name (operator)" in found[0][1]
+
+
+def test_with_no_author_every_committer_is_the_repos_own(repo):
+    write_config("secrets", '[private_names]\nwords = ["bobsecret"]\n')
+    enabled(repo)
+    git(repo, "config", "user.email", "alice@example.test")
+    assert [s for s, _ in states(repo)] == ["ok"]

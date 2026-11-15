@@ -11,6 +11,9 @@ Read-only, and no row uses the network. For each repo repo has indexed:
 - `fail` when a commit-msg hook of the repo's own runs after the pieces while the message
   piece's `drop-trailer` names `Commit-Check` or holds no value (which reads as the seed,
   which names it): that hook would never see the line it checks;
+- `warn` when the repo's `user.email` (or `user.name`, when secrets' author has no email)
+  isn't secrets' `author.*`, since the push piece then reads none of the repo's commits as
+  its own and refuses no leftover drop or pass key;
 - `warn` when `moxi-publishing.github` is unset, and when a workflow file `moxi
   publishing workflows write` writes is there but differs from its template;
 - `ok`, one row, for a flagged repo with none of the above.
@@ -183,11 +186,39 @@ def _later_hook_rows(root: str, name: str, have: dict) -> Iterator[Row]:
                   f"pass-trailer={CHECKED_TRAILER}")
 
 
+def _identity_rows(root: str, name: str) -> Iterator[Row]:
+    """`warn` when the repo commits as someone other than secrets' `author.*`: the push
+    piece's leftover-key refusal reads only the repo's own commits, so it reads none."""
+    from moxi_repo.api import quote_arg
+    from moxi_secrets import SetUnavailable
+
+    from moxi_publishing import flag, push
+
+    try:
+        own = push._own_identity()
+    except SetUnavailable:
+        return  # the once row on the private names list says so
+    if own is None:
+        return
+    mine = (flag.config_get(root, "user.name") or "", flag.config_get(root, "user.email")
+            or "")
+    if push._same(mine, own):
+        return
+    key, want, have = (("email", own[1], mine[1]) if own[1] else ("name", own[0], mine[0]))
+    yield Row(MODULE, name, "warn",
+              f"the repo's user.{key} ({have or 'unset'}) isn't secrets' author.{key} "
+              f"({want}), so the push piece reads no commit as the repo's own and never "
+              "refuses a leftover drop-trailer or pass-trailer key",
+              f"git -C {quote_arg(root)} config user.{key} {quote_arg(want)} (or set "
+              f"secrets' author.{key} to the repo's)")
+
+
 def _warn_rows(root: str, name: str) -> Iterator[Row]:
     from moxi_repo.api import quote_arg
 
     from moxi_publishing import flag, release
 
+    yield from _identity_rows(root, name)
     if not flag.config_get(root, flag.GITHUB):
         yield Row(MODULE, name, "warn",
                   f"{flag.GITHUB} is unset, so the tag gate and github show have no repo",

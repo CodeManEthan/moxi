@@ -318,8 +318,10 @@ repo isn't marked public; a hook command repo wrote for the pieces that runs ano
 interpreter than the one `enable` recorded in `moxi-publishing.interpreter`; and a repo
 where a commit-msg hook of its own runs after the pieces while the message piece's
 `drop-trailer` names `Commit-Check`, or holds no value, which reads as the seed that
-names it: that hook would never see the line. It warns when `moxi-publishing.github` is
-unset and when a workflow file `workflows write` writes is there but differs from the
+names it: that hook would never see the line. It warns when the repo's `user.email` (or
+`user.name`, when secrets' author has no email) isn't secrets' `author.*`, since the push
+piece then reads none of the repo's commits as its own and refuses no leftover drop or
+pass key; when `moxi-publishing.github` is unset; and when a workflow file `workflows write` writes is there but differs from the
 template; and, once, when secrets' private names list is empty and when the push log
 can't be written.
 
