@@ -364,7 +364,7 @@ def test_the_reader_leaves_a_wal_its_writer_left_unflushed_as_it_is():
     writer.execute("PRAGMA wal_autocheckpoint = 0")
     with transaction(writer):
         writer.execute("INSERT INTO meta(key, value) VALUES ('left', 'in the wal')")
-    writer.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
+    writer.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE)
     writer.close()
     wal = target.with_name(target.name + "-wal")
     before, wal_before = target.read_bytes(), wal.read_bytes()

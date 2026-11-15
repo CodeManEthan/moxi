@@ -237,7 +237,7 @@ def open_read(target=None, *, env=None, timeout: float = 5.0,
     conn = _store.connect(target, create=False, timeout_s=timeout,
                           check_same_thread=check_same_thread)
     try:
-        conn.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
+        conn.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE)
         conn.execute("PRAGMA query_only = ON")
         if check_step:
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])
