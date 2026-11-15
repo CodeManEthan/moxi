@@ -517,3 +517,25 @@ def test_with_no_entry_in_the_variable_nothing_is_marked_and_every_write_is_save
             status, data = shell.post("unset", key=key)
             assert status == 200 and data["ok"]
             assert shell.keys()[key]["source"] == "default"
+
+
+def test_the_shipped_schema_passes_the_cores_check_and_carries_the_page_fields():
+    from importlib import resources
+
+    from moxi.config import Schema
+
+    text = resources.files("moxi_ui").joinpath("settings.toml").read_text()
+    keys = Schema.parse(text, source="moxi_ui/settings.toml").keys
+    assert {name: key.label for name, key in keys.items()} == {
+        "port": "Port", "idle_s": "Idle shutdown", "theme.mode": "Light or dark",
+        "theme.palette": "Look", "gateway.enabled": "Phone access",
+        "gateway.port": "Phone port"}
+    assert [name for name, key in keys.items() if key.common] == [
+        "port", "theme.mode", "theme.palette"]
+    assert keys["theme.palette"].pick and not keys["theme.mode"].pick
+    assert keys["theme.palette"].choices == {"plain": "Plain", "midnight-neon": "Midnight neon"}
+    assert keys["theme.mode"].choices["system"] == "follow the browser"
+    assert keys["idle_s"].unit == "seconds"
+    assert keys["port"].line == "Where this page is served, on this computer only."
+    assert keys["gateway.enabled"].terminal == {"on": "moxi ui gateway enable",
+                                                "off": "moxi ui gateway disable"}
