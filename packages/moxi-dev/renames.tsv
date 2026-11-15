@@ -782,6 +782,7 @@ comms	packages/comms/src/moxi_comms/api/__init__.py	identity_state	name	deadline
 comms	packages/comms/src/moxi_comms/api/__init__.py	identity_state	name	e	exc
 comms	packages/comms/src/moxi_comms/api/__init__.py	owner	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	record = _config.load().local.record	keep	record	record
+comms	packages/comms/src/moxi_comms/api/__init__.py	return CacheFact(kind=kind, until=float(round(until))) if _finite(until) else None	keep	round	round
 comms	packages/comms/src/moxi_comms/api/__init__.py	roster	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	roster_rows	name	deadline	timeout_s
 comms	packages/comms/src/moxi_comms/api/__init__.py	send	name	deadline	timeout_s
@@ -1211,20 +1212,75 @@ comms	packages/comms/src/moxi_comms/owed.py	return (any(t not in HARNESS_INTERNA
 comms	packages/comms/src/moxi_comms/owed.py	self.ledger.settle(answer, now)	keep	handled	handled
 comms	packages/comms/src/moxi_comms/owed.py	tail.append(TOOLS_FALLBACK.format(id=one))	keep	id	id
 comms	packages/comms/src/moxi_comms/page.py	"adapter": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"after": lb.Field("string", required=False, max=19),	keep	required	required
+comms	packages/comms/src/moxi_comms/page.py	"b": lb.Field("string", required=False, max=200),	keep	required	required
+comms	packages/comms/src/moxi_comms/page.py	"before": lb.Field("string", required=False, max=19),	keep	required	required
 comms	packages/comms/src/moxi_comms/page.py	"bound_at": lb.Out("float", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"cache": lb.Out("table", nullable=True, items={	keep	nullable	nullable
+comms	packages/comms/src/moxi_comms/page.py	"changed": lb.Out("list", nullable=True, items=lb.Out("table", items={	keep	changed	changed
+comms	packages/comms/src/moxi_comms/page.py	"changed": lb.Out("list", nullable=True, items=lb.Out("table", items={	keep	nullable	nullable
+comms	packages/comms/src/moxi_comms/page.py	"cold_at": lb.Out("float", nullable=True),	keep	nullable	nullable
+comms	packages/comms/src/moxi_comms/page.py	"delivered": lb.Out("list", items=lb.Out("string")),	keep	delivered	delivered
 comms	packages/comms/src/moxi_comms/page.py	"detail": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"earlier": lb.Out("table", nullable=True, items={	keep	nullable	nullable
+comms	packages/comms/src/moxi_comms/page.py	"expired": lb.Out("list", items=lb.Out("string")),	keep	expired	expired
 comms	packages/comms/src/moxi_comms/page.py	"kind": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=100)},	keep	required	required
+comms	packages/comms/src/moxi_comms/page.py	"limit": lb.Field("int", required=False, max=500)},	keep	required	required
+comms	packages/comms/src/moxi_comms/page.py	"message_id": lb.Out("string", nullable=True),	keep	nullable	nullable
 comms	packages/comms/src/moxi_comms/page.py	"module": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	"oldest": lb.Field("string", required=False, max=19),	keep	required	required
+comms	packages/comms/src/moxi_comms/page.py	"posture": lb.Out("string", nullable=True),	keep	nullable	nullable
+comms	packages/comms/src/moxi_comms/page.py	"read": lb.Out("bool", nullable=True),	keep	nullable	nullable
+comms	packages/comms/src/moxi_comms/page.py	"refusal": lb.Out("table", nullable=True, items={"code": lb.Out("string")}),	keep	nullable	nullable
+comms	packages/comms/src/moxi_comms/page.py	"reply_to": lb.Field("string", required=False, max=19),	keep	required	required
+comms	packages/comms/src/moxi_comms/page.py	"reply_to": lb.Out("string", nullable=True),	keep	nullable	nullable
 comms	packages/comms/src/moxi_comms/page.py	"scope": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"session_id": lb.Out("string", nullable=True),	keep	nullable=	nullable=
 comms	packages/comms/src/moxi_comms/page.py	"tier": lb.Out("string", nullable=True),	keep	nullable=	nullable=
+comms	packages/comms/src/moxi_comms/page.py	#: What `/api/take-back` answers: the verb's `outcome` (`deleted`, `refused`, `offline`,	keep	refused	refused
+comms	packages/comms/src/moxi_comms/page.py	#: `expired` or `reserved`. `held` is the queue row's hold for the next turn; `takeable`	keep	expired	expired
+comms	packages/comms/src/moxi_comms/page.py	#: `refused`, `cache-unread`, `blocked`, `offline`, `failed` or `unknown`); the posted	keep	refused	refused
+comms	packages/comms/src/moxi_comms/page.py	#: already (`delivered`) and those whose copy had `expired`; and `refusal`, the code of	keep	delivered	delivered
+comms	packages/comms/src/moxi_comms/page.py	#: already (`delivered`) and those whose copy had `expired`; and `refusal`, the code of	keep	expired	expired
+comms	packages/comms/src/moxi_comms/page.py	#: either, with those rows, so a message the page holds that `changed` doesn't list has	keep	changed	changed
+comms	packages/comms/src/moxi_comms/page.py	#: message of the pair above `after`, `earlier` null, and `changed`, the read state of	keep	changed	changed
+comms	packages/comms/src/moxi_comms/page.py	#: oldest one's time, or null when there are none; `changed` is null. With `after` (the	keep	changed	changed
 comms	packages/comms/src/moxi_comms/page.py	lb.Route("/api/events", "read", "moxi_comms.pagehandlers:events", stream=True,	keep	stream=	stream=
+comms	packages/comms/src/moxi_comms/page.py	query={"day": lb.Field("string", required=False, max=10),	keep	required	required
+comms	packages/comms/src/moxi_comms/pageacts.py	"delivered": list(result.delivered), "expired": list(result.expired),	keep	delivered	delivered
+comms	packages/comms/src/moxi_comms/pageacts.py	"delivered": list(result.delivered), "expired": list(result.expired),	keep	expired	expired
+comms	packages/comms/src/moxi_comms/pageacts.py	"refused", "send", "take_back", "taken"]	keep	refused	refused
+comms	packages/comms/src/moxi_comms/pageacts.py	_logged: set[type] = set()	keep	set	set
+comms	packages/comms/src/moxi_comms/pageacts.py	held=body["held"], new_name=True, timeout_s=ACT_TIMEOUT_S)	keep	held	held
+comms	packages/comms/src/moxi_comms/pageacts.py	return {"outcome": outcome, "withdrawn": [], "delivered": [], "expired": [],	keep	delivered	delivered
+comms	packages/comms/src/moxi_comms/pageacts.py	return {"outcome": outcome, "withdrawn": [], "delivered": [], "expired": [],	keep	expired	expired
+comms	packages/comms/src/moxi_comms/pageacts.py	within SQLite's integer) is `refused` with `message-id-shape`, each before anything is	keep	refused	refused
+comms	packages/comms/src/moxi_comms/pageacts.py	words each from the outcome and the code. A blank `to` is `refused` with the code	keep	refused	refused
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_Feed._poll	name	err	exc
 comms	packages/comms/src/moxi_comms/pagehandlers.py	_logged: set[type] = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/pagehandlers.py	await self.snapshot.changed()	use	changed	on_changed
 comms	packages/comms/src/moxi_comms/pagehandlers.py	for row, name in zip(rows, short, strict=True):	keep	strict	strict
 comms	packages/comms/src/moxi_comms/pagehandlers.py	gather	name	err	exc
 comms	packages/comms/src/moxi_comms/pagehandlers.py	mail	name	err	exc
+comms	packages/comms/src/moxi_comms/pagehandlers.py	return (isinstance(value, dict) and set(value) == set(shape.items)	keep	set	set
+comms	packages/comms/src/moxi_comms/pagereads.py	"earlier": None, "changed": None}	keep	changed	changed
+comms	packages/comms/src/moxi_comms/pagereads.py	"opened", "query_id", "queue", "readable", "sent_entry", "shaped", "stamp",	keep	opened	opened
+comms	packages/comms/src/moxi_comms/pagereads.py	_logged: set[type] = set()	keep	set	set
+comms	packages/comms/src/moxi_comms/pagereads.py	above it and `changed`, the books' rows of the messages from `oldest` (the oldest the	keep	changed	changed
+comms	packages/comms/src/moxi_comms/pagereads.py	count, first, last, last_id = store.record.count_before(store.room, start)	keep	record	record
+comms	packages/comms/src/moxi_comms/pagereads.py	for msg in store.record.since(store.room, start))	keep	record	record
+comms	packages/comms/src/moxi_comms/pagereads.py	found = readable(store.record.since(store.room,	keep	record	record
+comms	packages/comms/src/moxi_comms/pagereads.py	found = readable(store.record.since(store.room, start))	keep	record	record
+comms	packages/comms/src/moxi_comms/pagereads.py	if any(row["qualified"] == pair.a for row in rows[mid]):	keep	any	any
+comms	packages/comms/src/moxi_comms/pagereads.py	if not any(tag_matches(tag, OPERATOR_NAME) for tag in ask.tags):	keep	any	any
+comms	packages/comms/src/moxi_comms/pagereads.py	msg = store.record.get_message(mid)	keep	record	record
+comms	packages/comms/src/moxi_comms/pagereads.py	msg = store.record.get_message(str(mid))	keep	record	record
+comms	packages/comms/src/moxi_comms/pagereads.py	out["changed"] = _changed(store, pair, oldest, after)	keep	changed	changed
+comms	packages/comms/src/moxi_comms/pagereads.py	page = store.record.history(store.room, before=cursor, limit=DAY_PAGE)	keep	record	record
+comms	packages/comms/src/moxi_comms/pagereads.py	page = store.record.history(store.room, before=cursor, limit=THREAD_PAGE)	keep	record	record
+comms	packages/comms/src/moxi_comms/pagereads.py	return any(word in zero for word in self.spelled[side])	keep	any	any
+comms	packages/comms/src/moxi_comms/pagereads.py	store.record.history(store.room, after=after))	keep	record	record
 comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--backend-store", help="JSON store, mock backend only")	keep	help	help
 comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--db", help="comms.db path (default: STATE/comms/comms.db)")	keep	help	help
 comms	packages/comms/src/moxi_comms/provision.py	ap.add_argument("--log-level", default="INFO")	keep	default	default
@@ -1247,6 +1303,7 @@ comms	packages/comms/src/moxi_comms/record.py	return LocalRecord(local.record or
 comms	packages/comms/src/moxi_comms/record.py	self.closed = False	keep	closed	closed
 comms	packages/comms/src/moxi_comms/record.py	self.closed = True	keep	closed	closed
 comms	packages/comms/src/moxi_comms/record.py	while not self._q and not self.closed:	keep	closed	closed
+comms	packages/comms/src/moxi_comms/replies.py	if not any(tag_matches(t, asker) for t in e.tags):	keep	any	any
 comms	packages/comms/src/moxi_comms/reserved.py	-	name	_held	_Held
 comms	packages/comms/src/moxi_comms/reserved.py	_free	name	e	exc
 comms	packages/comms/src/moxi_comms/reserved.py	_mint	name	e	exc
@@ -1296,6 +1353,7 @@ comms	packages/comms/src/moxi_comms/sending.py	_send_reserved	name	e	exc
 comms	packages/comms/src/moxi_comms/sending.py	_send_resolved	name	e	exc
 comms	packages/comms/src/moxi_comms/sending.py	_thread_idle	name	e	exc
 comms	packages/comms/src/moxi_comms/sending.py	`_bodies`, which needs only `say` and `record`)."""	keep	record	record
+comms	packages/comms/src/moxi_comms/sending.py	`close` closes the record the context opened for itself; a `record` given at	keep	record	record
 comms	packages/comms/src/moxi_comms/sending.py	after = ctx.record.history(names_channel, after=root.id)	keep	record	record
 comms	packages/comms/src/moxi_comms/sending.py	and state.age_seconds is not None and state.ttl_seconds is not None):	use	state.age_seconds	state.age_s
 comms	packages/comms/src/moxi_comms/sending.py	and state.age_seconds is not None and state.ttl_seconds is not None):	use	state.ttl_seconds	state.ttl_s
@@ -1629,6 +1687,15 @@ comms	packages/comms/tests/test_books.py	t.join(timeout=10)	keep	timeout	timeout
 comms	packages/comms/tests/test_books.py	test_delete_racing_open_digest_ends_withdrawn_or_in_a_digest.worker	name	e	exc
 comms	packages/comms/tests/test_books.py	test_the_books_serve_many_threads_on_one_connection.work	name	e	exc
 comms	packages/comms/tests/test_books.py	{"id": "102", "reason": "expired"}]	keep	expired	expired
+comms	packages/comms/tests/test_browser_page.py	"folder": project},	keep	folder	folder
+comms	packages/comms/tests/test_browser_page.py	assert {"text", "text-dim"} <= set(reached), (scheme, reached)	keep	set	set
+comms	packages/comms/tests/test_browser_page.py	return rig.record.post_as_identity(by, rig.names_channel,	keep	record	record
+comms	packages/comms/tests/test_browser_page.py	self.answer: dict = {"refused": None}	keep	refused	refused
+comms	packages/comms/tests/test_browser_page.py	shell = ui_shells(env=rig_env(), child_args=["--idle-s", "1"], **options)	keep	env	env
+comms	packages/comms/tests/test_browser_page.py	stub.answer = {"refused": None}	keep	refused	refused
+comms	packages/comms/tests/test_browser_page.py	stub.answer = {"refused": {"code": "gone", "row": None, "problem": "the launch has ended",	keep	refused	refused
+comms	packages/comms/tests/test_browser_page.py	texts = set()	keep	set	set
+comms	packages/comms/tests/test_browser_page.py	timeout=15_000)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	"waiting on planner", timeout=PUSH_MS)	keep	timeout	timeout
 comms	packages/comms/tests/test_browser_roster.py	assert any(roster_kit.ROSTER in url for url in check.requests), check.requests	keep	any	any
 comms	packages/comms/tests/test_browser_roster.py	expect(chip(roster, R, new)).to_have_attribute("data-shows", "cold", timeout=PUSH_MS)	keep	timeout	timeout
@@ -2325,6 +2392,70 @@ comms	packages/comms/tests/test_page.py	inner = lb.app(page.PAGE, module="comms"
 comms	packages/comms/tests/test_page.py	keys = set(page.ROW.items) | set(page.ROSTER)	keep	set	set
 comms	packages/comms/tests/test_page.py	monkeypatch.setattr(pagehandlers, "_logged", set())	keep	set	set
 comms	packages/comms/tests/test_page.py	self._gone.set()	keep	set	set
+comms	packages/comms/tests/test_page.py	"until": float(round(turned_at + 300.0))}	keep	round	round
+comms	packages/comms/tests/test_page.py	@pytest.mark.parametrize("bad", [api.CacheFact(kind=None, until=1.0),	keep	bad	bad
+comms	packages/comms/tests/test_page.py	assert not any(r["confirmed"] for r in routes.values())	keep	any	any
+comms	packages/comms/tests/test_page_acts.py	"expired": [], "refusal": None}	keep	expired	expired
+comms	packages/comms/tests/test_page_acts.py	"expired": [], "refusal": {"code": "already-delivered"}}	keep	expired	expired
+comms	packages/comms/tests/test_page_acts.py	"would-send", "sent", "refused", answers[3]["outcome"], "refused", "offline"]	keep	refused	refused
+comms	packages/comms/tests/test_page_acts.py	TAKEN_KEYS = ["outcome", "withdrawn", "delivered", "expired", "refusal"]	keep	delivered	delivered
+comms	packages/comms/tests/test_page_acts.py	TAKEN_KEYS = ["outcome", "withdrawn", "delivered", "expired", "refusal"]	keep	expired	expired
+comms	packages/comms/tests/test_page_acts.py	assert (bare.outcome, bare.refusal.code) == ("refused", "never-bound")	keep	refused	refused
+comms	packages/comms/tests/test_page_acts.py	assert answer == {"outcome": "refused", "message_id": None, "recipients": [],	keep	refused	refused
+comms	packages/comms/tests/test_page_acts.py	assert answer == {"outcome": "refused", "withdrawn": [], "delivered": [MAIN],	keep	delivered	delivered
+comms	packages/comms/tests/test_page_acts.py	assert answer == {"outcome": "refused", "withdrawn": [], "delivered": [MAIN],	keep	refused	refused
+comms	packages/comms/tests/test_page_acts.py	assert take_back(mid) == {"outcome": "deleted", "withdrawn": [MAIN], "delivered": [],	keep	delivered	delivered
+comms	packages/comms/tests/test_page_acts.py	comms_db().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+comms	packages/comms/tests/test_page_acts.py	found = rig.record.history(rig.names_channel)	keep	record	record
+comms	packages/comms/tests/test_page_acts.py	line = machine_line.parse(rig.record.get_message(answer["message_id"]).content)	keep	record	record
+comms	packages/comms/tests/test_page_acts.py	monkeypatch.setattr(pageacts, "_logged", set())	keep	set	set
+comms	packages/comms/tests/test_page_acts.py	values = dict(zip(cols, row, strict=True))	keep	strict	strict
+comms	packages/comms/tests/test_page_acts_shell.py	"/m/comms/api/check": (SEND, {"outcome": "refused", "message_id": None,	keep	refused	refused
+comms	packages/comms/tests/test_page_acts_shell.py	"/m/comms/api/send": (SEND, {"outcome": "refused", "message_id": None,	keep	refused	refused
+comms	packages/comms/tests/test_page_acts_shell.py	"outcome": "refused", "withdrawn": [], "delivered": [], "expired": [],	keep	delivered	delivered
+comms	packages/comms/tests/test_page_acts_shell.py	"outcome": "refused", "withdrawn": [], "delivered": [], "expired": [],	keep	expired	expired
+comms	packages/comms/tests/test_page_acts_shell.py	"outcome": "refused", "withdrawn": [], "delivered": [], "expired": [],	keep	refused	refused
+comms	packages/comms/tests/test_page_ceilings.py	assert refreshed["changed"] and refreshed["earlier"] is None	keep	changed	changed
+comms	packages/comms/tests/test_page_mail_state.py	assert not any(out.mark for out in page.MAIL_STATE[key].items.items.values())	keep	any	any
+comms	packages/comms/tests/test_page_mail_state.py	assert set(last) == {MAIN, OTHER, "planner@proj-a", "herald"}	keep	set	set
+comms	packages/comms/tests/test_page_mail_state.py	comms_db().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+comms	packages/comms/tests/test_page_mail_state.py	return rig.record.post_as_identity(	keep	record	record
+comms	packages/comms/tests/test_page_mail_state.py	return rig.record.post_as_user(rig.prov.operator_user_id, rig.names_channel,	keep	record	record
+comms	packages/comms/tests/test_page_mail_state.py	rig.record._post("webhook", "someone", rig.names_channel,	keep	record	record
+comms	packages/comms/tests/test_page_messages.py	assert not any(by_id[i]["withdrawn"] for i in (waiting.id, handed.id, expired.id))	keep	any	any
+comms	packages/comms/tests/test_page_messages.py	assert not any(field.required for field in route.query.values())	keep	any	any
+comms	packages/comms/tests/test_page_messages.py	assert not comms_db().parent.exists() or not any(comms_db().parent.iterdir())	keep	any	any
+comms	packages/comms/tests/test_page_messages.py	assert set(route.query) == {"day", "before", "limit"}	keep	set	set
+comms	packages/comms/tests/test_page_messages.py	monkeypatch.setattr(pagereads, "_logged", set())	keep	set	set
+comms	packages/comms/tests/test_page_messages.py	return rig.record.post_as_identity(	keep	record	record
+comms	packages/comms/tests/test_page_messages.py	return rig.record.post_as_identity(PLANNER, rig.names_channel, text)	keep	record	record
+comms	packages/comms/tests/test_page_messages.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+comms	packages/comms/tests/test_page_messages.py	{"qualified": MAIN, "state": "expired", "held": False, "takeable": False}]	keep	expired	expired
+comms	packages/comms/tests/test_page_queue.py	comms_db().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+comms	packages/comms/tests/test_page_thread.py	"""With `oldest`, the oldest message the page holds, `changed` covers the messages	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	"changed": None}	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	"count_today": 0, "earlier": None, "changed": None}	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	"earlier": None, "changed": None}	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	(PLANNER, "expired")]	keep	expired	expired
+comms	packages/comms/tests/test_page_thread.py	KEYS = ["state", "detail", "today", "messages", "count_today", "earlier", "changed"]	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert (body["messages"], body["earlier"], body["changed"]) == ([], None, None)	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert [c["message_id"] for c in body["changed"]] == [first, last]	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert [c["message_id"] for c in read(a=MAIN, after=last)["changed"]] == [	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert [c["message_id"] for c in read(a=MAIN, after=last, oldest=last)["changed"]] == [	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert [r["qualified"] for r in read(a=OTHER, after=both.id)["changed"][0]["rows"]] == [	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert body["count_today"] == 8 and body["changed"] is None	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert isinstance(body["changed"], list)	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert read(a=MAIN, b=PLANNER, after=newest)["changed"] == [], (	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	assert set(below) <= set(looked)	keep	set	set
+comms	packages/comms/tests/test_page_thread.py	changed = read(a=MAIN, after=newest)["changed"]	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	changed = read(a=MAIN, b=OTHER, after=last, oldest=first)["changed"]	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	changed = read(a=MAIN, b=PLANNER, after=both.id)["changed"]	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	changed = read(a=MAIN, b=PLANNER, after=newest)["changed"]	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	comms_db().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+comms	packages/comms/tests/test_page_thread.py	for c in read(a=MAIN, after=newest)["changed"]}	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	pair is in `changed` while the books hold it, and gone once the name has read it."""	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	read(a=MAIN, b=PLANNER, after=newest)["changed"]}	keep	changed	changed
+comms	packages/comms/tests/test_page_thread.py	rig.record.post_as_identity(MAIN, rig.names_channel, "planner@proj-a: just words")	keep	record	record
 comms	packages/comms/tests/test_paths.py	-	name	test_a_link_inside_the_runtime_directory_that_leaves_it_is_refused	test_a_link_inside_the_runtime_dir_that_leaves_it_is_refused
 comms	packages/comms/tests/test_paths.py	-	name	test_a_socket_outside_the_runtime_directory_is_refused	test_a_socket_outside_the_runtime_dir_is_refused
 comms	packages/comms/tests/test_paths.py	-	name	test_a_socket_under_the_runtime_directory_passes	test_a_socket_under_the_runtime_dir_passes
@@ -2498,7 +2629,10 @@ comms	packages/comms/tests/test_roles.py	other = {"MOXI_COMMS_CONFIG_HOME": str(
 comms	packages/comms/tests/test_roster_delta.py	-	name	test_state_writes_are_temp_plus_rename_in_the_same_directory	test_state_writes_are_temp_plus_rename_in_the_same_dir
 comms	packages/comms/tests/test_roster_rows.py	assert asked == [{"deadline": api.READ_DEADLINE}]	use	"deadline"	"timeout_s"
 comms	packages/comms/tests/test_roster_rows.py	assert asked[-1] == {"deadline": 3}	use	"deadline"	"timeout_s"
+comms	packages/comms/tests/test_roster_rows.py	assert row.cache == api.CacheFact(kind=kind, until=float(round(at + TTL)))	keep	round	round
+comms	packages/comms/tests/test_roster_rows.py	assert row.cache.until == float(round(at + TTL))	keep	round	round
 comms	packages/comms/tests/test_roster_rows.py	assert wait_until(lambda: {P, R} <= set(rig.daemon.bindings)	keep	set	set
+comms	packages/comms/tests/test_roster_rows.py	assert wait_until(lambda: {P, R} <= set(rig.daemon.bindings))	keep	set	set
 comms	packages/comms/tests/test_roster_rows.py	daemon = two_live(fail={"roster": api.DaemonError("refused")}).install(monkeypatch)	keep	refused	refused
 comms	packages/comms/tests/test_roster_rows.py	return self.sessions.get(identity, {"bound": False})	keep	sessions	sessions
 comms	packages/comms/tests/test_roster_rows.py	self.sessions = sessions or {}	keep	sessions	sessions
