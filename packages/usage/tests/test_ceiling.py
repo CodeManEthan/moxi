@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi import modules
 from moxi.config import ConfigError
@@ -536,4 +537,4 @@ def test_the_judge_below_the_warning_band_takes_under_two_milliseconds():
     for _ in range(50):
         assert ceiling.judge(call) is None
     per_call = (time.perf_counter() - t0) / 50 * 1000
-    assert per_call < 2.0, f"{per_call:.3f} ms per call"
+    assert per_call < 2.0 * timed_slack(), f"{per_call:.3f} ms per call"

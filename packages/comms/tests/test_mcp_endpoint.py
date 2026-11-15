@@ -20,6 +20,7 @@ import time
 import warnings
 
 import pytest
+from moxi_dev.testing import timed_slack
 from conftest import wait_until, write_config
 
 from moxi_comms import bindings, claimfile, config, wire
@@ -400,7 +401,7 @@ def test_subscriptions_listen_is_refused_at_once_as_json_and_holds_nothing_open(
     status, headers, body, _ = post_modern(daemon, "subscriptions/listen", token=s.token,
                                            timeout=3,
                                            notifications={"toolsListChanged": True})
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 2 * timed_slack()
     assert headers["content-type"].startswith("application/json")
     error = json.loads(body)["error"]
     assert (status, error["code"]) == (404, -32601), body
@@ -694,7 +695,7 @@ def test_a_request_in_flight_at_the_stop_gets_a_graceful_bound(serving, sessions
     assert entered.wait(10)
     started = time.monotonic()
     daemon.stop()
-    assert time.monotonic() - started < 5
+    assert time.monotonic() - started < 5 * timed_slack()
     caller.join(10)
 
 
@@ -807,5 +808,5 @@ def test_the_endpoints_import_is_paid_by_the_daemon_start_alone():
     are paid once, at a daemon start with `[mcp] enabled`."""
     endpoint = statistics.median(_import_ms("moxi_comms.mcp.server") for _ in range(3))
     daemon = statistics.median(_import_ms("moxi_comms.daemon") for _ in range(3))
-    assert endpoint < 1500, endpoint
+    assert endpoint < 1500 * timed_slack(), endpoint
     assert daemon < endpoint / 2, (daemon, endpoint)

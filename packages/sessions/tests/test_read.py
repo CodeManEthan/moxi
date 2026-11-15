@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -781,11 +782,14 @@ def test_a_rewritten_file_reads_from_the_start_with_a_reset(projects):
     t.path.write_bytes(t.path.read_bytes()[: t.offset(2)])
     batch = records_since(src, cursor)
     assert batch.reset and [x.at["line"] for x in batch.records] == [1]
-    # Another file at the path.
+    # Another file at the path: a sibling replaces it, so the two inodes differ.
     cursor = batch.cursor
-    data = t.path.read_bytes()
-    t.path.unlink()
-    t.path.write_bytes(data)
+    before = t.path.stat()
+    sibling = t.path.with_name(t.path.name + ".new")
+    sibling.write_bytes(t.path.read_bytes())
+    os.replace(sibling, t.path)
+    after = t.path.stat()
+    assert (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
     assert records_since(src, cursor).reset
 
 

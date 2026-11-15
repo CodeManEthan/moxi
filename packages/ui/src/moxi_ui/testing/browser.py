@@ -18,6 +18,9 @@ from urllib.parse import parse_qs, urlsplit
 PHONE_WIDTH = 360
 #: Milliseconds a placed component has to render into its shadow root.
 RENDER_MS = 5000
+#: Milliseconds a rendered component has to show each token it takes in a colour: a part
+#: drawn from data (a pushed topic's first value) comes after the first render.
+TOKEN_MS = 5000
 #: Seconds with no new request after which a component is taken to have settled.
 QUIET_S = 0.3
 #: The longest a component is given to settle, in seconds.
@@ -236,6 +239,17 @@ def _allowed(url: str, origin: str, modules: Sequence[str], held: set[str]) -> b
     return False
 
 
+def _reaches(page: Any, mark: str, token: str) -> bool:
+    """Whether changing `token` on the placed component's host changes a colour it shows,
+    probed again until it does or `TOKEN_MS` has passed."""
+    deadline = time.monotonic() + TOKEN_MS / 1000
+    while not page.evaluate(_function(_JS_TOKEN), [mark, token, list(_PROBES), _COLOURS]):
+        if time.monotonic() >= deadline:
+            return False
+        page.wait_for_timeout(50)
+    return True
+
+
 def check_component(page: Any, module: str, name: str,
                     attrs: Mapping[str, str] | None = None, *,
                     tokens: Sequence[str] = ("accent",), allow: Sequence[str] = (),
@@ -246,7 +260,8 @@ def check_component(page: Any, module: str, name: str,
     It passes when the shell places the component; it renders into an open shadow root
     within 5 s; it adds no style sheet to the document; each of `tokens` (theme token
     names without `--moxi-`, `accent` by default) reaches at least one colour in its shadow
-    tree, so changing the token on its host changes what it shows; and every request its
+    tree within 5 s of that, so changing the token on its host changes what it shows (a
+    part the component draws once its data arrives counts); and every request its
     browser context made from the placement until it settled went to the shell's own
     origin, under `/m/<module>/` (or `/m/<m>/` for each `m` of `allow`, the modules whose
     components it places in turn), or to the push channel for `<module>`'s, `allow`'s
@@ -294,9 +309,10 @@ def check_component(page: Any, module: str, name: str,
                                  "component's styles belong in its shadow root")
         reached = []
         for token in tokens:
-            if not page.evaluate(_function(_JS_TOKEN), [mark, token, list(_PROBES), _COLOURS]):
+            if not _reaches(page, mark, token):
                 raise AssertionError(f"--moxi-{token} reaches no colour of {placed['tag']}: "
-                                     "changing it on the host changed nothing it shows")
+                                     "changing it on the host changed nothing it shows "
+                                     f"in {TOKEN_MS / 1000:g}s")
             reached.append(token)
         deadline = time.monotonic() + SETTLE_S
         while time.monotonic() - stamp[0] < QUIET_S and time.monotonic() < deadline:
