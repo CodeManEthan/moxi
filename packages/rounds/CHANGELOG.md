@@ -144,6 +144,11 @@ does not yet build.
   skip of one finish action for one stage: `finish` passes it as done, `show` lists
   it with the other skips, and it is replaced or taken back like any skip. A finish
   removes no folder yet: it names the build's worktree and scratch folder it kept.
+- `mark ROUND B<n> --brief FILE` sizes a worker's brief: its data block names one
+  slice of the stage within `slice_minutes`, or one verification, and the pass is
+  recorded as `brief.sized` with the brief's SHA-256. `fold` warns of a slice over the
+  limit; `show` and the round note say which slices of an open build have a sized
+  brief, and `next` names the ones that have none.
 - The finish lock: one finish at a time per repo and target, held as the ref
   `refs/rounds/finishing/<into>` (or the repo's `lock_ref`) pointing at a blob with the
   holder's line. A holder on this machine whose process has ended is cleared in one

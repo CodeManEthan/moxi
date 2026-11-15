@@ -31,7 +31,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 - `warnings`: what the lead should know beside the steps: a ruling that holds a stage
   until the design has a row for it is said here as well as in that stage's wait, and
   a plan of `MANY_BUILDS` or more stages that are builds is pointed at child rounds,
-  which refuses nothing.
+  which refuses nothing, and an open build's slices that have no sized brief are named
+  with the mark that sizes one, to run before the brief is handed out.
 
 A step with no row in `steps.ROWS` is printed as not built in this version, with the
 holds on its stage. **A later step's lines** are a row of `LINES`: the step's name ->
@@ -54,7 +55,8 @@ import json
 from collections.abc import Callable
 
 from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
-               model_tiers, report_block, showing, stages, steps, tracing, versions)
+               model_tiers, report_block, showing, sizing, stages, steps, tracing,
+               versions)
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -76,6 +78,7 @@ STALE_ROW = "stale-row"
 HOLDS_STAGE = "holds-stage"
 READ_BACK_UNKNOWN = "read-back-unknown"
 MANY_STAGES = "many-stages"
+UNSIZED = "unsized-slice"
 
 #: How many stages that are builds a round plans before `next` points at child rounds.
 MANY_BUILDS = 5
@@ -340,6 +343,14 @@ def _warnings(found: showing.Shown) -> list[dict]:
                 HOLDS_STAGE, f"{one.id} holds {stage.id} until a version of the "
                              f"design has a row for it: {one.text}",
                 f"give {versions.DESIGN_FILE} a row for {one.id}, then {fold}"))
+    for build in builds.builds(state):
+        left = [] if build.ended is not None else sizing.unsized(state, build)
+        if left:
+            warnings.append(_warning(
+                UNSIZED, f"{build.stage}'s slice{'' if len(left) == 1 else 's'} "
+                         f"{', '.join(left)} {'has' if len(left) == 1 else 'have'} no "
+                         "sized brief: size each brief before a worker gets it",
+                sizing.mark_line(name, build.stage)))
     return warnings
 
 

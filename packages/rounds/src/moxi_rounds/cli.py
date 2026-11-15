@@ -23,6 +23,7 @@
     moxi rounds mark ROUND Q<n> --blocks LIST|all | --reopen [--as NAME]
     moxi rounds mark ROUND --flow NAME [--as NAME]
     moxi rounds mark ROUND B<n> --after LIST [--as NAME]
+    moxi rounds mark ROUND B<n> --brief FILE [--as NAME]
     moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA [--commit SHA]...
                      --no-behaviour-change [--as NAME]
     moxi rounds mark ROUND B<n>.W<k>|B<n>.M<k> --done --record PTR [--as NAME]
@@ -57,7 +58,10 @@ A stage is out of the plan by the item `unstage:B<n>`, while it has no open or f
 build; it does not come back, and the same work planned again takes a new id.
 `mark ROUND B<n> --after LIST` makes a stage wait for more stages, which anyone may do,
 and the item `unafter:B<n>=B<m>` takes one off. Neither of those two rulings is taken
-back.
+back. `mark ROUND B<n> --brief FILE` sizes a worker's brief before the worker gets it:
+its data block names the stage and one slice the stage declares, given no more than
+the project's `slice_minutes`, or one verification (`verify = "build"`, `"design"` or
+`"retro"`); a pass is recorded with the brief's SHA-256.
 A ruling is corrected by a later one: `--supersedes` names the earlier ruling of the
 same thing that this one replaces, and the item `revoke:C<n>` (`revoke:S<n>` on a
 project) takes a ruling back with nothing in its place.
@@ -652,7 +656,7 @@ def _declare_mark(verbs) -> None:
             "question of a round hold up more stages, reopen a parked one, make a "
             "stage wait for more stages, mark a minor finding of a build fixed, mark "
             "a waiting item done, move a round up to a heavier flow, decide a thread of the design's "
-            "verification, say that rulings were shown to the "
+            "verification, size a worker's brief, say that rulings were shown to the "
             "operator as recorded, with a pointer to where, or repair a record: "
             "read a build's base again from git, or a recorded report again.")
     parser = verbs.add_parser("mark", help=said, description=said)
@@ -670,7 +674,8 @@ def _declare_mark(verbs) -> None:
                              "in letters, digits and . _ -; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
                              "several separated by commas; with --resync, a stage, "
-                             "B<n>; with --reread, a recorded report's file; left "
+                             "B<n>; with --brief, the stage the brief is of, B<n>; "
+                             "with --reread, a recorded report's file; left "
                              "out with --flow, which marks the round")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
@@ -685,6 +690,12 @@ def _declare_mark(verbs) -> None:
                            "be a stage of the round, and none may wait for B<n>; "
                            "only the operator takes one off (rule "
                            "unafter:B<n>=B<m>)")
+    form.add_argument("--brief", metavar="FILE",
+                      help="size a worker's brief for the stage B<n> before the "
+                           "worker gets it: its data block names the stage and one "
+                           "slice the stage declares, within the slice_minutes "
+                           "setting, or one verification (verify = build, design "
+                           "or retro); a pass is recorded with the brief's SHA-256")
     form.add_argument("--fixed", action="store_true",
                       help="the lead's mark that a minor or note finding of a build "
                            "is fixed, with no re-check; needs every commit of the fix "
@@ -771,6 +782,8 @@ def _mark(args, out) -> int:
         return _mark_thread(args, out)
     if args.after is not None:
         return _mark_after(args, out)
+    if args.brief is not None:
+        return _mark_brief(args, out)
     if args.record is not None:
         raise BadArgument("--record is the pointer to where rulings were shown, and "
                           "a change to a question that anyone may make carries none",
@@ -869,6 +882,25 @@ def _mark_after(args, out) -> int:
     return codes.OK
 
 
+def _mark_brief(args, out) -> int:
+    """`mark B<n> --brief FILE`: size a worker's brief before the worker gets it."""
+    from . import sizing
+
+    if args.record is not None:
+        raise BadArgument("a sized brief is the lead's check of a file, and carries no "
+                          "pointer", "leave --record out")
+    done = sizing.size(args.target, args.id, args.brief, actor=_actor(args))
+    one = done.sized
+    within = ("" if done.limit is None
+              else f" ({done.minutes} of {done.limit} minutes)")
+    print(f"{done.name} {one.stage} {one.piece}{within}: sized   brief: {one.brief}   "
+          f"sha256: {one.sha256[:12]}", file=out)
+    if done.found:
+        print(f"sized already, {one.at} by {one.actor}: nothing was written", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
+    return codes.OK
+
+
 def _mark_flow(args, out) -> int:
     """`mark --flow`: move a round up to a heavier flow, which is the lead's to do."""
     from . import stepping
@@ -944,6 +976,11 @@ def _fold(args, out) -> int:
         print(line, file=out)
     for line in tracing.lines(frozen.trace):
         print(line, file=out)
+    for one in frozen.oversized:
+        print(f"warning: the slice {one['slice']} of {one['stage']} is given "
+              f"{one['minutes']} minutes, over the {frozen.slice_minutes} of "
+              "slice_minutes: a worker gets one piece, well under an hour, and a brief "
+              "for it is refused until the design cuts it", file=out)
     _warn_of(frozen.failed, args.prog, args.verb)
     return codes.OK
 

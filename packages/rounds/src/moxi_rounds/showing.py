@@ -30,7 +30,10 @@ repo's check, of each command step of the user's own and of the local part of a 
 CI, its newest read of CI, and, while it is open, its state as read from git now (`open_builds`):
 whether it is idle, the builds it shares commits with, or what kept it from being read;
 and, once a report of it is recorded, how far the target moved under it since and
-whether that owes a re-check (`drift`). Each of the lead's repairs is shown with what
+whether that owes a re-check (`drift`). Each build carries its stage's slices, each
+with the sized brief that counts for it, and the verifications a brief was sized for
+(`sizing`); the lines say which slices of an open build have a sized brief and which
+have none. Each of the lead's repairs is shown with what
 it derived again and the old and new value of each field it changed.
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
@@ -51,7 +54,8 @@ from moxi import store
 
 from . import (builds, checking, ci, closing, decisions, drift, findings, folders,
                index, log,
-               open_builds, questions, shown, skips, steps, tracing, versions, waits)
+               open_builds, questions, shown, sizing, skips, steps, tracing, versions,
+               waits)
 from . import settings as own
 from . import state as states
 from .errors import (BadArgument, NoLog, NoRound, Refused, RoundsError, Unmet,
@@ -295,6 +299,10 @@ def history_of(event: dict) -> str | None:
         of = repair_of(event)
     if event.get("type") == "lock.cleared":
         of = f"{event.get('ref')}, held by {event.get('holder')}"
+    if event.get("type") == sizing.SIZED:
+        piece = (f"slice {event.get('slice')}" if event.get("slice") is not None
+                 else f"verify {event.get('verify')}")
+        of = f"{event.get('stage')} {piece}, {event.get('brief')}"
     if event.get("type") == "verdict.recorded" and event.get("design") is not None:
         of = f"{event.get('verdict')} for v{event.get('design')}"
     if event.get("type") == "verdict.recorded" and event.get("stage") is not None:
@@ -426,6 +434,8 @@ def _builds(found: Shown) -> list:
                "verdict": _build_verdict(found.state, one),
                "findings": [finding.data()
                             for finding in findings.of_build(found.state, one)],
+               "slices": sizing.slices_of(found.state, one),
+               "briefs": sizing.verifications_of(found.state, one),
                "drift": None}
         now = read.get(one.stage) if one.ended is None else None
         if now is not None and now.build.n == one.n:
@@ -583,8 +593,24 @@ def _build_lines(listed: list) -> list[str]:
         if one.get("drift") is not None:
             lines.append(f"    {drift_line(one['stage'], one['drift'])}")
         lines += [f"    {finding_line(finding)}" for finding in one.get("findings", ())]
+        if one["ended"] is None:
+            lines += [f"    {line}" for line in briefs_lines(one)]
         if one["record"] is not None:
             lines.append(f"    go: {one['record']}")
+    return lines
+
+
+def briefs_lines(one: dict) -> list[str]:
+    """Which slices of a build have a sized brief, and which verifications:
+    `slices: 2a sized, 2b not sized` and `verification briefs sized: build`."""
+    lines = []
+    if one.get("slices"):
+        lines.append("slices: " + ", ".join(
+            f"{piece['id']} {'not sized' if piece['sized'] is None else 'sized'}"
+            for piece in one["slices"]))
+    if one.get("briefs"):
+        lines.append("verification briefs sized: "
+                     + ", ".join(str(brief["verify"]) for brief in one["briefs"]))
     return lines
 
 

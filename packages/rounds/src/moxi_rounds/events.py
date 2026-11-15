@@ -144,8 +144,9 @@ TYPES = _types(
     # A finding or a waiting item moved to a new state.
     EventType("finding.marked", ("id", "state", "commits", "record")),
     EventType("wait.marked", ("id", "state", "commits", "record")),
-    # A slice's brief was sized: the file, its digest and the result.
-    EventType("brief.sized", ("stage", "slice", "brief", "sha256", "result")),
+    # A brief was sized: the stage, the one slice or verification it is for, the file,
+    # its digest and the result.
+    EventType("brief.sized", ("stage", "slice", "verify", "brief", "sha256", "result")),
     # One finish action reached a state at a build's tip; a merge also holds where it
     # landed and the target's head before it.
     EventType("finish.action",

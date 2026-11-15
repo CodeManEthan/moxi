@@ -86,6 +86,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND Q<n> --blocks B<n>[,...]\|all`, `mark ROUND Q<n> --reopen` | make a question hold up more stages, or reopen a parked one |
 | `moxi rounds mark ROUND --flow NAME` | move the round up to a heavier flow, or to its own flow's steps as the config has them now |
 | `moxi rounds mark ROUND B<n> --after B<m>[,...]` | make a stage wait for more stages |
+| `moxi rounds mark ROUND B<n> --brief FILE` | size a worker's brief before the worker gets it: one slice of the stage within `slice_minutes`, or one verification |
 | `moxi rounds mark ROUND B<n>.L<k> --fixed --commit SHA... --no-behaviour-change` | the lead's mark of a minor or note finding fixed, naming every commit of the fix |
 | `moxi rounds mark ROUND B<n>.W<k> --done --record PTR` | a waiting item is done, with a pointer to the report, commit or message that shows it |
 | `moxi rounds mark ROUND thread:NAME --close\|--accept-risk --record PTR` | the lead's decision on a design that was sent back twice in a row |
@@ -376,6 +377,30 @@ holds it. A repo's branch has one open build at a time, across every round: a
 commission on a branch another round's open build is on is refused, naming that round.
 `next` warns once a round plans five or more stages that are builds, and refuses
 nothing for it: a part of the work that stands on its own can be a child round.
+
+A worker gets one slice: one mechanism or one file group, well under an hour. `fold`
+warns of a slice given more minutes than the project's `slice_minutes` (45 unless set),
+and refuses nothing for it. Before a brief goes to a worker, the lead sizes it:
+
+```text
+$ moxi rounds mark alpha/search B1 --brief briefs/1a.md
+```
+
+The brief carries a data block naming its stage and one piece of work:
+
+```toml
+stage = "B1"
+slice = "1a"      # or, for a checker's brief: verify = "build" | "design" | "retro"
+```
+
+It passes when the slice is one the stage declares and its minutes are within
+`slice_minutes`, or when it names one verification, and the pass is recorded with the
+brief's SHA-256. A brief that names two slices, both a slice and a verification, or
+neither, a slice the stage does not declare, or one over the limit is refused, and
+nothing is written. `show` and the round note say which slices of each open build have
+a sized brief, and `next` names the ones that have none. A sizing counts for the build
+of its stage that is open, or for the stage's next build when none is: a dropped
+build's briefs are not its successor's.
 
 Once a round has stages, a question may hold up some of them (`ask --blocks B1,B2`,
 `narrow:Q<n>=B2`), be parked until one is finished (`park:Q<n> --until B2`), and a

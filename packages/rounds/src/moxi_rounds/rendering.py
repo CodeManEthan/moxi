@@ -359,6 +359,8 @@ def _builds(shown_as: dict) -> list[str]:
         if one.get("drift") is not None:
             said.append(showing.drift_line(one["stage"], one["drift"]))
         said += [showing.finding_line(finding) for finding in one.get("findings", ())]
+        if one["ended"] is None:
+            said += showing.briefs_lines(one)
         for line in said:
             lines += _item(line, indent="  ")
     return lines
