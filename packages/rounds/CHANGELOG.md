@@ -106,6 +106,12 @@ does not yet build.
   rules it, a later ruling replaces it and `revoke:` takes it back; a rejected one is a
   waiting item until its fix is marked done. Unruled majors show in `list --waiting` and
   a project's export; every decision shows in `show` and the round note.
+- A round's export has two views, both when `--view` is left out: `docket`, its open
+  and parked questions, and `ratify`, the unruled decisions of its finished builds,
+  which it names under `covers`, as the project's `ratify` setting picks them (`majors`,
+  `majors+minors` with the minor ones as one group of ids, or `off`). The major
+  decisions of builds not yet finished are listed under `later`. A decision that
+  forecloses a capability is always an entry of its own, marked `alone`.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

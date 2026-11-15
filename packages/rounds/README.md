@@ -94,7 +94,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
-| `moxi rounds list ROUND\|PROJECT --questions [--view docket] [--json] [--out DIR]` | the questions written out as markdown; `--out` writes `questions.md` and `questions.json` into DIR |
+| `moxi rounds list ROUND\|PROJECT --questions [--view docket\|ratify] [--json] [--out DIR]` | the questions written out as markdown; `--out` writes `questions.md` and `questions.json` into DIR; a round's two views are both given when `--view` is left out |
 | `moxi rounds drop ROUND --by operator\|lead --record PTR [--withdraw-questions]` | end a round short of its work |
 
 No command closes a round: a round closes itself (see Closing).
@@ -419,6 +419,16 @@ item, `B1.M1`, until `mark ROUND B1.M1 --done --record PTR` names the fix. A rep
 build report carries, each with its `stage`, and names the builds it covers in
 `stages`. `list --waiting` and a project's export list each unruled major.
 
+A round's export has two views. The docket (`--view docket`) is its open questions and,
+after them, the parked ones. The ratification (`--view ratify`) is the unruled decisions
+of the builds that are finished when it runs, named under `covers`; what it puts to the
+operator is the project's `ratify` setting: `majors` (the default) each major decision,
+`majors+minors` the minor ones too, drawn as one group that lists their ids and is
+still ruled one id at a time, and `off` none. The major decisions of builds not yet
+finished are listed under `later`, and come in an export run once their build is
+finished. A decision that forecloses a capability is an entry of its own everywhere:
+`alone` in the data, its own heading in the markdown, never in a group.
+
 A verdict records the head it read and that head's merge-base with the target. When the
 target moves on, `show` reads whether the move touches the build: `target moved 4
 commits under B2; 0 paths meet`, or `...; 2 paths meet: re-check owed`. A re-check is
@@ -640,7 +650,8 @@ workflow reads `green`, `pending`, `red` or `absent` at the tip; the check step 
 done once every workflow reads green there, the workflows named are the ones the
 setting names now, and the local run passed at the tip with the command it declares
 now. The full check, run with `check --full`, meets the step whatever CI reads. A
-`ci` in a project with no `check` is refused. It also takes `defaults.ratify`,
+`ci` in a project with no `check` is refused. `defaults.ratify` (and a project's
+`ratify`) picks what a round's ratification view puts to the operator. It also takes
 `defaults.check_on`, `defaults.dormant_days`, `defaults.slice_minutes` and
 `defaults.sitting_at`, and in a project's table `finish`, `keep_branch` and
 `lock_ref`. They are checked when the file is read, and nothing in this version acts on

@@ -109,7 +109,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 19
+DERIVED = 20
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -119,7 +119,8 @@ DERIVED = 19
 QUESTION = "question"
 RULING = "ruling"
 READ_BACK = "read-back"
-#: A round's plan is here too: each stage it has, the current version of its design
+#: A round's plan is here too: each stage it has, with whether its build is finished,
+#: the current version of its design
 #: with the design's standing, what that version took away and still waits for a
 #: verdict or a ruling, each verdict recorded of the design, and each decision the
 #: lead made on a thread of its verification.
@@ -145,6 +146,15 @@ def _step(folded: state.State):
     return steps.at(folded)
 
 
+def _stages(folded: state.State):
+    # Whether a stage's build is finished is an act on record, so it is read here
+    # with no git: the ratification covers the builds that are.
+    for stage_id, body in versions.stages(folded):
+        build = builds.current(folded, stage_id)
+        yield stage_id, {**body, "finished": build is not None
+                         and build.ended == builds.FINISHED}
+
+
 def _waits(folded: state.State):
     # The waiting items' module marks one done through the write path, which updates
     # the index: it too is loaded when a log is first read.
@@ -154,7 +164,7 @@ def _waits(folded: state.State):
 
 ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
     QUESTION: questions.waiting, RULING: readback.unmarked,
-    READ_BACK: readback.read_backs, STAGE: versions.stages, VERSION: versions.newest,
+    READ_BACK: readback.read_backs, STAGE: _stages, VERSION: versions.newest,
     PENDING: versions.waiting, VERDICT: versions.verdicts,
     THREAD: versions.threads, STEP: _step, BUILD: builds.opened, WAIT: _waits,
     DECISION: decisions.items}

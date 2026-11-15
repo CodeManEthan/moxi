@@ -12,8 +12,25 @@ who asked it and when; then, each only when the question has it, what a parked o
 for, the options it offers now, and the record it was moved from with what it held up
 there. A bare question is written out bare.
 
-**A round's export** is its docket: every question of the round that reads as open,
-whatever else is set, and after them the parked ones, which are not put to him.
+**A round's export** has two views, each a filter on the one kind of record, and with
+no view it holds both, the docket first:
+
+- **The docket**: every question of the round that reads as open, whatever else is
+  set, and after them the parked ones, which are not put to him.
+- **The ratification**: the decisions not yet ruled of the builds that are finished
+  when the export is computed. It names those builds under `covers`. What it puts to
+  him is the project's `ratify` setting: `majors` (the default) each major decision,
+  each an entry of its own; `majors+minors` adds the minor ones as one group, whose
+  entries carry `group` and are drawn together under one heading that lists their
+  ids; `off` none. A group is a way to draw, not a thing to answer: each id in it is
+  ruled on its own. The major decisions of builds that are not finished are listed
+  under `later`, which are no entries: they come in a later export, once their build
+  is finished. Nothing here waits on a build that is not finished, and no ruling
+  waits on an export.
+
+A decision that forecloses a capability is major, and wherever it is written out it
+is an entry of its own: its data is marked `alone`, the markdown gives it a heading
+of its own, and it is in no group and no summary line.
 
 **A round that has ended** has an empty docket, and its export says how it ended. A
 question whose record still reads as open or parked there (a correction made after the
@@ -51,9 +68,18 @@ from . import state as states
 from .errors import (BadArgument, NoLog, NoRound, Refused, RoundsError, SharedFolder,
                      Unmet, Unreadable)
 
-#: The view of a round's export that holds its open questions, and the views there are.
+#: The view of a round's export that holds its open questions, the view that holds
+#: the decisions of its finished builds, and the views there are.
 DOCKET = "docket"
-VIEWS = (DOCKET,)
+RATIFY = "ratify"
+VIEWS = (DOCKET, RATIFY)
+
+#: The values of the project's `ratify` setting: what the ratification puts to him.
+MAJORS = "majors"
+MAJORS_AND_MINORS = "majors+minors"
+OFF = "off"
+#: The group the minor decisions are drawn in, under `majors+minors`.
+MINORS = "minors"
 
 #: The names of the two files an export is written to.
 MARKDOWN_FILE = "questions.md"
@@ -104,6 +130,8 @@ class Entry:
     stage: str | None = None
     weight: str | None = None
     forecloses: bool = False
+    #: The group it is drawn in (`MINORS`), or None for an entry of its own.
+    group: str | None = None
 
     @property
     def decision(self) -> bool:
@@ -135,6 +163,8 @@ class Entry:
             if self.forecloses:
                 # An entry of its own wherever it is drawn: in no group or summary.
                 data["alone"] = True
+        if self.group is not None:
+            data["group"] = self.group
         return data
 
 
@@ -144,22 +174,29 @@ class Rows:
     group in the order of its logs; and the error of each round whose log could not be
     read, whose questions are therefore not among them. The rows of one round that has
     ended are none: `ended` says how it ended, as the index keeps it, and `left` holds
-    its questions whose records still read as open or parked."""
+    its questions whose records still read as open or parked. A round's rows that
+    hold its ratification give the stages of the builds it covers in `covers`, and in
+    `later` the major decisions of builds not yet finished."""
 
     entries: tuple[Entry, ...]
     unreadable: tuple[Unreadable, ...] = ()
     ended: Mapping | None = None
     left: tuple[Entry, ...] = ()
+    covers: tuple[str, ...] | None = None
+    later: tuple[Entry, ...] = ()
 
 
 @dataclass(frozen=True)
 class Export:
     """One export: `name` is the round or the project it is of, `round` the round's name
-    or None for a project's, `view` the view of a round's export or None, `computed`
-    the second it was computed in, and `read_back` the project's list of rulings not
-    yet shown. `unreadable` says, a line each, which logs could not be read. For a
-    round that has ended, `ended` says how (`how`, `by`, `record`, `at`) and `left`
-    holds its questions that wait for a new round, which are no entries."""
+    or None for a project's, `view` the view of a round's export, None for both views
+    and for a project's, `computed` the second it was computed in, and `read_back` the
+    project's list of rulings not yet shown. `unreadable` says, a line each, which
+    logs could not be read. For a round that has ended, `ended` says how (`how`, `by`,
+    `record`, `at`) and `left` holds its questions that wait for a new round, which
+    are no entries. An export that holds the ratification gives the project's `ratify`
+    setting, the stages of the finished builds it `covers`, and the decisions put off
+    to a `later` one; for any other these are None, None and empty."""
 
     name: str
     project: str
@@ -171,6 +208,19 @@ class Export:
     unreadable: tuple[str, ...] = ()
     ended: Mapping | None = None
     left: tuple[Entry, ...] = ()
+    ratify: str | None = None
+    covers: tuple[str, ...] | None = None
+    later: tuple[Entry, ...] = ()
+
+    @property
+    def has_docket(self) -> bool:
+        """Whether it holds the questions: a project's export, or a round's docket."""
+        return self.round is None or self.view != RATIFY
+
+    @property
+    def has_ratification(self) -> bool:
+        """Whether it holds a round's ratification."""
+        return self.round is not None and self.view != DOCKET
 
     @property
     def open(self) -> tuple[Entry, ...]:
@@ -185,12 +235,20 @@ class Export:
     def decisions(self) -> tuple[Entry, ...]:
         return tuple(entry for entry in self.entries if entry.decision)
 
+    @property
+    def grouped(self) -> tuple[Entry, ...]:
+        """The decisions drawn as the one group of minor decisions."""
+        return tuple(entry for entry in self.decisions if entry.group == MINORS)
+
     def data(self) -> dict:
         """The export as data: what `as_markdown` writes, for a program to read."""
         back = self.read_back
         return {"of": self.name, "project": self.project, "round": self.round,
                 "view": self.view, "computed": self.computed,
                 "entries": [entry.data() for entry in self.entries],
+                "ratify": self.ratify,
+                "covers": None if self.covers is None else list(self.covers),
+                "later": [entry.data() for entry in self.later],
                 "ended": None if self.ended is None else dict(self.ended),
                 "left": [entry.data() for entry in self.left],
                 "unreadable": list(self.unreadable),
@@ -308,22 +366,55 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
     return Rows(_ordered(entries), tuple(unreadable))
 
 
-def of_round(home: folders.Home, slug: str, *, settings=None, env=None) -> Rows:
-    """The question rows of one round: every question of it that reads as open, then
-    the parked ones; none of a round that has ended, whose `ended` and `left` are
-    given in their place. Raises `NoRound` for a round that was never opened and `Unreadable`
-    for one whose log can't be read. It writes nothing."""
+def of_round(home: folders.Home, slug: str, *, view: str | None = None, settings=None,
+             env=None) -> Rows:
+    """The rows of one round in `view`, both views when None: for the docket, every
+    question of it that reads as open, then the parked ones; for the ratification,
+    the decisions it puts to him by the project's `ratify` setting, with the builds
+    it covers and what it puts off to a later export. A round that has ended has no
+    rows: its `ended` and `left` are given in their place. Raises `NoRound` for a
+    round that was never opened and `Unreadable` for one whose log can't be read. It
+    writes nothing."""
     try:
         summary = index.read(home.project, home.folder, slug, env=env)
     except NoLog:
         raise NoRound(f"{home.project}/{slug}") from None
     if summary.unreadable is not None:
         raise summary.unreadable
-    closed = _closed(own.load() if settings is None else settings)
-    # A round's export is its docket, of asked questions.
-    found = [entry for entry in _entries(summary, closed) if not entry.decision]
-    return Rows(_ordered(found), ended=summary.ended,
-                left=tuple(entry for entry in found if entry.state == questions.LEFT))
+    settings = own.load() if settings is None else settings
+    found = _entries(summary, _closed(settings))
+    asked = [entry for entry in found if not entry.decision]
+    rows = Rows(_ordered(asked) if view != RATIFY else (), ended=summary.ended,
+                left=tuple(entry for entry in asked if entry.state == questions.LEFT
+                           and view != RATIFY))
+    if view == DOCKET:
+        return rows
+    put, covers, later = _ratification(
+        summary, [entry for entry in found if entry.decision],
+        own.round_setting(settings, home.project, "ratify"))
+    return replace(rows, entries=rows.entries + put, covers=covers, later=later)
+
+
+def _ratification(summary: index.Summary, found: list[Entry], setting: str):
+    """What a round's ratification holds, as `(entries, covers, later)`: of the
+    decisions not yet ruled, `found`, those of the finished builds that `setting` puts
+    to him, the major ones first and then the minor ones as one group; the stages of
+    the finished builds; and the major decisions of the builds not yet finished."""
+    covers = tuple(item.id for item in summary.of(index.STAGE)
+                   if item.body.get("finished") is True)
+    unruled = [entry for entry in found if entry.state == questions.OPEN]
+    if setting == OFF:
+        return (), covers, ()
+    majors = [entry for entry in unruled
+              if entry.stage in covers and entry.weight == report_block.MAJOR]
+    minors = []
+    if setting == MAJORS_AND_MINORS:
+        minors = [replace(entry, group=MINORS) for entry in unruled
+                  if entry.stage in covers and entry.weight != report_block.MAJOR
+                  and not entry.forecloses]
+    later = tuple(entry for entry in unruled
+                  if entry.stage not in covers and entry.weight == report_block.MAJOR)
+    return tuple(majors + minors), covers, later
 
 
 # -- the export --------------------------------------------------------------------------
@@ -332,8 +423,8 @@ def questions_of(name: str, *, view: str | None = None, settings=None,
                  now: str | None = None) -> Export:
     """The export of the round or the project `name`.
 
-    - `view`: for a round, `DOCKET` or None, which is the docket. A project's export
-      has no view.
+    - `view`: for a round, `DOCKET`, `RATIFY`, or None for both, the docket first. A
+      project's export has no view.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out.
     - `now`: the second the export is computed in, as a log writes a time; a ruling
@@ -351,7 +442,8 @@ def questions_of(name: str, *, view: str | None = None, settings=None,
     project, slug = folders.split(name) if "/" in name else (name, None)
     if view is not None and view not in VIEWS:
         raise BadArgument(f"{view!r} is no view of a round's questions",
-                          f"leave --view out, or say --view {DOCKET}")
+                          f"leave --view out for both views, or say --view "
+                          f"{DOCKET} or --view {RATIFY}")
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     if slug is None and view is not None:
@@ -361,7 +453,7 @@ def questions_of(name: str, *, view: str | None = None, settings=None,
             "its open rounds", f"moxi rounds list {home.project} --questions")])
     now = log.stamp() if now is None else now
     rows = (waiting(home, settings=settings) if slug is None
-            else of_round(home, slug, settings=settings))
+            else of_round(home, slug, view=view, settings=settings))
     back = shown.unshown(home.project, settings=settings, now=now)
     # One line for a log, whichever of the two readings could not read it.
     unreadable = tuple(dict.fromkeys(
@@ -369,9 +461,12 @@ def questions_of(name: str, *, view: str | None = None, settings=None,
     return Export(name=home.project if slug is None else f"{home.project}/{slug}",
                   project=home.project,
                   round=None if slug is None else f"{home.project}/{slug}",
-                  view=None if slug is None else DOCKET, computed=now,
+                  view=view, computed=now,
                   entries=rows.entries, read_back=back, unreadable=unreadable,
-                  ended=rows.ended, left=rows.left)
+                  ended=rows.ended, left=rows.left,
+                  ratify=(own.round_setting(settings, home.project, "ratify")
+                          if slug is not None and view != DOCKET else None),
+                  covers=rows.covers, later=rows.later)
 
 
 # -- the two forms -----------------------------------------------------------------------
@@ -383,13 +478,18 @@ def as_json(export: Export) -> str:
 
 def as_markdown(export: Export) -> str:
     """The export as plain markdown, ending in a line break: the open questions, the
-    parked ones under their own heading, those of a round that has ended under
-    theirs, the logs that could not be read when there
-    are any, and last the rulings not yet shown."""
+    parked ones under their own heading, then a round's ratification, those of a
+    round that has ended under their own heading, the logs that could not be read
+    when there are any, and last the rulings not yet shown."""
     opened, parked = export.open, export.parked
     what = f"{export.view}, computed" if export.view else "computed"
+    counts = []
+    if export.has_docket:
+        counts += [f"{len(opened)} open", f"{len(parked)} parked"]
+    if export.has_ratification:
+        counts.append(f"{len(export.decisions)} to ratify")
     lines = [f"# Questions of {export.name}", "",
-             f"{what} {export.computed}: {len(opened)} open, {len(parked)} parked", ""]
+             f"{what} {export.computed}: {', '.join(counts)}", ""]
     if export.ended is not None:
         ended = export.ended
         how = f"{ended.get('how')} at {ended.get('at')}"
@@ -398,10 +498,13 @@ def as_markdown(export: Export) -> str:
                    f"record {ended.get('record')}")
         lines += [f"This round has ended: {how}. Nothing of it is put to the "
                   "operator.", ""]
-    lines += ["## Open", ""]
-    lines += _group(opened, "No question is open.")
-    lines += ["## Parked: not put to the operator", ""]
-    lines += _group(parked, "No question is parked.")
+    if export.has_docket:
+        lines += ["## Open", ""]
+        lines += _group(opened, "No question is open.")
+        lines += ["## Parked: not put to the operator", ""]
+        lines += _group(parked, "No question is parked.")
+    if export.has_ratification:
+        lines += _ratification_lines(export)
     if export.round is None:
         lines += ["## Major decisions not yet ruled", ""]
         lines += _group(export.decisions, "No major decision waits.")
@@ -417,6 +520,41 @@ def as_markdown(export: Export) -> str:
         lines += [f"- {reason}" for reason in export.unreadable] + [""]
     lines += _read_back_lines(export)
     return "\n".join(lines) + "\n"
+
+
+_PUTS = {MAJORS: "each major decision not yet ruled",
+         MAJORS_AND_MINORS: "each major decision not yet ruled, and the minor ones as "
+                            "one group",
+         OFF: "no decision: the project's ratify setting is off"}
+
+
+def _ratification_lines(export: Export) -> list[str]:
+    covers = ", ".join(export.covers or ()) or "no build: none is finished"
+    majors = tuple(entry for entry in export.decisions if entry.group is None)
+    lines = ["## Ratification", "",
+             f"Covers the finished builds: {covers}. It puts to the operator "
+             f"{_PUTS.get(export.ratify, export.ratify)}.", ""]
+    if export.ratify == OFF:
+        return lines
+    lines += ["## Ratification: major decisions", ""]
+    lines += _group(majors, "No major decision of a finished build waits.")
+    if export.ratify == MAJORS_AND_MINORS:
+        grouped = export.grouped
+        ids = ", ".join(entry.id for entry in grouped)
+        lines += [f"## Ratification: minor decisions, one group: {ids or 'none'}", ""]
+        if grouped:
+            lines += ["Drawn together, each ruled on its own:", "",
+                      f"    moxi rounds rule {export.round} B<n>.M<k>=accept|reject "
+                      "--record PTR", ""]
+            lines += [f"- {entry.id}: {entry.text}" for entry in grouped]
+            lines.append("")
+        else:
+            lines += ["No minor decision of a finished build waits.", ""]
+    if export.later:
+        lines += ["## Later: decisions of builds not yet finished, not put to the operator",
+                  ""]
+        lines += _group(export.later, "")
+    return lines
 
 
 def _group(entries: tuple[Entry, ...], none: str) -> list[str]:
@@ -518,6 +656,7 @@ def _kept_there(folder: Path, settings) -> str | None:
     return None
 
 
-__all__ = ["DOCKET", "VIEWS", "MARKDOWN_FILE", "JSON_FILE", "Option", "Entry", "Rows",
+__all__ = ["DOCKET", "RATIFY", "VIEWS", "MAJORS", "MAJORS_AND_MINORS", "OFF", "MINORS",
+           "MARKDOWN_FILE", "JSON_FILE", "Option", "Entry", "Rows",
            "Export", "ENTRIES", "read_back_data", "of_log", "waiting", "of_round",
            "questions_of", "as_json", "as_markdown", "write"]

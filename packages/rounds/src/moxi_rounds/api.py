@@ -105,11 +105,14 @@ def waiting() -> dict:
 
 def questions(name: str, view: str | None = None) -> dict:
     """The questions of the round or the project `name`, written out: `{"of",
-    "project", "round", "view", "computed", "entries", "ended", "left", "unreadable",
-    "read_back"}`, the open entries first and the parked ones after. For a round that
+    "project", "round", "view", "computed", "entries", "ratify", "covers", "later",
+    "ended", "left", "unreadable", "read_back"}`, the open entries first, the parked
+    ones after, then a round's decisions to ratify. For a round that
     has ended, `ended` says how and `left` holds its questions whose records still
     read as open or parked: they wait for a new round and are no entries. `view` is for a round, and is
-    `"docket"` or None, which is the docket.
+    `"docket"`, `"ratify"` (the decisions not yet ruled of its finished builds, which
+    `covers` names, as the project's `ratify` setting picks them, with the major ones
+    of unfinished builds in `later`), or None for both.
 
     A project's export names the rounds it could not read in `unreadable` and holds
     the rest. Raises `Unreadable` for a round, or a project's own log, that can't be

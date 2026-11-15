@@ -544,7 +544,7 @@ def test_a_question_a_correction_leaves_unanswered_in_an_ended_round_waits_nowhe
 
     assert main(["list", A, "--questions"]) == 0
     out = capsys.readouterr().out
-    assert ": 0 open, 0 parked\n" in out
+    assert ": 0 open, 0 parked, 0 to ratify\n" in out
     assert "This round has ended: dropped by operator at " in out
     docket, _heading, left = out.partition(
         "## Waiting for a new round: not put to the operator\n")

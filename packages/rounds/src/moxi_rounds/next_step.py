@@ -140,7 +140,7 @@ def _verify_design(found: showing.Shown, step: steps.Step) -> dict:
 
 def _docket(found: showing.Shown, step: steps.Step) -> dict:
     asked = {one.id: one for one in found.state.questions}
-    return {"export": f"moxi rounds list {found.name} --questions",
+    return {"export": f"moxi rounds list {found.name} --questions --view docket",
             "then": [steps.answer(found.name, asked[question_id])
                      for question_id in step.questions]}
 

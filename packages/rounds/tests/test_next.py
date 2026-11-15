@@ -237,7 +237,7 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
     assert printed[:5] == [
         f"round {ROUND}   flow full   step docket   by operator",
         "questions: Q1",
-        f"export: moxi rounds list {ROUND} --questions",
+        f"export: moxi rounds list {ROUND} --questions --view docket",
         f"then:  moxi rounds rule {ROUND} Q1 --text TEXT --record PTR",
         "waits: nothing"]
     assert ASKED in do(capsys, said(printed, "export:")[0])

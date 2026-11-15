@@ -35,7 +35,7 @@
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
     moxi rounds list [PROJECT] --waiting [--json]
-    moxi rounds list ROUND --questions [--view docket] [--json] [--out DIR]
+    moxi rounds list ROUND --questions [--view docket|ratify] [--json] [--out DIR]
     moxi rounds list PROJECT --questions [--json] [--out DIR]
 
 `ROUND` is `<project>/<slug>` and `PROJECT` a project's key. `PTR` is a pointer: to
@@ -168,6 +168,12 @@ his pointer is a ruling, and is printed as `rule` prints one. `list --questions`
 the questions that wait on the operator, of one round or of one project with its open
 rounds, and after them the rulings not yet shown to him: as markdown, with `--json` as
 data, and with `--out DIR` as both, in the files `questions.md` and `questions.json`.
+A round's questions have two views, both with no `--view`: the docket, its open and
+parked questions; and the ratification, the decisions not yet ruled of its finished
+builds, which it names, as the project's `ratify` setting picks them (`majors`, or
+`majors+minors` with the minor ones as one group of ids, or `off`), with the major
+decisions of unfinished builds listed as later. A decision that forecloses a
+capability is always an entry of its own.
 `next` says what is done next in a round: the step it is at, who does it and at which
 tier, with the model the `models` setting names for that tier, what they read, the
 command that completes the step and what the step waits for; then what the lead
@@ -1313,10 +1319,11 @@ def _declare_list(verbs) -> None:
                         help="list the rounds that have ended, not the open ones")
     parser.add_argument("--questions", action="store_true",
                         help="list the questions of the round or the project")
-    parser.add_argument("--view", metavar="docket", choices=("docket",),
+    parser.add_argument("--view", metavar="docket|ratify", choices=("docket", "ratify"),
                         help="with --questions, for a round, which of its questions: "
-                             "docket, every open one and after them the parked ones "
-                             "(the default); a project's questions have no view")
+                             "docket, every open one and after them the parked ones; "
+                             "ratify, the decisions of its finished builds; both "
+                             "when left out; a project's questions have no view")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="print the same rows as data")
     parser.add_argument("--out", metavar="DIR",
