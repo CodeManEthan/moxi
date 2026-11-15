@@ -105,12 +105,13 @@ CODEX_KEEP = frozenset({
 RECORDED, CREDENTIAL = "recorded", "credential"
 
 
-def _module_env(module: str, interface: int, name: str) -> str:
-    """An optional module's exported environment name."""
+def _stamp(env: dict[str, str], module: str, interface: int, name: str, value: str) -> None:
+    """Stamp `value` under the environment name an optional module exports as `name`.
+    Nothing is stamped when the module can't be loaded here: only it reads the variable,
+    and a replayed row may still carry a value for a module removed since."""
     found = modules.load(module, interface=interface)
-    if not found.ok or found.api is None:
-        raise RuntimeError(f"{module} interface {interface} is unavailable")
-    return getattr(found.api, name)
+    if found.ok and found.api is not None:
+        env[getattr(found.api, name)] = value
 
 #: Each name of the keep-lists (`CLAUDE_KEEP`, `CODEX_KEEP`), and each provider name a
 #: recorded switch needs that the scrub never touches, classed once. A name is a
@@ -538,7 +539,7 @@ def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
     if values.get("recycle_at_limit") in ("relaunch", "compact") and values.get("limit_at"):
-        env[_module_env("usage", 1, "CROSSING_AT_ENV")] = str(values["limit_at"])
+        _stamp(env, "usage", 1, "CROSSING_AT_ENV", str(values["limit_at"]))
     return env
 
 
@@ -552,13 +553,13 @@ def stamps(request_id: str, *, turns: bool = False, additions: Additions | None 
     `options` the option rows' stamps and any a replay adds."""
     env: dict[str, str] = {}
     if turns:
-        env[_module_env("turns", 2, "COMMANDS_ENV")] = ",".join(granted)
+        _stamp(env, "turns", 2, "COMMANDS_ENV", ",".join(granted))
     if additions is not None:
         env.update(additions.env)
     if warn_at:
-        env[_module_env("usage", 1, "WARN_AT_ENV")] = str(warn_at)
+        _stamp(env, "usage", 1, "WARN_AT_ENV", str(warn_at))
     if notes_dir:
-        env[_module_env("notes", 1, "NOTES_DIR_ENV")] = str(notes_dir)
+        _stamp(env, "notes", 1, "NOTES_DIR_ENV", str(notes_dir))
     env.update(options or {})
     env[REQUEST_ENV] = request_id
     return env

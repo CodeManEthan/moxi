@@ -6,7 +6,7 @@ the step works with no module installed. ui's check names the same two
 (`moxi.terminal.RECORD_COMMAND`, `DOCTOR_COMMAND`), so its lines and this row can't
 disagree.
 
-Standard library only.
+Standard library and `moxi.paths` only.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ DOCTOR_COMMAND = "moxi doctor"
 #: The agents by the names a person knows them by.
 HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode"}
 #: The harnesses' tool marks, each with its harness (`moxi._mark.TOOL_MARKS`, repeated here
-#: so the words import nothing).
+#: so the words import no more than `moxi.paths`).
 TOOL_MARKS = {"CLAUDECODE": "claude"}
 #: How the walk names a program run from a file descriptor.
 FD_PREFIX = "/proc/self/fd/"

@@ -3,6 +3,8 @@ past."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from moxi import modules
 
@@ -124,6 +126,18 @@ def test_the_stamps_with_turns_the_additions_usage_and_notes():
                          notes_dir="/notes") == {
         "MOXI_TURNS_COMMANDS": "exit", "MOXI_X": "1", "MOXI_USAGE_WARN_AT": "1.5x",
         "MOXI_NOTES_DIR": "/notes", "MOXI_LAUNCHER_REQUEST": "r1"}
+
+
+def test_a_value_for_a_module_that_cannot_load_is_not_stamped_and_the_launch_goes_on(
+        monkeypatch):
+    # A replayed row can carry warn_at or notes_dir after usage or notes was removed.
+    real = modules.load
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=False, api=None) if name in ("usage", "notes")
+        else real(name, **kw)))
+    assert common.stamps("r1", warn_at="1.5x", notes_dir="/notes") == {
+        "MOXI_LAUNCHER_REQUEST": "r1"}
+    assert common.option_stamps({"recycle_at_limit": "compact", "limit_at": "1x"}) == {}
 
 
 @pytest.mark.parametrize("harness, extra", [("claude", {}), ("codex", {})])

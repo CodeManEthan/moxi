@@ -239,7 +239,7 @@ def _read_bounds(tool_input: Mapping) -> None:
 
 #: What Codex's patch parser trims from a line (Rust's `trim`): Unicode White_Space.
 _WS = ("\t\n\x0b\x0c\r \x85\xa0 " + "".join(chr(c) for c in range(0x2000, 0x200B))
-       + "\\u2028\\u2029\\u202f\\u205f\\u3000")
+       + "\u2028\u2029\u202f\u205f\u3000")
 BEGIN_PATCH, END_PATCH = "*** Begin Patch", "*** End Patch"
 ADD_FILE, UPDATE_FILE = "*** Add File: ", "*** Update File: "
 DELETE_FILE, MOVE_TO = "*** Delete File:", "*** Move to:"

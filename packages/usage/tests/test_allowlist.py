@@ -10,7 +10,7 @@ the user added.
 
 import os
 
-from moxi_usage.allowlist import allowed
+from moxi_usage.allowlist import allowed, patch_files
 
 COMMANDS = (("make", "handoff"),)
 
@@ -515,3 +515,14 @@ def test_the_process_home_expands_a_leading_tilde_when_none_is_given(tmp_path, m
     monkeypatch.setenv("HOME", p["HOME"])
     command = {"command": "git -C ~/tmp/builds/branch status --short"}
     assert allowed("Bash", command, p["CWD"], work_roots=[p["WORK"]]) == (True, "")
+
+
+def test_a_patch_path_loses_only_unicode_white_space_at_its_ends():
+    # A header line is trimmed as Rust's `trim` does: the wide spaces after the path go,
+    # and no letter, digit or backslash the path ends in.
+    padded = "notes/a.conf\u205f\u202f\u2029\u2028\u3000"
+    text = ("*** Begin Patch\n"
+            f"*** Add File: {padded}\n+x\n"
+            "*** Add File: notes/2025\\u\n+x\n"
+            "*** End Patch\u3000\n")
+    assert patch_files(text) == ["notes/a.conf", "notes/2025\\u"]

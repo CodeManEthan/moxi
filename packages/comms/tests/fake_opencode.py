@@ -484,7 +484,7 @@ def window(url: str, session_id: str) -> int:
     try:
         urllib.request.urlopen(req, timeout=5).read()
     except urllib.error.HTTPError as exc:
-        print(f"Error: opencode server GET {url}/session/{session_id} → {e.excode}",
+        print(f"Error: opencode server GET {url}/session/{session_id} → {exc.code}",
               file=sys.stderr, flush=True)
         event("window-exit", code=1, why=str(exc.code))
         return 1
