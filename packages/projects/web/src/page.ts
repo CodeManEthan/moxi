@@ -14,6 +14,10 @@
 //   rows are by key until every facts component has reported once, or for 3 s; then, with
 //   an activity source, bad news first and the rest by latest activity. Past twelve
 //   projects, a find field, a kind filter and the `Earlier` fold.
+// - Folders that are not projects: under the list, `Not a project` (`Worked in this week`
+//   when there is no project), each folder an activity source said was worked in, one
+//   line, newest first, with `Add` at the right, which opens the Add panel with the folder
+//   and the name filled. Five, then how many more, with `Show`.
 // - The list's states: nothing for 400 ms, then `Reading…`; while projects' page server
 //   isn't answering, a first row saying so over the last list, dim and with no acts; a
 //   store that refuses, its reason and fix and nothing else; no project, the empty
@@ -63,10 +67,10 @@ import { factsModules, FirstOrder, givenOf, HeldReports, presentModules } from "
 import { HOLD_MS, JOIN, listView, rowAttributes } from "./list-model.ts";
 import type { ListView, ProjectRow } from "./list-model.ts";
 import {
-  addBackBody, emptySentence, GOES, MAY_BE_REMOVED, mintJob, NO_PROJECTS, NOTHING_CHANGED, openedRows, pressedOf,
-  refusedRows, refusedTitle, removedAt, removedLine, removeStep,
+  addBackBody, emptySentence, folderAsk, folderGroup, GOES, MAY_BE_REMOVED, mintJob, NO_PROJECTS, NOTHING_CHANGED,
+  openedRows, pressedOf, refusedRows, refusedTitle, removedAt, removedLine, removeStep,
 } from "./opened-model.ts";
-import type { Pressed } from "./opened-model.ts";
+import type { FolderGroup, FolderRow, Pressed } from "./opened-model.ts";
 import type { OpenedRow } from "./opened-model.ts";
 import { PANEL_WIDTH_PX } from "./panel.ts";
 import type { PanelAsk } from "./panel.ts";
@@ -94,6 +98,7 @@ const REMOVE_FROM_MOXI = "Remove from Moxi";
 const CANCEL = "Cancel";
 const CLOSE = "Close";
 const ADD_IT_BACK = "Add it back";
+const ADD = "Add";
 
 /** Sets each attribute of a map on the element it is bound to, and removes each one whose
  * value is null. */
@@ -288,6 +293,8 @@ export class ProjectsPage extends LitElement {
   #typed = "";
   #kind: string | null = null;
   #earlierShown = false;
+  /** `Show` was pressed under the folders that are not projects. */
+  #foldersShown = false;
   #order: string[] = [];
 
   // The facts: the shell's module list as last heard (undefined before it is), the hidden
@@ -697,6 +704,9 @@ export class ProjectsPage extends LitElement {
     const placed = this.#modules === undefined ? null : this.#facts.size + this.#placing.size;
     const held = this.#first.held(placed, this.#reports.reported, Date.now());
     const open = state.acts ? this.#open : null;
+    const now = Date.now() / 1000;
+    const folders = listing === null ? null : folderGroup(reports, {
+      home: listing.home, now, hasProjects: listing.projects.length > 0, showAll: this.#foldersShown });
     return html`<section data-part="list" data-state=${state.state}>
       ${state.line !== null ? html`<p class="state ${state.state === "loading" ? "dim" : ""}"
         data-line=${state.state === "loading" ? "reading" : "failed"} role="status">${state.line}</p>` : nothing}
@@ -704,16 +714,19 @@ export class ProjectsPage extends LitElement {
       ${listing === null ? nothing : listing.projects.length === 0 ? state.acts ? html`${
           this.#removed !== null ? this.#removedPart(this.#removed) : nothing}<div class="first" data-part="empty">
           <p data-line="empty">${NO_PROJECTS}</p><p data-line="sentence">${emptySentence(reports)}</p>
-          <button type="button" class="x" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button></div>` : nothing
-        : this.#rows(listing, listView(listing.projects, { home: listing.home, reports, open, now: Date.now() / 1000 },
-                                       { find: this.#typed, kind: this.#kind, held, previous: this.#order }), state.acts)}
+          <button type="button" class="x" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button></div>
+          ${folders !== null ? html`<div class="grps">${this.#foldersPart(folders, true)}</div>` : nothing}` : nothing
+        : this.#rows(listing, listView(listing.projects, { home: listing.home, reports, open, now },
+                                       { find: this.#typed, kind: this.#kind, held, previous: this.#order }), folders,
+                     state.acts)}
       ${this.#unknown !== null && state.acts ? html`<p class="foot" data-line="unknown">${noSuchProject(this.#unknown)}</p>`
         : nothing}
     </section>`;
   }
 
-  /** The rows, with their acts when `acts`; without, the last list kept, dim. */
-  #rows(listing: Listing, view: ListView, acts: boolean) {
+  /** The rows, then the folders that are not projects, with their acts when `acts`;
+   * without, the last list kept, dim. */
+  #rows(listing: Listing, view: ListView, folders: FolderGroup | null, acts: boolean) {
     this.#order = view.order;
     const byKey = new Map(listing.projects.map((project) => [project.key, project]));
     const row = (item: ProjectRow) => this.#row(byKey.get(item.key) as Listed, item, acts);
@@ -734,7 +747,26 @@ export class ProjectsPage extends LitElement {
             @click=${() => { this.#earlierShown = !this.#earlierShown; this.requestUpdate(); }}>${
             this.#earlierShown ? HIDE : SHOW}</button></div>
             ${this.#earlierShown ? repeat(view.earlier, (item) => item.key, row) : nothing}</div></section>` : nothing}
+        ${folders !== null ? this.#foldersPart(folders, acts) : nothing}
       </div>`;
+  }
+
+  /** The folders worked in that are not projects: one line each, `Add` at the right, and
+   * how many more there are, with `Show` while some are held back. */
+  #foldersPart(group: FolderGroup, acts: boolean) {
+    return html`<section class="grp" data-part="folders"><div class="gk" data-line="folders">${group.label}</div>
+      <div class="gl">${repeat(group.rows, (item) => item.folder, (item) => this.#folderRow(item, acts))}
+        ${group.more !== null ? html`<div class="one"><span data-line="more-folders">${group.more}</span>${
+          group.canShow && acts ? html`<button type="button" data-action="show-folders"
+            @click=${() => { this.#foldersShown = true; this.requestUpdate(); }}>${SHOW}</button>` : nothing}</div>`
+          : nothing}</div></section>`;
+  }
+
+  #folderRow(item: FolderRow, acts: boolean) {
+    return html`<moxi-ui-row data-folder=${item.folder} ${attributes({ name: item.name, where: item.where, fact: item.fact })}>
+      ${acts ? html`<button type="button" slot="acts-one" class="fix" data-action="add-folder"
+        @click=${() => this.#addFolder(item)}>${ADD}</button>` : nothing}
+    </moxi-ui-row>`;
   }
 
   #findPart(view: ListView) {
@@ -820,6 +852,17 @@ export class ProjectsPage extends LitElement {
     this.#unknown = null;
     this.#told = null;
     this.#adding = { mode: "add" };
+    this.#write();
+    this.requestUpdate();
+  }
+
+  /** A folder row's `Add`: the add is open, with that folder and its name filled. The
+   * address says `add`: what is filled lives only in the panel. */
+  #addFolder(row: FolderRow): void {
+    this.#close();
+    this.#unknown = null;
+    this.#told = null;
+    this.#adding = folderAsk(row);
     this.#write();
     this.requestUpdate();
   }

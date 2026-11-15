@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { readReport } from "../src/facts.ts";
 import {
-  addBackBody, agentPhrase, agentsLine, emptySentence, folderGroup, GOES, joinNames, MAY_BE_REMOVED, mintJob,
+  addBackBody, agentPhrase, agentsLine, emptySentence, folderAsk, folderGroup, GOES, joinNames, MAY_BE_REMOVED, mintJob,
   MISSING_SAYS, moreFolders, NO_PROJECTS, NOTHING_CHANGED, openedRows, pressedOf, refusedRows, refusedTitle,
   removedAt, removedLine, removeStep,
 } from "../src/opened-model.ts";
@@ -354,4 +354,14 @@ test("five rows, then the rest counted with more_folders, and Show", () => {
   assert.deepEqual([few.rows.length, few.more, few.canShow], [3, "1 more folder", false]);
   assert.equal(group([folders(20, rows.slice(0, 5), { activity: "all" })]).more, null);
   assert.equal(moreFolders(2), "2 more folders");
+});
+
+test("a folder row's Add fills the folder in its ~ form and the name from its last part", () => {
+  const usage = folders(20, [{ folder: `${HOME}/code/finch-scripts/`, at: NOW, parts: [] },
+                             { folder: "/srv/tools", at: NOW - 1, parts: [] }], { activity: "all" });
+  const [home, elsewhere] = group([usage]).rows;
+  assert.deepEqual(folderAsk(home), { mode: "add", folder: "~/code/finch-scripts/", name: "finch-scripts" });
+  assert.deepEqual(folderAsk(elsewhere), { mode: "add", folder: "/srv/tools", name: "tools" });
+  assert.equal(folderAsk({ ...elsewhere, folder: "C:\\work\\wren", name: "C:\\work\\wren" }).name, "wren");
+  assert.equal(folderAsk({ ...elsewhere, folder: "/", name: "/" }).name, "");
 });

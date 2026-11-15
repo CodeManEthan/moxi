@@ -336,6 +336,13 @@ export interface FolderGroup {
 /** `<n> more folder(s)`. */
 export const moreFolders = (n: number): string => `${n} more ${n === 1 ? "folder" : "folders"}`;
 
+/** A folder row's `Add`: the panel's folder in `~` form, and the name filled from the
+ * folder's last part, as the folder's read will fill it. */
+export function folderAsk(row: FolderRow): { mode: "add"; folder: string; name: string } {
+  const parts = row.folder.split(/[\\/]+/).filter((part) => part !== "");
+  return { mode: "add", folder: row.name, name: parts.length === 0 ? "" : parts[parts.length - 1] };
+}
+
 /**
  * The folders no project holds. Rows of one folder from several reports are one row, parts
  * in order and the newest `at`; a row shows only once some report gives it an `at`, which
