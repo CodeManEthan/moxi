@@ -129,7 +129,7 @@ const SIDE_FROM_PX = 1100;
 const HALF_COLUMN_PX = 340;
 
 // The list is the Sessions page's rows under a dim count at the left, at its width; no
-// accent and no warning colour on it. What is not yet drawn anew keeps its old look.
+// accent and no warning colour on it.
 const STYLES = [BASE, css`
   :host { max-width: 680px; margin: 0 auto; padding: 4px 0 16px; font-size: 14px; line-height: 20px; }
   /* Beside the panel, where the window has the room, the column stands at the centre of
