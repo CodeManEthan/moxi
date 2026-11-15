@@ -147,7 +147,8 @@ def test_the_closing_event_is_the_verb_s_own_and_holds_the_round_s_numbers(folde
 
     assert closed == {"v": 1, "n": recorded["n"] + 1, "at": closed["at"],
                       "actor": "critic", "type": "round.closed",
-                      "numbers": numbers.of(state.fold(events(folder)[:-1]))}
+                      "numbers": numbers.of(state.fold(events(folder)[:-1]),
+                                            ended_at=closed["at"])}
     assert closed["numbers"]["design_passes"] == 1 and closed["numbers"]["folds"] == 1
 
 

@@ -171,12 +171,14 @@ def is_due(state: states.State, *, ratify: str | None = None) -> bool:
     return state.status == states.OPEN and not waits(state, ratify=ratify)
 
 
-def entry(state: states.State, *, ratify: str | None = None) -> write.Entry | None:
+def entry(state: states.State, *, ratify: str | None = None,
+          at: str | None = None) -> write.Entry | None:
     """The event that closes the round `state` is of, or None while it is not to be
-    closed: it has ended, or its close waits for something."""
+    closed: it has ended, or its close waits for something. `at` is the time the event
+    is appended at, which the round's time in its last step runs to."""
     if not is_due(state, ratify=ratify):
         return None
-    return write.Entry(CLOSED, {"numbers": counted.of(state)})
+    return write.Entry(CLOSED, {"numbers": counted.of(state, ended_at=at)})
 
 
 def said(waited: tuple[str, ...] | list[str]) -> str:

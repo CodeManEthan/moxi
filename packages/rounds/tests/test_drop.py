@@ -104,7 +104,8 @@ def test_the_operator_drops_a_round_that_holds_his_rulings(rounds, capsys):
     assert event == {"actor": "curator", "type": "round.dropped", "at": event["at"],
                      "by": "operator", "record": "comms:30", "tips": [],
                      "questions": {},
-                     "numbers": numbers.of(state.fold(log.read(round_log(rounds))[:-1]))}
+                     "numbers": numbers.of(state.fold(log.read(round_log(rounds))[:-1]),
+                                           ended_at=event["at"])}
     found = held(round_log(rounds))
     assert found.status == state.DROPPED
     assert found.ended == state.Ended(how="dropped", by="operator", record="comms:30",

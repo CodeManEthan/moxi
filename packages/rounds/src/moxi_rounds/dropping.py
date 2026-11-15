@@ -54,7 +54,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import (builds, checking, ending, folders, index, moving, open_builds, pointers,
+from . import (builds, checking, ending, folders, index, log, moving, open_builds, pointers,
                questions, removal, sweeping, waits, write)
 from . import numbers as counted
 from . import settings as own
@@ -220,11 +220,14 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
             # open, its questions are asked in both logs, and nothing was let go.
             entries += [one.entry for one in found if one.entry is not None]
             went = {one.question: one.became for one in found}
-        # One event is the whole of the drop in the round's log.
+        # One event is the whole of the drop in the round's log. It is stamped here,
+        # so the round's time in its last step runs to the event's own time.
+        when = log.stamp() if at is None else at
         entries.append(write.Entry("round.dropped", {
             "by": by, "record": record,
             "tips": [_tip(one) for one in builds.builds(view.state) if one.ended is None],
-            "questions": went, "numbers": counted.of(view.state)}))
+            "questions": went, "numbers": counted.of(view.state, ended_at=when)},
+            at=when))
         return entries
 
     try:

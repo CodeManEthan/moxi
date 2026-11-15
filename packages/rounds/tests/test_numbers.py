@@ -141,4 +141,56 @@ def test_a_dropped_round_holds_its_numbers_in_its_drop(folder):
 
     event = log.read(log.round_log(folder))[-1]
     assert event["type"] == "round.dropped"
-    assert event["numbers"] == before and before["folds"] == 1
+    assert event["numbers"] == {**before, "step_time_s": event["numbers"]["step_time_s"]}
+    assert before["folds"] == 1
+
+
+def timed(events, *seconds):
+    """The events with their times set, `seconds` after a fixed start each."""
+    return [{**one, "at": log.stamp(1_000_000 + after)}
+            for one, after in zip(events, seconds, strict=True)]
+
+
+def test_each_step_s_time_runs_from_the_event_that_reached_it_to_the_next(built):
+    events = timed(log.read(log.round_log(built)), 0, 10, 30)
+
+    found = numbers.step_time_s(events, ended_at=log.stamp(1_000_000 + 100))
+
+    # Opened with no stage, the round is at the commission that declares one; once
+    # B1 is declared, at B1's; once commissioned, at its build, which git would read.
+    assert found == {"commission": 10, "commission B1": 20, "build B1": 70}
+    assert list(found) == ["commission", "commission B1", "build B1"]
+
+
+def test_with_no_ending_time_the_count_stops_at_the_last_event(built):
+    events = timed(log.read(log.round_log(built)), 0, 10, 30)
+    assert numbers.step_time_s(events) == {"commission": 10, "commission B1": 20}
+
+
+def test_a_stretch_that_runs_backwards_or_has_no_time_counts_nothing(built):
+    events = timed(log.read(log.round_log(built)), 0, 10, 5)
+    events[1]["at"] = "not a time"
+
+    found = numbers.step_time_s(events, ended_at=log.stamp(1_000_000 + 25))
+
+    assert found == {"build B1": 20}
+
+
+def test_a_round_that_has_ended_is_at_no_step_after_its_ending(folder):
+    dropping.drop(ROUND, by="operator", record=PTR, actor="planner")
+    events = timed(log.read(log.round_log(folder)), 0, 40)
+
+    found = numbers.step_time_s(events, ended_at=log.stamp(1_000_000 + 90))
+
+    assert found == {"commission": 40}
+
+
+def test_the_drop_s_numbers_time_its_last_step_to_the_drop_itself(folder):
+    dropping.drop(ROUND, by="operator", record=PTR, actor="planner", at=log.stamp(4e9))
+
+    opened, dropped = log.read(log.round_log(folder))
+
+    spent = dropped["numbers"]["step_time_s"]
+    assert dropped["at"] == log.stamp(4e9)
+    assert spent == numbers.step_time_s([opened], ended_at=dropped["at"])
+    assert spent["commission"] > 0

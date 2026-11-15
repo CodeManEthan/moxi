@@ -613,10 +613,14 @@ ready and the operator's, with the command that rules each.
 
 The event that ends a round, its close or its drop, holds the round's numbers, counted
 from its log: design passes, `fold-first` verdicts, folds and records-only folds, the
-lead's decisions on a thread, findings by severity, re-checks and drift re-checks,
+lead's decisions on a thread, the time spent at each step, findings by severity,
+re-checks and drift re-checks,
 failed check runs, questions by where they came from, decisions accepted and rejected,
 skips, step-ups, repairs, corrections, dropped builds, cleared locks, and reports
-flagged `extra-full-pass` or `model-below-tier`. A flow with a `retro` step
+flagged `extra-full-pass` or `model-below-tier`. The time at each step is in whole
+seconds, under the step's name or `<step> B<n>` for a stage's: the log is read once at
+the end, and the time from each event to the next goes to the step the round was at
+then, as read from the log alone. A flow with a `retro` step
 waits for it too, until that step is skipped; the retro report is not in this version.
 
 ## Dropping a round

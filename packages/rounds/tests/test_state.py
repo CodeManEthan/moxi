@@ -63,6 +63,12 @@ def test_the_history_is_every_event_in_order():
     assert state.fold(log_events).history == log_events
 
 
+def test_folding_gives_after_each_event_the_state_that_events_prefix_folds_to():
+    events_ = [opened(), event(2, "round.closed", numbers={})]
+    seen = [copy.deepcopy(one) for one in state.folding(events_)]
+    assert seen == [state.fold(events_[:1]), state.fold(events_)]
+
+
 def test_the_same_log_folds_to_the_same_state():
     log_events = [opened(), event(2, "ruling.recorded", id="C1", text="a ruling",
                                   record="comms:12")]

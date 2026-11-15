@@ -4,7 +4,8 @@
 none of them, and gives equal states for equal logs. Each event type has one handler in
 `_HANDLERS`, called with the state so far and the event; a type whose handler is `_kept`
 changes nothing and is still in the history. A type this code does not know is kept the
-same way, so a log with a later version's events still folds.
+same way, so a log with a later version's events still folds. `folding(events)` is the
+same fold, giving the state after each event in turn.
 
 The state holds what the round's first event set (its description, its flow's name and
 the steps recorded for it, its parent, and its status), the rulings recorded in the log,
@@ -60,7 +61,7 @@ are its register, and its questions the project's list.
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 
 #: The status of a round that was opened and has not ended.
@@ -394,10 +395,21 @@ class State:
 def fold(events: Iterable[dict]) -> State:
     """The state the events of one log give, read oldest first."""
     state = State()
+    for state in folding(events):
+        pass
+    return state
+
+
+def folding(events: Iterable[dict]) -> Iterator[State]:
+    """The state the events of one log give after each of them, oldest first. This is
+    the fold itself, so what a round was at any event is read by the same code as what
+    it is now. One `State` is changed in place and given after each event: read it
+    before asking for the next."""
+    state = State()
     for event in events:
         _HANDLERS.get(event["type"], _kept)(state, event)
         state.history.append(event)
-    return state
+        yield state
 
 
 def _kept(state: State, event: dict) -> None:
@@ -910,5 +922,5 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
 
 __all__ = ["OPEN", "DROPPED", "CLOSED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
            "Ended", "Ruling", "Change", "Question", "Stage", "Pending", "Version",
-           "Decided", "Verdict", "State", "fold", "without", "BASE", "REPORT",
+           "Decided", "Verdict", "State", "fold", "folding", "without", "BASE", "REPORT",
            "REREAD_LISTS", "with_rereads"]
