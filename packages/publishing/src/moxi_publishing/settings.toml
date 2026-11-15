@@ -10,12 +10,17 @@ items = "str"
 default = ["session-link", "session-pointer", "message-id", "quoted-ruling", "ruling-tag", "round-pointer"]
 doc = "Which provenance rules run on commit messages and files. Remove one to switch it off."
 read = "use"
+label = "Provenance rules that run"
+line = "Shapes that point into notes, sessions or messages, refused in commit messages and files."
+hurts = { when = "remove", says = "switches this rule off", confirm = "From the next commit or push, text of this rule's shape can go into a public repo without a refusal." }
 
 [push.word_pattern]
 type = "string"
 default = '^\S+$'
 doc = "The regular expression a push word (MOXI_PUBLISHING_PUSH_WORD) must match in full."
 read = "use"
+label = "What a push word must look like"
+line = "A regular expression MOXI_PUBLISHING_PUSH_WORD must match in full."
 
 [defaults.drop_trailers]
 type = "list"
@@ -23,15 +28,21 @@ items = "str"
 default = ["Claude-Session", "Commit-Check"]
 doc = "Seeds a repo's drop-trailer setting when enable first registers the message piece there: trailer keys removed at commit. A key on the repo's pass-trailer is never dropped."
 read = "use"
+label = "Trailers to drop, for a new repo"
+line = "Copied in when enable first registers the message piece in a repo; a later change reaches no repo that has it."
 
 [defaults.main]
 type = "string"
 default = "main"
 doc = "Seeds a repo's main setting when enable first registers the push piece there: the branch deletions are judged against."
 read = "use"
+label = "The main branch, for a new repo"
+line = "Copied in when enable first registers the push piece in a repo: the branch deletions are judged against."
 
 [defaults.word_required]
 type = "bool"
 default = false
 doc = "Seeds a repo's word-required setting when enable first registers the push piece there: whether a push needs MOXI_PUBLISHING_PUSH_WORD."
 read = "use"
+label = "Push word needed, for a new repo"
+line = "Copied in when enable first registers the push piece in a repo: whether a push needs a push word."
