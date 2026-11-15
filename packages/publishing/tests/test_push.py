@@ -228,6 +228,27 @@ def test_a_urls_userinfo_is_never_printed_or_logged(repo, names, remote, tmp_pat
     assert logged["url"] == logged["remote"] == f"file://localhost{empty}"
 
 
+def test_a_shown_url_drops_userinfo_up_to_the_last_at_before_the_path():
+    from moxi_publishing import push as piece
+
+    secret = token(14)
+    host = "example.test/proj-a.git"
+    shown = "https://example.test/proj-a.git"
+    # An unencoded `@` in the password: git reads the host after the last one.
+    split = f"{secret[:7]}@{secret[7:]}"
+    assert piece._shown_url(with_userinfo("https", split, host)) == shown
+    assert secret[7:] not in piece._shown_url(with_userinfo("https", split, host))
+    assert piece._shown_url(with_userinfo("https", f"{secret[:7]}%40{secret[7:]}", host)) \
+        == shown
+    assert piece._shown_url("https:/" + f"/alice@{host}") == shown
+    assert piece._shown_url("alice@example.test:proj-a.git") == \
+        "alice@example.test:proj-a.git"
+    assert piece._shown_url("https://example.test/alice@proj-a.git") == \
+        "https://example.test/alice@proj-a.git"
+    assert piece._shown_url(with_userinfo("https", secret, "example.test/a@b.git")) == \
+        "https://example.test/a@b.git"
+
+
 def test_an_intermediate_commits_lines_are_read(pub):
     a = commit(pub, "Add a name", text="bobsecret\n")
     assert a.returncode == 0

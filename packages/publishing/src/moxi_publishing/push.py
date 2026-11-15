@@ -81,8 +81,9 @@ _HEADS = "refs/heads/"
 _TAGS = "refs/tags/"
 
 
-#: A URL's scheme and its userinfo, up to the `@` before the host.
-_USERINFO = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@")
+#: A URL's scheme and its userinfo, up to the last `@` before the path: git reads the
+#: host after the last one, so a password may hold an unencoded `@`.
+_USERINFO = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/]*@")
 
 def _shown_url(url: str) -> str:
     """`url` without its userinfo (the `user:token@` after the scheme), as it is printed
