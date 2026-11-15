@@ -27,6 +27,10 @@ CONFIG_CHECK = "moxi_rounds.settings:check_text"
 #: The module's own doctor checks: git, each project's rounds folder, each log, the
 #: index, CI, finish locks and the sweep's dry run.
 DOCTOR = "moxi_rounds.doctor:rows"
+#: The one shipped skill, moxi-rounds, one subfolder: the judgment a round leaves to its
+#: lead and checkers, placed for each harness at install. It holds no command manual,
+#: since the verbs print their own commands.
+SKILLS = "skills"
 SETUP = None
 SEGMENT = None
 #: The stores: the index, a cache of what the rounds' logs say, made by the first write and
