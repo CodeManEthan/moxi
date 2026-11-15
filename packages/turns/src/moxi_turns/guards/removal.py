@@ -55,7 +55,7 @@ from . import Deny, ToolCall
 
 #: The Claude Code version the rules were checked against. The doctor warns when the
 #: installed Claude Code is newer: its removal check may have moved.
-CHECKED_CLAUDE = "2.1.316"
+CHECKED_CLAUDE = "2.1.325"
 
 REASON_T = (
     "Refused before it ran (turns removal guard). This command's text mentions a directory "
