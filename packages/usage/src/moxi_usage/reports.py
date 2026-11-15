@@ -333,9 +333,12 @@ class _Query:
         return " AND ".join(clauses) or "1", args
 
     def filters(self) -> dict[str, Any]:
-        return {name: getattr(self, name)
-                for name in ("harness", "project", "folder", "model", "session", "agent")
-                if getattr(self, name) is not None}
+        """The filters set, by the report's own keys: `work_dir` goes out as `folder`."""
+        return {key: value
+                for key, value in (("harness", self.harness), ("project", self.project),
+                                   ("folder", self.work_dir), ("model", self.model),
+                                   ("session", self.session), ("agent", self.agent))
+                if value is not None}
 
 
 def _span(conn: sqlite3.Connection, query: _Query) -> tuple[float | None, float | None]:

@@ -55,7 +55,7 @@ for n, spec in enumerate(json.loads(sys.argv[1])):
                            project=cwd.replace("/", "-"), cwd=cwd, start=now - 3600 * (n + 1))
     for m in range(spec["requests"]):
         t.user("Fix the failing test.")
-        t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),
+        t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000 + m * 500),
                     request_id=f"req_{spec['session'][-2:]}{m}", model=spec["model"])
     t.write()
 """

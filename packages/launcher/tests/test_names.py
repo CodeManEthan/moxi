@@ -405,7 +405,7 @@ WITHOUT_UI = textwrap.dedent("""\
 
     me = proc.identity(os.getpid())
     conn = store.connect()
-    store.insert(conn, request_id="running", actor="alice", harness="claude",
+    store.insert(conn, request_id="running", by="alice", harness="claude",
                  target="terminal", cwd="/work", values={"name": "proj-a-1"},
                  argv=["claude"], env={}, posture="operator", session_id="session-1",
                  slot=None, at="2026-01-02T00:00:00.000000Z")

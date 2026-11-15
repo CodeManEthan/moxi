@@ -52,13 +52,13 @@ for spec in json.loads(sys.argv[1]):
                            start=now - spec["hours_ago"] * 3600)
     for m in range(3):
         t.user("Fix the failing test.")
-        t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),
+        t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000 + m * 500),
                     request_id=f"req_{spec['session'][-2:]}{m}", model=spec["model"])
     if spec["agent"]:
         child = t.subagent(spec["agent"])
         for m in range(2):
             child.user("Look into it.")
-            child.assistant("Found it.", usage=T.usage(input=100, output=400),
+            child.assistant("Found it.", usage=T.usage(input_tokens=100, output=400),
                             request_id=f"req_{spec['agent'][-4:]}{m}", model=spec["model"])
     t.write()
 """

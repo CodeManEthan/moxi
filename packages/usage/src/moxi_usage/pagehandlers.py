@@ -189,7 +189,7 @@ def _read(kind: str, query: Mapping[str, Any], **given: Any) -> dict[str, Any]:
     """`report(kind)` over the index as it is, with the route's filters, as a dict."""
     args = {"since": _day(query.get("since")), "until": _day(query.get("until")),
             "harness": query.get("harness"), "project": query.get("project"),
-            "folder": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}
+            "work_dir": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}
     args.update(given)
     try:
         return api.report(kind, fresh=False, **args).as_dict()

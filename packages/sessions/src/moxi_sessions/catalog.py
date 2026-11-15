@@ -505,7 +505,7 @@ class PromptRead:
     taken: int
 
 
-def reads_prompt(harness: str, program: bool | None) -> bool:
+def reads_prompt(harness: str, *, program: bool | None) -> bool:
     """Whether a session of `harness` whose `by_program` is `program` is read for a
     prompt: its record carries a typed mark, and no program started it."""
     return harness in TYPED and program is not True
@@ -550,7 +550,7 @@ def read_prompt(listed: Listed, kept: Kept | None = None) -> PromptRead:
             end = st.st_size
             if kept is not None and kept.stamp == (st.st_dev, st.st_ino, end,
                                                    st.st_mtime_ns):
-                return PromptRead(kept, False, 0)
+                return PromptRead(kept, whole=False, taken=0)
             offset, prompt, before = 0, None, b""
             if (kept is not None and kept.offset >= WINDOW and kept.offset <= end
                     and (kept.dev, kept.ino) == (st.st_dev, st.st_ino)):
@@ -940,11 +940,11 @@ class Catalog:
                     self._tails.popitem(last=False)
         return tail
 
-    def _prompt(self, entry: Entry, program: bool | None) -> Said | None:
+    def _prompt(self, entry: Entry, *, program: bool | None) -> Said | None:
         """The entry's prompt: the kept one where the file is as it was kept, else what
         a read now gives, which is then kept. None when the session is not read for one
         or the read failed; a failed read leaves what was kept as it was."""
-        if not reads_prompt(entry.harness, program):
+        if not reads_prompt(entry.harness, program=program):
             return None
         listed, path = entry.listed, entry.path
         with self._lock:
@@ -988,7 +988,7 @@ class Catalog:
                        by_program=head.by_program,
                        name=(tail.name or head.name) if entry.harness == CLAUDE else None,
                        model=tail.model, activity=tail.activity,
-                       prompt=self._prompt(entry, head.by_program))
+                       prompt=self._prompt(entry, program=head.by_program))
 
 
 # --- the process's catalog ------------------------------------------------------------------

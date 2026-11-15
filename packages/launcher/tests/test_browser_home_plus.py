@@ -97,7 +97,7 @@ def started(fake, count: int) -> dict:
 def test_continue_the_last_session_is_not_offered_for_another_actors_session(page, shell, work_dir):
     other = "planner"
     assert other != kit.actor(shell)
-    kit.seed(shell, "worker-in-folder", target="slot", cwd=str(work_dir), actor=other)
+    kit.seed(shell, "worker-in-folder", target="slot", cwd=str(work_dir), by=other)
     piece = kit.open_home(page)
     plus = piece.get_by_role("button", name="More ways to start")
     expect(plus).to_have_text("+")
@@ -108,9 +108,9 @@ def test_continue_the_last_session_is_not_offered_for_another_actors_session(pag
 
 
 def test_his_own_last_session_is_offered_and_resumes_in_a_slot_keeping_the_box(page, shell, fake, work_dir):
-    sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), actor=kit.actor(shell))
+    sid = kit.seed(shell, "his-own-in-folder", target="slot", cwd=str(work_dir), by=kit.actor(shell))
     # A newer session of another actor in the same folder is passed over.
-    kit.seed(shell, "worker-after-him", target="slot", cwd=str(work_dir), actor="planner")
+    kit.seed(shell, "worker-after-him", target="slot", cwd=str(work_dir), by="planner")
     piece = kit.open_home(page)
     piece.locator("textarea").fill("a draft that stays")
     menu = plus_menu(page, piece)

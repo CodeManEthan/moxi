@@ -3372,6 +3372,7 @@ launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	if any(name in type
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	if any(sources.get(name) in GIVEN for name in _BRIEF_ROWS) and row.brief:	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	keep_warm	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	launch	name	err	exc
+launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	launch in the folder `cwd` finds (`presets.folder_place`, which also expands `~`).	use	`presets.folder_place`	`presets.dir_place`
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	launched	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	limit=limit, before=before, conn=conn).data["sessions"]	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/pagehandlers.py	live_states	name	err	exc
@@ -3652,6 +3653,7 @@ launcher	packages/launcher/tests/test_browser_home_fill.py	-	name	folder	work_di
 launcher	packages/launcher/tests/test_browser_home_fill.py	extra = str(Path(shell.env["HOME"]) / "work" / "proj-a")	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_home_fill.py	extra = str(Path(shell.env["HOME"]) / "work" / "proj-b")	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_home_fill.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_browser_home_fill.py	note	kwonly	them	them
 launcher	packages/launcher/tests/test_browser_home_fill.py	page	name	folder	work_dir
 launcher	packages/launcher/tests/test_browser_home_fill.py	where = Path(shell.env["HOME"]) / "work" / key	keep	HOME	HOME
 launcher	packages/launcher/tests/test_browser_home_fill.py	where.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -3739,6 +3741,7 @@ launcher	packages/launcher/tests/test_browser_page.py	kit.published(ui_shell, "s
 launcher	packages/launcher/tests/test_browser_page.py	kit.published(ui_shell, "sessions", kit.holding_session(sid, red=False))	keep	sessions	sessions
 launcher	packages/launcher/tests/test_browser_page.py	ui_width_check(ui_page, module="launcher", name="sessions")	keep	sessions	sessions
 launcher	packages/launcher/tests/test_browser_phone_running.py	"folder": "page"}	keep	folder	folder
+launcher	packages/launcher/tests/test_browser_phone_running.py	_seen	kwonly	visible	visible
 launcher	packages/launcher/tests/test_browser_phone_running.py	assert (status, answer) == (200, {"refused": None})	keep	refused	refused
 launcher	packages/launcher/tests/test_browser_phone_running.py	expect(other.locator(".fact")).to_have_text("kept warm", timeout=PASS_MS)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_browser_phone_running.py	expect(row.locator(".lead.strong")).to_have_text("waiting on 1 subagent", timeout=PASS_MS)	keep	timeout	timeout
@@ -9723,6 +9726,7 @@ sessions	packages/sessions/src/moxi_sessions/catalog.py	* From the head of the f
 sessions	packages/sessions/src/moxi_sessions/catalog.py	* `folder`, `started`, `by_program`: the head's (`Head`).	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/catalog.py	* `folder`, `started`: the head's (`Head`).	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/catalog.py	* `folder`: the session's directory.	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/catalog.py	Catalog._prompt	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/catalog.py	Catalog._tail	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/catalog.py	Details	name	folder	work_dir
 sessions	packages/sessions/src/moxi_sessions/catalog.py	Facts	name	folder	work_dir
@@ -9736,6 +9740,7 @@ sessions	packages/sessions/src/moxi_sessions/catalog.py	live: set[str] = set()  
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_head	name	handle	fh
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_prompt	name	handle	fh
 sessions	packages/sessions/src/moxi_sessions/catalog.py	read_tail	kwonly	program	program
+sessions	packages/sessions/src/moxi_sessions/catalog.py	reads_prompt	kwonly	program	program
 sessions	packages/sessions/src/moxi_sessions/catalog.py	return Details(folder=head.folder, started=head.started,	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/catalog.py	return Details(work_dir=head.folder, started=head.started,	use	head.folder	head.work_dir
 sessions	packages/sessions/src/moxi_sessions/catalog.py	return Facts(name=name, folder=head.folder, started=head.started)	keep	folder	folder
@@ -10568,6 +10573,7 @@ sessions	packages/sessions/tests/test_page_list.py	opencode.user("Do the thing."
 sessions	packages/sessions/tests/test_page_list.py	return {"claude": claude_home / "projects", "codex": codex_home / "sessions",	keep	sessions	sessions
 sessions	packages/sessions/tests/test_page_list.py	test_the_filters_narrow_the_list_and_keep_the_counts_exact	name	by_folder	by_work_dir
 sessions	packages/sessions/tests/test_page_list.py	test_two_folder_requests_at_once_read_each_head_once.ask	name	folder	work_dir
+sessions	packages/sessions/tests/test_prompt_kept.py	assert cat._prompt(entry, program=None) is None	keep	program	program
 sessions	packages/sessions/tests/test_prompt_kept.py	if isinstance(r, Message) and r.role == "user" and r.injected is False]	keep	injected	injected
 sessions	packages/sessions/tests/test_prompt_kept.py	rewrite	name	handle	fh
 sessions	packages/sessions/tests/test_prompt_kept.py	seen = set()	keep	set	set
@@ -11642,6 +11648,8 @@ turns	packages/turns/tests/test_codex_host_entry.py	proc.wait(timeout=WAIT)	keep
 turns	packages/turns/tests/test_codex_host_entry.py	return proc.wait(timeout=timeout)	keep	timeout	timeout
 turns	packages/turns/tests/test_codex_limits.py	assert set(fresh) == {"payload", "received_at"}	keep	set	set
 turns	packages/turns/tests/test_codex_limits.py	client.call("usage.codex_limits", {}, timeout=5)	use	timeout=	timeout_s=
+turns	packages/turns/tests/test_codex_mcp.py	app.note("comms", "failed")	keep	note	note
+turns	packages/turns/tests/test_codex_mcp.py	app.note("comms", "ready", after=0.1, then="connected")	keep	note	note
 turns	packages/turns/tests/test_codex_mcp.py	assert set(records) == {"mcp:t:other"}	keep	set	set
 turns	packages/turns/tests/test_codex_mcp.py	gate.set()	keep	set	set
 turns	packages/turns/tests/test_codex_mcp.py	go_on.set()	keep	set	set
@@ -13295,12 +13303,12 @@ usage	packages/usage/src/moxi_usage/page.py	ref=lb.Out("table", nullable=True, i
 usage	packages/usage/src/moxi_usage/page.py	values=("project", "folder")), **FILTERS},	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": _str(folder), "started": started, "known": known}	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": _str(work_dir), "started": started, "known": known}	keep	folder	folder
-usage	packages/usage/src/moxi_usage/pagehandlers.py	"folder": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"name": None, "folder": None, "started": None, "known": None,	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"opened": _str(row.get("opened")), "note": _str(row.get("note")),	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"opened": plan.iso(row.opened),	keep	opened	opened
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"session", "sessions", "start_pass", "status", "terms"]	keep	sessions	sessions
 usage	packages/usage/src/moxi_usage/pagehandlers.py	"used": used,	keep	used	used
+usage	packages/usage/src/moxi_usage/pagehandlers.py	"work_dir": query.get("folder") or None, "model": query.get("model"), "tz": "UTC" if query.get("utc") else None}	keep	folder	folder
 usage	packages/usage/src/moxi_usage/pagehandlers.py	A folder the sessions module did not give is the row's `cwd`; `folders` names the	use	`folders`	`work_dirs`
 usage	packages/usage/src/moxi_usage/pagehandlers.py	_Feed._pass	name	err	pass_exc
 usage	packages/usage/src/moxi_usage/pagehandlers.py	_Feed._poll	name	err	exc
@@ -13335,12 +13343,14 @@ usage	packages/usage/src/moxi_usage/prices.py	repriced: set[str] = set()	keep	se
 usage	packages/usage/src/moxi_usage/prices.py	unpriced: set[str] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/readings.py	return now == set(previous)	keep	set	set
 usage	packages/usage/src/moxi_usage/reports.py	"""The `folder` filter as files hold a `cwd`: a whole path, with no slash after it."""	use	`folder`	`work_dir`
+usage	packages/usage/src/moxi_usage/reports.py	"""The filters set, by the report's own keys: `work_dir` goes out as `folder`."""	keep	folder	folder
 usage	packages/usage/src/moxi_usage/reports.py	"daily": daily, "monthly": monthly, "sessions": sessions, "models": models_report,	keep	sessions	sessions
 usage	packages/usage/src/moxi_usage/reports.py	"reads_at_input": round(reads_at_input, 10),	keep	round	round
 usage	packages/usage/src/moxi_usage/reports.py	"reads_cost": round(reads_cost, 10),	keep	round	round
 usage	packages/usage/src/moxi_usage/reports.py	"saved": round(reads_at_input - reads_cost - write_extra, 10)}	keep	round	round
 usage	packages/usage/src/moxi_usage/reports.py	"write_extra": round(write_extra, 10),	keep	round	round
 usage	packages/usage/src/moxi_usage/reports.py	#: own; a file with no session id is a session of its own. The `sessions` report groups	keep	sessions	sessions
+usage	packages/usage/src/moxi_usage/reports.py	("folder", self.work_dir), ("model", self.model),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/reports.py	("project", project), ("folder", folder),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/reports.py	("project", project), ("folder", work_dir),	keep	folder	folder
 usage	packages/usage/src/moxi_usage/reports.py	* `sessions`: by session, the main file and its subagents together, with its title,	keep	sessions	sessions
@@ -13362,7 +13372,6 @@ usage	packages/usage/src/moxi_usage/reports.py	facts = current.lookup(name, prov
 usage	packages/usage/src/moxi_usage/reports.py	facts = table.lookup(model, provider=provider, at=at)	keep	at	at
 usage	packages/usage/src/moxi_usage/reports.py	facts = table.lookup(model, provider=provider, at=row["first_ts"])	keep	at	at
 usage	packages/usage/src/moxi_usage/reports.py	for lane in sorted(set(known) | set(counts),	keep	set	set
-usage	packages/usage/src/moxi_usage/reports.py	for name in ("harness", "project", "folder", "model", "session", "agent")	keep	folder	folder
 usage	packages/usage/src/moxi_usage/reports.py	for slot, term in zip(group["terms"], priced.terms, strict=True):	keep	strict	strict
 usage	packages/usage/src/moxi_usage/reports.py	found: set[int] = set()	keep	set	set
 usage	packages/usage/src/moxi_usage/reports.py	if sides and not any(side[1] for side in sides):	keep	any	any
@@ -13920,13 +13929,13 @@ usage	packages/usage/tests/test_reports.py	-	name	test_projects_by_folder_group_
 usage	packages/usage/tests/test_reports.py	-	name	test_report_takes_a_folder_and_by_for_projects	test_report_takes_a_dir_and_by_for_projects
 usage	packages/usage/tests/test_reports.py	-	name	test_the_folder_filter_matches_the_cwd_whatever_key_a_file_carries	test_the_dir_filter_matches_the_cwd_whatever_key_a_file_carries
 usage	packages/usage/tests/test_reports.py	assert api.KINDS == ("daily", "monthly", "sessions", "models", "projects", "session",	keep	sessions	sessions
-usage	packages/usage/tests/test_reports.py	assert count(folder="/w") == 0                 # a folder above matches nothing under it	keep	folder	folder
-usage	packages/usage/tests/test_reports.py	assert count(folder="/w/app") == 2             # the keyed file and the one with none	keep	folder	folder
-usage	packages/usage/tests/test_reports.py	assert count(folder="/w/app", project="key-app") == 1	keep	folder	folder
-usage	packages/usage/tests/test_reports.py	assert count(folder="/w/app-wt") == 2	keep	folder	folder
-usage	packages/usage/tests/test_reports.py	assert count(folder="/w/app-wt/") == 2	keep	folder	folder
-usage	packages/usage/tests/test_reports.py	assert count(folder=None) == count(folder="") == 5	keep	folder	folder
-usage	packages/usage/tests/test_reports.py	assert fn(conn, folder="/w/gone", table=table(), **given).total["requests"] == 0	keep	folder	folder
+usage	packages/usage/tests/test_reports.py	assert count(folder="/w") == 0                 # a folder above matches nothing under it	use	folder=	work_dir=
+usage	packages/usage/tests/test_reports.py	assert count(folder="/w/app") == 2             # the keyed file and the one with none	use	folder=	work_dir=
+usage	packages/usage/tests/test_reports.py	assert count(folder="/w/app", project="key-app") == 1	use	folder=	work_dir=
+usage	packages/usage/tests/test_reports.py	assert count(folder="/w/app-wt") == 2	use	folder=	work_dir=
+usage	packages/usage/tests/test_reports.py	assert count(folder="/w/app-wt/") == 2	use	folder=	work_dir=
+usage	packages/usage/tests/test_reports.py	assert count(folder=None) == count(folder="") == 5	use	folder=	work_dir=
+usage	packages/usage/tests/test_reports.py	assert fn(conn, folder="/w/gone", table=table(), **given).total["requests"] == 0	use	folder=	work_dir=
 usage	packages/usage/tests/test_reports.py	assert found.filters == {"folder": "/w/app-wt"}	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	assert found.rows == [] and found.filters == {"folder": "/w/app"}	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	assert of("claude", "") is None	keep	draft	draft
@@ -13942,13 +13951,13 @@ usage	packages/usage/tests/test_reports.py	assert of(None, "s1") == of("claude",
 usage	packages/usage/tests/test_reports.py	assert reports.read("projects", by="folder").total["requests"] == 5	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	assert set(lines) == {(None, None), ("fast", None), (None, "2026-10-02T06:00:00Z")}	keep	set	set
 usage	packages/usage/tests/test_reports.py	assert set(saving) == {"input_tokens", "read_tokens", "reads_at_input", "reads_cost",	keep	set	set
-usage	packages/usage/tests/test_reports.py	count(folder=bad)	keep	folder	folder
+usage	packages/usage/tests/test_reports.py	count(folder=bad)	use	folder=	work_dir=
 usage	packages/usage/tests/test_reports.py	first_ts=min(times, default=None), last_ts=max(times, default=None), **fields)	keep	default	default
 usage	packages/usage/tests/test_reports.py	found = api.report("projects", by="folder", folder="/w/app-wt", fresh=False)	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	found = api.report("projects", by="folder", folder="/w/app/")	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	found = api.report("projects", by="folder", work_dir="/w/app-wt", fresh=False)	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	found = api.report("projects", by="folder", work_dir="/w/app/")	keep	folder	folder
-usage	packages/usage/tests/test_reports.py	found = fn(conn, folder="/w/app-wt", table=table(), **given)	keep	folder	folder
+usage	packages/usage/tests/test_reports.py	found = fn(conn, folder="/w/app-wt", table=table(), **given)	use	folder=	work_dir=
 usage	packages/usage/tests/test_reports.py	report = api.report("sessions")	keep	sessions	sessions
 usage	packages/usage/tests/test_reports.py	report = reports.projects(conn, by="folder", table=table())	keep	folder	folder
 usage	packages/usage/tests/test_reports.py	request	name	input	input_tokens

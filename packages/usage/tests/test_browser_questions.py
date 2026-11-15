@@ -111,7 +111,7 @@ for spec in specs:
         r.turn(spec["model"])
         r.user("Move the two helpers.")
         for m in range(spec["requests"]):
-            r.request(T.token_usage(input=4000, cached=3000, output=800),
+            r.request(T.token_usage(input_tokens=4000, cached=3000, output=800),
                       response_id=f"resp_{spec['session'][-3:]}{m}", limits=False)
         r.turn_end()
         r.write()
@@ -122,13 +122,13 @@ for spec in specs:
         t.title(spec["title"])
     for m in range(spec["requests"]):
         t.user("Fix the failing test.")
-        t.assistant("Done.", usage=T.usage(input=200, cache_read=6000, cache_write=1000, output=1000),
+        t.assistant("Done.", usage=T.usage(input_tokens=200, cache_read=6000, cache_write=1000, output=1000),
                     request_id=f"req_{spec['session'][-3:]}{m}", model=spec["model"])
     for k, agent in enumerate(spec["agents"]):
         child = t.subagent(agent, agent_type=("Explore", "general-purpose")[k])
         for m in range(2):
             child.user("Look into it.")
-            child.assistant("Found it.", usage=T.usage(input=100, output=400 * (k + 1)),
+            child.assistant("Found it.", usage=T.usage(input_tokens=100, output=400 * (k + 1)),
                             request_id=f"req_{agent[-4:]}{m}", model=spec["model"])
     t.write()
 """

@@ -285,8 +285,8 @@ def test_a_question_ruled_withdrawn_or_parked_leaves_the_step_done(round_dir, it
 def test_a_parked_question_makes_the_step_due_once_what_it_waits_for_has_come(round_dir):
     ask()
     rule("park:Q1", until="round:proj-a/another")
-    assert step(round_dir, "docket", closed=lambda name: False).state == steps.DONE
-    found = step(round_dir, "docket", closed=lambda name: name == "proj-a/another")
+    assert step(round_dir, "docket", on_closed=lambda name: False).state == steps.DONE
+    found = step(round_dir, "docket", on_closed=lambda name: name == "proj-a/another")
     assert (found.state, found.questions) == (steps.READY, ("Q1",))
 
 

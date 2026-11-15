@@ -223,7 +223,7 @@ def _reads(page) -> int:
     return page.evaluate("() => window.__runningReads")
 
 
-def _seen(page, visible: bool) -> None:
+def _seen(page, *, visible: bool) -> None:
     """The document reads as shown or hidden, and says so as a browser does."""
     page.evaluate("""(visible) => {
       Object.defineProperty(document, "visibilityState",
@@ -252,12 +252,12 @@ def test_on_the_phone_the_row_reads_again_every_30_s_while_shown_and_when_shown_
     assert _reads(page) == first + 1
 
     # Hidden, the page reads nothing however long it waits.
-    _seen(page, False)
+    _seen(page, visible=False)
     page.clock.fast_forward("02:00")
     assert _reads(page) == first + 1
 
     # Shown again, it reads at once, and every 30 s from then on.
-    _seen(page, True)
+    _seen(page, visible=True)
     assert _reads(page) == first + 2
     page.clock.fast_forward("00:30")
     assert _reads(page) == first + 3

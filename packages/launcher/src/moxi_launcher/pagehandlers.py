@@ -718,7 +718,7 @@ def _keep_checked(query: Mapping[str, Any]) -> None:
 def name_now(query: Mapping[str, Any]) -> dict[str, Any]:
     """`/api/name`'s answer: the name a launch would take now, from the template of its
     project, else the one for every launch. Its project is `project`, else the one a
-    launch in the folder `cwd` finds (`presets.folder_place`, which also expands `~`).
+    launch in the folder `cwd` finds (`presets.dir_place`, which also expands `~`).
     `seat`, else `agent`, fills `<agent>`; the project's key, else the name of that
     folder, fills `<project>`; `identity` and `scope` fill nothing without comms. The
     answer's `project` is the key of the project whose template it rendered, null for

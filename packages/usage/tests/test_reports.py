@@ -436,25 +436,25 @@ def test_the_dir_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
     def count(**filters):
         return reports.daily(conn, tz="UTC", table=table(), **filters).total["requests"]
 
-    assert count(folder="/w/app") == 2             # the keyed file and the one with none
+    assert count(work_dir="/w/app") == 2             # the keyed file and the one with none
     assert count(project="/w/app") == 1            # the project filter finds only the latter
-    assert count(folder="/w/app-wt") == 2
-    assert count(folder="/w/app-wt/") == 2
-    assert count(folder="/w/app", project="key-app") == 1
-    assert count(folder="/w") == 0                 # a folder above matches nothing under it
-    assert count(folder=None) == count(folder="") == 5
+    assert count(work_dir="/w/app-wt") == 2
+    assert count(work_dir="/w/app-wt/") == 2
+    assert count(work_dir="/w/app", project="key-app") == 1
+    assert count(work_dir="/w") == 0                 # a folder above matches nothing under it
+    assert count(work_dir=None) == count(work_dir="") == 5
     assert reports.daily(conn, work_dir="/w/app/", table=table()).filters == {
         "folder": "/w/app"}
     for bad in ("app", "./app", "~/app"):
         with pytest.raises(reports.ReportError, match="whole path"):
-            count(folder=bad)
+            count(work_dir=bad)
     for kind, fn in reports.REPORTS.items():
         if kind == "status":
             continue
         given = {"session": "s2"} if kind in ("session", "requests") else {}
-        found = fn(conn, folder="/w/app-wt", table=table(), **given)
+        found = fn(conn, work_dir="/w/app-wt", table=table(), **given)
         assert found.total["requests"] == 2, kind
-        assert fn(conn, folder="/w/gone", table=table(), **given).total["requests"] == 0
+        assert fn(conn, work_dir="/w/gone", table=table(), **given).total["requests"] == 0
     with pytest.raises(reports.ReportError, match="takes no folder"):
         reports.status(conn, work_dir="/w/app")
 

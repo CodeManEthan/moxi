@@ -489,14 +489,14 @@ def many(monkeypatch):
 
     conn = store.open_index()
     try:
-        claude("dear", request("d1", t, input=9000), request("d2", t + 600, input=40_000),
+        claude("dear", request("d1", t, input_tokens=9000), request("d2", t + 600, input_tokens=40_000),
                cwd="/w/app")
-        claude("mid", request("m1", t + 60, input=5000), cwd="/w/app")
+        claude("mid", request("m1", t + 60, input_tokens=5000), cwd="/w/app")
         claude("tie-b", request("b1", t + 120), cwd="/w/tool")
         claude("tie-a", request("a1", t + 180), cwd="/w/tool")
         source(conn, "/c/tie.jsonl", [request("c1", t + 240, harness="codex")],
                lane="codex", harness="codex", session_id="tie-a", rank=1, cwd="/w/tool")
-        claude("unpriced", request("u1", t + 300, model="mystery-9", input=90_000),
+        claude("unpriced", request("u1", t + 300, model="mystery-9", input_tokens=90_000),
                cwd="/w/app")
         source(conn, "/p/loose-2.jsonl", [request("l2", t + 420)], session_id=None,
                cwd="/w/loose-b")
@@ -533,7 +533,7 @@ def test_fewer_tokens_at_the_same_cost_come_after_more(monkeypatch):
     try:
         # $0.0045 each: 1,000 in and 100 out of m-a; 4,500 in and no out of m-b
         source(conn, "/p/few.jsonl", [request("f1", t)], session_id="a-few")
-        source(conn, "/p/more.jsonl", [request("m1", t, model="m-b", input=4500, output=0)],
+        source(conn, "/p/more.jsonl", [request("m1", t, model="m-b", input_tokens=4500, output=0)],
                session_id="z-more")
     finally:
         conn.close()
@@ -580,19 +580,19 @@ def windows(monkeypatch):
     conn = store.open_index()
     try:
         source(conn, "/c/th1.jsonl", [
-            request("t1", t, harness="codex", model="m-a", input=20_000),
-            request("t2", t + 60, harness="codex", model="m-a", input=51_680,
+            request("t1", t, harness="codex", model="m-a", input_tokens=20_000),
+            request("t2", t + 60, harness="codex", model="m-a", input_tokens=51_680,
                     context_window=258_400)],
             lane="codex", harness="codex", session_id="th1", rank=1)
-        source(conn, "/p/s1.jsonl", [request("r1", t, input=30_000),
-                                     request("r2", t + 600, input=40_000)],
+        source(conn, "/p/s1.jsonl", [request("r1", t, input_tokens=30_000),
+                                     request("r2", t + 600, input_tokens=40_000)],
                session_id="s1", cwd="/w/app")
-        source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input=7)],
+        source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input_tokens=7)],
                session_id="s1", kind="subagent", agent_id="a", cwd="/w/app")
-        source(conn, "/p/s2.jsonl", [request("u1", t, model="mystery-9", input=1234)],
+        source(conn, "/p/s2.jsonl", [request("u1", t, model="mystery-9", input_tokens=1234)],
                session_id="s2")
-        source(conn, "/p/s3.jsonl", [request("v1", t, input=500),
-                                     request("v2", t + 60, input=sessions.UNKNOWN)],
+        source(conn, "/p/s3.jsonl", [request("v1", t, input_tokens=500),
+                                     request("v2", t + 60, input_tokens=sessions.UNKNOWN)],
                session_id="s3")
     finally:
         conn.close()
@@ -1400,7 +1400,7 @@ def codex_window(used: float, ago: float, *, now: float, resets: float | None = 
 
 def codex_session(conn, sid: str, *times: float, input_tokens: int = 1000) -> None:
     source(conn, f"/c/{sid}.jsonl",
-           [request(f"{sid}-{n}", ts, harness="codex", input=input_tokens)
+           [request(f"{sid}-{n}", ts, harness="codex", input_tokens=input_tokens)
             for n, ts in enumerate(times)],
            lane="codex", harness="codex", session_id=sid, cwd="/w/app")
 
@@ -1522,7 +1522,7 @@ def test_a_main_window_lists_the_sessions_that_used_it_since_it_opened(monkeypat
         codex_session(conn, "before", opened - 2 * HOUR, opened - 1)
         codex_session(conn, "dear", opened + 600, input_tokens=50_000)
         codex_session(conn, "at-the-start", opened, input_tokens=20_000)
-        source(conn, "/p/other.jsonl", [request("o1", opened + 60, input=90_000)],
+        source(conn, "/p/other.jsonl", [request("o1", opened + 60, input_tokens=90_000)],
                session_id="other-harness", cwd="/w/app")
     finally:
         conn.close()
@@ -1592,20 +1592,20 @@ def named(monkeypatch, names):
     monkeypatch.setattr(models, "table", lambda *a, **k: table())
     conn = store.open_index()
     try:
-        source(conn, "/p/typed.jsonl", [request("n1", T0, input=9000)],
+        source(conn, "/p/typed.jsonl", [request("n1", T0, input_tokens=9000)],
                session_id="typed", cwd="/w/index-says", title="A title the harness made")
-        source(conn, "/p/plain.jsonl", [request("p1", T0 + 60, input=8000)],
+        source(conn, "/p/plain.jsonl", [request("p1", T0 + 60, input_tokens=8000)],
                session_id="plain", cwd="/w/app")
-        source(conn, "/c/thread.jsonl", [request("c1", T0 + 120, harness="codex", input=7000)],
+        source(conn, "/c/thread.jsonl", [request("c1", T0 + 120, harness="codex", input_tokens=7000)],
                lane="codex", harness="codex", session_id="thread", rank=1, cwd="/w/tool")
         source(conn, "/oc/opencode.db", [request("o1", T0 + 180, harness="opencode",
-                                                 input=6000)],
+                                                 input_tokens=6000)],
                lane="opencode", harness="opencode", part="ses_a", session_id="ses_a",
                rank=2, cwd="/w/oc", title="A title of unknown hand")
-        source(conn, "/p/gone.jsonl", [request("g1", T0 - 86_400, input=5000),
-                                       request("g2", T0 + 240, input=5000)],
+        source(conn, "/p/gone.jsonl", [request("g1", T0 - 86_400, input_tokens=5000),
+                                       request("g2", T0 + 240, input_tokens=5000)],
                session_id="gone", cwd="/w/gone")
-        source(conn, "/p/loose.jsonl", [request("l1", T0 + 300, input=10)],
+        source(conn, "/p/loose.jsonl", [request("l1", T0 + 300, input_tokens=10)],
                session_id=None, cwd="/w/loose")
     finally:
         conn.close()
@@ -1726,7 +1726,7 @@ def test_an_answer_of_200_rows_asks_the_sessions_module_once(monkeypatch, names)
     conn = store.open_index()
     try:
         for n in range(205):
-            source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input=1000 + n)],
+            source(conn, f"/p/s{n:03d}.jsonl", [request(f"r{n}", T0 + n, input_tokens=1000 + n)],
                    session_id=f"s{n:03d}", cwd="/w/app")
     finally:
         conn.close()
@@ -1828,7 +1828,7 @@ NAMES_ON_REAL_ROOTS = textwrap.dedent("""
     import json, sys
     from moxi_usage import pagehandlers
     pairs = [tuple(pair) for pair in json.loads(sys.argv[1])]
-    ref = pagehandlers._refs(pairs, folders=pairs)
+    ref = pagehandlers._refs(pairs, work_dirs=pairs)
     print(json.dumps([ref(harness, sid) for harness, sid in pairs]))
 """)
 

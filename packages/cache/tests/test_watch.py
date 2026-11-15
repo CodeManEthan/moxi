@@ -484,7 +484,7 @@ def test_the_reading_is_no_file_under_clock(root, sessions):
 
 def test_a_stand_in_dir_puts_the_reading_beside_it(tmp_path, sessions):
     records_dir = tmp_path / "rt" / "cache" / "clock"
-    make(Fake([entry(11, A)]), sessions, directory=records_dir).tick()
+    make(Fake([entry(11, A)]), sessions, records_dir=records_dir).tick()
     assert records.reading(tmp_path / "rt" / "cache" / "watch.json")["listed_at"] is not None
     assert not records.reading_path().exists()
 

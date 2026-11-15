@@ -524,7 +524,7 @@ def test_a_read_that_ends_before_the_files_size_fails_and_moves_nothing(roots, c
         read_prompt(entry.listed, kept)
     with pytest.raises(Unreadable):
         read_prompt(entry.listed)
-    assert cat._prompt(entry, None) is None
+    assert cat._prompt(entry, program=None) is None
     assert kept_of(cat, t) is kept
 
     monkeypatch.setattr(catalog_module.os, "fstat", real)

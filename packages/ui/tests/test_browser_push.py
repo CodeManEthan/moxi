@@ -226,7 +226,7 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
     expect(row).to_contain_text("The next request after 10 s tries again.")
     expect(row).to_contain_text("last exited with code 3")
     expect(row).to_contain_text("log: ")
-    fixture_kit.fail_start(shell, on=False)
+    fixture_kit.fail_start(shell, enabled=False)
 
 
 def test_the_servers_block_says_when_no_page_server_has_run(ui_shells, fixture_site, ui_contexts):
@@ -315,7 +315,7 @@ def test_a_version_change_drains_the_server_and_the_next_request_starts_the_new_
     assert shell.server("fixture")["state"] == "draining"
     # A new request waits for the drain; the open one finishes on the old server.
     waiting = _in_thread(lambda: shell.session(timeout=30).get("/m/fixture/api/summary"))
-    fixture_kit.hold(shell, on=False)
+    fixture_kit.hold(shell, enabled=False)
     status, data = held()
     assert status == 200 and data["pid"] == old["pid"]
     status, data = waiting()

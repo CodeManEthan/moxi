@@ -113,7 +113,7 @@ def open_list(piece):
     return listed
 
 
-def note(whose: str, them: bool = False) -> re.Pattern:
+def note(whose: str, *, them: bool = False) -> re.Pattern:
     """The sentence under the item's list."""
     return re.compile(rf"^Filled from {re.escape(whose)} last launch, today .+\. "
                       rf"The preset sets nothing for {'them' if them else 'it'}\.$")

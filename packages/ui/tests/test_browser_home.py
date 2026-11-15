@@ -524,7 +524,7 @@ def test_a_failing_check_of_a_real_run_shows_on_health_and_check_again_runs_the_
     expect(mine).to_contain_text(DETAIL)
     expect(mine).to_contain_text("fixture · check")
     expect(mine.locator("code")).to_have_text(FIX)
-    fixture_kit.fail_check(shell, on=False)
+    fixture_kit.fail_check(shell, enabled=False)
     health.get_by_role("button", name="Check again").click()
     # While the doctor runs the foot says so and offers no second run.
     expect(health.get_by_role("status")).to_have_text("Checking…")
