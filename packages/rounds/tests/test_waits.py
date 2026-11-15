@@ -174,8 +174,7 @@ def test_a_waiting_item_holds_the_close_and_not_the_finish(built):
     now = folded(round_dir)
 
     finish = verdicts.finish_waits(now, "B1", name=ROUND, settings=own.load())
-    close = [line for condition in closing.CONDITIONS
-             for line in condition(now, lambda _name: False)]
+    close = closing.waits(now)
 
     assert not any("W1" in line for line in finish)
     assert "waiting item B1.W1, open" in close
