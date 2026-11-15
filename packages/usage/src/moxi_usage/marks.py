@@ -161,7 +161,7 @@ def _live_marks(session_id: str) -> dict[str, str | None] | None:
         if session is None:
             return None
         with session:
-            return session.environ([listener.WARN_AT, listener.CROSSING_AT])
+            return session.env([listener.WARN_AT_ENV, listener.CROSSING_AT_ENV])
     except Exception:  # noqa: BLE001 - an endpoint that can't say leaves the record
         return None
 
@@ -242,14 +242,14 @@ def mark(session_id: str, *, harness: str | None = None,
 
 def fired(env: Mapping[str, str] | None = None) -> list[Fired]:
     """Every session's file of fired purposes, newest first."""
-    directory = listener.state_dir(env)
+    marks_dir = listener.state_dir(env)
     try:
-        names = sorted(n for n in os.listdir(directory) if n.endswith(".json"))
+        names = sorted(n for n in os.listdir(marks_dir) if n.endswith(".json"))
     except OSError:
         return []
     out = []
     for name in names:
-        path = directory / name
+        path = marks_dir / name
         doc = listener.read_record(path)
         if doc is None:
             continue
@@ -282,17 +282,17 @@ def sweep(*, now: float, marks_days: float, ceiling_days: float,
     named in `problems`."""
     problems: list[str] = []
     swept_marks = kept = swept_ceiling = 0
-    directory = listener.state_dir(env)
+    marks_dir = listener.state_dir(env)
     try:
-        names = os.listdir(directory)
+        names = os.listdir(marks_dir)
     except FileNotFoundError:
         names = []
     except OSError as exc:
         names = []
-        problems.append(f"{directory}: {exc}")
+        problems.append(f"{marks_dir}: {exc}")
     oldest = now - marks_days * _DAY
     for name in names:
-        path = os.path.join(directory, name)
+        path = os.path.join(marks_dir, name)
         try:
             st = os.lstat(path)
             if st.st_mtime < oldest:

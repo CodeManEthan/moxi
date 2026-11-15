@@ -243,7 +243,7 @@ def test_an_assertion_with_a_wrong_origin_rp_id_or_no_user_verification_is_refus
 def test_a_stale_device_signs_in_to_nothing(phone):
     authenticator = Authenticator()
     phone.pair(authenticator, keep=False)
-    phone.access.stale(KEPT)
+    phone.access.mark_stale(KEPT)
     assert phone.sign_in(authenticator).status == 403
     assert phone.audit.codes()[-1] == "stale"
     assert Devices.of(phone.state_dir).all()[0].stale

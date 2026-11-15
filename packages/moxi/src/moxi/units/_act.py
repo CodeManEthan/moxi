@@ -59,27 +59,27 @@ _tokens_lock = threading.Lock()
 def start(module: str, names, *, foreign: bool = False, kinds=None,
           runner=None) -> list[Acted]:
     """Start each named unit: a daemon now, a timer's run now through its gate."""
-    return _act("start", module, names, foreign, runner, kinds)
+    return _act("start", module, names, foreign=foreign, runner=runner, kinds=kinds)
 
 
 def restart(module: str, names, *, foreign: bool = False, kinds=None,
             runner=None) -> list[Acted]:
     """Restart each named unit: a daemon, or a timer's run (`stop` then `start`)."""
-    return _act("restart", module, names, foreign, runner, kinds)
+    return _act("restart", module, names, foreign=foreign, runner=runner, kinds=kinds)
 
 
 def enable(module: str, names, *, foreign: bool = False, kinds=None,
            runner=None) -> list[Acted]:
     """Enable each named unit, taking effect now: a daemon runs, a timer's schedule is
     armed."""
-    return _act("enable", module, names, foreign, runner, kinds)
+    return _act("enable", module, names, foreign=foreign, runner=runner, kinds=kinds)
 
 
 def disable(module: str, names, *, foreign: bool = False, kinds=None,
             runner=None) -> list[Acted]:
     """Disable each named unit, taking effect now: a daemon is stopped, a timer's schedule
     is off (on Windows a timer's run in progress goes on; `stop` ends it)."""
-    return _act("disable", module, names, foreign, runner, kinds)
+    return _act("disable", module, names, foreign=foreign, runner=runner, kinds=kinds)
 
 
 def stop(module: str, names=None, *, replace: bool = False, stopped: list | None = None,
@@ -95,7 +95,7 @@ def stop(module: str, names=None, *, replace: bool = False, stopped: list | None
     never stopped without an entry that starts it again, and raises `ValueError`
     without one. `foreign=True` takes no record.
     """
-    _kinds(kinds, foreign)
+    _kinds(kinds, foreign=foreign)
     if replace and stopped is None:
         raise ValueError("stop(replace=True) needs a record, so an unmarked unit is never "
                          "stopped without an entry that starts it again")
@@ -111,8 +111,8 @@ def stop(module: str, names=None, *, replace: bool = False, stopped: list | None
         names = list(decl.daemons) + [name for kind, name in decl.rejected
                                       if kind == "daemon" and name not in decl.daemons]
     if stopped is None:
-        return _act("stop", module, names, foreign, runner, kinds)
-    return _stop_recorded(module, _names(names), replace, stopped, runner)
+        return _act("stop", module, names, foreign=foreign, runner=runner, kinds=kinds)
+    return _stop_recorded(module, _names(names), replace=replace, stopped=stopped, runner=runner)
 
 
 def resume(record: Iterable[Stopped], *, runner=None) -> list[Acted]:
@@ -146,12 +146,13 @@ def _resume_one(entry, impl, fence, problem: str | None) -> Acted:
     if not isinstance(entry, Stopped) or not _take(entry.token):
         unit = getattr(entry, "unit", repr(entry))
         return Acted(getattr(entry, "module", None), getattr(entry, "name", str(unit)),
-                     "start", False, (f"{unit}: not stopped by this process; not started",))
+                     "start", ok=False,
+                     lines=(f"{unit}: not stopped by this process; not started",))
     if impl is None or impl.name != entry.backend:
         why = problem or ("no supervisor on this system" if impl is None
                           else f"this system's supervisor is {impl.name}")
-        return Acted(entry.module, entry.name, "start", False,
-                     (f"{entry.unit}: stopped on {entry.backend}, but {why}; not started",))
+        return Acted(entry.module, entry.name, "start", ok=False,
+                     lines=(f"{entry.unit}: stopped on {entry.backend}, but {why}; not started",))
     try:
         ran = impl.start_id(entry.unit, fence)
     except Exception as exc:  # each entry's error stays in its own Acted
@@ -161,12 +162,14 @@ def _resume_one(entry, impl, fence, problem: str | None) -> Acted:
         command = _start_command(impl, entry.unit)
         if command:
             lines.append(f"start it by hand: {command}")
-        return Acted(entry.module, entry.name, "start", False, tuple(lines))
+        return Acted(entry.module, entry.name, "start", ok=False, lines=tuple(lines))
     if not ran.ok:
-        return Acted(entry.module, entry.name, "start", False,
-                     (f"{entry.unit}: {ran.failure()}", f"start it by hand: {ran.command}"))
+        return Acted(entry.module, entry.name, "start", ok=False,
+                     lines=(f"{entry.unit}: {ran.failure()}",
+                            f"start it by hand: {ran.command}"))
     _clear_record(entry)
-    return Acted(entry.module, entry.name, "start", True, (f"{entry.unit} started",))
+    return Acted(entry.module, entry.name, "start", ok=True,
+                 lines=(f"{entry.unit} started",))
 
 
 def _start_command(impl, unit: str) -> str | None:
@@ -223,7 +226,7 @@ def _names(names) -> list[str]:
     return out
 
 
-def _kinds(kinds, foreign: bool) -> dict[str, str]:
+def _kinds(kinds, *, foreign: bool) -> dict[str, str]:
     """The acts' `kinds`, checked as `status` checks it; given without `foreign=True` it
     raises `ValueError`, since a module's own units carry their kind in their files."""
     if kinds is not None and not foreign:
@@ -232,15 +235,16 @@ def _kinds(kinds, foreign: bool) -> dict[str, str]:
     return check_kinds(kinds)
 
 
-def _act(act: str, module: str, names, foreign: bool, runner, kinds=None) -> list[Acted]:
+def _act(act: str, module: str, names, *, foreign: bool, runner, kinds=None) -> list[Acted]:
     names = _names(names)
-    kinds = _kinds(kinds, foreign)
+    kinds = _kinds(kinds, foreign=foreign)
     owner = None if foreign else module
     with core_lock():
         impl = _implementation()
         if isinstance(impl, str):
-            return [Acted(owner, name, act, False, (f"{_label(module, name, foreign)}: "
-                                                    f"{impl}; nothing to {act}",))
+            return [Acted(owner, name, act, ok=False,
+                          lines=(f"{_label(module, name, foreign=foreign)}: "
+                                 f"{impl}; nothing to {act}",))
                     for name in names]
         fence = _fence(impl, runner)
         marked = () if foreign else impl.marked(module)
@@ -249,12 +253,12 @@ def _act(act: str, module: str, names, foreign: bool, runner, kinds=None) -> lis
             unit = (foreign_unit(impl, name, fence, kinds.get(name)) if foreign
                     else _marked_unit(marked, module, name))
             if isinstance(unit, str):
-                out.append(Acted(owner, name, act, False, (unit,)))
+                out.append(Acted(owner, name, act, ok=False, lines=(unit,)))
                 continue
             try:
                 acted = impl.act(act, unit, fence)
             except FenceError as exc:  # a name the fence refuses is that name's refusal
-                out.append(Acted(owner, name, act, False, (f"{name}: {exc}",)))
+                out.append(Acted(owner, name, act, ok=False, lines=(f"{name}: {exc}",)))
                 continue
             out.append(Acted(owner, name, act, acted.ok, acted.lines))
         return out
@@ -269,7 +273,7 @@ def _implementation():
     return "no supervisor on this system" if impl is None else impl
 
 
-def _label(module: str, name: str, foreign: bool) -> str:
+def _label(module: str, name: str, *, foreign: bool) -> str:
     return name if foreign else f"{module}/{name}"
 
 
@@ -306,13 +310,14 @@ def foreign_unit(impl, ref: str, fence, kind: str | None = None) -> UnitRef | st
     return unit
 
 
-def _stop_recorded(module: str, names: list[str], replace: bool, record: list,
+def _stop_recorded(module: str, names: list[str], *, replace: bool, stopped: list,
                    runner) -> list[Acted]:
     with core_lock():
         impl = _implementation()
         if isinstance(impl, str):
             # Nothing can run without a supervisor, so nothing is stopped or recorded.
-            return [Acted(module, name, "stop", True, (f"{module}/{name}: {impl}",))
+            return [Acted(module, name, "stop", ok=True,
+                          lines=(f"{module}/{name}: {impl}",))
                     for name in names]
         fence = _fence(impl, runner)
         marked = impl.marked(module)
@@ -336,17 +341,17 @@ def _stop_recorded(module: str, names: list[str], replace: bool, record: list,
             running = impl.running(every, fence) if every else frozenset()
         except ReadError as exc:
             line = f"cannot tell which units of {module} run: {exc}; nothing was stopped"
-            return [Acted(module, name, "stop", False, (line,)) for name in names]
+            return [Acted(module, name, "stop", ok=False, lines=(line,)) for name in names]
         out = []
         for name, ids in plans:
             if isinstance(ids, str):
-                out.append(Acted(module, name, "stop", False, (ids,)))
+                out.append(Acted(module, name, "stop", ok=False, lines=(ids,)))
                 continue
             ok, lines = True, []
             for unit, is_marked in ids:
                 if unit not in running:
                     continue
-                record.append(Stopped(module, name, unit, impl.name, is_marked, _issue()))
+                stopped.append(Stopped(module, name, unit, impl.name, is_marked, _issue()))
                 ran = impl.stop_id(unit, fence)
                 if ran.ok:
                     lines.append(f"{unit} stopped")

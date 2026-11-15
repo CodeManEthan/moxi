@@ -7,16 +7,16 @@ import os
 
 from moxi_loadout.manifest import USER, is_module_skill
 
-_FOLDERS = {"skill": "skills", "agent": "agents"}
+_KIND_DIRS = {"skill": "skills", "agent": "agents"}
 
 
-def entries(folder=None) -> list[dict]:
+def entries(loadout_dir=None) -> list[dict]:
     """One entry per item per section that lists it: `kind`, `name`, `scope` (`user` or
     the project section's name), `harnesses` (None for every harness), `source` and
     `disabled` (the harnesses switched off there, `*` for all)."""
     from moxi_loadout import manifest as manifest_mod
 
-    found = manifest_mod.load(folder)
+    found = manifest_mod.load(loadout_dir)
     out = []
     for section in found.sections():
         scope = USER if section.is_user else section.name
@@ -38,10 +38,10 @@ def _source(found, kind: str, name: str, section) -> str:
     own = found.source_of(kind, name)
     if own is not None:
         return os.fspath(own)
-    if kind not in _FOLDERS:
+    if kind not in _KIND_DIRS:
         return os.fspath(found.path)
     filename = name + (".md" if kind == "agent" else "")
-    mine = found.folder / _FOLDERS[kind] / filename
+    mine = found.loadout_dir / _KIND_DIRS[kind] / filename
     if os.path.lexists(mine) or section.is_user:
         return os.fspath(mine)
     return "held by the project"

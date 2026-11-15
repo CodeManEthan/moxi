@@ -175,7 +175,7 @@ def test_nothing_holds_a_quiet_session():
 
 def test_every_word_holds_in_its_order():
     facts = Facts(turn_open=True, turn=person(NOW - 10), draft=True, stale=True)
-    agents = Agents((Agent("a", "subagent", "running", False),))
+    agents = Agents((Agent("a", "subagent", "running", final=False),))
     reading = judge(facts, agents, PaneUse(pane_in_mode=True))
     assert reading.words == quiet.WORDS
     assert reading.first.word == "turn"
@@ -195,14 +195,14 @@ def test_a_turn_not_yet_tied_holds_until_it_is():
 
 
 @pytest.mark.parametrize("entry, holds", [
-    (Agent("a", "subagent", "running", False), True),
+    (Agent("a", "subagent", "running", final=False), True),
     (Agent("a", "subagent", "pending", None), True),
-    (Agent("a", "teammate", "waiting", False), True),
+    (Agent("a", "teammate", "waiting", final=False), True),
     (Agent("a", "teammate", "unknown", None), True),
-    (Agent("a", "subagent", "running", True), False),  # its final notice came
-    (Agent("a", "subagent", "done", False), False),
+    (Agent("a", "subagent", "running", final=True), False),  # its final notice came
+    (Agent("a", "subagent", "done", final=False), False),
     (Agent("a", "subagent", "idle", None), False),
-    (Agent("a", "shell", "running", False), False),  # a shell never holds
+    (Agent("a", "shell", "running", final=False), False),  # a shell never holds
     (Agent("a", "shell", "unknown", None), False),
 ])
 def test_which_agents_hold(entry, holds):
@@ -217,9 +217,9 @@ def test_an_incomplete_agent_list_holds():
 
 
 def test_the_subagent_words_count_the_live_ones():
-    agents = Agents((Agent("a", "subagent", "running", False),
+    agents = Agents((Agent("a", "subagent", "running", final=False),
                      Agent("b", "teammate", "waiting", None),
-                     Agent("c", "shell", "running", False)))
+                     Agent("c", "shell", "running", final=False)))
     assert judge(agents=agents).first.detail == "2 still working (subagent, teammate)"
 
 

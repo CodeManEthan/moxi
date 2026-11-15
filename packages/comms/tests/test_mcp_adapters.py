@@ -82,7 +82,7 @@ def launch(rig, tmp_path):
 
 def test_the_token_is_read_from_a_launch_carrying_the_pair_and_only_its_hash_stays():
     env = {TOKEN_ENV: VALUE, URL_ENV: URL}
-    token = ToolToken.from_environ(env)
+    token = ToolToken.from_env(env)
     assert token.hash == tokens.digest(VALUE)
     assert TOKEN_ENV not in env, "the value leaves the environment"
     assert VALUE not in repr(token)
@@ -92,7 +92,7 @@ def test_the_token_is_read_from_a_launch_carrying_the_pair_and_only_its_hash_sta
                                  {TOKEN_ENV: "", URL_ENV: URL}])
 def test_a_launch_without_the_pair_has_no_token(env):
     before = dict(env)
-    assert ToolToken.from_environ(env) is None
+    assert ToolToken.from_env(env) is None
     assert env == before
 
 
@@ -462,19 +462,19 @@ def test_the_roster_leaves_an_unnamed_value_to_the_launch(tmp_path):
                      thread_file=None)
     assert row.network_access is None
     assert "network_access" not in " ".join(codex_wrapper.row_flags(row))
-    off = row.launch_options(network=False)["config"]["sandbox_workspace_write"]
+    off = row.launch_options(allow_network=False)["config"]["sandbox_workspace_write"]
     assert off["network_access"] is False
     row.network_access = True
-    on = row.launch_options(network=False)["config"]["sandbox_workspace_write"]
+    on = row.launch_options(allow_network=False)["config"]["sandbox_workspace_write"]
     assert on["network_access"] is True
 
 
 def test_comms_flags_add_the_default_only_where_nothing_names_it():
-    flags = codex_wrapper.comms_flags({"sandbox": "workspace-write"}, network=False)
+    flags = codex_wrapper.comms_flags({"sandbox": "workspace-write"}, allow_network=False)
     assert "sandbox_workspace_write.network_access=false" in flags
     named_ = codex_wrapper.comms_flags(
         {"sandbox": "workspace-write",
-         "config": {"sandbox_workspace_write": {"network_access": True}}}, network=False)
+         "config": {"sandbox_workspace_write": {"network_access": True}}}, allow_network=False)
     assert not any("network_access" in f for f in named_)
 
 

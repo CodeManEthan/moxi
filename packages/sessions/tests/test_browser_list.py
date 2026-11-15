@@ -74,10 +74,10 @@ def changed_at(path: Path, at: float) -> None:
 
 
 def claude(root: Path, n: int, at: float, *, program: bool = False, typed: str | None = None,
-           folder: str = "proj-a", name: str | None = None, subagents: int = 0) -> None:
+           work_dir: str = "proj-a", name: str | None = None, subagents: int = 0) -> None:
     """A Claude Code session last changed at `at`: started in a terminal, or by a program;
     with a typed message only when `typed` gives one."""
-    t = ClaudeTranscript(root, session_id=sid(n), cwd=f"/work/{folder}", project=f"-work-{folder}",
+    t = ClaudeTranscript(root, session_id=sid(n), cwd=f"/work/{work_dir}", project=f"-work-{work_dir}",
                          entrypoint="sdk-cli" if program else "cli", start=at - 600)
     if name is not None:
         t.title(name)
@@ -112,7 +112,7 @@ def seed(env: dict[str, str]) -> None:
     root = Path(env["CLAUDE_CONFIG_DIR"]) / "projects"
     now = time.time()
     claude(root, 1, now - 600, typed=PROMPT, name="fix-tooltips", subagents=2)
-    claude(root, 2, now - 1200, folder="proj-b")
+    claude(root, 2, now - 1200, work_dir="proj-b")
     for k in range(10):
         claude(root, 10 + k, noon(2).timestamp() + 60 * k, typed=f"Task {k}.")
     for k in range(3):
@@ -131,7 +131,7 @@ def seed(env: dict[str, str]) -> None:
     rollout.path.with_name(f"rollout-2026-10-30T10-00-00-{tid(2)}.jsonl.zst").write_bytes(b"not read")
 
     db = OpenCodeDb(Path(env["XDG_DATA_HOME"]) / "opencode")
-    db.session(title="a title the harness made", directory="/work/proj-c", at=noon(5).timestamp())
+    db.session(title="a title the harness made", work_dir="/work/proj-c", at=noon(5).timestamp())
     db.write()
 
 
@@ -369,7 +369,7 @@ def test_the_when_filter_takes_today_and_a_range_of_days(seeded, ui_page):
     expect(count_line(view)).to_have_text(f"{ALL} sessions")
 
 
-def test_the_folder_filter_lists_the_folders_narrows_them_and_narrows_the_list(seeded, ui_page):
+def test_the_dir_filter_lists_the_dirs_narrows_them_and_narrows_the_list(seeded, ui_page):
     view = open_list(ui_page)
     button = filter_button(view, "folder")
     button.click()
@@ -393,7 +393,7 @@ def test_the_folder_filter_lists_the_folders_narrows_them_and_narrows_the_list(s
     expect(menu).to_have_count(0)
 
 
-def test_the_find_field_finds_by_folder_and_by_id_a_program_session_too(seeded, ui_page):
+def test_the_find_field_finds_by_dir_and_by_id_a_program_session_too(seeded, ui_page):
     view = open_list(ui_page)
     field = view.get_by_label("Find a session")
     expect(field).to_have_attribute("placeholder", "Find a session by its id or folder")

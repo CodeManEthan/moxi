@@ -120,7 +120,7 @@ def test_the_listener_rows(turns_env, registry):
     assert {r.state for r in later} == {"ok", "warn"}
 
 
-def test_a_v1_directory_is_named_and_left(turns_env, registry):
+def test_a_v1_dir_is_named_and_left(turns_env, registry):
     old = client.runtime_dir() / "claude-old"
     old.mkdir(parents=True)
     (old / "hello.json").write_text(json.dumps({"v": 1}))

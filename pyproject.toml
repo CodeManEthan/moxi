@@ -53,3 +53,14 @@ moxi-rounds = { workspace = true }
 # checks a change must pass.
 [dependency-groups]
 dev = ["moxi-dev"]
+
+[tool.ruff]
+extend-exclude = ["packages/moxi/src/moxi/_vendor"]
+
+[tool.ruff.lint]
+select = ["N", "A", "FBT"]
+ignore = ["N818"]
+external = ["MX"]
+
+[tool.ruff.lint.flake8-boolean-trap]
+extend-allowed-calls = ["os.set_inheritable", "os.set_handle_inheritable"]

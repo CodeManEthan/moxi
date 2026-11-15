@@ -115,9 +115,9 @@ def put_clock(shell: Any, session_id: str, *, age: float, ttl: float = 3600,
               "kind": "warm", "last_request": now - age, "ttl": ttl, "read_at": now - 1,
               "seen_at": now - 1, "code": None, "warn_before": warn_before,
               "stale_after": 30}
-    directory = clock_dir(shell)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{session_id}.json"
+    clock_records_dir = clock_dir(shell)
+    clock_records_dir.mkdir(parents=True, exist_ok=True)
+    path = clock_records_dir / f"{session_id}.json"
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(record))
     os.replace(tmp, path)

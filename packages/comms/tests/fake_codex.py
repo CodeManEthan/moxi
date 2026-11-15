@@ -57,14 +57,14 @@ def record_dir() -> Path | None:
 
 
 def event(kind: str, **fields) -> None:
-    directory = record_dir()
-    if directory is None:
+    records_dir = record_dir()
+    if records_dir is None:
         return
     line = {"event": kind, "tag": os.environ.get("FAKE_CODEX_TAG", ""),
             "self": os.environ.get("FAKE_CODEX_SELF", ""),
             "pid": os.getpid(), "pgid": os.getpgrp(), "t": time.time(), **fields}
-    with open(directory / "events.jsonl", "a") as f:
-        f.write(json.dumps(line) + "\n")
+    with open(records_dir / "events.jsonl", "a") as fh:
+        fh.write(json.dumps(line) + "\n")
 
 
 # --------------------------------------------------------------------------- app-server
@@ -91,17 +91,17 @@ def shell_hook_runner(argv):
 def app_server(socket_path: str) -> int:
     from fake_app_server import FakeAppServer
 
-    directory = record_dir()
+    records_dir = record_dir()
 
     class StubServer(FakeAppServer):
         def _dispatch(self, conn, msg):
-            if directory is not None and msg.get("method"):
-                with open(directory / "calls.jsonl", "a") as f:
-                    f.write(json.dumps({"pid": os.getpid(), "method": msg.get("method"),
+            if records_dir is not None and msg.get("method"):
+                with open(records_dir / "calls.jsonl", "a") as fh:
+                    fh.write(json.dumps({"pid": os.getpid(), "method": msg.get("method"),
                                         "params": msg.get("params") or {}}) + "\n")
             return super()._dispatch(conn, msg)
 
-    store = str(directory / "threads.json") if directory is not None else None
+    store = str(records_dir / "threads.json") if records_dir is not None else None
     server = StubServer(socket_path, store=store)
     # Codex's hooks: listed and trusted as 0.153 would list them, and each run as Codex
     # runs it, through the shell with its JSON on stdin.
@@ -110,8 +110,8 @@ def app_server(socket_path: str) -> int:
     server.load_store()
     server.start()
     event("app-server", argv=sys.argv, socket=socket_path)
-    if directory is not None:
-        threading.Thread(target=control, args=(server, directory / "control.sock"),
+    if records_dir is not None:
+        threading.Thread(target=control, args=(server, records_dir / "control.sock"),
                          daemon=True).start()
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
@@ -169,10 +169,10 @@ def window(thread_id: str, remote: str) -> int:
         client.connect()
         client.initialize()
         client.call("thread/resume", {"threadId": thread_id})
-    except Exception as e:                                   # noqa: BLE001
+    except Exception as exc:                                   # noqa: BLE001
         print(f"Failed to resume session: thread/resume failed during TUI bootstrap: "
-              f"{e}", file=sys.stderr, flush=True)
-        event("window-exit", code=1, why=str(e))
+              f"{exc}", file=sys.stderr, flush=True)
+        event("window-exit", code=1, why=str(exc))
         return 1
     if "term-exit-0" in modes:
         def killed(*_):
@@ -286,10 +286,10 @@ def main(argv) -> int:
     return 2
 
 
-def install(directory: Path, *, tag: str = "", name: str = "codex") -> Path:
+def install(bin_dir: Path, *, tag: str = "", name: str = "codex") -> Path:
     """Write an executable `codex` into `directory` that runs this stub."""
-    directory.mkdir(parents=True, exist_ok=True)
-    script = directory / name
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / name
     script.write_text(f"#!/bin/sh\nFAKE_CODEX_TAG=${{FAKE_CODEX_TAG:-{tag}}} "
                       f"FAKE_CODEX_SELF=\"$0\" "
                       f"exec {sys.executable} {Path(__file__).resolve()} \"$@\"\n")
@@ -297,26 +297,26 @@ def install(directory: Path, *, tag: str = "", name: str = "codex") -> Path:
     return script
 
 
-def control_call(directory: Path, op: dict, timeout: float = 5.0) -> dict:
+def control_call(records_dir: Path, op: dict, timeout: float = 5.0) -> dict:
     """One control op against the stub app-server whose records are in `directory`."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(timeout)
-        s.connect(str(directory / "control.sock"))
+        s.connect(str(records_dir / "control.sock"))
         with s.makefile("rw") as f:
             f.write(json.dumps(op) + "\n")
             f.flush()
             return json.loads(f.readline())
 
 
-def events(directory: Path) -> list:
-    path = directory / "events.jsonl"
+def events(records_dir: Path) -> list:
+    path = records_dir / "events.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def calls(directory: Path, method: str | None = None) -> list:
-    path = directory / "calls.jsonl"
+def calls(records_dir: Path, method: str | None = None) -> list:
+    path = records_dir / "calls.jsonl"
     if not path.exists():
         return []
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]

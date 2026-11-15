@@ -224,8 +224,8 @@ def _latest(a: float | None, b: float | None) -> float | None:
 def _try(failures: dict[str, str], name: str, call: Callable[[], Any]) -> Any | None:
     try:
         return call()
-    except Exception as error:
-        failures[name] = _words(error)
+    except Exception as exc:
+        failures[name] = _words(exc)
         return None
 
 
@@ -283,10 +283,10 @@ class Watch:
         try:
             for event in self._watch:
                 self._take(event)
-        except Exception as error:
-            log.info("the quiet read's watch ended: %s", error)
+        except Exception as exc:
+            log.info("the quiet read's watch ended: %s", exc)
             with self._changed:
-                self.gone = self.gone or f"the watch broke: {_words(error)}"
+                self.gone = self.gone or f"the watch broke: {_words(exc)}"
                 self.events += 1
                 self._changed.notify_all()
             return

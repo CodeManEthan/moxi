@@ -128,7 +128,7 @@ class WindowSession:
             generation = self.wait_ready()
             if generation is None:
                 return 0
-            outcome = self.show(generation)
+            outcome = self.supervise(generation)
             if outcome == "lost":
                 continue
             return 0
@@ -152,7 +152,7 @@ class WindowSession:
                 raise GaveUp(self.adapter.give_up_reason())
             self.stopping.wait(POLL)
 
-    def show(self, generation) -> str:
+    def supervise(self, generation) -> str:
         """One window on `generation`. Returns "lost" when it ended with its generation
         (a new one is waited for), "operator" when the operator closed it, and "stop"
         when the wrapper is stopping."""

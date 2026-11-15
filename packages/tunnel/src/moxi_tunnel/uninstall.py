@@ -220,8 +220,8 @@ def _put_back(act: acts._Act, plan: _Plan, done: _Done, exc: StepFailed) -> None
     try:
         act.commit(going)
         act.commit(back)
-    except StepFailed as again:
-        act.commit({k: replace(e, detail=again.reason) for k, e in going.items()})
+    except StepFailed as rollback_exc:
+        act.commit({k: replace(e, detail=rollback_exc.reason) for k, e in going.items()})
     for key, entry in back.items():
         record.event("rollback", key, provider=entry.provider, port=entry.port,
                      act="uninstall")

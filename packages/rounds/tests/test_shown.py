@@ -29,22 +29,22 @@ def rounds(tmp_path, add_project, capsys):
     add_project("proj-a", notes_root=tmp_path / "notes")
     for slug in ("a-round", "b-round"):
         opening.open_round(f"proj-a/{slug}", description="a placeholder round",
-                           actor="planner", flow="fix")
+                           by="planner", flow="fix")
     capsys.readouterr()
     return tmp_path / "notes" / "rounds"
 
 
 def rule(target=ROUND, *, at, text=SAID, record="comms:12", **more):
-    return ruling.rule(target, text=text, record=record, actor="planner", at=at, **more)
+    return ruling.rule(target, text=text, record=record, by="planner", at=at, **more)
 
 
 def read_back(time, *, at=LATER, record="comms:90", **more):
     return ruling.rule("proj-a", item=f"readback={time}", record=record,
-                       actor="planner", at=at, **more)
+                       by="planner", at=at, **more)
 
 
 def mark(target, ids, record="comms:20", **more):
-    return shown.mark(target, ids, record=record, actor="planner", **more)
+    return shown.mark(target, ids, record=record, by="planner", **more)
 
 
 def listed(now=LATER):
@@ -104,7 +104,7 @@ def test_a_register_entry_is_named_by_its_project_wherever_it_was_recorded_from(
 
 
 def test_an_answer_is_printed_with_the_sentence_of_its_question(rounds, capsys):
-    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
     capsys.readouterr()
 
     assert main(["rule", ROUND, "Q1", "--text", ANSWER, "--record", "comms:12"]) == 0
@@ -159,7 +159,7 @@ def test_a_project_with_nothing_unshown_has_an_empty_list_with_no_heading(rounds
 
 
 def test_a_row_says_what_its_ruling_rules_replaces_and_takes_back(rounds):
-    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
     rule(at=T1, item="Q1", text=ANSWER)
     rule(at=T2, item="Q1", text="Everything follows them.", supersedes="C1")
     rule(at=T3, item="revoke:C2", text=None)
@@ -241,8 +241,8 @@ def test_the_rulings_of_a_round_that_cant_be_read_are_left_out_and_the_round_nam
         rounds):
     rule(at=T1)
     rule(OTHER, at=T2)
-    with round_log(rounds, "b-round").open("ab") as file:
-        file.write(b"not an event\n")
+    with round_log(rounds, "b-round").open("ab") as fh:
+        fh.write(b"not an event\n")
 
     found = shown.unshown("proj-a", now=LATER)
 
@@ -720,7 +720,7 @@ def test_the_list_is_the_same_from_the_index_from_a_stale_one_and_from_none(roun
     # A ruling the index has not seen, appended as another machine's verb would.
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C2", "text": SAID, "record": "comms:13", "kind": "substance",
-                "stages": "all"}, actor="pilot", at=T4)
+                "stages": "all"}, by="pilot", at=T4)
     assert index.disagreements([home]) != []
     stale = shown.unshown("proj-a", now=LATER)
     assert [(row.holder, row.id) for row in stale.rows] == [
@@ -737,9 +737,9 @@ def test_the_list_is_the_same_from_the_index_from_a_stale_one_and_from_none(roun
 def test_a_round_that_has_ended_still_takes_the_mark_that_its_rulings_were_shown(
         rounds, capsys, how):
     rule(at=T1)
-    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
     rule(at=T2, text=None, item="park:Q1", record="comms:13")
-    log.append(round_log(rounds), f"round.{how}", {}, actor="planner")
+    log.append(round_log(rounds), f"round.{how}", {}, by="planner")
     # A correction recorded after the round ended is shown like any other ruling.
     rule(at=T3, text="Usage is shown there.", record="comms:14", supersedes="C1")
     capsys.readouterr()
@@ -760,9 +760,9 @@ def test_a_round_that_has_ended_still_takes_the_mark_that_its_rulings_were_shown
     (["ask", ROUND, "A new question?", "--from", "comms:40"], "a new question")])
 def test_a_round_that_has_ended_takes_no_other_mark_and_no_question(
         rounds, capsys, how, argv, what):
-    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
     rule(at=T1, text=None, item="park:Q1", record="comms:13")
-    log.append(round_log(rounds), f"round.{how}", {}, actor="planner")
+    log.append(round_log(rounds), f"round.{how}", {}, by="planner")
     before = logs(rounds)
 
     assert main(argv) == 3

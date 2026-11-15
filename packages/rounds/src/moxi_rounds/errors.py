@@ -18,7 +18,7 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
 - `NoFolder` (exit 3): a project's rounds folder can't be worked out. `problem` says why,
   and the fix names the setting that gives it one.
 - `SharedFolder` (exit 3), a `NoFolder`: the project's rounds folder is another
-  project's too. `other` is that project and `folder` the one folder both reach.
+  project's too. `other` is that project and `shared_dir` the one folder both reach.
 - `BadBlock` (exit 3): a file's data block can't be used. `file` is the file and
   `problems` every thing wrong with it, each a `Problem` with its line and its fix.
 """
@@ -192,20 +192,20 @@ class NoFolder(RoundsError):
 
 class SharedFolder(NoFolder):
     """The rounds folder of the project `project` is the rounds folder of the project
-    `other` too: both reach `folder`, once every link on the way is followed. A rounds
+    `other` too: both reach `shared_dir`, once every link on the way is followed. A rounds
     folder belongs to one project, since a log in it is written under its project's
     lock, and under two projects' locks two writers would not wait for each other."""
 
-    def __init__(self, project: str, other: str, folder: Path):
+    def __init__(self, project: str, other: str, shared_dir: Path):
         self.project = project
         self.other = other
-        self.folder = Path(folder)
-        self.problem = (f"it is {self.folder}, which is the rounds folder of the "
+        self.shared_dir = Path(shared_dir)
+        self.problem = (f"it is {self.shared_dir}, which is the rounds folder of the "
                         f"project {other!r} too")
         self.known = True
         RoundsError.__init__(
             self,
-            f"the rounds folder of the project {project!r} is {self.folder}, and that "
+            f"the rounds folder of the project {project!r} is {self.shared_dir}, and that "
             f"is the rounds folder of the project {other!r} too: a rounds folder "
             "belongs to one project, and neither is used while the two share one",
             f'give one of the two a folder of its own: set dir = "/an/absolute/folder" '

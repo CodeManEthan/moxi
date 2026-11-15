@@ -227,7 +227,7 @@ class FakeOpenCode:
                 if answer is not None:
                     return self.reply(handler, answer[0], answer[1])
                 self.summarize(sid)
-                return self.reply(handler, 200, True)
+                return self.reply(handler, 200, body=True)
         status, content_type, text = self.missing_route_answer
         return self.reply(handler, status, raw=text, content_type=content_type)
 
@@ -337,7 +337,7 @@ class FakeOpenCode:
         if self.auto:
             threading.Timer(self.finish_after, self.finish, args=(sid,)).start()
 
-    def finish(self, sid, finish="stop", error=None, idle=True):
+    def finish(self, sid, finish="stop", error=None, *, idle=True):
         """End the running turn: its assistant message completes (sent twice, as the
         real server does), then idle."""
         with self.lock:
@@ -401,10 +401,10 @@ def event(kind: str, **fields) -> None:
     value = os.environ.get("FAKE_OPENCODE_DIR")
     if not value:
         return
-    directory = Path(value)
-    directory.mkdir(parents=True, exist_ok=True)
-    with (directory / "events.jsonl").open("a") as f:
-        f.write(json.dumps({"event": kind, "pid": os.getpid(), "t": time.time(),
+    records_dir = Path(value)
+    records_dir.mkdir(parents=True, exist_ok=True)
+    with (records_dir / "events.jsonl").open("a") as fh:
+        fh.write(json.dumps({"event": kind, "pid": os.getpid(), "t": time.time(),
                             **fields}) + "\n")
 
 
@@ -438,9 +438,9 @@ def main(argv) -> int:
     return 2
 
 
-def install(directory: Path, name: str = "opencode") -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    script = directory / name
+def install(bin_dir: Path, name: str = "opencode") -> Path:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / name
     script.write_text(f"#!/bin/sh\nexec {sys.executable} {Path(__file__).resolve()} \"$@\"\n")
     script.chmod(0o755)
     return script
@@ -454,8 +454,8 @@ def control(url: str, op: str, **body) -> dict:
     return json.loads(urllib.request.urlopen(req, timeout=5).read() or b"{}")
 
 
-def events(directory: Path) -> list:
-    path = directory / "events.jsonl"
+def events(records_dir: Path) -> list:
+    path = records_dir / "events.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]

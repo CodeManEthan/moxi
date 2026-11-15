@@ -70,9 +70,9 @@ def shell(ui_shell, monkeypatch):
     clock record or claim file left by an earlier test. A claim file names its holder's
     claim socket, in that earlier test's tmp, and the daemon would try it."""
     roster_kit.point_at(ui_shell, monkeypatch)
-    directory = roster_kit.clock_dir(ui_shell)
-    if directory.is_dir():
-        for path in directory.iterdir():
+    clock_dir = roster_kit.clock_dir(ui_shell)
+    if clock_dir.is_dir():
+        for path in clock_dir.iterdir():
             path.unlink()
     for path in claimfile.claim_dir().glob(f"{claimfile.PREFIX}*{claimfile.SUFFIX}"):
         path.unlink()

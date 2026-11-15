@@ -43,13 +43,13 @@ class FakeWatch:
         self._closed.set()
 
 
-def facts(turn_open=False, number=4, draft=False):
+def facts(*, turn_open=False, number=4, draft=False):
     return SimpleNamespace(turn_open=turn_open, turn=None, turn_number=number, draft=draft,
                            stale=False)
 
 
 class FakeSession:
-    def __init__(self, exits=(Result("ran"),), facts_seq=None, agents_complete=True,
+    def __init__(self, exits=(Result("ran"),), facts_seq=None, *, agents_complete=True,
                  delivered="started"):
         self.session_id, self.endpoint_pid, self.pid = SID, os.getpid(), os.getppid()
         self.capabilities = frozenset({"exit"})
@@ -202,20 +202,20 @@ def launched_result(state="started", outcome="sent", reason=None):
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    store.insert(connection, request_id="r1", actor="ann", harness="claude", target="slot",
+    conn = store.connect(tmp_path / "launcher.db")
+    store.insert(conn, request_id="r1", by="ann", harness="claude", target="slot",
                  cwd="/work", values={"model": "opus", "director": ["boss"]},
                  argv=["claude"], env={}, posture="operator", session_id=SID, slot="3",
                  identity="planner")
-    store.set_facts(connection, "r1", pane_id="%9")
-    connection.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'", (me(),))
-    yield connection
-    connection.close()
+    store.set_facts(conn, "r1", pane_id="%9")
+    conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'", (me(),))
+    yield conn
+    conn.close()
 
 
 def arm(conn, mode="self", handoff="/work/h.md", turn_number=4):
     return store.insert_run(conn, kind="relaunch", mode=mode, request_id="r1",
-                            session_id=SID, actor="planner" if mode == "self" else "boss",
+                            session_id=SID, by="planner" if mode == "self" else "boss",
                             handoff_path=handoff if mode == "self" else None, slot="3",
                             pane_id="%9", turn_number=turn_number, job="slots:relaunch-x")
 
@@ -609,7 +609,7 @@ def failed_run(conn, mode="self"):
 
 def repair_run(conn, original):
     return store.insert_run(conn, kind="relaunch", mode="repair", request_id="r1",
-                            session_id=SID, actor="ann", slot="3", repair_of=original.run_id,
+                            session_id=SID, by="ann", slot="3", repair_of=original.run_id,
                             handoff_path=original.handoff_path, job="slots:repair-y")
 
 

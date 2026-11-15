@@ -524,7 +524,7 @@ def test_a_failing_check_of_a_real_run_shows_on_health_and_check_again_runs_the_
     expect(mine).to_contain_text(DETAIL)
     expect(mine).to_contain_text("fixture · check")
     expect(mine.locator("code")).to_have_text(FIX)
-    fixture_kit.fail_check(shell, on=False)
+    fixture_kit.fail_check(shell, enabled=False)
     health.get_by_role("button", name="Check again").click()
     # While the doctor runs the foot says so and offers no second run.
     expect(health.get_by_role("status")).to_have_text("Checking…")
@@ -597,16 +597,16 @@ def test_health_asks_again_when_the_document_is_shown_and_an_old_run_starts_a_ne
     # Hidden asks nothing; shown again asks, and the old run starts a new one.
     asked: list[str] = []
     page.on("request", lambda r: asked.append(r.url) if r.url.endswith("/api/checks") else None)
-    page.evaluate(_SHOW, True)
+    page.evaluate(_SHOW, arg=True)
     with page.expect_response(lambda r: r.url.endswith("/m/ui/api/checks")) as first:
-        page.evaluate(_SHOW, False)
+        page.evaluate(_SHOW, arg=False)
     assert len(asked) == 1 and first.value.json()["running"] is True
     expect(row.locator(".fact .heavy")).to_have_text(re.compile(r"^\d+ checks? failing$"),
                                                      timeout=DOCTOR_MS)
     # The run it kept is fresh now: shown again, Health asks and no run starts.
-    page.evaluate(_SHOW, True)
+    page.evaluate(_SHOW, arg=True)
     with page.expect_response(lambda r: r.url.endswith("/m/ui/api/checks")) as second:
-        page.evaluate(_SHOW, False)
+        page.evaluate(_SHOW, arg=False)
     answer = second.value.json()
     assert answer["running"] is False and answer["at"] > old
     status, kept = shell.session().get("/m/ui/api/checks")

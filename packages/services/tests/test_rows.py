@@ -59,7 +59,7 @@ def test_is_user_names_only_the_services_half():
     ("\\X\\y", "schtasks", False, "daemon"),
 ])
 def test_a_foreign_unit_takes_its_kind(ref, backend, timer, kind):
-    assert rows.check_ref(ref, backend, timer=timer) == kind
+    assert rows.check_ref(ref, backend, is_timer=timer) == kind
 
 
 @pytest.mark.parametrize("ref,backend", [
@@ -100,7 +100,7 @@ def test_a_systemd_unit_of_another_type_is_refused():
 
 def test_timer_on_a_systemd_service_is_a_usage_error():
     with pytest.raises(Usage):
-        rows.check_ref("web.service", "systemd", timer=True)
+        rows.check_ref("web.service", "systemd", is_timer=True)
 
 
 @pytest.mark.parametrize("ref", ["", " web.service", "a\nb", None])

@@ -1,6 +1,6 @@
 """Opening a round: its folder, and the first event of its log.
 
-`open_round("<project>/<slug>", description=..., actor=...)` makes the round's folder in
+`open_round("<project>/<slug>", description=..., by=...)` makes the round's folder in
 the project's rounds folder and appends `round.opened` through the write path. The event
 holds the description, the name of the round's flow and that flow's steps as the config
 has them at that moment, and the pointer to the operator's go when one is given.
@@ -51,7 +51,7 @@ class Opened:
     standing rulings of the project it starts from, by id."""
 
     name: str
-    folder: Path
+    round_dir: Path
     flow: str
     steps: tuple[dict, ...]
     event: dict
@@ -60,14 +60,14 @@ class Opened:
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
-def open_round(name: str, *, description: str, actor: str, flow: str | None = None,
+def open_round(name: str, *, description: str, by: str, flow: str | None = None,
                record: str | None = None, inherits: Iterable[str] | None = None,
                settings=None, wait_s: float = write.WAIT_S,
                at: str | None = None) -> Opened:
     """Open the round `name`, `<project>/<slug>`, and return it as opened.
 
     - `description`: what the round is for, in a line.
-    - `actor`: who opens it, the event's actor.
+    - `by`: who opens it, the event's actor.
     - `flow`: the flow's name; the project's `flow` setting when left out.
     - `record`: the pointer to where the operator gave the go, kept as given once its
       shape is one a pointer has.
@@ -92,9 +92,9 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
-    folder = home.round_folder(slug)
-    if folder.exists() and not folder.is_dir():
-        raise RoundsError(f"the round's folder can't be made: {folder} is a file",
+    round_dir = home.round_dir(slug)
+    if round_dir.exists() and not round_dir.is_dir():
+        raise RoundsError(f"the round's folder can't be made: {round_dir} is a file",
                           "move the file away, or open the round under another name")
     inherited = tuple(dict.fromkeys(inherits or ()))
     if inherits is not None and not inherited:
@@ -106,8 +106,8 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
     steps = known.get(flow)
 
     def not_yet_opened(view):
-        if log.exists(log.round_log(folder)):
-            return Unmet(f"the round {name} is already there ({folder} holds a log), "
+        if log.exists(log.round_log(round_dir)):
+            return Unmet(f"the round {name} is already there ({round_dir} holds a log), "
                          "and a round is opened once; a new round needs another name",
                          f"moxi rounds show {name}")
         return None
@@ -115,9 +115,9 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
     def not_another_tools(view):
         # The note is written here only beside a log, so one with no log is not ours,
         # and opening would overwrite it.
-        if log.exists(log.round_log(folder)) or not (folder / NOTE_FILE).exists():
+        if log.exists(log.round_log(round_dir)) or not (round_dir / NOTE_FILE).exists():
             return None
-        return Unmet(f"{folder} holds a {NOTE_FILE} and no log, so the round there "
+        return Unmet(f"{round_dir} holds a {NOTE_FILE} and no log, so the round there "
                      "belongs to another tool and is not opened here; pick another "
                      "slug for this round",
                      f"moxi rounds open {home.project}/SLUG --description TEXT")
@@ -131,11 +131,11 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
                          f"moxi rounds open {name} --flow NAME --description TEXT")
         return None
 
-    def make_folder(view):
+    def make_round_dir(view):
         try:
-            folder.mkdir(parents=True, exist_ok=True)
-        except OSError as error:
-            raise RoundsError(f"the round's folder {folder} can't be made: {error}",
+            round_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RoundsError(f"the round's folder {round_dir} can't be made: {exc}",
                               "give the project a rounds folder that can be written "
                               "to") from None
 
@@ -162,12 +162,12 @@ def open_round(name: str, *, description: str, actor: str, flow: str | None = No
             fields["record"] = record
         return write.Entry("round.opened", fields)
 
-    written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
+    written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
                            gates=[not_yet_opened, not_another_tools, flow_exists,
                                   go_is_a_pointer, inherits_what_stands],
-                           act=make_folder,
+                           act=make_round_dir,
                            event=opened, opens=True, wait_s=wait_s, at=at)
-    return Opened(name=name, folder=folder, flow=flow, steps=tuple(steps),
+    return Opened(name=name, round_dir=round_dir, flow=flow, steps=tuple(steps),
                   event=written.events[0], failed=written.failed, inherits=inherited,
                   left=dropping.left_behind(written.view.project_state, home,
                                             settings=settings))

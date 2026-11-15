@@ -28,20 +28,20 @@ def rounds(tmp_path, add_project, capsys):
     """The rounds folder of the project `proj-a`, with the round `a-round` opened in it
     and the stages B1 and B2 declared."""
     add_project("proj-a", notes_root=tmp_path / "notes")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
-    folder = tmp_path / "notes" / "rounds"
+    rounds_dir = tmp_path / "notes" / "rounds"
     for stage in ("B1", "B2"):
-        log.append(log.round_log(folder / "a-round"), "stage.declared",
+        log.append(log.round_log(rounds_dir / "a-round"), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     capsys.readouterr()
-    return folder
+    return rounds_dir
 
 
 def ask(*given, target=ROUND, blocks=None):
     """Ask a question of `target` with the options `given`, and return its id."""
-    return asking.ask(target, SAID, origin="comms:11", blocks=blocks, actor="scout",
+    return asking.ask(target, SAID, origin="comms:11", blocks=blocks, by="scout",
                       options=given).id
 
 
@@ -207,7 +207,7 @@ def test_options_are_added_to_a_projects_question(rounds, capsys):
 
 def test_options_are_added_to_a_parked_question(rounds):
     ask()
-    ruling.rule(ROUND, item="park:Q1", record="comms:12", actor="planner")
+    ruling.rule(ROUND, item="park:Q1", record="comms:12", by="planner")
 
     assert fill("--option", A, "--option", B) == 0
 
@@ -219,7 +219,7 @@ def test_options_are_added_to_a_parked_question(rounds):
 def test_a_ruled_or_withdrawn_question_takes_no_options(rounds, capsys, item, was):
     ask(A, B)
     ruling.rule(ROUND, item=item, text="Prose only.", record="comms:12",
-                actor="planner")
+                by="planner")
     before = logs(rounds)
 
     assert fill("--option", C) == 3
@@ -264,7 +264,7 @@ def test_a_question_the_log_does_not_hold_is_refused(rounds, capsys):
 
 def test_a_round_that_was_never_opened_is_refused(rounds):
     with pytest.raises(NoRound):
-        options.fill("proj-a/c-round", "Q1", options=[A, B], actor="helper")
+        options.fill("proj-a/c-round", "Q1", options=[A, B], by="helper")
 
 
 def test_an_id_with_nothing_to_change_or_with_what_asking_takes_is_a_usage_error(
@@ -279,7 +279,7 @@ def test_an_id_with_nothing_to_change_or_with_what_asking_takes_is_a_usage_error
         assert fill("--option", A, "--option", B, flag, value) == 2
         assert f"{flag} is given when a question is asked" in capsys.readouterr().err
     with pytest.raises(BadArgument):
-        options.fill(ROUND, "B1", options=[A, B], actor="helper")
+        options.fill(ROUND, "B1", options=[A, B], by="helper")
     assert logs(rounds) == before
 
 
@@ -469,7 +469,7 @@ def test_no_options_call_changes_a_questions_state_or_what_it_holds_up(
 
 def test_no_options_call_changes_a_parked_question_or_what_it_waits_for(rounds):
     ask(blocks="B1,B2")
-    ruling.rule(ROUND, item="park:Q1", until="B2", record="comms:12", actor="planner")
+    ruling.rule(ROUND, item="park:Q1", until="B2", record="comms:12", by="planner")
     before = held(rounds)
 
     assert fill("--option", A, "--option", B, "--option", C) == 0
@@ -488,7 +488,7 @@ def test_a_refused_options_call_writes_nothing(rounds):
 
     with pytest.raises(Refused):
         options.fill(ROUND, "Q1", options=["a=another line", C], retire=["b"],
-                     actor="helper")
+                     by="helper")
 
     assert logs(rounds) == before
 

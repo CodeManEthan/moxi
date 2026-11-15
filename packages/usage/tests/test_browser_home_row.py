@@ -41,7 +41,7 @@ t = T.ClaudeTranscript(Path(sessions.root("claude")), session_id=sys.argv[1],
                        start=T.today_at(60, oldest_s=60, now=time.time()))
 for m in range(3):
     t.user("Fix the failing test.")
-    t.assistant("Done.", usage=T.usage(input=200, output=1000),
+    t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000),
                 request_id=f"req_c{m}", model="claude-sonnet-4-5")
 t.write()
 """

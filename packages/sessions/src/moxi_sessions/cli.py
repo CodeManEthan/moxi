@@ -212,7 +212,7 @@ def _list(args, prog: str) -> int:
     try:
         answer = lists.newest_sessions(recent_s=settings.recent_s(), limit=args.limit,
                                        harness=args.harness, since=since,
-                                       folder=args.folder)
+                                       work_dir=args.folder)
     except ValueError as exc:
         print(f"{prog} list: {exc}", file=sys.stderr)
         return 2
@@ -221,7 +221,7 @@ def _list(args, prog: str) -> int:
     if args.text and redact is None:
         print(f"{prog} list: not redacted: {redactor.reason}; install the secrets module "
               "to redact what this prints", file=sys.stderr)
-    rows = [_list_row(row, redact, args.text) for row in answer.pop("rows")]
+    rows = [_list_row(row, redact, text=args.text) for row in answer.pop("rows")]
     if args.json:
         print(json.dumps(document(**answer, limit=args.limit, text=args.text,
                                   redacted=redact is not None, rows=rows), indent=2))
@@ -248,7 +248,7 @@ def _list(args, prog: str) -> int:
     return 0
 
 
-def _list_row(row: dict, redact, text: bool) -> dict:
+def _list_row(row: dict, redact, *, text: bool) -> dict:
     """A list's row as the verb prints it: the name redacted; the newest thing said and
     the prompt redacted and with their text only when `text` is asked."""
     out = dict(row)

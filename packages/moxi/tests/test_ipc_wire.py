@@ -23,8 +23,8 @@ def frame(line: bytes) -> dict:
     return json.loads(line)
 
 
-def req(id, method, params=None, **extra) -> bytes:
-    obj = {"jsonrpc": "2.0", "id": id, "method": method, **extra}
+def req(request_id, method, params=None, **extra) -> bytes:
+    obj = {"jsonrpc": "2.0", "id": request_id, "method": method, **extra}
     if params is not None:
         obj["params"] = params
     return json.dumps(obj).encode()
@@ -40,8 +40,8 @@ def note(method, params=None) -> bytes:
 HELLO = ipc.Hello((1, 3), {"watch", "steer"})
 
 
-def hello_line(id=0, versions=(1, 3), capabilities=("watch",)) -> bytes:
-    return req(id, "rpc.hello", {"versions": list(versions),
+def hello_line(request_id=0, versions=(1, 3), capabilities=("watch",)) -> bytes:
+    return req(request_id, "rpc.hello", {"versions": list(versions),
                                  "capabilities": list(capabilities)})
 
 
@@ -73,7 +73,7 @@ def test_rpc_error_carries_code_message_and_data():
     assert exc.error() == {"code": 1001, "message": "no such session", "data": {"session": "x"}}
     assert ipc.RpcError(1002, "plain").error() == {"code": 1002, "message": "plain"}
     with pytest.raises(TypeError):
-        ipc.RpcError(True, "a bool is no code")
+        ipc.RpcError(code=True, message="a bool is no code")
 
 
 def test_not_rpc_keeps_the_first_200_bytes():
@@ -221,10 +221,14 @@ def test_an_old_clients_first_frame_is_marked_for_the_legacy_hook():
 
 def test_a_request_and_a_notification_reach_the_handler():
     inbound = wire.Inbound()
-    assert inbound.receive(req(7, "go", {"a": 1})) == wire.Message(7, "go", {"a": 1}, False)
-    assert inbound.receive(req("k", "go", [1])) == wire.Message("k", "go", [1], False)
-    assert inbound.receive(note("tick")) == wire.Message(None, "tick", None, True)
-    assert inbound.receive(req(None, "go")) == wire.Message(None, "go", None, False)
+    assert inbound.receive(req(7, "go", {"a": 1})) == wire.Message(
+        7, "go", {"a": 1}, False)  # noqa: FBT003 -- wire record fields are positional
+    assert inbound.receive(req("k", "go", [1])) == wire.Message(
+        "k", "go", [1], False)  # noqa: FBT003 -- wire record fields are positional
+    assert inbound.receive(note("tick")) == wire.Message(
+        None, "tick", None, True)  # noqa: FBT003 -- wire record fields are positional
+    assert inbound.receive(req(None, "go")) == wire.Message(
+        None, "go", None, False)  # noqa: FBT003 -- wire record fields are positional
 
 
 def test_a_reserved_method_never_reaches_the_handler():

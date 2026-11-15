@@ -83,8 +83,8 @@ class Noting(Mapping):
     On Windows a name is looked up without case, as Windows looks it up.
     """
 
-    def __init__(self, data: Mapping[str, str], *, windows: bool | None = None):
-        self.windows = _windows() if windows is None else windows
+    def __init__(self, data: Mapping[str, str], *, is_windows: bool | None = None):
+        self.windows = _windows() if is_windows is None else is_windows
         self.data = {self._key(k): v for k, v in dict(data).items()}
         self.read: dict[str, None] = {}
 
@@ -129,23 +129,27 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
     anchor = terminal.anchor_set(here_env, fold=windows)
     try:
         record = paths.terminal_record()
-    except paths.NoAnchor as no:
-        return _with_anchor(no_place(no.cause, no.step, page=for_page), anchor, for_page)
+    except paths.NoAnchor as anchor_exc:
+        return _with_anchor(
+            no_place(anchor_exc.cause, anchor_exc.step, for_page=for_page),
+            anchor=anchor,
+            for_page=for_page,
+        )
     outcome = terminal.read(record)
     if isinstance(outcome, terminal.NoRecord):
-        return _with_anchor(no_record(str(record), page=for_page), anchor, for_page)
+        return _with_anchor(no_record(str(record), for_page=for_page), anchor=anchor, for_page=for_page)
     if isinstance(outcome, terminal.Unreadable):
-        return _with_anchor(unreadable(str(record), _error(outcome.error), page=for_page),
-                            anchor, for_page)
+        return _with_anchor(unreadable(str(record), _error(outcome.error), for_page=for_page),
+                            anchor=anchor, for_page=for_page)
     if isinstance(outcome, terminal.NewerFormat):
         return _with_anchor(newer(str(record), outcome.format, outcome.moxi,
-                                  outcome.reader, page=for_page), anchor, for_page)
-    there_env = Noting(outcome.env, windows=windows)
-    here = Noting(here_env, windows=windows)
+                                  outcome.reader, for_page=for_page), anchor=anchor, for_page=for_page)
+    there_env = Noting(outcome.env, is_windows=windows)
+    here = Noting(here_env, is_windows=windows)
     then = _resolve(places, there_env)
     now = _resolve(places, here)
     for env in (there_env, here):
-        _refuse_outside(env, windows)
+        _refuse_outside(env, is_windows=windows)
     problems: list[str] = []
     givers: set[str] = set()
     for label in dict.fromkeys([*then, *now]):
@@ -158,14 +162,14 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
             continue
         relative = False
         for side, path, env in ((True, mine, here), (False, there, there_env)):
-            if not _absolute(path, windows):
+            if not _absolute(path, is_windows=windows):
                 relative = True
-                name = _giver(path, env, windows)
+                name = _giver(path, env, is_windows=windows)
                 if name is not None:
                     givers.add(name)
-                problems.append(not_full(label, side, name,
-                                         None if name is None else env.value(name)))
-        if not relative and _norm(mine, windows) != _norm(there, windows):
+                problems.append(not_full(label, here=side, name=name,
+                                         value=None if name is None else env.value(name)))
+        if not relative and _norm(mine, is_windows=windows) != _norm(there, is_windows=windows):
             problems.append(differs(label, mine, there))
     read = list(dict.fromkeys([*there_env.read, *here.read]))
     missing = []
@@ -175,59 +179,59 @@ def check(places: Places, *, programs: Mapping[str, str] | None = None,
             problems.append(program_missing(name, why))
     if not problems:
         return None
-    sets, takes = _fix(read, there_env, here, givers, missing, windows)
-    return _with_anchor(fix(problems, sets, takes, page=for_page), anchor, for_page)
+    sets, takes = _fix(read, there_env, here, givers, missing, is_windows=windows)
+    return _with_anchor(fix(problems, sets, takes, for_page=for_page), anchor=anchor, for_page=for_page)
 
 
 # -- the comparison --------------------------------------------------------------------------
 
-def _resolve(places: Places, env: Noting) -> dict[str, str]:
-    found = places(env)
+def _resolve(places: Places, noting: Noting) -> dict[str, str]:
+    found = places(noting)
     return {str(label): os.fspath(path) for label, path in found.items()}
 
 
-def _refuse_outside(env: Noting, windows: bool) -> None:
+def _refuse_outside(noting: Noting, *, is_windows: bool) -> None:
     from moxi import terminal
 
-    outside = [name for name in env.read if not terminal.in_set(name, fold=windows)]
+    outside = [name for name in noting.read if not terminal.in_set(name, fold=is_windows)]
     if outside:
         raise ValueError("a page's places read " + ", ".join(outside) + ", which the "
                          "core doesn't record from a terminal; a place resolver may read "
                          "only the variables that place folders or find programs")
 
 
-def _absolute(path: str, windows: bool) -> bool:
+def _absolute(path: str, *, is_windows: bool) -> bool:
     import ntpath
     import posixpath
 
-    return (ntpath if windows else posixpath).isabs(path)
+    return (ntpath if is_windows else posixpath).isabs(path)
 
 
-def _norm(path: str, windows: bool) -> str:
+def _norm(path: str, *, is_windows: bool) -> str:
     import ntpath
     import posixpath
 
-    flavour = ntpath if windows else posixpath
+    flavour = ntpath if is_windows else posixpath
     return flavour.normcase(flavour.abspath(path))
 
 
-def _giver(path: str, env: Noting, windows: bool) -> str | None:
-    """The variable read under `env` whose value gave the relative `path`: the first read
+def _giver(path: str, noting: Noting, *, is_windows: bool) -> str | None:
+    """The variable read under `noting` whose value gave the relative `path`: the first read
     whose value isn't a full path and starts `path`, else the first read whose value isn't
     a full path, else None."""
-    loose = [name for name in env.read
-             if (value := env.value(name)) and not _absolute(value, windows)
+    loose = [name for name in noting.read
+             if (value := noting.value(name)) and not _absolute(value, is_windows=is_windows)
              and name not in ("PATH", "PATHEXT")]
     parts = PurePath(path).parts
     for name in loose:
-        given = PurePath(env.value(name)).parts
+        given = PurePath(noting.value(name)).parts
         if parts[:len(given)] == given:
             return name
     return loose[0] if loose else None
 
 
 def _fix(read: list[str], terminal: Noting, here: Noting, givers: set[str],
-         missing: list[str], windows: bool) -> tuple[list[str], list[str]]:
+         missing: list[str], *, is_windows: bool) -> tuple[list[str], list[str]]:
     """The fix's words: each name read whose value differs, set to the terminal's value or
     taken out; a name that gave a relative path, set to a full path when the terminal's
     own value is relative (even when the two agree); `PATH` with each missing program's
@@ -237,7 +241,7 @@ def _fix(read: list[str], terminal: Noting, here: Noting, givers: set[str],
         if name in ("PATH", "PATHEXT") and missing:
             continue
         there, mine = terminal.value(name), here.value(name)
-        if name in givers and there and not _absolute(there, windows):
+        if name in givers and there and not _absolute(there, is_windows=is_windows):
             sets.append(to_full_path(name))
         elif there == mine:
             continue
@@ -259,8 +263,8 @@ def _error(error: OSError) -> str:
     return error.strerror or str(error) or type(error).__name__
 
 
-def _with_anchor(line: str, anchor: bool, page: bool) -> str:
-    return f"{line} {anchor_clause(page=page)}" if anchor else line
+def _with_anchor(line: str, *, anchor: bool, for_page: bool) -> str:
+    return f"{line} {anchor_clause(for_page=for_page)}" if anchor else line
 
 
 # -- the lines -------------------------------------------------------------------------------
@@ -281,7 +285,7 @@ def placed_only_there(label: str, there: str) -> str:
     return f"{label} isn't placed here, but the last run in a terminal used {there}"
 
 
-def not_full(label: str, here: bool, name: str | None, value: str | None) -> str:
+def not_full(label: str, *, here: bool, name: str | None, value: str | None) -> str:
     side = "here" if here else "in the last run in a terminal"
     text = f"{label} isn't a full path {side}"
     if name is not None:
@@ -310,14 +314,14 @@ def path_with(program: str) -> str:
     return f"PATH, with {program}'s folder on it,"
 
 
-def fix(problems: Iterable[str], sets: list[str], takes: list[str], *, page: bool,
+def fix(problems: Iterable[str], sets: list[str], takes: list[str], *, for_page: bool,
         platform: str | None = None) -> str:
     """The difference line: `problems` joined, then the fix that sets every name in `sets`
     (already worded) and takes every name in `takes` out of the browser shell's
     environment. With neither, no variable places it differently."""
     said = "; ".join(problems) + ". "
     if not sets and not takes:
-        if page:
+        if for_page:
             return said + ("No variable places it differently here, so run the command "
                            "in a terminal.")
         return said + ("No variable places it differently; the browser page refuses to "
@@ -325,7 +329,7 @@ def fix(problems: Iterable[str], sets: list[str], takes: list[str], *, page: boo
                        "terminal.")
     place, step = where(platform)
     action = _action(sets, takes, place)
-    if page:
+    if for_page:
         return said + f"{_capital(action)}, then {step}; or run the command in a terminal."
     return (said + "The browser page refuses to write while its shell differs from the "
             f"last run in a terminal; to give the browser shell the terminal's values at "
@@ -343,10 +347,10 @@ def _action(sets: list[str], takes: list[str], place: str) -> str:
     return ", and ".join(parts)
 
 
-def no_record(record: str, *, page: bool) -> str:
+def no_record(record: str, *, for_page: bool) -> str:
     """No record at `record`: the step that makes one, and where to look when it doesn't."""
     record_command, doctor_command = _commands()
-    if page:
+    if for_page:
         return ("Moxi has no record of the environment your terminal uses (it is kept at "
                 f"{record}), so this page can't tell whether it would write where your "
                 f"terminal does. Type {record_command} in a terminal of your own, not one "
@@ -361,15 +365,15 @@ def no_record(record: str, *, page: bool) -> str:
             "it.")
 
 
-def no_place(cause: str, step: str, *, page: bool) -> str:
+def no_place(cause: str, step: str, *, for_page: bool) -> str:
     """The account's folder can't be placed (`moxi.paths.NoAnchor`'s `cause` and `step`)."""
-    who = "this page" if page else "the browser page"
+    who = "this page" if for_page else "the browser page"
     return (f"Moxi can't find where it keeps its record of your terminal: {cause}, so "
             f"{who} refuses to write; {step}, or run the command in a terminal.")
 
 
-def unreadable(record: str, error: str, *, page: bool) -> str:
-    who = "this page" if page else "the browser page"
+def unreadable(record: str, error: str, *, for_page: bool) -> str:
+    who = "this page" if for_page else "the browser page"
     record_command, _ = _commands()
     return (f"Moxi's record of your terminal's environment at {record} can't be read "
             f"({error}), so {who} refuses to write; fix its permissions or remove it, "
@@ -377,8 +381,8 @@ def unreadable(record: str, error: str, *, page: bool) -> str:
 
 
 def newer(record: str, found_format: object, writer: object, mine: str, *,
-          page: bool) -> str:
-    who = "this page" if page else "the browser page"
+          for_page: bool) -> str:
+    who = "this page" if for_page else "the browser page"
     by = "a newer moxi" if writer is None else f"moxi {writer}"
     return (f"Moxi's record of your terminal's environment at {record} was written by "
             f"{by} in format {found_format}, newer than the moxi {mine} {who} "
@@ -387,11 +391,11 @@ def newer(record: str, found_format: object, writer: object, mine: str, *,
             "the command in a terminal.")
 
 
-def anchor_clause(*, page: bool) -> str:
+def anchor_clause(*, for_page: bool) -> str:
     """The clause a line ends with when its own environment sets `MOXI_ANCHOR_HOME`."""
     from moxi import paths
 
-    whose = "This page's environment" if page else "This environment"
+    whose = "This page's environment" if for_page else "This environment"
     return (f"{whose} sets {paths.ANCHOR_HOME_ENV}, which only test kits set; take it out of "
             "the browser shell's environment.")
 

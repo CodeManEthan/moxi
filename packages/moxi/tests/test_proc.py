@@ -609,7 +609,7 @@ def test_on_windows_every_spelling_of_the_variable_is_taken_out(monkeypatch):
     monkeypatch.setattr(proc, "_WINDOWS", True)
     given = {"PATH": "p", "moxi_lifeline_fd": "7", "Moxi_Lifeline_Fd": "8",
              proc.LIFELINE_ENV: "9"}
-    mark = {_mark.NAME: _mark.program}
+    mark = {_mark.STARTED_BY_ENV: _mark.program}
     assert proc._lifeline_env(given, None) == {"PATH": "p", **mark}
     assert proc._lifeline_env(given, "0") == {"PATH": "p", proc.LIFELINE_ENV: "0", **mark}
     assert given["moxi_lifeline_fd"] == "7"  # the caller's mapping is left alone
@@ -683,7 +683,7 @@ def test_a_detached_output_file_is_created_0600(tmp_path):
 
 
 @POSIX
-def test_each_directory_a_detached_output_file_needs_is_made_0700(tmp_path):
+def test_each_dir_a_detached_output_file_needs_is_made_0700(tmp_path):
     log = tmp_path / "a" / "b" / "child.log"
     before = stat.S_IMODE(tmp_path.stat().st_mode)
     old = os.umask(0)
@@ -736,8 +736,8 @@ def _ended_unreaped(pid: int) -> bool:
         except psutil.Error:
             return False
     try:
-        with open(f"/proc/{pid}/stat") as f:
-            return f.read().rpartition(")")[2].split()[0] == "Z"
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().rpartition(")")[2].split()[0] == "Z"
     except OSError:
         return False
 
@@ -967,7 +967,7 @@ def _end(child: subprocess.Popen) -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no environment reader")
-def test_environ_reads_a_child_as_it_was_started():
+def test_env_reads_a_child_as_it_was_started():
     env = {"PATH": os.environ.get("PATH", ""), "MOXI_TEST_A": "1",
            "MOXI_TEST_B": "x=y", "MOXI_TEST_C": "", "MOXI_TEST_D": "caf\u00e9"}
     if sys.platform == "darwin":
@@ -983,19 +983,19 @@ def test_environ_reads_a_child_as_it_was_started():
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no environment reader")
-def test_environ_of_this_process_reads_what_it_started_with():
+def test_env_of_this_process_reads_what_it_started_with():
     read = proc.process_env(os.getpid())
     assert read is not None and read.get("PATH") == os.environ.get("PATH")
 
 
-def test_environ_of_a_gone_process_is_none():
+def test_env_of_a_gone_process_is_none():
     child = subprocess.Popen([PY, "-c", "pass"])
     child.wait()
     assert proc.process_env(child.pid) is None
 
 
 @LINUX
-def test_environ_of_a_zombie_is_none():
+def test_env_of_a_zombie_is_none():
     # This kernel may refuse the read or return nothing; either way the answer is None.
     child = subprocess.Popen([PY, "-c", "pass"])
     try:
@@ -1009,12 +1009,12 @@ def test_environ_of_a_zombie_is_none():
 
 
 def _state(pid: int) -> str:
-    with open(f"/proc/{pid}/stat") as f:
-        return f.read().rpartition(")")[2].split()[0]
+    with open(f"/proc/{pid}/stat") as fh:
+        return fh.read().rpartition(")")[2].split()[0]
 
 
 @LINUX
-def test_the_linux_reader_reads_an_empty_environment_of_a_running_process_as_empty():
+def test_the_linux_reader_reads_an_empty_env_of_a_running_process_as_empty():
     child = _child_with({})
     try:
         assert proc.process_env(child.pid) == {}
@@ -1023,12 +1023,12 @@ def test_the_linux_reader_reads_an_empty_environment_of_a_running_process_as_emp
 
 
 @pytest.mark.parametrize("pid", [0, -1, True])
-def test_environ_of_no_pid_is_none(pid):
+def test_env_of_no_pid_is_none(pid):
     assert proc.process_env(pid) is None
 
 
 @LINUX
-def test_environ_of_another_users_process_is_none():
+def test_env_of_another_users_process_is_none():
     if os.geteuid() == 0:
         pytest.skip("root reads every process")
     if not os.path.exists("/proc/1/environ"):
@@ -1041,9 +1041,9 @@ def test_the_linux_reader_splits_entries_and_skips_what_is_not_one(tmp_path):
     fake = tmp_path / "12"
     fake.mkdir()
     (fake / "environ").write_bytes(b"A=1\0B=x=y\0junk\0C=\0=nokey\0D=\xff\0")
-    assert proc._linux_environ(12, str(tmp_path)) == {
+    assert proc._linux_env(12, str(tmp_path)) == {
         "A": "1", "B": "x=y", "C": "", "D": "\ufffd"}
-    assert proc._linux_environ(13, str(tmp_path)) is None
+    assert proc._linux_env(13, str(tmp_path)) is None
 
 
 @LINUX
@@ -1053,14 +1053,14 @@ def test_the_linux_reader_splits_entries_and_skips_what_is_not_one(tmp_path):
     (b"12 (a) Z) S 1 12", {}),              # asleep, its name holding ") Z"
     (None, None),                           # gone before its state was read
 ])
-def test_the_linux_reader_reads_an_empty_environment_by_the_process_state(tmp_path, stat,
+def test_the_linux_reader_reads_an_empty_env_by_the_process_state(tmp_path, stat,
                                                                           read):
     fake = tmp_path / "12"
     fake.mkdir()
     (fake / "environ").write_bytes(b"")
     if stat is not None:
         (fake / "stat").write_bytes(stat)
-    assert proc._linux_environ(12, str(tmp_path)) == read
+    assert proc._linux_env(12, str(tmp_path)) == read
 
 
 def _procargs(argc: int, path: bytes, argv: list[bytes], env: list[bytes],
@@ -1075,14 +1075,14 @@ def _procargs(argc: int, path: bytes, argv: list[bytes], env: list[bytes],
     return out
 
 
-def test_a_procargs2_answer_gives_the_environment_and_not_the_system_strings():
+def test_a_procargs2_answer_gives_the_env_and_not_the_system_strings():
     raw = _procargs(2, b"/usr/bin/python3", [b"python3", b"-c"],
                     [b"A=1", b"B=x=y", b"junk", b"C="],
                     [b"executable_path=/usr/bin/python3", b"ptr_munge="])
     assert proc._procargs2(raw) == {"A": "1", "B": "x=y", "C": ""}
 
 
-def test_a_procargs2_answer_with_no_environment_is_empty():
+def test_a_procargs2_answer_with_no_env_is_empty():
     assert proc._procargs2(_procargs(1, b"/bin/x", [b"x"], [], [b"apple=1"])) == {}
     raw = 1 .to_bytes(4, sys.byteorder) + b"/bin/x\0\0x\0"
     assert proc._procargs2(raw) == {}
@@ -1110,20 +1110,20 @@ def test_a_procargs2_answer_cut_short_is_none():
 
 
 @MACOS
-def test_environ_on_macos_reads_a_same_user_process_through_the_kernel():
+def test_env_on_macos_reads_a_same_user_process_through_the_kernel():
     child = _child_with({"PATH": "/usr/bin:/bin", "MOXI_TEST_MAC": "here"})
     try:
-        read = proc._mac_environ(child.pid)
+        read = proc._mac_env(child.pid)
     finally:
         _end(child)
     assert read is not None and read["MOXI_TEST_MAC"] == "here"
 
 
 @MACOS
-def test_environ_on_macos_reads_a_process_whose_first_argument_is_empty():
+def test_env_on_macos_reads_a_process_whose_first_argument_is_empty():
     child = _child_with({"PATH": "/usr/bin:/bin", "MOXI_TEST_MAC": "here"}, argv0="")
     try:
-        read = proc._mac_environ(child.pid)
+        read = proc._mac_env(child.pid)
     finally:
         _end(child)
     # Read one argument short, PATH (the first entry) would be taken for an argument.
@@ -1133,14 +1133,14 @@ def test_environ_on_macos_reads_a_process_whose_first_argument_is_empty():
 
 
 @MACOS
-def test_environ_on_macos_of_another_users_process_is_none():
+def test_env_on_macos_of_another_users_process_is_none():
     if os.geteuid() == 0:
         pytest.skip("root reads every process")
     assert proc.process_env(1) is None  # launchd, root's
 
 
 @WINDOWS
-def test_environ_on_windows_is_none():
+def test_env_on_windows_is_none():
     assert proc.process_env(os.getpid()) is None
 
 
@@ -1149,7 +1149,7 @@ def test_the_windows_reader_reads_a_child_as_it_was_started():
     env = child_env(MOXI_TEST_W="here")
     child = _child_with(env)
     try:
-        read = proc._environ(child.pid)
+        read = proc._env(child.pid)
         line = proc.cmdline(child.pid)
     finally:
         _end(child)
@@ -1160,12 +1160,12 @@ def test_the_windows_reader_reads_a_child_as_it_was_started():
 # -- the start mark ------------------------------------------------------------------------
 
 def test_a_child_of_a_process_that_started_without_the_mark_notes_it_absent():
-    env = {k: v for k, v in os.environ.items() if k.upper() != _mark.NAME}
+    env = {k: v for k, v in os.environ.items() if k.upper() != _mark.STARTED_BY_ENV}
     code = ("import json, os, moxi._mark as m; "
-            "print(json.dumps([m.started_by, os.environ[m.NAME], m.program]))")
+            "print(json.dumps([m.started_by, os.environ[m.STARTED_BY_ENV], m.program]))")
     # The mark proc.run hands on: one already in this environment, else this program's
     # name (`pytest` in a serial run, `python` in an xdist worker).
-    ours = _mark.marked()[_mark.NAME]
+    ours = _mark.marked()[_mark.STARTED_BY_ENV]
     done = proc.run([PY, "-c", code], timeout_s=30, env=None, capture=True)
     assert done.returncode == 0
     # proc.run marks a child it starts, so this child started with the mark, and keeps
@@ -1182,9 +1182,9 @@ def test_a_child_of_a_process_that_started_without_the_mark_notes_it_absent():
 
 @pytest.mark.parametrize("start", ["run", "spawn", "detached"])
 def test_run_and_spawn_add_the_mark_to_an_env_they_are_given(tmp_path, start):
-    code = "import os; print(os.environ.get(%r))" % _mark.NAME
+    code = "import os; print(os.environ.get(%r))" % _mark.STARTED_BY_ENV
     env = child_env()
-    assert _mark.NAME not in env
+    assert _mark.STARTED_BY_ENV not in env
     if start == "run":
         out = proc.run([PY, "-c", code], timeout_s=30, env=env).stdout.decode()
     elif start == "spawn":
@@ -1202,16 +1202,16 @@ def test_run_and_spawn_add_the_mark_to_an_env_they_are_given(tmp_path, start):
 
 
 def test_a_mark_already_in_the_env_is_kept():
-    env = child_env(**{_mark.NAME: "by hand"})
-    assert proc._lifeline_env(env, None)[_mark.NAME] == "by hand"
-    assert _mark.marked(env)[_mark.NAME] == "by hand"
-    assert env[_mark.NAME] == "by hand" and _mark.NAME in _mark.marked({})
+    env = child_env(**{_mark.STARTED_BY_ENV: "by hand"})
+    assert proc._lifeline_env(env, None)[_mark.STARTED_BY_ENV] == "by hand"
+    assert _mark.marked(env)[_mark.STARTED_BY_ENV] == "by hand"
+    assert env[_mark.STARTED_BY_ENV] == "by hand" and _mark.STARTED_BY_ENV in _mark.marked({})
 
 
 def test_on_windows_any_spelling_of_the_mark_counts(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     assert _mark.marked({"moxi_started_by": "x"}) == {"moxi_started_by": "x"}
-    assert _mark.marked({}) == {_mark.NAME: _mark.program}
+    assert _mark.marked({}) == {_mark.STARTED_BY_ENV: _mark.program}
 
 
 @pytest.mark.parametrize("argv, orig, name", [
@@ -1293,7 +1293,7 @@ def test_the_linux_readers_raise_a_refusal_as_a_permission_error(tmp_path, monke
 
     monkeypatch.setattr("builtins.open", refuse)
     with pytest.raises(PermissionError):
-        proc._linux_read_environ(12, str(tmp_path))
+        proc._linux_read_env(12, str(tmp_path))
     with pytest.raises(PermissionError):
         proc._linux_cmdline(12, str(tmp_path))
 
@@ -1317,12 +1317,12 @@ def test_the_psutil_reader_names_each_failure(monkeypatch, error, raised):
         def __init__(self, pid):
             self.pid = pid
 
-        def environ(self):
+        def env(self):
             raise getattr(psutil, error)(self.pid) if error != "Error" else psutil.Error()
 
     monkeypatch.setattr(psutil, "Process", Refusing)
     with pytest.raises(raised) as caught:
-        proc._psutil_read(12, "environ")
+        proc._psutil_read(12, "env")
     if raised is OSError:
         assert type(caught.value) is OSError
 

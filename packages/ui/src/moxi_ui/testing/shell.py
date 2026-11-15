@@ -50,6 +50,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from moxi.paths import ANCHOR_HOME_ENV, HOME_ENV
+
 #: Seconds a test shell has to print its ready line.
 START_TIMEOUT = 30.0
 #: Seconds a stopping test shell has before it is killed.
@@ -60,13 +62,13 @@ STDERR_LINES = 200
 #: The variables passed on from this process, when set. `MOXI_ANCHOR_HOME` is the test
 #: kit's stand-in for the account's folder, so the shell reads the test's record.
 _KEPT = ("PATH", "LANG", "LANGUAGE", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
-         "MOXI_ANCHOR_HOME")
+         ANCHOR_HOME_ENV)
 #: The variables that keep a test shell under its home; a test's `env` can't set them.
 _OWNED = frozenset({"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
-                    "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "MOXI_HOME", "TMPDIR", "TEMP", "TMP",
+                    "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", HOME_ENV, "TMPDIR", "TEMP", "TMP",
                     "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PYTHONPATH",
                     "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA",
-                    "PYTEST_CURRENT_TEST", "MOXI_ANCHOR_HOME"})
+                    "PYTEST_CURRENT_TEST", ANCHOR_HOME_ENV})
 #: A Moxi locator variable: `MOXI_HOME`, `MOXI_<M>_HOME`, `MOXI_<M>_<KIND>_HOME` or
 #: `MOXI_<M>_RUNTIME_DIR`. Gateway mode sets none.
 _LOCATOR = re.compile(r"MOXI_(?:HOME|[A-Z0-9_]+_(?:HOME|RUNTIME_DIR))")
@@ -112,7 +114,7 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
         env[key] = str(home / rel)
     env["XDG_RUNTIME_DIR"] = str(home / "run")
     if not gateway:
-        env["MOXI_HOME"] = str(home / "moxi")
+        env[HOME_ENV] = str(home / "moxi")
     for key in ("TMPDIR", "TEMP", "TMP"):
         env[key] = str(home / "tmp")
     if sys.platform == "win32":
@@ -122,8 +124,8 @@ def shell_env(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (),
         if gateway:
             env["WIN_PD_OVERRIDE_APPDATA"] = env["APPDATA"]
             env["WIN_PD_OVERRIDE_LOCAL_APPDATA"] = env["LOCALAPPDATA"]
-    if not env.get("MOXI_ANCHOR_HOME"):  # no kit's fence: the shell's own home stands in
-        env["MOXI_ANCHOR_HOME"] = env.get("LOCALAPPDATA") or str(home)
+    if not env.get(ANCHOR_HOME_ENV):  # no kit's fence: the shell's own home stands in
+        env[ANCHOR_HOME_ENV] = env.get("LOCALAPPDATA") or str(home)
     if site:
         env["PYTHONPATH"] = os.pathsep.join(str(Path(path)) for path in site)
     env.update(extra)

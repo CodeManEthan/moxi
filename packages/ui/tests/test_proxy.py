@@ -595,7 +595,7 @@ def test_an_answer_that_breaks_off_cuts_the_browsers_connection():
 
 def test_a_failed_start_is_a_502_naming_the_module_its_exit_and_log():
     async def body():
-        failure = StartFailed("pxfake", "the page server exited 3 at start", exit=3, log=LOG)
+        failure = StartFailed("pxfake", "the page server exited 3 at start", exit_code=3, log=LOG)
         got = await Browser(fake_proxy(FakeStarters(fail=failure)), fake_scope(
             "GET", "/m/pxfake/api/read")).start().answer()
         assert got.status == 502
@@ -624,7 +624,7 @@ def test_the_client_alone_gives_a_stream_that_a_drain_ends():
             starters = FakeStarters(up)
             client = Client(starters)
             response = await client.request("pxfake", "GET", "/api/events?topics=tick",
-                                            stream=True)
+                                            streaming=True)
             async with response:
                 chunks = response.chunks()
                 assert b"tick" in await anext(chunks)
@@ -635,8 +635,8 @@ def test_the_client_alone_gives_a_stream_that_a_drain_ends():
             assert starters.current.streams == 0
             release.set()
             with pytest.raises(UpstreamError) as failed:
-                await Client(FakeStarters(fail=StartFailed("pxfake", "x", exit=1, log=LOG))
-                             ).request("pxfake", "GET", "/api/events", stream=True)
+                await Client(FakeStarters(fail=StartFailed("pxfake", "x", exit_code=1, log=LOG))
+                             ).request("pxfake", "GET", "/api/events", streaming=True)
             assert failed.value.status == 502
 
     run(body)
@@ -655,7 +655,7 @@ def test_a_stream_cancelled_while_its_connection_is_proved_is_not_counted():
 
             server.connect = slow
             request = asyncio.ensure_future(Client(starters).request(
-                "pxfake", "GET", "/api/events?topics=tick", stream=True))
+                "pxfake", "GET", "/api/events?topics=tick", streaming=True))
             await until(lambda: server.streams == 1, what="the stream's count")
             request.cancel()
             await asyncio.gather(request, return_exceptions=True)

@@ -71,33 +71,33 @@ class FakeUnits:
                 out.append(Applied(change, change.cause == "editable",
                                    (f"{change.unit}: {change.reason}",)))
             elif change.action in ("skip", "keep"):
-                out.append(Applied(change, True, (f"{change.unit}: {change.reason}",)))
+                out.append(Applied(change, ok=True, lines=(f"{change.unit}: {change.reason}",)))
             elif change.action == "add":
                 if "install" in self.fail:
-                    out.append(Applied(change, False, (f"{change.unit}: Job failed",)))
+                    out.append(Applied(change, ok=False, lines=(f"{change.unit}: Job failed",)))
                     continue
                 self.unit = "active"
                 self._start()
-                out.append(Applied(change, True, (f"{change.unit} add",)))
+                out.append(Applied(change, ok=True, lines=(f"{change.unit} add",)))
             elif change.action == "remove":
                 if "remove" in self.fail:
-                    out.append(Applied(change, False, (f"{change.unit}: remove failed",)))
+                    out.append(Applied(change, ok=False, lines=(f"{change.unit}: remove failed",)))
                     continue
                 self.unit = None
                 self.started_on = None
-                out.append(Applied(change, True, (f"{change.unit} remove",)))
+                out.append(Applied(change, ok=True, lines=(f"{change.unit} remove",)))
         return out
 
     def restart(self, module, names, *, foreign=False, runner=None):
         self._call("restart", module, tuple(names))
         if self.unit is None:
-            return [Acted(module, NAME, "restart", False, ("not installed",))]
+            return [Acted(module, NAME, "restart", ok=False, lines=("not installed",))]
         if "restart" in self.fail:
             self.unit = "failed"
-            return [Acted(module, NAME, "restart", False, ("cloudflared: start failed",))]
+            return [Acted(module, NAME, "restart", ok=False, lines=("cloudflared: start failed",))]
         self.unit = "active"
         self._start()
-        return [Acted(module, NAME, "restart", True, ())]
+        return [Acted(module, NAME, "restart", ok=True, lines=())]
 
     def status(self, modules=None, *, foreign=(), runner=None):
         self._call("status")

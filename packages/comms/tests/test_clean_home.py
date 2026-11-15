@@ -72,9 +72,9 @@ def _normal(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _project(directory: Path) -> dict:
-    with (directory / "pyproject.toml").open("rb") as f:
-        return tomllib.load(f)["project"]
+def _project(project_dir: Path) -> dict:
+    with (project_dir / "pyproject.toml").open("rb") as fh:
+        return tomllib.load(fh)["project"]
 
 
 def workspace_members() -> dict[str, Path]:
@@ -297,10 +297,10 @@ def installed(fence, uv_env):
     home.mkdir()
     dist = base / "dist"
     wheels = {}
-    for name, directory in REQUIRED.items():
+    for name, source_dir in REQUIRED.items():
         out = dist / name
         build = subprocess.run([UV, "build", "--wheel", "--out-dir", str(out),
-                                str(directory)],
+                                str(source_dir)],
                                capture_output=True, text=True, timeout=300, env=uv_env)
         assert build.returncode == 0, build.stderr
         [wheels[name]] = out.glob("*.whl")
@@ -355,9 +355,9 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
     procs = []
     stub_pids = []
 
-    def start(*argv, environ=None):
+    def start(*argv, spawn_env=None):
         argv = [str(venv / "bin" / argv[0]) if "/" not in argv[0] else argv[0], *argv[1:]]
-        proc = subprocess.Popen(argv, env=environ or env, cwd=home,
+        proc = subprocess.Popen(argv, env=spawn_env or env, cwd=home,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True)
         procs.append(proc)

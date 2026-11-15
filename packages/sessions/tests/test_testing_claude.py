@@ -24,7 +24,7 @@ def test_a_transcript_lives_where_the_finder_looks(projects):
 
 def test_each_block_of_a_request_is_its_own_line_with_the_same_usage(projects):
     t = ClaudeTranscript(projects)
-    req = t.request(usage_block=usage(input=5))
+    req = t.request(usage_block=usage(input_tokens=5))
     req.thinking()
     req.text()
     req.tool_use("Read", {"file_path": "/x"})
@@ -32,7 +32,7 @@ def test_each_block_of_a_request_is_its_own_line_with_the_same_usage(projects):
     assert len(lines) == 3
     assert {line["requestId"] for line in lines} == {req.request_id}
     assert {line["message"]["id"] for line in lines} == {req.message_id}
-    assert all(line["message"]["usage"] == usage(input=5) for line in lines)
+    assert all(line["message"]["usage"] == usage(input_tokens=5) for line in lines)
     assert [line["message"]["content"][0]["type"] for line in lines] == [
         "thinking", "text", "tool_use"]
 

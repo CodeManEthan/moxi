@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
 - comms has a row on Home in the browser UI shell, the `mail` component
   (`<moxi-comms-mail>`, order 200). When mail waits for names no live session holds it
   says so on one line, `3 messages waiting · curator and scout aren't running`, the count

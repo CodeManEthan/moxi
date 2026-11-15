@@ -24,7 +24,7 @@ def _git(tmp_path, monkeypatch):
 
 # --- moxi notes dir ---------------------------------------------------------------------
 
-def test_dir_prints_the_folder(monkeypatch):
+def test_dir_prints_the_dir(monkeypatch):
     alpha = repo(home() / "code" / "alpha")
     code, out, _ = moxi_cmd("notes", "dir", str(alpha))
     assert (code, out.strip()) == (0, str(home() / "notes" / "code" / "alpha"))
@@ -33,7 +33,7 @@ def test_dir_prints_the_folder(monkeypatch):
     assert moxi_cmd("notes", "dir", ".")[1].strip() == out.strip()
 
 
-def test_dir_exits_1_with_no_folder_and_prints_json():
+def test_dir_exits_1_with_no_dir_and_prints_json():
     code, out, err = moxi_cmd("notes", "dir", str(home()))
     assert (code, out) == (1, "")
     assert err.strip().startswith("no notes directory: notes computes one only for a folder "
@@ -42,14 +42,14 @@ def test_dir_exits_1_with_no_folder_and_prints_json():
     assert code == 1 and json.loads(out) == {"dir": None, "rule": "none", "warning": None}
 
 
-def test_dir_says_why_an_excluded_folder_has_none():
+def test_dir_says_why_an_excluded_dir_has_none():
     configure(exclude=[str(home() / "private")])
     code, out, err = moxi_cmd("notes", "dir", str(home() / "private" / "x"))
     assert (code, out) == (1, "")
     assert "exclude setting" in err
 
 
-def test_dir_takes_the_override_from_its_own_environment(monkeypatch):
+def test_dir_takes_the_override_from_its_own_env(monkeypatch):
     alpha = repo(home() / "code" / "alpha")
     monkeypatch.setenv("MOXI_NOTES_DIR", "~/elsewhere")
     code, out, _ = moxi_cmd("notes", "dir", str(alpha), "--json")
@@ -80,9 +80,9 @@ def test_a_bad_setting_is_named_with_its_fix():
 
 def test_handoffs_dir_joins_handoffs_and_makes_it_only_when_asked():
     alpha = repo(home() / "code" / "alpha")
-    folder = home() / "notes" / "code" / "alpha" / "handoffs"
-    assert api.handoffs_dir(alpha) == folder and not folder.exists()
-    assert api.handoffs_dir(alpha, create=True) == folder and folder.is_dir()
+    handoffs_dir = home() / "notes" / "code" / "alpha" / "handoffs"
+    assert api.handoffs_dir(alpha) == handoffs_dir and not handoffs_dir.exists()
+    assert api.handoffs_dir(alpha, create=True) == handoffs_dir and handoffs_dir.is_dir()
     assert api.handoffs_dir(home()) is None
     assert api.handoffs_dir(home(), create=True) is None
 

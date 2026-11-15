@@ -115,12 +115,12 @@ def printed(argv: list[str]):
 
 
 @pytest.fixture
-def lo(folder):
+def lo(loadout_dir):
     """A configured loadout folder with one skill, listed for the user."""
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    kit.manifest(folder, '[user]\nskills = ["review"]\n')
-    return folder
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    kit.manifest(loadout_dir, '[user]\nskills = ["review"]\n')
+    return loadout_dir
 
 
 @pytest.fixture

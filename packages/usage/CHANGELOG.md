@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_usage.api.report`: `folder` is now `work_dir`. The
+  CLI flag `--folder`, the page's query parameter and the report's JSON filter key stay
+  `folder`.
 - usage has a row on Home in the browser UI shell, the `row` component (`<moxi-usage-row>`,
   order 300). It says on one line how full the main 5-hour and weekly windows of the
   harness read last are, when the 5-hour one resets and today's cost:

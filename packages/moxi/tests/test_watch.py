@@ -451,7 +451,8 @@ def test_a_descendant_moved_away_after_a_scan_is_still_killed(tmp_path):
         assert {middle, orphan} <= set(watch.watched)
         os.kill(middle, signal.SIGKILL)
         assert wait_for(lambda: psutil.Process(orphan).ppid() != middle)
-        assert orphan not in {p.pid for p in psutil.Process(child.pid).children(True)}
+        assert orphan not in {
+            p.pid for p in psutil.Process(child.pid).children(recursive=True)}
         watch.stop(grace=0.2)
         assert child.wait(timeout=30) == -signal.SIGTERM
         assert wait_for(lambda: gone(orphan))
@@ -517,9 +518,9 @@ def test_the_watchdog_kills_what_starts_while_it_waits_out_the_grace(tmp_path):
             time.sleep(0.1)
     """
     out = tmp_path / "kids.txt"
-    with open(out, "wb") as sink:
+    with open(out, "wb") as fh:
         child = proc.spawn([PY, script(tmp_path, "forker.py", forker)], lifeline="watch",
-                           stdout=sink)
+                           stdout=fh)
     kids: list[int] = []
     try:
         assert wait_for(lambda: len(out.read_text().split()) >= 3)

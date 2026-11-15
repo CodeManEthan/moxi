@@ -39,7 +39,7 @@ def home(tmp_path, monkeypatch):
 
 @windows("under `link` a skill folder is placed as a directory junction that reads through "
          "to its source, is kept on a re-plan, and is removed alone, its source left")
-def test_link_places_a_folder_as_a_junction_and_removes_only_the_junction(home, skill):
+def test_link_places_a_dir_as_a_junction_and_removes_only_the_junction(home, skill):
     src = skill()
     set_core("skills.form", "link")
     item = Item(src, "claude", "comms-send")
@@ -69,7 +69,7 @@ def project(tmp_path, skill):
 @windows("a held item's folder is placed as a relative directory symlink when this account "
          "can make symlinks, readable through it, and dropping it leaves the "
          "source")
-def test_a_held_folder_links_relative_when_symlinks_are_allowed(project):
+def test_a_held_dir_links_relative_when_symlinks_are_allowed(project):
     root, src = project
     dest = root / ".claude" / "skills" / "tidy"
     if not place._symlink_allowed(str(dest.parent)):
@@ -90,15 +90,15 @@ def test_a_held_folder_links_relative_when_symlinks_are_allowed(project):
 
 @windows("where this account can't make symlinks, a held item's folder is copied, marked "
          "held, with the note that says why, and dropping it leaves the source")
-def test_a_held_folder_is_copied_with_its_note_when_symlinks_are_not_allowed(
+def test_a_held_dir_is_copied_with_its_note_when_symlinks_are_not_allowed(
         project, monkeypatch):
     root, src = project
-    monkeypatch.setattr(place, "_symlink_allowed", lambda folder: False)
+    monkeypatch.setattr(place, "_symlink_allowed", lambda link_dir: False)
     before = place._hash(str(src))
     dest = root / ".claude" / "skills" / "tidy"
     item = Item(src, "claude", "tidy", dest=dest, held=True, root=root)
     step = one(place.plan("loadout", [item]), "add")
-    assert (step.form, step.note) == ("copy", place.FOLDER_NOTE)
+    assert (step.form, step.note) == ("copy", place.DIR_NOTE)
     place.apply([step])
     assert dest.is_dir() and not os.path.islink(dest) and not os.path.isjunction(dest)
     mark = json.loads((dest / place.MARK).read_text())

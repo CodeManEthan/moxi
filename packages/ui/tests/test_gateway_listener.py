@@ -147,10 +147,10 @@ def loop():
 def env(tmp_path_factory):
     """An environment with no Moxi locator, whose runtime directory is short and private."""
     root = tempfile.mkdtemp(prefix="gw", dir=tmp_path_factory.getbasetemp())
-    environ = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r")}
-    os.makedirs(environ["XDG_RUNTIME_DIR"], mode=0o700)
-    Layout("ui").runtime_dir(environ, create=True)
-    return environ
+    shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r")}
+    os.makedirs(shell_env["XDG_RUNTIME_DIR"], mode=0o700)
+    Layout("ui").runtime_dir(shell_env, create=True)
+    return shell_env
 
 
 def address(world, *, state="on", change="r1.1", host=HOST, port=443, provider="cloudflare",
@@ -170,7 +170,7 @@ def _gateway(world, hooks, env, **kwargs) -> Gateway:
     kwargs.setdefault("system", "linux")
     gw = Gateway(Layout("ui"), parts=hooks.parts(), settings=world.settings,
                  extra=lambda: world.extra, tunnel=world.tunnel,
-                 find_uid=lambda name: world.uid, remove=world.remove, environ=env,
+                 find_uid=lambda name: world.uid, remove=world.remove, env=env,
                  tick_s=0.05, **kwargs)
     gw.start()
     return gw
@@ -289,7 +289,7 @@ def test_a_gateway_port_equal_to_the_shells_takes_no_hold(env, loop):
         loop.run(gw.close())
 
 
-def test_a_shell_whose_environment_moves_its_runtime_dir_takes_no_hold(env, loop, tmp_path):
+def test_a_shell_whose_env_moves_its_runtime_dir_takes_no_hold(env, loop, tmp_path):
     world, hooks = World(switch=True), Hooks()
     world.address = address(world)
     gw = _gateway(world, hooks, {**env, "MOXI_UI_HOME": str(tmp_path / "moved")})
@@ -508,7 +508,8 @@ def test_the_mount_on_a_socket_and_its_reasons_at_each_tick(env, loop, monkeypat
     gw = _gateway(world, hooks, env, kind="unix")
     try:
         _on(world, gw, loop)
-        assert gw.mount == Mount(True, None) and hooks.tables[-1] == Mount(True, None)
+        assert gw.mount == Mount(mounted=True, reason=None) and hooks.tables[-1] == Mount(
+            mounted=True, reason=None)
         assert read_acts(gw.runtime_dir) == {"pid": os.getpid(), "acts": True, "reason": None,
                                              "uid_found": True}
         assert hooks.audit[-1] == ("acts", {"acts": True, "reason": None})
@@ -518,15 +519,15 @@ def test_the_mount_on_a_socket_and_its_reasons_at_each_tick(env, loop, monkeypat
         rows = len(hooks.audit)
         world.address = address(world, gw=gw, change="r1.2", target="/elsewhere/gateway.sock")
         loop.run(gw.tick())
-        assert gw.mount == Mount(False, "target") and len(hooks.audit) == rows + 1
+        assert gw.mount == Mount(mounted=False, reason="target") and len(hooks.audit) == rows + 1
         assert read_acts(gw.runtime_dir)["reason"] == "target"
-        assert hooks.tables[-1] == Mount(False, "target") and hooks.ended == 0
+        assert hooks.tables[-1] == Mount(mounted=False, reason="target") and hooks.ended == 0
         world.address = address(world, gw=gw, change="r1.3", form="http", target=world.port)
         loop.run(gw.tick())
         assert gw.mount.reason == "target"
         world.address = address(world, gw=gw, change="r1.4", retired=True)
         loop.run(gw.tick())
-        assert gw.mount == Mount(False, "origin")
+        assert gw.mount == Mount(mounted=False, reason="origin")
         world.address = address(world, gw=gw, change="r1.5")
         loop.run(gw.tick())
         assert gw.mount.mounted
@@ -534,7 +535,7 @@ def test_the_mount_on_a_socket_and_its_reasons_at_each_tick(env, loop, monkeypat
         kept = gw.kept
         world.address = REFUSED
         loop.run(gw.tick())
-        assert gw.mount == Mount(False, "record") and gw.holding and hooks.ended == 0
+        assert gw.mount == Mount(mounted=False, reason="record") and gw.holding and hooks.ended == 0
         assert gw.profile is not None and gw.kept == kept
         assert _request(gw)[0] == 200 and read_acts(gw.runtime_dir)["reason"] == "record"
         world.address = address(world, gw=gw, change="r1.5")
@@ -550,7 +551,8 @@ def test_on_tcp_the_acts_are_never_mounted(env, loop):
     gw = _gateway(world, hooks, env)
     try:
         _on(world, gw, loop)
-        assert gw.mount == Mount(False, "tcp") and read_acts(gw.runtime_dir)["reason"] == "tcp"
+        assert gw.mount == Mount(mounted=False, reason="tcp") and read_acts(
+            gw.runtime_dir)["reason"] == "tcp"
         assert gw.kind == "tcp"
     finally:
         loop.run(gw.close())
@@ -652,7 +654,8 @@ def test_the_tunnel_is_read_through_interface_2_else_1(monkeypatch):
                                                      reason=""))
 
     monkeypatch.setattr(modules, "load", load)
-    assert listener.read_tunnel() == TunnelRead(None, False, "tunnel isn't installed")
+    assert listener.read_tunnel() == TunnelRead(
+        None, current=False, reason="tunnel isn't installed")
 
     def api(value):
         def address(module, name):
@@ -670,4 +673,4 @@ def test_the_tunnel_is_read_through_interface_2_else_1(monkeypatch):
     assert read.address == "tcp-entry" and not read.current and "offers interfaces" in read.reason
     found[2] = SimpleNamespace(state=modules.PRESENT, api=api(RuntimeError("bad record")),
                                reason="")
-    assert listener.read_tunnel() == TunnelRead(REFUSED, True, "bad record")
+    assert listener.read_tunnel() == TunnelRead(REFUSED, current=True, reason="bad record")

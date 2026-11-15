@@ -317,7 +317,7 @@ def _screens(screens) -> tuple[Screen, ...]:
         return (screens,)
     if isinstance(screens, (str, bytes)) or not isinstance(screens, Sequence) \
             or not screens or not all(isinstance(s, Screen) for s in screens):
-        raise UsageError("screens is a Screen or a list of them (CLAUDE_TRUST_FOLDER, "
+        raise UsageError("screens is a Screen or a list of them (CLAUDE_TRUST_DIR, "
                          "CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG)")
     return tuple(screens)
 
@@ -325,16 +325,18 @@ def _screens(screens) -> tuple[Screen, ...]:
 def _seen(held: Match | None, frame: Frame | None, pane_id: str | None,
           screens: Sequence[Screen]) -> Seen:
     if frame is None:
-        return Seen(None, False, "the run pane is gone", (), True, pane_id)
+        return Seen(None, full=False, why="the run pane is gone", rows=(), dead=True,
+                    pane_id=pane_id)
     if held is None or not held.present:
         names = ", ".join(s.name for s in screens)
         found = None if held is None else held.rows
-        return Seen(None, False, f"none of {names} is on the pane", found or (),
-                    frame.dead, pane_id)
+        return Seen(None, full=False, why=f"none of {names} is on the pane",
+                    rows=found or (), dead=frame.dead, pane_id=pane_id)
     if frame.dead:
-        return Seen(held.screen, False, "the pane has ended; its last frame is not "
-                                        "answered", held.rows, True, pane_id)
-    return Seen(held.screen, held.full, held.why, held.rows, False, pane_id)
+        return Seen(held.screen, full=False,
+                    why="the pane has ended; its last frame is not answered",
+                    rows=held.rows, dead=True, pane_id=pane_id)
+    return Seen(held.screen, held.full, held.why, held.rows, dead=False, pane_id=pane_id)
 
 
 def read_screen(slot: int | str, screens) -> Seen:
@@ -343,7 +345,7 @@ def read_screen(slot: int | str, screens) -> Seen:
     screens = _screens(screens)
     number, pane_id = _run_pane(slot)
     if pane_id is None:
-        return Seen(None, False, f"slot {number} has no run pane")
+        return Seen(None, full=False, why=f"slot {number} has no run pane")
     frame = TmuxPane(number, pane_id).read()
     held = None if frame is None else find(screens, frame.text, frame.width,
                                            in_mode=frame.in_mode)
@@ -357,7 +359,7 @@ def answer_screen(slot: int | str, screen: Screen, wait_s: float = 5) -> Answer:
     module's text for the steps. Returns an `Answer` and never raises for what it found
     on the pane."""
     if not isinstance(screen, Screen):
-        raise UsageError("screen is one Screen (CLAUDE_TRUST_FOLDER, CLAUDE_DEV_CHANNELS, "
+        raise UsageError("screen is one Screen (CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS, "
                          "CLAUDE_EXIT_DIALOG)")
     if isinstance(wait_s, bool) or not isinstance(wait_s, (int, float)) or wait_s < 0:
         raise UsageError(f"wait_s is a number of seconds, not {wait_s!r}")
@@ -396,29 +398,29 @@ def _region_rows(text: str, width: int) -> list[str]:
 def save_mismatch(screen: Screen, why: str, frame: Frame, ansi: str) -> Path:
     """Save the region of a mismatched screen, plain and with escape sequences, as one
     file in the `mismatches` store; keep the last `KEEP`. Returns the file's path."""
-    directory = files.private_dir(places.mismatches_dir())
+    mismatches_dir = files.private_dir(places.mismatches_dir())
     record = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "screen": screen.name, "why": why, "width": frame.width,
               "plain": _region_rows(frame.text, frame.width),
               "ansi": _region_rows(ansi, frame.width)}
-    path = directory / f"{time.time_ns():020d}-{screen.name.lower()}.json"
+    path = mismatches_dir / f"{time.time_ns():020d}-{screen.name.lower()}.json"
     files.atomic_write(path, json.dumps(record, indent=1, ensure_ascii=False) + "\n")
-    prune(directory)
+    prune(mismatches_dir)
     return path
 
 
-def prune(directory: Path | None = None, keep: int = KEEP) -> list[str]:
+def prune(mismatches_dir: Path | None = None, keep: int = KEEP) -> list[str]:
     """Remove all but the newest `keep` saved regions; returns the names removed."""
-    directory = places.mismatches_dir() if directory is None else directory
+    mismatches_dir = places.mismatches_dir() if mismatches_dir is None else mismatches_dir
     try:
-        names = sorted(e.name for e in os.scandir(directory)
+        names = sorted(e.name for e in os.scandir(mismatches_dir)
                        if e.name.endswith(".json") and e.is_file(follow_symlinks=False))
     except FileNotFoundError:
         return []
     gone = names[:-keep] if keep > 0 else names
     for name in gone:
         try:
-            os.remove(directory / name)
+            os.remove(mismatches_dir / name)
         except FileNotFoundError:
             pass
     return gone

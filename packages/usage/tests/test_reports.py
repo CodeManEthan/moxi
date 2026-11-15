@@ -56,11 +56,11 @@ def conn():
     connection.close()
 
 
-def request(rid, ts, *, model="m-a", harness="claude", input=1000, cache_read=0,
+def request(rid, ts, *, model="m-a", harness="claude", input_tokens=1000, cache_read=0,
             cache_write=0, cache_write_1h=0, output=100, **fields):
     """A sessions request as a harness reader would give it."""
     return sessions.Request(harness=harness, request_id=rid, time=ts, model=model,
-                            input_tokens=input, cache_read_input_tokens=cache_read,
+                            input_tokens=input_tokens, cache_read_input_tokens=cache_read,
                             cache_creation_input_tokens=cache_write,
                             cache_creation_1h_input_tokens=cache_write_1h,
                             output_tokens=output, **fields)
@@ -92,7 +92,7 @@ def one(report, **match):
 # --- cost --------------------------------------------------------------------------------
 
 def test_the_five_terms_price_fresh_input_reads_both_writes_and_output(conn):
-    source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"), input=1000,
+    source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"), input_tokens=1000,
                                         cache_read=200, cache_write=300, cache_write_1h=100,
                                         output=100)])
     row = one(reports.daily(conn, tz="UTC", table=table()), day="2026-10-01")
@@ -157,7 +157,7 @@ def test_unknown_rows_flags_a_group_mixing_known_and_unknown_counts(conn):
 
 def test_an_unknown_cache_write_under_a_writes_as_input_rule_is_priced_and_named(conn):
     rows = [request("t1", at("2026-10-01T12:00"), harness="codex", model="gpt-x",
-                    input=1000, cache_read=400, cache_write=UNKNOWN, cache_write_1h=UNKNOWN,
+                    input_tokens=1000, cache_read=400, cache_write=UNKNOWN, cache_write_1h=UNKNOWN,
                     output=50)]
     source(conn, "/c/r.jsonl", rows, lane="codex", harness="codex", rank=1)
     report = reports.daily(conn, tz="UTC", table=table())
@@ -176,7 +176,7 @@ def test_an_unknown_cache_write_without_such_a_rule_counts_as_unknown(conn):
 
 def test_fast_mode_prices_its_cache_on_the_fast_input_price(conn):
     source(conn, "/p/a.jsonl", [
-        request("r1", at("2026-10-01T12:00"), speed="fast", input=1000, cache_read=500,
+        request("r1", at("2026-10-01T12:00"), speed="fast", input_tokens=1000, cache_read=500,
                 cache_write=300, cache_write_1h=100, output=100),
         request("r2", at("2026-10-01T12:05"), speed="standard", output=100)])
     report = reports.daily(conn, tz="UTC", table=table())
@@ -191,9 +191,9 @@ def test_fast_mode_prices_its_cache_on_the_fast_input_price(conn):
 
 def test_prompt_size_tiers_take_bounds_from_each_model_in_range(conn):
     source(conn, "/p/a.jsonl", [
-        request("r1", at("2026-10-01T12:00"), model="m-a", input=150_000, output=0),
-        request("r2", at("2026-10-01T12:01"), model="m-a", input=250_000, output=0),
-        request("r3", at("2026-10-01T12:02"), model="m-b", input=150_000, output=0)])
+        request("r1", at("2026-10-01T12:00"), model="m-a", input_tokens=150_000, output=0),
+        request("r2", at("2026-10-01T12:01"), model="m-a", input_tokens=250_000, output=0),
+        request("r3", at("2026-10-01T12:02"), model="m-b", input_tokens=150_000, output=0)])
     report = reports.models_report(conn, table=table())
     # m-a: 150k is under its 200k bound; 250k is above it
     assert one(report, model="m-a")["cost"] == pytest.approx(
@@ -205,10 +205,10 @@ def test_prompt_size_tiers_take_bounds_from_each_model_in_range(conn):
 def test_a_service_tier_picks_its_tier_and_a_write_bills_at_the_tier_input(conn):
     source(conn, "/c/r.jsonl", [
         request("t1", at("2026-10-01T12:00"), harness="codex", model="gpt-x",
-                service_tier="priority", input=1000, cache_read=400, cache_write=100,
+                service_tier="priority", input_tokens=1000, cache_read=400, cache_write=100,
                 output=10),
         request("t2", at("2026-10-01T12:01"), harness="codex", model="gpt-x",
-                service_tier="default", input=1000, output=10)],
+                service_tier="default", input_tokens=1000, output=10)],
         lane="codex", harness="codex")
     row = one(reports.daily(conn, tz="UTC", table=table()), model="gpt-x")
     priority = 500 * 2.0 + 400 * 0.2 + 100 * 2.0 + 10 * 16.0
@@ -396,7 +396,7 @@ def test_projects_group_by_the_stored_key_then_by_cwd(conn):
     source(conn, "/p/b.jsonl", [request("r2", t)], session_id="s2", cwd="/w/app-wt",
            project="key-app")
     source(conn, "/p/c.jsonl", [request("r3", t)], session_id="s3", cwd="/w/gone")
-    source(conn, "/p/d.jsonl", [request("r4", t, input=5000)], session_id="s4",
+    source(conn, "/p/d.jsonl", [request("r4", t, input_tokens=5000)], session_id="s4",
            cwd="/w/gone")
     report = reports.projects(conn, table=table())
     assert [(r["project"], r["cwd"], r["requests"]) for r in report.rows] == [
@@ -409,12 +409,12 @@ def stored_keys(conn):
     source(conn, "/p/a.jsonl", [request("r1", t)], cwd="/w/app", project="key-app")
     source(conn, "/p/b.jsonl", [request("r2", t), request("r3", t + 60)], session_id="s2",
            cwd="/w/app-wt", project="key-app")
-    source(conn, "/p/c.jsonl", [request("r4", t, input=5000)], session_id="s3",
+    source(conn, "/p/c.jsonl", [request("r4", t, input_tokens=5000)], session_id="s3",
            cwd="/w/app")
     source(conn, "/p/d.jsonl", [request("r5", t, model="m-b")], session_id="s4")
 
 
-def test_projects_by_folder_group_by_cwd_alone(conn):
+def test_projects_by_dir_group_by_cwd_alone(conn):
     stored_keys(conn)
     report = reports.projects(conn, by="folder", table=table())
     assert [(r["project"], r["cwd"], r["requests"]) for r in report.rows] == [
@@ -430,60 +430,60 @@ def test_projects_by_folder_group_by_cwd_alone(conn):
         reports.projects(conn, by="session", table=table())
 
 
-def test_the_folder_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
+def test_the_dir_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
     stored_keys(conn)
 
     def count(**filters):
         return reports.daily(conn, tz="UTC", table=table(), **filters).total["requests"]
 
-    assert count(folder="/w/app") == 2             # the keyed file and the one with none
+    assert count(work_dir="/w/app") == 2             # the keyed file and the one with none
     assert count(project="/w/app") == 1            # the project filter finds only the latter
-    assert count(folder="/w/app-wt") == 2
-    assert count(folder="/w/app-wt/") == 2
-    assert count(folder="/w/app", project="key-app") == 1
-    assert count(folder="/w") == 0                 # a folder above matches nothing under it
-    assert count(folder=None) == count(folder="") == 5
-    assert reports.daily(conn, folder="/w/app/", table=table()).filters == {
+    assert count(work_dir="/w/app-wt") == 2
+    assert count(work_dir="/w/app-wt/") == 2
+    assert count(work_dir="/w/app", project="key-app") == 1
+    assert count(work_dir="/w") == 0                 # a folder above matches nothing under it
+    assert count(work_dir=None) == count(work_dir="") == 5
+    assert reports.daily(conn, work_dir="/w/app/", table=table()).filters == {
         "folder": "/w/app"}
     for bad in ("app", "./app", "~/app"):
         with pytest.raises(reports.ReportError, match="whole path"):
-            count(folder=bad)
+            count(work_dir=bad)
     for kind, fn in reports.REPORTS.items():
         if kind == "status":
             continue
         given = {"session": "s2"} if kind in ("session", "requests") else {}
-        found = fn(conn, folder="/w/app-wt", table=table(), **given)
+        found = fn(conn, work_dir="/w/app-wt", table=table(), **given)
         assert found.total["requests"] == 2, kind
-        assert fn(conn, folder="/w/gone", table=table(), **given).total["requests"] == 0
+        assert fn(conn, work_dir="/w/gone", table=table(), **given).total["requests"] == 0
     with pytest.raises(reports.ReportError, match="takes no folder"):
-        reports.status(conn, folder="/w/app")
+        reports.status(conn, work_dir="/w/app")
 
 
-def test_report_takes_a_folder_and_by_for_projects(conn, passes):
+def test_report_takes_a_dir_and_by_for_projects(conn, passes):
     stored_keys(conn)
-    assert api.report("sessions", folder="/w/app", fresh=False).total["requests"] == 2
-    found = api.report("projects", by="folder", folder="/w/app-wt", fresh=False)
+    assert api.report("sessions", work_dir="/w/app", fresh=False).total["requests"] == 2
+    found = api.report("projects", by="folder", work_dir="/w/app-wt", fresh=False)
     assert [(r["project"], r["cwd"]) for r in found.rows] == [(None, "/w/app-wt")]
     assert found.filters == {"folder": "/w/app-wt"}
     assert reports.read("projects", by="folder").total["requests"] == 5
     with pytest.raises(ValueError, match="not a key of the projects report"):
         api.report("projects", by="model")
     with pytest.raises(ValueError, match="whole path"):
-        api.report("daily", folder="app", fresh=False)
+        api.report("daily", work_dir="app", fresh=False)
     with pytest.raises(ValueError, match="takes no folder"):
-        api.report("status", folder="/w/app", fresh=False)
+        api.report("status", work_dir="/w/app", fresh=False)
     assert passes == []
 
 
-def test_a_folder_on_no_index_is_still_checked_and_named(monkeypatch):
+def test_a_dir_on_no_index_is_still_checked_and_named(monkeypatch):
     monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
     assert not store.index_path().exists()
-    found = api.report("projects", by="folder", folder="/w/app/")
+    found = api.report("projects", by="folder", work_dir="/w/app/")
     assert found.rows == [] and found.filters == {"folder": "/w/app"}
     with pytest.raises(ValueError, match="whole path"):
-        api.report("daily", folder="app")
+        api.report("daily", work_dir="app")
     with pytest.raises(ValueError, match="takes no folder"):
-        api.report("status", folder="/w/app")
+        api.report("status", work_dir="/w/app")
 
 
 def test_no_report_reads_projects(conn, monkeypatch):
@@ -989,7 +989,7 @@ def test_there_is_no_saving_when_a_group_with_cache_tokens_is_unpriced(conn, fie
 def test_a_saving_of_zero_or_less_is_stated_as_it_falls(conn):
     t = at("2026-10-01T12:00")
     # 10 reads save 27 millionths of a dollar and 1000 written tokens cost 750 more
-    source(conn, "/p/a.jsonl", [request("r1", t, input=2000, cache_read=10,
+    source(conn, "/p/a.jsonl", [request("r1", t, input_tokens=2000, cache_read=10,
                                         cache_write=1000)])
     saving = reports.terms(conn, tz="UTC", table=table()).total["saving"]
     assert saving["saved"] == pytest.approx((30 - 3 - 750) / 1e6) and saving["saved"] < 0
@@ -1192,9 +1192,9 @@ def test_terms_verb_prints_each_groups_terms_adding_up_to_its_cost(conn, monkeyp
                  'tiers.fast = {speed = "fast", input = 6.0, output = 30.0}\n')
     t = at("2026-10-01T12:00")
     source(conn, "/p/a.jsonl", [
-        request("r1", t, model="test-model-1", input=1_234_567, cache_read=200_000,
+        request("r1", t, model="test-model-1", input_tokens=1_234_567, cache_read=200_000,
                 output=4_567),
-        request("r2", t + 60, model="test-model-1", speed="fast", input=2_000_000,
+        request("r2", t + 60, model="test-model-1", speed="fast", input_tokens=2_000_000,
                 cache_read=1_500_000, cache_write=300_000, output=10_000),
         request("r3", at("2026-10-02T12:00"), model="mystery-9")])
     monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
@@ -1279,7 +1279,7 @@ def requests_index(conn):
         request("r1", t, turn_id="u1", cache_read=300, **line(2)),
         request("r2", t + 60, turn_id="u1", speed="fast", **line(3)),
         request("r3", t + 120, turn_id="u2", output=UNKNOWN, **line(6)),
-        request("r4", t + 180, turn_id="u2", model="m-b", input=150_000, **line(7))],
+        request("r4", t + 180, turn_id="u2", model="m-b", input_tokens=150_000, **line(7))],
         session_id="s1", title="Main", size=900, marks_read=1)
     compactions(conn, main, (4, t + 90, "auto", 167_412))
     agent = source(conn, "/p/s1/subagents/agent-a.jsonl", [
@@ -1425,22 +1425,22 @@ def context_index(conn):
     later child session, and one id two harnesses hold."""
     t = at("2026-10-01T12:00")
     source(conn, "/c/r.jsonl", [
-        request("t1", t, harness="codex", model="m-a", input=10_000, context_window=1000),
-        request("t2", t + 60, harness="codex", model="m-a", input=51_680,
+        request("t1", t, harness="codex", model="m-a", input_tokens=10_000, context_window=1000),
+        request("t2", t + 60, harness="codex", model="m-a", input_tokens=51_680,
                 context_window=258_400)],
         lane="codex", harness="codex", session_id="th1", rank=1)
-    source(conn, "/p/s1.jsonl", [request("r2", t + 600, input=40_000),
-                                 request("r1", t, input=30_000)], session_id="s1")
-    source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input=7)],
+    source(conn, "/p/s1.jsonl", [request("r2", t + 600, input_tokens=40_000),
+                                 request("r1", t, input_tokens=30_000)], session_id="s1")
+    source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input_tokens=7)],
            session_id="s1", kind="subagent", agent_id="a")
     db = "/oc/opencode.db"
-    source(conn, db, [request("o1", t, harness="opencode", model="mystery-9", input=600)],
+    source(conn, db, [request("o1", t, harness="opencode", model="mystery-9", input_tokens=600)],
            lane="opencode", harness="opencode", part="ses_p", session_id="ses_p", rank=2)
-    source(conn, db, [request("o2", t + 99, harness="opencode", input=9)],
+    source(conn, db, [request("o2", t + 99, harness="opencode", input_tokens=9)],
            lane="opencode", harness="opencode", part="ses_c", session_id="ses_c",
            parent_session="ses_p", agent_id="ses_c", kind="subagent", rank=2)
-    source(conn, "/p/both.jsonl", [request("b1", t, input=111)], session_id="both")
-    source(conn, "/c/both.jsonl", [request("b2", t, harness="codex", input=222)],
+    source(conn, "/p/both.jsonl", [request("b1", t, input_tokens=111)], session_id="both")
+    source(conn, "/c/both.jsonl", [request("b2", t, harness="codex", input_tokens=222)],
            lane="codex", harness="codex", session_id="both", rank=1)
 
 
@@ -1467,8 +1467,8 @@ def test_a_sessions_context_is_the_newest_request_of_its_main_file(conn):
 
 def test_a_context_is_none_when_the_newest_request_gave_no_prompt_size(conn):
     t = at("2026-10-01T12:00")
-    source(conn, "/p/a.jsonl", [request("r1", t, input=500),
-                                request("r2", t + 60, input=UNKNOWN)])
+    source(conn, "/p/a.jsonl", [request("r1", t, input_tokens=500),
+                                request("r2", t + 60, input_tokens=UNKNOWN)])
     assert reports.session_context(conn, "claude", "s1", table=table()) is None
 
 
@@ -1476,10 +1476,10 @@ def test_a_context_counts_only_a_claimed_request(conn):
     t = at("2026-10-01T12:00")
     # both files hold `shared`, the newest request of each; the earlier file's copy is
     # the claimed one, so the later file's newest claimed request is its own
-    source(conn, "/p/old.jsonl", [request("first", t, input=100),
-                                  request("shared", t + 60, input=700)], session_id="old")
-    source(conn, "/p/new.jsonl", [request("mine", t + 30, input=300),
-                                  request("shared", t + 60, input=700)], session_id="new")
+    source(conn, "/p/old.jsonl", [request("first", t, input_tokens=100),
+                                  request("shared", t + 60, input_tokens=700)], session_id="old")
+    source(conn, "/p/new.jsonl", [request("mine", t + 30, input_tokens=300),
+                                  request("shared", t + 60, input_tokens=700)], session_id="new")
     assert reports.session_context(conn, "claude", "old", table=table())["tokens"] == 700
     assert reports.session_context(conn, "claude", "new", table=table())["tokens"] == 300
 
@@ -1514,7 +1514,7 @@ def test_contexts_build_no_index(monkeypatch):
     assert not store.index_path().exists()
 
 
-def test_a_sessions_origin_is_its_folder_and_its_earliest_request_whatever_the_range(conn):
+def test_a_sessions_origin_is_its_dir_and_its_earliest_request_whatever_the_range(conn):
     t = at("2026-10-01T12:00")
     # the main file gives the folder though a subagent's file comes first in the index,
     # and the earliest request is the subagent's

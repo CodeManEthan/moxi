@@ -112,18 +112,18 @@ class Refused(Exception):
 class Acts:
     """The act store and its three handlers, in the shell.
 
-    `mounts()` gives the exports the gateway mounts (module to export); `mounted()` checks
+    `mounts()` gives the exports the gateway mounts (module to export); `on_mounted()` checks
     the act condition now; `client` sends to the modules' servers (the proxy's `Client`);
     `audit` is the gateway's `Audit`; `key()` the gateway's key; `device_of(id_hash)` the
     device of a live session.
     """
 
     def __init__(self, *, mounts: Callable[[], Mapping[str, Mapping[str, Any]]],
-                 mounted: Callable[[], bool], client: Any, audit: _audit.Audit,
+                 on_mounted: Callable[[], bool], client: Any, audit: _audit.Audit,
                  key: Callable[[], bytes], device_of: Callable[[str | None], str | None],
                  clock: Callable[[], float] = time.time,
                  monotonic: Callable[[], float] = time.monotonic):
-        self.mounts, self.mounted, self.client = mounts, mounted, client
+        self.mounts, self.on_mounted, self.client = mounts, on_mounted, client
         self.audit, self.key, self.device_of = audit, key, device_of
         self._clock, self._now = clock, monotonic
         self._acts: dict[str, _Act] = {}
@@ -138,20 +138,20 @@ class Acts:
         """Answer one request to an act path: `(answer, refusal code or None)`."""
         method, raw = scope.get("method"), (scope.get("raw_path") or b"").decode("latin-1")
         try:
-            if not self.mounted():
+            if not self.on_mounted():
                 raise Refused(_empty(404), "route")
             if method == "POST" and raw in (PREPARE, COMMIT):
                 body = await _read(receive, _PREPARE_CAP if raw == PREPARE else _COMMIT_CAP)
                 # The acts may have come down while the body arrived: nothing passes then.
-                if not self.mounted():
+                if not self.on_mounted():
                     raise Refused(_empty(404), "route")
                 handler = self.prepare if raw == PREPARE else self.commit
                 return await handler(body), None
             if method == "GET" and raw == STATE:
                 return await self.state(scope.get("query_string") or b""), None
             raise Refused(_empty(404), "route")
-        except Refused as refused:
-            return refused.answer, refused.code
+        except Refused as refused_exc:
+            return refused_exc.answer, refused_exc.code
 
     def _who(self) -> tuple[str | None, str | None]:
         id_hash = admitted.get()
@@ -174,8 +174,8 @@ class Acts:
             raise Refused(_empty(404), "route")
         try:
             check_body(body, route)
-        except BadBody as bad:
-            raise Refused(_json(400, {"error": str(bad)}), None) from None
+        except BadBody as bad_exc:
+            raise Refused(_json(400, {"error": str(bad_exc)}), None) from None
         device, session = self._who()
         stored = canonical(body)
         act = _Act(secrets.token_urlsafe(32), module, path, stored, device, session,
@@ -245,8 +245,8 @@ class Acts:
         try:
             response = await self.client.request(act.module, "POST", act.path,
                                                  headers=headers, body=act.body, act=True)
-        except UpstreamError as err:
-            return err.status, err.body
+        except UpstreamError as exc:
+            return exc.status, exc.body
         except Exception:  # noqa: BLE001 - anything after the send may have acted
             _log.warning("the act on %s got no answer", act.module, exc_info=True)
             return 0, None

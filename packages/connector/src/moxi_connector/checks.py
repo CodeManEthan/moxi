@@ -35,9 +35,9 @@ def health():
 
     try:
         answer = ask("status")
-    except ipc.IpcError as e:
+    except ipc.IpcError as exc:
         return Row(MODULE, "server", "fail",
-                   f"the control socket doesn't answer within {ASK_WAIT:g} s: {e}", RESTART)
+                   f"the control socket doesn't answer within {ASK_WAIT:g} s: {exc}", RESTART)
     url = answer.get("url") if isinstance(answer, dict) else None
     return Row(MODULE, "server", "ok",
                f"answers; the door's address is {url}" if url else

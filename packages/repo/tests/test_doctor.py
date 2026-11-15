@@ -294,7 +294,7 @@ def test_commits_not_pushed_are_a_warn_row_until_the_push(demo, clock):
                                  "failed: ")
     assert "remote says no" in row.detail
     assert row.fix == f"moxi repo commit {repo} --spec demo/snap"
-    deny(bare, False)
+    deny(bare, enabled=False)
     clock[0] += 400
     assert moxi_repo.commit_saved(repo, "demo/snap").pushed == ("main",)
     assert problems(f"spec {repo}") == []

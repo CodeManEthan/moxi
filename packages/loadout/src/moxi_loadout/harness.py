@@ -50,30 +50,30 @@ GLOBAL_NAMES = {"claude": "CLAUDE.md", "codex": "AGENTS.md", "opencode": "AGENTS
 
 
 def claude_home(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("CLAUDE_CONFIG_DIR")
+    given = _env(env).get("CLAUDE_CONFIG_DIR")
     return Path(given) if given else _home(env) / ".claude"
 
 
 def claude_json(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("CLAUDE_CONFIG_DIR")
+    given = _env(env).get("CLAUDE_CONFIG_DIR")
     return Path(given) / ".claude.json" if given else _home(env) / ".claude.json"
 
 
 def codex_home(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("CODEX_HOME")
+    given = _env(env).get("CODEX_HOME")
     return Path(given) if given else _home(env) / ".codex"
 
 
 def opencode_home(env: Mapping[str, str] | None = None) -> Path:
     """Where OpenCode reads its `AGENTS.md` and `opencode.json`."""
-    given = _environ(env).get("OPENCODE_CONFIG_DIR")
+    given = _env(env).get("OPENCODE_CONFIG_DIR")
     return Path(given) if given else opencode_xdg_home(env)
 
 
 def opencode_xdg_home(env: Mapping[str, str] | None = None) -> Path:
     """OpenCode's folder under the XDG config home, which its skills and agents folders
     stay under whatever `OPENCODE_CONFIG_DIR` says."""
-    given = _environ(env).get("XDG_CONFIG_HOME")
+    given = _env(env).get("XDG_CONFIG_HOME")
     return (Path(given) if given else _home(env) / ".config") / "opencode"
 
 
@@ -89,7 +89,7 @@ def settings_file(harness: str) -> Path | None:
             "opencode": opencode_home() / "opencode.json"}.get(harness)
 
 
-def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
+def _env(env: Mapping[str, str] | None) -> Mapping[str, str]:
     return os.environ if env is None else env
 
 
@@ -206,11 +206,11 @@ def backup(path: Path, harness: str, data: bytes, keep: int) -> Path:
 
     from moxi_loadout import stores
 
-    folder = private_dir(stores.backups_dir() / harness)
+    backup_dir = private_dir(stores.backups_dir() / harness)
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + f"{time.time_ns() % 10**9:09d}"
-    out = folder / f"{stamp}-{path.name}"
+    out = backup_dir / f"{stamp}-{path.name}"
     atomic_write(out, data, mode=0o600)
-    mine = sorted(p for p in folder.iterdir() if p.name.endswith("-" + path.name))
+    mine = sorted(p for p in backup_dir.iterdir() if p.name.endswith("-" + path.name))
     for old in mine[:-keep] if keep > 0 else []:
         try:
             old.unlink()

@@ -142,13 +142,13 @@ class Item:
 @dataclass(frozen=True)
 class Summary:
     """What the index answers about one log: a round's, or with no `slug` a project's
-    own. `folder` is the round's folder, or for a project its rounds folder. A round
+    own. `log_dir` is the round's folder, or for a project its rounds folder. A round
     whose log can't be read has its error in `unreadable` and nothing else from the log.
     `changed_since` is set while the log is known to have changed outside this machine."""
 
     project: str
     slug: str | None
-    folder: Path
+    log_dir: Path
     status: str | None = None
     flow: str | None = None
     items: tuple[Item, ...] = ()
@@ -197,24 +197,24 @@ def on_append(written) -> None:
     wrote_project = len(written.project_events) > len(written.view.project_events)
     with _writing(None) as conn:
         if where.slug is not None:
-            _refresh(conn, where.project, where.slug, where.folder, wrote=wrote_round)
+            _refresh(conn, where.project, where.slug, where.rounds_dir, wrote=wrote_round)
         # A round's verb that only read the project's log holds no lock on it, so that
         # log's row is left for whoever writes it.
         if where.slug is None or wrote_project:
-            _refresh(conn, where.project, _PROJECT, where.folder, wrote=wrote_project)
+            _refresh(conn, where.project, _PROJECT, where.rounds_dir, wrote=wrote_project)
 
 
-def refresh(project: str, folder: Path, slug: str | None = None, *, env=None) -> Summary:
+def refresh(project: str, rounds_dir: Path, slug: str | None = None, *, env=None) -> Summary:
     """Bring the index up to one log as it stands, and answer from it: the round
-    `<project>/<slug>` in the rounds folder `folder`, or the project's own log. For a
+    `<project>/<slug>` in the rounds folder `rounds_dir`, or the project's own log. For a
     command that shows a round. Raises `NoLog` for a round with no log."""
     with _writing(env) as conn:
-        found = _refresh(conn, project, _PROJECT if slug is None else slug, folder,
+        found = _refresh(conn, project, _PROJECT if slug is None else slug, rounds_dir,
                          wrote=False)
     if found is None:
         if slug is not None:
-            raise NoLog(log.round_log(Path(folder) / slug))
-        return Summary(project, None, Path(folder))
+            raise NoLog(log.round_log(Path(rounds_dir) / slug))
+        return Summary(project, None, Path(rounds_dir))
     return found
 
 
@@ -224,8 +224,8 @@ def rebuild(homes: Iterable[folders.Home], *, env=None) -> None:
     with _writing(env) as conn:
         kept = set()
         for home in homes:
-            for slug in (_PROJECT, *folders.slugs(home.folder)):
-                if _refresh(conn, home.project, slug, home.folder, wrote=False):
+            for slug in (_PROJECT, *folders.slugs(home.rounds_dir)):
+                if _refresh(conn, home.project, slug, home.rounds_dir, wrote=False):
                     kept.add((home.project, slug))
         for project, slug in conn.execute("SELECT project, slug FROM logs").fetchall():
             if (project, slug) not in kept:
@@ -234,23 +234,23 @@ def rebuild(homes: Iterable[folders.Home], *, env=None) -> None:
 
 # -- reads, which write nothing -------------------------------------------------------------
 
-def read(project: str, folder: Path, slug: str | None = None, *, env=None) -> Summary:
-    """The round `<project>/<slug>` in the rounds folder `folder`, or with no slug the
+def read(project: str, rounds_dir: Path, slug: str | None = None, *, env=None) -> Summary:
+    """The round `<project>/<slug>` in the rounds folder `rounds_dir`, or with no slug the
     project's own log, from the index when its row is fresh and from the log itself when
     not. Writes nothing. Raises `NoLog` for a round with no log; a project with none
     holds nothing."""
     with _reading(env) as conn:
-        return _read(conn, project, _PROJECT if slug is None else slug, Path(folder))
+        return _read(conn, project, _PROJECT if slug is None else slug, Path(rounds_dir))
 
 
-def rounds(project: str, folder: Path, *, env=None) -> list[Summary]:
-    """Every round in the rounds folder `folder` of the project `project`, by slug, each
+def rounds(project: str, rounds_dir: Path, *, env=None) -> list[Summary]:
+    """Every round in the rounds folder `rounds_dir` of the project `project`, by slug, each
     as `read` gives it. Writes nothing."""
     found = []
     with _reading(env) as conn:
-        for slug in folders.slugs(folder):
+        for slug in folders.slugs(rounds_dir):
             try:
-                found.append(_read(conn, project, slug, Path(folder)))
+                found.append(_read(conn, project, slug, Path(rounds_dir)))
             except NoLog:  # removed since the folder was listed
                 continue
     return found
@@ -274,9 +274,9 @@ def disagreements(homes: Iterable[folders.Home], *, env=None) -> list[Disagreeme
             return found
         seen = set()
         for home in homes:
-            for slug in (_PROJECT, *folders.slugs(home.folder)):
+            for slug in (_PROJECT, *folders.slugs(home.rounds_dir)):
                 name = home.project if slug == _PROJECT else f"{home.project}/{slug}"
-                path = _log_path(Path(home.folder), slug)
+                path = _log_path(Path(home.rounds_dir), slug)
                 try:
                     data = path.read_bytes()
                 except FileNotFoundError:
@@ -326,8 +326,8 @@ class _Stored:
     changed_since: str | None
 
 
-def _log_path(folder: Path, slug: str) -> Path:
-    return log.project_log(folder) if slug == _PROJECT else log.round_log(folder / slug)
+def _log_path(rounds_dir: Path, slug: str) -> Path:
+    return log.project_log(rounds_dir) if slug == _PROJECT else log.round_log(rounds_dir / slug)
 
 
 def _derive(project: str, slug: str, path: Path,
@@ -339,8 +339,8 @@ def _derive(project: str, slug: str, path: Path,
         # A round's log is read as a round's: one that opens no round is unreadable.
         parse = log.parse if slug == _PROJECT else log.parse_round
         folded = state.fold(parse(path, data))
-    except Unreadable as error:
-        return _Row(project, slug, str(path), len(data), digest, readable=False), error
+    except Unreadable as exc:
+        return _Row(project, slug, str(path), len(data), digest, readable=False), exc
     items = tuple(Item(kind, item_id, _plain(body))
                   for kind, listed in ITEMS.items() for item_id, body in listed(folded))
     return _Row(project, slug, str(path), len(data), digest, readable=True,
@@ -384,31 +384,31 @@ def _changed_since(stored: _Stored | None, path: Path, data: bytes) -> str | Non
     return None
 
 
-def _summary(row: _Row, error: Unreadable | None, folder: Path,
+def _summary(row: _Row, error: Unreadable | None, rounds_dir: Path,
              changed_since: str | None) -> Summary:
     project_own = row.slug == _PROJECT
     return Summary(project=row.project, slug=None if project_own else row.slug,
-                   folder=folder if project_own else folder / row.slug,
+                   log_dir=rounds_dir if project_own else rounds_dir / row.slug,
                    status=row.status, flow=row.flow, items=row.items,
                    changed_since=changed_since, unreadable=error, ended=row.ended)
 
 
-def _read(conn, project: str, slug: str, folder: Path) -> Summary:
-    path = _log_path(folder, slug)
+def _read(conn, project: str, slug: str, rounds_dir: Path) -> Summary:
+    path = _log_path(rounds_dir, slug)
     try:
         data = path.read_bytes()
     except FileNotFoundError:
         if slug != _PROJECT:
             raise NoLog(path) from None
-        return Summary(project, None, folder)
+        return Summary(project, None, rounds_dir)
     stored = None if conn is None else _stored(conn, project, slug)
     changed_since = _changed_since(stored, path, data)
     if _fresh(stored, path, data) and stored.row.readable:
-        return _summary(stored.row, None, folder, changed_since)
+        return _summary(stored.row, None, rounds_dir, changed_since)
     # Stale, or a log that could not be read (its error is not kept): the log itself
     # answers, and the row stays as it is.
     row, error = _derive(project, slug, path, data)
-    return _summary(row, error, folder, changed_since)
+    return _summary(row, error, rounds_dir, changed_since)
 
 
 # -- the store ------------------------------------------------------------------------------
@@ -485,12 +485,12 @@ def _stored(conn, project: str, slug: str) -> _Stored | None:
                         items, ended), derived, seen_at, changed_since)
 
 
-def _refresh(conn, project: str, slug: str, folder: Path, *, wrote: bool) -> Summary | None:
+def _refresh(conn, project: str, slug: str, rounds_dir: Path, *, wrote: bool) -> Summary | None:
     """Make one log's rows what the log says now, inside the caller's transaction, and
     answer from them; None, with its rows removed, when the log is not there. `wrote`
     says an event was just appended here, which ends a changed-outside notice."""
-    folder = Path(folder)
-    path = _log_path(folder, slug)
+    rounds_dir = Path(rounds_dir)
+    path = _log_path(rounds_dir, slug)
     try:
         # Read inside the transaction: of two refreshes of one log, the one that writes
         # its row last is then the one that read the file last.
@@ -502,11 +502,11 @@ def _refresh(conn, project: str, slug: str, folder: Path, *, wrote: bool) -> Sum
                                                       data)
     row, error = _derive(project, slug, path, data)
     _drop(conn, project, slug)
-    _put(conn, row, folder, seen_at=log.stamp(), changed_since=changed_since)
-    return _summary(row, error, folder, changed_since)
+    _put(conn, row, rounds_dir, seen_at=log.stamp(), changed_since=changed_since)
+    return _summary(row, error, rounds_dir, changed_since)
 
 
-def _put(conn, row: _Row, folder: Path, *, seen_at: str, changed_since: str | None) -> None:
+def _put(conn, row: _Row, rounds_dir: Path, *, seen_at: str, changed_since: str | None) -> None:
     conn.execute("INSERT INTO logs (project, slug, path, length, sha256, readable, "
                  "derived, seen_at, changed_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                  (row.project, row.slug, row.path, row.length, row.sha256,
@@ -514,7 +514,7 @@ def _put(conn, row: _Row, folder: Path, *, seen_at: str, changed_since: str | No
     if row.slug != _PROJECT:
         conn.execute("INSERT INTO rounds (project, slug, folder, status, flow, ended) "
                      "VALUES (?, ?, ?, ?, ?, ?)",
-                     (row.project, row.slug, str(folder / row.slug), row.status, row.flow,
+                     (row.project, row.slug, str(rounds_dir / row.slug), row.status, row.flow,
                       None if row.ended is None
                       else json.dumps(row.ended, sort_keys=True)))
     conn.executemany(

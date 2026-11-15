@@ -116,8 +116,8 @@ class MockRecord:
             return
         fd, tmp = tempfile.mkstemp(dir=self.store_path.parent, prefix=".gw.")
         try:
-            with os.fdopen(fd, "w") as f:
-                json.dump(asdict(self._state), f)
+            with os.fdopen(fd, "w") as fh:
+                json.dump(asdict(self._state), fh)
             os.replace(tmp, self.store_path)
         except BaseException:
             Path(tmp).unlink(missing_ok=True)

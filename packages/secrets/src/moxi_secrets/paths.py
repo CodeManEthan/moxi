@@ -27,8 +27,8 @@ def globs() -> tuple:
     global _globs
     if _globs is None:
         names, dirs, paths = [], [], []
-        with open(_FILE, encoding="utf-8") as handle:
-            for raw in handle:
+        with open(_FILE, encoding="utf-8") as fh:
+            for raw in fh:
                 line = raw.strip()
                 if not line or line.startswith("#"):
                     continue

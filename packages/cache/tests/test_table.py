@@ -171,7 +171,7 @@ def codex_rollout(root: Path, model="gpt-5.6-terra", age=60) -> None:
     r.clock = NOW - age - 5
     r.turn(model, turn_id="t1")
     r.clock = NOW - age
-    r.request(token_usage(input=100, cached=90))
+    r.request(token_usage(input_tokens=100, cached=90))
     r.write()
 
 

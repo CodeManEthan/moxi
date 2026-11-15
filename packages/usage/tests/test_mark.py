@@ -78,7 +78,7 @@ class Session:
 
     def context(self, tokens, *, model=MODEL):
         self.t.user("go")
-        self.t.assistant("ok", usage=usage(input=tokens - 1000, cache_read=1000,
+        self.t.assistant("ok", usage=usage(input_tokens=tokens - 1000, cache_read=1000,
                                            cache_write=0), model=model)
         self.t.write()
 
@@ -86,7 +86,7 @@ class Session:
         child = self.agents.get(agent_id) or self.t.subagent(agent_id)
         self.agents[agent_id] = child
         child.user("look")
-        child.assistant("found", usage=usage(input=tokens - 10, cache_read=10,
+        child.assistant("found", usage=usage(input_tokens=tokens - 10, cache_read=10,
                                              cache_write=0), model=MODEL)
         self.t.write()
 
@@ -305,7 +305,7 @@ class Codex:
 
     def context(self, tokens):
         self.r.user("go")
-        self.r.request(sessions.testing.token_usage(input=tokens, cached=tokens // 2))
+        self.r.request(sessions.testing.token_usage(input_tokens=tokens, cached=tokens // 2))
         self.r.write()
 
     def agent_context(self, tokens):
@@ -313,7 +313,7 @@ class Codex:
             self.child = self.r.spawn(CHILD, "explore")
             self.child.turn(MODEL)
         self.child.user("look")
-        self.child.request(sessions.testing.token_usage(input=tokens, cached=0))
+        self.child.request(sessions.testing.token_usage(input_tokens=tokens, cached=0))
         self.r.write()
         self.child.write()
 
@@ -338,7 +338,7 @@ class OpenCode:
     def _step(session, tokens):
         session.user("go", model=("provider", MODEL))
         reply = session.assistant(model=("provider", MODEL))
-        reply.step(input=tokens - 1000, cache_read=1000, output=10)
+        reply.step(input_tokens=tokens - 1000, cache_read=1000, output=10)
         reply.complete()
 
     def context(self, tokens):
@@ -432,7 +432,7 @@ def test_an_open_opencode_step_neither_fires_nor_re_arms():
     reply.tool("bash", {"command": "ls"})
     h.db.write()
     assert mark.on_tool(h.event(env=one)) is None
-    reply.step_finish(input=125_000)
+    reply.step_finish(input_tokens=125_000)
     h.db.write()
     assert mark.on_tool(h.event(env=one)) is None
 
@@ -477,13 +477,13 @@ def test_the_floor_and_the_listener_take_turns_own_event():
 
     from moxi import modules
 
-    SessionEvent = modules.load("turns").api.SessionEvent
+    session_event_type = modules.load("turns").api.SessionEvent
     s = Session()
-    ready = SessionEvent(event="ready", harness="claude", session_id=SESSION,
+    ready = session_event_type(event="ready", harness="claude", session_id=SESSION,
                          env={"MOXI_USAGE_WARN_AT": "1x"})
     assert mark.floor(dataclasses.replace(ready, env=dict(ready.env))) == ONE_X
     s.context(120_000)
-    tool = SessionEvent(event="after-tool", harness="claude", session_id=SESSION,
+    tool = session_event_type(event="after-tool", harness="claude", session_id=SESSION,
                         env={"MOXI_USAGE_WARN_AT": "1x"}, tool="Bash", point="after",
                         record_path=str(s.t.path))
     assert mark.on_tool(tool) == notice(120_000)

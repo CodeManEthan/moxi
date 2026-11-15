@@ -17,18 +17,18 @@ from moxi_loadout import cli, harness, homes, install, ledger, pagejob
 
 
 @pytest.fixture
-def lo(folder):
-    kit.configure(folder)
-    kit.skill(folder / "skills", "review")
-    kit.manifest(folder, "[user]\n")
-    return folder
+def lo(loadout_dir):
+    kit.configure(loadout_dir)
+    kit.skill(loadout_dir / "skills", "review")
+    kit.manifest(loadout_dir, "[user]\n")
+    return loadout_dir
 
 
 @pytest.fixture
 def page(monkeypatch):
     """This process as a page job would run: loadout's marker set (and taken out again
     after the test)."""
-    monkeypatch.setenv(homes.MARKER, "test")
+    monkeypatch.setenv(homes.CALLER_ENV, "test")
 
 
 @pytest.fixture
@@ -42,8 +42,8 @@ def end(job: str) -> dict:
     return json.loads(pagejob.end_path(job).read_text())
 
 
-def manifest_bytes(folder: Path) -> bytes:
-    return (folder / "loadout.toml").read_bytes()
+def manifest_bytes(loadout_dir: Path) -> bytes:
+    return (loadout_dir / "loadout.toml").read_bytes()
 
 
 # -- the runner -----------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def test_a_job_runs_the_verb_and_writes_its_outcome(lo, page, recorded):
     assert record["exit"] == 0 and record["outcome"]["exit"] == 0
     assert "listed skill review in user" in record["outcome"]["lines"]
     assert os.readlink(kit.claude() / "review") == str(lo / "skills" / "review")
-    assert os.environ[homes.MARKER] == pagejob.CALLER
+    assert os.environ[homes.CALLER_ENV] == pagejob.CALLER
     assert not {"homes", "git"} & set(ledger.read())
     assert pagejob.read("j1")["state"] == "done"
 
@@ -188,15 +188,15 @@ def test_a_failure_before_the_verb_is_written_as_exit_1(lo, monkeypatch, page):
 
 
 def test_the_runner_prunes_records_older_than_a_day(lo, page):
-    folder = pagejob.jobs_dir(create=True)
-    old, new = folder / "old.json", folder / "new.json"
-    for path in (old, new, folder / "old.end.json", folder / "old.log"):
+    records_dir = pagejob.jobs_dir(create=True)
+    old, new = records_dir / "old.json", records_dir / "new.json"
+    for path in (old, new, records_dir / "old.end.json", records_dir / "old.log"):
         path.write_text("{}")
     then = time.time() - pagejob.KEEP_SECONDS - 60
-    for path in (old, folder / "old.end.json", folder / "old.log"):
+    for path in (old, records_dir / "old.end.json", records_dir / "old.log"):
         os.utime(path, (then, then))
     pagejob.run("j1", ["status"])
-    assert sorted(p.name for p in folder.iterdir()) == ["j1.end.json", "new.json"]
+    assert sorted(p.name for p in records_dir.iterdir()) == ["j1.end.json", "new.json"]
 
 
 # -- spawning and reading -------------------------------------------------------------------
@@ -248,7 +248,7 @@ def test_a_pid_that_cant_be_recorded_after_the_spawn_still_starts_the_job(
 
     monkeypatch.setattr(proc, "identity", broken)
     started = pagejob.start(["install"], job="k1")
-    assert started == pagejob.Started("k1", True) and len(calls) == 1
+    assert started == pagejob.Started("k1", new=True) and len(calls) == 1
     record = json.loads(pagejob.record_path("k1").read_text())
     assert "pid" not in record and record["argv"] == ["install"]
     assert "its pid wasn't recorded" in caplog.text
@@ -258,19 +258,19 @@ def test_a_pid_that_cant_be_recorded_after_the_spawn_still_starts_the_job(
 def test_a_confirmed_acts_repeat_finds_its_record(lo, monkeypatch):
     calls = fake_spawn(monkeypatch)
     key = "A" * 43
-    assert pagejob.start(["global", "remove"], job=key) == pagejob.Started(key, True)
+    assert pagejob.start(["global", "remove"], job=key) == pagejob.Started(key, new=True)
     # A restarted page server holds no memory of the key; the record is enough.
-    assert pagejob.start(["global", "remove"], job=key) == pagejob.Started(key, False)
+    assert pagejob.start(["global", "remove"], job=key) == pagejob.Started(key, new=False)
     assert len(calls) == 1
     with pytest.raises(pagejob.Clash):
         pagejob.start(["install"], job=key)
 
 
 def test_a_fresh_record_with_no_pid_reads_running_and_an_old_one_interrupted(lo):
-    folder = pagejob.jobs_dir(create=True)
-    (folder / "fresh.json").write_text(json.dumps({"job": "fresh", "argv": ["install"],
+    records_dir = pagejob.jobs_dir(create=True)
+    (records_dir / "fresh.json").write_text(json.dumps({"job": "fresh", "argv": ["install"],
                                                    "created": time.time()}))
-    (folder / "old.json").write_text(json.dumps({"job": "old", "argv": ["install"],
+    (records_dir / "old.json").write_text(json.dumps({"job": "old", "argv": ["install"],
                                                  "created": time.time() - 60}))
     assert pagejob.read("fresh")["state"] == "running"
     old = pagejob.read("old")
@@ -294,9 +294,9 @@ def test_a_record_whose_pid_was_reused_reads_interrupted(lo):
     from moxi import proc
 
     ident = proc.identity(os.getpid())
-    folder = pagejob.jobs_dir(create=True)
+    records_dir = pagejob.jobs_dir(create=True)
     # This process is alive under the pid, but started at another time than the job.
-    (folder / "j1.json").write_text(json.dumps({
+    (records_dir / "j1.json").write_text(json.dumps({
         "job": "j1", "argv": ["install"], "created": time.time() - 60,
         "pid": os.getpid(), "started": ident.started - 1000}))
     found = pagejob.read("j1")
@@ -304,10 +304,10 @@ def test_a_record_whose_pid_was_reused_reads_interrupted(lo):
 
 
 def test_a_record_with_its_end_reads_done(lo):
-    folder = pagejob.jobs_dir(create=True)
-    (folder / "j1.json").write_text(json.dumps({"job": "j1", "argv": ["install"],
+    records_dir = pagejob.jobs_dir(create=True)
+    (records_dir / "j1.json").write_text(json.dumps({"job": "j1", "argv": ["install"],
                                                 "created": time.time() - 60}))
-    (folder / "j1.end.json").write_text(json.dumps({"exit": 3, "outcome": None,
+    (records_dir / "j1.end.json").write_text(json.dumps({"exit": 3, "outcome": None,
                                                     "lines": ["refused"]}))
     assert pagejob.read("j1") == {"job": "j1", "argv": ["install"], "state": "done",
                                   "exit": 3, "outcome": None, "lines": ["refused"]}

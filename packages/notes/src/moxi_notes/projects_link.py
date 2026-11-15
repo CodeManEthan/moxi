@@ -70,10 +70,10 @@ def prepare(fields) -> dict | None:
     return out or None
 
 
-def _files_in(folder) -> int:
+def _files_in(root_dir) -> int:
     """How many files `folder` holds, at any depth; links are not followed."""
     count = 0
-    for _here, _dirs, files in os.walk(folder):
+    for _here, _dirs, files in os.walk(root_dir):
         count += len(files)
     return count
 

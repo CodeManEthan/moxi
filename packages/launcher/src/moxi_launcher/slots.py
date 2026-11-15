@@ -25,17 +25,17 @@ MODULE = "slots"
 #: The interface of slots' API the launcher is written against.
 INTERFACE = 1
 #: A test seam: the import name of a module that stands in for slots' API.
-SEAM = "MOXI_LAUNCHER_SLOTS"
+SLOTS_ENV = "MOXI_LAUNCHER_SLOTS"
 
 
 def available() -> bool:
     """Whether slots is installed here (or stood in for on the seam). Imports nothing."""
-    return bool(os.environ.get(SEAM)) or modules.available(MODULE)
+    return bool(os.environ.get(SLOTS_ENV)) or modules.available(MODULE)
 
 
 def api() -> Any | None:
     """slots' API module, or None when slots is not installed or can't be loaded."""
-    seam = os.environ.get(SEAM)
+    seam = os.environ.get(SLOTS_ENV)
     if seam:
         return importlib.import_module(seam)
     if not modules.available(MODULE):
@@ -53,4 +53,4 @@ def links(name: str) -> bool:
     return available() if name == MODULE else modules.available(name)
 
 
-__all__ = ["INTERFACE", "MODULE", "SEAM", "api", "available", "links"]
+__all__ = ["INTERFACE", "MODULE", "SLOTS_ENV", "api", "available", "links"]

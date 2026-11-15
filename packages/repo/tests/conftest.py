@@ -327,12 +327,12 @@ class Demo:
         return [run["id"] for run in self.runs()]
 
 
-def git(cwd: Path, *args: str, input: str | None = None, check: bool = True,
+def git(cwd: Path, *args: str, stdin_data: str | None = None, check: bool = True,
         env: dict | None = None) -> subprocess.CompletedProcess:
     """Run git in `cwd` with this process's (fenced) environment plus `env`."""
     full = dict(os.environ)
     full.update(env or {})
-    done = subprocess.run(["git", *args], cwd=cwd, input=input, capture_output=True,
+    done = subprocess.run(["git", *args], cwd=cwd, input=stdin_data, capture_output=True,
                           text=True, env=full, timeout=60)
     if check and done.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed ({done.returncode}):\n"

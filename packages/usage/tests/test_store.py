@@ -273,7 +273,7 @@ def test_an_opencode_request_is_ordered_by_its_start_in_milliseconds():
 def test_a_claude_transcript_read_by_sessions_gives_rows_keyed_and_ordered(tmp_path):
     t = ClaudeTranscript(tmp_path / "projects")
     t.user("hello")
-    t.assistant("one", usage=usage(input=3, cache_read=900, cache_write=50,
+    t.assistant("one", usage=usage(input_tokens=3, cache_read=900, cache_write=50,
                                    cache_write_1h=20, output=40))
     t.user("again")
     t.assistant("two", request_id=None, message_id=None, usage=usage(output=7))

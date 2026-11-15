@@ -518,7 +518,7 @@ def test_the_additions_env_goes_over_the_launchers(monkeypatch, launched):
     assert code == 0 and seen["env"]["MOXI_TURNS_COMMANDS"] == "clear"
 
 
-def test_turns_endpoint_command_reaches_the_environment_claude_starts_with(launched):
+def test_turns_endpoint_command_reaches_the_env_claude_starts_with(launched):
     """turns' own additions, not a fake: the endpoint command turns' config names is in
     `MOXI_TURNS_ENDPOINT` in the environment `claude` is started with."""
     from pathlib import Path
@@ -569,7 +569,7 @@ def test_the_session_query_and_the_roster_carry_the_endpoint_state(rig):
         agents = rig.daemon._agents_query({})["bindings"]
         (row,) = [b for b in agents if b["qualified"] == "reviewer@proj-a"]
         assert row["endpoint"] is False and row["endpoint_since"] is not None
-        shim.notify_endpoint(True)
+        shim.notify_endpoint(present=True)
         assert wait_until(lambda: binding(rig, "reviewer@proj-a").endpoint is True)
     finally:
         a.stop()

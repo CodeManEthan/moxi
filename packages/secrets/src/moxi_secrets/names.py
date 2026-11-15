@@ -208,7 +208,7 @@ class Compiled:
         for entry in cuts:
             norm = normalise(entry) if isinstance(entry, str) else ""
             if norm and norm not in {c.norm for c in self.cuts}:
-                self.cuts.append(_Entry(norm, None, False))
+                self.cuts.append(_Entry(norm, None, words=False))
         self._sets = {}
 
     def pattern(self, entry, eng):

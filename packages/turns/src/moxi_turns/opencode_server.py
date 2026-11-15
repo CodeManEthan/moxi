@@ -172,9 +172,9 @@ class Http:
                                           timeout=timeout or self.timeout)
         try:
             conn.connect()
-        except OSError as e:
+        except OSError as exc:
             conn.close()
-            raise Unreachable(f"{self.url}: {e}") from e
+            raise Unreachable(f"{self.url}: {exc}") from exc
         return conn
 
     def request(self, method: str, path: str, body=None,
@@ -188,8 +188,8 @@ class Http:
                 conn.request(method, path, body=data, headers=self.headers())
                 resp = conn.getresponse()
                 return resp.status, resp.read().decode(errors="replace")
-            except (OSError, http.client.HTTPException) as e:
-                raise NoAnswer(f"{method} {path}: {e}") from e
+            except (OSError, http.client.HTTPException) as exc:
+                raise NoAnswer(f"{method} {path}: {exc}") from exc
         finally:
             conn.close()
 
@@ -231,9 +231,9 @@ class EventStream:
             if sock is not None:
                 sock.settimeout(self.silence)
             resp = conn.getresponse()
-        except (OSError, http.client.HTTPException) as e:
+        except (OSError, http.client.HTTPException) as exc:
             conn.close()
-            raise NoAnswer(f"GET /event: {e}") from e
+            raise NoAnswer(f"GET /event: {exc}") from exc
         if resp.status != 200:
             conn.close()
             raise NoAnswer(f"GET /event answered {resp.status}")
@@ -266,10 +266,10 @@ class EventStream:
                         self.on_event(event)
                     except Exception:                       # noqa: BLE001
                         log.exception("an event could not be handled")
-        except Exception as e:                              # noqa: BLE001
+        except Exception as exc:                              # noqa: BLE001
             # A close from another thread can leave http.client half torn down, and
             # what it raises then is not always an OSError. Either way the stream ended.
-            reason = self.reason or f"the event stream failed: {e!r}"
+            reason = self.reason or f"the event stream failed: {exc!r}"
         finally:
             self.close(reason)
 

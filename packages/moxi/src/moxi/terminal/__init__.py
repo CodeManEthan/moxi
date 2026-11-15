@@ -37,7 +37,7 @@ environment.
 
 from __future__ import annotations
 
-from .._mark import NAME as STARTED_BY_ENV
+from .._mark import STARTED_BY_ENV as STARTED_BY_ENV
 from .._mark import marked
 from ._record import (FAILED, FORMAT, FOUND, NO_KEYBOARD, NO_PLACE, SAME, UNDECIDED,
                       WRITTEN, NewerFormat, NoRecord, Outcome, Read, Record, Unreadable,

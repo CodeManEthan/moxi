@@ -38,11 +38,11 @@ def answer(event) -> str | None:
     if event.event != "start" or getattr(event, "source", None) not in SOURCES:
         return None
     env = listeners.event_env(event)
-    if env.get(listeners.RELAUNCH):
+    if env.get(listeners.RELAUNCH_ENV):
         return None
     conn = listeners.open_store()
     try:
-        if env.get(listeners.REQUEST):
+        if env.get(listeners.REQUEST_ENV):
             lines = _launched(event, conn)
         else:
             lines = _by_hand(event, env, conn)
@@ -57,7 +57,7 @@ def _launched(event, conn) -> list[str]:
     if row is None or row.target == "headless":
         return []
     key = handoffs.key_of_row(row)
-    where = handoffs.folder_of_row(row, create=key is not None)
+    where = handoffs.handoff_dir_of_row(row, create=key is not None)
     lines = []
     found = handoffs.waiting(conn, where, key) if key is not None else None
     if found is not None:
@@ -70,7 +70,7 @@ def _launched(event, conn) -> list[str]:
 
 def _by_hand(event, env, conn) -> list[str]:
     key = handoffs.key_of_env(env)
-    where = handoffs.folder(_cwd(event, env), create=key is not None)
+    where = handoffs.handoff_dir(_cwd(event, env), create=key is not None)
     lines = []
     found = handoffs.waiting(conn, where, key) if key is not None else None
     if found is not None:

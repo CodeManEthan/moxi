@@ -114,7 +114,7 @@ def inputs() -> dict[str, dict]:
                        "maximum": CONNECTOR_WAIT_CEILING,
                        "description": "seconds to wait; leave it out for the usual "
                                       "wait. The longest wait is "
-                                      f"{ConnectorConfig.wait_max} seconds unless "
+                                      f"{ConnectorConfig.wait_max_s} seconds unless "
                                       "comms is configured otherwise; a longer "
                                       "one is cut to it"},
         }, "required": ["to", "text"], "additionalProperties": False},
@@ -178,18 +178,18 @@ SPOKEN = {
 
 class Tools:
     """The four tools over one `Link`. `result` builds a result (the connector's
-    `Result`); `refused(code, text, **fields)` an error result.
+    `Result`); `on_refused(code, text, **fields)` an error result.
 
     `record` and `env` are what the send verb reads (the record, the config's roots);
     `clock` ages messages."""
 
-    def __init__(self, link, *, result: Callable, refused: Callable, wait_default: int,
+    def __init__(self, link, *, result: Callable, on_refused: Callable, wait_default_s: int,
                  wait_max: int, record=None, env: Mapping[str, str] | None = None,
                  clock: Callable[[], float] = time.time):
         self.link = link
         self.result = result
-        self.refused = refused
-        self.wait_default = wait_default
+        self.on_refused = on_refused
+        self.wait_default_s = wait_default_s
         self.wait_max = wait_max
         self.record = record
         self.env = env
@@ -208,18 +208,18 @@ class Tools:
         if self.link.bound:
             return None
         if self.link.state in (link_mod.HELD, link_mod.REFUSED):
-            return self.refused("name-held" if self.link.state == link_mod.HELD
+            return self.on_refused("name-held" if self.link.state == link_mod.HELD
                                 else "identity-refused",
                                 HELD_TEXT.format(detail=self.link.detail or "it is held"),
                                 holder=self.link.holder)
-        return self.refused("offline", OFFLINE_TEXT)
+        return self.on_refused("offline", OFFLINE_TEXT)
 
     # ---------------------------------------------------------------- agents
     async def agents(self, args: Mapping[str, Any], ctx) -> Any:
         try:
             info = await asyncio.to_thread(self.link.read, "agents")
-        except (DaemonError, DaemonOffline) as e:
-            return self._read_refused(e)
+        except (DaemonError, DaemonOffline) as exc:
+            return self._read_refused(exc)
         info = dict(info)
         standing = [s for s in info.get("standing") or ()
                     if isinstance(s, dict) and s.get("kind") != SEND_ONLY]
@@ -276,7 +276,7 @@ class Tools:
     def _send_refused(self, result):
         text = "\n".join(result.lines())
         refusal = result.refusal or sending.Refusal(result.outcome, text)
-        return self.refused(refusal.code, refusal.text or text, outcome=result.outcome)
+        return self.on_refused(refusal.code, refusal.text or text, outcome=result.outcome)
 
     @staticmethod
     def _sent_fields(result) -> dict:
@@ -299,15 +299,15 @@ class Tools:
             return unbound
         limit = int(args.get("limit", LIMIT_DEFAULT))
         if not LIMIT[0] <= limit <= LIMIT[1]:
-            return self.refused("limit-shape", f"limit {limit} is outside "
+            return self.on_refused("limit-shape", f"limit {limit} is outside "
                                 f"{LIMIT[0]} to {LIMIT[1]}. Nothing was read.")
         try:
             # The count first: once the digest is open, no read may fail and turn the
             # answer into an error, which the connector would still settle as written.
             waiting = await self._waiting()
             shown, _ = await self._take(ctx, lambda pending: pending[:limit])
-        except (DaemonError, DaemonOffline) as e:
-            return self._read_refused(e)
+        except (DaemonError, DaemonOffline) as exc:
+            return self._read_refused(exc)
         more = max(0, waiting - len(shown))
         ctx.log(returned=len(shown), more_waiting=more)
         count = len(shown)
@@ -347,7 +347,7 @@ class Tools:
                 # that settle: if it opens a newer digest over the same ids, the older
                 # settle finds its rows moved and changes nothing.
                 held = False
-                job.add_done_callback(self._abandoned)
+                job.add_done_callback(self._on_abandoned)
                 raise
             kept = {str(i) for i in answer.get("ids") or ()}
             digest = answer.get("digest")
@@ -365,7 +365,7 @@ class Tools:
             self.shown.pop(mid, None)
         return out, {str(d.get("id")) for d in answer.get("dropped") or ()}
 
-    def _abandoned(self, job: asyncio.Future) -> None:
+    def _on_abandoned(self, job: asyncio.Future) -> None:
         """A cancelled call's open has returned: schedule its digest's settle unhandled,
         and free the buffer for the next call without waiting for that settle."""
         try:
@@ -379,20 +379,20 @@ class Tools:
 
     def _release(self, digest) -> None:
         try:
-            self.link.settle(digest, False)
-        except (DaemonError, DaemonOffline) as e:
+            self.link.settle(digest, handled=False)
+        except (DaemonError, DaemonOffline) as exc:
             # The binding's close puts the digest's rows back to waiting.
             log.warning("digest %s of a cancelled call couldn't be released (%s); its "
-                        "messages wait again when the binding closes", digest, e)
+                        "messages wait again when the binding closes", digest, exc)
 
     def _settler(self, digest, ids):
-        async def settle(written: bool) -> None:
+        async def settle(written: bool) -> None:  # noqa: FBT001 -- connector callback protocol passes the result positionally
             try:
-                await asyncio.to_thread(self.link.settle, digest, bool(written))
-            except (DaemonError, DaemonOffline) as e:
+                await asyncio.to_thread(self.link.settle, digest, handled=bool(written))
+            except (DaemonError, DaemonOffline) as exc:
                 # The binding's close puts the digest's rows back to waiting.
                 log.warning("digest %s couldn't be settled (%s); its messages wait again",
-                            digest, e)
+                            digest, exc)
                 return
             if written:
                 for mid in ids:
@@ -416,15 +416,15 @@ class Tools:
         unbound = self._unbound()
         if unbound is not None:
             return unbound
-        wait = int(args.get("wait_s", self.wait_default))
+        wait = int(args.get("wait_s", self.wait_default_s))
         if wait < 1:
-            return self.refused("wait-shape", f"wait_s {wait} is under 1. Nothing "
+            return self.on_refused("wait-shape", f"wait_s {wait} is under 1. Nothing "
                                 "was sent.")
         # The schema can't know the configured longest wait; a longer ask is cut to it,
         # and the answer says how long it waited.
         wait = min(wait, self.wait_max)
         if self.waiting >= WAITERS:
-            return self.refused("busy", f"{WAITERS} calls are already waiting for "
+            return self.on_refused("busy", f"{WAITERS} calls are already waiting for "
                                 "replies; try again when one has finished. Nothing was "
                                 "sent.")
         self.waiting += 1
@@ -467,8 +467,8 @@ class Tools:
                 if pushed:
                     taken, gone = await self._take(ctx, lambda pending, mid=mid: [
                         p for p in pending if str(p["message_id"]) == mid])
-            except (DaemonError, DaemonOffline) as e:
-                return self._read_refused(e)
+            except (DaemonError, DaemonOffline) as exc:
+                return self._read_refused(exc)
             if not pushed:
                 message = self._message(reply, already=False)
                 self.shown[mid] = None
@@ -587,9 +587,9 @@ class Tools:
 
     def _read_refused(self, e: Exception):
         if isinstance(e, DaemonOffline):
-            return self.refused("offline", OFFLINE_TEXT)
+            return self.on_refused("offline", OFFLINE_TEXT)
         reason = (getattr(e, "data", None) or {}).get("reason") or str(e)
-        return self.refused("refused", f"comms refused the read: {reason}")
+        return self.on_refused("on_refused", f"comms on_refused the read: {reason}")
 
 
 _ASKS = {machine_line.POSTURE_ONCE: "asks for one reply",

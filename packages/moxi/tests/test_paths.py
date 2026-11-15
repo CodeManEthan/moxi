@@ -46,7 +46,7 @@ def test_the_defaults_without_xdg():
 
 
 @POSIX
-def test_the_roots_are_moxis_and_the_directories_the_modules():
+def test_the_roots_are_moxis_and_the_dirs_the_modules():
     lay = Layout("cache")
     e = env()
     assert lay.data_root(e) == Path(HOME, ".local/share/moxi")
@@ -152,7 +152,7 @@ def test_the_locators_are_the_modules_variables_and_moxi_home():
     assert "DEVICE" not in paths.LOCATORS
 
 
-def test_without_a_mapping_it_reads_the_process_environment(monkeypatch, tmp_path):
+def test_without_a_mapping_it_reads_the_process_env(monkeypatch, tmp_path):
     monkeypatch.setenv("MOXI_CACHE_HOME", str(tmp_path))
     for var in ("MOXI_CACHE_DATA_HOME", "MOXI_CACHE_STATE_HOME", "MOXI_CACHE_RUNTIME_DIR"):
         monkeypatch.delenv(var, raising=False)
@@ -178,7 +178,7 @@ def test_a_layout_needs_a_module_name():
 
 def test_windows_defaults_keep_only_config_roaming(monkeypatch):
     monkeypatch.setattr(paths, "_WINDOWS", True)
-    monkeypatch.setattr(paths, "_windows_folders", lambda env=None: ("/Roaming", "/Local"))
+    monkeypatch.setattr(paths, "_windows_dirs", lambda env=None: ("/Roaming", "/Local"))
     lay = Layout("cache")
     e = env(XDG_DATA_HOME="/x", XDG_RUNTIME_DIR="/run/user/1000")
     assert lay.data_dir(e) == Path("/Local/moxi/data/cache")
@@ -190,7 +190,7 @@ def test_windows_defaults_keep_only_config_roaming(monkeypatch):
 
 
 @WINDOWS
-def test_windows_defaults_are_the_users_application_data_folders():
+def test_windows_defaults_are_the_users_application_data_dirs():
     from moxi import _win
 
     lay = Layout("cache")
@@ -231,7 +231,7 @@ def test_the_device_id_is_written_once(home):
 
 
 @POSIX
-def test_the_device_ids_missing_directories_are_each_made_0700(home):
+def test_the_device_ids_missing_dirs_are_each_made_0700(home):
     root = Path(home["MOXI_HOME"])
     root.mkdir()
     os.chmod(root, 0o775)
@@ -284,8 +284,8 @@ def test_two_threads_of_one_process_agree_on_one_device_id(home, monkeypatch):
         barrier.wait()
         try:
             found.append(paths.device_id(home))
-        except Exception as e:  # noqa: BLE001 - the test reports it
-            failed.append(e)
+        except Exception as exc:  # noqa: BLE001 - the test reports it
+            failed.append(exc)
 
     threads = [threading.Thread(target=first_run) for _ in range(2)]
     for t in threads:
@@ -312,7 +312,7 @@ def test_the_device_label(home):
 
 # -- live data under a host folder ---------------------------------------------------------
 
-def test_an_old_host_folder_is_read_in_place_until_moved(home, monkeypatch):
+def test_an_old_host_dir_is_read_in_place_until_moved(home, monkeypatch):
     monkeypatch.setattr(paths, "_host_name", lambda: "thishost")
     root = Path(home["MOXI_HOME"])
     lay = Layout("cache")
@@ -331,7 +331,7 @@ def test_an_old_host_folder_is_read_in_place_until_moved(home, monkeypatch):
     assert lay.cache_dir(home) == old_cache
 
 
-def test_the_modules_device_variable_names_the_old_folder_first(home, monkeypatch):
+def test_the_modules_device_variable_names_the_old_dir_first(home, monkeypatch):
     monkeypatch.setattr(paths, "_host_name", lambda: "thishost")
     root = Path(home["MOXI_HOME"])
     (root / "state" / "thishost" / "cache").mkdir(parents=True)
@@ -341,7 +341,7 @@ def test_the_modules_device_variable_names_the_old_folder_first(home, monkeypatc
     assert Layout("cache").state_dir(home) == root / "state" / "thishost" / "cache"
 
 
-def test_what_is_not_an_old_folder_is_passed_over(home, monkeypatch):
+def test_what_is_not_an_old_dir_is_passed_over(home, monkeypatch):
     monkeypatch.setattr(paths, "_host_name", lambda: "thishost")
     root = Path(home["MOXI_HOME"])
     (root / "state" / "thishost").mkdir(parents=True)
@@ -359,7 +359,7 @@ def test_the_host_name_comes_without_the_socket_module():
 # -- the runtime directory and sockets ----------------------------------------------------
 
 @POSIX
-def test_a_created_runtime_directory_is_private(home):
+def test_a_created_runtime_dir_is_private(home):
     lay = Layout("cache")
     path = lay.runtime_dir(home)
     assert not path.exists()
@@ -371,7 +371,7 @@ def test_a_created_runtime_directory_is_private(home):
 
 
 @WINDOWS
-def test_a_created_runtime_directory_grants_only_this_user(home):
+def test_a_created_runtime_dir_grants_only_this_user(home):
     from moxi import _win
 
     path = Layout("cache").runtime_dir(home, create=True)
@@ -380,7 +380,7 @@ def test_a_created_runtime_directory_grants_only_this_user(home):
 
 
 @POSIX
-def test_a_short_socket_path_is_in_the_runtime_directory(monkeypatch, tmp_path):
+def test_a_short_socket_path_is_in_the_runtime_dir(monkeypatch, tmp_path):
     # Short roots that need not exist: socket_path makes no runtime directory.
     monkeypatch.setattr(paths, "_SHORT_ROOT", str(tmp_path / "t"))
     monkeypatch.setenv("MOXI_CACHE_RUNTIME_DIR", "/r")
@@ -392,7 +392,7 @@ def test_a_short_socket_path_is_in_the_runtime_directory(monkeypatch, tmp_path):
 
 
 @POSIX
-def test_a_long_socket_path_is_hashed_into_a_private_directory(monkeypatch, tmp_path):
+def test_a_long_socket_path_is_hashed_into_a_private_dir(monkeypatch, tmp_path):
     short = tmp_path / "t"
     monkeypatch.setattr(paths, "_SHORT_ROOT", str(short))
     runtime = tmp_path / ("r" * 100)
@@ -425,7 +425,7 @@ def test_windows_has_no_socket_paths(monkeypatch):
 
 # -- this environment's programs ---------------------------------------------------------
 
-def test_script_is_in_this_environments_scripts_directory(monkeypatch, tmp_path):
+def test_script_is_in_this_environments_scripts_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "_scripts", lambda: tmp_path)
     exe = tmp_path / ("moxi-cache-watch.exe" if sys.platform == "win32" else "moxi-cache-watch")
     exe.write_text("#!/bin/sh\n")
@@ -452,13 +452,13 @@ def test_python_is_the_environments_own_path():
     assert paths.python() == own
 
 
-def test_python_without_one_in_the_scripts_directory_is_this_interpreter(monkeypatch,
+def test_python_without_one_in_the_scripts_dir_is_this_interpreter(monkeypatch,
                                                                           tmp_path):
     monkeypatch.setattr(paths, "_scripts", lambda: tmp_path)
     assert paths.python() == Path(sys.executable)
 
 
-def test_script_tries_pathext_in_the_scripts_directory_only(monkeypatch, tmp_path):
+def test_script_tries_pathext_in_the_scripts_dir_only(monkeypatch, tmp_path):
     """The Windows search, by hand: each PATHEXT extension in the scripts directory, and
     never the working directory, where a file of the same name may stand."""
     scripts, here = tmp_path / "scripts", tmp_path / "here"
@@ -483,7 +483,7 @@ def test_script_tries_pathext_in_the_scripts_directory_only(monkeypatch, tmp_pat
 
 
 @WINDOWS
-def test_script_on_windows_never_takes_a_file_in_the_working_directory(monkeypatch,
+def test_script_on_windows_never_takes_a_file_in_the_working_dir(monkeypatch,
                                                                        tmp_path):
     scripts, here = tmp_path / "scripts", tmp_path / "here"
     scripts.mkdir()
@@ -543,15 +543,15 @@ def test_a_home_nothing_places_raises_and_leaves_a_tilde_as_it_is(monkeypatch):
     assert paths._expanduser("~/.local/share", {}) == "~/.local/share"
 
 
-@pytest.fixture
-def shell_folders(monkeypatch):
+@pytest.fixture(name="shell_dirs")
+def shell_dirs_fixture(monkeypatch):
     """Windows as the core sees it, with the shell's known folders made up: `profile`,
     `local` and `roaming` under `/Shell`. Unset, a name the shell gives nothing for."""
     from moxi import _win
 
     given = {"roaming": "/Shell/Roaming", "local": "/Shell/Local", "profile": "/Shell/Me"}
 
-    def known_folder(name):
+    def known_folder(name):  # noqa: MX3 -- mirrors the Windows Known Folders helper
         if name not in given:
             raise OSError(f"the shell gives no {name} folder for this user")
         return given[name]
@@ -562,7 +562,7 @@ def shell_folders(monkeypatch):
 
 
 def test_the_windows_home_is_userprofile_then_homedrive_and_homepath_then_the_shell(
-        shell_folders, monkeypatch):
+        shell_dirs, monkeypatch):
     monkeypatch.setenv("USERPROFILE", "/poisoned")
     assert paths.home({"USERPROFILE": "C:/Users/ada"}) == Path("C:/Users/ada")
     split = {"HOMEDRIVE": "D:", "HOMEPATH": "/Users/ada"}
@@ -572,26 +572,26 @@ def test_the_windows_home_is_userprofile_then_homedrive_and_homepath_then_the_sh
     assert paths.home({"HOME": "/not/read/on/windows"}) == Path("/Shell/Me")
     assert paths._expanduser("~\\.claude", {"USERPROFILE": "C:/Users/ada"}) == (
         "C:/Users/ada\\.claude")
-    del shell_folders["profile"]
+    del shell_dirs["profile"]
     with pytest.raises(LookupError):
         paths.home({})
 
 
-def test_the_windows_folders_are_the_overrides_else_the_shells(shell_folders, monkeypatch):
+def test_the_windows_dirs_are_the_overrides_else_the_shells(shell_dirs, monkeypatch):
     monkeypatch.setenv("WIN_PD_OVERRIDE_APPDATA", "/poisoned/roaming")
     monkeypatch.setenv("WIN_PD_OVERRIDE_LOCAL_APPDATA", "/poisoned/local")
     monkeypatch.setenv("APPDATA", "/poisoned/appdata")
     monkeypatch.setenv("LOCALAPPDATA", "/poisoned/localappdata")
-    assert paths._windows_folders({}) == ("/Shell/Roaming", "/Shell/Local")
-    assert paths._windows_folders({"APPDATA": "/a", "LOCALAPPDATA": "/l"}) == (
+    assert paths._windows_dirs({}) == ("/Shell/Roaming", "/Shell/Local")
+    assert paths._windows_dirs({"APPDATA": "/a", "LOCALAPPDATA": "/l"}) == (
         "/Shell/Roaming", "/Shell/Local")
-    assert paths._windows_folders({"WIN_PD_OVERRIDE_APPDATA": "/r",
+    assert paths._windows_dirs({"WIN_PD_OVERRIDE_APPDATA": "/r",
                                    "WIN_PD_OVERRIDE_LOCAL_APPDATA": "/l"}) == ("/r", "/l")
     # Empty or blank reads as unset, as platformdirs reads these names (it strips them).
-    assert paths._windows_folders({"WIN_PD_OVERRIDE_APPDATA": "",
+    assert paths._windows_dirs({"WIN_PD_OVERRIDE_APPDATA": "",
                                    "WIN_PD_OVERRIDE_LOCAL_APPDATA": "  "}) == (
         "/Shell/Roaming", "/Shell/Local")
-    assert paths._windows_folders() == ("/poisoned/roaming", "/poisoned/local")
+    assert paths._windows_dirs() == ("/poisoned/roaming", "/poisoned/local")
     lay = Layout("cache")
     assert lay.data_dir({"WIN_PD_OVERRIDE_LOCAL_APPDATA": ""}) == Path(
         "/Shell/Local/moxi/data/cache")
@@ -608,9 +608,9 @@ def test_the_core_no_longer_needs_platformdirs():
 
 # -- finding a program on a given PATH ----------------------------------------------------
 
-def _program(folder: Path, name: str) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / name
+def _program(program_dir: Path, name: str) -> Path:
+    program_dir.mkdir(parents=True, exist_ok=True)
+    path = program_dir / name
     path.write_text("#!/bin/sh\n")
     path.chmod(0o755)
     return path
@@ -679,7 +679,7 @@ def test_no_store_variable_and_not_home_moves_the_anchor(monkeypatch, variable):
     assert paths.anchor_dir(EVERY_STORE_VARIABLE) == Path(account, ".local/share/moxi/moxi")
 
 
-def test_the_windows_anchor_is_under_the_shells_local_folder(shell_folders):
+def test_the_windows_anchor_is_under_the_shells_local_dir(shell_dirs):
     assert paths.anchor_dir({}) == Path("/Shell/Local/moxi/data/moxi")
     assert paths.anchor_dir(EVERY_STORE_VARIABLE) == Path("/Shell/Local/moxi/data/moxi")
     assert paths.anchor_dir({"MOXI_ANCHOR_HOME": "/kit"}) == Path("/kit/moxi/data/moxi")
@@ -707,8 +707,8 @@ def test_an_account_the_user_database_lacks_has_no_anchor(monkeypatch):
         "/kit/.local/share/moxi/moxi")
 
 
-def test_a_windows_account_with_no_local_folder_has_no_anchor(shell_folders):
-    del shell_folders["local"]
+def test_a_windows_account_with_no_local_dir_has_no_anchor(shell_dirs):
+    del shell_dirs["local"]
     with pytest.raises(paths.NoAnchor) as raised:
         paths.anchor_dir({"LOCALAPPDATA": "/l", "WIN_PD_OVERRIDE_LOCAL_APPDATA": "/o"})
     assert raised.value.cause == "the shell gives no local application data folder"
@@ -716,7 +716,7 @@ def test_a_windows_account_with_no_local_folder_has_no_anchor(shell_folders):
     assert raised.value.uid is None
 
 
-def test_the_test_kits_variable_stands_in_for_the_accounts_folder(fence, monkeypatch):
+def test_the_test_kits_variable_stands_in_for_the_accounts_dir(fence, monkeypatch):
     if sys.platform == "win32":
         assert paths.anchor_dir() == Path(fence.env["LOCALAPPDATA"], "moxi", "data", "moxi")
     else:
@@ -731,7 +731,7 @@ def test_the_test_kits_variable_stands_in_for_the_accounts_folder(fence, monkeyp
 
 
 @WINDOWS
-def test_the_windows_anchor_is_the_users_real_local_folder(monkeypatch):
+def test_the_windows_anchor_is_the_users_real_local_dir(monkeypatch):
     from moxi import _win
 
     monkeypatch.delenv("MOXI_ANCHOR_HOME")
@@ -743,7 +743,7 @@ def test_the_windows_anchor_is_the_users_real_local_folder(monkeypatch):
 
 
 @WINDOWS
-def test_the_windows_shell_folders_are_the_real_ones(fence, monkeypatch):
+def test_the_windows_shell_dirs_are_the_real_ones(fence, monkeypatch):
     from moxi import _win
 
     # The shell expands its folders from USERPROFILE unless asked with the account's
@@ -752,7 +752,7 @@ def test_the_windows_shell_folders_are_the_real_ones(fence, monkeypatch):
     assert not Path(real).is_relative_to(fence.home)
     monkeypatch.setenv("USERPROFILE", str(fence.home / "moved"))
     assert _win.known_folder("local") == real
-    assert paths._windows_folders({}) == (_win.known_folder("roaming"),
+    assert paths._windows_dirs({}) == (_win.known_folder("roaming"),
                                           _win.known_folder("local"))
     assert paths.home({}) == Path(_win.known_folder("profile"))
     for name in ("roaming", "local", "profile"):

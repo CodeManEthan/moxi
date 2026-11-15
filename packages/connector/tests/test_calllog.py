@@ -41,8 +41,8 @@ def rows_of(path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def every_byte(directory) -> bytes:
-    return b"".join(p.read_bytes() for p in sorted(directory.iterdir()))
+def every_byte(log_dir) -> bytes:
+    return b"".join(p.read_bytes() for p in sorted(log_dir.iterdir()))
 
 
 def test_the_day_file_is_private_and_holds_one_object_per_line(logdir):
@@ -189,11 +189,11 @@ def test_no_file_rolls_past_a_megabyte(logdir):
     assert [r["n"] for r in rows_of(path)] == list(range(1200))
 
 
-def _days(directory, first: int, last: int) -> list[str]:
+def _days(log_dir, first: int, last: int) -> list[str]:
     names = []
     for back in range(first, last + 1):
         name = (dt.date(2026, 11, 4) - dt.timedelta(days=back)).isoformat() + ".jsonl"
-        (directory / name).write_text("{}\n")
+        (log_dir / name).write_text("{}\n")
         names.append(name)
     return names
 
@@ -235,11 +235,11 @@ def test_a_minute_open_at_midnight_is_summed_in_its_own_days_file(logdir):
 def test_read_rows_reads_days_oldest_first_and_skips_bad_lines(logdir):
     (logdir / "2026-11-03.jsonl").write_text('{"kind": "a"}\nnot json\n[1]\n')
     (logdir / "2026-11-04.jsonl").write_text('{"kind": "b"}\n{"kind": "check"}\n')
-    rows = list(calllog.read_rows(days=2, now=T0, directory=logdir))
+    rows = list(calllog.read_rows(days=2, now=T0, log_dir=logdir))
     assert [r["kind"] for r in rows] == ["a", "b", "check"]
-    assert [r["kind"] for r in calllog.read_rows(now=T0, directory=logdir)] == ["b", "check"]
-    assert calllog.last({"a"}, now=T0, directory=logdir) == {"kind": "a"}
-    assert calllog.last({"zzz"}, now=T0, directory=logdir) is None
+    assert [r["kind"] for r in calllog.read_rows(now=T0, log_dir=logdir)] == ["b", "check"]
+    assert calllog.last({"a"}, now=T0, log_dir=logdir) == {"kind": "a"}
+    assert calllog.last({"zzz"}, now=T0, log_dir=logdir) is None
 
 
 def test_a_flood_of_metadata_fetches_without_a_token_stays_bounded(logdir):

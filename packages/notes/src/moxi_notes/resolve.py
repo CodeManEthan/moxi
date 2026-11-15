@@ -91,7 +91,7 @@ def _parts(path: str, flavour) -> list[str]:
     return [anchor, *names]
 
 
-def _spellings(path: str, flavour, real: bool) -> list[str]:
+def _spellings(path: str, flavour, *, real: bool) -> list[str]:
     spelled = flavour.normpath(path)
     out = [spelled]
     if real:
@@ -112,10 +112,10 @@ def below(path, root, *, flavour=os.path, real: bool | None = None) -> tuple[str
     if real is None:
         real = flavour is os.path
     path, root = os.fspath(path), os.fspath(root)
-    for p in _spellings(path, flavour, real):
+    for p in _spellings(path, flavour, real=real):
         p_parts = _parts(p, flavour)
         p_folded = _parts(flavour.normcase(p), flavour)
-        for r in _spellings(root, flavour, real):
+        for r in _spellings(root, flavour, real=real):
             r_folded = _parts(flavour.normcase(r), flavour)
             if p_folded[:len(r_folded)] == r_folded:
                 return tuple(p_parts[len(r_folded):])

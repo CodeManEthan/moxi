@@ -59,18 +59,18 @@ class Shown:
 
     A round whose log can't be read has its error in `unreadable` and no `state`. When
     only the project's log can't be read, `register` is None and its error is in
-    `register_unreadable`. `closed` answers whether a round, by name, is closed."""
+    `register_unreadable`. `on_closed` answers whether a round, by name, is closed."""
 
     name: str
     project: str
     slug: str
-    folder: Path
+    round_dir: Path
     state: states.State | None = None
     register: states.State | None = None
     notice: str | None = None
     unreadable: Unreadable | None = None
     register_unreadable: Unreadable | None = None
-    closed: Callable[[str], bool] | None = None
+    on_closed: Callable[[str], bool] | None = None
 
 
 def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
@@ -93,37 +93,37 @@ def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     found = {"name": f"{home.project}/{slug}", "project": home.project, "slug": slug,
-             "folder": home.round_folder(slug)}
+             "round_dir": home.round_dir(slug)}
     try:
         summary = (_refreshed(home, slug) if refresh
-                   else index.read(home.project, home.folder, slug))
+                   else index.read(home.project, home.rounds_dir, slug))
         found["notice"] = summary.notice
         if summary.unreadable is not None:
             return Shown(**found, unreadable=summary.unreadable)
         # The whole state is the log's; the index answers only the summary of it.
-        state = states.fold(log.read_round(log.round_log(home.round_folder(slug))))
+        state = states.fold(log.read_round(log.round_log(home.round_dir(slug))))
     except NoLog:
         raise NoRound(found["name"]) from None
-    except Unreadable as error:
-        return Shown(**found, unreadable=error)
+    except Unreadable as exc:
+        return Shown(**found, unreadable=exc)
     register, register_unreadable = None, None
     try:
-        register = states.fold(log.read(log.project_log(home.folder)))
+        register = states.fold(log.read(log.project_log(home.rounds_dir)))
     except NoLog:
         register = states.State()
-    except Unreadable as error:
-        register_unreadable = error
+    except Unreadable as exc:
+        register_unreadable = exc
     return Shown(**found, state=state, register=register,
                  register_unreadable=register_unreadable,
-                 closed=lambda round_name: questions.is_closed(round_name, settings))
+                 on_closed=lambda round_name: questions.is_closed(round_name, settings))
 
 
 def _refreshed(home: folders.Home, slug: str) -> index.Summary:
     try:
-        return index.refresh(home.project, home.folder, slug)
+        return index.refresh(home.project, home.rounds_dir, slug)
     except (sqlite3.Error, OSError, store.StoreError):
         # The index is a cache: when it can't be brought up to date, the log answers.
-        return index.read(home.project, home.folder, slug)
+        return index.read(home.project, home.rounds_dir, slug)
 
 
 # -- the sections ------------------------------------------------------------------------
@@ -141,7 +141,7 @@ class Section:
 def _questions(found: Shown) -> list:
     listed = []
     for question in found.state.questions:
-        reads = questions.current(question, found.state, closed=found.closed)
+        reads = questions.current(question, found.state, on_closed=found.on_closed)
         state = questions.shown_as(reads, ended=found.state.ended is not None)
         data = {"id": question.id, "text": question.text, "from": question.origin,
                 "blocks": (None if question.blocks is None
@@ -335,21 +335,21 @@ SECTIONS: tuple[Section, ...] = (
 
 def _head(found: Shown) -> dict:
     head = {"name": found.name, "project": found.project, "slug": found.slug,
-            "folder": str(found.folder), "notice": found.notice}
+            "folder": str(found.round_dir), "notice": found.notice}
     if found.unreadable is not None:
         error = found.unreadable
         return {**head, "unreadable": {"file": str(error.file), "line": error.line,
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
     state = found.state
-    at = steps.current(state, name=found.name, closed=found.closed)
+    at = steps.current(state, name=found.name, on_closed=found.on_closed)
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "inherits": list(state.inherits),
             "flow": state.flow, "steps": state.steps,
             "step": None if at is None else at.data(),
             "close": (None if state.status != states.OPEN
-                      else {"waits": list(closing.waits(state, closed=found.closed))}),
+                      else {"waits": list(closing.waits(state, on_closed=found.on_closed))}),
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
             "trace": tracing.shown(state, found.register),
@@ -524,7 +524,7 @@ def as_text(found: Shown) -> str:
     """The round as lines, ending in a line break."""
     shown_as = data(found)
     if found.unreadable is not None:
-        lines = [f"round {found.name}   unreadable", f"folder: {found.folder}",
+        lines = [f"round {found.name}   unreadable", f"folder: {found.round_dir}",
                  found.unreadable.reason]
         if found.unreadable.fix:
             lines.append(f"  fix: {found.unreadable.fix}")
@@ -534,7 +534,7 @@ def as_text(found: Shown) -> str:
     steps = ", ".join(str(step.get("step")) for step in shown_as["steps"]) or "no steps"
     lines = [f"round {found.name}   {shown_as['status']}   flow {shown_as['flow']} "
              f"({steps})",
-             f"description: {shown_as['description']}", f"folder: {found.folder}"]
+             f"description: {shown_as['description']}", f"folder: {found.round_dir}"]
     lines += step_lines(shown_as["step"])
     if shown_as["close"] is not None:
         lines.append(closing.said(shown_as["close"]["waits"]))

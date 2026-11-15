@@ -90,7 +90,7 @@ def feeds_a_file(cmd: str) -> bool:
     return name in ("cat", "tee") or (name in ("python3", "node") and "-" in words[1:])
 
 
-def _closing_line(raw: str, start: int, delim: str, tabs: bool) -> tuple[int, int] | None:
+def _closing_line(raw: str, start: int, delim: str, *, tabs: bool) -> tuple[int, int] | None:
     """(where the body that starts at `start` ends, where the text after its closing line
     starts), or None when no line closes it."""
     j = start
@@ -154,7 +154,7 @@ def cut_heredocs(raw: str) -> str:
         elif c == "\n":
             cmd_start = i = i + 1
             for delim, tabs, cut in pending:
-                found = _closing_line(raw, i, delim, tabs)
+                found = _closing_line(raw, i, delim, tabs=tabs)
                 if found is None:
                     break
                 body_end, after = found

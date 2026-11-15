@@ -168,15 +168,15 @@ def _ran(command: str, result: Any) -> Verdict:
 def ask_expiry(session_id: str, *, conn: sqlite3.Connection | None = None,
                turns: Any | None = None, slots_api: Any = LOOK, cache: Any = LOOK,
                settings: Mapping[str, Any] | None = None,
-               environ: Mapping[str, str] | None = None) -> Verdict:
+               caller_env: Mapping[str, str] | None = None) -> Verdict:
     """One expiry ask of the session `session_id`, to its end. Never raises for what it
-    reads; a fault after its run was written ends the run `error`."""
-    env = dict(os.environ if environ is None else environ)
+    reads; a fault after its run was written ends the run `exc`."""
+    env = dict(os.environ if caller_env is None else caller_env)
     try:
         opened = conn if conn is not None else store.connect(create=False)
-    except Exception as error:  # noqa: BLE001  (no launch log: nothing was launched)
+    except Exception as exc:  # noqa: BLE001  (no launch log: nothing was launched)
         return Verdict(None, "not-launched", f"the launch log could not be opened: "
-                                             f"{_words(error)}")
+                                             f"{_words(exc)}")
     try:
         return _expiry(opened, session_id, turns, slots_api, cache, settings, env)
     finally:
@@ -202,8 +202,8 @@ def _expiry(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: An
         return Verdict(None, "run-open", f"run {current.run_id} is open on the launch")
     try:
         found = target.find(session_id, conn=conn, turns=turns, slots_api=api)
-    except catalog.Refused as refused:
-        return Verdict(None, getattr(refused, "code", None) or "refused", refused.problem)
+    except catalog.Refused as refused_exc:
+        return Verdict(None, getattr(refused_exc, "code", None) or "refused", refused_exc.problem)
     try:
         if not found.live or found.session is None:
             return Verdict(None, "not-live", f"session {session_id} is not live")
@@ -225,11 +225,11 @@ def _expiry(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: An
         try:
             run = store.insert_run(
                 conn, kind=command, mode="expiry", request_id=row.request_id,
-                session_id=sid, actor=store.LAUNCHER, state="acting", slot=row.slot,
+                session_id=sid, by=store.LAUNCHER, state="acting", slot=row.slot,
                 pane_id=row.pane_id, turn_number=reading.turn_number, job=exits.own_job(),
                 gone=gone)
-        except store.RunOpen as open_run:
-            return Verdict(None, "run-open", str(open_run))
+        except store.RunOpen as open_run_exc:
+            return Verdict(None, "run-open", str(open_run_exc))
         if verdict is not None:
             return _blocked(conn, run, verdict)
         age = getattr(clock, "age_s", None)
@@ -283,22 +283,22 @@ def _act(conn: sqlite3.Connection, run: store.Run, session: Any, command: str,
                 result = session.command(command, if_turn_number=number, stop_shells=True)
             else:
                 result = session.command(command, if_turn_number=number)
-        except Exception as error:  # noqa: BLE001  (turns' error is the verdict)
-            result = error
+        except Exception as exc:  # noqa: BLE001  (turns' error is the verdict)
+            result = exc
         verdict = verdict_of(command, result)
         store.add_run_event(conn, run.run_id, "result", {"outcome": verdict.outcome,
                                                          "word": verdict.word,
                                                          "detail": verdict.detail})
         return end(conn, run, verdict)
-    except BaseException as error:  # a run never stays open on a fault
-        if store.end_run(conn, run.run_id, "error", word=type(error).__name__,
-                         detail=_words(error)):
+    except BaseException as exc:  # a run never stays open on a fault
+        if store.end_run(conn, run.run_id, "error", word=type(exc).__name__,
+                         detail=_words(exc)):
             store.add_run_event(conn, run.run_id, "ended", {"outcome": "error",
-                                                            "detail": _words(error)})
-        if not isinstance(error, Exception):
+                                                            "detail": _words(exc)})
+        if not isinstance(exc, Exception):
             raise
         log.exception("expiry run %s stopped on a fault", run.run_id)
-        return Verdict("error", type(error).__name__, _words(error), run.run_id)
+        return Verdict("error", type(exc).__name__, _words(exc), run.run_id)
 
 
 def end(conn: sqlite3.Connection, run: store.Run, verdict: Verdict) -> Verdict:
@@ -349,10 +349,10 @@ def claude_projects(cache: Any, row: store.LaunchRow) -> str | None:
     rule = getattr(cache, "projects_root", None)
     if not config or rule is None:
         return None
-    environ = {"CLAUDE_CONFIG_DIR": config}
+    env = {"CLAUDE_CONFIG_DIR": config}
     if recorded.get("HOME"):
-        environ["HOME"] = recorded["HOME"]
-    return rule(environ)
+        env["HOME"] = recorded["HOME"]
+    return rule(env)
 
 
 def codex_sessions(row: store.LaunchRow, env: Mapping[str, str]) -> str:
@@ -377,8 +377,8 @@ def on_crossing(crossing: Any) -> str | None:
         return None
     try:
         return crossing_line(conn, crossing, pid=os.getpid())
-    except Exception as error:  # noqa: BLE001  (a busy store loses this crossing)
-        log.info("a crossing was not taken: %s", _words(error))
+    except Exception as exc:  # noqa: BLE001  (a busy store loses this crossing)
+        log.info("a crossing was not taken: %s", _words(exc))
         return None
     finally:
         conn.close()
@@ -409,7 +409,7 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
         return None
     try:
         run = store.insert_run(conn, kind="compact", mode="limit", request_id=row.request_id,
-                               session_id=session_id, actor=store.LAUNCHER, state="armed",
+                               session_id=session_id, by=store.LAUNCHER, state="armed",
                                slot=row.slot, pane_id=row.pane_id, crossing_key=key,
                                pend=True)
     except store.RunOpen:
@@ -428,20 +428,20 @@ def _told(conn: sqlite3.Connection, request_id: str, key: str) -> bool:
 
 
 def start_compact(conn: sqlite3.Connection, run: store.Run, *, spawn: Any | None = None,
-                  environ: Mapping[str, str] | None = None) -> bool:
+                  caller_env: Mapping[str, str] | None = None) -> bool:
     """Spawn a limit compact's job, detached, and record it on the run; say whether it
     started. One that does not start ends the run `failed`, word `not-started`."""
     from .compose import common
 
-    env = dict(os.environ if environ is None else environ)
+    env = dict(os.environ if caller_env is None else caller_env)
     spawn = spawn or proc.spawn
     try:
         argv = [str(paths.script("moxi-launcher-job")), "compact", run.run_id]
         cwd = Layout(store.MODULE).state_dir(env)
         pid = spawn(argv, detached=True, env=common.scrub(env, modules.session_env()),
                     cwd=str(cwd))
-    except Exception as error:  # noqa: BLE001  (a job that did not start ends its run)
-        detail = f"the compact's job did not start: {_words(error)}"
+    except Exception as exc:  # noqa: BLE001  (a job that did not start ends its run)
+        detail = f"the compact's job did not start: {_words(exc)}"
         if store.end_run(conn, run.run_id, "failed", word="not-started", detail=detail):
             store.add_run_event(conn, run.run_id, "ended", {"outcome": "failed",
                                                             "word": "not-started",
@@ -462,8 +462,8 @@ def start_compact(conn: sqlite3.Connection, run: store.Run, *, spawn: Any | None
 def _prune(conn: sqlite3.Connection, current: Mapping[str, Any]) -> None:
     try:
         store.prune(conn, float(current["records.keep_days"]))
-    except Exception as error:  # noqa: BLE001  (retention never stops a run)
-        log.warning("the launcher's records were not pruned: %s", error)
+    except Exception as exc:  # noqa: BLE001  (retention never stops a run)
+        log.warning("the launcher's records were not pruned: %s", exc)
 
 
 def _settings() -> Mapping[str, Any]:

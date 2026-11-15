@@ -300,7 +300,7 @@ class Terminal(Target):
             return self._start_child(launch)
         rid = launch.request_id
         pid = os.getpid()
-        _started(launch.conn, rid, pid)
+        _on_started(launch.conn, rid, pid)
         if launch.first_owed or _wrapped(launch.composition):
             failed = _start_deliverer(launch, pid)
             if failed is not None:
@@ -311,10 +311,10 @@ class Terminal(Target):
         try:
             os.chdir(launch.cwd)
             _execve(launch.command, list(launch.argv), terminal.marked(launch.env))
-        except OSError as error:
+        except OSError as exc:
             os.chdir(here)
             return fail(launch.conn, rid, SPAWN_FAILED,
-                           f"{launch.argv[0]} could not be started: {error}")
+                           f"{launch.argv[0]} could not be started: {exc}")
         # Only a stand-in for exec returns.
         return Started("started", exits.OK, pid=pid)
 
@@ -323,10 +323,10 @@ class Terminal(Target):
         try:
             child = _popen([launch.command, *launch.argv[1:]],
                            env=terminal.marked(launch.env), cwd=launch.cwd)
-        except OSError as error:
+        except OSError as exc:
             return fail(launch.conn, rid, SPAWN_FAILED,
-                           f"{launch.argv[0]} could not be started: {error}")
-        _started(launch.conn, rid, child.pid)
+                           f"{launch.argv[0]} could not be started: {exc}")
+        _on_started(launch.conn, rid, child.pid)
         failed = _start_deliverer(launch, child.pid) if launch.first_owed else None
         while True:
             try:
@@ -357,10 +357,10 @@ class Headless(Target):
         try:
             pid = _spawn(argv, detached=True, output=output, env=dict(launch.env),
                          cwd=launch.cwd)
-        except OSError as error:
+        except OSError as exc:
             return fail(launch.conn, rid, SPAWN_FAILED,
-                           f"{launch.argv[0]} could not be started: {error}")
-        _started(launch.conn, rid, pid)
+                           f"{launch.argv[0]} could not be started: {exc}")
+        _on_started(launch.conn, rid, pid)
         return Started("started", exits.OK, pid=pid,
                        line=f"launch {rid} started headless, pid {pid}; its output goes "
                             f"to {output}")
@@ -388,15 +388,15 @@ class Slot(Target):
             return []
         try:
             found = api.show(named)
-        except api.TryAgain as error:
-            return [SlotsBusy("slot", f"slots did not answer about slot {named}: {error}",
+        except api.TryAgain as exc:
+            return [SlotsBusy("slot", f"slots did not answer about slot {named}: {exc}",
                               "try again in a moment")]
-        except api.UsageError as error:
-            return [catalog.BadValue("slot", f"slots does not take slot {named!r}: {error}",
+        except api.UsageError as exc:
+            return [catalog.BadValue("slot", f"slots does not take slot {named!r}: {exc}",
                                      "name a slot by its number (1-999) or its name")]
-        except api.SlotsError as error:
+        except api.SlotsError as exc:
             return [SlotsFailed("slot", f"slots could not show slot {named}: "
-                                        f"{_error_words(error)}",
+                                        f"{_error_words(exc)}",
                                 "moxi slots list shows the slots")]
         if found is None:
             return [SlotMissing(named, f"there is no slot {named}",
@@ -451,20 +451,20 @@ class Slot(Target):
                 placed = api.respawn(named, list(launch.argv), **place)
             else:
                 placed = api.start(named, list(launch.argv), **place, create=named is None)
-        except api.Refused as refused:
-            holder = _refused_holder(refused.reason, refused.holder)
-            words = refused.words or f"slots refused the slot: {refused.reason}"
+        except api.Refused as refused_exc:
+            holder = _refused_holder(refused_exc.reason, refused_exc.holder)
+            words = refused_exc.words or f"slots refused the slot: {refused_exc.reason}"
             if holder and holder not in words:
-                words += f" ({refused.reason} by {holder})"
-            return fail(conn, rid, refused.reason, words)
-        except api.TryAgain as error:
-            return fail(conn, rid, TRY_AGAIN, f"slots' lock was not had in time: {error}")
-        except api.SlotsError as error:
+                words += f" ({refused_exc.reason} by {holder})"
+            return fail(conn, rid, refused_exc.reason, words)
+        except api.TryAgain as exc:
+            return fail(conn, rid, TRY_AGAIN, f"slots' lock was not had in time: {exc}")
+        except api.SlotsError as exc:
             # Its registry unreadable or unwritable, tmux failing, or an argument slots
             # does not take: the launch fails with slots' words.
             return fail(conn, rid, SPAWN_FAILED,
                         f"{launch.argv[0]} could not be started in a slot: "
-                        f"{_error_words(error)}")
+                        f"{_error_words(exc)}")
 
         slot, pane_id = placed.slot, placed.pane_id
         where = {"slot": str(slot), "pane_id": pane_id}
@@ -496,8 +496,8 @@ class Slot(Target):
         turns = first.turns_api(quiet=True)
         try:
             enabled = startup.screens(launch.composition.harness, api)
-        except ConfigError as error:
-            log.warning("startup screens of %s not watched: %s", rid, error)
+        except ConfigError as exc:
+            log.warning("startup screens of %s not watched: %s", rid, exc)
             enabled = []
         if enabled:
             watched = startup.watch(conn, rid, slot, enabled, api=api,
@@ -580,7 +580,7 @@ def failed_exit(reason: str | None) -> int:
     return exits.ERROR if reason in FAILED_ERRORS else exits.REFUSED
 
 
-def _started(conn: sqlite3.Connection, request_id: str, pid: int) -> None:
+def _on_started(conn: sqlite3.Connection, request_id: str, pid: int) -> None:
     ident = proc.identity(pid)
     store.set_state(conn, request_id, "started", leaving=("spawning",), pid=pid,
                     pid_started=ident.started if ident is not None else None)
@@ -735,8 +735,8 @@ def _wrapper_ended(conn: sqlite3.Connection, row: store.LaunchRow, comms: Any,
     `COMMS_OFFLINE`, taken is `IDENTITY_TAKEN`, and anything else `COMMS_FAILED`."""
     try:
         state = identity.ask(row.identity, row.scope, comms)
-    except Exception as error:  # noqa: BLE001  (the cause is then the status's, or unknown)
-        state, said = None, f"comms could not say why: {error}"
+    except Exception as exc:  # noqa: BLE001  (the cause is then the status's, or unknown)
+        state, said = None, f"comms could not say why: {exc}"
     else:
         said = None if state is None else _comms_words(row, state)
     offline = state is not None and state.state == "offline"
@@ -871,9 +871,9 @@ def _ready(turns: Any, launch: Launch, row: store.LaunchRow | None,
 def _start_deliverer(launch: Launch, pid: int) -> Started | None:
     try:
         first.start_deliverer(launch.request_id, pid=pid, env=launch.deliverer_env)
-    except OSError as error:
+    except OSError as exc:
         return fail(launch.conn, launch.request_id, NO_DELIVERER,
-                       f"the first turn's deliverer could not be started: {error}")
+                       f"the first turn's deliverer could not be started: {exc}")
     return None
 
 
@@ -894,8 +894,8 @@ def sweep(conn: sqlite3.Connection | None = None, *, env: Mapping[str, str] | No
     past `cap` bytes from the front, keeping its newest lines. A file whose launch is
     still running (its row's process alive, by pid and start time) is left alone. A file
     that can't be read or removed is left for the next sweep."""
-    folder = runs_dir(env)
-    if not folder.is_dir():
+    run_dir = runs_dir(env)
+    if not run_dir.is_dir():
         return Swept()
     if keep_days is None:
         from . import settings
@@ -904,7 +904,7 @@ def sweep(conn: sqlite3.Connection | None = None, *, env: Mapping[str, str] | No
     now = time.time() if now is None else now
     removed: list[str] = []
     cut: list[str] = []
-    for path in sorted(folder.iterdir()):
+    for path in sorted(run_dir.iterdir()):
         request_id = _request_of(path.name)
         if request_id is None or not path.is_file():
             continue
@@ -950,9 +950,9 @@ def _cut(path: Path, size: int, cap: int) -> None:
     first, so the whole fits in `cap` bytes."""
     head = CUT_LINE.format(size=size).encode("utf-8")
     keep = max(cap - len(head) - 32, 0)
-    with open(path, "rb") as log:
-        log.seek(max(size - keep, 0))
-        tail = log.read(keep)
+    with open(path, "rb") as fh:
+        fh.seek(max(size - keep, 0))
+        tail = fh.read(keep)
     newline = tail.find(b"\n")
     if 0 <= newline < len(tail) - 1:
         tail = tail[newline + 1:]

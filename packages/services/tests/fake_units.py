@@ -119,7 +119,7 @@ class FakeUnits:
                                    (f"{change.unit}: {change.reason}",)))
                 continue
             if self.apply_fails:
-                out.append(Applied(change, False, (f"{change.unit}: Job failed",)))
+                out.append(Applied(change, ok=False, lines=(f"{change.unit}: Job failed",)))
                 continue
             if change.action == "remove":
                 self.written.pop(change.name, None)
@@ -127,7 +127,7 @@ class FakeUnits:
                 on = change.enabled
                 self.written[change.name] = Unit(change.kind, on,
                                                  on and change.kind == "daemon")
-            out.append(Applied(change, True, (f"{change.unit} {change.action}",)))
+            out.append(Applied(change, ok=True, lines=(f"{change.unit} {change.action}",)))
         return out
 
     def start(self, module, names, *, foreign=False, kinds=None, runner=None):
@@ -164,10 +164,10 @@ class FakeUnits:
             unit = table.get(key(name))
             owner = None if foreign else module
             if unit is None:
-                out.append(Acted(owner, name, act, False, (f"{name}: no such unit",)))
+                out.append(Acted(owner, name, act, ok=False, lines=(f"{name}: no such unit",)))
                 continue
             if (act, name) in self.fail:
-                out.append(Acted(owner, name, act, False, (f"{name}: Job for {name} failed",)))
+                out.append(Acted(owner, name, act, ok=False, lines=(f"{name}: Job for {name} failed",)))
                 continue
             if not self.drift:
                 if act in ("start", "restart"):
@@ -178,7 +178,7 @@ class FakeUnits:
                     unit.enabled, unit.active = True, unit.kind == "daemon"
                 elif act == "disable":
                     unit.enabled, unit.active = False, False
-            out.append(Acted(owner, name, act, True, (f"{name} {act}ed",)))
+            out.append(Acted(owner, name, act, ok=True, lines=(f"{name} {act}ed",)))
         return out
 
     def status(self, modules=None, *, foreign=(), kinds=None, runner=None):
@@ -216,7 +216,7 @@ class FakeUnits:
                 out.append(self._state(None, ref, unit, self.wrapped.get(ref), foreign=True))
         return out
 
-    def _state(self, module, name, unit, wrapped=None, foreign=False):
+    def _state(self, module, name, unit, wrapped=None, *, foreign=False):
         # As the core's on systemd: only a foreign timer's state carries `wrapped` (the
         # table is keyed by timer), and a timer's carries `triggers`; a missing, unknown
         # or unread one carries neither. Other backends report no `triggers`.
@@ -245,25 +245,25 @@ class FakeUnits:
         self.calls.append(("wrap", ref, module, key, name))
         self._held()
         if self.wrap_refuses is not None:
-            return Acted(module, ref, "wrap", False, (self.wrap_refuses,))
+            return Acted(module, ref, "wrap", ok=False, lines=(self.wrap_refuses,))
         self.wrapped[ref] = Wrapped(module, key, name)
         if self.wrap_fails:
-            return Acted(module, ref, "wrap", False, (f"{ref}: daemon-reload failed",))
+            return Acted(module, ref, "wrap", ok=False, lines=(f"{ref}: daemon-reload failed",))
         # As the core's over systemd: the backend's two lines, the second telling the
         # user to set the key, then the core's own line saying how the key stands.
-        return Acted(module, ref, "wrap", True,
-                     (f"{ref}: its runs are behind the switch",
-                      f"turn them on with: moxi config set {module} {key} true",
-                      f"{ref} wrapped; its runs are off until: moxi config set {module} "
-                      f"{key} true"))
+        return Acted(module, ref, "wrap", ok=True,
+                     lines=(f"{ref}: its runs are behind the switch",
+                            f"turn them on with: moxi config set {module} {key} true",
+                            f"{ref} wrapped; its runs are off until: moxi config set {module} "
+                            f"{key} true"))
 
     def unwrap(self, ref, *, module, runner=None):
         self.calls.append(("unwrap", ref, module))
         self._held()
         if self.unwrap_fails:
-            return Acted(module, ref, "unwrap", False, (f"{ref}: daemon-reload failed",))
+            return Acted(module, ref, "unwrap", ok=False, lines=(f"{ref}: daemon-reload failed",))
         self.wrapped.pop(ref, None)
-        return Acted(module, ref, "unwrap", True, (f"{ref} unwrapped",))
+        return Acted(module, ref, "unwrap", ok=True, lines=(f"{ref} unwrapped",))
 
     def wraps(self, module):
         return {ref: w for ref, w in self.wrapped.items() if w.module == module}

@@ -23,7 +23,7 @@ def _ready(record, store) -> str:
                      operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH)).state
 
 
-def test_a_fresh_directory_has_no_webhook_table(rig):
+def test_a_fresh_dir_has_no_webhook_table(rig):
     record, store = rig
     provision(record, comms_db(), standing=[("planner", "proj-a")], store=store)
     conn = directory.connect(comms_db(), read_only=True)

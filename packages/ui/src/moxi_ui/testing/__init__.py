@@ -189,12 +189,12 @@ def ui_browser(request: pytest.FixtureRequest) -> Iterator[Any]:
     try:
         try:
             browser = getattr(playwright, name).launch()
-        except Error as err:
+        except Error as exc:
             if name == "chromium":
                 raise
-            said = next((line.strip() for line in str(err).splitlines()
+            said = next((line.strip() for line in str(exc).splitlines()
                          if "error" in line.lower() and "launch" not in line.lower()),
-                        str(err).splitlines()[0])
+                        str(exc).splitlines()[0])
             pytest.skip(f"{name} can't start on this machine: {said}")
         try:
             yield browser
@@ -261,12 +261,12 @@ def _open_settled(page: Any, path: str) -> None:
         if "/m/ui/api/push" not in request.url:
             pending.add(request)
 
-    def ended(request: Any) -> None:
+    def on_ended(request: Any) -> None:
         pending.discard(request)
 
     page.on("request", begun)
-    page.on("requestfinished", ended)
-    page.on("requestfailed", ended)
+    page.on("requestfinished", on_ended)
+    page.on("requestfailed", on_ended)
     try:
         page.goto(path)
         page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
@@ -279,8 +279,8 @@ def _open_settled(page: Any, path: str) -> None:
                 break
     finally:
         page.remove_listener("request", begun)
-        page.remove_listener("requestfinished", ended)
-        page.remove_listener("requestfailed", ended)
+        page.remove_listener("requestfinished", on_ended)
+        page.remove_listener("requestfailed", on_ended)
 
 
 def _stored_sign_in(browser: Any, shell: Any) -> dict[str, Any]:

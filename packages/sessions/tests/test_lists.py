@@ -13,7 +13,7 @@ import pytest
 from moxi_sessions import resume as resume_module
 from moxi_sessions.catalog import Catalog, Gathered
 from moxi_sessions.lists import (DAY_ROWS, EARLIER, FOUND, MORE_ROWS, RECENT, RECENT_ROWS,
-                                 SUBAGENTS_MAX, UNDATED, list_folders, list_sessions,
+                                 SUBAGENTS_MAX, UNDATED, list_work_dirs, list_sessions,
                                  local_day, more_sessions, newest_sessions, open_session,
                                  parse_position, position)
 from moxi_sessions.resume import resume
@@ -117,7 +117,7 @@ def ids(rows) -> list[str]:
 
 # --- filters and counts --------------------------------------------------------------------
 
-def shared_directory(roots):
+def shared_dir(roots):
     """Two folders whose sessions sit in one Claude project directory, and a Codex
     session in the first folder."""
     claude(roots, 1, NOW - 10, cwd="/work/proj-a", project="-work-proj")
@@ -126,12 +126,12 @@ def shared_directory(roots):
     codex(roots, 4, NOW - 3 * DAY, cwd="/work/proj-a")
 
 
-def test_a_folder_counts_its_own_sessions_where_two_folders_share_a_directory(roots):
-    shared_directory(roots)
+def test_a_work_dir_counts_its_own_sessions_where_two_work_dirs_share_a_dir(roots):
+    shared_dir(roots)
 
     everything = listed(roots)
-    one = listed(roots, folder="/work/proj-a")
-    other = listed(roots, folder="/work/proj-b")
+    one = listed(roots, work_dir="/work/proj-a")
+    other = listed(roots, work_dir="/work/proj-b")
 
     assert (everything["all"], everything["total"]) == (4, 4)
     assert (one["all"], one["total"]) == (4, 3)
@@ -140,27 +140,27 @@ def test_a_folder_counts_its_own_sessions_where_two_folders_share_a_directory(ro
                                 {"harness": OPENCODE, "count": 0}]
     assert (other["all"], other["total"]) == (4, 1)
     assert ids(group(other, RECENT)["rows"]) == [sid(3)]
-    assert listed(roots, folder="/work/proj")["total"] == 0
+    assert listed(roots, work_dir="/work/proj")["total"] == 0
 
 
-def test_a_folder_is_the_same_folder_with_or_without_a_slash_at_its_end(roots):
-    shared_directory(roots)
+def test_a_work_dir_is_the_same_work_dir_with_or_without_a_slash_at_its_end(roots):
+    shared_dir(roots)
     claude(roots, 9, NOW - 30, cwd="/work/proj-a/")       # a record that wrote the slash
 
-    plain = listed(roots, folder="/work/proj-a")
-    slashed = listed(roots, folder="/work/proj-a/")
+    plain = listed(roots, work_dir="/work/proj-a")
+    slashed = listed(roots, work_dir="/work/proj-a/")
 
     assert plain["total"] == slashed["total"] == 4
     assert ids(group(slashed, RECENT)["rows"]) == ids(group(plain, RECENT)["rows"])
-    folders = {f["folder"]: f["count"] for f in list_folders(catalog(roots))["folders"]}
-    assert folders == {"/work/proj-a": 4, "/work/proj-b": 1}
-    assert listed(roots, folder="/work/proj-A")["total"] == 0     # nothing else is folded
+    work_dirs = {f["folder"]: f["count"] for f in list_work_dirs(catalog(roots))["folders"]}
+    assert work_dirs == {"/work/proj-a": 4, "/work/proj-b": 1}
+    assert listed(roots, work_dir="/work/proj-A")["total"] == 0     # nothing else is folded
 
 
 def test_a_harness_filter_leaves_the_harness_counts_as_they_were(roots):
-    shared_directory(roots)
+    shared_dir(roots)
 
-    answer = listed(roots, folder="/work/proj-a", harness=CLAUDE)
+    answer = listed(roots, work_dir="/work/proj-a", harness=CLAUDE)
 
     assert answer["total"] == 2
     assert [h["count"] for h in answer["harnesses"]] == [2, 1, 0]
@@ -168,7 +168,7 @@ def test_a_harness_filter_leaves_the_harness_counts_as_they_were(roots):
 
 
 def test_since_and_until_cut_on_the_last_change(roots):
-    shared_directory(roots)
+    shared_dir(roots)
 
     assert listed(roots, since=NOW - DAY)["total"] == 2
     assert listed(roots, until=NOW - DAY)["total"] == 2
@@ -188,32 +188,32 @@ def test_entry_level_filters_read_no_head_but_the_ones_the_groups_show(roots):
 
     assert answer["total"] == 11 and group(answer, EARLIER)["count"] == 3
     assert cat.head_reads == 8                  # `recent` and the seven days
-    list_sessions(cat, recent_s=HOUR, now=NOW, folder="/work/proj-a")
+    list_sessions(cat, recent_s=HOUR, now=NOW, work_dir="/work/proj-a")
     assert cat.head_reads == 11                 # a folder asks for every head, once
     list_sessions(cat, recent_s=HOUR, now=NOW, find="proj")
-    list_folders(cat)
+    list_work_dirs(cat)
     assert cat.head_reads == 11
 
 
-def test_folders_are_counted_under_the_other_filters_newest_first(roots):
-    shared_directory(roots)
+def test_work_dirs_are_counted_under_the_other_filters_newest_first(roots):
+    shared_dir(roots)
     cat = catalog(roots)
 
-    answer = list_folders(cat)
+    answer = list_work_dirs(cat)
 
     assert answer == {"folders": [
         {"folder": "/work/proj-a", "count": 3, "changed": NOW - 10},
         {"folder": "/work/proj-b", "count": 1, "changed": NOW - 20}], "more": 0}
-    assert list_folders(cat, harness=CODEX) == {"folders": [
+    assert list_work_dirs(cat, harness=CODEX) == {"folders": [
         {"folder": "/work/proj-a", "count": 1, "changed": NOW - 3 * DAY}], "more": 0}
-    assert list_folders(cat, since=NOW - HOUR, limit=1) == {"folders": [
+    assert list_work_dirs(cat, since=NOW - HOUR, limit=1) == {"folders": [
         {"folder": "/work/proj-a", "count": 1, "changed": NOW - 10}], "more": 1}
-    assert list_folders(cat, find="proj-b")["folders"][0]["folder"] == "/work/proj-b"
+    assert list_work_dirs(cat, find="proj-b")["folders"][0]["folder"] == "/work/proj-b"
 
 
 def test_a_filter_that_is_not_one_is_refused(roots):
     cat = catalog(roots)
-    for bad in ({"harness": "other"}, {"folder": "proj-a"}, {"find": "a"},
+    for bad in ({"harness": "other"}, {"work_dir": "proj-a"}, {"find": "a"},
                 {"find": " a "}, {"since": "today"}):
         with pytest.raises(ValueError):
             list_sessions(cat, recent_s=HOUR, now=NOW, **bad)
@@ -221,7 +221,7 @@ def test_a_filter_that_is_not_one_is_refused(roots):
 
 # --- find -------------------------------------------------------------------------------------
 
-def test_find_matches_an_id_start_or_the_folder_last_segment_and_nothing_else(roots):
+def test_find_matches_an_id_start_or_the_work_dir_last_segment_and_nothing_else(roots):
     claude(roots, 1, NOW - 10, session="abc10000-0000-7000-8000-000000000001",
            cwd="/work/other")
     claude(roots, 2, NOW - 2 * DAY, program=True, cwd="/work/Atlas-Api",
@@ -238,9 +238,9 @@ def test_find_matches_an_id_start_or_the_folder_last_segment_and_nothing_else(ro
     assert keys(by_id) == [FOUND]
     assert ids(group(by_id, FOUND)["rows"]) == ["abc10000-0000-7000-8000-000000000001"]
     assert (by_id["total"], by_id["all"]) == (1, 4)
-    by_folder = find("las-a")
-    assert ids(group(by_folder, FOUND)["rows"]) == [sid(2)]
-    assert group(by_folder, FOUND)["rows"][0]["by_program"] is True
+    by_work_dir = find("las-a")
+    assert ids(group(by_work_dir, FOUND)["rows"]) == [sid(2)]
+    assert group(by_work_dir, FOUND)["rows"][0]["by_program"] is True
     assert find("atlas")["total"] == 1          # a segment that is not the last is not read
     assert find("abc")["total"] == 1            # nor the middle of an id
     assert find("Done")["total"] == 0           # nor what was said
@@ -773,7 +773,7 @@ def test_an_opened_session_lists_its_eight_newest_subagents_and_counts_the_rest(
 
 def test_an_opencode_session_lists_its_children_newest_change_first(roots):
     db = OpenCodeDb(roots[OPENCODE].parent)
-    session = db.session(directory="/work/proj-a", at=NOW - 900)
+    session = db.session(work_dir="/work/proj-a", at=NOW - 900)
     session.user("Do the thing.")
     for n in range(1, 11):
         # Made oldest first; the lower the number, the later its last change.
@@ -792,7 +792,7 @@ def test_an_opencode_session_lists_its_children_newest_change_first(roots):
 def test_a_codex_and_an_opencode_session_open_with_their_resume_commands(roots):
     codex(roots, 1, NOW - 10, cwd="/work/proj-b")
     db = OpenCodeDb(roots[OPENCODE].parent)
-    session = db.session(directory="/work/proj-a", at=NOW - 20)
+    session = db.session(work_dir="/work/proj-a", at=NOW - 20)
     session.user("Do the thing.")
     session.child()
     db.write()
@@ -825,7 +825,7 @@ def test_an_id_a_shell_would_read_is_quoted():
     assert resume(CODEX, "") is None and resume(CODEX, None) is None
 
 
-def test_a_command_that_needs_the_sessions_folder_is_not_given_without_it(roots):
+def test_a_command_that_needs_the_sessions_dir_is_not_given_without_it(roots):
     assert resume(CLAUDE, "abc") is None and resume(CLAUDE, "abc", "") is None
     assert resume(OPENCODE, "ses_1") is None
     assert resume(CODEX, "abc") == {"command": "codex resume abc", "folder": None}
@@ -874,7 +874,7 @@ def test_the_newest_sessions_are_one_run_of_both_kinds_with_the_lists_counts(roo
     assert cat.head_reads == 4 and cat.tail_reads == 4
 
     some = newest_sessions(cat, recent_s=HOUR, now=NOW, harness=CLAUDE,
-                           folder="/work/proj-a", since=NOW - DAY)
+                           work_dir="/work/proj-a", since=NOW - DAY)
     assert [r["session"] for r in some["rows"]] == [sid(1), sid(2)]
     assert (some["total"], some["before"]) == (2, None)
     for limit in (0, -1, True, "3"):
@@ -967,7 +967,7 @@ def test_a_root_that_failed_has_a_reason_and_no_number_of_parts(roots, tmp_path)
 
 
 @not_root
-def test_a_row_whose_subagents_folder_cannot_be_listed_has_no_count(roots, locked):
+def test_a_row_whose_subagents_dir_cannot_be_listed_has_no_count(roots, locked):
     t = ClaudeTranscript(roots[CLAUDE], session_id=sid(1), cwd="/work/proj-a")
     t.user("Do the thing.", origin="human")
     t.subagent("a0190b0000000001").user("look")

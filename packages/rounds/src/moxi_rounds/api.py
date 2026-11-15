@@ -64,7 +64,7 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
     return listing.rounds(project, ended=status == _CLOSED, refresh=False).data()
 
 
-def round(name: str) -> dict:
+def round_data(name: str) -> dict:
     """The round `name`, `<project>/<slug>`: its head (`name`, `project`, `slug`,
     `folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,
     `step`, `close`, `skips`, `stages`, `versions`, `standing`, `trace`, `threads`,
@@ -110,4 +110,4 @@ def questions(name: str, view: str | None = None) -> dict:
     return export.questions_of(name, view=view).data()
 
 
-__all__ = ["rounds", "round", "waiting", "questions"]
+__all__ = ["rounds", "round_data", "waiting", "questions"]

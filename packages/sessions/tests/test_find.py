@@ -281,7 +281,7 @@ def test_a_missing_root_is_not_an_empty_listing(tmp_path):
 
 
 @needs_permissions
-def test_a_directory_that_cannot_be_listed_is_named_and_the_walk_goes_on(projects,
+def test_a_dir_that_cannot_be_listed_is_named_and_the_walk_goes_on(projects,
                                                                            unlock):
     claude_corpus(projects)
     locked = projects / "-work-a"
@@ -405,13 +405,13 @@ def test_a_subagent_entry_is_read_up_to_its_listed_size(projects):
     assert entry.size < os.stat(sub.path).st_size
 
 
-def test_no_subagents_directory_is_none(projects):
+def test_no_subagents_dir_is_none(projects):
     path = transcript(projects).write()
     listing = subagents(Source("claude", str(path), SESSION))
     assert listing.state == NONE and listing.entries == ()
 
 
-def test_an_empty_subagents_directory_is_none(projects):
+def test_an_empty_subagents_dir_is_none(projects):
     path = transcript(projects).write()
     (path.parent / SESSION / "subagents").mkdir(parents=True)
     assert subagents(Source("claude", str(path), SESSION)).state == NONE
@@ -424,7 +424,7 @@ def test_a_missing_transcript_is_unreadable_not_none(projects):
 
 
 @needs_permissions
-def test_a_subagents_directory_that_cannot_be_listed_is_unreadable(projects, unlock):
+def test_a_subagents_dir_that_cannot_be_listed_is_unreadable(projects, unlock):
     t, *_ = claude_corpus(projects)
     locked = t.path.parent / SESSION / "subagents"
     os.chmod(locked, 0)
@@ -434,7 +434,7 @@ def test_a_subagents_directory_that_cannot_be_listed_is_unreadable(projects, unl
 
 
 @needs_permissions
-def test_a_workflow_directory_that_cannot_be_listed_is_named(projects, unlock):
+def test_a_workflow_dir_that_cannot_be_listed_is_named(projects, unlock):
     t, *_ = claude_corpus(projects)
     locked = t.path.parent / SESSION / "subagents" / "workflows"
     os.chmod(locked, 0)
@@ -658,8 +658,8 @@ def test_codex_a_parent_still_writing_is_read_to_its_listed_size(rollouts):
     child.flush()
     r.spawn_item(GRANDCHILD)
     r.flush(terminated=False)
-    with open(r.path, "rb+") as handle:
-        handle.truncate(os.path.getsize(r.path) - 20)
+    with open(r.path, "rb+") as fh:
+        fh.truncate(os.path.getsize(r.path) - 20)
     assert [e.agent_id for e in subagents(listed)] == [CHILD]
     now = subagents(Source("codex", str(r.path), THREAD))
     assert [e.agent_id for e in now] == [CHILD, CHILD_B]
@@ -772,7 +772,7 @@ def test_live_a_real_spawn_lists_its_one_child():
     assert entry.size == os.stat(entry.source.path).st_size
     assert entry.spawn_depth == 1 and entry.parent_agent_id is None
     assert isinstance(entry.tool_use_id, str) and entry.description.startswith("/root/")
-    with open(entry.source.path, "rb") as handle:
-        header = file_header(entry.source, handle, entry.size)
+    with open(entry.source.path, "rb") as fh:
+        header = file_header(entry.source, fh, entry.size)
     assert header.spawn.parent_thread_id == thread and header.parent == thread
     assert header.spawn.depth == 1 and header.spawn.agent_path == entry.description

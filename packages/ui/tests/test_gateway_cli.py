@@ -53,10 +53,10 @@ def _not_ready() -> type:
 @pytest.fixture
 def env(tmp_path):
     """An environment with no Moxi locator, whose runtime directory is its own."""
-    environ = {"HOME": str(tmp_path / "h"), "XDG_RUNTIME_DIR": str(tmp_path / "r"),
+    shell_env = {"HOME": str(tmp_path / "h"), "XDG_RUNTIME_DIR": str(tmp_path / "r"),
                "XDG_STATE_HOME": str(tmp_path / "s")}
-    os.makedirs(environ["XDG_RUNTIME_DIR"], mode=0o700)
-    return environ
+    os.makedirs(shell_env["XDG_RUNTIME_DIR"], mode=0o700)
+    return shell_env
 
 
 def _ns(**kw) -> argparse.Namespace:
@@ -69,12 +69,12 @@ def _ns(**kw) -> argparse.Namespace:
 def test_upstream_on_tcp_waits_for_a_hold_that_names_a_running_shell(env):
     runtime = Layout("ui").runtime_dir(env, create=True)
     with pytest.raises(_not_ready()) as err:
-        decl.upstream(environ=env, kind="tcp")
+        decl.upstream(env=env, kind="tcp")
     assert "moxi ui gateway enable" in str(err.value)
     endpoint.write_hold(runtime, 8471, pid=os.getpid())
-    assert decl.upstream(environ=env, kind="tcp") == "http://127.0.0.1:8471"
+    assert decl.upstream(env=env, kind="tcp") == "http://127.0.0.1:8471"
     with pytest.raises(_not_ready()):
-        decl.upstream(environ=env, kind="tcp", running=lambda pid: False)
+        decl.upstream(env=env, kind="tcp", running=lambda pid: False)
 
 
 def test_upstream_refuses_with_the_locator_text_when_the_runtime_dir_moves(env, tmp_path):
@@ -83,18 +83,18 @@ def test_upstream_refuses_with_the_locator_text_when_the_runtime_dir_moves(env, 
     moved = {**env, "MOXI_UI_RUNTIME_DIR": str(tmp_path / "elsewhere")}
     for kind in ("tcp", "unix"):
         with pytest.raises(_not_ready()) as err:
-            decl.upstream(environ=moved, kind=kind)
+            decl.upstream(env=moved, kind=kind)
         assert "MOXI_UI_RUNTIME_DIR" in str(err.value)
-    assert decl.upstream(environ=env, kind="tcp") == "http://127.0.0.1:8471"
+    assert decl.upstream(env=env, kind="tcp") == "http://127.0.0.1:8471"
 
 
 def test_upstream_on_a_socket_gives_its_path_only_when_the_path_passes(env, monkeypatch):
     path = endpoint.socket_path(Layout("ui"), env)
     with pytest.raises(_not_ready()) as err:
-        decl.upstream(environ=env, kind="unix")  # pytest's temp root fails the walk
+        decl.upstream(env=env, kind="unix")  # pytest's temp root fails the walk
     assert "the gateway's socket" in str(err.value)
     monkeypatch.setattr(endpoint, "check_socket_path", lambda p: None)
-    assert decl.upstream(environ=env, kind="unix") == f"unix:{path}"
+    assert decl.upstream(env=env, kind="unix") == f"unix:{path}"
 
 
 def test_the_declaration_is_in_the_group_only_tunnel_two_reads():
@@ -167,7 +167,7 @@ def test_a_new_host_or_provider_marks_devices_paired_elsewhere_stale(tmp_path):
 def test_pair_with_the_shell_stopped_mints_a_code_a_later_shell_redeems(env, monkeypatch):
     monkeypatch.setattr(verbs, "_address", lambda: Address())
     said = []
-    assert verbs.cmd_pair(_ns(), said.append, environ=env) == 0
+    assert verbs.cmd_pair(_ns(), said.append, env=env) == 0
     url = said[-1]
     assert url.startswith("https://box.example.ts.net:8461/pair?n=")
     code = url.split("#c=", 1)[1]
@@ -179,10 +179,10 @@ def test_pair_refuses_with_the_locator_text_and_without_an_address(env, tmp_path
     monkeypatch.setattr(verbs, "_address", lambda: Address())
     moved = {**env, "MOXI_UI_HOME": str(tmp_path / "moved")}
     with pytest.raises(cli.Refused, match="MOXI_UI_HOME"):
-        verbs.cmd_pair(_ns(), print, environ=moved)
+        verbs.cmd_pair(_ns(), print, env=moved)
     monkeypatch.setattr(verbs, "_address", lambda: None)
     with pytest.raises(cli.Refused, match="moxi ui gateway enable"):
-        verbs.cmd_pair(_ns(), print, environ=env)
+        verbs.cmd_pair(_ns(), print, env=env)
 
 
 def test_the_tunnel_missing_or_too_old_is_refused_with_its_fix(monkeypatch):
@@ -277,15 +277,15 @@ class World:
 def test_on_checks_in_order_and_names_each_fix(env, tmp_path, monkeypatch):
     World(monkeypatch, env, extra=False)
     with pytest.raises(cli.Refused, match="MOXI_UI_HOME"):
-        verbs.cmd_on(_ns(), print, environ={**env, "MOXI_UI_HOME": str(tmp_path / "m")})
+        verbs.cmd_enable(_ns(), print, env={**env, "MOXI_UI_HOME": str(tmp_path / "m")})
     with pytest.raises(cli.Refused, match="moxi install ui --with gateway"):
-        verbs.cmd_on(_ns(), print, environ=env)
+        verbs.cmd_enable(_ns(), print, env=env)
     World(monkeypatch, env, state=("absent", "tunnel isn't installed"))
     with pytest.raises(cli.Refused, match="moxi install ui --with tunnel"):
-        verbs.cmd_on(_ns(), print, environ=env)
+        verbs.cmd_enable(_ns(), print, env=env)
     world = World(monkeypatch, env, kind="unix")
     with pytest.raises(cli.Refused, match="the gateway's socket"):
-        verbs.cmd_on(_ns(), print, environ=env)
+        verbs.cmd_enable(_ns(), print, env=env)
     assert world.ran == []  # nothing set, nothing started
 
 
@@ -294,13 +294,13 @@ def test_on_sets_the_switch_starts_the_shell_waits_for_the_hold_then_adds_the_en
     world = World(monkeypatch, env, shell="socket")
     endpoint.write_hold(world.runtime, 8461, pid=os.getpid())
     said = []
-    assert verbs.cmd_on(_ns(), said.append, environ=env) == 0
+    assert verbs.cmd_enable(_ns(), said.append, env=env) == 0
     assert world.words() == [["config", "set", "--", "ui", "gateway.enabled", "true"],
                              ["tunnel", "add", "ui/gateway"]]
     assert world.started == 1  # the socket held the port, so the unit was started
     world.address = Address()
     world.ran.clear()
-    assert verbs.cmd_on(_ns(), said.append, environ=env) == 0
+    assert verbs.cmd_enable(_ns(), said.append, env=env) == 0
     assert world.words() == [["config", "set", "--", "ui", "gateway.enabled", "true"]]
     assert said[-1] == "the gateway is on at https://box.example.ts.net:8461/"
 
@@ -308,32 +308,32 @@ def test_on_sets_the_switch_starts_the_shell_waits_for_the_hold_then_adds_the_en
 def test_on_stops_with_the_doctors_text_when_no_hold_comes(env, monkeypatch):
     world = World(monkeypatch, env)
     with pytest.raises(cli.Refused, match="the doctor's text"):
-        verbs.cmd_on(_ns(), print, environ=env)
+        verbs.cmd_enable(_ns(), print, env=env)
     assert ["tunnel", "add", "ui/gateway"] not in world.words()
 
 
 def test_off_clears_the_switch_and_asks_about_the_entry(env, monkeypatch):
     world = World(monkeypatch, env)
     said = []
-    verbs.cmd_off(_ns(), said.append)
+    verbs.cmd_disable(_ns(), said.append)
     assert world.words() == [["config", "unset", "--", "ui", "gateway.enabled"]]
     assert world.asked == []  # no entry, no question
     world = World(monkeypatch, env, address=Address())
-    verbs.cmd_off(_ns(), said.append)
+    verbs.cmd_disable(_ns(), said.append)
     assert world.asked == [f"{verbs.OFF_QUESTION} {verbs.OFF_PERSIST}"]
     assert world.words()[-1] == ["tunnel", "remove", "ui/gateway"]
     world = World(monkeypatch, env, address=Address(form="unix"), kind="unix", answer=False)
-    verbs.cmd_off(_ns(), said.append)
+    verbs.cmd_disable(_ns(), said.append)
     assert world.asked == [verbs.OFF_QUESTION]
     assert ["tunnel", "remove", "ui/gateway"] not in world.words()
     world = World(monkeypatch, env, address=Address(), tty=False)
-    verbs.cmd_off(_ns(), said.append)
+    verbs.cmd_disable(_ns(), said.append)
     assert world.asked == [] and said[-1].endswith("To remove it: moxi tunnel remove ui/gateway")
     assert verbs.OFF_PERSIST in said[-1]
     world = World(monkeypatch, env, address=REFUSED)
     monkeypatch.setattr("moxi_ui.gateway.listener.read_tunnel",
                         lambda: SimpleNamespace(address=REFUSED, reason="applied.json is newer"))
-    assert verbs.cmd_off(_ns(), said.append) == 0
+    assert verbs.cmd_disable(_ns(), said.append) == 0
     assert world.asked == [] and "applied.json is newer" in said[-1]
     assert "moxi doctor tunnel" in said[-1]
     assert said[-1].endswith("To remove it: moxi tunnel remove ui/gateway")

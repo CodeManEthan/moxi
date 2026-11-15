@@ -4,7 +4,8 @@
 
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_slots.api.answer_screen`: `wait` is now `wait_s`;
-  `moxi_slots.api.wait_ended`: `timeout` is now `timeout_s`.
+  `moxi_slots.api.wait_ended`: `timeout` is now `timeout_s`; `moxi_slots.api`:
+  `CLAUDE_TRUST_FOLDER` is now `CLAUDE_TRUST_DIR`.
 
 The first public release.
 

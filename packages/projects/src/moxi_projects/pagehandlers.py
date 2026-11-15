@@ -259,8 +259,8 @@ def remove(call: Any) -> Any:
         # A refusal the store kept has its row; any other is answered here.
         try:
             kept = acts.remove_status(job)
-        except ProjectsError as again:
-            raise _answer(again) from None
+        except ProjectsError as status_exc:
+            raise _answer(status_exc) from None
         if kept is None:
             raise _answer(exc) from None
     return link

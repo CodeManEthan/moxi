@@ -28,7 +28,7 @@ class Result:
         self.KIND, self.reason = kind, reason
 
 
-def facts(turn_open=False, number=4, draft=False, stale=False):
+def facts(*, turn_open=False, number=4, draft=False, stale=False):
     return SimpleNamespace(turn_open=turn_open, turn=None, turn_number=number, draft=draft,
                            stale=stale)
 
@@ -133,15 +133,15 @@ class Clock:
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection)
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn)
+    yield conn
+    conn.close()
 
 
 def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, claimed=True,
              harness="claude"):
-    store.insert(conn, request_id=request_id, actor="ann", harness=harness,
+    store.insert(conn, request_id=request_id, by="ann", harness=harness,
                  target=target_name, cwd="/work", values={"model": "opus"}, argv=["claude"],
                  env={}, posture="operator", session_id=session_id,
                  slot="3" if target_name == "slot" else None)
@@ -156,7 +156,7 @@ def go(conn, which=SID, *, session=None, slots_api=None, turns=None, **kw):
     return exits.exit_session(
         which, conn=conn, turns=turns or FakeTurns(session or FakeSession()),
         slots_api=slots_api if slots_api is not None else FakeSlots(ended=True),
-        settings=SETTINGS, environ={**os.environ, first.COMMS_NAME: "ann"}, clock=clock,
+        settings=SETTINGS, caller_env={**os.environ, first.comms_name_env(): "ann"}, clock=clock,
         wall=lambda: 1e9, sleep=clock.sleep, **kw)
 
 
@@ -307,27 +307,27 @@ def test_a_check_that_fails_at_the_dialog_leaves_it_for_a_person(conn, seq, word
                                             RuntimeError("endpoint gone")])
 def test_outside_a_slot_an_exit_turns_did_not_see_through_is_at_the_dialog(
         tmp_path, harness_result):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection, target_name="terminal")
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, target_name="terminal")
     try:
         slots_api = FakeSlots()
-        result = go(connection, session=FakeSession(exits=(harness_result,)),
+        result = go(conn, session=FakeSession(exits=(harness_result,)),
                     slots_api=slots_api)
         assert result.exit_code == 1 and result.data["outcome"] == "at-dialog"
         assert "a person answers it" in result.run.detail
         assert slots_api.calls == []
-        assert logged(connection)[0].verdict == "at-dialog"
+        assert logged(conn)[0].verdict == "at-dialog"
     finally:
-        connection.close()
+        conn.close()
 
 
 def test_outside_a_slot_an_exit_turns_saw_through_is_exited(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection, target_name="terminal")
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, target_name="terminal")
     try:
-        assert go(connection).data["outcome"] == "exited"
+        assert go(conn).data["outcome"] == "exited"
     finally:
-        connection.close()
+        conn.close()
 
 
 def test_a_slot_launch_where_slots_does_not_run_is_treated_as_outside_a_slot(conn):
@@ -367,16 +367,16 @@ def test_a_session_no_launch_holds_is_not_launched_and_logged_nowhere(conn):
 
 
 def test_an_unclaimed_launch_is_refused_and_logged_without_a_run(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    launched(connection, claimed=False)
+    conn = store.connect(tmp_path / "launcher.db")
+    launched(conn, claimed=False)
     try:
         with pytest.raises(target.Unclaimed):
-            go(connection)
-        [row] = logged(connection)
+            go(conn)
+        [row] = logged(conn)
         assert (row.verdict, row.word, row.run_id) == ("refused", "unclaimed", None)
-        assert store.runs(connection) == []
+        assert store.runs(conn) == []
     finally:
-        connection.close()
+        conn.close()
 
 
 def test_a_session_not_live_is_refused(conn):
@@ -396,7 +396,7 @@ def test_a_harness_that_offers_no_exit_is_refused(conn):
 
 def test_an_exit_loses_at_insert_to_an_open_run_whose_job_lives(conn):
     other = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                             session_id=SID, actor="cache", job=f"proc:{me()}")
+                             session_id=SID, by="cache", job=f"proc:{me()}")
     session = FakeSession()
     with pytest.raises(store.RunOpen):
         go(conn, session=session)
@@ -408,7 +408,7 @@ def test_an_exit_loses_at_insert_to_an_open_run_whose_job_lives(conn):
 
 def test_an_exit_loses_to_an_open_run_past_its_grace_whose_job_lives(conn):
     other = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                             session_id=SID, actor="cache", job=f"proc:{me()}",
+                             session_id=SID, by="cache", job=f"proc:{me()}",
                              at="2026-01-01T00:00:00.000000Z")
     session = FakeSession()
     with pytest.raises(store.RunOpen):
@@ -442,10 +442,10 @@ def test_an_exits_run_makes_every_other_act_lose_at_insert(conn):
                                ("relaunch", "self")):
                 try:
                     store.insert_run(conn, kind=kind, mode=mode, request_id="r1",
-                                     session_id=SID, actor="x", job="proc:1@1.0",
+                                     session_id=SID, by="x", job="proc:1@1.0",
                                      gone=lambda j: True)
-                except store.RunOpen as error:
-                    seen[kind] = error.run.kind
+                except store.RunOpen as exc:
+                    seen[kind] = exc.run.kind
             return super().command(name, if_turn_number=if_turn_number)
 
     assert go(conn, session=Watching()).data["outcome"] == "exited"
@@ -454,7 +454,7 @@ def test_an_exits_run_makes_every_other_act_lose_at_insert(conn):
 
 def test_an_open_run_whose_job_is_gone_is_ended_and_the_exit_goes_on(conn):
     stale = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                             session_id=SID, actor="cache", job="proc:999999@1.0",
+                             session_id=SID, by="cache", job="proc:999999@1.0",
                              at="2026-01-01T00:00:00.000000Z")
     assert go(conn).data["outcome"] == "exited"
     assert store.get_run(conn, stale.run_id).outcome == "error"
@@ -524,7 +524,7 @@ def test_an_exit_row_takes_only_a_verdict(conn):
 def test_retention_ages_out_exits_with_their_runs_and_those_with_none(conn):
     old = "2026-01-01T00:00:00.000000Z"
     run = store.insert_run(conn, kind="exit", mode="verb", request_id="r1", session_id=SID,
-                           actor="ann", job="proc:1", at=old)
+                           by="ann", job="proc:1", at=old)
     store.end_run(conn, run.run_id, "exited", at=old)
     store.add_exit(conn, run_id=run.run_id, request_id="r1", session_id=SID,
                    verdict="exited", at=old)

@@ -96,17 +96,17 @@ def v2_root(runtime_dir: Path | str) -> Path:
     return Path(runtime_dir) / V2_ROOT
 
 
-def read_hello(directory: Path | str) -> dict[str, Any] | None:
+def read_hello(endpoint_dir: Path | str) -> dict[str, Any] | None:
     """The `hello.json` in `directory` as a dict, or None when it is missing or does not
     read as a JSON object (an endpoint starting, or one that is not a turns endpoint)."""
     try:
-        hello = json.loads((Path(directory) / HELLO).read_text(encoding="utf-8"))
+        hello = json.loads((Path(endpoint_dir) / HELLO).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return hello if isinstance(hello, dict) else None
 
 
-def v2_directories(runtime_dir: Path | str) -> list[Path]:
+def v2_endpoint_dirs(runtime_dir: Path | str) -> list[Path]:
     """Every directory under version 2's root, sorted by name. A directory with no
     readable `hello.json` is an endpoint starting: the caller leaves it alone."""
     try:
@@ -116,7 +116,7 @@ def v2_directories(runtime_dir: Path | str) -> list[Path]:
     return sorted(Path(e.path) for e in entries if _is_dir(e))
 
 
-def v1_directories(runtime_dir: Path | str) -> list[Path]:
+def v1_endpoint_dirs(runtime_dir: Path | str) -> list[Path]:
     """Every version 1 endpoint directory: a directory directly under turns' runtime
     directory, other than version 2's root, that holds a readable `hello.json`, whatever
     the file says. Sorted by name."""
@@ -135,23 +135,23 @@ def _is_dir(entry: os.DirEntry) -> bool:
         return False
 
 
-def endpoint_socket(directory: Path | str, filename: str) -> str:
+def endpoint_socket(endpoint_dir: Path | str, filename: str) -> str:
     """Where an endpoint's internal socket `filename` lives: in its directory, or, when
     that path is too long for a socket address (a long `MOXI_HOME` or runtime directory),
     `moxi.paths.socket_path`'s path for the name `<endpoint name>-<stem>`, which falls
     back to a short hashed path as the endpoint's own address does."""
     from moxi import paths
 
-    directory = Path(directory)
-    path = str(directory / filename)
+    endpoint_dir = Path(endpoint_dir)
+    path = str(endpoint_dir / filename)
     if len(os.fsencode(path)) < paths.SOCKET_MAX or sys.platform == "win32":
         return path
-    return paths.socket_path("turns", f"{directory.name}-{Path(filename).stem}")
+    return paths.socket_path("turns", f"{endpoint_dir.name}-{Path(filename).stem}")
 
 
 # -- sweeping a version 2 directory -------------------------------------------------------
 
-def sweep(directory: Path | str, address: str) -> str:
+def sweep(endpoint_dir: Path | str, address: str) -> str:
     """Clear a version 2 endpoint's directory once its server is known to be gone.
 
     Call it when a connect to `address` failed. It asks `moxi.ipc.sweep(address)`, which
@@ -171,33 +171,33 @@ def sweep(directory: Path | str, address: str) -> str:
         return SWEPT_LIVE
     if verdict == SWEPT_LIVE:
         return verdict
-    remove_moved_sockets(directory)
-    remove_directory(directory)
+    remove_moved_sockets(endpoint_dir)
+    remove_endpoint_dir(endpoint_dir)
     remove_lock(address)
     return verdict
 
 
-def remove_moved_sockets(directory: Path | str) -> None:
+def remove_moved_sockets(endpoint_dir: Path | str) -> None:
     """Remove a dead endpoint's internal sockets that sit outside its directory (the
     short path). Only a path `endpoint_socket` gives for the directory, only outside it,
     and only a socket; anything else, or a path that cannot be worked out, stays."""
-    directory = Path(directory)
+    endpoint_dir = Path(endpoint_dir)
     for name in INTERNAL_SOCKS:
         try:
-            path = Path(endpoint_socket(directory, name))
-            if path.parent == directory or not stat.S_ISSOCK(os.lstat(path).st_mode):
+            path = Path(endpoint_socket(endpoint_dir, name))
+            if path.parent == endpoint_dir or not stat.S_ISSOCK(os.lstat(path).st_mode):
                 continue
             os.unlink(path)
         except (OSError, ValueError, NotImplementedError):
             continue
 
 
-def remove_directory(directory: Path | str) -> None:
+def remove_endpoint_dir(endpoint_dir: Path | str) -> None:
     """Remove the files directly in an endpoint's directory, then the directory. A
     subdirectory, or a file that will not go, leaves the directory in place."""
-    directory = Path(directory)
+    endpoint_dir = Path(endpoint_dir)
     try:
-        entries = list(os.scandir(directory))
+        entries = list(os.scandir(endpoint_dir))
     except OSError:
         return
     for entry in entries:
@@ -205,7 +205,7 @@ def remove_directory(directory: Path | str) -> None:
             with contextlib.suppress(OSError):
                 os.unlink(entry.path)
     with contextlib.suppress(OSError):
-        directory.rmdir()
+        endpoint_dir.rmdir()
 
 
 def remove_lock(address: str) -> None:
@@ -228,13 +228,13 @@ def remove_lock(address: str) -> None:
 
 # -- reading a version 1 directory --------------------------------------------------------
 
-def v1_hello(directory: Path | str, timeout: float = 1.0) -> dict[str, Any] | None:
+def v1_hello(endpoint_dir: Path | str, timeout: float = 1.0) -> dict[str, Any] | None:
     """Ask the version 1 endpoint in `directory` for its hello, with version 1's own line
     on its `sock`. Its hello (a dict naming its session) when a version 1 answer comes
     back; None when nothing answers, or the answer is not version 1's. Nothing under the
     directory is written, renamed or removed."""
     try:
-        conn = connect(Path(directory) / SOCK, timeout)
+        conn = connect(Path(endpoint_dir) / SOCK, timeout)
     except OSError:
         return None
     try:
@@ -368,6 +368,6 @@ __all__ = ["VERSION", "VERSIONS", "V2_ROOT", "HELLO", "MOD_SOCK", "CODEX_APP_SOC
            "INSTRUCTIONS", "ENDPOINT_FILES", "METHODS", "STOP_ASKED", "SOCK", "V1_HELLO",
            "MAX_LINE", "CONNECT_TIMEOUT", "LIVE", "STALE", "UNKNOWN", "SWEPT_LIVE",
            "SWEPT_REMOVED", "SWEPT_ABSENT", "endpoint_name", "address", "v2_root",
-           "read_hello", "v2_directories", "v1_directories", "sweep", "remove_directory",
+           "read_hello", "v2_endpoint_dirs", "v1_endpoint_dirs", "sweep", "remove_endpoint_dir",
            "remove_lock",
            "v1_hello", "ProtocolError", "probe", "connect", "LineConn"]

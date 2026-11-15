@@ -55,8 +55,8 @@ def check(text: str) -> None:
     if public_url:
         try:
             origin.parse(public_url)
-        except origin.BadOrigin as e:
-            raise ConfigError(None, "public_url", str(e),
+        except origin.BadOrigin as exc:
+            raise ConfigError(None, "public_url", str(exc),
                               "set https://<name> or https://<name>:<port>, with no "
                               "path, or leave it empty to use tunnel's address") from None
     port = settings["port"]

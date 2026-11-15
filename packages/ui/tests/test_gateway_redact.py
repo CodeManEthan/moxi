@@ -96,12 +96,13 @@ class Gate:
         access.open_paths = OPEN_PATHS | ICONS
         self.state_dir = self.phone.state_dir
         self.writer = audit_mod.Audit(self.state_dir)
-        self.mount = Mount(True, None) if mounted else Mount(False, "tcp")
+        self.mount = (Mount(mounted=True, reason=None) if mounted
+                      else Mount(mounted=False, reason="tcp"))
         self.reads = Reads()
         self.push = Push(FakeStarters([{"module": "fixture", "state": "up", "log": LOG}]),
                          mounts=MOUNTS, client=FakeClient())
         self.page_answer: tuple[int, list, bytes] = (200, JSON, b"{}")
-        self.acts = Acts(mounts=lambda: MOUNTS, mounted=lambda: self.mount.mounted,
+        self.acts = Acts(mounts=lambda: MOUNTS, on_mounted=lambda: self.mount.mounted,
                          client=self.reads, audit=self.writer, key=lambda: KEY,
                          device_of=access.device_of)
         self.router = GatewayRouter(access, mounts=lambda: MOUNTS,
@@ -310,7 +311,7 @@ def test_each_request_writes_its_row_and_each_gate_its_refusal_code(tmp_path: Pa
         assert [row.get("gate") for row in by_kind.get(code, [])] == [number], code
     (read,) = [row for row in by_kind["request"] if row["path"] == "/m/fixture/api/rows"]
     assert read["status"] == 200 and read["module"] == "fixture" and read["device"]
-    assert read["session"] == gate.phone.access.store.find(
+    assert read["session"] == gate.phone.access.store.use(
         [gate.phone.cookie], gate.phone.key, need_key=True)[:12]
     assert isinstance(read["ms"], int)
     assert all(not set(row) & audit_mod.FORBIDDEN for row in rows)

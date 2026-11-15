@@ -79,13 +79,13 @@ ANNOUNCEMENT = {
 }
 
 
-def _module(root: Path, name: str, *, page: bool = True, handlers: bool = True,
+def _module(root: Path, name: str, *, has_page: bool = True, handlers: bool = True,
             extra: str = "", version: str = "0.1.0") -> None:
     package = root / f"moxi_{name}"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("")
     fields = dict(ANNOUNCEMENT)
-    if page:
+    if has_page:
         fields["PAGE"] = repr(f"moxi_{name}.page:PAGE")
         (package / "page.py").write_text(textwrap.dedent(extra) + PAGE.format(name=name))
     if handlers:
@@ -113,7 +113,7 @@ def site(tmp_path_factory):
         _module(root, name)
     _module(root, "stbad", handlers=False)  # its handlers don't import: exit 3
     _module(root, "stslow", extra="import time\ntime.sleep(30)\n")
-    _module(root, "stnopage", page=False, handlers=False)
+    _module(root, "stnopage", has_page=False, handlers=False)
     return root
 
 
@@ -174,7 +174,7 @@ async def get(conn: Conn, info, path: str) -> tuple[int, bytes]:
 # --- no spawn ---------------------------------------------------------------------------
 
 
-def test_every_child_runs_as_python_P_m_from_the_shells_runtime_dir(shell_dirs, monkeypatch):
+def test_every_child_runs_as_python_p_m_from_the_shells_runtime_dir(shell_dirs, monkeypatch):
     monkeypatch.setenv("MOXI_LOG_FILE", "/elsewhere/shell.log")
     seen = []
 
@@ -456,7 +456,7 @@ def test_a_version_change_drains_and_restarts(shell_dirs, tmp_path, monkeypatch)
         old = await starters.ensure("stver")
         assert old.info.version == "0.1.0"
         request = old.use()
-        stream = old.use(stream=True, close=lambda: cut.append(True))
+        stream = old.use(streaming=True, close=lambda: cut.append(True))
         assert starters.set_versions({"stver": "0.1.0"}) == []
         drains = starters.set_versions({"stver": "0.2.0", "other": "9"})
         assert len(drains) == 1 and starter.state == "draining"

@@ -81,7 +81,7 @@ def _put_back(saved: list[tuple[Path, int]]) -> None:
         path.chmod(mode)
 
 
-def test_no_test_sees_the_package_folder(claude_root):
+def test_no_test_sees_the_package_dir(claude_root):
     from moxi.paths import Layout
 
     package = Path(claude_setup.__file__).resolve().parent / "claude"
@@ -97,7 +97,7 @@ def test_the_volatile_paths_are_each_plugins_loader_files_and_endpoint_json(clau
         "moxi-turns-gate/.claude-plugin/types")
 
 
-def test_endpoint_json_names_this_environment_script(placed):
+def test_endpoint_json_names_this_env_script(placed):
     from moxi_turns.endpoint import package_version
 
     path = claude_setup.write_endpoint_file()
@@ -117,7 +117,7 @@ def test_the_config_key_wins_and_must_be_absolute(turns_env, placed):
         claude_setup.write_endpoint_file()
 
 
-def test_claude_plugin_dirs_returns_both_folders_and_writes_nothing(turns_env, claude_root):
+def test_claude_plugin_dirs_returns_both_dirs_and_writes_nothing(turns_env, claude_root):
     before = sorted(claude_root.rglob("*"))
     runner, gate = claude_setup.claude_plugin_dirs()
     assert (runner, gate) == ((claude_root / "moxi-turns").resolve(),
@@ -155,7 +155,7 @@ def test_a_failed_write_leaves_no_temp_file(placed, monkeypatch):
     assert _temps(placed) == []
 
 
-def test_a_read_only_runner_folder_is_a_setup_error(placed):
+def test_a_read_only_runner_dir_is_a_setup_error(placed):
     runner = placed / "moxi-turns"
     runner.chmod(0o555)
     try:
@@ -229,7 +229,7 @@ def test_setup_refuses_a_marketplace_of_the_same_name_elsewhere(turns_env, claud
     assert not [line for line in _log(fake_claude) if "remove" in line]
 
 
-def test_setup_moves_a_marketplace_added_from_a_package_folder(turns_env, claude_root,
+def test_setup_moves_a_marketplace_added_from_a_package_dir(turns_env, claude_root,
                                                                fake_claude, capsys):
     old = "/opt/env/lib/python3.12/site-packages/moxi_turns/claude"
     (fake_claude / "markets.json").write_text(json.dumps(
@@ -350,7 +350,7 @@ def test_launch_uses_the_current_copy_and_falls_back_to_the_package(placed, clau
     assert claude_setup.claude_plugin_dirs() == package
 
 
-def test_a_launch_through_launch_additions_names_the_placed_folders(placed):
+def test_a_launch_through_launch_additions_names_the_placed_dirs(placed):
     claude_setup.write_endpoint_file()
     adds = turns.launch_additions("claude", cwd=placed.parent, env={})
     assert str((placed / "moxi-turns").resolve()) in adds.argv

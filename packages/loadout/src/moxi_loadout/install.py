@@ -109,7 +109,7 @@ class Outcome:
 
 # -- status ---------------------------------------------------------------------------------
 
-def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
+def status(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.resolve_key,
            git: ignores.Git | None = None, git_seconds: float | None = None) -> Outcome:
     """Every item's state; the scope filters the rows. Takes no lock, writes nothing.
     When this process would read or write elsewhere than the user's last run in a
@@ -118,7 +118,7 @@ def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
     `git` runs the would-commit check's git calls (a fresh `ignores.Git` when None).
     `git_seconds` is how long the core placer's tracked check may give git in all (the
     placer's own 10 seconds a call when None)."""
-    plan, run = _plan(folder, resolver, git_seconds)
+    plan, run = _plan(loadout_dir, resolver, git_seconds)
     notes = _check_placed(plan, ignores.Git() if git is None else git)
     for level, line in opencode_reads_claude(plan, run, after=False):
         run.global_lines.append((level, line))
@@ -195,7 +195,7 @@ def _check_placed(plan: planner.Plan, git: ignores.Git) -> list[str]:
             w.commit = v.line
         elif v.state == "needs" and w.step.action == "keep":
             w.commit = (f"git would commit it; install writes "
-                        f"{os.path.join(v.folder, ignores.IGNORE)}")
+                        f"{os.path.join(v.target_dir, ignores.IGNORE)}")
         elif v.state == "unchecked":
             skipped.append(v.line)
     if not skipped:
@@ -214,13 +214,13 @@ def _shown(scope: Scope, r: Row) -> bool:
     return scope.covers(r.scope, r.kind, r.name) if r.scope is not None else scope.whole
 
 
-def _plan(folder, resolver, git_seconds=None) -> tuple[planner.Plan, entries.Run]:
+def _plan(loadout_dir, resolver, git_seconds=None) -> tuple[planner.Plan, entries.Run]:
     from moxi_loadout import manifest as manifest_mod
     from moxi_loadout import settings
 
     machine = settings.read()
-    if folder is not None:
-        machine.source = os.path.abspath(folder)
+    if loadout_dir is not None:
+        machine.source = os.path.abspath(loadout_dir)
     found = manifest_mod.load(machine.source)
     data = ledger.read()
     plan = planner.build(found, machine, data, resolver=resolver)
@@ -230,7 +230,7 @@ def _plan(folder, resolver, git_seconds=None) -> tuple[planner.Plan, entries.Run
 
 # -- the global file's preview -----------------------------------------------------------
 
-def global_preview(folder=None, *, resolver=planner.resolve_key,
+def global_preview(loadout_dir=None, *, resolver=planner.resolve_key,
                    git_seconds: float | None = None) -> dict:
     """What the next install makes of each global file, for `global show`:
     `{"mode": <the manifest's mode>, "files": [...]}`. Each file the managed part edits is
@@ -245,7 +245,7 @@ def global_preview(folder=None, *, resolver=planner.resolve_key,
     from moxi_loadout import globalfile
     from moxi_loadout import harness as hz
 
-    plan, run = _plan(folder, resolver, git_seconds)
+    plan, run = _plan(loadout_dir, resolver, git_seconds)
     mode, shared = plan.manifest.global_mode, plan.manifest.global_file
 
     def parts(harness: str) -> list[str]:
@@ -262,7 +262,8 @@ def global_preview(folder=None, *, resolver=planner.resolve_key,
     out = []
     for path, (now, then) in sorted(shown.items()):
         a, b = now.decode("utf-8", "replace"), then.decode("utf-8", "replace")
-        diff = "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True),
+        diff = "".join(difflib.unified_diff(a.splitlines(keepends=True),
+                                            b.splitlines(keepends=True),
                                             path, f"{path} after install"))
         h = owner.get(path, "")
         out.append({"file": path, "harness": h, "parts": parts(h), "changes": a != b,
@@ -280,13 +281,13 @@ def global_preview(folder=None, *, resolver=planner.resolve_key,
 # -- install --------------------------------------------------------------------------------
 
 def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: bool = False,
-            folder=None, resolver=planner.resolve_key,
+            loadout_dir=None, resolver=planner.resolve_key,
             say: Callable[[str], object] | None = None) -> Outcome:
     """Adopt, plan the whole manifest, apply the steps in scope. See the module's docs.
     Every line the run says lands in the outcome's `lines`; `say`, when given, is also
     told the line that it waits for the core lock, as it waits."""
     if dry_run:
-        out = status(scope, folder=folder, resolver=resolver)
+        out = status(scope, loadout_dir=loadout_dir, resolver=resolver)
         out.code = planner.exit_code(r.code for r in out.rows
                                      if r.state not in ("missing", "stale"))
         return out
@@ -304,7 +305,7 @@ def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: boo
     try:
         with files.lock(stores.install_lock(), timeout_s=INSTALL_WAIT):
             with _core_lock(files, paths, tell):
-                out = _install(scope, list(replace), folder, resolver, lines)
+                out = _install(scope, list(replace), loadout_dir, resolver, lines)
     except files.LockTimeout as exc:
         lines.append(f"{exc}; another install is running, so try again later")
         return Outcome(lines=lines, code=TEMPFAIL)
@@ -346,7 +347,7 @@ def _core_lock(files, paths, say: Callable[[str], object]):
     return held()
 
 
-def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str]) -> Outcome:
+def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: list[str]) -> Outcome:
     from moxi import place
 
     from moxi_loadout import manifest as manifest_mod
@@ -354,11 +355,11 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
 
     say = lines.append
     machine = settings.read()
-    if folder is not None:
-        machine.source = os.path.abspath(folder)
+    if loadout_dir is not None:
+        machine.source = os.path.abspath(loadout_dir)
     data = ledger.read()
     old_source = data.get("source")
-    for t in adoption.take(folder=machine.source, say=say):
+    for t in adoption.take(loadout_dir=machine.source, say=say):
         say(f"adopted skill {t.module}/{t.placed.name} for {t.placed.harness}")
         data["placed"][str(t.placed.path)] = {
             "section": USER, "kind": "skill", "item": f"{t.module}/{t.placed.name}",
@@ -469,9 +470,9 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
         else:
             say(f"removed {r.kind} {r.name} for {r.harness} ({target})")
 
-    folders = None if scope.whole else touched | {os.path.dirname(str(s.target))
+    touched_dirs = None if scope.whole else touched | {os.path.dirname(str(s.target))
                                                   for s in removes}
-    lines.extend(ignores.settle(data, place.status(planner.OWNER), folders, say=say))
+    lines.extend(ignores.settle(data, place.status(planner.OWNER), touched_dirs, say=say))
     if found.global_mode == "managed":
         harness_entries()
     rows += written
@@ -493,7 +494,7 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     for level, line in opencode_reads_claude(plan, ran[0], after=True):
         said.append((level, line))
         lines.append(line)
-    repo_link.sync(machine.source, machine.reinstall_on_commit, say=say)
+    repo_link.sync(machine.source, enabled=machine.reinstall_on_commit, say=say)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
                    planner.exit_code(codes), global_lines=said)
 
@@ -522,16 +523,16 @@ def _cover(in_scope, plain, forced, seeded, placed, data, rows, say) -> set[str]
     stopped: set[str] = set()
     for target, v in verdicts.items():
         if v.state == "needs":
-            needs.setdefault(v.folder, []).append(target)
+            needs.setdefault(v.target_dir, []).append(target)
         elif v.state in ("would-commit", "unchecked"):
             line = v.line if v.state == "would-commit" else (
                 f"loadout can't tell whether git would commit it ({v.line})")
             for want in by_target[target]:
                 want.commit = line
             stopped.add(target)
-    for folder, targets in needs.items():
-        names = have.get(folder, set()) | {os.path.basename(t) for t in targets}
-        problem = ignores.write(folder, names, data, by_target[targets[0]][0].scope, say)
+    for target_dir, targets in needs.items():
+        names = have.get(target_dir, set()) | {os.path.basename(t) for t in targets}
+        problem = ignores.write(target_dir, names, data, by_target[targets[0]][0].scope, say)
         if problem:
             for t in targets:
                 for want in by_target[t]:
@@ -544,7 +545,7 @@ def _cover(in_scope, plain, forced, seeded, placed, data, rows, say) -> set[str]
     plain[:] = [s for s in plain if s.action == "keep" or str(s.target) not in stopped]
     forced[:] = [s for s in forced if str(s.target) not in stopped]
     seeded[:] = [w for w in seeded if str(w.step.target) not in stopped]
-    return {v.folder for v in verdicts.values()}
+    return {v.target_dir for v in verdicts.values()}
 
 
 def _claims(replace: list[str]) -> dict[str, bool]:

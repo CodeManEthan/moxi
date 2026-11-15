@@ -86,8 +86,8 @@ def test_block_and_limit_have_no_default(tmp_path):
 def test_bytes_appended_after_the_open_are_not_read(tmp_path):
     path = write(tmp_path, b'{"n": 1}\n')
     with read_back(path, block=BLOCK, limit=LIMIT_BYTES) as reader:
-        with open(path, "ab") as f:
-            f.write(b'{"n": 2}\n')
+        with open(path, "ab") as fh:
+            fh.write(b'{"n": 2}\n')
         assert [raw for raw, _ in reader] == [b'{"n": 1}']
 
 

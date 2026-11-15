@@ -158,7 +158,7 @@ def rows(state: states.State, declared: Mapping | None = None) -> tuple[dict, ..
 
 def check(state: states.State, register: states.State | None,
           declared: Mapping | None = None, *, asked: Iterable[str] = (),
-          closed: Callable[[str], bool] | None = None) -> Result:
+          on_closed: Callable[[str], bool] | None = None) -> Result:
     """Check the rows of `declared` against the round as `state` gives it.
 
     - `register`: the state of the project's log, which says what stands of the
@@ -167,7 +167,7 @@ def check(state: states.State, register: states.State | None,
       out.
     - `asked`: the ids of questions to count as open beside the ones on record, for a
       block whose own questions the record does not hold yet.
-    - `closed`: answers whether a round, by name, is closed, for a question parked
+    - `on_closed`: answers whether a round, by name, is closed, for a question parked
       until another round closes; `questions.is_closed` when left out.
     """
     if declared is None:
@@ -176,7 +176,7 @@ def check(state: states.State, register: states.State | None,
     cited = {one["id"] for one in listed}
     open_now = set(asked) | {
         one.id for one in state.questions
-        if questions.current(one, state, closed=closed) == questions.OPEN}
+        if questions.current(one, state, on_closed=on_closed) == questions.OPEN}
     committed = [one.get("id") for one in declared.get("commitment") or ()
                  if isinstance(one, dict)]
     return Result(

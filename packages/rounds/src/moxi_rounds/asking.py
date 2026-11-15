@@ -1,6 +1,6 @@
 """Asking a question: one sentence put to the operator, recorded with where it came from.
 
-`ask("<project>/<slug>", "one sentence", origin=..., actor=...)` appends one
+`ask("<project>/<slug>", "one sentence", origin=..., by=...)` appends one
 `question.asked` event through the write path and returns the question as recorded. A
 round's question is `Q<n>` in the round's log; one asked of a project, with no round yet,
 is `P<n>` in the project's log. Each log numbers its own from 1.
@@ -50,7 +50,7 @@ class Asked:
     options: tuple[tuple[str, str], ...] = ()
 
 
-def ask(target: str, text: str, *, actor: str, origin: str | None = None,
+def ask(target: str, text: str, *, by: str, origin: str | None = None,
         record: str | None = None, blocks: str | None = None,
         options: Sequence[str] = (), settings=None,
         wait_s: float = write.WAIT_S, at: str | None = None) -> Asked:
@@ -58,7 +58,7 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
     and return it as recorded.
 
     - `text`: the question, one sentence on one line.
-    - `actor`: who asks it; the event's actor and the question's asker.
+    - `by`: who asks it; the event's actor and the question's asker.
     - `origin`: the pointer to where the question came from.
     - `record`: the pointer to where the operator asked it, for a question that is his
       own, in place of `origin`.
@@ -142,7 +142,7 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
         fields = {"id": questions.next_id("Q" if slug is not None else "P", mine),
                   "text": text, "from": record if record is not None else origin,
                   "blocks": questions.stored(held), "state": questions.OPEN,
-                  "asked_by": actor, "asked_at": at}
+                  "asked_by": by, "asked_at": at}
         if record is not None:
             fields["record"] = record
         if offered:
@@ -151,7 +151,7 @@ def ask(target: str, text: str, *, actor: str, origin: str | None = None,
                            log=write.ROUND if slug is not None else write.PROJECT)
 
     try:
-        written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
+        written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
                                gates=[ending.takes_new_work(name, "a new question"),
                                       has_an_origin, names_stages_of_the_round,
                                       offers_two_to_four],

@@ -73,9 +73,9 @@ def test_the_same_log_folds_to_the_same_state():
 
 def test_a_log_read_from_its_file_folds_to_what_its_events_fold_to(tmp_path):
     path = log.round_log(tmp_path)
-    written = [log.append(path, "round.opened", OPENED, actor="planner"),
+    written = [log.append(path, "round.opened", OPENED, by="planner"),
                log.append(path, "finish.done", {"stage": "B1", "tip": "0" * 40},
-                          actor="coder")]
+                          by="coder")]
 
     assert state.fold(log.read(path)) == state.fold(written)
     assert state.fold(log.read(path)) == state.fold(log.read(path))

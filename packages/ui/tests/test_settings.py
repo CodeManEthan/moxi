@@ -25,7 +25,7 @@ def _key(name, type_, value, default=None, *, read="use", source="default", **ex
 
 #: A recorded `show --json` with a key of each of the eight types.
 EIGHT = [
-    _key("on", "bool", True, False, source="file"),
+    _key("on", "bool", value=True, default=False, source="file"),
     _key("count", "int", 3, 1, read="start"),
     _key("ratio", "float", 0.5, 1.0),
     _key("name", "string", "-x y", "", env="MOXI_DEMO_NAME", source="env"),
@@ -58,9 +58,9 @@ def test_each_of_the_eight_types_gives_a_descriptor_spelled_as_set_takes_it():
 
 
 def test_the_marks_a_daemon_switch_the_shell_port_and_an_absent_module():
-    switch = _key("enabled", "bool", False, False)
+    switch = _key("enabled", "bool", value=False, default=False)
     port = _key("port", "int", 8460, 8460, read="start")
-    needs = _key("hook", "bool", False, False, needs="turns")
+    needs = _key("hook", "bool", value=False, default=False, needs="turns")
     assert settings.descriptor("demo", switch, switches={"enabled"})["mark"] == MARK_SWITCH
     assert settings.descriptor("ui", port, platform="linux")["mark"] == \
         "applies after `moxi install ui`"

@@ -162,11 +162,11 @@ class Runner:
     def __init__(self, site, cwd, log, *args, module=MODULE, safe=True, env=None):
         argv = [sys.executable, *(["-P"] if safe else []), "-m", "moxi_ui.loopback.serve",
                 module, *args]
-        environ = {**os.environ, "PYTHONPATH": str(site),
+        child_env = {**os.environ, "PYTHONPATH": str(site),
                    f"MOXI_{module.upper()}_LOG_LEVEL": "info", **(env or {})}
         self.log = log
         self._err = open(log, "ab")
-        self.proc = proc.spawn(argv, lifeline="stdin", cwd=cwd, env=environ,
+        self.proc = proc.spawn(argv, lifeline="stdin", cwd=cwd, env=child_env,
                                stdout=subprocess.PIPE, stderr=self._err)
         self.server_id = None
 
@@ -699,14 +699,14 @@ def test_from_a_fresh_moxi_home_it_runs_in_its_own_runtime_dir(spawn, monkeypatc
         assert runner.exit(EXIT_DEADLINE + 2)[0] == 0
 
 
-def _plant(directory: Path, package: str, marker: Path) -> None:
-    (directory / package).mkdir()
-    (directory / package / "__init__.py").write_text(
+def _plant(work_dir: Path, package: str, marker: Path) -> None:
+    (work_dir / package).mkdir()
+    (work_dir / package / "__init__.py").write_text(
         f"open({str(marker)!r}, 'a').write({package!r} + '\\n')\n")
 
 
 @posix
-def test_a_planted_moxi_ui_in_the_working_directory_is_never_imported(spawn, cwd, tmp_path):
+def test_a_planted_moxi_ui_in_the_working_dir_is_never_imported(spawn, cwd, tmp_path):
     marker = tmp_path / "imported"
     _plant(cwd, "moxi_ui", marker)
     _plant(cwd / "moxi_ui", "loopback", marker)

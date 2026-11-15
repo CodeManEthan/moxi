@@ -10,11 +10,11 @@ from moxi_launcher import handoffs, module
 
 
 def skill_text() -> str:
-    folder = resources.files("moxi_launcher").joinpath(module.SKILLS)
-    return folder.joinpath("moxi-handoff", "SKILL.md").read_text(encoding="utf-8")
+    skill_dir = resources.files("moxi_launcher").joinpath(module.SKILLS)
+    return skill_dir.joinpath("moxi-handoff", "SKILL.md").read_text(encoding="utf-8")
 
 
-def test_the_skill_ships_in_the_skills_folder_with_its_name_and_description():
+def test_the_skill_ships_in_the_skills_dir_with_its_name_and_description():
     text = skill_text()
     front = re.match(r"---\n(.*?)\n---\n", text, re.S)
     assert front, "the skill opens with its front matter"
@@ -23,7 +23,7 @@ def test_the_skill_ships_in_the_skills_folder_with_its_name_and_description():
     assert fields["description"]
 
 
-def test_the_skill_states_the_folder_and_the_file_name_rule():
+def test_the_skill_states_the_dir_and_the_file_name_rule():
     text = skill_text()
     assert "handoff dir:" in text
     assert "moxi launcher handoff dir" in text

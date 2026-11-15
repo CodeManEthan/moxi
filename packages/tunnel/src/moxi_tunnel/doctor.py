@@ -309,7 +309,7 @@ def _tailscale_rows(reads: _Reads, *, public: bool) -> list[Row]:
     if "binary" in got:
         miss = got["binary"]
         return [Row(MODULE, "tailscale CLI", "fail", miss.text, str(miss.value)),
-                *(_off_row(name, public) or
+                *(_off_row(name, public=public) or
                   Row(MODULE, name, "warn", "not checked: no tailscale CLI")
                   for name in TAILSCALE_ROWS[1:])]
     out = []
@@ -346,7 +346,7 @@ def _tailscale_rows(reads: _Reads, *, public: bool) -> list[Row]:
     else:
         out.append(_owner("logged in", status, "start Tailscale, then tailscale up"))
         out.append(_behind("HTTPS certificates", status, "tailscale status"))
-        out.append(_off_row("Funnel allowed", public) or
+        out.append(_off_row("Funnel allowed", public=public) or
                    _behind("Funnel allowed", status, "tailscale status"))
 
     # may change serve config, shields up: tailscale debug prefs
@@ -354,7 +354,7 @@ def _tailscale_rows(reads: _Reads, *, public: bool) -> list[Row]:
     return out
 
 
-def _off(name: str, public: bool) -> str | None:
+def _off(name: str, *, public: bool) -> str | None:
     """Why row `name` does not apply here, or None when it does."""
     if name in ("Funnel allowed", "shields up") and not public:
         return "no public Tailscale target is recorded"
@@ -363,8 +363,8 @@ def _off(name: str, public: bool) -> str | None:
     return None
 
 
-def _off_row(name: str, public: bool) -> Row | None:
-    why = _off(name, public)
+def _off_row(name: str, *, public: bool) -> Row | None:
+    why = _off(name, public=public)
     return Row(MODULE, name, "off", why) if why else None
 
 
@@ -412,7 +412,7 @@ def _status_rows(ts: ts_.Tailscale, status: object, *, public: bool) -> list[Row
     else:
         out.append(Row(MODULE, "HTTPS certificates", "ok",
                        f"MagicDNS and HTTPS certificates are on ({', '.join(domains)})"))
-    off = _off_row("Funnel allowed", public)
+    off = _off_row("Funnel allowed", public=public)
     if off is not None:
         out.append(off)
     elif "funnel" in caps and ts.funnel_ports() is not None:
@@ -431,7 +431,7 @@ def _prefs_rows(prefs: _Read | None, *, public: bool) -> list[Row]:
     out = []
     owned = False
     for name in ("may change serve config", "shields up"):
-        off = _off_row(name, public)
+        off = _off_row(name, public=public)
         if off is not None:
             out.append(off)
             continue

@@ -47,7 +47,7 @@ class Ctx:
         assert bad is None, bad
         self.fields.update(fields)
 
-    async def answered(self, written=True):
+    async def answered(self, *, written=True):
         for fn in self.after:
             await fn(written)
 
@@ -67,7 +67,7 @@ def link(rig):
 @pytest.fixture
 def tools(rig, link):
     assert wait_until(lambda: link.bound)
-    return tools_mod.Tools(link, result=Result, refused=Result.refused, wait_default=2,
+    return tools_mod.Tools(link, result=Result, on_refused=Result.refused, wait_default_s=2,
                            wait_max=5, record=rig.record)
 
 
@@ -93,7 +93,7 @@ def call(tools, name, args=None, *, written=True):
     async def go():
         ctx = Ctx()
         got = await getattr(tools, name)(args or {}, ctx)
-        await ctx.answered(written)
+        await ctx.answered(written=written)
         return got, ctx
     return run(go())
 
@@ -122,7 +122,7 @@ def test_a_held_name_makes_the_tools_refuse_and_the_status_name_the_holder(rig):
         assert wait_until(lambda: link.state == HELD)
         [row] = link.status()
         assert row[:2] == ("identity", "fail") and "claude-shim" in row[2]
-        t = tools_mod.Tools(link, result=Result, refused=Result.refused, wait_default=2,
+        t = tools_mod.Tools(link, result=Result, on_refused=Result.refused, wait_default_s=2,
                             wait_max=5, record=rig.record)
         got, _ = call(t, "send", {"to": "planner@proj-a", "text": "x"})
         assert got.is_error and got.refusal == "name-held" and "claude-shim" in got.text
@@ -275,8 +275,8 @@ def test_two_overlapping_checks_never_return_the_same_mail(rig, tools, link):
         await asyncio.sleep(0.3)                     # its count read, then the lock
         go_on.set()
         r1, r2 = await asyncio.gather(first, second)
-        await c1.answered(True)
-        await c2.answered(True)
+        await c1.answered(written=True)
+        await c2.answered(written=True)
         return r1, r2
 
     try:
@@ -316,7 +316,7 @@ def wait_call(tools, args, during=None):
         if during is not None:
             await asyncio.to_thread(during)
         got = await task
-        await ctx.answered(True)
+        await ctx.answered(written=True)
         return got
     return run(go())
 
@@ -592,7 +592,7 @@ def test_a_wait_over_wait_max_waits_wait_max_and_the_schema_says_so(rig, tools):
     assert got.text.startswith("No reply within 1 second.")
     schema = tools_mod.inputs()["send_and_wait"]["properties"]["wait_s"]
     assert schema["maximum"] == CONNECTOR_WAIT_CEILING
-    assert f"longest wait is {ConnectorConfig.wait_max} seconds" in schema["description"]
+    assert f"longest wait is {ConnectorConfig.wait_max_s} seconds" in schema["description"]
 
 
 def test_a_wait_under_one_second_is_refused(rig, tools):

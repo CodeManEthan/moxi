@@ -324,7 +324,7 @@ def test_location_warn_inside_a_work_tree(config_home, tmp_path, git, depth):
 @pytest.mark.skipif(sys.platform == "win32",
                     reason="creating a directory link needs a privilege Windows runners "
                            "may lack")
-def test_location_warn_when_the_config_directory_links_into_a_work_tree(config_home,
+def test_location_warn_when_the_config_dir_links_into_a_work_tree(config_home,
                                                                          tmp_path):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
@@ -336,7 +336,7 @@ def test_location_warn_when_the_config_directory_links_into_a_work_tree(config_h
     assert doctor.private_names_location_row().state == "warn"
 
 
-def test_location_ok_inside_a_git_directory(config_home, tmp_path):
+def test_location_ok_inside_a_git_dir(config_home, tmp_path):
     repo = tmp_path / "repo"
     (repo / ".git" / "moxi").mkdir(parents=True)
     config_home(repo / ".git" / "moxi")

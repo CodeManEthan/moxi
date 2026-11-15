@@ -145,7 +145,7 @@ def run_pass(w, pid, settle_pass):
 class Ops:
     """The settle steps' ops over the world: its clock, its passes, its counter and lock."""
 
-    def __init__(self, world, name, settle_pass=True):
+    def __init__(self, world, name, *, settle_pass=True):
         self.w, self.name, self.settle_pass = world, name, settle_pass
         self.pid = None
         self.raised = None
@@ -254,7 +254,7 @@ def _remote(w, rng):
 
 def _hand_pass(w, rng):
     yield _q(rng, 0, 60)
-    yield from run_pass(w, 0, False)
+    yield from run_pass(w, 0, settle_pass=False)
 
 
 def _ext_lock(w, rng, longest):
