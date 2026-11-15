@@ -17,7 +17,8 @@
   `moxi_turns.Session.codex_limits`: `timeout` is now `timeout_s`;
   `moxi_turns.Session.command`: `timeout` is now `timeout_s`;
   `moxi_turns.Session.mcp_reload`: `timeout` is now `timeout_s`;
-  `moxi_turns.wait_ready`: `timeout` is now `timeout_s`.
+  `moxi_turns.wait_ready`: `timeout` is now `timeout_s`; `moxi_turns.Session`: `environ`
+  is now `env`.
 - `start.order`'s default is `["launcher", "comms", "notes"]`, the start-context modules
   in this repository. A config that sets the key keeps its own list.
 - The README is written for a newcomer: what turns is, its three guards and what each
