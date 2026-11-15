@@ -423,6 +423,43 @@ def test_a_build_merged_by_hand_reads_the_target_before_its_merge(ready, repo):
     assert gates(path) == ()
 
 
+def _gone(repo, tree) -> None:
+    """Remove the build's worktree and delete its branch, as a user may once they merged
+    it by hand."""
+    repo.git("worktree", "remove", "--force", str(tree.root))
+    repo.git("branch", "-D", "work")
+
+
+def test_a_build_merged_by_hand_whose_branch_is_gone_meets_the_check_gate_at_its_head(
+        ready, repo):
+    path, tree = ready
+    head = tree.rev()
+    repo.merge("work")
+    _gone(repo, tree)
+
+    seen = seen_now(path)
+    assert (seen.tip, seen.head) == (None, head)
+    assert gates(path) == ()
+    assert steps.one(folded(path), "check", "B1", name=ROUND,
+                     seen={"B1": seen}).state == steps.DONE
+
+
+def test_a_check_met_only_by_ci_is_read_at_the_head_once_the_branch_is_gone(
+        opened, repo, configure):
+    configure(f'check_on = "tip"\nci = {{ workflows = ["{FLOW}"], local = "none" }}')
+    path, tree = opened()
+    verify(path, tree.rev())
+    _green(path, tree.rev(), repo.rev("main"))
+    repo.commit("other.txt", "a change the build does not touch")
+    repo.merge("work")
+    _gone(repo, tree)
+
+    found = gates(path)
+
+    assert numbers(found) == [finish_gates.TARGET]
+    assert "the check is met only by CI" in found[0].unmet.reason
+
+
 # -- the row -----------------------------------------------------------------------------
 
 def test_finish_is_not_due_before_commission_and_carries_the_holds_on_its_stage(

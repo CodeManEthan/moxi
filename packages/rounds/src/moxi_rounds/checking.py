@@ -268,13 +268,16 @@ def seen_of(state: states.State, name: str, *, settings,
                 f"{build.stage} can't be read from git: {exc.reason}",
                 f"moxi rounds show {name}"))
             continue
-        argv = None if tip is None else argv_now(settings, name, build, root=root, tip=tip)
+        # The check is read at the head, which is the tip while the branch is there:
+        # a build whose branch is gone is finished at its head, so a run there counts.
+        argv = None if head is None else argv_now(settings, name, build, root=root,
+                                                  tip=head)
         found[build.stage] = steps.Seen(
             state=now.status.state, tip=tip, clean=clean,
             check=None if argv is None and declared(settings, build.repo) is None
             else tuple(argv or ()),
-            values=None if tip is None else values(name, build, root=root, tip=tip),
-            ci=_ci_now(settings, build, name=name, root=root, tip=tip),
+            values=None if head is None else values(name, build, root=root, tip=head),
+            ci=_ci_now(settings, build, name=name, root=root, tip=head),
             head=head, since=since, drift=moved, reported=reported,
             target_before=before, holds_target=holds, tree=tree,
             check_on=own.build_setting(settings, build.repo, "check_on"),

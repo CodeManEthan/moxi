@@ -167,10 +167,10 @@ class Seen:
     """What the caller read of a stage's open build now, from git and the settings:
     `state`, the build's state as git reads it; `tip`, its branch's tip; `clean`,
     whether its worktree is on this machine with the build's branch checked out and
-    nothing uncommitted; `check`, the argv the repo's check gives now at the tip, None
+    nothing uncommitted; `check`, the argv the repo's check gives now at `head`, None
     when the repo declares no check; `values`, what the placeholders of a command read
-    for the build at the tip (`checking.values`); `ci`, what CI's form of the check
-    gate compares at the tip where the repo declares `ci` (`ci.Now`), else None;
+    for the build at `head` (`checking.values`); `ci`, what CI's form of the check
+    gate compares at `head` where the repo declares `ci` (`ci.Now`), else None;
     `head`, the tip, or the build's head where its branch is gone; `since`, the commits
     from the head its newest build verdict read to `head`, None with no such verdict or
     when git does not hold that head; `drift`, the build's drift against that verdict
@@ -432,15 +432,17 @@ def _check(state: states.State, about: Asked) -> Step:
                          about.name)
     if seen.problem is not None:
         return Step(CHECK, WAITING, stage=stage, waits=(seen.problem,))
-    if seen.tip is not None and seen.check is not None and checking.passes(
-            state, stage, CHECK, tip=seen.tip, argv=seen.check):
+    # Read at the head: the tip, or the build's head once its branch is gone, which is
+    # where a finish reads it.
+    if seen.head is not None and seen.check is not None and checking.passes(
+            state, stage, CHECK, tip=seen.head, argv=seen.check):
         return Step(CHECK, DONE, stage=stage)
     owes: tuple[str, ...] = ()
-    if seen.ci is not None and seen.tip is not None and seen.check is not None:
-        by_ci = ci_reads.why_not(state, stage, tip=seen.tip, now=seen.ci)
+    if seen.ci is not None and seen.head is not None and seen.check is not None:
+        by_ci = ci_reads.why_not(state, stage, tip=seen.head, now=seen.ci)
         if by_ci is None:
             return Step(CHECK, DONE, stage=stage)
-        full = checking.why_not(state, stage, CHECK, tip=seen.tip, argv=seen.check)
+        full = checking.why_not(state, stage, CHECK, tip=seen.head, argv=seen.check)
         owes = (f"by the full check: {full}", f"by CI: {by_ci}")
     waits = _before_a_run(stage, seen, "check")
     return Step(CHECK, WAITING if waits else READY, stage=stage, waits=waits, owes=owes)
@@ -624,8 +626,8 @@ def command_row(step: str) -> Row:
         if seen.problem is not None:
             return Step(step, WAITING, stage=stage, waits=(seen.problem,))
         entry = checking.step_entry(state, step)
-        if (entry is not None and seen.tip is not None and seen.values is not None
-                and checking.passes(state, stage, step, tip=seen.tip,
+        if (entry is not None and seen.head is not None and seen.values is not None
+                and checking.passes(state, stage, step, tip=seen.head,
                                     argv=checking.fill(entry["argv"], seen.values))):
             return Step(step, DONE, stage=stage)
         waits = _before_a_run(stage, seen, f"run {step} on")

@@ -152,8 +152,8 @@ def unmet(state: states.State, stage: str, *, seen, tip: str | None = None,
             + f": moxi rounds verdict {name} <your report>; or {_skip(name, step, stage)}")
 
     only_ci = (checked is not None and checked.state == steps.DONE
-               and seen.check is not None and seen.tip is not None
-               and not checking.passes(state, stage, checking.CHECK, tip=seen.tip,
+               and seen.check is not None and seen.head is not None
+               and not checking.passes(state, stage, checking.CHECK, tip=seen.head,
                                        argv=seen.check))
     if (seen.check_on == MERGED or only_ci) and seen.holds_target is not True:
         why = ("the check is met only by CI, which ran on the tip and not on the "

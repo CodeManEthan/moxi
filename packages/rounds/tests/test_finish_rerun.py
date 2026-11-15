@@ -140,6 +140,21 @@ def test_a_hand_merge_is_found_recorded_and_finished_with_what_it_put_on_the_tar
     assert done["tip"] == tip and build_of(path).ended == builds.FINISHED
 
 
+def test_a_hand_merge_whose_branch_is_gone_is_finished_at_its_checked_head(
+        ready, repo, path, capsys):
+    head = ready.rev()
+    hand = repo.merge("work", "-m", "merged by hand")
+    repo.git("worktree", "remove", "--force", str(ready.root))
+    repo.git("branch", "-D", "work")
+
+    assert main(["finish", ROUND, "B1", "--as", "coder"]) == 0
+
+    assert "finished B1" in capsys.readouterr().out
+    (action,) = of_type(path, "finish.action")
+    assert (action["tip"], action["state"], action["landing"]) == (head, "found", hand)
+    assert build_of(path).ended == builds.FINISHED
+
+
 def test_a_hand_merge_before_verification_is_refused_with_what_is_owed(repo, path):
     tree = built(repo, "work.txt")
     repo.merge("work", "-m", "merged by hand")
