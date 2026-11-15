@@ -5,10 +5,6 @@ and 20) read the message before it, and the repo's existing git hook reads it af
 every branch, detached HEAD, merges and replays alike, it reads every line above git's
 scissors line, comment lines included, and:
 
-(The hook can't see git's cleanup mode, and git drops the lines below that line only for
-an edited message. The push piece and `scan` read a made commit or tag whole.)
-
-
 - drops each trailer line whose key is on the repo's `drop-trailer` setting, with the
   lines that continue its value, and rewrites the message file. It removes whole lines
   only, and prints one line per key it dropped;
@@ -18,6 +14,9 @@ an edited message. The push piece and `scan` read a made commit or tag whole.)
 - refuses a line holding a hit of secrets' `credentials` or `private-names` set, or of a
   provenance rule that applies to messages. A provenance hit is shown with its text, cut
   at 100 characters; a secrets hit with its rule only, so a credential is never printed.
+
+(The hook can't see git's cleanup mode, and git drops the lines below the scissors line
+only for an edited message. The push piece and `scan` read a made commit or tag whole.)
 
 A trailer line is one git's trailer parser reads as one: a key of ASCII letters, digits
 and `-` at the start of the line, then spaces or tabs, then `:`; a `:` followed by `//`
