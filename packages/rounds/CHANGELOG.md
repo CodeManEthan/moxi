@@ -82,6 +82,11 @@ does not yet build.
   verb prints what the build's finish still waits for, and `show` and the round note
   give each build's newest verdict and findings.
 - A user command step waits, as `check` does, for a clean worktree.
+- `show` and the round note say how far the target moved under each open build since
+  its newest verdict, and whether that owes a re-check: one is owed when the target
+  changed a path the build changes, or a lockfile or a path of the repo's
+  `shared_paths`, or when a merge of the target into the branch after the verdict
+  brought such a change or came with commits of the build's own.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

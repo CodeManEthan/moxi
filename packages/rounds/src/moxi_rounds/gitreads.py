@@ -6,8 +6,9 @@ its work tree holds anything not committed, whether a name is one git takes for 
 which commit a branch is, which of some commits git still has, a commit's tree,
 parents and commit date, whether one commit is an ancestor of another, the merge bases
 of two, the one commit of several that has the others as ancestors, the merge that
-brought a commit onto a branch's first-parent line, the commits of a range, and whether
-a range holds a commit that is not a merge. It writes nothing.
+brought a commit onto a branch's first-parent line, the commits of a range, whether
+a range holds a commit that is not a merge, and the paths two commits differ in. It
+writes nothing.
 
 git runs with the caller's environment less every `GIT_` variable, so a variable meant
 for another repo or another git never steers what is read here.
@@ -183,11 +184,21 @@ class Git:
             return None
         return None if self.parents(oldest)[:1] == (commit,) else oldest
 
-    def between(self, start: str, end: str, *, first_parent: bool = False) -> list[str]:
+    def between(self, start: str, end: str, *, first_parent: bool = False,
+                nor: Iterable[str] = ()) -> list[str]:
         """The commits reachable from `end` and not from `start`, newest first; with
-        `first_parent`, only those on the first-parent line from `end`."""
+        `first_parent`, only those on the first-parent line from `end`; with `nor`, not
+        from any of those commits either."""
         return self._lines("rev-list", *(["--first-parent"] if first_parent else []),
-                           f"{start}..{end}")
+                           f"{start}..{end}", *(f"^{one}" for one in nor))
+
+    def changed_paths(self, start: str, end: str) -> frozenset[str]:
+        """The paths whose content differs between the trees of two commits. A renamed
+        file is a change to both its names, and a path is read whatever bytes it holds."""
+        # diff-tree is plumbing: no diff setting of the user's renames or hides a path.
+        out = self._run("diff-tree", "-r", "--name-only", "--no-renames", "-z", start,
+                        end)[1]
+        return frozenset(one for one in out.split("\0") if one)
 
     def holds_non_merge(self, start: str, end: str) -> bool:
         """Whether a commit that is not a merge is reachable from `end` and not from

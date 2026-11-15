@@ -346,6 +346,8 @@ def _builds(shown_as: dict) -> list[str]:
             said.append(showing.ci_line(one["ci"]))
         if one.get("verdict") is not None:
             said.append(showing.build_verdict_line(one["verdict"]))
+        if one.get("drift") is not None:
+            said.append(showing.drift_line(one["stage"], one["drift"]))
         said += [showing.finding_line(finding) for finding in one.get("findings", ())]
         for line in said:
             lines += _item(line, indent="  ")

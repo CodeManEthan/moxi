@@ -28,7 +28,9 @@ A project is not shown: its rounds are listed.
 Its builds are shown each with what its commission recorded, the newest run of its
 repo's check, of each command step of the user's own and of the local part of a check by
 CI, its newest read of CI, and, while it is open, its state as read from git now (`open_builds`):
-whether it is idle, the builds it shares commits with, or what kept it from being read.
+whether it is idle, the builds it shares commits with, or what kept it from being read;
+and, once a report of it is recorded, how far the target moved under it since and
+whether that owes a re-check (`drift`).
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
 its key, what it reads from a `Shown`, and how that reads as lines. What a round is
@@ -46,11 +48,13 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (builds, checking, ci, closing, findings, folders, index, log,
+from . import (builds, checking, ci, closing, drift, findings, folders, index, log,
                open_builds, questions, shown, skips, steps, tracing, versions)
 from . import settings as own
 from . import state as states
-from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
+from .errors import (BadArgument, NoLog, NoRound, Refused, RoundsError, Unmet,
+                     Unreadable)
+from .gitreads import Git
 
 #: The order the states of a question are shown in.
 _STATES = (questions.OPEN, questions.PARKED, questions.LEFT, questions.RULED,
@@ -367,17 +371,41 @@ def _builds(found: Shown) -> list:
                "ci": _ci_read(found.state, one),
                "verdict": _build_verdict(found.state, one),
                "findings": [finding.data()
-                            for finding in findings.of_build(found.state, one)]}
+                            for finding in findings.of_build(found.state, one)],
+               "drift": None}
         now = read.get(one.stage) if one.ended is None else None
         if now is not None and now.build.n == one.n:
             data = now.data()
             row.update({key: data[key] for key in ("state", "by", "why", "head", "idle",
                                                    "shares", "problem")})
+            row["drift"] = _drift(found, one, now.status)
         elif one.ended is None:
             row["problem"] = {"reason": f"the repo {one.repo} could not be read",
                               "fix": "moxi projects list"}
         listed.append(row)
     return listed
+
+
+def _drift(found: Shown, build: builds.Build, status: builds.Status | None) -> dict | None:
+    """The drift of an open build at its head now, against its newest build verdict,
+    as data; None with no such verdict or nothing read from git; `{"problem": ...}`
+    when git could not answer."""
+    if status is None or drift.newest_verdict(found.state, build) is None:
+        return None
+    try:
+        _key, root = folders.root(build.repo)
+        settings = own.load() if found.settings is None else found.settings
+        read = drift.of_build(found.state, build, status, Git(root), settings=settings)
+    except RoundsError as error:
+        return {"problem": {"reason": error.reason, "fix": error.fix}}
+    return None if read is None else read.data()
+
+
+def drift_line(stage: str, one: dict) -> str:
+    """A build's drift in words, or what kept it from being read."""
+    if "problem" in one:
+        return f"drift not read: {one['problem']['reason']}"
+    return drift.line(stage, one)
 
 
 def _build_verdict(state: states.State, build: builds.Build) -> dict | None:
@@ -499,6 +527,8 @@ def _build_lines(listed: list) -> list[str]:
         if one.get("verdict") is not None:
             lines.append(f"    {build_verdict_line(one['verdict'])}")
             lines.append(f"      report: {one['verdict']['report']}")
+        if one.get("drift") is not None:
+            lines.append(f"    {drift_line(one['stage'], one['drift'])}")
         lines += [f"    {finding_line(finding)}" for finding in one.get("findings", ())]
         if one["record"] is not None:
             lines.append(f"    go: {one['record']}")
@@ -745,5 +775,5 @@ def as_text(found: Shown) -> str:
 
 __all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
            "ended_line", "skip_line", "stage_line", "build_line", "build_verdict_line",
-           "finding_line", "step_lines", "version_lines", "thread_line", "verdict_lines",
-           "history_of"]
+           "finding_line", "drift_line", "step_lines", "version_lines", "thread_line",
+           "verdict_lines", "history_of"]

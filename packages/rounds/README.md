@@ -388,6 +388,16 @@ build takes an id no earlier report of the stage used, a dropped build's include
 `verdict` prints the build's findings and what its finish still waits for; `show` and
 the round note give each build's newest verdict and its findings.
 
+A verdict records the head it read and that head's merge-base with the target. When the
+target moves on, `show` reads whether the move touches the build: `target moved 4
+commits under B2; 0 paths meet`, or `...; 2 paths meet: re-check owed`. A re-check is
+owed when the target changed a path the build's branch changes against it, or a shared
+path: the common lockfiles (`uv.lock`, `package-lock.json` and the like, in any folder)
+and the globs of the repo's `shared_paths`. A glob with no `/` matches a file's name in
+any folder, one with a `/` the whole path. The target merged into the branch after the
+verdict needs no re-check when the branch gained nothing else since and the merge
+changes no path of the build and no shared path.
+
 ## Questions
 
 A question is one sentence on one line. It may offer two to four options, each a line
@@ -601,9 +611,10 @@ setting names now, and the local run passed at the tip with the command it decla
 now. The full check, run with `check --full`, meets the step whatever CI reads. A
 `ci` in a project with no `check` is refused. It also takes `defaults.ratify`,
 `defaults.check_on`, `defaults.dormant_days`, `defaults.slice_minutes` and
-`defaults.sitting_at`, and in a project's table `finish`, `shared_paths`,
-`keep_branch` and `lock_ref`. They are checked when the file is read, and nothing in
-this version acts on them.
+`defaults.sitting_at`, and in a project's table `finish`, `keep_branch` and
+`lock_ref`. They are checked when the file is read, and nothing in this version acts on
+them. A project's `shared_paths` lists globs of paths every build of its repo shares,
+beside the common lockfiles: a change to one on the target owes a build a re-check.
 
 `models` maps each tier a step names to a model per harness. The order the tiers are
 written in is their order, strongest first. `next` prints beside a tier every
