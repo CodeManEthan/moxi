@@ -61,7 +61,8 @@ and the item `unafter:B<n>=B<m>` takes one off. Neither of those two rulings is 
 back. `mark ROUND B<n> --brief FILE` sizes a worker's brief before the worker gets it:
 its data block names the stage and one slice the stage declares, given no more than
 the project's `slice_minutes`, or one verification (`verify = "build"`, `"design"` or
-`"retro"`); a pass is recorded with the brief's SHA-256.
+`"retro"`), or, for a stage that declares no slices and so is one, neither; a pass is
+recorded with the brief's SHA-256.
 A ruling is corrected by a later one: `--supersedes` names the earlier ruling of the
 same thing that this one replaces, and the item `revoke:C<n>` (`revoke:S<n>` on a
 project) takes a ruling back with nothing in its place.
@@ -695,7 +696,8 @@ def _declare_mark(verbs) -> None:
                            "worker gets it: its data block names the stage and one "
                            "slice the stage declares, within the slice_minutes "
                            "setting, or one verification (verify = build, design "
-                           "or retro); a pass is recorded with the brief's SHA-256")
+                           "or retro), or neither for a stage that declares no "
+                           "slices; a pass is recorded with the brief's SHA-256")
     form.add_argument("--fixed", action="store_true",
                       help="the lead's mark that a minor or note finding of a build "
                            "is fixed, with no re-check; needs every commit of the fix "
@@ -962,7 +964,7 @@ def _declare_fold(verbs) -> None:
 
 
 def _fold(args, out) -> int:
-    from . import freezing, tracing
+    from . import freezing, sizing, tracing
 
     frozen = freezing.freeze(args.round, actor=_actor(args),
                              records_only=args.records_only, record=args.record)
@@ -977,10 +979,7 @@ def _fold(args, out) -> int:
     for line in tracing.lines(frozen.trace):
         print(line, file=out)
     for one in frozen.oversized:
-        print(f"warning: the slice {one['slice']} of {one['stage']} is given "
-              f"{one['minutes']} minutes, over the {frozen.slice_minutes} of "
-              "slice_minutes: a worker gets one piece, well under an hour, and a brief "
-              "for it is refused until the design cuts it", file=out)
+        print(sizing.oversized_line(one, frozen.slice_minutes), file=out)
     _warn_of(frozen.failed, args.prog, args.verb)
     return codes.OK
 
@@ -1140,7 +1139,7 @@ def _declare_commission(verbs) -> None:
 
 
 def _commission(args, out) -> int:
-    from . import commissioning
+    from . import commissioning, sizing
 
     if len(args.slices) != len(args.minutes):
         raise BadArgument(f"{len(args.slices)} --slice and {len(args.minutes)} "
@@ -1168,6 +1167,8 @@ def _commission(args, out) -> int:
         print(f"go: {made.record}", file=out)
     for line in made.block.lead_lines():
         print(line, file=out)
+    for one in made.oversized:
+        print(sizing.oversized_line(one, made.slice_minutes), file=out)
     _warn_of(made.failed, args.prog, args.verb)
     return codes.OK
 

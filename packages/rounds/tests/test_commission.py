@@ -582,6 +582,32 @@ def test_a_light_flow_declares_the_stage_as_it_commissions_it(repo, opened, caps
     assert steps.one(states.fold(log.read(path)), "commission", "B1").state == steps.DONE
 
 
+def test_a_slice_declared_over_the_limit_is_commissioned_with_a_warning(repo, opened,
+                                                                       capsys):
+    path = opened(stages=())
+
+    assert run(ROUND, "--repo", "proj-a", "--branch", "work", "--builder", "coder",
+               "--slice", "1a=the log", "--minutes", "45",
+               "--slice", "1b=the fold", "--minutes", "50") == 0
+
+    [declared] = events(path, "stage.declared")
+    assert [one["minutes"] for one in declared["slices"]] == [45, 50]
+    assert len(events(path, "build.commissioned")) == 1
+    warnings = [line for line in capsys.readouterr().out.splitlines()
+                if line.startswith("warning:")]
+    assert warnings == [
+        "warning: the slice 1b of B1 is given 50 minutes, over the 45 of slice_minutes: "
+        "a worker gets one piece, well under an hour, and a brief for it is refused "
+        "until it is cut"]
+
+
+def test_a_stage_commissioned_by_its_id_warns_of_no_slice(repo, opened):
+    opened()
+
+    assert commissioning.commission(ROUND, "B1", builder="coder",
+                                    actor="planner").oversized == ()
+
+
 def test_the_stage_declared_takes_the_lowest_id_the_round_has_not_used(repo, opened):
     path = opened(stages=())
     log.append(path, "stage.declared", {"id": "B1", "round": "proj-a/child", "after": []},

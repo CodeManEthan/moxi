@@ -345,7 +345,12 @@ def _warnings(found: showing.Shown) -> list[dict]:
                 f"give {versions.DESIGN_FILE} a row for {one.id}, then {fold}"))
     for build in builds.builds(state):
         left = [] if build.ended is not None else sizing.unsized(state, build)
-        if left:
+        if left == [sizing.ONE_SLICE]:
+            warnings.append(_warning(
+                UNSIZED, f"{build.stage} declares no slices, and its one slice has no "
+                         "sized brief: size the brief before a worker gets it",
+                sizing.mark_line(name, build.stage)))
+        elif left:
             warnings.append(_warning(
                 UNSIZED, f"{build.stage}'s slice{'' if len(left) == 1 else 's'} "
                          f"{', '.join(left)} {'has' if len(left) == 1 else 'have'} no "

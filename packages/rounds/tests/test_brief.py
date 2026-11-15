@@ -160,11 +160,64 @@ def test_a_slice_the_stage_does_not_declare_is_refused_naming_its_slices(built):
 def test_a_slice_of_a_stage_with_no_slices_is_refused_and_a_verification_passes(built):
     with pytest.raises(Refused) as caught:
         size(brief(built, 'stage = "B2"', 'slice = "2a"'), stage="B2")
-    assert ("B2 declares no slice 2a: it declares none, so only a verification brief "
-            "is sized for it") in str(caught.value)
+    assert ("B2 declares no slice 2a: it declares none, so it is one slice: leave slice "
+            "out of the block") in str(caught.value)
 
     size(brief(built, 'stage = "B2"', 'verify = "build"', name="check.md"), stage="B2")
     assert [one["stage"] for one in sized_events(built)] == ["B2"]
+
+
+def test_a_stage_with_no_slices_is_sized_as_its_one_slice_with_no_minutes(built):
+    done = size(brief(built, 'stage = "B2"', name="brief-b2.md"), stage="B2")
+
+    assert (done.minutes, done.limit) == (None, None)
+    assert done.sized.piece == "one slice"
+    [event] = sized_events(built)
+    assert (event["stage"], event["slice"], event["verify"], event["result"]) == (
+        "B2", None, None, "passed")
+
+
+def test_a_block_naming_no_piece_is_refused_for_a_stage_that_declares_slices(built):
+    with pytest.raises(Refused) as caught:
+        size(brief(built, 'stage = "B1"'))
+
+    assert ("the brief's block names no slice and no verification, and B1 declares "
+            "slices: 1a, 1b, 1c") in str(caught.value)
+    assert sized_events(built) == []
+
+
+def test_show_and_next_treat_the_one_slice_of_a_stage_like_any_other(built, tmp_path,
+                                                                    capsys):
+    from moxi_rounds import commissioning
+
+    other = "proj-a/b-round"
+    opening.open_round(other, description="a placeholder round", actor="planner",
+                       flow="fix")
+    commissioning.commission(other, repo="proj-a", branch="more", builder="coder",
+                             actor="planner")
+    capsys.readouterr()
+
+    def row():
+        [one] = showing.data(showing.show(other))["builds"]
+        return one
+
+    def unsized_warnings():
+        return [one for one in next_step.read(other)["warnings"]
+                if one["what"] == next_step.UNSIZED]
+
+    assert row()["slices"] == [{"id": None, "what": None, "minutes": None,
+                                "sized": None}]
+    assert showing.briefs_lines(row()) == ["slices: one slice not sized"]
+    [warning] = unsized_warnings()
+    assert warning["text"] == ("B1 declares no slices, and its one slice has no sized "
+                               "brief: size the brief before a worker gets it")
+
+    path = brief(tmp_path / "notes" / "rounds" / "b-round", 'stage = "B1"')
+    assert main(["mark", other, "B1", "--brief", str(path)]) == 0
+    assert capsys.readouterr().out.startswith(f"{other} B1 one slice: sized   brief: ")
+
+    assert showing.briefs_lines(row()) == ["slices: one slice sized"]
+    assert unsized_warnings() == []
 
 
 @pytest.mark.parametrize(("keys", "problem"), [
@@ -172,7 +225,6 @@ def test_a_slice_of_a_stage_with_no_slices_is_refused_and_a_verification_passes(
      "a list: a brief names one slice, since a worker gets one"),
     (('stage = "B1"', 'slice = "1a"', 'verify = "build"'),
      "names a slice and a verification, and a brief is for one piece of work"),
-    (('stage = "B1"',), "names no slice and no verification"),
     (('stage = "B1"', 'verify = "everything"'), "which is none of build | design | retro"),
     (('slice = "1a"',), "the block has no `stage`"),
     (('stage = "B1"', 'slice = "1a"', 'minutes = 40'), "`minutes` is not a key"),

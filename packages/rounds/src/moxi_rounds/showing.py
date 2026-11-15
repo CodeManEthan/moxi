@@ -300,8 +300,7 @@ def history_of(event: dict) -> str | None:
     if event.get("type") == "lock.cleared":
         of = f"{event.get('ref')}, held by {event.get('holder')}"
     if event.get("type") == sizing.SIZED:
-        piece = (f"slice {event.get('slice')}" if event.get("slice") is not None
-                 else f"verify {event.get('verify')}")
+        piece = sizing.piece_of(event.get("slice"), event.get("verify"))
         of = f"{event.get('stage')} {piece}, {event.get('brief')}"
     if event.get("type") == "verdict.recorded" and event.get("design") is not None:
         of = f"{event.get('verdict')} for v{event.get('design')}"
@@ -602,11 +601,13 @@ def _build_lines(listed: list) -> list[str]:
 
 def briefs_lines(one: dict) -> list[str]:
     """Which slices of a build have a sized brief, and which verifications:
-    `slices: 2a sized, 2b not sized` and `verification briefs sized: build`."""
+    `slices: 2a sized, 2b not sized` (`slices: one slice sized` for a stage that
+    declares none) and `verification briefs sized: build`."""
     lines = []
     if one.get("slices"):
         lines.append("slices: " + ", ".join(
-            f"{piece['id']} {'not sized' if piece['sized'] is None else 'sized'}"
+            f"{sizing.ONE_SLICE if piece['id'] is None else piece['id']} "
+            f"{'not sized' if piece['sized'] is None else 'sized'}"
             for piece in one["slices"]))
     if one.get("briefs"):
         lines.append("verification briefs sized: "

@@ -67,8 +67,8 @@ from pathlib import Path
 from moxi import proc
 
 from . import (builds, by_branch, commission_block, design_block, ending, folders,
-               gitreads, index, open_builds, paths, places, pointers, skips, stages,
-               stepping, steps, versions, write)
+               freezing, gitreads, index, open_builds, paths, places, pointers, sizing,
+               skips, stages, stepping, steps, versions, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, RoundsError, Unmet
@@ -86,7 +86,10 @@ class Commissioned:
     `builder` and the go pointer `record`. `adopted` is true when the worktree was
     left by a stopped run of this commission. `event` is the event written; `block`
     is the commission block, read from the logs as they stood under the lock;
-    `failed` pairs each after-append callback that raised with what it raised."""
+    `oversized` lists each slice this commission declared over the project's
+    `slice_minutes`, as `{"stage", "slice", "minutes"}`, and `slice_minutes` is that
+    limit as read now; `failed` pairs each after-append callback that raised with what
+    it raised."""
 
     name: str
     stage: str
@@ -103,6 +106,8 @@ class Commissioned:
     adopted: bool
     event: dict
     block: commission_block.Block | None = None
+    oversized: tuple[dict, ...] = ()
+    slice_minutes: int | None = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
@@ -158,7 +163,9 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, actor: s
     that can't be one, `BadName`, `UnknownProject`,
     `NoFolder` or `NoRound` for a round that can't be found, `Refused` with every
     condition that does not hold, and `RoundsError` when git or the file system fails
-    to make a folder. A refusal makes nothing and writes nothing."""
+    to make a folder. A refusal makes nothing and writes nothing. A slice declared
+    here over the project's `slice_minutes` is recorded as given, and named in
+    `Commissioned.oversized`, as a freezing names one."""
     if not isinstance(builder, str) or not builder.strip():
         raise BadArgument("the build has no builder", "name who builds it: --builder NAME")
     declaring = _declaring(name, stage_id, repo=repo, branch=branch, slices=slices)
@@ -245,12 +252,15 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, actor: s
         after, written.view.project_state, name=name, stage=one["stage"],
         repo=one["repo"], branch=one["branch"], base=one["base"], target=one["target"],
         worktree=Path(one["worktree"]), scratch=Path(one["scratch"]), settings=settings)
+    limit = own.round_setting(settings, home.project, sizing.LIMIT)
+    declared = [event for event in written.events if event["type"] == "stage.declared"]
     return Commissioned(
         name=name, stage=one["stage"], repo=one["repo"], branch=one["branch"],
         base=one["base"], target=one["target"], worktree=Path(one["worktree"]),
         scratch=Path(one["scratch"]), build=one["build"], host=one["host"],
         builder=builder, record=record, adopted=written.result[2], event=one,
-        block=made, failed=written.failed)
+        block=made, oversized=freezing.oversized({"stage": declared}, limit),
+        slice_minutes=limit, failed=written.failed)
 
 
 # -- what is read under the lock ---------------------------------------------------------

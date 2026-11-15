@@ -10,14 +10,17 @@ on the brief itself, and shows a slice no brief was sized for.
     stage = "B2"
     slice = "2a"          # or, in place of slice: verify = "build" | "design" | "retro"
 
-`read(file)` reads it. A block that names no slice and no verification, both, or a
-list of slices is refused as a bad block: a brief is for one piece of work.
+`read(file)` reads it. A block that names both a slice and a verification, or a list
+of slices, is refused as a bad block: a brief is for one piece of work. A block that
+names neither is the brief of a stage that declares no slices, which is one slice.
 
 **The check.** `size(round, stage, brief, actor=...)` passes when the block names the
 stage the command names and either one slice that stage declares, given no more minutes
-than the round's project allows (`slice_minutes`), or one verification. The limit is
-read when the brief is sized, so a slice over it can't be sized until the design cuts
-it. A pass appends one `brief.sized` event with the brief's file and SHA-256; a refusal
+than the round's project allows (`slice_minutes`), or one verification, or, for a stage
+that declares no slices, neither: the whole stage as its one slice, with no minutes to
+check. A block naming neither is refused for a stage that declares slices, naming them.
+The limit is read when the brief is sized, so a slice over it can't be sized until the
+design cuts it. A pass appends one `brief.sized` event with the brief's file and SHA-256; a refusal
 writes nothing. The same brief sized again for the same piece writes nothing and says
 so, so a rerun after a stop finds its own record. A brief changed since, sized again,
 is recorded again.
@@ -26,9 +29,11 @@ is recorded again.
 counts for the build of its stage that was open when it was recorded, or, with none
 open, for the stage's next build: a brief may be sized before the commission it will
 carry. So a dropped build's briefs are not its successor's. `of_build` gives what counts
-for one build, and `slices_of` each slice of the build's stage with its newest sizing.
-A stage that declares no slices has none to size: only a verification brief is sized
-for it.
+for one build, and `slices_of` each slice of the build's stage with its newest sizing;
+a stage that declares no slices gives its one slice, whose id is None.
+
+`oversized_line` is the warning `fold` and `commission` print for a slice they record
+over the limit: both go ahead, and the slice's brief is then refused until it is cut.
 """
 
 from __future__ import annotations
@@ -64,7 +69,8 @@ LIMIT = "slice_minutes"
 @dataclass(frozen=True, kw_only=True)
 class BriefBlock(Entry):
     """A brief's block as read: the `file` and its `sha256`, the `stage`, and the one
-    `slice` or `verify` it names (the other is None)."""
+    `slice` or `verify` it names (the other is None; both None for the one slice of a
+    stage that declares none)."""
 
     file: Path
     sha256: str
@@ -96,7 +102,7 @@ def read(file: Path | str) -> BriefBlock:
     """The data block of the brief `file`.
 
     Raises `BadBlock` when the file has no one data block that is TOML, when the block
-    does not fit the schema, and when it names no slice and no verification, or both.
+    does not fit the schema, and when it names both a slice and a verification.
     """
     found = datablock.find(file, WHAT)
     problems = datablock.check(found, SCHEMA)
@@ -108,11 +114,6 @@ def read(file: Path | str) -> BriefBlock:
                 "the block names a slice and a verification, and a brief is for one "
                 "piece of work", "keep slice or verify, and write a brief of its own "
                 "for the other"))
-        elif "slice" not in data and "verify" not in data:
-            problems.append(Problem(
-                found.line, "the block names no slice and no verification, and a brief "
-                "is for one", 'add slice = "<a slice id of the stage>", or verify = '
-                + " | ".join(f'"{one}"' for one in VERIFIES)))
     if problems:
         raise BadBlock(found.file, WHAT, problems)
     data = found.data
@@ -139,13 +140,33 @@ class Sized:
 
     @property
     def piece(self) -> str:
-        """What was sized, in words: `slice 2a` or `verify build`."""
-        return f"slice {self.slice}" if self.slice is not None else f"verify {self.verify}"
+        """What was sized, in words: `slice 2a`, `verify build`, or `one slice` for a
+        stage that declares none."""
+        return piece_of(self.slice, self.verify)
 
     def data(self) -> dict:
         return {"stage": self.stage, "slice": self.slice, "verify": self.verify,
                 "brief": self.brief, "sha256": self.sha256, "n": self.n,
                 "actor": self.actor, "at": self.at}
+
+
+#: How the one slice of a stage that declares none is named.
+ONE_SLICE = "one slice"
+
+
+def piece_of(slice_: str | None, verify: str | None) -> str:
+    """A sized piece in words: `slice 2a`, `verify build`, or `one slice`."""
+    if slice_ is not None:
+        return f"slice {slice_}"
+    return f"verify {verify}" if verify is not None else ONE_SLICE
+
+
+def oversized_line(one: dict, limit: int) -> str:
+    """The warning for a slice recorded over the limit, `one` as `{"stage", "slice",
+    "minutes"}`."""
+    return (f"warning: the slice {one['slice']} of {one['stage']} is given "
+            f"{one['minutes']} minutes, over the {limit} of {LIMIT}: a worker gets one "
+            "piece, well under an hour, and a brief for it is refused until it is cut")
 
 
 def _sized(event: dict) -> Sized | None:
@@ -205,14 +226,17 @@ def _counts_now(state: states.State, stage_id: str) -> list[Sized]:
 def slices_of(state: states.State, build: builds.Build) -> list[dict]:
     """Each slice of the build's stage, in the order declared, as `{"id", "what",
     "minutes", "sized"}`, `sized` the newest sizing of it that counts for the build,
-    or None."""
+    or None. A stage that declares no slices gives its one slice, with every field
+    but `sized` None."""
     stage = stages.find(state, build.stage)
+    if stage is None:
+        return []
     counted = of_build(state, build)
     listed = []
-    for piece in stage.slices if stage is not None else ():
+    for piece in stage.slices or ({"id": None, "what": None, "minutes": None},):
         newest = None
         for one in counted:
-            if one.slice == piece.get("id"):
+            if one.slice == piece.get("id") and one.verify is None:
                 newest = one
         listed.append({"id": piece.get("id"), "what": piece.get("what"),
                        "minutes": piece.get("minutes"),
@@ -231,8 +255,10 @@ def verifications_of(state: states.State, build: builds.Build) -> list[dict]:
 
 
 def unsized(state: states.State, build: builds.Build) -> list[str]:
-    """The ids of the build's slices that no sized brief counts for."""
-    return [one["id"] for one in slices_of(state, build) if one["sized"] is None]
+    """The build's slices that no sized brief counts for, by id, or `ONE_SLICE` for a
+    stage that declares none."""
+    return [ONE_SLICE if one["id"] is None else one["id"]
+            for one in slices_of(state, build) if one["sized"] is None]
 
 
 def mark_line(name: str, stage_id: str) -> str:
@@ -246,7 +272,8 @@ def mark_line(name: str, stage_id: str) -> str:
 class Sizing:
     """A brief after `size`: the `name` of its round, the `sized` record as the log has
     it, for a slice the `minutes` its stage gives it and the `limit` read (both None
-    for a verification), the `event` written,
+    for a verification and for the one slice of a stage that declares none), the
+    `event` written,
     None when `found`, the same brief sized for the same piece already. `failed` pairs
     each after-append callback that raised with what it raised."""
 
@@ -264,10 +291,12 @@ def size(target: str, stage_id: str, brief: Path | str, *, actor: str, settings=
     """Size the brief `brief` for the stage `stage_id` of the round `target`.
 
     Raises `BadArgument` for a round or stage that can't be one; `BadBlock` for a brief
-    whose block can't be read or names no one piece; `UnknownProject`, `NoFolder` or
+    whose block can't be read or names two pieces; `UnknownProject`, `NoFolder` or
     `NoRound` for a round that can't be found; and `Refused` when the round has ended,
     the block names another stage, the stage is not the round's or left the plan, the
-    slice is not one the stage declares, or its minutes are over the limit. A refusal
+    slice is not one the stage declares, the block names neither a slice nor a
+    verification for a stage that declares slices, or the slice's minutes are over the
+    limit. A refusal
     leaves the log as it was. A brief already sized with these bytes for this piece
     and this build is returned with `found` set, and nothing is written.
     """
@@ -304,13 +333,20 @@ def size(target: str, stage_id: str, brief: Path | str, *, actor: str, settings=
 
     def declares_the_slice(view):
         stage = stages.find(view.state, stage_id)
-        if block.slice is None or stage is None:
-            return None
-        if any(one.get("id") == block.slice for one in stage.slices):
+        if block.verify is not None or stage is None:
             return None
         have = ", ".join(str(one.get("id")) for one in stage.slices)
+        if block.slice is None:
+            if not have:
+                return None
+            return Unmet(f"the brief's block names no slice and no verification, and "
+                         f"{stage_id} declares slices: {have}",
+                         f'give the block slice = "<one of {have}>", then {again}')
+        if any(one.get("id") == block.slice for one in stage.slices):
+            return None
         said = (f"its slices are {have}" if have
-                else "it declares none, so only a verification brief is sized for it")
+                else "it declares none, so it is one slice: leave slice out of the "
+                     "block")
         return Unmet(f"{stage_id} declares no slice {block.slice}: {said}",
                      f"name one of its slices in the brief's block, then {again}")
 
@@ -368,5 +404,5 @@ def _same(state: states.State, stage_id: str, block: BriefBlock) -> Sized | None
 
 
 __all__ = ["WHAT", "SIZED", "PASSED", "VERIFIES", "LIMIT", "SCHEMA", "BriefBlock",
-           "Sized", "Sizing", "read", "of_build", "slices_of", "verifications_of",
-           "unsized", "mark_line", "size"]
+           "ONE_SLICE", "Sized", "Sizing", "read", "piece_of", "oversized_line",
+           "of_build", "slices_of", "verifications_of", "unsized", "mark_line", "size"]
