@@ -288,6 +288,10 @@ def test_commit_rules_are_applied_at_push(repo, names, remote):
     git(repo, "reset", "-q", "--hard", "HEAD~1")
     commit(repo, f"Fix {TAG}\n", flags=("--no-verify",))
     refused(push(repo, "origin", "main"), TAG)
+    git(repo, "reset", "-q", "--hard", "HEAD~1")
+    # -m keeps a comment-prefixed line, so it is the commit's own and is judged.
+    git(repo, "commit", "-q", "--allow-empty", "-m", "Fix it", "-m", f"# per {TAG}")
+    refused(push(repo, "origin", "main"), TAG)
 
 
 @pytest.mark.parametrize("setting, key", [("drop-trailer", "Claude-Session"),
