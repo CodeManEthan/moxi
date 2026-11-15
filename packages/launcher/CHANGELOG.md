@@ -8,7 +8,8 @@
   (run files, run records, the fallback agent, the two startup screens and the variables
   a relaunch carries), the rest under Waits, Relaunch and Keep warm, and a can-hurt mark
   on turning on either startup-screen answer (the folder-trust one stays marked while on)
-  and on adding a name to `relaunch.pass_env`. The launcher needs moxi 0.1.9 or later.
+  and on adding a name to `relaunch.pass_env` or `relaunch.director_pass_env`. The
+  launcher needs moxi 0.1.9 or later.
 - The handoff lines answer at a resume as at a startup, and a resume of a launch the
   endpoint holds marks the handoff it shows as picked. After the seat's own pointer, one
   line per other seat's waiting handoff in the same folder, newest first, at most 5, then

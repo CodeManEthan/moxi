@@ -157,6 +157,7 @@ read = "use"
 label = "Carry from a director"
 line = "Variable names a director's relaunch carries from the director's environment."
 group = "Relaunch"
+hurts = { when = "add", says = "carries this variable from a director into its relaunches", confirm = "From a director's next relaunch, its value in the director's environment is carried into the new session." }
 
 [relaunch.notice_retry_s]
 type = "int"

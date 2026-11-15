@@ -137,17 +137,18 @@ def test_show_json_gives_each_wait_and_count_its_unit(capsys):
             assert key["unit"] is None, name
 
 
-def test_show_json_marks_the_three_changes_that_can_hurt(capsys):
+def test_show_json_marks_the_four_changes_that_can_hurt(capsys):
     keys = show_json(capsys)
     hurts = {name: key["hurts"] for name, key in keys.items() if key["hurts"]}
     assert set(hurts) == {"startup.trust_dialog", "startup.dev_channels_dialog",
-                          "relaunch.pass_env"}
+                          "relaunch.pass_env", "relaunch.director_pass_env"}
     trust = hurts["startup.trust_dialog"]
     assert (trust["when"], trust["stays"]) == ("on", True)
     assert trust["says"] == "answers the trust question for every slot launch"
     assert (hurts["startup.dev_channels_dialog"]["when"],
             hurts["startup.dev_channels_dialog"]["stays"]) == ("on", False)
     assert hurts["relaunch.pass_env"]["when"] == "add"
+    assert hurts["relaunch.director_pass_env"]["when"] == "add"
     assert all(hurt["confirm"] for hurt in hurts.values())
 
 
