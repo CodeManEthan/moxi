@@ -1,6 +1,6 @@
-"""comms' page's acts through a real test shell, with no browser: a request without the
-shell's key or cookie is refused by the shell before comms' page server starts, and one
-with both reaches it.
+"""comms' page's acts (check, send, take-back) through a real test shell, with no
+browser: a request without the shell's key or cookie is refused by the shell before
+comms' page server starts, and one with both reaches it.
 
 The shell keeps every file under its own home, so its comms page server finds no
 `comms.db` and no `MOXI_COMMS_OPERATOR` there, and answers `operator-unknown` without
@@ -18,8 +18,19 @@ import pytest
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="comms runs on Linux only")
 
-ACTS = ("/m/comms/api/check", "/m/comms/api/send")
-BODY = {"to": "main@proj-a", "text": "hello", "posture": "none", "held": False}
+SEND = {"to": "main@proj-a", "text": "hello", "posture": "none", "held": False}
+#: Each act, the body the page sends it, and its answer with no operator to act as.
+ACTS = {
+    "/m/comms/api/check": (SEND, {"outcome": "refused", "message_id": None,
+                                  "recipients": [],
+                                  "refusal": {"code": "operator-unknown"}}),
+    "/m/comms/api/send": (SEND, {"outcome": "refused", "message_id": None,
+                                 "recipients": [],
+                                 "refusal": {"code": "operator-unknown"}}),
+    "/m/comms/api/take-back": ({"message_id": "5"}, {
+        "outcome": "refused", "withdrawn": [], "delivered": [], "expired": [],
+        "refusal": {"code": "operator-unknown"}}),
+}
 
 
 @pytest.fixture(scope="module")
@@ -30,7 +41,8 @@ def ui_shell_options():
 def post(port: int, path: str, headers: dict[str, str]) -> int:
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     try:
-        conn.request("POST", path, body=json.dumps(BODY).encode(), headers=headers)
+        conn.request("POST", path, body=json.dumps(ACTS[path][0]).encode(),
+                     headers=headers)
         answer = conn.getresponse()
         answer.read()
     finally:
@@ -56,9 +68,7 @@ def test_an_act_without_the_key_or_the_cookie_is_refused_before_the_page_server(
             assert post(shell.port, path, headers) == 403, (path, sorted(headers))
     assert not_started(shell), "a refused act never reaches comms' page server"
 
-    for path in ACTS:
-        status, answer = session.post(path, BODY)
-        assert status == 200, (path, status)
-        assert answer == {"outcome": "refused", "message_id": None, "recipients": [],
-                          "refusal": {"code": "operator-unknown"}}
+    for path, (body, expected) in ACTS.items():
+        status, answer = session.post(path, body)
+        assert (status, answer) == (200, expected), path
     assert not not_started(shell)

@@ -1,4 +1,4 @@
-"""comms' page's acts, `/api/check` and `/api/send`, through loopback's strict app over a
+"""comms' page's acts, `/api/check`, `/api/send` and `/api/take-back`, through loopback's strict app over a
 rig's daemon and record.
 
 Each act runs the send verb's own path as the operator's lane, so these tests pin what the
@@ -23,7 +23,7 @@ from moxi_comms import api, machine_line, page, pageacts, store
 from moxi_comms.paths import comms_db
 
 from test_page import PORT, TOKEN, run, served
-from test_page_messages import MAIN, backend  # noqa: F401 -- a fixture, found by name
+from test_page_messages import MAIN, backend, set_row  # noqa: F401 -- a fixture, found by name
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="comms runs on Linux only")
@@ -335,3 +335,118 @@ def test_his_credential_is_in_no_answer_and_no_log_line(rig, monkeypatch, caplog
         "would-send", "sent", "refused", answers[3]["outcome"], "refused", "offline"]
     said = json.dumps(answers) + caplog.text + "".join(capsys.readouterr())
     assert secret not in said
+
+
+# --- take-back -----------------------------------------------------------------------------
+
+TAKEN_KEYS = ["outcome", "withdrawn", "delivered", "expired", "refusal"]
+
+
+def take_back(message_id) -> dict:
+    status, answer = run(post_raw("/api/take-back",
+                                  json.dumps({"message_id": message_id}).encode()))
+    assert status == 200, answer
+    assert list(answer) == TAKEN_KEYS
+    return answer
+
+
+def books_row(mid, name=MAIN):
+    conn = store.open_read()
+    try:
+        row = conn.execute("SELECT state FROM queue WHERE message_id = ? AND name = ?",
+                           (int(mid), name)).fetchone()
+        gone = conn.execute("SELECT reason FROM dropped WHERE message_id = ? AND name = ?",
+                            (int(mid), name)).fetchone()
+    finally:
+        conn.close()
+    return (row[0] if row else None), (gone[0] if gone else None)
+
+
+def test_take_back_declares_its_body_and_answer():
+    route = {r.path: r for r in page.PAGE.routes}["/api/take-back"]
+    assert (route.kind, route.gateway, route.confirmed) == ("act", False, False)
+    assert list(route.body) == ["message_id"] and route.body["message_id"].max == 20
+    assert dict(route.returns) == page.TAKEN and list(route.returns) == TAKEN_KEYS
+
+
+def test_take_back_before_a_digest_withdraws_it(rig):
+    mid = send(to=MAIN)["message_id"]
+    assert wait_until(lambda: books_row(mid)[0] == "waiting")
+    assert take_back(mid) == {"outcome": "deleted", "withdrawn": [MAIN], "delivered": [],
+                              "expired": [], "refusal": None}
+    assert books_row(mid) == (None, "withdrawn")
+
+
+def test_take_back_after_a_digest_is_already_delivered(rig):
+    mid = send(to=MAIN)["message_id"]
+    assert wait_until(lambda: books_row(mid)[0] == "waiting")
+    set_row(mid, MAIN, state="in_digest", digested_once=1)
+    answer = take_back(mid)
+    assert answer == {"outcome": "refused", "withdrawn": [], "delivered": [MAIN],
+                      "expired": [], "refusal": {"code": "already-delivered"}}
+    assert books_row(mid)[0] == "in_digest"
+
+
+def test_take_back_of_anothers_message_or_none_is_refused_with_its_code(rig):
+    theirs = rig.post_as("planner@proj-a", [MAIN], "mine").id
+    assert take_back(theirs)["refusal"] == {"code": "not-sender"}
+    assert take_back("4611686018427399999")["refusal"] == {"code": "unknown-message"}
+
+
+@pytest.mark.parametrize("mid", ["12a", "", " 5", "-1"])
+def test_a_message_id_that_is_not_digits_is_refused_before_anything_is_read(
+        rig, monkeypatch, mid):
+    monkeypatch.setattr(pageacts, "operator_id", lambda: pytest.fail("read"))
+    assert take_back(mid) == pageacts.taken("message-id-shape")
+
+
+def test_a_message_id_over_twenty_characters_is_refused_by_the_route(rig):
+    status, _ = run(post_raw("/api/take-back", json.dumps({"message_id": "1" * 21}).encode()))
+    assert status == 400
+
+
+def test_take_back_with_no_operator_is_operator_unknown(rig):
+    mid = send()["message_id"]
+    operators()
+    assert take_back(mid) == pageacts.taken("operator-unknown")
+    assert wait_until(lambda: books_row(mid)[0] == "waiting")
+
+
+def test_take_back_inside_an_agents_session_is_no_identity(rig):
+    mid = send()["message_id"]
+    world = World()
+    try:
+        world.real("alice")
+        assert take_back(mid) == pageacts.taken("no-identity")
+    finally:
+        world.stop()
+
+
+def test_take_back_with_the_daemon_stopped_is_offline(rig):
+    mid = send()["message_id"]
+    rig.daemon.stop()
+    answer = take_back(mid)
+    assert answer["outcome"] == "offline" and answer["withdrawn"] == []
+
+
+def test_a_take_back_that_breaks_may_have_acted_and_logs_no_text(rig, monkeypatch,
+                                                                 caplog):
+    secret = rig.operator_token
+
+    def broken(*a, **kw):
+        raise RuntimeError(f"broke holding {secret}")
+
+    monkeypatch.setattr(api, "delete", broken)
+    with caplog.at_level(logging.DEBUG):
+        assert take_back("5") == pageacts.taken("page-error", "unknown")
+    assert "RuntimeError" in caplog.text and secret not in caplog.text
+
+
+def test_his_credential_is_in_no_take_back_answer_or_log_line(rig, caplog, capsys):
+    secret = rig.operator_token
+    with caplog.at_level(logging.DEBUG):
+        mid = send()["message_id"]
+        assert wait_until(lambda: books_row(mid)[0] == "waiting")
+        answers = [take_back(mid), take_back(mid), take_back("12a")]
+    said = json.dumps(answers) + caplog.text + "".join(capsys.readouterr())
+    assert secret and secret not in said

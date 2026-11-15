@@ -74,6 +74,10 @@
   with `operator-unknown`. Each answers `{outcome, message_id, recipients, refusal}`:
   each recipient's `delivery` and `cold_at`, and the refusal's `code`, never the verb's
   text. Neither is reachable through the phone's gateway.
+- comms' page server has a third act, `POST /api/take-back` with `{message_id}`, which
+  runs `moxi comms remove` as the operator: `{outcome, withdrawn, delivered, expired,
+  refusal}`, the refusal its `code` only; an id that is not all digits is refused with
+  `message-id-shape`. It is not reachable through the phone's gateway.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the

@@ -17,6 +17,8 @@
                       of every recipient shown
     POST /api/check   every check a send makes, as the operator, posting nothing
     POST /api/send    one message to one address, posted as the operator
+    POST /api/take-back  a message the operator sent, withdrawn from every recipient
+                      that hasn't had it
 
 The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
 --json` prints, and the `Roster` it was joined from; the mail read from one
@@ -268,6 +270,18 @@ SENT = {
     "refusal": lb.Out("table", nullable=True, items={"code": lb.Out("string")}),
 }
 
+#: What `/api/take-back` answers: the verb's `outcome` (`deleted`, `refused`, `offline`,
+#: `unknown` or `failed`); the qualified names it was `withdrawn` from, those that had it
+#: already (`delivered`) and those whose copy had `expired`; and `refusal`, the code of
+#: why nothing was withdrawn, or null. No answer carries the verb's text.
+TAKEN = {
+    "outcome": lb.Out("string"),
+    "withdrawn": lb.Out("list", items=lb.Out("string")),
+    "delivered": lb.Out("list", items=lb.Out("string")),
+    "expired": lb.Out("list", items=lb.Out("string")),
+    "refusal": lb.Out("table", nullable=True, items={"code": lb.Out("string")}),
+}
+
 PAGE = lb.Page(
     routes=(
         lb.Route("/api/roster", "read", "moxi_comms.pagehandlers:roster",
@@ -297,9 +311,11 @@ PAGE = lb.Page(
                  body_cap=SEND_BODY_CAP, returns=SENT),
         lb.Route("/api/send", "act", "moxi_comms.pageacts:send", body=SEND_BODY,
                  body_cap=SEND_BODY_CAP, returns=SENT),
+        lb.Route("/api/take-back", "act", "moxi_comms.pageacts:take_back",
+                 body={"message_id": lb.Field("string", max=20)}, returns=TAKEN),
     ),
     assets="web",
 )
 
 __all__ = ["DELIVERY", "MAIL", "MAIL_STATE", "MESSAGE", "MESSAGES", "PAGE", "QUEUE", "ROSTER",
-           "ROW", "SEND_BODY", "SEND_BODY_CAP", "SENT", "THREAD"]
+           "ROW", "SEND_BODY", "SEND_BODY_CAP", "SENT", "TAKEN", "THREAD"]

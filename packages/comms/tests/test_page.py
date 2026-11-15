@@ -185,9 +185,9 @@ def test_the_page_declares_its_reads_and_acts():
     routes = {route["path"]: route for route in exported["routes"]}
     assert list(routes) == ["/api/roster", "/api/mail", "/api/events", "/api/messages",
                            "/api/mail-state", "/api/queue", "/api/thread", "/api/check",
-                           "/api/send"]
+                           "/api/send", "/api/take-back"]
     acts = {path for path, r in routes.items() if r["kind"] == "act"}
-    assert acts == {"/api/check", "/api/send"}
+    assert acts == {"/api/check", "/api/send", "/api/take-back"}
     assert all(r["kind"] == "read" for path, r in routes.items() if path not in acts)
     assert not any(r["confirmed"] for r in routes.values())
     assert not routes["/api/mail"]["query"] and not routes["/api/mail"]["stream"]

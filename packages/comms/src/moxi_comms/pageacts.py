@@ -1,9 +1,11 @@
-"""The page's acts, in the page server's process: `check` and `send` as the operator.
+"""The page's acts, in the page server's process: `check`, `send` and `take_back` as the
+operator.
 
-Each act runs the send verb's own path (`api.check`, `api.send`) as the operator's lane,
-`api.Sender.operator(<his user id>)`, with the posture always given, `new_name` set (the
-page offers only names the roster or the record holds) and `ACT_TIMEOUT_S` for every
-daemon call. The verb reads his credential from its chain in this process for the one
+`check` and `send` run the send verb's own path (`api.check`, `api.send`) as the
+operator's lane, `api.Sender.operator(<his user id>)`, with the posture always given and
+`new_name` set (the page offers only names the roster or the record holds); `take_back`
+runs `api.delete` (`moxi comms remove`) the same way. Each gives every daemon call
+`ACT_TIMEOUT_S`. The verb reads his credential from its chain in this process for the one
 call and keeps nothing; no answer carries it.
 
 **His user id**: this process's `MOXI_COMMS_OPERATOR` when it is set and not blank, as
@@ -14,13 +16,15 @@ nothing. A store that can't be read refuses with `record-unreadable`.
 
 **The answers** carry the verb's outcome and its refusal's code, never its text: the page
 words each from the outcome and the code. A request the verb's own parser refuses (a
-blank `to`) is `refused` with the code `request-shape`. Any other failure is logged once
-per class with its traceback but not its text, and answers the code `page-error`:
-`failed` for a check, `unknown` for a send, since a send that broke may have posted.
+blank `to`) is `refused` with the code `request-shape`; a `message_id` that is not all
+digits is `refused` with `message-id-shape` before anything is read. Any other failure is
+logged once per class with its traceback but not its text, and answers the code
+`page-error`: `failed` for a check, `unknown` for a send or a take-back, since one that
+broke may have acted.
 
 Inside an agent's session the verb refuses the operator's lane, so `check` and `send`
 answer `operator-in-session`, or `operator-and-claim` when this process also carries an
-agent's claim.
+agent's claim, and `take_back` answers `no-identity`.
 
 Like `page`, this module is imported only by the page server and loopback's export.
 """
@@ -29,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 import traceback
@@ -48,7 +53,10 @@ ACT_TIMEOUT_S = 10.0
 OPERATOR_UNKNOWN = "operator-unknown"
 RECORD_UNREADABLE = "record-unreadable"
 REQUEST_SHAPE = "request-shape"
+MESSAGE_ID_SHAPE = "message-id-shape"
 PAGE_ERROR = "page-error"
+
+_ID = re.compile(r"\A[0-9]{1,20}\Z")
 
 log = logging.getLogger("moxi.comms.page")
 
@@ -144,5 +152,37 @@ def send(call: Any) -> dict[str, Any]:
     return _act(call, api.send, OUTCOME_UNKNOWN)
 
 
-__all__ = ["ACT_TIMEOUT_S", "OPERATOR_UNKNOWN", "PAGE_ERROR", "RECORD_UNREADABLE",
-           "REQUEST_SHAPE", "answered", "check", "operator_id", "refused", "send"]
+def taken(code: str, outcome: str = OUTCOME_REFUSED) -> dict[str, Any]:
+    """A take-back's answer that withdrew nothing, with `code`."""
+    return {"outcome": outcome, "withdrawn": [], "delivered": [], "expired": [],
+            "refusal": {"code": code}}
+
+
+def take_back(call: Any) -> dict[str, Any]:
+    """`POST /api/take-back`: withdraw `message_id`, which the operator sent, from every
+    recipient that hasn't had it in a digest (`moxi comms remove`): `deleted` with who it
+    was withdrawn from, who had it already and whose copy had expired, or why nothing
+    was withdrawn."""
+    mid = call.body["message_id"]
+    if not _ID.match(mid):
+        return taken(MESSAGE_ID_SHAPE)
+    try:
+        user = operator_id()
+    except Exception as exc:
+        _log_once(exc, "reading the operator's user id failed")
+        return taken(RECORD_UNREADABLE, OUTCOME_FAILED)
+    if user is None:
+        return taken(OPERATOR_UNKNOWN)
+    try:
+        result = api.delete(api.Sender.operator(user), mid, timeout_s=ACT_TIMEOUT_S)
+    except Exception as exc:
+        _log_once(exc, "the page's take-back failed")
+        return taken(PAGE_ERROR, OUTCOME_UNKNOWN)
+    return {"outcome": result.outcome, "withdrawn": list(result.withdrawn),
+            "delivered": list(result.delivered), "expired": list(result.expired),
+            "refusal": None if result.refusal is None else {"code": result.refusal.code}}
+
+
+__all__ = ["ACT_TIMEOUT_S", "MESSAGE_ID_SHAPE", "OPERATOR_UNKNOWN", "PAGE_ERROR",
+           "RECORD_UNREADABLE", "REQUEST_SHAPE", "answered", "check", "operator_id",
+           "refused", "send", "take_back", "taken"]
