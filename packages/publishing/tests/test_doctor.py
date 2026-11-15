@@ -26,7 +26,9 @@ def states(root):
 
 
 def enabled(repo, *sets):
+    """A repo set up whole: flagged, with its GitHub repo and both workflow files."""
     flag.enable(repo, github="operator/proj-a", sets=list(sets))
+    release.workflows_write(str(repo))
     return repo
 
 
@@ -120,19 +122,31 @@ def test_no_later_hook_lets_the_seed_stand(repo, names):
 
 def test_an_unset_github_repo_warns(repo, names):
     flag.enable(repo)
+    release.workflows_write(str(repo))
     assert [s for s, _ in states(repo)] == ["warn", "ok"]
     assert "moxi-publishing.github is unset" in states(repo)[0][1]
 
 
-def test_a_workflow_file_unlike_its_template_warns_and_a_missing_one_doesnt(repo, names):
+def test_a_workflow_file_unlike_its_template_warns(repo, names):
     enabled(repo)
-    release.workflows_write(str(repo))
     assert [s for s, _ in states(repo)] == ["ok"]
     (repo / ".github" / "workflows" / "release.yml").write_text("name: mine\n")
-    os.remove(repo / ".github" / "workflows" / "publishing.yml")
     assert states(repo) == [
         ("warn", ".github/workflows/release.yml differs from publishing's template"),
         ("ok", "marked public; the three pieces are enabled")]
+
+
+def test_a_missing_scan_workflow_warns_and_a_missing_release_one_does_not(repo, names):
+    enabled(repo)
+    os.remove(repo / ".github" / "workflows" / "release.yml")
+    assert [s for s, _ in states(repo)] == ["ok"]
+    os.remove(repo / ".github" / "workflows" / "publishing.yml")
+    found = [r for r in doctor.rows() if r.name == f"repo {repo}"]
+    assert [(r.state, r.detail) for r in found] == [
+        ("warn", ".github/workflows/publishing.yml is missing, so GitHub scans no push for "
+                 "what the pieces refuse"),
+        ("ok", "marked public; the three pieces are enabled")]
+    assert found[0].fix.startswith("moxi publishing workflows write ")
 
 
 def test_an_empty_names_list_and_an_unwritable_push_log_warn_once(repo, tmp_path,

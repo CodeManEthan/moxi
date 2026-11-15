@@ -336,9 +336,11 @@ where a commit-msg hook of its own runs after the pieces while the message piece
 names it: that hook would never see the line. It warns when the repo's `user.email` (or
 `user.name`, when secrets' author has no email) isn't secrets' `author.*`, since the push
 piece then reads none of the repo's commits as its own and refuses no leftover drop or
-pass key; when `moxi-publishing.github` is unset; and when a workflow file `workflows write` writes is there but differs from the
-template; and, once, when secrets' private names list is empty and when the push log
-can't be written.
+pass key; when `moxi-publishing.github` is unset; when `publishing.yml`, the public scan
+GitHub runs on every push, is missing (a missing `release.yml` only means the repo
+doesn't release); and when a workflow file `workflows write` writes is there but differs
+from the template; and, once, when secrets' private names list is empty and when the
+push log can't be written.
 
 ## Provenance rules
 

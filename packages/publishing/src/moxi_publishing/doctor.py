@@ -14,8 +14,9 @@ Read-only, and no row uses the network. For each repo repo has indexed:
 - `warn` when the repo's `user.email` (or `user.name`, when secrets' author has no email)
   isn't secrets' `author.*`, since the push piece then reads none of the repo's commits as
   its own and refuses no leftover drop or pass key;
-- `warn` when `moxi-publishing.github` is unset, and when a workflow file `moxi
-  publishing workflows write` writes is there but differs from its template;
+- `warn` when `moxi-publishing.github` is unset, when `publishing.yml`, the public scan
+  GitHub runs on every push, is missing, and when a workflow file `moxi publishing
+  workflows write` writes is there but differs from its template;
 - `ok`, one row, for a flagged repo with none of the above.
 
 Then, once: `warn` when secrets' private names list is empty or can't be read, and when
@@ -242,6 +243,14 @@ def _warn_rows(root: str, name: str) -> Iterator[Row]:
             with open(path, "rb") as fh:
                 same = fh.read() == release.template(file)
         except FileNotFoundError:
+            # The scan's file is the server-side check of every push; the release file
+            # matters only to a repo that releases.
+            if file == release.SCAN_WORKFLOW:
+                yield Row(MODULE, name, "warn",
+                          f"{release.WORKFLOW_DIR}/{file} is missing, so GitHub scans no "
+                          "push for what the pieces refuse",
+                          f"moxi publishing workflows write {quote_arg(root)}, then "
+                          "commit it")
             continue
         except OSError as exc:
             yield Row(MODULE, name, "warn", f"{release.WORKFLOW_DIR}/{file} can't be read: "

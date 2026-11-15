@@ -716,7 +716,9 @@ def ci_siblings(path: str, name: str, *, artifact: str, resolution: str | None =
 # -- the workflow files ---------------------------------------------------------------------
 
 #: The workflow files `workflows write` writes, from the package's templates.
-WORKFLOWS = ("publishing.yml", "release.yml")
+#: The public scan's workflow: GitHub's check of every push, a release or not.
+SCAN_WORKFLOW = "publishing.yml"
+WORKFLOWS = (SCAN_WORKFLOW, "release.yml")
 WORKFLOW_DIR = ".github/workflows"
 
 
