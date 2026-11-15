@@ -209,15 +209,25 @@ def seen_of(state: states.State, name: str, *, settings,
     by stage, the commit to read a build at as its branch's tip, in every read that
     names that tip; the others are read at their branch's tip as it is now. A build
     that can't be read is given with its problem. Under no stage (`None`) is what the
-    round's own steps read, the project's `ratify` setting, given whatever is open
-    where the round's flow has a `ratify` step. Nothing is written."""
-    from . import closing, steps
+    round's own steps read: the project's `ratify` setting, given whatever is open
+    where the round's flow has a `ratify` step, and what `commission` refuses on while
+    `design.md` changed since its current version was frozen. Nothing is written."""
+    from . import closing, skips, steps, versions
 
     found: dict = {}
     ratify = closing.RATIFY_DEFAULT
     if flows.has(state.steps, closing.RATIFY):
         ratify = closing.ratify_of(settings, name)
         found[None] = steps.Seen(ratify=ratify)
+    if (flows.has(state.steps, steps.DESIGN) and not skips.is_skipped(state, steps.DESIGN)
+            and versions.current(state) is not None):
+        project, slug = folders.split(name)
+        moved = versions.unchanged(state, folders.home(project, settings).round_dir(slug),
+                                   name)
+        if moved is not None:
+            # What sits under no stage reads as the settings read, so ratify is too.
+            found[None] = steps.Seen(ratify=closing.ratify_of(settings, name),
+                                     design=moved)
     opened = [one for one in builds.builds(state) if one.ended is None
               and builds.current(state, one.stage) == one]
     if not opened or state.status != states.OPEN:

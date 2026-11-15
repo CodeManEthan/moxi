@@ -592,6 +592,23 @@ def test_a_design_edited_since_it_was_frozen_is_warned_of(round_dir, capsys):
     assert warned(capsys, "design-changed")[0]["fix"] == f"moxi rounds fold {ROUND}"
 
 
+def test_commission_waits_on_a_design_edited_since_it_was_frozen_as_the_verb_does(
+        opened, capsys):
+    round_dir = opened("small")
+    fold(round_dir, stage("B1"))
+    assert said(lines(capsys), "waits:") == ["nothing"]
+
+    design(round_dir, stage("B1"))
+
+    printed = [line.strip() for line in lines(capsys)]
+    assert printed[0] == f"round {ROUND}   flow small   stage B1   step commission"
+    assert said(printed, "waits:") == ["design.md changed since v1 was frozen"]
+    assert said(printed, "fix:")[0] == f"moxi rounds fold {ROUND}"
+    assert group(capsys)["state"] == "waiting"
+    assert main(["commission", ROUND, "B1", "--builder", "coder"]) != 0
+    assert "design.md changed since v1 was frozen" in capsys.readouterr().err
+
+
 def test_a_design_never_frozen_is_not_warned_of(round_dir, capsys):
     design(round_dir)
 

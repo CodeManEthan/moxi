@@ -183,10 +183,12 @@ class Seen:
     or `elsewhere` (made on another machine); `check_on`, the repo's setting of that
     name; `actions`, the repo's finish actions, each with its `id`; `shares`, the
     `(round, stage)` of each build it shares commits with; `ratify`, the project's
-    setting of that name;
+    setting of that name; `design`, what `commission` refuses on while `design.md`
+    holds other bytes than its current version was frozen from (`versions.unchanged`),
+    None when it holds the same or that was not read;
     `problem`, what kept the build from being read, in which case nothing else is
     known. What was read for the round's own steps is kept under no stage (`None`),
-    with `ratify` alone filled, so it is there with no build open."""
+    with `ratify` and `design` alone filled, so it is there with no build open."""
 
     state: str | None = None
     tip: str | None = None
@@ -205,6 +207,7 @@ class Seen:
     actions: tuple[Mapping, ...] = ()
     shares: tuple[tuple[str, str], ...] = ()
     ratify: str = "majors"
+    design: Unmet | None = None
     problem: Unmet | None = None
 
 
@@ -339,6 +342,7 @@ def _commission(state: states.State, about: Asked) -> Step:
     if not is_settled(state, DESIGN, on_closed=about.on_closed):
         waits.append(Unmet("no version of the design is frozen",
                            f"moxi rounds fold {name}"))
+    waits += _design_moved(about)
     if not is_settled(state, VERIFIES, on_closed=about.on_closed):
         word = versions.standing(state).word
         waits.append(Unmet(f"the design is not verified: it stands at {word}",
@@ -354,6 +358,13 @@ def _commission(state: states.State, about: Asked) -> Step:
               for one in tracing.holding(state, stage.id, about.register)]
     return Step(COMMISSION, WAITING if waits else READY, stage=stage.id,
                 waits=tuple(waits))
+
+
+def _design_moved(about: Asked) -> tuple[Unmet, ...]:
+    """What `commission` refuses on while the design file changed since its freeze, as
+    the reader read it under no stage; nothing where that was not read."""
+    seen = (about.seen or {}).get(None)
+    return () if seen is None or seen.design is None else (seen.design,)
 
 
 def _declaring(state: states.State, about: Asked) -> Step:
@@ -373,6 +384,7 @@ def _declaring(state: states.State, about: Asked) -> Step:
     waits: list[Unmet] = []
     if not is_settled(state, DESIGN, on_closed=about.on_closed):
         waits.append(Unmet("no version of the design is frozen", fold))
+    waits += _design_moved(about)
     waits += held_unbuilt(state, stages.next_id(state), name=name, on_closed=about.on_closed)
     return Step(COMMISSION, WAITING if waits else READY, waits=tuple(waits))
 
