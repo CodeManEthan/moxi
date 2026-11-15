@@ -164,7 +164,7 @@ def test_the_fixture_components_keep_the_contract_and_fit_a_phone(ui_page, ui_co
     with pytest.raises(AssertionError, match="did not place"):
         ui_component_check(ui_page, "fixture", "later")
     with pytest.raises(AssertionError, match="--moxi-warn reaches no colour"):
-        ui_component_check(ui_page, "fixture", "block", tokens=("warn",))
+        ui_component_check(ui_page, "fixture", "block", tokens=("warn",), token_ms=1000)
     ui_width_check(ui_page)
     ui_width_check(ui_page, module="fixture")
     ui_width_check(ui_page, module="ui", route="settings")

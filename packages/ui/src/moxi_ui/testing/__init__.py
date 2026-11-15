@@ -3,9 +3,10 @@ shell and check its components against the component contract.
 
 moxi-ui installs it as a `pytest11` plugin, so every pytest run in an environment that
 holds moxi-ui loads it. Loading it imports only the standard library and pytest; the shell
-and Playwright load only when a test uses one of its fixtures. The browser fixtures need
-the `testing` extra (`moxi-ui[testing]`, which brings Playwright); a browser is installed
-once with `playwright install chromium`.
+and Playwright load only when a test uses one of its fixtures. Whenever a test imports
+Playwright's sync API, with or without these fixtures, its `expect` takes `WAIT_MS` as its
+default timeout. The browser fixtures need the `testing` extra (`moxi-ui[testing]`, which
+brings Playwright); a browser is installed once with `playwright install chromium`.
 
 A module whose `ui` is an optional extra uses these fixtures by name and never imports
 `moxi_ui`. Every fixture is named `ui_*`:
@@ -38,8 +39,8 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     them, run beside browser tests in one run.
 `ui_contexts`
     `ui_contexts(shell=None, *, sign_in=True, **context_args)` opens a fresh browser
-    context on `shell` (`ui_shell` by default), its waits 5 s, signed in with its first
-    page on the shell's document at `/m/ui/`. A shell is signed in once, through its
+    context on `shell` (`ui_shell` by default), its waits `WAIT_MS`, signed in with its
+    first page on the shell's document at `/m/ui/`. A shell is signed in once, through its
     sign-in page; each context after that starts from the cookie and key that sign-in
     stored, and a fresh sign-in replaces them once the shell refuses them. A trace is kept
     for a failed test, in `--ui-traces` (`<pytest's temp root>/ui-traces` by default). A
@@ -50,11 +51,12 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
 `ui_context`, `ui_page`
     One `ui_contexts()` context, and its first page, signed in on `ui_shell`.
 `ui_component_check`
-    `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False)`:
-    the contract check on one component (see `moxi_ui.testing.browser.check_component`).
-    The shell places it, it renders into an open shadow root, adds no style sheet to the
-    document, takes each of `tokens` as a colour (waiting up to 5 s for a part drawn from
-    data), and requests only under `/m/<module>/`.
+    `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False,
+    token_ms=TOKEN_MS)`: the contract check on one component (see
+    `moxi_ui.testing.browser.check_component`). The shell places it, it renders into an
+    open shadow root, adds no style sheet to the document, takes each of `tokens` as a
+    colour (waiting up to `token_ms`, 20 s by default, for a part drawn from data), and
+    requests only under `/m/<module>/`.
 `ui_width_check`
     `check(page, *, module=None, name="page", attrs=None, route="", width=360)`: the
     document has no horizontal scroll at 360 CSS px, with the module's panel open or its
@@ -81,6 +83,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import sys
 import weakref
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -88,8 +91,12 @@ from typing import Any
 
 import pytest
 
-#: Milliseconds a browser action or wait may take before it fails.
-WAIT_MS = 5000
+#: Milliseconds a browser action or wait may take before it fails: every context's default
+#: timeout and that of Playwright's sync `expect`. It bounds a wait for what must happen,
+#: so it is long: a passing wait returns as soon as its state holds.
+WAIT_MS = 20000
+#: The module whose `expect` takes `WAIT_MS`.
+_SYNC_API = "playwright.sync_api"
 
 _REPORTS = pytest.StashKey[dict[str, Any]]()
 #: The `--ui-traces` directory this run was given, made when the run started.
@@ -113,12 +120,57 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                          "<pytest's temp root>/ui-traces)")
 
 
+class _ExpectWaits:
+    """An import finder that gives Playwright's sync `expect` the default timeout
+    `WAIT_MS` as `playwright.sync_api` is imported, so the plugin sets it without importing
+    Playwright itself. It finds that one module through the other finders."""
+
+    def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
+        if fullname != _SYNC_API:
+            return None
+        for finder in sys.meta_path:
+            find = getattr(finder, "find_spec", None)
+            if finder is self or find is None:
+                continue
+            spec = find(fullname, path, target)
+            if spec is not None:
+                if spec.loader is not None:
+                    spec.loader = _ExpectWaitsLoader(spec.loader)
+                return spec
+        return None
+
+
+class _ExpectWaitsLoader:
+    """`playwright.sync_api`'s own loader, which then sets its `expect`'s timeout."""
+
+    def __init__(self, loader: Any) -> None:
+        self._loader = loader
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._loader, name)
+
+    def create_module(self, spec: Any) -> Any:
+        return self._loader.create_module(spec)
+
+    def exec_module(self, module: Any) -> None:
+        self._loader.exec_module(module)
+        module.expect.set_options(timeout=WAIT_MS)
+
+
+_EXPECT_WAITS = _ExpectWaits()
+
+
 def pytest_configure(config: pytest.Config) -> None:
     given = config.getoption("--ui-traces")
     if given:
         traces_dir = config.invocation_params.dir / given
         traces_dir.mkdir(parents=True, exist_ok=True)
         config.stash[_TRACES_DIR] = traces_dir
+    sync_api = sys.modules.get(_SYNC_API)
+    if sync_api is not None:
+        sync_api.expect.set_options(timeout=WAIT_MS)
+    elif _EXPECT_WAITS not in sys.meta_path:
+        sys.meta_path.insert(0, _EXPECT_WAITS)
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)

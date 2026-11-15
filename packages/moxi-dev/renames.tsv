@@ -13874,7 +13874,10 @@ ui	packages/ui/src/moxi_ui/testing/__init__.py	group.addoption("--ui-browser", d
 ui	packages/ui/src/moxi_ui/testing/__init__.py	group.addoption("--ui-traces", default=None, metavar="DIR",	keep	default	default
 ui	packages/ui/src/moxi_ui/testing/__init__.py	help="the browser moxi_ui.testing's browser fixtures run (default chromium)")	keep	help	help
 ui	packages/ui/src/moxi_ui/testing/__init__.py	help="where a failed browser test's Playwright trace goes (default "	keep	help	help
+ui	packages/ui/src/moxi_ui/testing/__init__.py	module.expect.set_options(timeout=WAIT_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/__init__.py	pending: set[Any] = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/testing/__init__.py	spec = find(fullname, path, target)	keep	find	find
+ui	packages/ui/src/moxi_ui/testing/__init__.py	sync_api.expect.set_options(timeout=WAIT_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/__init__.py	traces_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/src/moxi_ui/testing/__init__.py	ui_browser	name	err	exc
 ui	packages/ui/src/moxi_ui/testing/browser.py	"?.shadowRoot?.querySelector('*') != null", timeout=RENDER_MS)	keep	timeout	timeout
