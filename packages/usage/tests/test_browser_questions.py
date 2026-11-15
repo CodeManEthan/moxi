@@ -45,7 +45,7 @@ import pytest
 from moxi import modules
 from playwright.sync_api import expect
 
-from moxi_sessions.testing import today_at
+from moxi_sessions import api as sessions
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -240,7 +240,9 @@ def work_of(shell) -> Path:
 
 def start_of(spec: dict, moment: float) -> float:
     """When `spec`'s session starts: `ago` before the moment, kept on today if it is today's."""
-    return today_at(spec["ago"], oldest_s=TODAY_S, now=moment) if spec["today"] else moment - spec["ago"]
+    if spec["today"]:
+        return sessions.testing.today_at(spec["ago"], oldest_s=TODAY_S, now=moment)
+    return moment - spec["ago"]
 
 
 def write(shell, specs: list[dict], moment: float) -> None:
