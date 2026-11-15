@@ -1,7 +1,7 @@
 """`<moxi-ui-row>` in a browser: what each attribute draws and that an unset one draws
 nothing, one-line and two-line rows, which end of line one is cut when it is narrow, the
-opened state, the toggle a row sends only when it carries `toggles`, and where such a
-row's tab stop and button are.
+opened state, the toggle a row sends only when it carries `toggles`, where such a row's
+tab stop and button are, and the act line one holds in its `acts-one` slot.
 
 The rows are put in the shell's panel by the test: the element is the client's, so no
 module's page is needed to draw one."""
@@ -30,7 +30,7 @@ _JS_ROWS = """([rows, width]) => {
   const box = document.createElement("div");
   box.id = "rows";
   if (width) box.style.width = `${width}px`;
-  for (const [id, attrs, acts, body] of rows) {
+  for (const [id, attrs, acts, body, actsOne] of rows) {
     const row = document.createElement("moxi-ui-row");
     row.id = id;
     for (const [name, value] of Object.entries(attrs)) row.setAttribute(name, value);
@@ -42,6 +42,16 @@ _JS_ROWS = """([rows, width]) => {
       act.addEventListener("click", (event) => event.preventDefault());
       row.append(act);
     }
+    for (const text of actsOne ?? []) {
+      const act = document.createElement("button");
+      act.slot = "acts-one";
+      act.type = "button";
+      // Styled as a page styles its plain buttons: the row's font and colour, no box.
+      act.style.cssText = "font: inherit; color: inherit; padding: 0; border: 0; background: none;";
+      act.textContent = text;
+      act.addEventListener("click", () => window.__pressed.push([row.id, text]));
+      row.append(act);
+    }
     if (body) {
       const inner = document.createElement("p");
       inner.className = "body";
@@ -51,6 +61,7 @@ _JS_ROWS = """([rows, width]) => {
     box.append(row);
   }
   window.__toggles = [];
+  window.__pressed = [];
   box.addEventListener("moxi-row-toggle", (event) => {
     window.__toggles.push([event.target.id, event.detail, event.bubbles, event.composed]);
   });
@@ -62,7 +73,8 @@ _JS_ROWS = """([rows, width]) => {
 
 
 def _place(page, rows, width=None):
-    """Puts rows in the panel: each `(id, attributes, acts, opened content)`."""
+    """Puts rows in the panel: each `(id, attributes, acts, opened content)`, and after it
+    the texts of buttons for the `acts-one` slot, if any."""
     page.evaluate(_JS_ROWS, [[list(row) for row in rows], width])
 
 
@@ -498,3 +510,130 @@ def test_rows_hold_a_phone_width_and_line_two_wraps_there(ui_page, ui_width_chec
     assert _style(row.locator(".l2"), "white-space") == "normal"
     assert row.locator(".l2").evaluate("(node) => node.getBoundingClientRect().height") > 18
     assert _cut(row.locator(".name")) and not _cut(row.locator(".fact"))
+
+
+def _box(locator) -> dict:
+    return locator.evaluate("""(node) => {
+      const box = node.getBoundingClientRect();
+      return {top: box.top, bottom: box.bottom, left: box.left, right: box.right,
+              width: box.width, height: box.height};
+    }""")
+
+
+def test_a_row_whose_only_act_is_in_acts_one_is_one_line_with_the_act_after_the_fact(ui_page):
+    quiet = {"name": "alpha", "where": "~/code/alpha", "fact": "last active 19:09", "toggles": ""}
+    _place(ui_page, [("quiet", quiet, [], None, ["Open"]),
+                     ("alone", {}, [], None, ["Add"]),
+                     ("plain", {"name": "beta"}, [], None),
+                     ("both", dict(quiet, rest="Done."), ["Change folder"], None, ["Open"])], width=700)
+    row = ui_page.locator("#quiet")
+    act = row.get_by_role("button", name="Open", exact=True)
+    expect(act).to_be_visible()
+    # One line: the act adds no line two, and the row is as tall as a name alone.
+    expect(row.locator(".l2")).to_be_hidden()
+    expect(row.locator(".one")).to_be_visible()
+    height = ui_page.locator("#plain").evaluate("(node) => node.getBoundingClientRect().height")
+    assert height == 34
+    assert _box(row)["height"] == height
+    # The act is at line one's right end, after the fact, on the same line.
+    fact, open_ = _box(row.locator(".fact")), _box(act)
+    assert abs(open_["right"] - _box(row)["right"]) < 1
+    assert fact["right"] <= open_["left"]
+    assert _style(row.locator(".acts-one"), "padding-left") == "14px"
+    assert fact["top"] >= _box(row.locator(".one"))["top"] and open_["bottom"] <= _box(row.locator(".one"))["bottom"]
+    # It takes line one's size and the dim colour.
+    assert _style(row.locator(".acts-one"), "font-size") == "14px"
+    assert _style(row.locator(".acts-one"), "color") == _token(ui_page, "text-dim")
+    # A row with nothing but the act is one line too, the act at its right end.
+    alone = ui_page.locator("#alone")
+    expect(alone.locator(".l1")).to_be_hidden()
+    expect(alone.locator(".l2")).to_be_hidden()
+    assert _box(alone)["height"] == 34
+    assert abs(_box(alone.get_by_role("button", name="Add"))["right"] - _box(alone)["right"]) < 1
+    # A row without the slot filled draws as before: no room is kept for it.
+    expect(ui_page.locator("#plain .acts-one")).to_be_hidden()
+    # With acts on both lines, each act is at its own line's right end.
+    both = ui_page.locator("#both")
+    assert _box(both)["height"] == 34 + 18
+    open_both, change = _box(both.get_by_role("button", name="Open")), _box(both.get_by_role("link", name="Change folder"))
+    assert open_both["bottom"] <= change["top"] + 1
+    assert abs(open_both["right"] - change["right"]) < 1
+
+    # An act taken away is gone with its line when it was the line's only content.
+    alone.evaluate("(node) => node.querySelector('[slot=acts-one]').remove()")
+    assert _box(alone)["height"] == 0
+    row.evaluate("(node) => node.querySelector('[slot=acts-one]').remove()")
+    expect(row.locator(".acts-one")).to_be_hidden()
+    assert abs(_box(row.locator(".fact"))["right"] - _box(row)["right"]) < 1
+
+
+def test_a_press_in_acts_one_is_the_acts_and_sends_no_toggle(ui_page):
+    _place(ui_page, [("row", {"name": "alpha", "where": "~/code/alpha", "fact": "last active 19:09",
+                              "toggles": ""}, [], "The opened content.", ["Open"])])
+    row = ui_page.locator("#row")
+    act = row.get_by_role("button", name="Open", exact=True)
+    act.click()
+    assert ui_page.evaluate("() => window.__pressed") == [["row", "Open"]]
+    assert _toggles(ui_page) == []
+    # Nor a key on it: Enter and Space press the act, and the row sends nothing.
+    act.focus()
+    ui_page.keyboard.press("Enter")
+    ui_page.keyboard.press("Space")
+    assert ui_page.evaluate("() => window.__pressed") == [["row", "Open"]] * 3
+    assert _toggles(ui_page) == []
+    # The row is still the row's: a click on line one and a key on its stop each toggle.
+    row.locator(".name").click()
+    assert _toggles(ui_page) == [["row", None, True, True]]
+    row.locator(".l1").focus()
+    ui_page.keyboard.press("Enter")
+    assert len(_toggles(ui_page)) == 2
+    # Tab goes from line one's button to the act, then past the row.
+    ui_page.keyboard.press("Tab")
+    assert ui_page.evaluate("() => document.activeElement.textContent") == "Open"
+    ui_page.keyboard.press("Shift+Tab")
+    assert _focused(row) == "l1"
+
+
+def test_line_ones_button_holds_no_slotted_act(ui_page):
+    _place(ui_page, [("row", {"name": "alpha", "where": "~/code/alpha", "fact": "last active 19:09",
+                              "toggles": ""}, ["Change folder"], None, ["Open"])])
+    row = ui_page.locator("#row")
+    assert _stop(row) == {".head": [None, None, None], ".l1": ["0", "button", "false"]}
+    button = row.get_by_role("button", name="alpha ~/code/alpha last active 19:09", exact=True)
+    expect(button).to_have_class("l1")
+    expect(button).not_to_contain_text("Open")
+    assert row.evaluate("""(node) => {
+      const one = node.shadowRoot.querySelector(".l1");
+      return [...node.shadowRoot.querySelectorAll("slot[name]")].some((slot) => one.contains(slot));
+    }""") is False
+    # Each act is a control of its own.
+    expect(row.get_by_role("button", name="Open", exact=True)).to_be_visible()
+    expect(row.get_by_role("link", name="Change folder")).to_be_visible()
+    # With no piece on line one, the act alone makes no button: the lines are the stop.
+    row.evaluate("(node) => { for (const name of ['name', 'where', 'fact']) node.removeAttribute(name); }")
+    assert _stop(row) == {".head": ["0", None, None], ".l1": [None, None, None]}
+    expect(row.locator(".one")).to_be_visible()
+
+
+def test_at_400_px_the_fact_and_the_act_stay_whole_on_line_one(ui_page):
+    ui_page.set_viewport_size({"width": 400, "height": 800})
+    attrs = {"name": "a-long-project-name-that-will-not-fit", "where": "~/code/a-long-project-name",
+             "fact": "last active 19:09", "toggles": ""}
+    _place(ui_page, [("row", attrs, [], None, ["Open"])])
+    row = ui_page.locator("#row")
+    assert _box(row)["width"] <= 400
+    act = row.get_by_role("button", name="Open", exact=True)
+    one = _box(row.locator(".one"))
+    assert one["height"] == 20
+    assert _box(row)["height"] == 34
+    # The where and the name are cut; the fact and the act are whole, on line one.
+    assert _cut(row.locator(".where")) and _cut(row.locator(".name"))
+    assert not _cut(row.locator(".fact"))
+    assert not _cut(row.locator(".acts-one"))
+    for part in (row.locator(".fact"), act):
+        box = _box(part)
+        assert box["top"] >= one["top"] - 1 and box["bottom"] <= one["bottom"] + 1
+    assert _box(row.locator(".fact"))["right"] <= _box(act)["left"]
+    assert abs(_box(act)["right"] - _box(row)["right"]) < 1
+    assert _style(row.locator(".acts-one"), "padding-left") == "10px"
+    assert row.locator(".one").evaluate("(node) => node.scrollWidth <= node.clientWidth")

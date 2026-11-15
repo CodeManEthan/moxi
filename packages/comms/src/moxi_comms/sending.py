@@ -307,6 +307,9 @@ class Context:
     `cures` is the vocabulary a refusal or a note names its cure in (`CURES`): `cli`,
     the verb's command lines and flags, or `tool`, the names and parameters of comms'
     tools, so an agent that has only the tools can act on every cure it is given.
+
+    `close` closes the record the context opened for itself; a `record` given at
+    construction is the caller's, and stays open.
     """
 
     def __init__(self, record=None, db_path=None, socket_path=None, env=None, out=None,
@@ -327,6 +330,7 @@ class Context:
         self.out = out or sys.stdout
         self.backend = backend
         self._record = record
+        self._opened_record = False
         self._backend_name = None
 
     def backend_name(self) -> str:
@@ -360,7 +364,15 @@ class Context:
                 # the daemon down; delivery is what waits for the daemon's boot rescan.
                 self._record = gw.open_record(name, env=self.env,
                                                 busy_timeout=self.deadline)
+            self._opened_record = True
         return self._record
+
+    def close(self) -> None:
+        """Close the record this context opened, so none of its connections outlives the
+        verb; a record given at construction is left open."""
+        if self._opened_record and self._record is not None:
+            record, self._record, self._opened_record = self._record, None, False
+            record.close()
 
     @contextlib.contextmanager
     def db(self):
@@ -642,9 +654,11 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
                 "(Both stamps are named in this process's comms log.)")
         return _REFUSED
     if operator_id is not None and _inside_a_session():
-        # The operator's lane is a terminal outside every session: a process inside a
-        # live session is refused it, so an agent process that strips its stamp still
-        # cannot post as the operator.
+        # The operator's lane is a terminal outside every session: a process the
+        # membership rule places inside a live session is refused it, even when it
+        # carries no agent's claim. That keeps a session from taking the operator's lane
+        # by mistake. It is no wall against a process of this user outside every
+        # session, which can read the operator's credential just as this verb does.
         _refuse(ctx, "operator-in-session",
                 "comms cannot tell who this process is: it carries the operator's own "
                 "stamp inside an agent's session — nothing was sent. The operator's "

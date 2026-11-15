@@ -19,6 +19,8 @@ outside comms.
   `message_id`, `recipients` (one `Recipient` per resolved name, its `delivery` one of
   `DELIVERIES`), `refusal` (a `Refusal`, `code` and `text`, when nothing was posted),
   `notes`, and `lines()`, the verb's text. Branch on the data, never on the text.
+* `send`, `check`, `send_as` and `delete` each close the record they opened before they
+  return, so no connection to it outlives the call.
 
 **The other surfaces.**
 
@@ -26,7 +28,8 @@ outside comms.
 * Reads: `attributed(message_id)`, `session(identity)`, `session_of(identity)`,
   `roster()` (a `Roster`: `bound`, `standing`, and `waiting`, one `Waiting` per name
   with mail queued), `owner(session_id)`, `roster_rows()` (one `RosterRow` per address: the
-  roster joined with each live name's session and whom it awaits),
+  roster joined with each live name's session, its cache (a `CacheFact`) and whom it
+  awaits),
   `identity_state(name, scope=None)`,
   `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
@@ -44,11 +47,14 @@ outside comms.
 
 from __future__ import annotations
 
+import math
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+from .. import cache as _cache
 from .. import claimfile as _claimfile
 from .. import config as _config
 from .. import directory as _directory
@@ -159,7 +165,10 @@ def _run(sender, to, text, *, posture, reply_to, new, audience, held, cap, no_ca
             raise ValueError("send needs `to` to name at least one recipient")
         args.reply_to = None if reply_to is None else str(reply_to)
     ctx = _sending.Context(env=sender.sender_env(os.environ), deadline=deadline)
-    return _sending.run(ctx, args, tags=tags)
+    try:
+        return _sending.run(ctx, args, tags=tags)
+    finally:
+        ctx.close()
 
 
 def send_as(module: str, name: str, to, text: str, *, expires=None,
@@ -181,7 +190,10 @@ def send_as(module: str, name: str, to, text: str, *, expires=None,
                            standing=False, new_name=False, interrupt=bool(interrupt),
                            expires=expires, check=False, reply_to=None, message_id=None)
     ctx = _sending.Context(env=dict(os.environ), deadline=timeout_s)
-    return _sending.run_reserved(ctx, args, module=str(module), name=str(name), tags=tags)
+    try:
+        return _sending.run_reserved(ctx, args, module=str(module), name=str(name), tags=tags)
+    finally:
+        ctx.close()
 
 
 def delete(sender: Sender, message_id, *, timeout_s: float = 30.0) -> DeleteResult:
@@ -191,7 +203,10 @@ def delete(sender: Sender, message_id, *, timeout_s: float = 30.0) -> DeleteResu
     if not isinstance(sender, Sender):
         raise TypeError(f"sender must be an api.Sender, not {type(sender).__name__}")
     ctx = _sending.Context(env=sender.sender_env(os.environ), deadline=timeout_s)
-    return _sending.delete(ctx, message_id)
+    try:
+        return _sending.delete(ctx, message_id)
+    finally:
+        ctx.close()
 
 
 # --------------------------------------------------------------------------- reads
@@ -413,6 +428,17 @@ def owner(session_id: str, *, timeout_s: float = READ_DEADLINE) -> Owner:
 
 
 @dataclass(frozen=True)
+class CacheFact:
+    """A live name's cache as the daemon's `session` answer reads it, the read its gate
+    delivers by: `kind` is `warm` or `cold`, and `until` is when it goes cold (warm) or
+    went cold (cold), in epoch seconds rounded to the whole second: the read's time less
+    the cache's age plus the lifetime the read used."""
+
+    kind: str
+    until: float
+
+
+@dataclass(frozen=True)
 class RosterRow:
     """One address on the roster: a name a live session holds (`live`), or a standing
     name nobody holds now.
@@ -420,8 +446,10 @@ class RosterRow:
     `kind` and `module` are the name's standing row's (`agent`, or `send-only` with the
     module it is reserved for), None with no standing row. `tier`, `adapter` and
     `directors` are the binding's, so a standing row has none. `session_id`, `bound_at`
-    (the daemon's clock, epoch seconds) and `awaiting` (whom that session waits on) are a
-    live row's, empty when the daemon couldn't say."""
+    (the daemon's clock, epoch seconds), `awaiting` (whom that session waits on) and
+    `cache` (a `CacheFact`) are a live row's, empty when the daemon couldn't say. `cache`
+    is None too for any read but `warm` or `cold`, and for one with no age or lifetime,
+    so it is None for every row on a box without the cache module."""
 
     qualified: str
     name: str
@@ -435,12 +463,15 @@ class RosterRow:
     session_id: str | None = None
     bound_at: float | None = None
     awaiting: tuple = ()
+    cache: CacheFact | None = None
 
 
-def roster_rows(*, timeout_s: float = READ_DEADLINE) -> tuple[RosterRow, ...]:
+def roster_rows(*, timeout_s: float = READ_DEADLINE, with_roster: bool = False):
     """Who can be messaged, one row per address: `roster()` joined with each bound
     name's `session()` and its session's `owner()`. `moxi comms agents --json` prints
-    these rows, and comms' page shows them.
+    these rows, and comms' page shows them. With `with_roster` it returns `(rows,
+    roster)`, the `Roster` the rows were joined from, so a caller that needs its
+    `waiting` too asks the daemon for `agents` once.
 
     A bound name is a live row, carrying its standing row's `kind` and `module` when it
     has one; a standing name nobody holds is a standing row. Live rows come first, then
@@ -448,7 +479,8 @@ def roster_rows(*, timeout_s: float = READ_DEADLINE) -> tuple[RosterRow, ...]:
 
     Raises `DaemonOffline` the first time any call does, making no further call, and
     `DaemonError` when `roster()` does. A `DaemonError` on one name's `session()` or
-    `owner()` leaves that row's `session_id`, `bound_at` and `awaiting` empty."""
+    `owner()` leaves that row's `session_id`, `bound_at`, `awaiting` and `cache`
+    empty."""
     got = roster(timeout_s=timeout_s)
     standing: dict = {}
     for row in got.standing:
@@ -457,35 +489,57 @@ def roster_rows(*, timeout_s: float = READ_DEADLINE) -> tuple[RosterRow, ...]:
     for agent in got.bound:
         kept = standing.pop(agent.qualified, None)
         try:
-            session_id, bound_at, awaiting = _live_fields(agent.qualified, timeout_s)
+            session_id, bound_at, awaiting, cache = _live_fields(agent.qualified,
+                                                                 timeout_s)
         except DaemonError:
-            session_id, bound_at, awaiting = None, None, ()
+            session_id, bound_at, awaiting, cache = None, None, (), None
         rows.append(RosterRow(
             qualified=agent.qualified, name=agent.name, scope=agent.scope, live=True,
             kind=kept.kind if kept else None,
             module=getattr(kept, "module", None) if kept else None,
             tier=agent.tier, adapter=agent.adapter, directors=tuple(agent.directors),
-            session_id=session_id, bound_at=bound_at, awaiting=awaiting))
+            session_id=session_id, bound_at=bound_at, awaiting=awaiting, cache=cache))
     for row in standing.values():
         rows.append(RosterRow(
             qualified=row.qualified, name=row.name, scope=row.scope, live=False,
             kind=row.kind, module=getattr(row, "module", None), tier=None, adapter=None))
-    return tuple(sorted(rows, key=lambda r: (not r.live, r.qualified)))
+    rows = tuple(sorted(rows, key=lambda r: (not r.live, r.qualified)))
+    return (rows, got) if with_roster else rows
+
+
+def _finite(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _cache_fact(held: dict, read_at: float) -> CacheFact | None:
+    """The `CacheFact` of one `session()` answer read at `read_at`, or None."""
+    kind, age, ttl = held.get("cache_kind"), held.get("age_s"), held.get("cache_ttl")
+    if kind not in (_cache.WARM, _cache.COLD) or not (_finite(age) and _finite(ttl)):
+        return None
+    until = read_at - age + ttl
+    return CacheFact(kind=kind, until=float(round(until))) if _finite(until) else None
 
 
 def _live_fields(qualified: str, deadline: float) -> tuple:
-    """(session_id, bound_at, awaiting) of one bound name, from `session()` and, when it
-    names a session, `owner()`."""
+    """(session_id, bound_at, awaiting, cache) of one bound name, from `session()` and,
+    when it names a session, `owner()`."""
     held = session(qualified, timeout_s=deadline)
+    read_at = time.time()
     if not held.get("bound"):
-        return None, None, ()
+        return None, None, (), None
     at = held.get("bound_at")
     bound_at = float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) \
         else None
+    cache = _cache_fact(held, read_at)
     sid = held.get("session_id")
     if not (isinstance(sid, str) and sid):
-        return None, bound_at, ()
-    return sid, bound_at, tuple(owner(sid, timeout_s=deadline).awaiting)
+        return None, bound_at, (), cache
+    return sid, bound_at, tuple(owner(sid, timeout_s=deadline).awaiting), cache
 
 
 #: What `identity_state` says of a name.
@@ -593,7 +647,7 @@ __all__ = [
     "Recipient", "Refusal", "CODEX_RESUME", "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
-    "Standing", "Waiting", "Owner", "roster_rows", "RosterRow",
+    "Standing", "Waiting", "Owner", "roster_rows", "RosterRow", "CacheFact",
     "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",
     "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
     "DaemonError", "DaemonOffline", "BACKEND_ENV", "CLAIM_SOCKET_ENV", "COMMAND_ENV",

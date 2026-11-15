@@ -389,20 +389,49 @@ class Contributions:
         self.require_loaded("remove")
         out = []
         for c in self.loaded:
-            if c.refuse_remove is None:
-                continue
-            try:
-                said = c.refuse_remove(project)
-            except Exception as exc:  # noqa: BLE001 - a raising refusal is the module's
-                raise Broken(c.module, f"{c.module}'s refuse_remove raised "
-                                       f"{_describe(exc)}", _fix(c.module)) from exc
-            if said is None:
-                continue
-            if not isinstance(said, str) or not said.strip():
-                raise Broken(c.module, f"{c.module}'s refuse_remove answered {said!r}, not "
-                                       "a sentence or None", _fix(c.module))
-            out.append((c.module, said.strip()))
+            said = _ask_remove(c, project)
+            if said is not None:
+                out.append((c.module, said))
         return out
+
+    def remove_check(self, project: Project) -> list[tuple[str, str, str | None]]:
+        """What a remove of `project` would meet from the contributions now, as
+        `(module, sentence, fix)` rows, without stopping at the first: each entry that
+        won't load (its reason and fix), then each loaded one's refusal (its sentence,
+        which carries its own fix, so `fix` is None), or, for a `refuse_remove` that
+        raises or answers out of shape, the reason and fix of that `Broken`. Empty when
+        a remove would meet none. Never raises for a contribution's fault. Ask this
+        outside any write transaction, as `remove_refusals`."""
+        out: list[tuple[str, str, str | None]] = [
+            (module, reason, _fix(module)) for module, reason in self.unloadable]
+        for c in self.loaded:
+            try:
+                said = _ask_remove(c, project)
+            except Broken as exc:
+                out.append((c.module, exc.reason, exc.fix))
+                continue
+            if said is not None:
+                out.append((c.module, said, None))
+        return out
+
+
+def _ask_remove(c: Contribution, project: Project) -> str | None:
+    """`c`'s sentence refusing to remove `project`, stripped, or None when it has none.
+    Raises `Broken` naming the module for a `refuse_remove` that raises, or answers other
+    than a sentence or None."""
+    if c.refuse_remove is None:
+        return None
+    try:
+        said = c.refuse_remove(project)
+    except Exception as exc:  # noqa: BLE001 - a raising refusal is the module's
+        raise Broken(c.module, f"{c.module}'s refuse_remove raised "
+                               f"{_describe(exc)}", _fix(c.module)) from exc
+    if said is None:
+        return None
+    if not isinstance(said, str) or not said.strip():
+        raise Broken(c.module, f"{c.module}'s refuse_remove answered {said!r}, not "
+                               "a sentence or None", _fix(c.module))
+    return said.strip()
 
 
 def load() -> Contributions:

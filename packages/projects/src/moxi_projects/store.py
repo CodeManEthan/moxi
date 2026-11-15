@@ -14,9 +14,9 @@ one sequence in this order:
    store past this code in between;
 4. close.
 
-Step 2 adds `remove_status`, where the page keeps what a confirmed remove came to, keyed
-by the request's idempotency key, so a repeat of the request gets the same answer for a
-day, also after the page's server has restarted. A store at version 1 is still read; its
+Step 2 adds `remove_status`, where the page keeps what a remove came to, keyed by the
+`job` the page minted for that press, so a repeat of it gets the same answer for a day,
+also after the page's server has restarted. A store at version 1 is still read; its
 status read answers that no such request was kept.
 
 A store newer than this code raises `TooNew` (exit 3); a write still locked out when the
@@ -320,10 +320,10 @@ def delete(conn: sqlite3.Connection, key: str) -> Project:
 
 def keep_remove_status(conn: sqlite3.Connection, job: str, project: str,
                        outcome: dict) -> None:
-    """Keep what the remove request `job` (its idempotency key) came to for project
-    `project` (the key as asked): `outcome`, a dict of plain values. Rows older than a day
-    go first, in the same write. A row `job` already has stands: a repeat gets the first
-    answer."""
+    """Keep what the remove request `job` (the page's key for that press) came to for
+    project `project` (the key as asked): `outcome`, a dict of plain values. Rows older
+    than a day go first, in the same write. A row `job` already has stands: a repeat gets
+    the first answer."""
     conn.execute("DELETE FROM remove_status WHERE created < ?", (_status_cutoff(),))
     conn.execute("INSERT OR IGNORE INTO remove_status (key, project, outcome, created) "
                  "VALUES (?, ?, ?, ?)", (job, project, json.dumps(outcome), now()))

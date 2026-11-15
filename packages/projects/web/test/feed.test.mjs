@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHANGED, Feed, parseAdded, parseKinds, parseOne, parseProjects, parseRemoveStatus, parseWhere,
+  CHANGED, Feed, parseAdded, parseKinds, parseListing, parseOne, parseProjects, parseRemoveCheck, parseRemoveStatus, parseWhere,
   parseWritten,
   PICKED, RETRIES, saidOf,
 } from "../src/feed.ts";
@@ -34,6 +34,20 @@ test("a project list, and anything not of its shape refused", () => {
   assert.equal(parseProjects({ projects: [{ ...PROJECT, associated: "helper" }] }), null);
   assert.equal(parseProjects([]), null);
   assert.equal(parseProjects(null), null);
+});
+
+test("the page's list: each project's exists, the home and notes_installed", () => {
+  const data = { projects: [{ ...PROJECT, exists: true }, { ...PROJECT, key: "b", exists: false },
+                            { ...PROJECT, key: "c", exists: null }],
+                 home: "/home/me", notes_installed: false };
+  assert.deepEqual(parseListing(data), data);
+  assert.deepEqual(parseListing({ projects: [], home: null, notes_installed: true }),
+                   { projects: [], home: null, notes_installed: true });
+  assert.equal(parseListing({ ...data, projects: [PROJECT] }), null, "a project with no exists");
+  assert.equal(parseListing({ ...data, projects: [{ ...PROJECT, exists: "yes" }] }), null);
+  assert.equal(parseListing({ projects: [], notes_installed: true }), null, "no home");
+  assert.equal(parseListing({ projects: [], home: null }), null, "no notes_installed");
+  assert.equal(parseListing({ projects: {}, home: null, notes_installed: true }), null);
 });
 
 test("one project, and an add's answer with its notes", () => {
@@ -75,6 +89,18 @@ test("a remove's status: removed, or refused with its sentences", () => {
   assert.deepEqual(parseRemoveStatus(refused), refused);
   assert.equal(parseRemoveStatus({ ...removed, state: "gone" }), null);
   assert.equal(parseRemoveStatus({ ...removed, exit_code: "1" }), null);
+});
+
+test("what a remove would meet: each refusal, or none", () => {
+  const check = { key: "atlas-api", refusals: [
+    { module: "projects", sentence: "it has agents", fix: null },
+    { module: "notes", sentence: "its import failed", fix: "repair it" }] };
+  assert.deepEqual(parseRemoveCheck(check), check);
+  assert.deepEqual(parseRemoveCheck({ key: "a", refusals: [] }), { key: "a", refusals: [] });
+  for (const bad of [null, { key: "a" }, { key: 1, refusals: [] }, { key: "a", refusals: [{ module: "x", sentence: "s" }] },
+                     { key: "a", refusals: [{ module: "x", sentence: 2, fix: null }] }]) {
+    assert.equal(parseRemoveCheck(bad), null, JSON.stringify(bad));
+  }
 });
 
 test("an answer's own line", () => {
