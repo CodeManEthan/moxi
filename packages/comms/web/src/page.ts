@@ -30,7 +30,9 @@
 // today's `/api/messages` and the opened address's `/api/queue` with them, when it opens, when the roster's waiting mail
 // or its bound names change, when its tab is shown again and every 30 s while the tab is
 // visible, and after a send or a take-back; a newly opened address's queue is read at once.
-// Today's read takes as many messages as the page shows, so a refresh leaves no gap.
+// Today's read takes as many messages as the page shows, so a refresh leaves no gap; each
+// day before today the page added is read again from its cursor, as many as it shows, so
+// every message shown carries its read state as the books hold it now.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
@@ -57,8 +59,8 @@ import { COPY_ID, DETAILS, HELP, openedAgent, SHOW_ALL, THREAD_LINK } from "./op
 import type { Line } from "./opened-model.ts";
 import type { Said } from "./words.ts";
 import {
-  authorIn, EARLIER_TODAY, FIRST, joined, messagesPath, messagesView, MORE, OPEN, parseMessagesAnswer,
-  SHOW, todayOf,
+  authorIn, EARLIER_TODAY, FIRST, joined, messagesPath, messagesView, MORE, OPEN, parseMessagesAnswer, reread,
+  rereadPaths, SHOW, todayOf,
 } from "./today-model.ts";
 import type { Messages, ReadDay } from "./today-model.ts";
 import { newestDay, whenWords } from "./words.ts";
@@ -200,6 +202,9 @@ export class CommsPage extends LitElement {
   /** The `Show` whose read is out, and the line of one that failed. */
   #showing: string | null = null;
   #showFailed: string | null = null;
+  /** The days before today are being read again, and the line of a read that failed. */
+  #rereading = false;
+  #rereadFailed: string | null = null;
   /** The opened row's address, and the read of its rows in the books. */
   #queueFor: string | null = null;
   #queue: Feed<Queue> | null = null;
@@ -239,11 +244,42 @@ export class CommsPage extends LitElement {
     this.#readMail();
   };
 
-  /** Reads the mail state again, and the opened row's queue with it. */
+  /** Reads the mail state again, with today's messages, the days before today the page
+   * added and the opened row's queue. */
   #readMail(): void {
     void this.#mail?.refresh();
     void this.#messages?.refresh();
+    void this.#rereadDays();
     void this.#queue?.refresh();
+  }
+
+  /** Reads again each message the page shows of the days before today, so their read
+   * states and `taken back` follow the books as today's do. One at a time. */
+  async #rereadDays(): Promise<void> {
+    if (this.#rereading || this.#days.length === 0) return;
+    this.#rereading = true;
+    try {
+      const days = this.#days;
+      const reads = await Promise.all(days.map(async (read) => {
+        const results = await Promise.all(rereadPaths(read).map((path) => api("comms", path)));
+        const values = results.map((result) => (result.status === 200 ? parseMessagesAnswer(result.data) : null));
+        const failed = values.findIndex((value) => value === null || value.state !== "up");
+        if (failed >= 0) {
+          const why = values[failed]?.detail ?? failureWhy(results[failed].status);
+          return { day: read.day, fresh: null, why };
+        }
+        return { day: read.day, fresh: values.flatMap((value) => value?.messages ?? []), why: null };
+      }));
+      const why = reads.find((one) => one.why !== null)?.why ?? null;
+      this.#rereadFailed = why === null ? null : `The messages can't be read: ${why.replace(/\.$/, "")}.`;
+      this.#days = this.#days.map((read) => {
+        const fresh = reads.find((one) => one.day === read.day)?.fresh ?? null;
+        return fresh === null ? read : reread(read, fresh);
+      });
+    } finally {
+      this.#rereading = false;
+      this.requestUpdate();
+    }
   }
 
   connectedCallback(): void {
@@ -425,7 +461,8 @@ export class CommsPage extends LitElement {
     const read = this.#messages;
     const failed = read === null ? null : readLine("The messages", read);
     const lines = [...frame.lines, ...(failed !== null ? [{ key: "messages", text: failed }] : []),
-                   ...(this.#showFailed !== null ? [{ key: "show", text: this.#showFailed }] : [])];
+                   ...(this.#showFailed !== null ? [{ key: "show", text: this.#showFailed }] : []),
+                   ...(this.#rereadFailed !== null ? [{ key: "reread", text: this.#rereadFailed }] : [])];
     return lines.map((line) => html`<p class="last" data-line=${`foot-${line.key}`} role="status">${line.text}</p>`);
   }
 
@@ -506,7 +543,8 @@ export class CommsPage extends LitElement {
   async #readDay(day: string, before: string): Promise<void> {
     const value = await this.#page(messagesPath({ day, before, limit: MORE }));
     if (value === null) return;
-    this.#days = [...this.#days, { day, messages: value.messages, more: value.more, earlier: value.earlier }];
+    this.#days = [...this.#days, { day, messages: value.messages, more: value.more, earlier: value.earlier,
+                                   cursor: before }];
   }
 
   #down(down: Down) {

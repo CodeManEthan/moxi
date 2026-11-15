@@ -160,6 +160,9 @@ export interface ReadDay {
   more: number;
   /** Everything before this day, from the day's first read. */
   earlier: Earlier | null;
+  /** A day before today: the cursor its first read was made from, which reads it again
+   * from its newest message. */
+  cursor?: string;
 }
 
 /** Joins a day's next page onto what the page holds: the ids already held are not added
@@ -199,6 +202,26 @@ export function messagesView(today: ReadDay | null, days: readonly ReadDay[], re
     before: earlier === null ? null
       : { label, text: `${countWords(earlier.count)}, back to ${fullDayWord(clock.day(earlier.first_at))}`, earlier },
   };
+}
+
+/** The reads that carry again the read state of each message the page shows of a day
+ * before today: from the day's cursor, at most `MOST` a read, as many as it shows. A day's
+ * messages are a run of ids from its newest, so each read meets the same messages. */
+export function rereadPaths(read: ReadDay): string[] {
+  if (read.cursor === undefined) return [];
+  const paths: string[] = [];
+  for (let i = 0; i < read.messages.length; i += MOST) {
+    const before = i === 0 ? read.cursor : read.messages[i - 1].message_id;
+    paths.push(messagesPath({ day: read.day, before, limit: Math.min(MOST, read.messages.length - i) }));
+  }
+  return paths;
+}
+
+/** A day the page shows with each message it read again in place of the one it held: its
+ * rows and whether it was taken back. A message not read again stays as it was. */
+export function reread(read: ReadDay, fresh: readonly Message[]): ReadDay {
+  const byId = new Map(fresh.map((message) => [message.message_id, message]));
+  return { ...read, messages: read.messages.map((message) => byId.get(message.message_id) ?? message) };
 }
 
 /** The author of a message the page holds, by id; null when it holds none. */

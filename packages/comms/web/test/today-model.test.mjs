@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  authorIn, idBelow, joined, messageRow, messagesPath, messagesView, parseMessagesAnswer, todayOf,
+  authorIn, idBelow, joined, messageRow, messagesPath, messagesView, MOST, parseMessagesAnswer, reread, rereadPaths,
+  todayOf,
 } from "../src/today-model.ts";
 
 const CLOCK = { time: (at) => new Date(at * 1000).toISOString().slice(11, 16),
@@ -104,6 +105,30 @@ test("a day added sits under its own label, and Before moves down carrying the n
   const older = messagesView(null, [day([message("1000000000000000050")], 0, null, "2026-11-01")], readers(), when, TODAY,
                              CLOCK);
   assert.deepEqual([older.groups[0].label, older.before], ["Sun Nov 1", null]);
+});
+
+test("a day added is read again from its cursor, as many as it shows, so its read states follow the books", () => {
+  const cursor = "1000000000000000101";
+  const held = { ...day([message("1000000000000000100", { rows: [waiting("builder-1")] }),
+                         message("1000000000000000099", { rows: [waiting("reviewer")] })], 5, null, "2026-11-11"), cursor };
+  assert.deepEqual(rereadPaths(held), [`api/messages?day=2026-11-11&before=${cursor}&limit=2`]);
+  // Today is read again by its own read, with as many as it shows.
+  assert.deepEqual(rereadPaths(day([message("1")])), []);
+  // Past one read's most, the next read starts below the last message of the one before.
+  const ids = Array.from({ length: MOST + 3 }, (_, i) => String(2000 - i));
+  const big = { ...day(ids.map((id) => message(id)), 0, null, "2026-11-10"), cursor: "2001" };
+  assert.deepEqual(rereadPaths(big), [`api/messages?day=2026-11-10&before=2001&limit=${MOST}`,
+                                      `api/messages?day=2026-11-10&before=${ids[MOST - 1]}&limit=3`]);
+  // The first message has since been read, the second taken back; one not read again stays.
+  const fresh = [message("1000000000000000100", { rows: [] }),
+                 message("1000000000000000099", { rows: [{ ...waiting("reviewer"), state: "withdrawn" }], withdrawn: true })];
+  const now = reread(held, fresh);
+  assert.deepEqual(now.messages.map((m) => messageRow(m, readers(), when).where),
+                   ["to builder-1", "to builder-1 · taken back"]);
+  assert.deepEqual([now.more, now.cursor, now.day], [5, cursor, "2026-11-11"]);
+  assert.deepEqual(reread(held, fresh.slice(0, 1)).messages[1], held.messages[1]);
+  const view = messagesView(day([]), [now], readers(), when, TODAY, CLOCK);
+  assert.deepEqual(view.groups[0].rows.map((r) => r.where), ["to builder-1", "to builder-1 · taken back"]);
 });
 
 test("the author of a message the page holds, for a reply address", () => {
