@@ -6,6 +6,13 @@ commission of the stage. A stage commissioned again after a drop is a new build,
 dropped build's records count for nothing in it. `builds(state)` gives every build of a
 round's log, `current(state, stage)` the last one of a stage.
 
+**Its landings.** Each merge a finish recorded for the build, as made (`ok`) or as
+found already on the target (`found`), is a landing: the commit the target's head
+became (the merge commit, or the tip when the target was fast-forwarded onto the
+branch), and the target's head before it. A landing stays the build's whatever became
+of the build since. `landings(state)` gives every landing of a round's log with the
+repo and target of its build.
+
 **Its readings.** Each record that read the build at a commit holds that commit `h` and
 `x`, the merge-base of `h` and the target's head at that moment: a check's run and a
 verdict on a report of the build. `READINGS` names the field of each. A reading is
@@ -86,6 +93,10 @@ READINGS = {
 }
 #: Each type of record that holds a finish's tip, and its field for it.
 TIPS = {"finish.action": "tip", "finish.done": "tip"}
+#: The kind of finish action that lands a build, and the states of its record that say
+#: it did: made by the finish, or found already on the target.
+MERGE = "merge"
+LANDED = ("ok", "found")
 
 
 @dataclass(frozen=True)
@@ -106,11 +117,27 @@ class Reading:
 
 
 @dataclass(frozen=True)
+class Landing:
+    """One merge a finish recorded for a build: `landing` the commit the target's head
+    became, `target_before` its head before (None when the record holds no commit
+    there), `stage` and `build` the stage and the line of the build's commission, `n`
+    the line of the record, and the build's `repo` and `target`."""
+
+    stage: str
+    build: int
+    n: int
+    repo: str
+    target: str
+    landing: str
+    target_before: str | None
+
+
+@dataclass(frozen=True)
 class Build:
     """One build: its `stage`, the `repo` and `branch` it was cut in, its `base` (the
     target's head at its commission) and `target`, `n` the line of its commission, the
-    `readings` and finish `tips` recorded for it, oldest first, and `ended`, `DROPPED`
-    or `FINISHED` when one is on record, else None."""
+    `readings`, finish `tips` and `landings` recorded for it, oldest first, and `ended`,
+    `DROPPED` or `FINISHED` when one is on record, else None."""
 
     stage: str
     repo: str
@@ -120,6 +147,7 @@ class Build:
     n: int
     readings: tuple[Reading, ...] = ()
     tips: tuple[str, ...] = ()
+    landings: tuple[Landing, ...] = ()
     ended: str | None = None
 
     def commits(self) -> tuple[str, ...]:
@@ -156,7 +184,8 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
             continue
         kind = event["type"]
         if kind == "build.commissioned":
-            one = {"event": event, "readings": [], "tips": [], "ended": None}
+            one = {"event": event, "readings": [], "tips": [], "landings": [],
+                   "ended": None}
             found.append(one)
             open_by_stage[stage] = one
             continue
@@ -169,10 +198,18 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
                 one["readings"].append(reading)
         if kind in TIPS and is_id(event.get(TIPS[kind])):
             one["tips"].append(event[TIPS[kind]])
+        if (kind == "finish.action" and event.get("kind") == MERGE
+                and event.get("state") in LANDED and is_id(event.get("landing"))):
+            one["landings"].append(event)
         if kind in ("build.dropped", "finish.done"):
             one["ended"] = DROPPED if kind == "build.dropped" else FINISHED
             del open_by_stage[stage]
     return tuple(_build(one) for one in found)
+
+
+def landings(round_state: states.State) -> tuple[Landing, ...]:
+    """Every landing the round's log records, in the log's order."""
+    return tuple(landing for one in builds(round_state) for landing in one.landings)
 
 
 def current(round_state: states.State, stage_id: str) -> Build | None:
@@ -200,10 +237,17 @@ def _build(one: dict) -> Build:
         value = event.get(name)
         return value if isinstance(value, str) else ""
 
-    return Build(stage=event["stage"], repo=text("repo"), branch=text("branch"),
-                 base=text("base"), target=text("target"), n=event["n"],
+    repo, target = text("repo"), text("target")
+    landed = tuple(
+        Landing(stage=event["stage"], build=event["n"], n=merge["n"], repo=repo,
+                target=target, landing=merge["landing"],
+                target_before=(merge.get("target_before")
+                               if is_id(merge.get("target_before")) else None))
+        for merge in one["landings"])
+    return Build(stage=event["stage"], repo=repo, branch=text("branch"),
+                 base=text("base"), target=target, n=event["n"],
                  readings=tuple(one["readings"]), tips=tuple(one["tips"]),
-                 ended=one["ended"])
+                 landings=landed, ended=one["ended"])
 
 
 def shows_work(git: Git, reading: Reading) -> bool:
@@ -287,5 +331,5 @@ _END_WORD = {DROPPED: "drop", FINISHED: "finish"}
 
 __all__ = ["DROPPED", "FINISHED", "GONE", "EMPTY", "BUILDING", "UNCLEAR", "ENDED",
            "NO_HEAD", "OFF_TARGET", "ON_TARGET", "NO_ANSWER", "PARTED", "READINGS",
-           "TIPS", "Reading", "Build", "Status", "NoTarget", "builds", "current",
-           "shows_work", "read"]
+           "TIPS", "MERGE", "LANDED", "Reading", "Landing", "Build", "Status",
+           "NoTarget", "builds", "landings", "current", "shows_work", "read"]

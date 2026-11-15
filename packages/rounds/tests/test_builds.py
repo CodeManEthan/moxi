@@ -76,6 +76,22 @@ def test_only_the_stage_s_own_records_are_its_readings(a_round):
     assert only.commits() == ("c" * 40, "f" * 40)
 
 
+def test_a_merge_made_or_found_by_a_finish_is_a_landing_of_its_build(a_round):
+    a_round.commission(base="a" * 40, target="release")
+    for state_, landing in (("started", "1"), ("failed", "2"), ("ok", "3"), ("found", "4")):
+        a_round.add("finish.action", stage="B1", tip="b" * 40, id="merge", kind="merge",
+                    state=state_, landing=landing * 40, target_before="a" * 40)
+    a_round.add("finish.action", stage="B1", tip="b" * 40, id="push", kind="push",
+                state="ok", landing="5" * 40)
+    a_round.add("finish.action", stage="B1", tip="b" * 40, id="merge", kind="merge",
+                state="ok", landing="not a commit")
+    landed = a_round.build().landings
+    assert [(one.landing, one.target_before, one.repo, one.target, one.build)
+            for one in landed] == [("3" * 40, "a" * 40, "proj-a", "release", 2),
+                                   ("4" * 40, "a" * 40, "proj-a", "release", 2)]
+    assert builds.landings(state.fold(log.read(a_round.path))) == landed
+
+
 def test_a_value_that_is_not_a_full_commit_id_is_no_reading(a_round):
     a_round.commission(base="a" * 40)
     a_round.check("HEAD", "a" * 40)

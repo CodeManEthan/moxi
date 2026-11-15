@@ -2,7 +2,7 @@
 every log.
 
 `index.db` is in rounds' data directory. It holds nothing the logs do not: deleting it
-loses no record, and `rebuild` makes the same rows from the logs again. Three tables:
+loses no record, and `rebuild` makes the same rows from the logs again. Four tables:
 
     logs    one row per log this machine has read or written: the round's name (an empty
             slug for a project's own log), the file, its length and SHA-256 as last seen
@@ -11,6 +11,8 @@ loses no record, and `rebuild` makes the same rows from the logs again. Three ta
     rounds  one row per round: its folder, its status, the name of the flow it
             follows now, and how it ended once it has
     items   what each log holds open, one row per item, by kind
+    landings  each merge a finish recorded in a round's log, with its build's repo
+            and target, kept whatever became of the build since
 
 **Who writes it.** Every write to a log updates that log's rows before the lock is let go
 (`on_append`, one of the write path's after-append callbacks). `refresh` and `rebuild`
@@ -49,7 +51,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, log, paths, questions, readback, state, versions
+from . import builds, folders, log, paths, questions, readback, state, versions
 from .errors import NoLog, Unreadable
 
 #: The schema, one step per version of it (`moxi.store.migrate`). A step is never
@@ -86,11 +88,26 @@ STEPS = ("""
     );
 """, """
     ALTER TABLE rounds ADD COLUMN ended TEXT;
+""", """
+    CREATE TABLE landings (
+        project TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        stage TEXT NOT NULL,
+        build INTEGER NOT NULL,
+        n INTEGER NOT NULL,
+        repo TEXT NOT NULL,
+        target TEXT NOT NULL,
+        landing TEXT NOT NULL,
+        target_before TEXT,
+        PRIMARY KEY (project, slug, position)
+    );
+    CREATE INDEX landings_by_target ON landings (repo, target);
 """)
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 13
+DERIVED = 14
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -159,6 +176,8 @@ class Summary:
     #: round that closed has no `by` and no `record`. None for an open round and for
     #: a project.
     ended: Mapping | None = None
+    #: Each merge a finish recorded in the round's log, in the log's order.
+    landings: tuple[builds.Landing, ...] = ()
 
     @property
     def name(self) -> str:
@@ -176,6 +195,14 @@ class Summary:
         if self.changed_since is None:
             return None
         return f"log changed outside this machine since {self.changed_since}"
+
+
+@dataclass(frozen=True)
+class Landed:
+    """A landing on record, and `round`, the name of the round whose log holds it."""
+
+    round: str
+    landing: builds.Landing
 
 
 @dataclass(frozen=True)
@@ -256,6 +283,20 @@ def rounds(project: str, folder: Path, *, env=None) -> list[Summary]:
     return found
 
 
+def landings(homes: Iterable[folders.Home], *, repo: str, target: str,
+             env=None) -> list[Landed]:
+    """Every landing on record for a build of the repo `repo` into the branch `target`,
+    in any round of the projects `homes`, each as `read` gives its round, by project,
+    then slug, then the log's order. A round whose log can't be read gives none.
+    Writes nothing."""
+    found = []
+    for home in homes:
+        for summary in rounds(home.project, home.folder, env=env):
+            found += [Landed(summary.name, one) for one in summary.landings
+                      if one.repo == repo and one.target == target]
+    return found
+
+
 def usable(*, env=None) -> bool:
     """Whether there is an index a read can use: a file of this code's schema that
     opens. With none, every read answers from the logs. Writes nothing."""
@@ -314,6 +355,7 @@ class _Row:
     flow: str | None = None
     items: tuple[Item, ...] = ()
     ended: Mapping | None = None
+    landings: tuple[builds.Landing, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -345,7 +387,8 @@ def _derive(project: str, slug: str, path: Path,
                   for kind, listed in ITEMS.items() for item_id, body in listed(folded))
     return _Row(project, slug, str(path), len(data), digest, readable=True,
                 status=folded.status, flow=folded.flow, items=items,
-                ended=_ended(folded)), None
+                ended=_ended(folded),
+                landings=builds.landings(folded) if slug != _PROJECT else ()), None
 
 
 def _ended(folded: state.State) -> dict | None:
@@ -390,7 +433,8 @@ def _summary(row: _Row, error: Unreadable | None, folder: Path,
     return Summary(project=row.project, slug=None if project_own else row.slug,
                    folder=folder if project_own else folder / row.slug,
                    status=row.status, flow=row.flow, items=row.items,
-                   changed_since=changed_since, unreadable=error, ended=row.ended)
+                   changed_since=changed_since, unreadable=error, ended=row.ended,
+                   landings=row.landings)
 
 
 def _read(conn, project: str, slug: str, folder: Path) -> Summary:
@@ -473,6 +517,9 @@ def _stored(conn, project: str, slug: str) -> _Stored | None:
         items = tuple(Item(kind, item_id, json.loads(body)) for kind, item_id, body in
                       conn.execute("SELECT kind, id, body FROM items WHERE project = ? "
                                    "AND slug = ? ORDER BY position", (project, slug)))
+        landed = tuple(builds.Landing(*found) for found in conn.execute(
+            "SELECT stage, build, n, repo, target, landing, target_before FROM landings "
+            "WHERE project = ? AND slug = ? ORDER BY position", (project, slug)))
     except (sqlite3.Error, ValueError):
         return None
     (path, length, digest, readable, derived, seen_at, changed_since, status, flow,
@@ -482,7 +529,7 @@ def _stored(conn, project: str, slug: str) -> _Stored | None:
     except ValueError:
         return None
     return _Stored(_Row(project, slug, path, length, digest, bool(readable), status, flow,
-                        items, ended), derived, seen_at, changed_since)
+                        items, ended, landed), derived, seen_at, changed_since)
 
 
 def _refresh(conn, project: str, slug: str, folder: Path, *, wrote: bool) -> Summary | None:
@@ -523,13 +570,20 @@ def _put(conn, row: _Row, folder: Path, *, seen_at: str, changed_since: str | No
         [(row.project, row.slug, item.kind, item.id, position,
           json.dumps(item.body, sort_keys=True))
          for position, item in enumerate(row.items)])
+    conn.executemany(
+        "INSERT INTO landings (project, slug, position, stage, build, n, repo, target, "
+        "landing, target_before) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(row.project, row.slug, position, one.stage, one.build, one.n, one.repo,
+          one.target, one.landing, one.target_before)
+         for position, one in enumerate(row.landings)])
 
 
 def _drop(conn, project: str, slug: str) -> None:
-    for table in ("logs", "rounds", "items"):
+    for table in ("logs", "rounds", "items", "landings"):
         conn.execute(f"DELETE FROM {table} WHERE project = ? AND slug = ?", (project, slug))
 
 
 __all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "STAGE", "VERSION", "VERDICT", "THREAD", "STEP",
-           "PENDING", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
-           "refresh", "rebuild", "read", "rounds", "usable", "disagreements"]
+           "PENDING", "ITEMS", "Item", "Summary", "Landed", "Disagreement", "on_append",
+           "refresh", "rebuild", "read", "rounds", "landings", "usable",
+           "disagreements"]
