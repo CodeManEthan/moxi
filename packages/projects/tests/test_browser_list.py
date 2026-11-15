@@ -18,7 +18,13 @@ from playwright.sync_api import expect
 
 import projects_page_kit as kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+#: Each test's own time, past which it fails however far it got.
+TEST_S = 120
+#: How long a test whose order waits on the fixture's report waits for it: all but the
+#: last seconds of its own time, so a slow machine is only ever slow, never a failure.
+REPORT_S = TEST_S - 10
+
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(TEST_S),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
@@ -56,9 +62,9 @@ def keys_in_order(panel) -> list[str]:
     return rows(panel).evaluate_all("rows => rows.map(row => row.dataset.key)")
 
 
-def expect_order(panel, keys: list[str]) -> None:
-    """Wait until the list's rows are `keys`, in that order."""
-    deadline = time.monotonic() + 10
+def expect_order(panel, keys: list[str], within: float = 10) -> None:
+    """Wait until the list's rows are `keys`, in that order, for up to `within` seconds."""
+    deadline = time.monotonic() + within
     while True:
         seen = keys_in_order(panel)
         if seen == keys or time.monotonic() > deadline:
@@ -212,13 +218,16 @@ def test_a_row_opened_by_its_address_takes_its_place_once_the_first_order_applie
     now = time.time()
     kit.say(fixture_shell, kit.full_report(fixture_shell, now))
     # The page's clock stands still, so its first order is let go by the fixture's report
-    # and never by the hold's time running out, however slow the machine.
+    # and never by the hold's time running out, and the test waits for that report as long
+    # as its own time allows, however slow the machine.
     fixture_page.clock.set_fixed_time(now)
+    fixture_page.set_default_timeout(REPORT_S * 1000)
     fixture_page.goto(f"/m/projects/{route}")
     panel = fixture_page.locator("#moxi-panel > moxi-projects-page")
-    expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
-    expect(row(panel, route.split("/")[1])).to_have_attribute("open", "")
-    expect_order(panel, BY_ACTIVITY)
+    expect(panel.locator('section[data-part="list"]')).to_have_attribute(
+        "data-state", "up", timeout=REPORT_S * 1000)
+    expect(row(panel, route.split("/")[1])).to_have_attribute("open", "", timeout=REPORT_S * 1000)
+    expect_order(panel, BY_ACTIVITY, within=REPORT_S)
 
 
 #: Resolves once the shell's module list has reached this document, the page's copy with it.
@@ -257,6 +266,7 @@ def test_a_list_read_late_keeps_the_first_order_until_the_fixture_reports(
     now = time.time()
     kit.say(fixture_shell, kit.full_report(fixture_shell, now))
     fixture_page.clock.set_fixed_time(now)
+    fixture_page.set_default_timeout(REPORT_S * 1000)
     list_read = held(fixture_page, "**/m/projects/api/projects")
     kinds_read = held(fixture_page, "**/m/projects/api/kinds")
     fixture_page.goto(f"/m/projects/{route}")
@@ -269,9 +279,10 @@ def test_a_list_read_late_keeps_the_first_order_until_the_fixture_reports(
         kinds_read()
     fixture_page.evaluate(TWO_FRAMES)
     list_read()
-    expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
-    expect(row(panel, route.split("/")[1])).to_have_attribute("open", "")
-    expect_order(panel, BY_ACTIVITY)
+    expect(panel.locator('section[data-part="list"]')).to_have_attribute(
+        "data-state", "up", timeout=REPORT_S * 1000)
+    expect(row(panel, route.split("/")[1])).to_have_attribute("open", "", timeout=REPORT_S * 1000)
+    expect_order(panel, BY_ACTIVITY, within=REPORT_S)
 
 
 def test_a_failed_read_draws_the_list_without_the_fixtures_parts(fixture_shell, fixture_page):
