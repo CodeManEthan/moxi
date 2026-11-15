@@ -976,9 +976,10 @@ def write_request(request_id: str, data: Mapping[str, Any],
 
 def launch_request(request_id: str, data: Mapping[str, Any]):
     """The `api.LaunchRequest` a request file holds: its preset, the values the page set,
-    typed as `catalog.parse` gives them, the flags passed on, the rows left out (none
-    when the file names none) and `off_posture`, under `request_id`. It names no caller's
-    directory: a page launch names its own place."""
+    typed as `catalog.parse` gives them, the flags passed on, the rows left out and the
+    rows filled in from an earlier launch (none when the file names none) and
+    `off_posture`, under `request_id`. It names no caller's directory: a page launch
+    names its own place."""
     from . import api
 
     def text(key: str) -> str | None:
@@ -988,14 +989,16 @@ def launch_request(request_id: str, data: Mapping[str, Any]):
     typed = data.get("typed") or {}
     extra = data.get("extra") or []
     left_out = data.get("left_out") or []
+    filled = data.get("filled") or []
     if not isinstance(typed, dict) or not isinstance(extra, list) \
-            or not isinstance(left_out, list):
+            or not isinstance(left_out, list) or not isinstance(filled, list):
         raise NotHere(None, f"the page's request for launch {request_id} is not one the "
                             "launcher wrote", "preview the launch again and launch it")
     return api.LaunchRequest(seat=text("seat"), project_preset=text("project_preset"),
                              typed=typed, extra=tuple(str(word) for word in extra),
                              off_posture=bool(data.get("off_posture")),
                              left_out=tuple(str(name) for name in left_out),
+                             filled=tuple(str(name) for name in filled),
                              request_id=request_id)
 
 

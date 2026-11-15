@@ -8,8 +8,8 @@ loses no record, and `rebuild` makes the same rows from the logs again. Three ta
             slug for a project's own log), the file, its length and SHA-256 as last seen
             here and when that was, whether it could be read, and since when it has been
             known to have changed outside this machine
-    rounds  one row per round: its folder, its status, its flow's name, and how it
-            ended once it has
+    rounds  one row per round: its folder, its status, the name of the flow it
+            follows now, and how it ended once it has
     items   what each log holds open, one row per item, by kind
 
 **Who writes it.** Every write to a log updates that log's rows before the lock is let go
@@ -49,7 +49,7 @@ from pathlib import Path
 
 from moxi import store
 
-from . import folders, log, paths, questions, readback, state
+from . import folders, log, paths, questions, readback, state, versions
 from .errors import NoLog, Unreadable
 
 #: The schema, one step per version of it (`moxi.store.migrate`). A step is never
@@ -90,7 +90,7 @@ STEPS = ("""
 
 #: Counts the changes to what a row is made from. A row made under another count is
 #: stale, so it is not trusted after an upgrade that derives more from a log.
-DERIVED = 6
+DERIVED = 13
 
 #: What a log holds open, by kind: each function is given the log's `State` and lists
 #: `(id, body)` pairs, the body a JSON-ready mapping. A question is here while it is
@@ -100,9 +100,31 @@ DERIVED = 6
 QUESTION = "question"
 RULING = "ruling"
 READ_BACK = "read-back"
+#: A round's plan is here too: each stage it has, the current version of its design
+#: with the design's standing, what that version took away and still waits for a
+#: verdict or a ruling, each verdict recorded of the design, and each decision the
+#: lead made on a thread of its verification.
+STAGE = "stage"
+VERSION = "version"
+PENDING = "pending"
+VERDICT = "verdict"
+THREAD = "thread"
+#: And the step the round is at.
+STEP = "step"
+
+
+def _step(folded: state.State):
+    # What says a step's state reads the modules of the verbs, which append through
+    # this one: it is loaded when a log is first read, not with this module.
+    from . import steps
+    return steps.at(folded)
+
+
 ITEMS: dict[str, Callable[[state.State], Iterable[tuple[str, Mapping]]]] = {
     QUESTION: questions.waiting, RULING: readback.unmarked,
-    READ_BACK: readback.read_backs}
+    READ_BACK: readback.read_backs, STAGE: versions.stages, VERSION: versions.newest,
+    PENDING: versions.waiting, VERDICT: versions.verdicts,
+    THREAD: versions.threads, STEP: _step}
 
 #: The slug the tables give a project's own log.
 _PROJECT = ""
@@ -133,8 +155,9 @@ class Summary:
     changed_since: str | None = None
     unreadable: Unreadable | None = None
     #: How a round that is open no longer ended: `{"how", "by", "record", "at"}`, the
-    #: status it has since, whose act it was, the pointer it carried and when. None
-    #: for an open round and for a project.
+    #: status it has since, whose act it was, the pointer it carried and when; a
+    #: round that closed has no `by` and no `record`. None for an open round and for
+    #: a project.
     ended: Mapping | None = None
 
     @property
@@ -507,5 +530,6 @@ def _drop(conn, project: str, slug: str) -> None:
         conn.execute(f"DELETE FROM {table} WHERE project = ? AND slug = ?", (project, slug))
 
 
-__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
+__all__ = ["STEPS", "DERIVED", "QUESTION", "RULING", "READ_BACK", "STAGE", "VERSION", "VERDICT", "THREAD", "STEP",
+           "PENDING", "ITEMS", "Item", "Summary", "Disagreement", "on_append",
            "refresh", "rebuild", "read", "rounds", "usable", "disagreements"]

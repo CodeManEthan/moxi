@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bandEntries, isCurrent, loadPanel, pageName, where } from "../src/shell.ts";
+import { bandEntries, bandTab, isCurrent, loadPanel, pageName, where } from "../src/shell.ts";
 
 test("the URL names the module and the route", () => {
   assert.deepEqual(where("/m/ui/"), { module: "ui", route: "" });
@@ -156,4 +156,41 @@ test("a load another one replaced during the second try gives nothing and remove
   };
   assert.equal(await loadPanel("fixture", place, async () => null, () => shown), null);
   assert.equal(el.removed, true);
+});
+
+test("Tab with the band open: from the button to the first name, from the last to Settings, then on", () => {
+  const tab = (from, settingsShown = true) => bandTab(from, 4, false, settingsShown);
+  assert.equal(tab("button"), "first");
+  assert.equal(tab(3), "settings");
+  assert.equal(tab("settings"), "close");
+  // Between the names, and from anywhere else, the browser's own Tab moves on.
+  for (const from of [0, 1, 2, null]) assert.equal(tab(from), null);
+});
+
+test("Tab from the band's last name closes it where Settings is hidden", () => {
+  assert.equal(bandTab(3, 4, false, false), "close");
+  assert.equal(bandTab("button", 4, false, false), "first");
+});
+
+test("Shift+Tab with the band open walks back the same way", () => {
+  const back = (from, settingsShown = true) => bandTab(from, 4, true, settingsShown);
+  assert.equal(back("settings"), "last");
+  assert.equal(back(0), "button");
+  for (const from of ["button", 1, 2, 3, null]) assert.equal(back(from), null);
+  assert.equal(back(0, false), "button");
+});
+
+test("a band of one name is its first and its last", () => {
+  assert.equal(bandTab("button", 1, false, true), "first");
+  assert.equal(bandTab(0, 1, false, true), "settings");
+  assert.equal(bandTab(0, 1, false, false), "close");
+  assert.equal(bandTab(0, 1, true, true), "button");
+  assert.equal(bandTab("settings", 1, true, true), "last");
+});
+
+test("a band with no names leaves Tab alone", () => {
+  for (const from of ["button", "settings", null]) {
+    assert.equal(bandTab(from, 0, false, true), null);
+    assert.equal(bandTab(from, 0, true, true), null);
+  }
 });

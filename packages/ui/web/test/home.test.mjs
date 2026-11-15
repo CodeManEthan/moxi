@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { anyNeeds, readReport, rowMode, rowOpen, shownRows } from "../src/home-model.ts";
+import { anyNeeds, inOrder, readReport, readSide, rowMode, rowOpen, shownRows, SIDE_FROM_PX, sideMargin } from "../src/home-model.ts";
 
 const entry = (key, order, detail) => ({ key, order, report: readReport(detail) });
 const keys = (entries) => shownRows(entries).map((item) => item.key);
@@ -47,6 +47,22 @@ test("a row that needs the user sits above every row that does not, lower needs 
   assert.equal(anyNeeds([entry("quiet", 100, said(0)), entry("silent", 50, null)]), false);
 });
 
+test("the document order is the order seen: the shown rows as they show, then the silent ones in place", () => {
+  const said = (needs) => ({ parts: [{ text: "x" }], needs });
+  const rows = [entry("silent-early", 50, null), entry("quiet", 100, said(0)), entry("silent-late", 500, null),
+                entry("waits", 200, said(20)), entry("broken", 900, said(30))];
+  const order = (entries) => inOrder(entries).map((item) => item.key);
+  assert.deepEqual(order(rows), ["waits", "broken", "quiet", "silent-early", "silent-late"]);
+  // The same objects, each once, so a renderer keyed on them moves elements and makes none.
+  assert.equal(new Set(inOrder(rows)).size, rows.length);
+  for (const item of inOrder(rows)) assert.ok(rows.includes(item));
+  // A row that stops needing the user goes back to its fixed place; one that goes silent drops below.
+  rows[3].report = readReport(said(0));
+  rows[4].report = null;
+  assert.deepEqual(order(rows), ["quiet", "waits", "silent-early", "silent-late", "broken"]);
+  assert.deepEqual(order([]), []);
+});
+
 test("a row without opens is a link, one with opens a toggle, one held open neither", () => {
   assert.equal(rowMode(readReport({ parts: [] })), "link");
   assert.equal(rowMode(readReport({ parts: [], opens: true })), "toggle");
@@ -61,4 +77,32 @@ test("a component is shown under its row after a click or while it holds itself 
   // A click that came before the component stopped opening shows nothing.
   assert.equal(rowOpen(readReport({ parts: [] }), true), false);
   assert.equal(rowOpen(null, true), false);
+});
+
+test("a side panel's width is a number above 0, and anything else is no panel", () => {
+  assert.equal(readSide({ width: 400 }), 400);
+  assert.equal(readSide({ width: 312.5 }), 312.5);
+  for (const detail of [null, undefined, 400, "400", {}, { width: 0 }, { width: -400 }, { width: "400" },
+                        { width: NaN }, { width: Infinity }, { width: true }]) {
+    assert.equal(readSide(detail), 0);
+  }
+});
+
+// The column's centre in a window `inner` px wide, where the block that holds the
+// column is `block` px wide and centred in the window, as the browser works the margin out.
+function columnCentre(inner, block, width) {
+  const [, less] = /^calc\(50% - ([\d.]+)px\)$/.exec(sideMargin(width));
+  return (inner - block) / 2 + block / 2 - Number(less) + 340;
+}
+
+test("beside a side panel the column's centre is the centre of the window less the panel", () => {
+  assert.equal(sideMargin(400), "calc(50% - 540px)");
+  assert.equal(columnCentre(1400, 1136, 400), (1400 - 400) / 2);
+  assert.equal(columnCentre(SIDE_FROM_PX, SIDE_FROM_PX - 64, 400), (SIDE_FROM_PX - 400) / 2);
+  assert.equal(columnCentre(1920, 1136, 321), (1920 - 321) / 2);
+});
+
+test("no panel leaves the column centred, and the panel moves it from 1100 px of window", () => {
+  assert.equal(sideMargin(0), "");
+  assert.equal(SIDE_FROM_PX, 1100);
 });

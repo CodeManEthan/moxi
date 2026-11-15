@@ -317,8 +317,10 @@ def end(conn: sqlite3.Connection, run: store.Run, verdict: Verdict) -> Verdict:
 
 
 def cache_read(cache: Any, row: store.LaunchRow, session_id: str,
-                env: Mapping[str, str]) -> Any | None:
-    """Cache's read of the session, through cache's public API; None without cache."""
+               env: Mapping[str, str], *, now: float | None = None) -> Any | None:
+    """Cache's read of the session, through cache's public API; None without cache. `now`
+    (epoch seconds) is the time cache reads the clock at, passed on as cache's own `now`;
+    None leaves it to cache."""
     if cache is LOOK:
         cache = None
         if modules.available("cache"):
@@ -326,11 +328,13 @@ def cache_read(cache: Any, row: store.LaunchRow, session_id: str,
             cache = found.api if found.ok else None
     if cache is None:
         return None
+    at = {} if now is None else {"now": now}
     if row.harness == "codex":
-        return cache.read(row.harness, session_id, cache_source=codex_sessions(row, env))
+        return cache.read(row.harness, session_id, cache_source=codex_sessions(row, env),
+                          **at)
     if (root := claude_projects(cache, row)) is not None:
-        return cache.read(row.harness, session_id, projects_root=root)
-    return cache.read(row.harness, session_id)
+        return cache.read(row.harness, session_id, projects_root=root, **at)
+    return cache.read(row.harness, session_id, **at)
 
 
 def claude_projects(cache: Any, row: store.LaunchRow) -> str | None:

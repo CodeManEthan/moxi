@@ -116,7 +116,7 @@ read = "use"
 [keep_warm.director_cap]
 type = "int"
 default = 10
-doc = "How many keep-warm nudges in a row a director with open holds gets."
+doc = "How many keep-warm nudges in a row a director gets, for its open holds or for the agents it directs."
 read = "use"
 
 [keep_warm.subagent_texts]
@@ -130,7 +130,28 @@ read = "use"
 type = "list"
 default = ["Keep-warm: reply warm unless you are mid-work.", "Keep-warm: check each open hold by name, and release those whose work is done."]
 items = "str"
-doc = "The keep-warm nudges for a director: the first, then the second for every later one."
+doc = "The keep-warm nudges for a director with open holds: the first, then the second for every later one."
+read = "use"
+
+[keep_warm.directing_texts]
+type = "list"
+default = ["Keep-warm: agents you direct are still working. Reply warm unless you are mid-work."]
+items = "str"
+doc = "The keep-warm nudges for a director under cover with no open hold, in order, the last repeating; the directed agents at work are named after each."
+read = "use"
+needs = "comms"
+
+[name.template]
+type = "string"
+default = "<project>-<model>-<date:mmm-dd hh:mm>"
+doc = "The template a launch's session name is made from, with the pieces <project>, <agent>, <model>, <identity>, <scope>, <instance>, <date[:format]> and <time[:format]>."
+read = "use"
+
+[name.templates]
+type = "table"
+default = {}
+items = "str"
+doc = "A name template of its own for a project, by project key; a project with none takes name.template."
 read = "use"
 
 [page.launch_wait_s]

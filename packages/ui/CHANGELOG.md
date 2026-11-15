@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- `moxi_ui.testing.phone` gains the two helpers a module's phone test needs:
+  `gateway_shell(home, site=(), *, port=None, enabled=True, address=True, start=True,
+  **options)`, a gateway-mode test shell with its port set, its tunnel address written and
+  its hold waited for, and `pair_page(context, shell, *, passkey=False)`, which pairs a
+  browser context through a `PhoneBridge` and gives its page on the signed-in shell
+  document. `free_port`, `hold_port` and `wait_hold` come with them.
+- Keyboard order follows what is seen. Home puts its rows in the document in the order
+  shown, so Tab reaches a risen row before the rows under it; a row that moves takes its
+  component along, which gets one `disconnectedCallback` and one `connectedCallback` and
+  is not placed again, and an element inside a row that held the focus keeps it. A row
+  component must hold up under that move and not report `null` on the way
+  (`docs/home.md`, "Order").
+- With the band of pages open, Tab goes from the page-name button to the band's first
+  name and from its last name to `Settings`; from `Settings`, or from the last name where
+  `Settings` is hidden, the band closes and Tab goes on into the page. Shift+Tab walks
+  back the same way. With the band closed Tab is the browser's own.
+- Health's `Check again` hands the focus to `Checking…` while the run lasts and takes it
+  back when the run ends.
+- Home moves its column aside for a main piece's side panel. The piece dispatches a
+  bubbling, composed `moxi-home-side` event with `detail: {width}`, the width in px of a
+  panel it draws fixed to the window's right edge, and from 1100 px of window Home puts
+  its column's centre at the centre of the window less that width. A width of `0`, or
+  the piece leaving the spot, puts the column back; under 1100 px the column stays and
+  the panel lies over the page. `docs/home.md` has the contract.
 - New environment variable `MOXI_UI_LOCKED_SETTINGS`: a list of full setting keys
   (`<module>.<key>`, separated by commas or spaces) that the shell's pages may not change
   for that run. An entry locks its key and every key under it, and a write to a key
@@ -60,6 +84,17 @@
   it is old, `POST /m/ui/api/checks/run` starts one now, and the topic `ui.checks`
   carries it. The shell keeps it in `checks.json` in its state directory, a declared
   store that `moxi uninstall ui --purge` removes.
+- New element `<moxi-ui-row>`, defined by `client.js` beside the form: the two-line row
+  of a list. Line one is `name`, `where` and a `fact` at the right end; line two is
+  `lead`, `lead-more`, `time` with `rest`, and `tail`, a middle dot between each two, then
+  the slot `acts`; line three is `note`. An unset attribute draws nothing, and a row with
+  a name alone is one line. `open` shows the default slot's content under the lines. A
+  row with `toggles` shows a pointer and sends `moxi-row-toggle` for a click on its lines
+  outside `acts`; the page sets `open`. Its line one is the tab stop, a button whose
+  `aria-expanded` follows `open`, and Enter or Space there sends the event too; Space
+  does not scroll the page. A click that ends a selection of text does not toggle, so a
+  name can be copied. When line one is too narrow the where and the name are cut before
+  the fact. `docs/row.md` has the list. `client.d.ts` gains `RowElement`.
 
 ## 0.2.3 (2026-11-08)
 

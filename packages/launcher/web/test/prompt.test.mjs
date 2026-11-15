@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
-  buttonWords, copied, edited, FIRST_TURN, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
+  briefFileOf, buttonWords, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
   afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
   placeTime, projectKeys, samePick, tilde, typedFolder, valueOf, whereFace, withProjects,
@@ -33,6 +33,8 @@ test("the places read keeps each place's project, folder and time", () => {
   assert.equal(read.projects, true);
   assert.equal(read.home, ALICE);
   assert.equal(parsePlaces({ ...PLACES, home: undefined }).home, "");
+  assert.equal(read.actor, "operator");
+  assert.equal(parsePlaces({ ...PLACES, actor: undefined }).actor, "");
   assert.deepEqual(read.places[0], place("proj-a", "/home/alice/code/proj-a/web"));
   assert.equal(read.places[1].project_key, null);
   assert.deepEqual(parsePlaces({ ...PLACES, places: [{ cwd: "" }, "x", { project_key: 3, cwd: "/a" }] }).places,
@@ -120,14 +122,16 @@ test("a Home that never launched, without projects, opens on the home folder and
   for (const [data, picker] of [[{ ...PLACES, places: [] }, false], [{ ...PLACES, projects: false, places: [] }, true]]) {
     const { read, asked } = reads({ "launcher api/places": { status: 200, data } });
     const where = await openWhere(read, picker);
-    assert.deepEqual(where, { withProjects: false, home: ALICE, places: [], pick: { kind: "folder", path: "~" } });
+    assert.deepEqual(where, { withProjects: false, home: ALICE, actor: "operator", places: [],
+                              pick: { kind: "folder", path: "~" } });
     assert.deepEqual(asked, ["launcher api/places"]);
   }
 });
 
 test("a places read that fails opens on the home folder with no projects", async () => {
   const { read, asked } = reads({});
-  assert.deepEqual(await openWhere(read, true), { withProjects: false, home: "", places: [], pick: { kind: "folder", path: "~" } });
+  assert.deepEqual(await openWhere(read, true),
+                   { withProjects: false, home: "", actor: "", places: [], pick: { kind: "folder", path: "~" } });
   assert.deepEqual(asked, ["launcher api/places"]);
 });
 
@@ -517,6 +521,32 @@ test("no first-turn row reaches the request but the brief, as the box's text", (
   }
 });
 
+test("a brief file set through the + is the first turn: brief_file sent, no brief, the box's text left out", () => {
+  const fields = [...FORM_FIELDS, field("brief_file", { type: "path", value: "" }), field("handoff", { type: "path", value: "" })];
+  const sent = launchRequest(fields, null, { ...SET, brief_file: "/srv/briefs/first.md" }, SLOT_2);
+  assert.equal(sent.values.brief_file, "/srv/briefs/first.md");
+  assert.equal("brief" in sent.values || "handoff" in sent.values, false);
+  assert.equal(sent.leave_out.includes("brief") && sent.leave_out.includes("handoff"), true);
+  assert.equal(sent.leave_out.includes("brief_file"), false);
+  // The same with an empty box, and over a form filled with another brief file.
+  const filled = fields.map((item) => item.name === "brief_file" ? { ...item, value: "notes/other.md" } : item);
+  const empty = launchRequest(filled, null, { ...SET, brief: null, brief_file: "/srv/briefs/first.md" }, SLOT_2);
+  assert.equal(empty.values.brief_file, "/srv/briefs/first.md");
+  assert.equal("brief" in empty.values, false);
+});
+
+test("with no brief file set the rule is the box's: an empty or blank file is none", () => {
+  const fields = [...FORM_FIELDS, field("brief_file", { type: "path", value: "notes/other.md" })];
+  for (const brief_file of [undefined, null, "", "   "]) {
+    const sent = launchRequest(fields, null, { ...SET, brief_file }, SLOT_2);
+    assert.equal(sent.values.brief, "fix the build");
+    assert.equal("brief_file" in sent.values, false);
+    assert.equal(sent.leave_out.includes("brief_file"), true);
+  }
+  assert.equal(briefFileOf({ brief_file: " /a/b.md " }), "/a/b.md");
+  assert.equal(briefFileOf({}), null);
+});
+
 // --- the launch, and the lines under the box -----------------------------------------------
 
 const PREVIEW = { refused: [], harness: "claude", mode: "interactive", target: "slot", argv: ["claude"], stamps: [],
@@ -690,4 +720,43 @@ test("an edit of the box takes an ended launch's lines away and leaves a startin
   assert.equal(edited(copied("moxi launcher run", true, [])), IDLE);
   const late = followed(flight, status(launch("spawning", { stale: true })));
   assert.deepEqual([edited(late), following(edited(late))], [IDLE, false]);
+});
+
+// --- a resume from the + ---------------------------------------------------------------------
+
+test("a resume's 202 says Resuming and is followed to Resumed in its slot, the box kept", () => {
+  const { flight, copy } = resumeSent(STARTED);
+  assert.equal(copy, null);
+  assert.deepEqual([flight.phase, inFlight(flight), following(flight), texts(flight)], ["starting", true, true, [RESUMING]]);
+  const done = followed(flight, status(launch("ready", { slot: "4" })), clock);
+  assert.deepEqual([back(done), following(done), texts(done)], [true, false, ["Resumed in slot 4 · 20:42"]]);
+});
+
+test("a resume that fails, or meets a refusal on its path, says the resume failed", () => {
+  const { flight } = resumeSent(STARTED);
+  assert.deepEqual(texts(followed(flight, status(launch("failed", { reason: "live" })))), ["The resume failed: live"]);
+  const refused = followed(flight, ok({ state: "up", detail: null, launches: [], refused: refusal("slot 3 is taken", "pick another") }));
+  assert.deepEqual(texts(refused), ["The resume failed: slot 3 is taken. pick another"]);
+});
+
+test("a resume that goes stale, or is watched to the end, has the launch's two lines", () => {
+  const { flight } = resumeSent(STARTED);
+  const late = followed(flight, status(launch("spawning", { stale: true })));
+  assert.deepEqual([late.phase, back(late), texts(late)],
+                   ["late", true, ["Not started yet, and it should have been by now. The Launcher page lists it."]]);
+  assert.deepEqual(texts(followed(late, status(launch("started", { slot: "3" })), clock)), ["Resumed in slot 3 · 20:42"]);
+  assert.deepEqual(texts(stopped(flight)), ["Stopped watching this launch. The Launcher page lists it."]);
+});
+
+test("a resume refused, used already, copied as a command or unanswered gives the button back", () => {
+  const refused = resumeSent(ok({ refused: refusal("its session is live now", "attach to it instead: moxi slots attach 3", "live"),
+                                  command: null }));
+  assert.deepEqual([back(refused.flight), texts(refused.flight)],
+                   [true, ["its session is live now. attach to it instead: moxi slots attach 3"]]);
+  const used = resumeSent({ status: 409, data: { conflict: "the request for launch r9 was used already" } });
+  assert.deepEqual([back(used.flight), texts(used.flight)], [true, ["the request for launch r9 was used already"]]);
+  const command = resumeSent(ok({ refused: null, command: "moxi launcher resume 5f6e" }));
+  assert.equal(command.copy, "moxi launcher resume 5f6e");
+  const gone = resumeSent({ status: 0, data: null });
+  assert.deepEqual([back(gone.flight), texts(gone.flight)], [true, ["The resume failed: no answer from the shell"]]);
 });

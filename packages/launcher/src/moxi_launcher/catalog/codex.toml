@@ -10,6 +10,8 @@
 type = "string"
 default = ""
 doc = "The model."
+group = "model"
+label = "Model"
 flag = "-m"
 aliases = ["--model"]
 modes = { interactive = "-m", exec = "-m", host = "--model" }
@@ -20,6 +22,10 @@ default = "workspace-write"
 values = ["read-only", "workspace-write", "danger-full-access"]
 posture = true
 doc = "The sandbox policy for the commands the model runs."
+group = "access"
+sub = "Mode"
+label = "Sandbox"
+danger = ["danger-full-access"]
 flag = "-s"
 aliases = ["--sandbox"]
 modes = { interactive = "-s", exec = "-s", host = "--sandbox" }
@@ -30,6 +36,9 @@ default = "on-request"
 values = ["on-request", "never"]
 posture = true
 doc = "When the model asks before running a command; turns' host owns this itself."
+group = "access"
+sub = "Mode"
+label = "Approval"
 flag = "-a"
 aliases = ["--ask-for-approval"]
 modes = ["interactive"]
@@ -38,6 +47,9 @@ modes = ["interactive"]
 type = "string"
 default = ""
 doc = "A Codex config profile layered on the user's config."
+group = "config"
+sub = "Layers"
+label = "Config profile"
 flag = "-p"
 aliases = ["--profile"]
 modes = ["interactive", "exec"]
@@ -46,6 +58,9 @@ modes = ["interactive", "exec"]
 type = "bool"
 default = false
 doc = "Turn on live web search."
+group = "tools"
+sub = "Web & browser"
+label = "Web search"
 flag = "--search"
 modes = ["interactive"]
 
@@ -55,6 +70,9 @@ default = []
 items = "path"
 repeatable = true
 doc = "Another directory the session may write to; may be given more than once."
+group = "access"
+sub = "Reach"
+label = "Extra folders"
 flag = "--add-dir"
 modes = { interactive = "--add-dir", exec = "--add-dir", host = { flag = "--option", value = "sandbox_workspace_write.writable_roots={toml}" } }
 
@@ -63,6 +81,9 @@ type = "list"
 default = []
 repeatable = true
 doc = "A Codex config override, key=value; may be given more than once."
+group = "config"
+sub = "Layers"
+label = "Config overrides key=value"
 flag = "-c"
 aliases = ["--config"]
 modes = { interactive = "-c", exec = "-c", host = "--option" }
@@ -101,6 +122,9 @@ modes = ["exec"]
 type = "bool"
 default = false
 doc = "Trust the launch's directory for this launch only."
+group = "access"
+sub = "Reach"
+label = "Trust the launch folder"
 flag = "-c"
 modes = { interactive = { flag = "-c", value = "projects={{cwd_toml}={trust_level=\"trusted\"}}" }, exec = { flag = "-c", value = "projects={{cwd_toml}={trust_level=\"trusted\"}}" }, host = { flag = "--option", value = "projects.{cwd_toml}.trust_level=\"trusted\"" } }
 

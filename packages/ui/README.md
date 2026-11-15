@@ -64,8 +64,20 @@ edit of the file still change the key, and the variable holds no value for it.
 Home, at `/m/ui/`, shows one main piece and a row per module with something to report. A
 module takes a seat there by announcing a component with `home_as` (`"main"` or `"row"`)
 and an `order`; a row component reports its line with a `moxi-home-row` event and Home
-draws it. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/home.md)
-has the fields, how rows are ordered and opened, and the `needs` and `order` scales.
+draws it. A main piece that opens a panel at the window's right edge sends
+`moxi-home-side` with the panel's width, and Home moves its column aside. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/home.md)
+has the fields, how rows are ordered and opened, the `needs` and `order` scales and the
+side panel's event.
+
+## The row of a list
+
+`<moxi-ui-row>` is the two-line row a list page draws: a name, where it is and a fact at
+the right end; under them a leading phrase, a time, what was last said and the row's acts;
+and an opened state for content under the row. `/m/ui/client.js` defines it, so a page
+places it with attributes and bundles nothing. It draws nothing for an attribute that is
+unset, and a row opens by its lines only when it carries `toggles`.
+[docs/row.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/row.md)
+has every attribute, the slots and the `moxi-row-toggle` event.
 
 ## Confirmed acts in a page
 
@@ -213,6 +225,12 @@ beside it. Its `ui_*` fixtures start a real shell over the installed modules
 components. The browser fixtures need the `testing` extra and a browser:
 `pip install 'moxi-ui[testing]'`, then `playwright install chromium`. The plugin's
 docstring lists every fixture.
+
+A test of a module's phone face uses `moxi_ui.testing.phone`: `gateway_shell(home, site)`
+starts a shell in gateway mode with its tunnel address written, a `PhoneBridge` reaches its
+gateway at `https://gw.moxi.test/`, and `pair_page(context, shell)` pairs a browser context
+through the bridge and gives its page. Without a browser, `bridge.pair(shell)` gives a
+`PhoneSession` for the gateway's routes. The module's docstring has an example.
 
 A page module whose UI is optional:
 

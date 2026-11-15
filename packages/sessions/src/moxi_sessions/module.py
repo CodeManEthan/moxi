@@ -4,8 +4,8 @@ It offers interfaces 2 to 5, the read API in `moxi_sessions.api` (interface 3 is
 plus `retention()`; interface 4 is 3 plus the list of sessions, `sessions_list`;
 interface 5 is 4 plus `session_facts`, which names sessions asked for by key), the verb
 `moxi sessions`, a setup that prints how long each harness keeps its transcripts, and,
-with the `ui` extra, a page in the browser UI shell that shows one session's last turns
-and a block other pages may place for the same view. With the
+with the `ui` extra, a page in the browser UI shell that lists the sessions and shows one
+session's last turns, and a block other pages may place for that view. With the
 `secrets` extra, `moxi sessions read` redacts what it prints. With the `turns` extra, turns
 enforces sessions' transcript-read guard, off until the install's question or its switch
 turns it on.
@@ -17,8 +17,9 @@ CLI = "moxi_sessions.cli:main"
 SUMMARY = ("Read each harness's own session records in one shape: find a session and its "
            "subagents, list a root's sources, read records forward or back.")
 OPTIONAL = {
-    "ui": "The sessions page in the browser UI shell: one session's last turns and its "
-          "subagents, by harness and id, and the window block other pages place.",
+    "ui": "The sessions page in the browser UI shell: the list of sessions with its "
+          "filters and find field, one session's last turns and its subagents, and the "
+          "window block other pages place.",
     "secrets": "Redaction for `moxi sessions read`: each message and tool call line passes "
                "through secrets' credentials and broad sets before it is printed. Without "
                "it the read prints as written and says so.",
@@ -48,13 +49,13 @@ STORES = {}
 DOCTOR = "moxi_sessions.doctor:rows"
 #: sessions' page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_sessions.page:PAGE"
-#: The page, whose route names the session (`<harness>/<session>`, or
-#: `claude/<session>/<agent>` for a Claude Code subagent; at the empty route it asks for
-#: the harness and id), and the window block, the same view placed by attributes.
+#: The page, which lists the sessions at the empty route and shows one session at the
+#: route that names it (`<harness>/<session>`, or `claude/<session>/<agent>` for a Claude
+#: Code subagent), and the window block, that one session's view placed by attributes.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Sessions", "contract": 1, "place": "page",
              "group": "daily", "order": 20,
-             "doc": "One session's last turns and its subagents, by harness and session id"},
+             "doc": "The list of sessions, and one session's last turns and its subagents"},
     "window": {"script": "window.js", "title": "Session", "contract": 1, "place": "block",
                "doc": "One session's last turns, with a link that opens it in the sessions "
                       "page",

@@ -24,7 +24,8 @@ outside comms.
 
 * `ClaimServer`, for a binding held by a module's own process.
 * Reads: `attributed(message_id)`, `session(identity)`, `session_of(identity)`,
-  `roster()`, `owner(session_id)`, `roster_rows()` (one `RosterRow` per address: the
+  `roster()` (a `Roster`: `bound`, `standing`, and `waiting`, one `Waiting` per name
+  with mail queued), `owner(session_id)`, `roster_rows()` (one `RosterRow` per address: the
   roster joined with each live name's session and whom it awaits),
   `identity_state(name, scope=None)`,
   `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
@@ -292,11 +293,24 @@ class Standing:
 
 
 @dataclass(frozen=True)
+class Waiting:
+    """Mail queued for one name: how many messages, and the oldest one's time (epoch
+    seconds). One queue holds mail for a name that is offline, cold or flagged alike, and
+    no reason is kept, so a bound name can have mail waiting too."""
+
+    qualified: str
+    count: int
+    oldest: float
+
+
+@dataclass(frozen=True)
 class Roster:
-    """Who can be messaged: the bound names, and the standing rows."""
+    """Who can be messaged: the bound names, the standing rows, and the names with mail
+    waiting."""
 
     bound: tuple = ()
     standing: tuple = ()
+    waiting: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -328,9 +342,10 @@ def _declared_directors() -> dict:
 
 
 def roster(*, timeout_s: float = READ_DEADLINE) -> Roster:
-    """The bound agents with their declared directors, and the standing names: the
-    directory's standing rows and the reserved send-only names, as the daemon's `agents`
-    answer lists them. Raises `DaemonOffline` or `DaemonError`."""
+    """The bound agents with their declared directors, the standing names (the
+    directory's standing rows and the reserved send-only names) and the mail waiting per
+    name, as the daemon's `agents` answer lists them. Raises `DaemonOffline` or
+    `DaemonError`."""
     client = _daemon(timeout_s)
     try:
         answer = client.call("agents")
@@ -345,7 +360,9 @@ def roster(*, timeout_s: float = READ_DEADLINE) -> Roster:
                               scope=s.get("scope"), kind=s.get("kind"),
                               module=s.get("module"))
                      for s in answer.get("standing") or ())
-    return Roster(bound=bound, standing=standing)
+    waiting = tuple(Waiting(qualified=q, count=w.get("count"), oldest=w.get("oldest"))
+                    for q, w in (answer.get("waiting") or {}).items())
+    return Roster(bound=bound, standing=standing, waiting=waiting)
 
 
 #: The kind a reserved name reads as in `roster().standing`.
@@ -576,7 +593,7 @@ __all__ = [
     "Recipient", "Refusal", "CODEX_RESUME", "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
-    "Standing", "Owner", "roster_rows", "RosterRow",
+    "Standing", "Waiting", "Owner", "roster_rows", "RosterRow",
     "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",
     "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
     "DaemonError", "DaemonOffline", "BACKEND_ENV", "CLAIM_SOCKET_ENV", "COMMAND_ENV",

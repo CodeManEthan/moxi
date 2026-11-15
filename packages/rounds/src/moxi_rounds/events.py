@@ -44,20 +44,32 @@ TYPES = _types(
     EventType("round.opened",
               ("description", "flow", "steps", "parent", "inherits", "record"),
               required=("description", "flow", "steps")),
-    # The round moved to another flow: the name it had, the new name and its steps, who
-    # moved it, and the ruling when it was the operator's.
-    EventType("flow.changed", ("was", "flow", "steps", "by", "ruling")),
+    # The round moved to another flow: the name it had, the new name and its steps, and
+    # who moved it. The operator's move is his ruling, and that ruling's own event
+    # holds the same three.
+    EventType("flow.changed", ("was", "flow", "steps", "by")),
     # A design version was frozen: its number and digest, whether only records changed
-    # and the pointer that says so, the trace result, and the declarations it added.
+    # and the pointer that says so, the trace result, what the design's block declared
+    # (`declared`), what of that was new to the record and is added by this event
+    # (`added`), and what the block took away, which waits for a verdict or a ruling
+    # (`pending`).
     EventType("design.frozen",
-              ("version", "digest", "records_only", "record", "trace", "added")),
+              ("version", "digest", "records_only", "record", "trace", "declared",
+               "added", "pending"),
+              required=("version", "digest")),
     # A report's verdict: what kind of report and pass, the verdict word, what it read
     # (a design version, or a stage with its head and merge-base), the user step it is
     # for, the model and author, the report file and its digest, and what its block
-    # listed.
+    # listed. A design report's verdict that finds its version publishable is also the
+    # whole of what it applies: `applied` lists what that version's block took away
+    # and this event takes out of the record (for a hold, `gone` are the stages taken
+    # off it and `blocks` the hold that leaves), and `not_applied` the ones it leaves,
+    # each with `why`. `flags` are what is noted of
+    # the report and refuses nothing.
     EventType("verdict.recorded",
               ("kind", "pass", "verdict", "design", "stage", "head", "merge_base", "step",
-               "model", "by", "report", "sha256", "findings", "waits", "decisions")),
+               "model", "by", "report", "sha256", "findings", "waits", "decisions",
+               "applied", "not_applied", "flags")),
     # A question was put: its id, sentence, origin and what it holds up, its state, and
     # who asked it and when, which outlive a move to another log. `record` is the
     # operator's pointer when the question is his own; it is then the origin too.
@@ -81,9 +93,13 @@ TYPES = _types(
               required=("id",)),
     # A stage joined the plan: its id, the repo and branch it builds on or the child
     # round it stands for, the stages it comes after, and its slices.
-    EventType("stage.declared", ("id", "repo", "branch", "round", "after", "slices")),
-    # A stage left the plan or lost a wait, with the verdict or ruling that allowed it.
-    EventType("stage.changed", ("id", "removed", "after", "verdict", "ruling")),
+    EventType("stage.declared",
+              ("id", "repo", "branch", "round", "after", "slices", "why")),
+    # A stage changed: it waits for more stages (`after`, the ones added), which a
+    # mark writes. A stage waits for fewer, or leaves the plan, by the operator's
+    # ruling or by a verdict that applies it, and each of those is its own event:
+    # this one says neither.
+    EventType("stage.changed", ("id", "after"), required=("id",)),
     # A ruling: its id and sentence, the pointer to where the operator said it, a reason,
     # the repos and paths or the stages it applies to, its kind (of substance, or an act
     # on the process) and the item it rules, the key of the option an answer chose, and
@@ -93,12 +109,14 @@ TYPES = _types(
     # (`blocks`), each only when the ruling changes it; a move of the question to
     # another log names the record it became there, `moved_to`. A skip of the questions
     # step for a stage lists the questions it lets that stage past, `covers`. A ruling
+    # of the round's flow holds the name the flow had (`was`), the new name (`flow`)
+    # and its `steps`, and is the whole of the move. A ruling
     # that replaces an earlier one names it in `supersedes`, and one that takes an
     # earlier one back in `revokes`; the earlier ruling's line is never changed.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",
-               "revokes", "moved_to"),
+               "revokes", "moved_to", "was", "flow", "steps"),
               required=("id", "record", "kind")),
     # Rulings of this log were put in front of the operator: their ids, and the pointer
     # to where he was shown them.

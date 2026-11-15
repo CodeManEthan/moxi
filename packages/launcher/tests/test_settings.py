@@ -26,11 +26,14 @@ DEFAULTS = {
     "recycle.limit_wait_s": 1800,
     "keep_warm.subagent_cap": 3,
     "keep_warm.director_cap": 10,
+    "name.template": "<project>-<model>-<date:mmm-dd hh:mm>",
+    "name.templates": {},
     "page.launch_wait_s": 600,
     "records.keep_days": 90,
 }
 #: The list settings whose defaults are texts: checked for their count only.
-TEXTS = {"keep_warm.subagent_texts": 3, "keep_warm.director_texts": 2}
+TEXTS = {"keep_warm.subagent_texts": 3, "keep_warm.director_texts": 2,
+         "keep_warm.directing_texts": 1}
 
 
 def test_with_no_file_every_key_has_its_default():

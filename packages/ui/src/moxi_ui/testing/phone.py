@@ -25,6 +25,18 @@ user's, so the gateway's provider check passes the terminator's connections as t
 
 Without a browser, `bridge.pair(shell)` pairs a phone with no passkey, through the desk's
 pair route and the gateway's open routes, and gives a `PhoneSession` over the bridge.
+
+A module's phone test starts its shell with `gateway_shell(home, site)`: gateway mode, the
+gateway's port set, the tunnel address written and the hold waited for. With a browser,
+`pair_page(context, shell)` pairs a context made from `PhoneBridge.context_args` and gives
+its page on the signed-in shell document:
+
+    shell = gateway_shell(tmp_path / "gw", [site])
+    with PhoneBridge(shell.home, shell.gateway_port) as bridge:
+        browser = bridge.launch(playwright.chromium)
+        page = pair_page(browser.new_context(**PhoneBridge.context_args("chromium")), shell)
+        ...
+    shell.stop()
 """
 
 from __future__ import annotations
@@ -38,6 +50,7 @@ import os
 import socket
 import ssl
 import threading
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -50,6 +63,10 @@ from moxi import files
 HOST = "gw.moxi.test"
 #: The phone's origin at the default port.
 ORIGIN = f"https://{HOST}"
+#: Seconds a gateway-mode shell has to take the gateway's hold: two of its ticks and some.
+HOLD_WAIT_S = 10.0
+#: Ports `gateway_shell` tries when another program takes the one it picked.
+PORT_TRIES = 3
 #: The largest request head the 502 answer reads.
 _HEAD_MAX = 64 * 1024
 _BAD_GATEWAY = (b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\n"
@@ -474,3 +491,115 @@ def set_gateway(shell: Any, *, enabled: bool | None = None, port: int | None = N
         if port is not None:
             table["port"] = port
     return path
+
+
+# -- a gateway-mode shell, and a paired phone page ---------------------------------------
+
+
+def free_port() -> int:
+    """A loopback port nothing holds now."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def hold_port(shell: Any) -> int | None:
+    """The port the shell's `gateway.hold` names while its pid runs, else None."""
+    from moxi_ui.gateway import endpoint
+
+    return endpoint.hold_port(shell.runtime_dir("ui"))
+
+
+def wait_hold(shell: Any, port: int, *, timeout_s: float = HOLD_WAIT_S) -> None:
+    """Wait for the shell's `gateway.hold` to name `port`."""
+    deadline = time.monotonic() + timeout_s
+    while hold_port(shell) != port:
+        if time.monotonic() > deadline:
+            raise AssertionError(f"the shell took no gateway hold on {port} in {timeout_s:g}s:\n"
+                                 + "\n".join(shell.stderr()[-20:]))
+        time.sleep(0.1)
+
+
+def _has_entry(shell: Any) -> bool:
+    """Whether the shell's tunnel record still holds `ui/gateway`."""
+    record = shell.state_dir("tunnel") / "applied.json"
+    try:
+        return "ui/gateway" in json.loads(record.read_text(encoding="utf-8"))["entries"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _hold_with_entry(shell: Any, port: int, *, timeout_s: float = HOLD_WAIT_S) -> bool:
+    """Wait for the shell's hold on `port`: True once it holds it with its tunnel entry,
+    False once the entry is gone, which the shell does when another program holds the
+    port at a tick."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if hold_port(shell) == port:
+            return _has_entry(shell)
+        if not _has_entry(shell):
+            return False
+        if time.monotonic() > deadline:
+            raise AssertionError(f"the shell took no gateway hold on {port} in {timeout_s:g}s:\n"
+                                 + "\n".join(shell.stderr()[-20:]))
+        time.sleep(0.1)
+
+
+def gateway_shell(home: str | os.PathLike, site: Sequence[str | os.PathLike] = (), *,
+                  port: int | None = None, enabled: bool = True, address: bool = True,
+                  start: bool = True, **options: Any) -> Any:
+    """A gateway-mode `TestShell` under `home`, over this environment's modules and those
+    in the `site` directories, with the tunnel module left out: the gateway's switch as
+    `enabled`, its port `port` (a free one by default, kept as `shell.gateway_port`), and
+    with `address` the tunnel entry `on` for that port. Started unless `start` is false;
+    when it holds, the hold is waited for. `options` go to `TestShell`.
+
+    A port picked here is free when picked, but the shell binds it later, and on a busy
+    machine another program can take it in between. The shell then removes its tunnel
+    entry, as it must, and holds the port at a later tick with no address. So a shell that
+    lost the port picked here is stopped and started again on another one."""
+    from .shell import TestShell
+
+    shell = TestShell(home, site=site, gateway=True, leave_out=["tunnel"], **options)
+    tries = PORT_TRIES if port is None else 1
+    while True:
+        shell.gateway_port = port or free_port()
+        set_gateway(shell, enabled=enabled, port=shell.gateway_port)
+        if address:
+            write_address(shell, target=shell.gateway_port)
+        if not start:
+            return shell
+        shell.start()
+        if not address:
+            if enabled:
+                wait_hold(shell, shell.gateway_port)
+            return shell
+        if _hold_with_entry(shell, shell.gateway_port):
+            return shell
+        lost = (f"another program held the gateway's port {shell.gateway_port} when the "
+                "shell tried to bind it, so the shell removed its tunnel entry:\n"
+                + "\n".join(shell.stderr()[-20:]))
+        shell.stop()
+        tries -= 1
+        if tries == 0:
+            raise AssertionError(lost)
+
+
+def pair_page(context: Any, shell: Any, *, passkey: bool = False) -> Any:
+    """Pair the phone of `context` (a Playwright context through a `PhoneBridge`) through
+    the desk's pair link, with a passkey or without one. Returns its page, on the
+    signed-in shell document at `/m/ui/`: the context's first page, else a new one."""
+    from playwright.sync_api import expect
+
+    status, data = shell.session().post("/m/ui/api/gateway/pair")
+    if status != 200:
+        raise AssertionError(f"the desk's pair route answered {status}: {data}")
+    page = context.pages[0] if context.pages else context.new_page()
+    page.goto(data["url"])
+    expect(page).to_have_title("Moxi: pair this phone")
+    page.get_by_role("button", name="Continue").click()
+    name = "Create a passkey" if passkey else "Pair without a passkey"
+    page.get_by_role("button", name=name).click()
+    page.wait_for_url(ORIGIN + "/m/ui/")
+    page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
+    return page

@@ -1,12 +1,14 @@
 """Home in a browser: the main spot and its sentence, the rows Home draws from what row
 components report (nothing to report, a late report, needing the user, opening in place, held
-open, a script that does not load), the Health row on a kept run and on a real one, a
-small install, the colours and the layout at 360 px.
+open, a script that does not load), the column moving aside for a main piece's side panel,
+the Health row on a kept run and on a real one, a small install, the colours and the
+layout at 360 px.
 
 The module's one test shell serves `ui` and the `fixture` module, whose two rows report
 only what a test tells them to (tests/fixture/moxi_fixture/web/rows.js). It runs no
 doctor and keeps no run, so its Health row reads `Checking…`; the tests of Health start
-shells of their own."""
+shells of their own. The tests of the main spot install the fixture with its main piece
+(tests/fixture/moxi_fixture/web/main.js)."""
 
 from __future__ import annotations
 
@@ -43,6 +45,8 @@ PASS = {"module": "ui", "name": "shell", "state": "ok", "detail": "The shell ans
 
 _SAY = """([row, report]) => window.dispatchEvent(
   new CustomEvent("moxi-fixture-row", {detail: {row, report}}))"""
+
+_SIDE = """(detail) => window.dispatchEvent(new CustomEvent("moxi-fixture-side", {detail}))"""
 
 
 def _now() -> str:
@@ -308,6 +312,126 @@ def test_the_sentence_waits_for_a_main_piece_and_shows_when_it_does_not_load(
     expect(home.locator(".spot")).to_have_text(SENTENCE)
 
 
+# --- keyboard order ----------------------------------------------------------------------
+
+def test_tab_from_the_spot_reaches_a_risen_row_before_the_rows_under_it(ui_page):
+    quiet = {"parts": [{"text": "nothing much"}]}
+    _say(ui_page, "row-one", quiet)
+    _say(ui_page, "row-two", quiet)
+    _expect_shown(ui_page, [ONE, TWO, HEALTH])
+    _say(ui_page, "row-two", {"parts": [{"text": "waits for you"}], "needs": 20})
+    _expect_shown(ui_page, [TWO, ONE, HEALTH])
+    # The spot holds nothing to stop on, so Tab from the top line's last stop enters the rows.
+    ui_page.locator("#moxi-settings").focus()
+    ui_page.keyboard.press("Tab")
+    expect(_line(ui_page, TWO)).to_be_focused()
+    ui_page.keyboard.press("Tab")
+    expect(_line(ui_page, ONE)).to_be_focused()
+    ui_page.keyboard.press("Shift+Tab")
+    expect(_line(ui_page, TWO)).to_be_focused()
+
+
+def test_a_row_that_rises_keeps_the_focus_inside_its_component_and_the_same_component(
+        kept_shell, ui_contexts):
+    page = ui_contexts(kept_shell).pages[0]
+    home = _home(page)
+    quiet = {"parts": [{"text": "nothing much"}], "opens": True}
+    _say(page, "row-one", quiet)
+    _say(page, "row-two", quiet)
+    # The failing check holds Health on top.
+    _expect_shown(page, [HEALTH, ONE, TWO])
+    home.get_by_role("button", name=re.compile("Fixture two")).click()
+    component = home.locator("moxi-fixture-row-two")
+    before = component.element_handle()
+    act = component.get_by_role("button", name="Act on row-two")
+    act.focus()
+    _say(page, "row-two", {**quiet, "needs": 20})
+    _expect_shown(page, [TWO, HEALTH, ONE])
+    expect(act).to_be_focused()
+    # Moved, not placed again: the same element, still told it is open.
+    assert component.evaluate("(node, old) => node === old", before)
+    expect(component.get_by_test_id("inside")).to_have_text("Inside row-two, opened")
+    # It falls back with the focus too.
+    _say(page, "row-two", quiet)
+    _expect_shown(page, [HEALTH, ONE, TWO])
+    expect(act).to_be_focused()
+
+
+# --- a main piece's side panel -------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def main_shell(ui_shells, tmp_path_factory):
+    """A shell whose Home shows the fixture's main piece."""
+    site = fixture_kit.install(tmp_path_factory.mktemp("side-site"), main=True)
+    return ui_shells(site=[site], leave_out=_others())
+
+
+def _side_page(main_shell, ui_contexts, width: int):
+    """Home with the fixture's main piece placed, in a window `width` px wide."""
+    page = ui_contexts(main_shell).pages[0]
+    page.set_viewport_size({"width": width, "height": 800})
+    expect(_home(page).locator(".spot moxi-fixture-main").get_by_test_id("main")).to_be_visible()
+    return page
+
+
+def _expect_centre(page, centre: float) -> None:
+    """The column is 680 px wide with its centre `centre` px from the window's left."""
+    expect(_home(page)).to_have_js_property("offsetWidth", 680)
+    # Home sets the margin as it hears the event, before the call that sent it returns.
+    assert _home(page).evaluate(
+        "home => { const box = home.getBoundingClientRect(); return (box.left + box.right) / 2; }"
+    ) == centre
+
+
+def test_a_side_panel_moves_the_column_to_the_centre_of_what_it_leaves_and_0_puts_it_back(
+        main_shell, ui_contexts):
+    page = _side_page(main_shell, ui_contexts, 1400)
+    _expect_centre(page, 700)
+    page.evaluate(_SIDE, {"width": 400})
+    _expect_centre(page, (1400 - 400) / 2)
+    # The piece's fixed panel is still placed in the window: its right edge is the window's.
+    panel = _home(page).locator("moxi-fixture-main").get_by_test_id("side")
+    expect(panel).to_be_visible()
+    box = panel.bounding_box()
+    assert box["width"] == 400 and box["x"] + box["width"] == 1400 and box["height"] == 800
+    # The column and the rows under it clear the panel.
+    spot = _home(page).locator(".spot").bounding_box()
+    assert spot["x"] == 160 and spot["x"] + spot["width"] <= box["x"]
+    assert _line(page, HEALTH).bounding_box()["x"] == 160
+    # Another width moves it again, and 0 puts it back.
+    page.evaluate(_SIDE, {"width": 300})
+    _expect_centre(page, (1400 - 300) / 2)
+    page.evaluate(_SIDE, {"width": 0})
+    _expect_centre(page, 700)
+    expect(panel).to_be_hidden()
+
+
+def test_the_column_goes_back_when_the_piece_with_the_side_panel_leaves(main_shell, ui_contexts):
+    page = _side_page(main_shell, ui_contexts, 1400)
+    page.evaluate(_SIDE, {"width": 400})
+    _expect_centre(page, 500)
+    page.evaluate(_SIDE, {"leave": True})
+    expect(_home(page).locator("moxi-fixture-main")).to_have_count(0)
+    _expect_centre(page, 700)
+
+
+def test_under_1100_px_of_window_a_side_panel_moves_nothing(main_shell, ui_contexts):
+    page = _side_page(main_shell, ui_contexts, 1000)
+    _expect_centre(page, 500)
+    page.evaluate(_SIDE, {"width": 400})
+    panel = _home(page).locator("moxi-fixture-main").get_by_test_id("side")
+    expect(panel).to_be_visible()
+    _expect_centre(page, 500)
+    # The panel lies over the page, at the window's right edge.
+    box = panel.bounding_box()
+    assert box["x"] + box["width"] == 1000 and box["x"] < _home(page).bounding_box()["x"] + 680
+    # From 1100 px the column stands beside the panel that is still shown.
+    page.set_viewport_size({"width": 1100, "height": 800})
+    _expect_centre(page, (1100 - 400) / 2)
+    page.set_viewport_size({"width": 1099, "height": 800})
+    _expect_centre(page, 1099 / 2)
+
+
 def test_with_the_core_and_ui_alone_home_is_the_sentence_and_health(ui_shells, ui_contexts,
                                                                     tmp_path_factory):
     home_dir = tmp_path_factory.mktemp("small")
@@ -407,6 +531,44 @@ def test_a_failing_check_of_a_real_run_shows_on_health_and_check_again_runs_the_
     expect(health.get_by_role("button", name="Check again")).to_have_count(0)
     expect(mine).to_have_count(0, timeout=DOCTOR_MS)
     expect(health.get_by_role("status")).to_have_count(0, timeout=DOCTOR_MS)
+
+
+def test_check_again_keeps_the_focus_through_the_run_and_when_the_health_row_falls(
+        kept_shell, ui_contexts):
+    page = ui_contexts(kept_shell).pages[0]
+    home = _home(page)
+    quiet = {"parts": [{"text": "nothing much"}]}
+    blocked = {"parts": [{"text": "someone is blocked on you"}], "needs": 10}
+    _say(page, "row-one", quiet)
+    _expect_shown(page, [HEALTH, ONE])
+    home.get_by_role("button", name=re.compile("Health")).click()
+    health = home.locator("moxi-ui-health")
+    # The run is held until the test answers it.
+    held: list = []
+    page.route("**/m/ui/api/checks/run", lambda route: held.append(route))
+    again = health.get_by_role("button", name="Check again")
+    again.focus()
+    page.keyboard.press("Enter")
+    checking = health.get_by_role("status")
+    expect(checking).to_be_focused()
+    assert len(held) == 1
+    # The row falls while the run goes, and the focus stays with it.
+    _say(page, "row-one", blocked)
+    expect(_line(page, ONE).locator(".fact")).to_have_text("someone is blocked on you")
+    _expect_shown(page, [ONE, HEALTH])
+    expect(checking).to_be_focused()
+    held[0].fulfill(json={"at": _now(), "running": False, "rows": [PASS, WARN, FAIL],
+                          "error": None})
+    expect(again).to_be_focused()
+    # And rises and falls again with the focus on Check again.
+    _say(page, "row-one", quiet)
+    expect(_line(page, ONE).locator(".fact")).to_have_text("nothing much")
+    _expect_shown(page, [HEALTH, ONE])
+    expect(again).to_be_focused()
+    _say(page, "row-one", blocked)
+    expect(_line(page, ONE).locator(".fact")).to_have_text("someone is blocked on you")
+    _expect_shown(page, [ONE, HEALTH])
+    expect(again).to_be_focused()
 
 
 _SHOW = """(hidden) => {

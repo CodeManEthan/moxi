@@ -1,6 +1,6 @@
 // Home's row frame, worked out with no DOM so the tests can read it: what a row
 // component's report says, which rows show and in what order, and how a shown row
-// behaves under a click.
+// behaves under a click, and where the column stands beside a piece's side panel.
 
 /** One part of a row's fact. */
 export interface RowPart {
@@ -63,6 +63,15 @@ export function shownRows<T extends RowEntry>(entries: readonly T[]): T[] {
     .map((item) => item.entry);
 }
 
+/**
+ * Every entry in the order Home puts it in the document: the shown rows as `shownRows`
+ * orders them, then the rows with nothing to report in their fixed places. The document
+ * order is the order seen, so Tab reaches a risen row before the rows under it.
+ */
+export function inOrder<T extends RowEntry>(entries: readonly T[]): T[] {
+  return [...shownRows(entries), ...entries.filter((entry) => entry.report === null)];
+}
+
 /** Whether any row needs the user. */
 export function anyNeeds(entries: readonly RowEntry[]): boolean {
   return entries.some((entry) => (entry.report?.needs ?? 0) > 0);
@@ -85,4 +94,32 @@ export function rowMode(report: RowReport): RowMode {
 export function rowOpen(report: RowReport | null, clicked: boolean): boolean {
   if (report === null || !report.opens) return false;
   return report.open || clicked;
+}
+
+/** The window's width from which a side panel moves Home's column; under it the panel
+ * lies over the page. */
+export const SIDE_FROM_PX = 1100;
+
+/** Half of the column's width. */
+const HALF_COLUMN_PX = 340;
+
+/**
+ * Reads the `detail` of a `moxi-home-side` event: the width in px of the side panel the
+ * main piece shows at the window's right edge. 0, which is no panel, for anything but a
+ * `width` that is a number above 0.
+ */
+export function readSide(detail: unknown): number {
+  if (typeof detail !== "object" || detail === null) return 0;
+  const width = (detail as Record<string, unknown>).width;
+  return typeof width === "number" && Number.isFinite(width) && width > 0 ? width : 0;
+}
+
+/**
+ * The column's left margin beside a side panel `width` px wide, as a CSS length: it puts
+ * the column's centre at the centre of the window less the panel, wherever the block that
+ * holds the column is centred in the window. "" for no panel, which leaves the column
+ * centred.
+ */
+export function sideMargin(width: number): string {
+  return width > 0 ? `calc(50% - ${HALF_COLUMN_PX + width / 2}px)` : "";
 }

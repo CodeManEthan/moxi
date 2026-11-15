@@ -34,8 +34,9 @@ SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 ROUTES = ["/api/catalog", "/api/presets", "/api/form", "/api/launches", "/api/sessions",
-          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/preview", "/api/launch", "/api/resume",
-          "/api/events"]
+          "/api/state", "/api/runs", "/api/places", "/api/targets", "/api/last", "/api/recents",
+          "/api/recent", "/api/name", "/api/preview", "/api/launch", "/api/resume",
+          "/api/keep-warm", "/api/running", "/api/events"]
 #: Keys no answer of the page may declare, at any depth: an environment, a launch's
 #: recorded values, argv or brief, and a process's facts.
 NEVER_SENT = {"env", "env_json", "base_env", "base_env_json", "environ", "brief",
@@ -139,23 +140,23 @@ def test_the_gate_matrix_passes():
     assert loopback().gate_matrix(page.PAGE)
 
 
-def test_the_page_declares_every_route_none_for_the_gateway():
+def test_the_page_declares_every_route_and_only_the_running_launches_for_the_gateway():
     exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
     assert list(routes) == ROUTES
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
-        "/api/preview", "/api/launch", "/api/resume"}
-    assert not any(r["gateway"] for r in routes.values())
+        "/api/preview", "/api/launch", "/api/resume", "/api/keep-warm"}
+    assert [p for p, r in routes.items() if r["gateway"]] == ["/api/running"]
     assert [p for p, r in routes.items() if r["stream"]] == ["/api/events"]
-    assert list(routes["/api/events"]["topics"]) == ["sessions", "launches"]
+    assert list(routes["/api/events"]["topics"]) == ["sessions", "launches", "running"]
     assert routes["/api/launches"]["query"]["request"]["type"] == "string"
     assert page.PAGE.idle_s == 300 and page.PAGE.health is None
 
 
 def test_the_export_lists_the_built_assets():
     exported = loopback().export(page.PAGE)
-    assert exported["assets"] == ["build-stamp.txt", "page.js", "prompt.js", "sessions.js",
-                                  "state.js"]
+    assert exported["assets"] == ["build-stamp.txt", "page.js", "prompt.js", "running.js",
+                                  "sessions.js", "state.js"]
 
 
 def test_no_answer_declares_an_env_a_brief_or_a_process():
@@ -446,6 +447,60 @@ def test_no_presets_file_gives_the_shipped_defaults():
     said = form()
     assert said["harness"] == "claude" and said["refused"] is None
     assert {r["source"] for r in said["rows"]} == {"shipped"}
+
+
+def form_modes(query: str = "") -> dict[str, str | None]:
+    said = form(query)
+    assert [m["target"] for m in said["modes"]] == ["terminal", "headless", "slot"]
+    return {m["target"]: m["mode"] for m in said["modes"]}
+
+
+def test_the_form_names_the_command_a_launch_composes_in_each_target():
+    assert form()["modes"] == [{"target": "terminal", "mode": "interactive"},
+                               {"target": "headless", "mode": "print"},
+                               {"target": "slot", "mode": "interactive"}]
+    assert form_modes("harness=codex") == {"terminal": "interactive", "headless": "exec",
+                                           "slot": "interactive"}
+
+
+def test_the_forms_modes_follow_turns_host_for_codex(monkeypatch):
+    installed(monkeypatch, "turns")
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    assert form_modes("harness=codex") == {"terminal": "host", "headless": "exec",
+                                           "slot": "host"}
+    assert form_modes("harness=claude")["terminal"] == "interactive"
+
+
+def test_the_forms_modes_are_null_where_a_launch_under_the_identity_is_refused(monkeypatch):
+    installed(monkeypatch, "comms", "turns")
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    monkeypatch.setattr(presets, "comms_codex", lambda: True)
+    assert form_modes("identity=planner") == {"terminal": "interactive", "headless": None,
+                                              "slot": "interactive"}
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": "host", "headless": None, "slot": "host"}
+    # Without its wrapper's host a Codex launch under a name is refused everywhere.
+    monkeypatch.setattr(presets, "_host_installed", lambda: False)
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": None, "headless": None, "slot": None}
+    assert form_modes("harness=codex")["terminal"] == "interactive"
+
+
+def test_an_identity_changes_no_mode_without_comms():
+    assert form_modes("identity=planner") == form_modes()
+    assert form_modes("harness=codex&identity=planner") == form_modes("harness=codex")
+
+
+def test_the_forms_modes_are_for_the_harness_it_is_drawn_for():
+    write_presets(FORM_FILE)
+    assert form_modes("seat=coder")["headless"] == "exec"
+    # A form that is refused still says its harness's modes.
+    said = form("seat=coder&harness=claude")
+    assert said["rows"] == [] and said["modes"][1] == {"target": "headless", "mode": "print"}
+    # Every mode named is one some row of that harness composes into.
+    for harness in catalog.HARNESSES:
+        known = {mode for row in catalog.load(harness) for mode in row.modes}
+        assert set(form_modes(f"harness={harness}").values()) <= known
 
 
 def test_a_failed_form_read_says_only_the_class(monkeypatch):
@@ -793,6 +848,8 @@ def test_a_taken_slot_names_the_launch_the_log_holds_for_it(fake_slots, log):
     launched(log, "named", "2026-01-01T09:00:00.000000Z", identity="planner",
              cwd="/src/proj-a")
     launched(log, "bare", "2026-01-01T10:30:00.000000Z", cwd="/src/proj-b")
+    launched(log, "called", "2026-01-01T11:00:00.000000Z", identity="planner",
+             cwd="/src/proj-a", values={"name": "proj-a-opus-Jan-01 11:00"})
     at = store.parse_time("2026-01-01T10:30:00.000000Z").astimezone()
 
     def taken(request_id, state="occupied"):
@@ -802,13 +859,14 @@ def test_a_taken_slot_names_the_launch_the_log_holds_for_it(fake_slots, log):
 
     fake_slots(slots={"1": taken("named"), "2": taken("bare"), "3": taken("unknown"),
                       "4": {"state": "occupied", "launchable": False},
-                      "5": taken("named", state="ended"),
+                      "5": taken("named", state="ended"), "7": taken("called"),
                       "6": {"state": "occupied", "launchable": False,
                             "last": {"at": 1.0, "label": "by hand", "meta": None}}})
     by = {s["number"]: s["taken_by"] for s in targets_answer()["slots"]}
     assert by == {1: {"request_id": "named", "label": "planner"},
                   2: {"request_id": "bare", "label": f"proj-b {at:%H:%M}"},
-                  3: None, 4: None, 5: None, 6: None}
+                  3: None, 4: None, 5: None, 6: None,
+                  7: {"request_id": "called", "label": "proj-a-opus-Jan-01 11:00"}}
 
 
 def test_a_slot_a_launch_started_in_reads_taken_by_that_launch(fake_slots, log, tmp_path):
@@ -890,21 +948,29 @@ def test_the_announcement_names_the_page_and_the_ui_link():
     assert found.ok and found.page == module.PAGE
 
 
-def test_the_announcement_declares_the_panel_the_home_block_and_the_state():
+def test_the_announcement_declares_the_panel_the_home_pieces_the_block_and_the_state():
     from moxi_launcher import module
 
-    assert set(module.COMPONENTS) == {"page", "prompt", "sessions", "state"}
+    assert set(module.COMPONENTS) == {"page", "prompt", "running", "sessions", "state"}
     assert {name: decl["place"] for name, decl in module.COMPONENTS.items()} == {
-        "page": "page", "prompt": "block", "sessions": "block", "state": "inline"}
+        "page": "page", "prompt": "block", "running": "block", "sessions": "block",
+        "state": "inline"}
     assert module.COMPONENTS["sessions"]["home"] is True
+    assert "home_as" not in module.COMPONENTS["sessions"]
     assert "attributes" not in module.COMPONENTS["sessions"]
+    running = module.COMPONENTS["running"]
+    assert (running["title"], running["home"], running["home_as"], running["order"]) == (
+        "Sessions", True, "row", 100)
+    assert running["attributes"]["open"]["type"] == "bool"
+    assert module.OPTIONAL["sessions"].startswith("The latest thing said in each running")
     assert module.COMPONENTS["state"]["attributes"] == {
         "session": {"type": "string", "required": True, "doc": "a session id"}}
     for decl in module.COMPONENTS.values():
         assert decl["contract"] == 1
         assert decl["title"].strip() and "\n" not in decl["doc"]
     found = modules.load("launcher")
-    assert found.ok and set(found.components) == {"page", "prompt", "sessions", "state"}
+    assert found.ok and set(found.components) == {"page", "prompt", "running", "sessions",
+                                                  "state"}
 
 
 def test_each_components_script_is_a_built_asset_that_defines_its_element():
@@ -933,6 +999,11 @@ def test_the_components_reach_data_only_through_their_routes_and_topics():
     assert '"api/state"' in sessions and '"api/launches"' in sessions
     assert '"launcher","launches"' in sessions
     assert "api/state?session=" in state
+    # Home's Sessions row reads its one route and follows its topic.
+    running = (WEB / "running.js").read_text(encoding="utf-8")
+    assert '"api/running"' in running and '"launcher","running"' in running
+    assert "fetch(" not in running and "WebSocket" not in running
+    assert "EventSource" not in running
     # The panel reads and acts only through its own routes, follows both topics, draws the
     # launch form with the shell's one form renderer and places a state per live row.
     panel = (WEB / "page.js").read_text(encoding="utf-8")

@@ -1,8 +1,10 @@
 """The handlers of comms' page, and the poller that feeds its stream.
 
-Every answer comes from `api.roster_rows()`, which `moxi comms agents --json` prints. A
-handler only cuts each row to the route's declared keys, adds the server's `now` to the
-read, and turns a failure into a `state`:
+The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
+--json` prints; such a handler only cuts each row to the route's declared keys and adds
+the server's `now` to the read. The mail read, Home's Comms row, answers from one
+`api.roster()`: the names in its `waiting` that no live session holds. Each turns a
+failure into a `state`:
 
 - `DaemonOffline` is `offline` with no detail, since its text names the daemon's socket;
 - `DaemonError` is `error` with a fixed sentence naming its class;
@@ -34,7 +36,7 @@ from typing import Any
 from moxi import modules
 
 from . import api
-from .page import ROW
+from .page import MAIL, ROW
 
 _ui = modules.load("ui", interface=3)
 if not _ui.ok:
@@ -48,6 +50,8 @@ DEADLINE = 2.0
 TOPIC = "roster"
 #: The keys of one row, in the order `page.ROW` declares them.
 KEYS = tuple(ROW.items)
+#: One name of the mail read, as `page.MAIL` declares it.
+WAITING = MAIL["waiting"].items
 
 #: What the page shows for a daemon that answered with an error, and for any other
 #: failure. Each names only the exception's class.
@@ -78,6 +82,8 @@ def _fits(value: Any, shape: Any) -> bool:
         return isinstance(value, str)
     if shape.type == "bool":
         return isinstance(value, bool)
+    if shape.type == "int":
+        return isinstance(value, int) and not isinstance(value, bool)
     if shape.type == "float":
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return False
@@ -116,6 +122,48 @@ def gather() -> dict[str, Any]:
         return {"state": "error", "detail": UNEXPECTED.format(type(exc).__name__),
                 "rows": []}
     return {"state": "up", "detail": None, "rows": rows}
+
+
+def _waiting(found: api.Roster) -> list[dict[str, Any]]:
+    # A bound name is left out: its mail waits on a session that runs, not on someone to
+    # start one. A name is shown by the part before `@`, unless another name here
+    # shares it.
+    bound = {agent.qualified for agent in found.bound}
+    rows = []
+    for waiting in found.waiting:
+        if waiting.qualified in bound:
+            continue
+        out = {"qualified": waiting.qualified, "name": None, "count": waiting.count,
+               "since": waiting.oldest}
+        for key in ("qualified", "count", "since"):
+            if not _fits(out[key], WAITING.items[key]):
+                raise ValueError(f"a waiting name's {key} is not of its declared type")
+        out["since"] = float(out["since"])
+        rows.append(out)
+    rows.sort(key=lambda row: (row["since"], row["qualified"]))
+    short = [api.split_tag(row["qualified"])[0] for row in rows]
+    for row, name in zip(rows, short, strict=True):
+        row["name"] = name if short.count(name) == 1 else row["qualified"]
+    return rows
+
+
+def mail(call: Any) -> dict[str, Any]:
+    """`GET /api/mail`: `state`, `detail`, and the names with mail waiting that no live
+    session holds, oldest `since` first, from one daemon call. A failure is a 200 with
+    `state` `offline` or `error`, never a 500."""
+    try:
+        waiting = _waiting(api.roster(timeout_s=DEADLINE))
+    except api.DaemonOffline:
+        return {"state": "offline", "detail": None, "waiting": []}
+    except api.DaemonError as err:
+        _log_once(err, "the comms daemon answered the mail read with an error")
+        return {"state": "error", "detail": DAEMON_ERROR.format(type(err).__name__),
+                "waiting": []}
+    except Exception as err:
+        _log_once(err, "reading the mail failed")
+        return {"state": "error", "detail": UNEXPECTED.format(type(err).__name__),
+                "waiting": []}
+    return {"state": "up", "detail": None, "waiting": waiting}
 
 
 def roster(call: Any) -> dict[str, Any]:
@@ -162,5 +210,5 @@ def _feed() -> _Feed:
     return _current
 
 
-__all__ = ["DAEMON_ERROR", "DEADLINE", "KEYS", "PERIOD", "TOPIC", "UNEXPECTED", "events",
-           "gather", "roster"]
+__all__ = ["DAEMON_ERROR", "DEADLINE", "KEYS", "PERIOD", "TOPIC", "UNEXPECTED", "WAITING",
+           "events", "gather", "mail", "roster"]

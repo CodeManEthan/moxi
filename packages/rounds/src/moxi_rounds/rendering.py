@@ -1,8 +1,12 @@
 """The generated files: what the logs say, written out as markdown for people and
 agents to read beside the logs.
 
-    <rounds folder>/<slug>/round-note.md   one round: its flow, its questions by state,
-                                           its rulings and its history
+    <rounds folder>/<slug>/round-note.md   one round: the flow it follows now, the
+                                           skips that stand, its design's newest
+                                           version and standing, the lead's
+                                           decisions on threads, its stages, its
+                                           questions by state, its rulings, the
+                                           verdicts of its design and its history
     <rounds folder>/rulings.md             the project's register: its standing rulings
     <rounds folder>/questions.md           the questions on the project's own list
 
@@ -34,7 +38,7 @@ ruling that did it. An entry that was replaced or taken back stays, marked.
 **A later kind of record** (a stage, a build, a waiting item) joins the note as a row
 of `PARTS`: its heading and the lines it gives from the round as `showing.data` has it,
 so the record is first a row of `showing.SECTIONS`. What a round is doing now, its
-current step, joins the lines of `_flow`.
+current step, is among the lines of `_flow`.
 """
 
 from __future__ import annotations
@@ -48,7 +52,7 @@ from pathlib import Path
 from moxi import files
 
 from . import questions as asked
-from . import folders, log, readback, ruling, showing, write
+from . import closing, folders, log, readback, ruling, showing, write
 from . import state as states
 from .errors import Locked, NoLog, Unreadable
 
@@ -182,9 +186,29 @@ def note(project: str, slug: str, events: Iterable[dict],
 
 def _flow(shown_as: dict) -> list[str]:
     steps = ", ".join(str(step.get("step")) for step in shown_as["steps"]) or "no steps"
-    # The step the round is at goes here, after the flow's steps, once a function
-    # says what step a round is at.
-    return [f"{shown_as['flow']}: {steps}"]
+    lines = [f"{shown_as['flow']}: {steps}"]
+    at = showing.step_lines(shown_as["step"])
+    if at:
+        lines.append("")
+    for line in at:
+        lines += _item(line.strip())
+    if shown_as["close"] is not None:
+        lines += [*([] if at else [""]), *_item(closing.said(shown_as["close"]["waits"]))]
+    if shown_as["inherits"]:
+        lines += ["", *_item("starts from the standing rulings "
+                             f"{', '.join(shown_as['inherits'])}")]
+    if shown_as["skips"]:
+        lines.append("")
+    for one in shown_as["skips"]:
+        lines += _item(f"skipped: {showing.skip_line(one)}")
+    planned = [*showing.version_lines(shown_as["versions"], shown_as["standing"],
+                                     shown_as["threads"], shown_as["trace"]),
+               *(f"stage {showing.stage_line(one)}" for one in shown_as["stages"])]
+    if planned:
+        lines.append("")
+    for line in planned:
+        lines += _item(line)
+    return lines
 
 
 def _questions(shown_as: dict) -> list[str]:
@@ -268,12 +292,35 @@ def _ruling_facts(one: dict, *, kind: bool) -> list[str]:
     return said
 
 
+def _verdicts(shown_as: dict) -> list[str]:
+    listed = shown_as["verdicts"]
+    if not listed:
+        return ["No verdict."]
+    lines = []
+    for one in listed:
+        lines += _item(f"{one['verdict']} for v{one['version']}: {one['pass']} pass "
+                       f"by {one['by']}, model {one['model']}")
+        said = [f"report: {one['report']}", f"sha256: {one['sha256']}",
+                f"recorded: {one['at']} by {one['recorded_by']}"]
+        if one["flags"]:
+            said.append(f"flags: {', '.join(one['flags'])}")
+        said += [f"finding {finding.get('id')}: {finding.get('severity')}, "
+                 f"{finding.get('state')}: {finding.get('text')}"
+                 for finding in one["findings"]]
+        said += [f"applied: {taken['said']}" for taken in one["applied"]]
+        said += [f"not applied: {taken['said']}: {taken['why']}"
+                 for taken in one["not_applied"]]
+        for line in said:
+            lines += _item(line, indent="  ")
+    return lines
+
+
 def _history(shown_as: dict) -> list[str]:
     events = shown_as["history"]
     lines = [f"{len(events)} event{'' if len(events) == 1 else 's'}, oldest first.", ""]
     for event in events:
-        of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
-        named = f" {of}" if isinstance(of, str) and of else ""
+        of = showing.history_of(event)
+        named = f" {of}" if of else ""
         lines.append(f"{event.get('n')}. {event.get('at')} {event.get('actor')} "
                      f"{event.get('type')}{named}")
     return lines
@@ -284,6 +331,7 @@ PARTS: tuple[Part, ...] = (
     Part("Flow", _flow),
     Part("Questions", _questions),
     Part("Rulings", _rulings),
+    Part("Verdicts", _verdicts),
     Part("History", _history))
 
 

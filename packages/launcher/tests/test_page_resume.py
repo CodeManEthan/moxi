@@ -257,6 +257,22 @@ def test_the_pages_past_sessions_read_comms_once_for_the_list(monkeypatch):
     assert len(reads) == 1
 
 
+def test_the_pages_past_sessions_name_each_launchs_project_and_actor():
+    seed("r1", at="2026-01-01T00:00:00.000000Z")
+
+    def in_project(conn):
+        store.insert(conn, request_id="r2", actor="alice", harness="claude", target="slot",
+                     cwd="/src/proj-a", values={}, argv=["claude"], env={},
+                     posture="operator", session_id=OTHER, slot="2",
+                     project_key="proj-a", at="2026-01-02T00:00:00.000000Z")
+    with_store(in_project)
+    status, said, _ = get("/api/sessions", "limit=20")
+    assert status == 200
+    assert [(e["request_id"], e["project_key"], e["actor"], e["cwd"])
+            for e in said["sessions"]] == [("r2", "proj-a", "alice", "/src/proj-a"),
+                                           ("r1", None, "ann", "/work")]
+
+
 # --- a slot launch: the job ------------------------------------------------------------------------
 
 def test_a_slot_launch_is_resumed_by_the_launch_job_202(monkeypatch):

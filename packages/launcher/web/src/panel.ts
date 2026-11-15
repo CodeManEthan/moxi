@@ -220,35 +220,52 @@ export interface FormRow {
   withheld: boolean;
 }
 
+/** The command a launch composes in one place the `target` row names; null where the
+ * resolver refuses a launch there. */
+export interface FormMode {
+  target: string;
+  mode: string | null;
+}
+
 /** The value of `/api/form`: the harness the form is drawn for and its rows, or the
- * resolver's refusal with no rows. */
+ * resolver's refusal with no rows, and the command each place a launch runs in composes. */
 export interface Form {
   state: "up" | "error";
   detail: string | null;
   harness: string;
   rows: FormRow[];
   refused: Refusal | null;
+  modes: FormMode[];
+}
+
+function formModes(data: unknown): FormMode[] {
+  if (!Array.isArray(data)) return [];
+  return data.filter((item): item is Fields => isTable(item) && typeof item.target === "string")
+    .map((item) => ({ target: item.target as string, mode: typeof item.mode === "string" ? item.mode : null }));
 }
 
 export function parseForm(data: unknown): Form | null {
   const read = standing(data);
   if (read === null) return null;
-  if (read.state === "error") return { state: "error", detail: read.detail, harness: "", rows: [], refused: null };
-  const { harness, rows, refused } = read.fields;
+  if (read.state === "error") return { state: "error", detail: read.detail, harness: "", rows: [], refused: null, modes: [] };
+  const { harness, rows, refused, modes } = read.fields;
   if (typeof harness !== "string" || !Array.isArray(rows)) return null;
   const kept = rows.filter((row): row is Fields => isTable(row) && typeof row.name === "string")
     .map((row) => ({ name: row.name as string, value: text(row.value),
                      items: Array.isArray(row.items) ? texts(row.items) : null,
                      source: text(row.source) ?? "shipped", withheld: row.withheld === true }));
-  return { state: "up", detail: null, harness, rows: kept, refused: isRefusal(refused) ? refusal(refused) : null };
+  return { state: "up", detail: null, harness, rows: kept, refused: isRefusal(refused) ? refusal(refused) : null,
+           modes: formModes(modes) };
 }
 
-/** The `/api/form` path for a choice, for `harness` when one is asked. */
-export function formPath(choice: Choice, harness = ""): string {
+/** The `/api/form` path for a choice, for `harness` when one is asked, and with the comms
+ * name the launch holds, `identity`, when it holds one. */
+export function formPath(choice: Choice, harness = "", identity = ""): string {
   const query = new URLSearchParams();
   if (choice.kind === "seat" && choice.name) query.set("seat", choice.name);
   if (choice.kind === "project" && choice.name) query.set("project_preset", choice.name);
   if (harness) query.set(HARNESS, harness);
+  if (identity) query.set("identity", identity);
   const said = query.toString();
   return said ? `api/form?${said}` : "api/form";
 }
@@ -294,7 +311,8 @@ function isOff(field: FieldDescriptor): boolean {
   return field.needs_absent === true;
 }
 
-function isListField(field: FieldDescriptor): boolean {
+/** Whether a field is drawn as a list: the `list` type, or a row that may be given more than once. */
+export function isListField(field: FieldDescriptor): boolean {
   return field.type === "list" || field.repeatable === true;
 }
 
@@ -392,6 +410,8 @@ export interface LaunchBody {
   values: Record<string, Sent>;
   leave_out: string[];
   off_posture?: boolean;
+  /** The rows the page filled from the last launch and the user left as they were. */
+  filled?: string[];
 }
 
 export function launchBody(choice: Choice, request: FormRequest, offPosture: boolean): LaunchBody {
@@ -431,7 +451,8 @@ function isSet(field: FieldDescriptor, value: FormValue | undefined): boolean {
   return value !== "" && value !== leaveOutChoice(field);
 }
 
-function same(a: FormValue | undefined, b: FormValue | undefined): boolean {
+/** Whether two values of a field are the same value. */
+export function same(a: FormValue | undefined, b: FormValue | undefined): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
@@ -678,6 +699,10 @@ export interface Past {
   target: string;
   slot: string | null;
   cwd: string;
+  /** The project the launch ran in; null for a launch in a folder alone. */
+  project_key: string | null;
+  /** Who made the launch. */
+  actor: string;
   identity: string | null;
   state: string;
   session_id: string | null;

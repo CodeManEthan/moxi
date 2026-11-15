@@ -17,7 +17,7 @@ import inspect
 import re
 
 import pytest
-from conftest import wait_for_queue, write_config
+from conftest import wait_for_queue, wait_until, write_config
 
 import bind_kit
 from moxi import modules
@@ -89,7 +89,7 @@ def test_interface_2_holds_its_names():
     assert set(api.__all__) == {
         "INTERFACE", "send", "check", "Sender", "SendResult", "Recipient", "Refusal",
         "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
-        "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
+        "session", "roster", "owner", "Roster", "Agent", "Standing", "Waiting", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
@@ -163,7 +163,8 @@ def test_the_reads_and_names_are_pinned():
     assert list(api.Holder.__dataclass_fields__) == ["adapter", "session_id"]
     assert api.IDENTITY_STATES == ("free", "held", "standing", "reserved", "retired",
                                    "offline")
-    assert list(api.Roster.__dataclass_fields__) == ["bound", "standing"]
+    assert list(api.Roster.__dataclass_fields__) == ["bound", "standing", "waiting"]
+    assert list(api.Waiting.__dataclass_fields__) == ["qualified", "count", "oldest"]
     assert list(api.Owner.__dataclass_fields__) == ["session_id", "identity", "adapter",
                                                     "directors", "awaiting"]
     assert list(api.RosterRow.__dataclass_fields__) == [
@@ -454,6 +455,42 @@ def test_roster_and_owner_carry_declared_directors(rig):
     assert api.owner("no-such-session").identity is None
     with pytest.raises(api.DaemonError):
         api.owner("")
+
+
+def test_roster_carries_the_mail_waiting_for_each_name_from_the_daemons_answer(rig):
+    """`roster().waiting` is the daemon's `agents` answer's `waiting`, one `Waiting` per
+    name with mail queued: a name nobody has started yet counts here."""
+    rig.shim(name="planner", scope="proj-a")
+    sent_at = rig.clock()
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
+                         "first"], name="planner", scope="proj-a")
+    assert code == 0, out
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
+                         "second"], name="planner", scope="proj-a")
+    assert code == 0, out
+    assert wait_until(lambda: [w.count for w in api.roster().waiting] == [2])
+    got = api.roster()
+    (waiting,) = got.waiting
+    assert (waiting.qualified, waiting.count) == ("curator@proj-a", 2)
+    assert isinstance(waiting.oldest, float) and abs(waiting.oldest - sent_at) <= 5
+    assert "curator@proj-a" not in {a.qualified for a in got.bound}
+
+
+def test_roster_keeps_each_waiting_entry_as_the_daemon_gives_it(monkeypatch):
+    class Client:
+        def call(self, method):
+            assert method == "agents"
+            return {"bindings": [], "standing": [], "pending": {},
+                    "waiting": {"coder": {"count": 1, "oldest": 1700000000.5},
+                                "main@proj-a": {"count": 3, "oldest": 1690000000.0}}}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(api, "_daemon", lambda deadline: Client())
+    assert api.roster().waiting == (api.Waiting("coder", 1, 1700000000.5),
+                                    api.Waiting("main@proj-a", 3, 1690000000.0))
+    assert api.Roster().waiting == ()
 
 
 def _store(sql: str, *params) -> None:

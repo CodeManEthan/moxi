@@ -403,6 +403,89 @@ def test_projects_group_by_the_stored_key_then_by_cwd(conn):
         (None, "/w/gone", 2), ("key-app", None, 2)]
 
 
+def stored_keys(conn):
+    """Files that kept a project key from an earlier pass, beside files with none."""
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/a.jsonl", [request("r1", t)], cwd="/w/app", project="key-app")
+    source(conn, "/p/b.jsonl", [request("r2", t), request("r3", t + 60)], session_id="s2",
+           cwd="/w/app-wt", project="key-app")
+    source(conn, "/p/c.jsonl", [request("r4", t, input=5000)], session_id="s3",
+           cwd="/w/app")
+    source(conn, "/p/d.jsonl", [request("r5", t, model="m-b")], session_id="s4")
+
+
+def test_projects_by_folder_group_by_cwd_alone(conn):
+    stored_keys(conn)
+    report = reports.projects(conn, by="folder", table=table())
+    assert [(r["project"], r["cwd"], r["requests"]) for r in report.rows] == [
+        (None, "/w/app", 2), (None, "/w/app-wt", 2), (None, None, 1)]
+    assert one(report, cwd="/w/app")["models"] == ["m-a"]
+    by_key = reports.projects(conn, table=table())
+    assert [(r["project"], r["cwd"], r["requests"]) for r in by_key.rows] == [
+        (None, "/w/app", 1), ("key-app", None, 3), (None, None, 1)]
+    assert report.total == by_key.total
+    assert reports.projects(conn, by="project", table=table()).rows == by_key.rows
+    assert reports.projects(conn, by=None, table=table()).rows == by_key.rows
+    with pytest.raises(reports.ReportError, match="not a key of the projects report"):
+        reports.projects(conn, by="session", table=table())
+
+
+def test_the_folder_filter_matches_the_cwd_whatever_key_a_file_carries(conn):
+    stored_keys(conn)
+
+    def count(**filters):
+        return reports.daily(conn, tz="UTC", table=table(), **filters).total["requests"]
+
+    assert count(folder="/w/app") == 2             # the keyed file and the one with none
+    assert count(project="/w/app") == 1            # the project filter finds only the latter
+    assert count(folder="/w/app-wt") == 2
+    assert count(folder="/w/app-wt/") == 2
+    assert count(folder="/w/app", project="key-app") == 1
+    assert count(folder="/w") == 0                 # a folder above matches nothing under it
+    assert count(folder=None) == count(folder="") == 5
+    assert reports.daily(conn, folder="/w/app/", table=table()).filters == {
+        "folder": "/w/app"}
+    for bad in ("app", "./app", "~/app"):
+        with pytest.raises(reports.ReportError, match="whole path"):
+            count(folder=bad)
+    for kind, fn in reports.REPORTS.items():
+        if kind == "status":
+            continue
+        given = {"session": "s2"} if kind in ("session", "requests") else {}
+        found = fn(conn, folder="/w/app-wt", table=table(), **given)
+        assert found.total["requests"] == 2, kind
+        assert fn(conn, folder="/w/gone", table=table(), **given).total["requests"] == 0
+    with pytest.raises(reports.ReportError, match="takes no folder"):
+        reports.status(conn, folder="/w/app")
+
+
+def test_report_takes_a_folder_and_by_for_projects(conn, passes):
+    stored_keys(conn)
+    assert api.report("sessions", folder="/w/app", fresh=False).total["requests"] == 2
+    found = api.report("projects", by="folder", folder="/w/app-wt", fresh=False)
+    assert [(r["project"], r["cwd"]) for r in found.rows] == [(None, "/w/app-wt")]
+    assert found.filters == {"folder": "/w/app-wt"}
+    assert reports.read("projects", by="folder").total["requests"] == 5
+    with pytest.raises(ValueError, match="not a key of the projects report"):
+        api.report("projects", by="model")
+    with pytest.raises(ValueError, match="whole path"):
+        api.report("daily", folder="app", fresh=False)
+    with pytest.raises(ValueError, match="takes no folder"):
+        api.report("status", folder="/w/app", fresh=False)
+    assert passes == []
+
+
+def test_a_folder_on_no_index_is_still_checked_and_named(monkeypatch):
+    monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
+    assert not store.index_path().exists()
+    found = api.report("projects", by="folder", folder="/w/app/")
+    assert found.rows == [] and found.filters == {"folder": "/w/app"}
+    with pytest.raises(ValueError, match="whole path"):
+        api.report("daily", folder="app")
+    with pytest.raises(ValueError, match="takes no folder"):
+        api.report("status", folder="/w/app")
+
+
 def test_no_report_reads_projects(conn, monkeypatch):
     source(conn, "/p/a.jsonl", [request("r1", at("2026-10-01T12:00"))], cwd="/w/app")
     monkeypatch.delitem(sys.modules, "moxi_projects", raising=False)
@@ -829,6 +912,115 @@ def test_terms_show_a_prefix_row_with_a_digit_in_provenance(conn):
     assert group["cost"] == pytest.approx((1000 * 2 + 100 * 4) / 1e6)
 
 
+# --- what caching saved ----------------------------------------------------------------------
+
+def test_the_terms_total_says_what_caching_saved_against_its_own_terms(conn):
+    terms_index(conn)
+    filters = {"model": "m-a", "until": "2026-10-01"}
+    report = reports.terms(conn, tz="UTC", table=table(), **filters)
+    saving = report.total["saving"]
+    assert set(saving) == {"input_tokens", "read_tokens", "reads_at_input", "reads_cost",
+                           "write_extra", "saved"}
+    assert (saving["input_tokens"], saving["read_tokens"]) == (
+        report.total["input"], report.total["cache_read"]) == (2000, 700)
+    # each group's reads and writes at that group's own prices: r1 pays the row's, r2
+    # the fast tier's
+    groups = [g for row in report.rows for g in row["groups"]]
+    assert sorted(g["tier"] or "" for g in groups) == ["", "fast"]
+    paid = [{t["class"]: t for t in g["terms"]} for g in groups]
+    assert saving["reads_at_input"] == pytest.approx(sum(
+        p["cache_read"]["tokens"] * p["input"]["price"] / 1e6 for p in paid))
+    assert saving["reads_at_input"] == pytest.approx((200 * 3.0 + 500 * 6.0) / 1e6)
+    assert saving["reads_cost"] == pytest.approx(sum(p["cache_read"]["cost"] for p in paid))
+    assert saving["reads_cost"] == pytest.approx(sum(
+        e["cost"] for e in report.total["split"] if e["class"] == "cache_read"))
+    assert saving["write_extra"] == pytest.approx(sum(
+        p[cls]["tokens"] * (p[cls]["price"] - p["input"]["price"]) / 1e6
+        for p in paid for cls in ("cache_write_5m", "cache_write_1h")))
+    assert saving["write_extra"] == pytest.approx((200 * 0.75 + 100 * 3.0) / 1e6)
+    assert saving["saved"] == pytest.approx(
+        saving["reads_at_input"] - saving["reads_cost"] - saving["write_extra"])
+    # only the total says it, whatever the rows are keyed by
+    assert all("saving" not in row for row in report.rows)
+    for by in ("day", "month"):
+        again = reports.terms(conn, by=by, tz="UTC", table=table(), **filters)
+        assert again.total["saving"] == pytest.approx(saving)
+    agents = reports.terms(conn, by="agent", session="s1", tz="UTC", table=table(),
+                           **filters)
+    assert agents.total["saving"] == pytest.approx(saving)
+    data = report.as_dict()
+    assert data["total"]["saving"] == saving
+    json.dumps(data)
+
+
+def test_an_unpriced_group_with_no_cache_tokens_leaves_the_saving_stated(conn):
+    terms_index(conn)                      # mystery-9's one request holds no cache tokens
+    report = reports.terms(conn, harness="claude", tz="UTC", table=table())
+    assert report.unpriced_models == ["mystery-9"]
+    saving = report.total["saving"]
+    assert saving["read_tokens"] == 700 and saving["input_tokens"] == report.total["input"]
+    assert saving["saved"] == pytest.approx(
+        (200 * 3.0 + 500 * 6.0 - 200 * 0.3 - 500 * 0.6 - 200 * 0.75 - 100 * 3.0) / 1e6)
+
+
+def test_there_is_no_saving_with_no_cache_read(conn):
+    t = at("2026-10-01T12:00")
+    assert reports.terms(conn, tz="UTC", table=table()).total["saving"] is None
+    source(conn, "/p/a.jsonl", [request("r1", t), request("r2", t + 60, cache_write=300)])
+    report = reports.terms(conn, tz="UTC", table=table())
+    assert report.total["cache_write"] == 300 and report.total["saving"] is None
+    assert report.as_dict()["total"]["saving"] is None
+
+
+@pytest.mark.parametrize("fields", [{"cache_read": 200}, {"cache_write": 100}])
+def test_there_is_no_saving_when_a_group_with_cache_tokens_is_unpriced(conn, fields):
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/a.jsonl", [request("r1", t, cache_read=400)])
+    assert reports.terms(conn, tz="UTC", table=table()).total["saving"] is not None
+    # `half` has no cache price, and an unknown model none at all
+    for n, model in enumerate(("half", "mystery-9")):
+        source(conn, f"/p/b{n}.jsonl", [request(f"x{n}", t + 60, model=model, **fields)],
+               session_id=f"x{n}")
+        assert reports.terms(conn, tz="UTC", table=table()).total["saving"] is None
+        assert reports.terms(conn, model="m-a", tz="UTC",
+                             table=table()).total["saving"] is not None
+
+
+def test_a_saving_of_zero_or_less_is_stated_as_it_falls(conn):
+    t = at("2026-10-01T12:00")
+    # 10 reads save 27 millionths of a dollar and 1000 written tokens cost 750 more
+    source(conn, "/p/a.jsonl", [request("r1", t, input=2000, cache_read=10,
+                                        cache_write=1000)])
+    saving = reports.terms(conn, tz="UTC", table=table()).total["saving"]
+    assert saving["saved"] == pytest.approx((30 - 3 - 750) / 1e6) and saving["saved"] < 0
+    # a cache read that costs what input does saves exactly nothing
+    flat = models.Table(doc({"flat": {"input": 1.0, "output": 2.0, "cache_read": 1.0,
+                                      "provider": "other"}}))
+    source(conn, "/p/b.jsonl", [request("f1", t, model="flat", cache_read=500)],
+           session_id="s2")
+    saving = reports.terms(conn, model="flat", tz="UTC", table=flat).total["saving"]
+    assert saving["saved"] == 0 and saving["reads_at_input"] == saving["reads_cost"] > 0
+
+
+def test_a_provider_that_bills_writes_as_input_has_no_extra_for_them(conn):
+    t = at("2026-10-01T12:00")
+    source(conn, "/c/r.jsonl", [
+        request("t1", t, harness="codex", model="gpt-x", cache_read=400,
+                cache_write=UNKNOWN, cache_write_1h=UNKNOWN),
+        request("t2", t + 60, harness="codex", model="gpt-x", cache_read=100,
+                cache_write=300),
+        request("t3", t + 120, harness="codex", model="gpt-x", service_tier="priority",
+                cache_read=200, cache_write=100)],
+        lane="codex", harness="codex", session_id="s2")
+    report = reports.terms(conn, tz="UTC", table=table())
+    assert report.rules == [cost.rule_name("openai")]
+    saving = report.total["saving"]
+    assert saving["write_extra"] == 0
+    assert saving["reads_at_input"] == pytest.approx((500 * 1.0 + 200 * 2.0) / 1e6)
+    assert saving["reads_cost"] == pytest.approx((500 * 0.1 + 200 * 0.2) / 1e6)
+    assert saving["saved"] == pytest.approx((450 + 360) / 1e6)
+
+
 def test_terms_refuse_what_they_cannot_use(conn):
     terms_index(conn)
     with pytest.raises(reports.ReportError, match="needs a session"):
@@ -849,7 +1041,7 @@ def test_report_takes_by_for_terms_and_agent_for_requests(conn, passes):
         "requests"] == 2
     for kind in api.KINDS:
         given = {"session": "s1"} if kind in ("session", "requests") else {}
-        if kind != "terms":
+        if kind not in ("terms", "projects"):
             with pytest.raises(ValueError, match="takes no by"):
                 api.report(kind, by="model", fresh=False, **given)
         if kind != "requests":
@@ -1226,6 +1418,151 @@ def test_the_window_is_the_reported_one_else_the_reports_table_by_provider(conn)
     data = report.as_dict()
     assert "window" not in data["rows"][3] and "window" in data["rows"][3]["unknown"]
     assert "cost" in data["rows"][3]["unknown"]
+
+
+def context_index(conn):
+    """A Codex thread with a reported window, a Claude session with a subagent and a
+    later child session, and one id two harnesses hold."""
+    t = at("2026-10-01T12:00")
+    source(conn, "/c/r.jsonl", [
+        request("t1", t, harness="codex", model="m-a", input=10_000, context_window=1000),
+        request("t2", t + 60, harness="codex", model="m-a", input=51_680,
+                context_window=258_400)],
+        lane="codex", harness="codex", session_id="th1", rank=1)
+    source(conn, "/p/s1.jsonl", [request("r2", t + 600, input=40_000),
+                                 request("r1", t, input=30_000)], session_id="s1")
+    source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t + 900, input=7)],
+           session_id="s1", kind="subagent", agent_id="a")
+    db = "/oc/opencode.db"
+    source(conn, db, [request("o1", t, harness="opencode", model="mystery-9", input=600)],
+           lane="opencode", harness="opencode", part="ses_p", session_id="ses_p", rank=2)
+    source(conn, db, [request("o2", t + 99, harness="opencode", input=9)],
+           lane="opencode", harness="opencode", part="ses_c", session_id="ses_c",
+           parent_session="ses_p", agent_id="ses_c", kind="subagent", rank=2)
+    source(conn, "/p/both.jsonl", [request("b1", t, input=111)], session_id="both")
+    source(conn, "/c/both.jsonl", [request("b2", t, harness="codex", input=222)],
+           lane="codex", harness="codex", session_id="both", rank=1)
+
+
+def test_a_sessions_context_is_the_newest_request_of_its_main_file(conn):
+    context_index(conn)
+
+    def of(harness, sid):
+        return reports.session_context(conn, harness, sid, table=table())
+
+    assert of("codex", "th1") == {"tokens": 51_680, "window": 258_400}
+    # the newest by time, not by place in the file, and never a subagent's
+    assert of("claude", "s1") == {"tokens": 40_000, "window": 200_000}
+    # a model the table does not know has no window; a child session is not the main file
+    assert of("opencode", "ses_p") == {"tokens": 600, "window": None}
+    assert of("opencode", "ses_c") is None
+    assert of("claude", "th1") is None and of("claude", "nobody") is None
+    assert of("claude", "") is None
+    # with no harness given: the one that holds the id, and nothing when two do
+    assert of(None, "s1") == of("claude", "s1")
+    assert of(None, "both") is None
+    assert of("claude", "both") == {"tokens": 111, "window": 200_000}
+    assert of("codex", "both") == {"tokens": 222, "window": 200_000}
+
+
+def test_a_context_is_none_when_the_newest_request_gave_no_prompt_size(conn):
+    t = at("2026-10-01T12:00")
+    source(conn, "/p/a.jsonl", [request("r1", t, input=500),
+                                request("r2", t + 60, input=UNKNOWN)])
+    assert reports.session_context(conn, "claude", "s1", table=table()) is None
+
+
+def test_a_context_counts_only_a_claimed_request(conn):
+    t = at("2026-10-01T12:00")
+    # both files hold `shared`, the newest request of each; the earlier file's copy is
+    # the claimed one, so the later file's newest claimed request is its own
+    source(conn, "/p/old.jsonl", [request("first", t, input=100),
+                                  request("shared", t + 60, input=700)], session_id="old")
+    source(conn, "/p/new.jsonl", [request("mine", t + 30, input=300),
+                                  request("shared", t + 60, input=700)], session_id="new")
+    assert reports.session_context(conn, "claude", "old", table=table())["tokens"] == 700
+    assert reports.session_context(conn, "claude", "new", table=table())["tokens"] == 300
+
+
+def test_a_context_read_goes_by_the_sessions_files(conn):
+    context_index(conn)
+    plan = " | ".join(row[-1] for row in conn.execute(
+        "EXPLAIN QUERY PLAN " + reports._NEWEST_SQL, ("s1", "claude")))
+    assert "files_session" in plan, plan
+    assert "SEARCH r USING PRIMARY KEY (file_id=?)" in plan, plan
+    assert "requests_won_ts" not in plan and "SCAN" not in plan, plan
+
+
+def test_contexts_read_the_index_as_it_is_and_are_none_without_one(conn, monkeypatch):
+    context_index(conn)
+    monkeypatch.setattr(models, "table", lambda *a, **k: table())
+    keys = [("codex", "th1"), ("claude", "s1"), ("claude", "nobody"), ("codex", "th1")]
+    assert reports.session_contexts(keys) == {
+        ("codex", "th1"): {"tokens": 51_680, "window": 258_400},
+        ("claude", "s1"): {"tokens": 40_000, "window": 200_000},
+        ("claude", "nobody"): None}
+    assert reports.session_contexts([]) == {}
+    conn.execute(f"PRAGMA user_version = {store.INDEX_VERSION - 1}")
+    conn.commit()
+    assert reports.session_contexts(keys[:2]) == dict.fromkeys(keys[:2])
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.INDEX_VERSION - 1
+
+
+def test_contexts_build_no_index(monkeypatch):
+    assert not store.index_path().exists()
+    assert reports.session_contexts([("claude", "s1")]) == {("claude", "s1"): None}
+    assert not store.index_path().exists()
+
+
+def test_a_sessions_origin_is_its_folder_and_its_earliest_request_whatever_the_range(conn):
+    t = at("2026-10-01T12:00")
+    # the main file gives the folder though a subagent's file comes first in the index,
+    # and the earliest request is the subagent's
+    source(conn, "/p/s1/subagents/agent-a.jsonl", [request("a1", t - 60)],
+           session_id="s1", kind="subagent", agent_id="a", cwd="/w/elsewhere")
+    source(conn, "/p/s1.jsonl", [request("r1", t), request("r2", t + 600)],
+           session_id="s1", cwd="/w/app")
+    source(conn, "/p/bare.jsonl", [request("n1", None)], session_id="bare")
+    db = "/oc/opencode.db"
+    source(conn, db, [request("o1", t + 5, harness="opencode")], lane="opencode",
+           harness="opencode", part="ses_p", session_id="ses_p", cwd="/w/oc", rank=2)
+    source(conn, db, [request("o2", t - 900, harness="opencode")], lane="opencode",
+           harness="opencode", part="ses_c", session_id="ses_c", parent_session="ses_p",
+           agent_id="ses_c", kind="subagent", cwd="/w/child", rank=2)
+    source(conn, "/p/both.jsonl", [request("b1", t + 1)], session_id="both", cwd="/w/a")
+    source(conn, "/c/both.jsonl", [request("b2", t + 2, harness="codex")], lane="codex",
+           harness="codex", session_id="both", rank=1, cwd="/w/b")
+    keys = [("claude", "s1"), (None, "s1"), ("claude", "bare"), ("opencode", "ses_p"),
+            ("opencode", "ses_c"), ("claude", "both"), ("codex", "both"), (None, "both"),
+            ("codex", "s1"), ("claude", "nobody"), (None, "nobody"), ("claude", "")]
+    assert reports.session_origins(keys) == {
+        ("claude", "s1"): {"harness": "claude", "cwd": "/w/app", "first_ts": t - 60},
+        (None, "s1"): {"harness": "claude", "cwd": "/w/app", "first_ts": t - 60},
+        ("claude", "bare"): {"harness": "claude", "cwd": None, "first_ts": None},
+        ("opencode", "ses_p"): {"harness": "opencode", "cwd": "/w/oc", "first_ts": t + 5},
+        ("opencode", "ses_c"): None,              # a child session is its parent's agent
+        ("claude", "both"): {"harness": "claude", "cwd": "/w/a", "first_ts": t + 1},
+        ("codex", "both"): {"harness": "codex", "cwd": "/w/b", "first_ts": t + 2},
+        (None, "both"): None,                     # two harnesses hold a session of that id
+        ("codex", "s1"): None, ("claude", "nobody"): None, (None, "nobody"): None,
+        ("claude", ""): None}
+    assert reports.session_origins([]) == {}
+
+
+def test_origins_read_the_index_as_it_is_and_build_none(conn):
+    source(conn, "/p/s1.jsonl", [request("r1", at("2026-10-01T12:00"))], cwd="/w/app")
+    key = ("claude", "s1")
+    assert reports.session_origins([key])[key] is not None
+    conn.execute(f"PRAGMA user_version = {store.INDEX_VERSION - 1}")
+    conn.commit()
+    assert reports.session_origins([key]) == {key: None}
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.INDEX_VERSION - 1
+
+
+def test_origins_build_no_index():
+    assert not store.index_path().exists()
+    assert reports.session_origins([("claude", "s1")]) == {("claude", "s1"): None}
+    assert not store.index_path().exists()
 
 
 def test_requests_price_a_request_its_session_group_leaves_unpriced(conn):

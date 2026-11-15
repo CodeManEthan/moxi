@@ -256,3 +256,189 @@ def test_watch_is_wired_and_there_is_no_service_verb(monkeypatch, capsys):
         cli.main(["service", "install"], prog="moxi cache")
     assert stopped.value.code == 2
     assert "invalid choice: 'service'" in capsys.readouterr().err
+
+
+# --- doctor's watcher line on the watcher's reading ---------------------------------------
+
+#: 14:30 UTC, so in every zone the times a test words lie on the same local day.
+NOW = 1_800_023_400.0
+
+
+def _reading(tick_at: float, listed_at: float | None, stale_after: float = 30) -> None:
+    from moxi_cache import records
+
+    path = records.reading_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"v": 1, "pid": 7, "tick_at": tick_at, "listed_at": listed_at,
+                                "stale_after": stale_after}))
+
+
+def _clock(t: float) -> str:
+    import time
+
+    return time.strftime("%H:%M:%S", time.localtime(t))
+
+
+def _directory() -> str:
+    from moxi_cache import records
+
+    return str(records.record_dir())
+
+
+def test_listed_and_fresh_with_no_record_says_no_live_session():
+    _reading(NOW - 2, NOW - 2)
+    assert cli._watcher_line(NOW) == ("the watcher is running; no live Claude Code session, "
+                                      "so no clock record")
+
+
+def test_listed_and_fresh_with_records_says_how_the_records_stand():
+    _record(NOW - 2)
+    _reading(NOW - 2, NOW - 2)
+    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_directory()}, newest "
+                                      "seen 2s ago")
+
+
+def test_listed_and_fresh_over_records_that_stand_still_does_not_say_stopped():
+    """Writes of the records fail while the watcher lists: the newest evidence says it
+    runs, so only the records are named."""
+    _record(NOW - 600)
+    _reading(NOW - 2, NOW - 2)
+    line = cli._watcher_line(NOW)
+    assert line == (f"1 clock record(s) under {_directory()}, newest seen 600s ago: 1 of "
+                    "them not rewritten within their own stale_after, so their segment "
+                    "shows dim")
+
+
+def test_not_reading_since_the_last_listing():
+    _reading(NOW - 2, NOW - 600)
+    assert cli._watcher_line(NOW) == (
+        f"the watcher is running but has not listed Claude's sessions since "
+        f"{_clock(NOW - 600)}; its log says why; no clock records under {_directory()}")
+    _record(NOW - 600)
+    assert cli._watcher_line(NOW) == (
+        f"the watcher is running but has not listed Claude's sessions since "
+        f"{_clock(NOW - 600)}; its log says why; 1 clock record(s) under {_directory()}, "
+        "newest seen 600s ago: 1 of them not rewritten within their own stale_after, so "
+        "their segment shows dim")
+
+
+def test_not_reading_since_the_newest_record_when_that_is_newer():
+    _record(NOW - 100)
+    _reading(NOW - 2, NOW - 600)
+    assert cli._watcher_line(NOW).startswith(
+        f"the watcher is running but has not listed Claude's sessions since "
+        f"{_clock(NOW - 100)}; its log says why; 1 clock record(s)")
+
+
+def test_not_reading_and_never_listed():
+    _reading(NOW - 2, None)
+    assert cli._watcher_line(NOW) == (
+        "the watcher is running but has never listed Claude's sessions; its log says why; "
+        f"no clock records under {_directory()}")
+    _record(NOW - 600, warn_before=None, stale_after=None)
+    assert cli._watcher_line(NOW).startswith(
+        "the watcher is running but has never listed Claude's sessions; its log says why; "
+        "1 clock record(s) under")
+
+
+def test_stopped_at_its_last_tick():
+    _reading(NOW - 600, NOW - 600)
+    assert cli._watcher_line(NOW) == (f"the watcher stopped at {_clock(NOW - 600)}; no "
+                                      f"clock records under {_directory()}")
+    _record(NOW - 600)
+    assert cli._watcher_line(NOW) == (
+        f"the watcher stopped at {_clock(NOW - 600)}; 1 clock record(s) under "
+        f"{_directory()}, newest seen 600s ago: their segment shows dim and no timer runs")
+
+
+def test_stopped_at_the_newest_record_when_that_is_newer_than_its_tick():
+    _record(NOW - 300)
+    _reading(NOW - 900, None)
+    assert cli._watcher_line(NOW).startswith(f"the watcher stopped at {_clock(NOW - 300)}; ")
+
+
+def test_stopped_on_another_day_names_the_date():
+    import time
+
+    then = NOW - 3 * 86400
+    _reading(then, then)
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(then))
+    assert cli._watcher_line(NOW).startswith(f"the watcher stopped at {stamp}; ")
+
+
+def test_no_reading_and_no_record_says_no_watcher_is_running():
+    assert cli._watcher_line(NOW) == (f"no clock records under {_directory()}: no watcher "
+                                      "is running, so there is no status line segment and "
+                                      "no timer")
+
+
+@pytest.mark.parametrize("reading", [None, "malformed"])
+def test_with_no_reading_the_line_is_unchanged(reading):
+    from moxi_cache import records
+
+    if reading == "malformed":
+        records.reading_path().parent.mkdir(parents=True, exist_ok=True)
+        records.reading_path().write_text('{"v": 1, "pid": 7, "tick_at"')
+    _record(NOW - 2)
+    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_directory()}, newest "
+                                      "seen 2s ago")
+    _record(NOW - 600)
+    assert cli._watcher_line(NOW) == (f"1 clock record(s) under {_directory()}, newest "
+                                      "seen 600s ago: the watcher has stopped, so the "
+                                      "segment shows dim and no timer runs")
+    _record(NOW - 600, SID_B, warn_before=None, stale_after=None)
+    assert cli._watcher_line(NOW) == (
+        f"2 clock record(s) under {_directory()}, newest seen 600s ago: the watcher has "
+        "stopped, so the segment shows dim and no timer runs; 1 lack warn_before or "
+        "stale_after (an older watcher wrote them), so their segment shows nothing until "
+        "the watcher rewrites them")
+
+
+def test_doctor_prints_the_line_led_by_the_reading(capsys):
+    import time
+
+    _reading(time.time() - 600, time.time() - 600)
+    out = run(capsys, "doctor")[1]
+    assert "  watcher: the watcher stopped at " in out and "no watcher is running" not in out
+
+
+# --- the rule doctor and the page share ---------------------------------------------------
+
+def _rec(seen_at: float, stale_after: float | None = 30) -> dict:
+    out = {"seen_at": seen_at}
+    if stale_after is not None:
+        out["stale_after"] = stale_after
+    return out
+
+
+def _read(tick_at: float, listed_at: float | None, stale_after: float = 30) -> dict:
+    return {"v": 1, "pid": 7, "tick_at": tick_at, "listed_at": listed_at,
+            "stale_after": stale_after}
+
+
+@pytest.mark.parametrize("reading, found, outcome, at, last", [
+    (_read(NOW - 2, NOW - 2), [], "fresh", NOW - 2, NOW - 2),
+    (None, [_rec(NOW - 2)], "fresh", NOW - 2, NOW - 2),
+    (_read(NOW - 2, NOW - 600), [_rec(NOW - 10)], "fresh", NOW - 10, NOW - 2),
+    (_read(NOW - 2, NOW - 600), [], "not-reading", NOW - 600, NOW - 2),
+    (_read(NOW - 2, None), [], "not-reading", None, NOW - 2),
+    (_read(NOW - 2, None), [_rec(NOW - 2, None)], "not-reading", None, NOW - 2),
+    (_read(NOW - 600, NOW - 600), [], "stopped", NOW - 600, NOW - 600),
+    (_read(NOW - 600, None), [], "stopped", None, NOW - 600),
+    (_read(NOW - 900, None), [_rec(NOW - 300)], "stopped", NOW - 300, NOW - 300),
+    (None, [_rec(NOW - 600)], "stopped", NOW - 600, NOW - 600),
+    (None, [], "no-reading", None, None),
+    (None, [_rec(NOW - 2, None)], "no-reading", None, None),
+    # the one taken brings its own stale_after: the newest is old by its own
+    (None, [_rec(NOW - 60, 300), _rec(NOW - 40, 30)], "stopped", NOW - 40, NOW - 40),
+    # on equal times, the larger stale_after
+    (None, [_rec(NOW - 40, 30), _rec(NOW - 40, 300)], "fresh", NOW - 40, NOW - 40),
+    (_read(NOW - 40, NOW - 40, 300), [_rec(NOW - 40, 30)], "fresh", NOW - 40, NOW - 40),
+    # at the edge, fresh and ticking are inclusive
+    (_read(NOW - 30, NOW - 30), [], "fresh", NOW - 30, NOW - 30),
+    (_read(NOW - 30, NOW - 31), [], "not-reading", NOW - 31, NOW - 30),
+])
+def test_watching_is_one_outcome_for_every_input(reading, found, outcome, at, last):
+    from moxi_cache import records
+
+    assert records.watching(reading, found, NOW) == records.Watching(outcome, at, last)

@@ -13,7 +13,8 @@ this one way, from the launch log and turns:
 3. turns' `find(session_id=<the newest id>)` gives the live session, or None, and then the
    target is not live. A live session must be served by the endpoint process the claim
    names, else refused `changed`.
-4. From the row, the slot and pane, and for a slot launch slots' view of the slot.
+4. From the row, the slot and pane, and for a slot launch slots' view of the slot, unless
+   the caller asked for none (`slot=False`).
 
 **The claim is compared with the process it recorded.** A claim names the endpoint
 process, `<pid>@<start time>` (`listeners.endpoint_id`). For Claude that process is a child
@@ -157,15 +158,19 @@ class Target:
 
 
 def find(session_id: str, *, conn: sqlite3.Connection | None = None,
-         turns: Any | None = None, slots_api: Any | None = None) -> Target:
+         turns: Any | None = None, slots_api: Any | None = None,
+         slot: bool = True) -> Target:
     """The target of an act on `session_id`. Raises `NotLaunched`, `Unclaimed`, `Changed`,
     `NoTurns`, `TurnsFailed`, or slots' refusals (`targets.SlotsBusy`,
     `targets.SlotsFailed`) when the slot can't be read.
 
     `conn` is the launch log (opened and closed here when not given); `turns` and
-    `slots_api` stand in for turns' and slots' APIs.
+    `slots_api` stand in for turns' and slots' APIs. With `slot` false, slots is not asked:
+    the target's `slot` is None and no slots refusal is raised, for a reader that needs the
+    claim and the live session only.
     """
-    return _with_store(conn, lambda c: _find(c, session_id, None, turns, slots_api))
+    return _with_store(conn, lambda c: _find(c, session_id, None, turns, slots_api,
+                                             slot=slot))
 
 
 def caller(*, pid: int | None = None, conn: sqlite3.Connection | None = None,
@@ -214,7 +219,7 @@ def _with_store(conn: sqlite3.Connection | None, run):
 
 
 def _find(conn: sqlite3.Connection, session_id: str, session: Any | None, turns: Any | None,
-          slots_api: Any | None) -> Target:
+          slots_api: Any | None, *, slot: bool = True) -> Target:
     row = store.resolve(conn, session_id)
     if row is None:
         raise NotLaunched()
@@ -229,12 +234,12 @@ def _find(conn: sqlite3.Connection, session_id: str, session: Any | None, turns:
     try:
         if session is not None:
             check_claim(row, session)
-        slot = _slot(row, slots_api)
+        seen = _slot(row, slots_api) if slot else None
     except BaseException:
         if session is not None:
             session.close()
         raise
-    return Target(row, session, slot, row.pane_id, session is not None)
+    return Target(row, session, seen, row.pane_id, session is not None)
 
 
 def check_claim(row: store.LaunchRow, session: Any) -> None:

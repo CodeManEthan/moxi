@@ -51,6 +51,17 @@ stderr go to a file of its own (below). It does not wait. The started process ou
 watcher: a stop or restart of the watcher's unit ends the watcher only (`KillMode=process`,
 see `service`), and the asks it started keep running.
 
+**What it says it asks.** `Timer.asking(session, pid)` gives the sorted names of the loaded
+subscriptions whose `requires_env` the session's process meets (one without `requires_env`
+is met), or None before the timer's first `reload`. The watcher writes it into each clock
+record as `asks` (`records`). The environment is read only while a loaded subscription has
+a `requires_env`, so an install with none reads no process. A read is kept per `(session,
+pid)` while the session stays in the live list, since it is the environment the process
+started with, and the tick's `requires_env` check uses the same kept read. A read that
+gives None is not kept and is made again at the next tick. So the cost is one environment
+read per live session per watcher life, and one per tick for a session whose environment
+can't be read (another user's process, or any process on Windows).
+
 A process's environment can't be read on Windows (`env_checkable` says so), so there a
 subscription with `requires_env` never asks: the requirement counts as not met, as it
 does for any process whose environment can't be read. It stops
@@ -560,6 +571,10 @@ class Timer:
         self.loaded = Loaded()
         self._loaded_once = False
         self.tracks: dict[tuple[str, str], Track] = {}
+        #: The environments read, kept by `(session, pid)` while the session is live.
+        self.environs: dict[tuple[str, int], Mapping[str, str]] = {}
+        #: The `(session, pid)` whose read gave None since the last tick ended.
+        self._unread: set[tuple[str, int]] = set()
         self.pending: list[Pending] = []
         self.asked = 0
 
@@ -586,18 +601,55 @@ class Timer:
                  f", {len(self.loaded.refused)} refused" if self.loaded.refused else "")
         return self.loaded
 
+    # -- what it asks ------------------------------------------------------------------------
+
+    def asking(self, session: str, pid: int) -> tuple[str, ...] | None:
+        """The sorted names of the loaded subscriptions this session's process meets
+        `requires_env` for, a subscription without one included; None before the first
+        `reload`. The environment is read only when a loaded subscription has a
+        `requires_env` (the module doc's "What it says it asks")."""
+        if not self._loaded_once:
+            return None
+        subs = self.loaded.subscriptions
+        environ = (self._environ(session, pid) if any(s.requires_env for s in subs)
+                   else None)
+        return tuple(sorted(s.name for s in subs if env_met(s, environ)))
+
+    def _environ(self, session: str, pid: int) -> Mapping[str, str] | None:
+        """The process's environment, kept by `(session, pid)`. A None read is not kept,
+        and is not made twice before the tick ends."""
+        key = (session, pid)
+        if key in self.environs:
+            return self.environs[key]
+        if key in self._unread:
+            return None
+        environ = self.environ(pid)
+        if environ is None:
+            self._unread.add(key)
+        else:
+            self.environs[key] = environ
+        return environ
+
     # -- the tick ---------------------------------------------------------------------------
 
     def tick(self, live: Mapping[str, Mapping] | None, now: float | None = None) -> list[dict]:
         """One tick over the watcher's records of the live sessions (`live`, keyed by
         session id), or None when the watcher could not read the live list. Returns the
         asks it started."""
+        try:
+            return self._tick(live, now)
+        finally:
+            self._unread.clear()
+
+    def _tick(self, live: Mapping[str, Mapping] | None, now: float | None) -> list[dict]:
         now = self.now() if now is None else now
         self.reap(now)
         loaded = self.reload()
         if live is None:
             return []
         self.tracks = {k: v for k, v in self.tracks.items() if k[1] in live}
+        self.environs = {k: v for k, v in self.environs.items()
+                         if k[0] in live and live[k[0]].get("pid") == k[1]}
         started = []
         for session, record in live.items():
             clock = _clock(record)
@@ -607,7 +659,6 @@ class Timer:
                 continue
             last_request, ttl = clock
             rel = now - last_request - ttl
-            env = None
             for sub in loaded.subscriptions:
                 key = (sub.name, session)
                 track = self.tracks.get(key)
@@ -619,11 +670,8 @@ class Timer:
                 pid = record.get("pid")
                 if not isinstance(pid, int) or isinstance(pid, bool):
                     continue
-                if sub.requires_env:
-                    if env is None:
-                        env = self.process_env(pid)
-                    if not env_met(sub, env):
-                        continue
+                if sub.requires_env and not env_met(sub, self._environ(session, pid)):
+                    continue
                 if track is None:
                     track = self.tracks[key] = Track(last_request)
                 track.asked_at = now

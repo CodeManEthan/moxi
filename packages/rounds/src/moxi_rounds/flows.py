@@ -7,6 +7,9 @@ tier and what they read first. A step of the user's own has one of two shapes: a
 someone writes (`does = "report"`) or a command rounds runs (`does = "command"`, with its
 `argv`). Both are done before `finish`.
 
+`names(steps)` gives the steps a flow lists and `has(steps, step)` says whether the flow
+has a step, listed or not: three steps come with `build` and one with `verify-design`.
+
 `read(settings)` gives every flow by name as plain lists of tables, the built-in ones
 first; a flow the config names like a built-in one stands in its place. `check(settings)`
 refuses a flow the rest of rounds could not follow, and a tier that names no flow.
@@ -86,6 +89,23 @@ BUILT_IN = {
 def is_user_step(entry) -> bool:
     """True when step entry `entry` names a step of the user's own, not one of the ten."""
     return entry["step"] not in STEPS
+
+
+def names(steps) -> tuple[str, ...]:
+    """The names of the steps the entries `steps` list, in their order."""
+    return tuple(str(entry.get("step")) for entry in steps)
+
+
+def has(steps, step: str) -> bool:
+    """Whether a flow whose entries are `steps` has the step `step`: it lists it, or
+    the step is one a flow has without listing it. `commission`, `check` and `ratify`
+    come with `build`, and `docket` with `verify-design`."""
+    listed = names(steps)
+    if step in listed:
+        return True
+    if step == "docket":
+        return "verify-design" in listed
+    return step in UNLISTED_STEPS and "build" in listed
 
 
 def read(settings) -> dict[str, list[dict]]:
@@ -252,5 +272,6 @@ def kind_of(value) -> str:
 
 
 __all__ = ["ROUND", "STAGE", "STEPS", "VERIFY_STEPS", "OPERATOR_STEPS", "UNLISTED_STEPS",
-           "REPORT", "COMMAND", "DOES", "BEFORE", "BUILT_IN", "is_user_step", "read",
+           "REPORT", "COMMAND", "DOES", "BEFORE", "BUILT_IN", "is_user_step", "names",
+           "has", "read",
            "check", "check_argv", "check_timeout", "kind_of"]

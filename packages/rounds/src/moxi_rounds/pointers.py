@@ -71,13 +71,15 @@ def same(one: object, other: object) -> bool:
     return shape(one) == COMMS and shape(other) == COMMS and number(one) == number(other)
 
 
-def unmet(pointer: object, fix: str) -> Unmet | None:
+def unmet(pointer: object, fix: str, *,
+          names: str = "where the operator said it") -> Unmet | None:
     """The unmet condition of a pointer that has none of the four shapes, or None for one
-    that has. `fix` is the command that gives a right one."""
+    that has. `fix` is the command that gives a right one, and `names` what the pointer
+    is to, for one that names something else than the operator's word."""
     if shape(pointer) is not None:
         return None
-    return Unmet(f"{pointer!r} is not a pointer to where the operator said it; PTR below "
-                 f"is one token: {SHAPES}", fix)
+    return Unmet(f"{pointer!r} is not a pointer to {names}; PTR below is one token: "
+                 f"{SHAPES}", fix)
 
 
 def _is_time(text: str, *, seconds: bool) -> bool:

@@ -12,6 +12,8 @@ The first pass over it is made once too; each test starts from a copy of that in
 
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
 import json
 import os
 import random
@@ -584,6 +586,123 @@ def test_limits_with_no_pull_over_the_corpus_takes_under_100_ms(bench):
     taken = median_ms(lambda: limits.limits(now=bench.now, pull=False), 7)
     print(f"\nlimits() with no pull: {taken:.1f} ms (the first call {first:.1f} ms)")
     assert taken < 100
+
+
+# --- the page's reads ----------------------------------------------------------------------
+#
+# Each is timed through the page server's own app as a browser asks it, in a new process
+# over the test's homes, so nothing is kept: no catalog of the sessions module, no price
+# table, no module loaded on first use. The sessions module names the sessions from the
+# corpus's roots, as it does in a page server's process. The same process then waits out
+# the catalog's reuse of its gather and reads again, so the roots are listed again while
+# the heads read before are kept, as a later answer finds them.
+
+#: Runs of each read, each in a process of its own; a bound holds the median run.
+READ_RUNS = 3
+#: How long the sessions module's catalog reuses a gather, in seconds.
+GATHER_REUSE_S = 2.0
+#: The bounds, in ms: about four times the slowest of ten runs on a quiet machine (the
+#: opening reads 790 ms with nothing kept and 680 ms after the reuse, the sessions 470
+#: and 430 ms), so that they hold on a loaded one.
+OPENING_COLD_MS = 3_000
+OPENING_LAPSED_MS = 3_000
+SESSIONS_COLD_MS = 1_800
+SESSIONS_LAPSED_MS = 1_800
+
+
+def opening_reads(today: dt.date) -> list[tuple[str, dict[str, str]]]:
+    """The reads the page sends as it opens at its own address with no filter set, on an
+    install with projects: the limits, the status and Cost's 90 days; then, once the
+    status has answered, the last 30 days' chart, projects, models and terms, the closed
+    Sessions row's dearest session, and today's two dearest for Cost. All are sent at
+    once here, which asks more of the server than the page does. Prices is left out: the
+    page asks it only once the terms have answered, and it reads no index."""
+    day = today.isoformat()
+    month = {"since": (today - dt.timedelta(days=29)).isoformat(), "until": day}
+    return [("/api/limits", {}), ("/api/status", {}),
+            ("/api/daily", {"since": (today - dt.timedelta(days=89)).isoformat(),
+                            "until": day}),
+            ("/api/daily", {"by": "day", **month}), ("/api/projects", month),
+            ("/api/models", month), ("/api/terms", {"by": "model", **month}),
+            ("/api/sessions", {**month, "top": "1"}),
+            ("/api/sessions", {"since": day, "until": day, "top": "2"})]
+
+
+def sessions_reads(today: dt.date) -> list[tuple[str, dict[str, str]]]:
+    """The first list of the Sessions section, opened over the last 30 days: the ten
+    dearest."""
+    return [("/api/sessions", {"since": (today - dt.timedelta(days=29)).isoformat(),
+                               "until": today.isoformat(), "top": "10"})]
+
+
+def _named(answer: dict) -> None:
+    """Every session the answer sends was found by the sessions module."""
+    assert answer["rows"] and all(row["known"] for row in answer["rows"]), answer["rows"]
+
+
+def time_reads(which: str) -> None:
+    """Run in a new process: send `which` reads together, once with nothing kept and
+    again once the gather's reuse has lapsed, check the answers, and print the two times
+    in ms as JSON."""
+    from test_page import ask, served
+
+    reads = {"opening": opening_reads, "sessions": sessions_reads}[which](dt.date.today())
+    app = served()
+
+    async def all_of_them():
+        return await asyncio.gather(*(ask(app, path, query) for path, query in reads))
+
+    def once() -> float:
+        start = time.perf_counter()
+        answers = asyncio.run(all_of_them())
+        taken = (time.perf_counter() - start) * 1000
+        assert [status for status, _ in answers] == [200] * len(reads), answers
+        for (path, query), (_, body) in zip(reads, answers):
+            if path == "/api/sessions" and query["top"] != "2":
+                _named(body)
+                assert len(body["rows"]) == int(query["top"]) < body["count"]
+        return taken
+
+    cold = once()
+    time.sleep(GATHER_REUSE_S + 0.5)
+    print(json.dumps({"cold": cold, "lapsed": once()}))
+
+
+def _in_new_processes(which: str, cwd: Path) -> tuple[list[float], list[float]]:
+    cold, lapsed = [], []
+    code = (f"import sys; sys.path.insert(0, {str(Path(__file__).parent)!r}); "
+            f"import test_bench; test_bench.time_reads({which!r})")
+    for _ in range(READ_RUNS):
+        done = subprocess.run([sys.executable, "-c", code], cwd=cwd, env=dict(os.environ),
+                              capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+        taken = json.loads(done.stdout.strip().splitlines()[-1])
+        cold.append(taken["cold"])
+        lapsed.append(taken["lapsed"])
+    return cold, lapsed
+
+
+def _runs(taken: list[float]) -> str:
+    return f"median {statistics.median(taken):.0f} ms (" + ", ".join(
+        f"{ms:.0f}" for ms in taken) + ")"
+
+
+@pytest.mark.timed
+def test_the_pages_opening_reads_sent_together_take_under_3_s_kept_or_not(bench, tmp_path):
+    cold, lapsed = _in_new_processes("opening", tmp_path)
+    print(f"\nthe page's {len(opening_reads(dt.date.today()))} opening reads sent together:"
+          f" nothing kept {_runs(cold)}; after the gather's reuse {_runs(lapsed)}")
+    assert statistics.median(cold) < OPENING_COLD_MS
+    assert statistics.median(lapsed) < OPENING_LAPSED_MS
+
+
+@pytest.mark.timed
+def test_the_sessions_of_30_days_at_top_10_take_under_1_8_s_kept_or_not(bench, tmp_path):
+    cold, lapsed = _in_new_processes("sessions", tmp_path)
+    print(f"\n/api/sessions over 30 days at top=10: nothing kept {_runs(cold)}; after the "
+          f"gather's reuse {_runs(lapsed)}")
+    assert statistics.median(cold) < SESSIONS_COLD_MS
+    assert statistics.median(lapsed) < SESSIONS_LAPSED_MS
 
 
 #: turns' guard loader, which is the one importer of usage's guard declarations.

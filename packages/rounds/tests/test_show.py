@@ -8,8 +8,8 @@ import json
 import pytest
 from moxi import cli
 
-from moxi_rounds import (asking, index, log, moving, opening, paths, ruling, showing,
-                         shown)
+from moxi_rounds import (asking, dropping, index, log, moving, opening, paths, ruling,
+                         showing, shown)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadName, NoRound, Refused
 
@@ -79,31 +79,59 @@ def test_a_round_just_opened_is_shown_with_what_it_is_for_and_its_flow(rounds, c
 round {B}   open   flow fix ({names})
 description: a placeholder round
 folder: {rounds / "b-round"}
+step: commission, not-built
+close waits for: a finished stage, which this version does not build, so the round does not close in it
 
 questions: none
 
 rulings: none
+
+verdicts: none
 
 history: 1 event
   1  {T1}  planner  round.opened
 """
     found = data(capsys, B)
     assert list(found) == ["name", "project", "slug", "folder", "notice", "status",
-                           "ended", "description", "parent", "flow", "steps",
-                           "register_unreadable", "questions", "rulings", "history"]
-    assert {key: found[key] for key in list(found)[:12]} == {
+                           "ended", "description", "parent", "inherits", "flow",
+                           "steps", "step", "close", "skips",
+                           "stages", "versions", "standing", "trace", "threads",
+                           "register_unreadable", "questions",
+                           "rulings", "verdicts", "history"]
+    assert {key: found[key] for key in list(found)[:21]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
         "folder": str(rounds / "b-round"), "notice": None, "status": "open",
-        "ended": None, "description": "a placeholder round", "parent": None, "flow": "fix",
-        "steps": steps, "register_unreadable": None}
+        "ended": None, "description": "a placeholder round", "parent": None,
+        "inherits": [], "flow": "fix",
+        "steps": steps,
+        "step": {"step": "commission", "stage": None, "state": "not-built",
+                 "waits": [], "questions": []},
+        "close": {"waits": ["a finished stage, which this version does not build, so "
+                            "the round does not close in it"]},
+        "skips": [], "stages": [], "versions": [],
+        "standing": "none", "trace": None, "threads": [],
+        "register_unreadable": None}
     assert found["questions"] == found["rulings"] == []
     assert found["history"] == log.read(log.round_log(rounds / "b-round"))
 
 
-def test_no_step_is_shown_as_the_one_the_round_is_at(rounds, capsys):
-    found = data(capsys)
-    assert not {"step", "current", "next"} & set(found)
-    assert "step:" not in printed(capsys, A)
+def test_the_step_the_round_is_at_is_shown_with_what_it_waits_for(rounds, capsys):
+    stage(rounds, "B1")
+    ask(blocks="B1")
+    held = {"reason": f"Q1 holds B1: {SAID}",
+            "fix": f"moxi rounds rule {A} Q1 --text TEXT --record PTR"}
+    assert data(capsys)["step"] == {
+        "step": "commission", "stage": "B1", "state": "not-built", "waits": [held],
+        "questions": []}
+    assert printed(capsys, A).splitlines()[3:6] == [
+        "step: commission of B1, not-built", f"  waits for: {held['reason']}",
+        f"    fix: {held['fix']}"]
+
+
+def test_a_round_that_has_ended_is_shown_at_no_step(rounds, capsys):
+    dropping.drop(A, by="operator", record="comms:30", actor="planner")
+    assert data(capsys)["step"] is None
+    assert not any(line.startswith("step:") for line in printed(capsys, A).splitlines())
 
 
 def test_questions_are_shown_by_state_each_with_who_asked_it_and_when(rounds, capsys):
@@ -388,7 +416,7 @@ def test_a_log_changed_outside_this_machine_is_shown_with_the_notice(rounds, cap
     notice = found["notice"]
     assert notice.startswith("log changed outside this machine since ")
     assert found["description"] == "another placeholder"
-    assert printed(capsys, A).splitlines()[3] == notice
+    assert printed(capsys, A).splitlines()[5] == notice
     # It stays through every showing, until the next write here.
     assert data(capsys)["notice"] == notice
     ask(text=OTHER, at=T3)

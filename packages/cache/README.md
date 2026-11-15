@@ -28,6 +28,27 @@ while the recipient's cache is cold), and it adds these commands:
 - `moxi cache doctor` checks the config, the lifetime table, the drift record and the
   watcher, and exits 1 when something there stops reads.
 
+The watcher also writes its reading, `watch.json` beside the clock records, after every
+tick: when it last ticked and when it last listed Claude Code's live sessions. Its page
+and `moxi cache doctor` read it to say whether the watcher is reading, running but not
+listing, or stopped, and when. A watcher started before cache 0.1.5 writes no reading
+until it restarts; until then the page and doctor judge it by the clock records alone.
+
+With the `ui` extra, cache's page in Moxi's browser shell lists each session that has a
+clock record. A row is named as the Sessions page names it, by its typed name, else its
+folder and when it started, and never by its id. The rows sit in two groups, `warm` and
+`cold`, each with its count: warm rows say when they go cold, soonest first; cold rows
+say since when, most recent first. A row turns cold at its time with no new read.
+Sessions whose record holds no clock time sit behind one line at the foot of the list.
+Opened, a row shows its last request and its cold time to the second, the time left or
+since, the lifetime in words, a line saying when an old record was last rewritten, its
+harness, model, start and folder, a link to the session on the Sessions page when
+sessions holds it, and `Copy id`. The foot says when the records were last read and
+links to cache's settings. When the watcher is not reading, a row above the groups says
+so and, when it has stopped or never ran, gives the command that starts it. The page
+says nothing it did not read: a fact that is missing is not drawn. The chip, one
+session's cache age, stays offered to other pages.
+
 Its settings are `claude.ttl_s`, `lifetime` (your own lifetime table rows),
 `watch.tick_s`, `segment.warn_before_s` and `timer.subscriber`; `moxi config cache` shows
 them.

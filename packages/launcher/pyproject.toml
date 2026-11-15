@@ -36,9 +36,11 @@ ui = ["moxi-ui>=0.2.3,<0.3"]
 # notes' handoff folder, which a launch's handoff pointer and a relaunch's handoff use.
 notes = ["moxi-notes>=0.1,<0.2"]
 # cache's timer, for keep-warm and recycle on expiry.
-cache = ["moxi-cache>=0.1,<0.2"]
+cache = ["moxi-cache>=0.1.6,<0.2"]
 # usage's context warning: the warn_at, limit_at and recycle_at_limit rows.
 usage = ["moxi-usage>=0.2,<0.3"]
+# The latest thing said in each running session, on Home's Sessions row.
+sessions = ["moxi-sessions>=0.2.8,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

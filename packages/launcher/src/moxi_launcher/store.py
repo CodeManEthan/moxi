@@ -885,13 +885,29 @@ def kinds(session_ids: Iterable[str], *, timeout: float = 1.0,
     as it comes: the caller asks again later.
     """
     ids = list(dict.fromkeys(session_ids))
-    if not ids or not path(env).exists():
-        return dict.fromkeys(ids)
+    if not ids:
+        return {}
+    with reading(timeout=timeout, env=env) as conn:
+        if conn is None:
+            return dict.fromkeys(ids)
+        return {sid: None if (row := resolve(conn, sid)) is None else row.kind for sid in ids}
+
+
+@contextmanager
+def reading(*, timeout: float = 1.0,
+            env: Mapping[str, str] | None = None) -> Iterator[sqlite3.Connection | None]:
+    """The launch log opened for one read and closed after it; None when there is no log.
+
+    Writes nothing to it, except to bring an older schema up to date. Raises `Busy` when
+    the log is held past `timeout` seconds, `moxi.store.StoreTooNew` when a newer launcher
+    wrote it, and any other error as it comes."""
+    if not path(env).exists():
+        yield None
+        return
     try:
         conn = connect(env=env, create=False, timeout=timeout)
         try:
-            return {sid: None if (row := resolve(conn, sid)) is None else row.kind
-                    for sid in ids}
+            yield conn
         finally:
             conn.close()
     except sqlite3.OperationalError as exc:
@@ -979,6 +995,17 @@ def events(conn: sqlite3.Connection, request_id: str) -> list[Event]:
             detail in conn.execute(
                 "SELECT id, request_id, session_id, at, kind, detail_json FROM events "
                 "WHERE request_id = ? ORDER BY at, id", (request_id,))]
+
+
+def last_event(conn: sqlite3.Connection, request_id: str, kind: str) -> Event | None:
+    """The newest event of `kind` on one launch, None when it has none."""
+    found = conn.execute(
+        "SELECT id, request_id, session_id, at, kind, detail_json FROM events "
+        "WHERE request_id = ? AND kind = ? ORDER BY at DESC, id DESC LIMIT 1",
+        (request_id, kind)).fetchone()
+    if found is None:
+        return None
+    return Event(*found[:5], json.loads(found[5]))
 
 
 def picked(conn: sqlite3.Connection, key: str) -> list[str]:
@@ -1757,7 +1784,7 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTE
            "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked",
            "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
            "holds_log", "insert_run", "kinds", "launched_by", "learn_session", "log", "log_lines",
-           "made_by",
+           "made_by", "reading",
            "new_run_id",
            "now", "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",
            "pend_compact", "pending_compact", "picked", "places", "prune", "release_hold", "resolve",

@@ -678,6 +678,41 @@ def test_an_opened_session_carries_its_row_and_the_reply_to_the_last_prompt(root
                              "folder": "/work/proj-a"}
 
 
+def test_a_rows_prompt_is_the_newest_typed_message_of_the_whole_session(roots):
+    typed = ClaudeTranscript(roots[CLAUDE], session_id=sid(1))
+    asked = typed.clock
+    typed.user("Typed long ago.", origin="human")
+    typed.assistant("An answer.")
+    for n in range(12):
+        typed.user(f"Notice {n}.", origin="task-notification")
+        typed.assistant(f"Reply {n}.")
+    changed_at(typed.write(), NOW - 10)
+    fed = ClaudeTranscript(roots[CLAUDE], session_id=sid(2))
+    fed.user("A delivery.", origin="channel", isMeta=True)
+    fed.assistant("An answer.")
+    last = fed.clock
+    fed.user("who sent this")
+    changed_at(fed.write(), NOW - 20)
+    codex(roots, 3, NOW - 30)
+    cat = catalog(roots)
+
+    rows = {r["session"]: r
+            for r in newest_sessions(cat, recent_s=HOUR, now=NOW)["rows"]}
+
+    assert rows[sid(1)]["prompt"] == {"at": asked, "text": "Typed long ago.",
+                                      "truncated": False}
+    assert rows[sid(1)]["activity"]["who"] == "agent"
+    assert rows[sid(2)]["prompt"] is None
+    assert rows[sid(2)]["activity"] == {"at": last, "who": None,
+                                        "text": "who sent this"}
+    assert rows[tid(3)]["prompt"] is None
+    assert opened(roots, sid(1))["prompt"]["text"] == "Typed long ago."
+    assert opened(roots, sid(2))["prompt"] is None
+
+    newest_sessions(cat, recent_s=HOUR, now=NOW + 5)
+    assert cat.prompt_reads == 2                     # the two Claude sessions, once each
+
+
 def test_there_is_no_reply_when_a_user_message_is_the_newest(roots):
     unanswered = ClaudeTranscript(roots[CLAUDE], session_id=sid(1))
     unanswered.user("First.", origin="human")

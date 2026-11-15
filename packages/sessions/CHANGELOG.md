@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.2.9 (2026-11-10)
+
+- A list row's `prompt` is the newest message in the whole session that the record marks
+  as typed by a person, and nothing else. It was looked for in the last five turns only.
+  A session with no such message has no `prompt`. Codex and OpenCode rows have none:
+  sessions reads no typed mark from their records (the README says what Codex would
+  need).
+- The read for it: a session is read from its start once, whatever its size, and where
+  that read ended is kept in memory. An unchanged file is not read again, and a file
+  that grew is read from the kept place only, so a list over long sessions that are
+  being written pays for their new lines and not for their length. A file that shrank,
+  was written again or was replaced is read from its start. A last line with no newline
+  yet is not read until it has one. The README states what is kept and the two changes
+  to a file this read does not see.
+- `moxi_sessions.catalog`: `PROMPT_TURNS` is gone, and `Tail` no longer has `prompt`.
+  New: `TYPED`, `WINDOW`, `Kept`, `PromptRead`, `read_prompt`, `reads_prompt` and the
+  counters `Catalog.prompt_reads`, `prompt_whole` and `prompt_bytes`.
+  `moxi_sessions.claude` has `may_be_typed`, which tells from a line's bytes whether
+  it can hold a typed message. It says no for no line the decode would read as typed:
+  a line that writes the key or the kind with an escape, or is in UTF-16 or UTF-32, is
+  left to the decode.
+
+- The page lists the sessions at its own address: the ones started in a terminal that
+  changed in the last hour, then a group per day and `Earlier`, each row named by its
+  typed name or its folder and start, with the newest typed message as its second line.
+  A day folds past eight rows, and the sessions a program started sit behind one line
+  under their day. A find field (a session id or part of a folder's name) and three
+  filters, Folder, Harness and When, narrow the list, with the count beside them. The
+  list is read again every 30 seconds while its tab is visible. A harness whose sessions
+  could not be read, and Codex sessions left out because they are compressed, each get a
+  line under the list.
+- A row of the list opens in place: the newest typed message and the reply after it, the
+  session's subagents, a `Session` line (harness, model, start to last change), the
+  harness's own resume command with `Copy`, and under them `Read the transcript`, which
+  goes to the session's address, and `Copy id`. The session is read when its row is
+  opened, and again only when a newer list shows it changed.
+- The form that asked for a harness and a session id is gone: type the id in the find
+  field.
+- A session's own address has a new header: `Sessions`, which goes back to the list, and
+  the session's name as the list names it; under it the harness, the model and from when
+  to when. The page's heading and its opening sentence are gone. What the old header
+  listed (the harness's name, the id, title, directory, last activity, version, parent
+  session, entrypoint, the file read) is behind `Details`. A subagent and a session
+  another one started keep a heading by id or title, with those facts in the open. The
+  turns, "Earlier", `Refresh` and the subagents are as before, without the accent,
+  warning and error colours. A tool result that failed starts with `Failed` and the
+  message Claude Code writes for a request that failed starts with `Error`, each in the
+  heavier weight, here and in the window block. A read on its way and a read that failed
+  each say so in words. The header's name and facts come from `/api/session`, the read an
+  opened row of the list makes, asked beside the turns: it does not search every
+  session's first lines as the list's find does, so on a page server's first open the name
+  comes a fraction of a second after the turns rather than seconds after them. A transcript says only its own reason for a read that failed; the list's
+  line for a harness whose sessions were not all read is not drawn over it.
+- `/api/list` and `/api/session` carry `home`, the home folder of the account the page
+  server runs as (null when it has none), marked as a path. `/api/session` also carries
+  `today`, the server's local date, as the list does. The page writes a folder
+  under it with `~`: the resume line's folder, the path in the Folder menu and the
+  directory in `Details`.
+- The README says how to read the page and lists what the page leaves out, each with
+  what it needs.
+
 ## 0.2.8 (2026-11-10)
 
 - Interface 5, which is interface 4 plus `session_facts(keys)`: for up to 200

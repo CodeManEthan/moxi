@@ -64,6 +64,9 @@ UNTIL_ROUND = "round:"
 #: What starts the item of a ruling that takes a stage out of the plan; the stage's id
 #: follows.
 UNSTAGE = "unstage:"
+#: What starts the item of a ruling that takes one stage off what another waits for:
+#: the stage's id, `=`, and the id of the stage it waits for no longer.
+UNAFTER = "unafter:"
 
 Blocks = str | tuple[str, ...]
 
@@ -126,15 +129,14 @@ def holds_every(new: Blocks | None, old: Blocks | None) -> bool:
 
 
 # -- what a round's log says of its stages -----------------------------------------------
-# The readers below take what they need from the history and the rulings. They are the
-# one place that says which stages a round has, which are finished and which left the
-# plan.
+# The readers below take what they need from the stages the log declared (each by an
+# event of its own or by the frozen design version that first carried it), the history
+# and the rulings. They are the one place that says which stages a round has, which are
+# finished and which left the plan.
 
 def recorded_stages(state: states.State) -> tuple[str, ...]:
     """The ids of the stages the round's log declared, in the order it declared them."""
-    return tuple(dict.fromkeys(
-        event["id"] for event in state.history
-        if event["type"] == "stage.declared" and isinstance(event.get("id"), str)))
+    return tuple(stage.id for stage in state.stages)
 
 
 def finished_stages(state: states.State) -> frozenset[str]:
@@ -145,12 +147,11 @@ def finished_stages(state: states.State) -> frozenset[str]:
 
 
 def left_stages(state: states.State) -> frozenset[str]:
-    """The ids of the stages that left the round's plan: each one a change to the stage
-    records as removed, and each one a ruling takes out. A stage that left does not
-    come back."""
-    removed = {event["id"] for event in state.history
-               if event["type"] == "stage.changed" and event.get("removed") is True
-               and isinstance(event.get("id"), str)}
+    """The ids of the stages that left the round's plan: each one a verdict took out
+    when it applied what a design's block left out, and each one a ruling takes out.
+    Nothing else takes a stage out, and a stage that left does not come back."""
+    removed = {one.id for verdict in state.verdicts for one in verdict.applied
+               if one.what == states.STAGE}
     ruled_out = {ruling.rules[len(UNSTAGE):] for ruling in state.rulings
                  if (ruling.rules or "").startswith(UNSTAGE)
                  and STAGE.fullmatch(ruling.rules[len(UNSTAGE):])}

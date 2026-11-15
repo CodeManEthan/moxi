@@ -20,8 +20,10 @@
 import type { ApiResult, FieldDescriptor, FormValue } from "/m/ui/client.js";
 
 import type { LaunchRow } from "./feed.ts";
-import { followedOf, HARNESS, launchBody, leaveOutChoice, NO_PRESET, outcomeOf, parsePreview, requestOf, shownValue } from "./panel.ts";
-import type { Form, LaunchBody, Preview, Status } from "./panel.ts";
+import {
+  followedOf, HARNESS, launchBody, leaveOutChoice, NO_PRESET, outcomeOf, parsePreview, requestOf, same, shownValue,
+} from "./panel.ts";
+import type { Choice, Form, LaunchBody, Preview, Status } from "./panel.ts";
 
 type Fields = Record<string, unknown>;
 
@@ -40,11 +42,12 @@ export interface Place {
 }
 
 /** The value of `/api/places`: the places, newest first, whether the page server would
- * take a project for a launch's place, and the user's home folder as the page server sees
- * it ("" when the answer names none). */
+ * take a project for a launch's place, the user's home folder as the page server sees
+ * it ("" when the answer names none), and who the page server launches as ("" likewise). */
 export interface Places {
   projects: boolean;
   home: string;
+  actor: string;
   places: Place[];
 }
 
@@ -57,7 +60,8 @@ export function parsePlaces(data: unknown): Places | null {
     places.push({ project_key: typeof row.project_key === "string" && row.project_key ? row.project_key : null,
                   cwd: row.cwd, at: typeof row.at === "string" ? row.at : "" });
   }
-  return { projects: data.projects === true, home: typeof data.home === "string" ? data.home : "", places };
+  return { projects: data.projects === true, home: typeof data.home === "string" ? data.home : "",
+           actor: typeof data.actor === "string" ? data.actor : "", places };
 }
 
 /** Whether projects is there: the page server would take a project, and the shell has
@@ -108,6 +112,8 @@ export interface Where {
   withProjects: boolean;
   /** The user's home folder, "" when the places could not be read. */
   home: string;
+  /** Who the page server launches as, "" when the places could not be read. */
+  actor: string;
   places: Place[];
   pick: Pick;
 }
@@ -124,10 +130,11 @@ export async function openWhere(read: Read, picker: boolean): Promise<Where> {
   const projects = withProjects(places, picker);
   const rows = places?.places ?? [];
   const home = places?.home ?? "";
-  if (rows.length > 0) return { withProjects: projects, home, places: rows, pick: pickOf(rows[0], projects) };
-  if (!projects) return { withProjects: false, home, places: rows, pick: HOME_PICK };
+  const actor = places?.actor ?? "";
+  if (rows.length > 0) return { withProjects: projects, home, actor, places: rows, pick: pickOf(rows[0], projects) };
+  if (!projects) return { withProjects: false, home, actor, places: rows, pick: HOME_PICK };
   const listed = await read("projects", "api/projects");
-  return { withProjects: true, home, places: rows,
+  return { withProjects: true, home, actor, places: rows,
            pick: firstOpen(true, listed.status === 200 ? projectKeys(listed.data) : null) };
 }
 
@@ -228,8 +235,9 @@ export function samePick(a: Pick, b: Pick, home: string): boolean {
 /** A time as the browser's locale writes it. */
 export type Clock = (at: Date) => string;
 
-const HOUR: Clock = (at) => at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const DAY: Clock = (at) => at.toLocaleDateString([], { month: "short", day: "numeric" });
+/** A time of day, and a day, as the browser's locale writes them. */
+export const HOUR: Clock = (at) => at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+export const DAY: Clock = (at) => at.toLocaleDateString([], { month: "short", day: "numeric" });
 
 /** When a place was last launched in: the time of day for a launch on `now`'s day, else
  * the day. Empty for a time that can't be read. */
@@ -521,30 +529,101 @@ export const PLACED = ["target", "slot"] as const;
 /** The rows whose text or file a launch sends as its session's first turn. */
 export const FIRST_TURN = ["brief", "brief_file", "handoff"] as const;
 
+/** The brief file set through the `+`, or null while none is. */
+export function briefFileOf(set: Readonly<Record<string, FormValue>>): string | null {
+  const file = set.brief_file;
+  return typeof file === "string" && file.trim() !== "" ? file.trim() : null;
+}
+
+/** The built-in tools the Options panel draws a line for, in its order. No route lists a
+ * harness's tools, so a tool not here is drawn only as one of the rules it is named in. */
+export const BUILT_IN_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "Task"] as const;
+
 /**
  * The launch as `/api/preview` and `/api/launch` take it: the whole form, as the launcher's
  * panel sends its own, with where it runs set from `run` alone. `target` always has its
  * value; `slot` has one only for a slot picked by its number, and is otherwise left out
- * where the form has the row. The box's text is the whole first turn: of the rows in
- * `FIRST_TURN` the request holds `brief` alone, with the box's text, and only while the box
- * has text. Every other such row the form has is left out, whatever the form filled it
- * with or withheld, so nothing the box does not show is sent as the first turn. Any other
+ * where the form has the row. The first turn is what the piece shows: a brief file set
+ * through the `+` (`set.brief_file`), else the box's text. Of the rows in `FIRST_TURN` the
+ * request holds `brief_file` alone while a file is set, else `brief` alone, with the box's
+ * text, and only while the box has text. Every other such row the form has is left out,
+ * whatever the form filled it with or withheld, so nothing the piece does not show is sent
+ * as the first turn. Any other
  * text `/api/form` withheld, which the piece does not draw, is kept as the layers give it.
+ * The request names the one preset `choice` applies, whose values `fields` are filled
+ * with. It says it starts off the user's usual permissions exactly when one of its
+ * permission rows does, against `base` (see `offPosture`): the same harness's form read
+ * with no preset, which is `fields` when none is applied. `filled` names the rows of `set`
+ * filled from the last launch, which the request names in its own `filled`.
  */
 export function launchRequest(fields: readonly FieldDescriptor[], form: Form | null,
-                              set: Readonly<Record<string, FormValue>>, run: Run): LaunchBody {
+                              set: Readonly<Record<string, FormValue>>, run: Run,
+                              base: readonly FieldDescriptor[] = fields, choice: Choice = NO_PRESET,
+                              filled: readonly string[] = []): LaunchBody {
   const values = formValues(fields, set);
   const slotted = "slot" in values;
   for (const name of PLACED) delete values[name];
-  const box = typeof set.brief === "string" && set.brief !== "" ? set.brief : null;
-  for (const name of FIRST_TURN) if (name in values) values[name] = name === "brief" ? box : null;
+  const file = briefFileOf(set);
+  const box = file === null && typeof set.brief === "string" && set.brief !== "" ? set.brief : null;
+  const turn: Record<string, string | null> = { brief: box, brief_file: file };
+  for (const name of FIRST_TURN) if (name in values) values[name] = turn[name] ?? null;
   const withheld = new Set((form?.rows ?? []).filter((row) => row.withheld).map((row) => row.name));
   const kept = new Set([...withheld].filter((name) => !(FIRST_TURN as readonly string[]).includes(name)));
   const request = requestOf(fields, values, withheld, kept);
   request.values.target = run.target;
   if (run.target === "slot" && run.named && run.slot !== null) request.values.slot = String(run.slot);
   else if (slotted) request.leave_out.push("slot");
-  return launchBody(NO_PRESET, request, false);
+  const body = launchBody(choice, request, offPosture(fields, base, set).length > 0);
+  if (filled.length > 0) body.filled = [...filled];
+  return body;
+}
+
+// --- the permission rows ---------------------------------------------------------------------
+
+/** A row's value as the launch takes it: a row left empty launches with its shipped default. */
+export function launchedValue(field: FieldDescriptor, value: FormValue): FormValue {
+  if (Array.isArray(value) || field.optional_value === true) return value;
+  if (field.type === "bool") return value === "true" ? "true" : "false";
+  if (value === null || value === "" || value === leaveOutChoice(field)) {
+    return typeof field.default === "string" && field.default !== "" ? field.default : null;
+  }
+  return value;
+}
+
+/**
+ * The permission rows the launch would start off the user's usual value, by name, in the
+ * fields' order. `fields` and `set` are the form and the rows set over it, as the request
+ * is built from them; `base` is the same harness's form read with no preset, whose fill is
+ * each row's usual value: the user's own default for it, else the shipped one. A row sent
+ * with another value, or left out where the user's default is not the shipped one, is off.
+ */
+export function offPosture(fields: readonly FieldDescriptor[], base: readonly FieldDescriptor[],
+                           set: Readonly<Record<string, FormValue>>): string[] {
+  const values = formValues(fields, set);
+  const usual = new Map(base.map((field) => [field.name, field]));
+  return fields.filter((field) => field.posture === true && field.name in values).filter((field) => {
+    const mine = usual.get(field.name) ?? { ...field, value: undefined, value_items: undefined };
+    return !same(launchedValue(field, values[field.name]), launchedValue(mine, shownValue(mine)));
+  }).map((field) => field.name);
+}
+
+// --- the values that can do harm -----------------------------------------------------------
+
+/** The second sentence under a value that can do harm, picked by hand. */
+export const CONFIRMED = "Confirmed for this launch only.";
+
+/** What each value that can do harm does, by row and value: the first sentence under it. */
+export const DANGER_SAYS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  permission_mode: { bypassPermissions: "Every tool runs without asking, whatever the mode and the rules say." },
+  sandbox: { "danger-full-access": "Commands run with no sandbox: they can read and change anything your account can." },
+};
+
+/** The two sentences under a value that can do harm: what it does, from the map, else the
+ * row's help text, then that it holds for this launch alone. */
+export function dangerSentences(field: FieldDescriptor, value: string): [string, string] {
+  const said = DANGER_SAYS[field.name];
+  if (said !== undefined && Object.hasOwn(said, value)) return [said[value], CONFIRMED];
+  return [typeof field.doc === "string" ? field.doc : "", CONFIRMED];
 }
 
 // --- the launch, and the lines under the box -----------------------------------------------
@@ -561,7 +640,8 @@ export interface Line {
 }
 
 /**
- * A launch from the button, from the press to its end.
+ * A launch from the button, or a resume from the `+`, from the press to its end. `act` says
+ * which, for the words of its lines.
  * - `idle`: nothing under way; the button is back, with the lines of the last launch.
  * - `pressed`: the preview or the launch is being asked; the button is off.
  * - `starting`: a job runs the launch and its row is followed; the button is off.
@@ -577,9 +657,10 @@ export interface Flight {
   status: Status | null;
   /** The launch started, so the box is to be emptied. */
   started: boolean;
+  act: "launch" | "resume";
 }
 
-export const IDLE: Flight = { phase: "idle", lines: [], notes: [], status: null, started: false };
+export const IDLE: Flight = { phase: "idle", lines: [], notes: [], status: null, started: false, act: "launch" };
 
 /** The press: the button goes off and the last launch's lines go. */
 export const PRESSED: Flight = { ...IDLE, phase: "pressed" };
@@ -687,7 +768,7 @@ export function launched(result: ApiResult, run: Run, notes: Line[]):
   switch (outcome.kind) {
     case "started":
       return { copy: null, flight: { phase: "starting", lines: [{ name: "starting", tone: "plain", text: startingWords(run) }], notes,
-                                     status: outcome.status, started: false } };
+                                     status: outcome.status, started: false, act: "launch" } };
     case "refused":
       if (outcome.command !== null) return { copy: outcome.command, flight: PRESSED };
       return { copy: null, flight: ended([{ name: "refused", tone: "problem", text: refusalWords(outcome.refusal) }], notes) };
@@ -716,32 +797,38 @@ export function aroundPage(line: Line): [string, string] | null {
   return at < 0 ? null : [line.text.slice(0, at), line.text.slice(at + LAUNCHER_PAGE.length)];
 }
 
-/** `Started in slot 2 · 19:06`, or `Started headless · 19:06`, from what the row records. */
-export function startedWords(row: LaunchRow, hour: Clock = HOUR): string {
+/** `Started in slot 2 · 19:06`, or `Started headless · 19:06`, from what the row records;
+ * `word` leads in place of `Started`. */
+export function startedWords(row: LaunchRow, hour: Clock = HOUR, word = "Started"): string {
   const then = new Date(row.created_at);
   const at = Number.isNaN(then.getTime()) ? "" : ` · ${hour(then)}`;
   const where = row.target === "slot" ? (row.slot ? ` in slot ${row.slot}` : " in a slot")
     : row.target === "headless" ? " headless" : "";
-  return `Started${where}${at}`;
+  return `${word}${where}${at}`;
 }
 
 /**
  * A followed launch after one read of its status path. A row that started ends the launch
  * and empties the box; a failed row, or a refusal met before the row was written, ends it
- * with the reason: the sentence recorded for the failure, else the row's reason word. A row that reads stale while it is still starting gives the button back
- * and is followed on. No row yet, or a read that failed, changes nothing.
+ * with the reason: the sentence recorded for the failure, else the row's reason word. A row
+ * that reads stale while it is still starting gives the button back and is followed on. No
+ * row yet, or a read that failed, changes nothing. A resume's lines say `Resumed` and `The
+ * resume failed`.
  */
 export function followed(flight: Flight, result: ApiResult, hour: Clock = HOUR): Flight {
   if (!following(flight)) return flight;
+  const resume = flight.act === "resume";
+  const fail = (reason: string): Flight => resume ? resumeFailed(reason, flight.notes) : failed(reason, flight.notes);
   const read = followedOf(result);
-  if (read.kind === "refused") return failed(refusalWords(read.refusal), flight.notes);
+  if (read.kind === "refused") return fail(refusalWords(read.refusal));
   if (read.kind !== "row") return flight;
   const row = read.row;
   if (LAUNCHED.includes(row.state)) {
-    return { ...ended([{ name: "started", tone: "plain", text: startedWords(row, hour) }], flight.notes), started: true };
+    const text = startedWords(row, hour, resume ? RESUMED : "Started");
+    return { ...ended([{ name: "started", tone: "plain", text }], flight.notes), started: true };
   }
   if (row.state === "failed") {
-    return failed(read.why || row.reason || "the launcher gave no reason", flight.notes);
+    return fail(read.why || row.reason || "the launcher gave no reason");
   }
   if (row.stale === true && flight.phase === "starting") {
     return { ...flight, phase: "late", lines: [{ name: "late", tone: "plain", text: LATE }] };
@@ -758,4 +845,39 @@ export function stopped(flight: Flight): Flight {
  * longer followed. The lines of a launch still starting stay. */
 export function edited(flight: Flight): Flight {
   return inFlight(flight) ? flight : IDLE;
+}
+
+// --- a resume from the `+` -------------------------------------------------------------------
+
+/** The line while a resume's job starts it. */
+export const RESUMING = "Resuming…";
+/** The word that leads the line of a resume that started. */
+export const RESUMED = "Resumed";
+export const RESUME_FAILED = "The resume failed: ";
+
+function resumeFailed(reason: string, notes: Line[] = []): Flight {
+  return ended([{ name: "failed", tone: "problem", text: `${RESUME_FAILED}${reason}` }], notes);
+}
+
+/**
+ * Reads `/api/resume`'s answer. 202 starts the follow of the new launch's row, with the
+ * resume's words. A refusal ends it with `<problem>. <hint>`, a request used already with
+ * the answer's own text, and a terminal launch's answer with its command to copy (`copy`).
+ */
+export function resumeSent(result: ApiResult): { flight: Flight; copy: string | null } {
+  const outcome = outcomeOf(result);
+  switch (outcome.kind) {
+    case "started":
+      return { copy: null, flight: { phase: "starting", lines: [{ name: "starting", tone: "plain", text: RESUMING }],
+                                     notes: [], status: outcome.status, started: false, act: "resume" } };
+    case "refused":
+      if (outcome.command !== null) return { copy: outcome.command, flight: PRESSED };
+      return { copy: null, flight: ended([{ name: "refused", tone: "problem", text: refusalWords(outcome.refusal) }]) };
+    case "command":
+      return { copy: outcome.command, flight: PRESSED };
+    case "used":
+      return { copy: null, flight: ended([{ name: "used", tone: "problem", text: outcome.text }]) };
+    default:
+      return { copy: null, flight: resumeFailed(outcome.text) };
+  }
 }
