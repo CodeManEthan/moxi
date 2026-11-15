@@ -269,6 +269,29 @@ def test_a_push_never_moves_the_remote_target_off_a_line_that_lacks_the_landing(
     assert ended(path) is None
 
 
+def _refs(repo) -> dict[str, str]:
+    listed = repo.git("for-each-ref", "--format=%(refname) %(objectname)")
+    return dict(line.split() for line in listed.splitlines())
+
+
+def test_reading_the_remote_target_changes_only_its_remote_tracking_branch(
+        repo, tmp_path):
+    repo.git("push", "-q", "origin", "main")
+    landing = repo.rev("main")
+    later = _push_on_from_a_clone(repo, tmp_path, "later.txt")
+    before = _refs(repo)
+
+    there = finishing._remote_holds(repo.root, "origin", "main", landing)
+
+    after = _refs(repo)
+    assert there == later
+    assert before["refs/remotes/origin/main"] == landing
+    assert {name: rev for name, rev in after.items() if before.get(name) != rev} == {
+        "refs/remotes/origin/main": later}
+    assert before.keys() == after.keys()
+    assert not (repo.root / ".git" / "FETCH_HEAD").exists()
+
+
 # -- a command ------------------------------------------------------------------------------
 
 def test_a_command_runs_in_the_worktree_with_its_placeholders_after_its_start_is_recorded(

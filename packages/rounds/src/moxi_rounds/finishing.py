@@ -549,7 +549,10 @@ def _remote_git(root: Path, *args: str) -> _Said:
 def _remote_holds(root: Path, remote: str, target: str, landing: str) -> str | None:
     """The commit `remote`'s branch `target` is at when it holds `landing` (is it, or
     has it as an ancestor); None when it does not, or can't be read. A head this repo
-    lacks is fetched with no ref changed, so its history can be read."""
+    lacks is fetched so its history can be read. The fetch writes no FETCH_HEAD and
+    names no ref to write, but git still refreshes the remote-tracking branch
+    `refs/remotes/<remote>/<target>` from it, as a push that succeeds does; it changes
+    no other ref."""
     ref = f"refs/heads/{target}"
     listed = _remote_git(root, "ls-remote", remote, ref)
     heads = [line.split()[0] for line in listed.said.splitlines()
