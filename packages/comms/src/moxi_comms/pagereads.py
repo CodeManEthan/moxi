@@ -624,8 +624,8 @@ def thread(call: Any) -> dict[str, Any]:
     `a` and `b`, or by or to `a` without `b`, oldest first: the newest `limit` (6 by
     default) below `before`, read newest first back through the whole record, with
     `earlier`, the pair's messages before the oldest sent; or, with `after`, every one
-    above it and `changed`, the books' rows of `a` and `b` for the messages at or below
-    it. `count_today` is the pair's messages today. A failure is a 200 with `state`
+    above it and `changed`, the books' rows of the messages at or below it: `a`'s and
+    `b`'s, or, without `b`, every row of `a`'s messages. `count_today` is the pair's messages today. A failure is a 200 with `state`
     `error`, never a 500."""
     query = call.query
     today = _today()
@@ -653,7 +653,7 @@ def thread(call: Any) -> dict[str, Any]:
                 found = [r for r in map(pair.match,
                                         store.record.history(store.room, after=after))
                          if r is not None]
-                out["changed"] = _changed(store.conn, [a, *([b] if b else [])], after)
+                out["changed"] = _changed(store, pair, after)
             out["messages"] = shaped(store, found)
             start, _ = day_bounds(today)
             out["count_today"] = sum(pair.match(msg) is not None
@@ -689,13 +689,23 @@ def _back_through(store: Store, pair: _Pair, before: str | None,
     return kept, ({"count": count, "first_at": float(first_at)} if count else None)
 
 
-def _changed(conn: sqlite3.Connection, names: list[str],
-             after: str) -> list[dict[str, Any]]:
-    # Each message at or below `after` with a row for one of `names` in the books, with
-    # those names' rows, by message id.
-    marks = ", ".join("?" * len(names))
-    rows = _rows_where(conn, f"name IN ({marks}) AND message_id <= ?",
-                       [*names, int(after)])
+def _changed(store: Store, pair: _Pair, after: str) -> list[dict[str, Any]]:
+    # The read state of every recipient the view shows, for the messages at or below
+    # `after`, by message id. Between two names: each message with a row for `a` or
+    # `b`, with those rows. By or to one name: each of its messages with a row for any
+    # name, with all its rows; a message with no row for `a` is read from the record to
+    # see whether it is `a`'s.
+    if pair.b is not None:
+        rows = _rows_where(store.conn, "name IN (?, ?) AND message_id <= ?",
+                           [pair.a, pair.b, int(after)])
+    else:
+        rows = _rows_where(store.conn, "message_id <= ?", [int(after)])
+        for mid in list(rows):
+            if any(row["qualified"] == pair.a for row in rows[mid]):
+                continue
+            msg = store.record.get_message(mid)
+            if msg is None or pair.match(msg) is None:
+                del rows[mid]
     return [{"message_id": mid, "rows": rows[mid]} for mid in sorted(rows, key=int)]
 
 

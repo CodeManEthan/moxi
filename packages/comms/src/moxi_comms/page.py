@@ -13,8 +13,8 @@
     GET /api/queue    one address's messages in the books' queue, oldest first, each
                       with that address's row first
     GET /api/thread   the messages between two addresses, or by or to one, oldest
-                      first, and on a refresh the newer ones and the two addresses'
-                      rows in the books
+                      first, and on a refresh the newer ones and the rows in the books
+                      of every recipient shown
 
 The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
 --json` prints, and the `Roster` it was joined from; the mail read from one
@@ -206,9 +206,11 @@ QUEUE = {
 #: `earlier`, the pair's messages before the oldest sent, how many and the oldest one's
 #: time, or null when there are none; `changed` is null. With `after` (the newest
 #: message id the page holds), a refresh: every message of the pair above it, `earlier`
-#: null, and `changed`, each message at or below `after` with a row in the books for `a`
-#: or `b`, with those rows; a message the page holds that `changed` doesn't list has no
-#: row for either. `count_today` is the pair's messages today, `today` the page
+#: null, and `changed`, the read state of every recipient the view shows: between `a`
+#: and `b`, each message at or below `after` with a row in the books for either, with
+#: those rows, so a message the page holds that `changed` doesn't list has no row for
+#: either; without `b`, each of `a`'s messages at or below `after` with a row for any
+#: name, with all its rows, so a message not listed has none. `count_today` is the pair's messages today, `today` the page
 #: server's local date. `state` and `detail` are as `MESSAGES`'; an error answers no
 #: message.
 THREAD = {

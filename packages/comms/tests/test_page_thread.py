@@ -2,8 +2,8 @@
 
 The messages between two addresses, or by or to one (`All mail with`), matched by the
 one rule with no directory query; attribution runs only on the messages sent. A refresh
-with `after` reads only the newer messages and sends the two addresses' rows in the
-books. The kit (the local-backend rig, the pinned date, `post`, the strict app) is
+with `after` reads only the newer messages and sends the books' rows of every recipient
+the view shows. The kit (the local-backend rig, the pinned date, `post`, the strict app) is
 `test_page_messages.py`'s.
 """
 
@@ -248,7 +248,30 @@ def test_changed_holds_only_the_two_addresses_rows_at_or_below_after(rig, today)
     changed = read(a=MAIN, b=PLANNER, after=both.id)["changed"]
     assert changed == [{"message_id": both.id, "rows": [
         {"qualified": MAIN, "state": "waiting", "held": False, "takeable": True}]}]
-    assert read(a=OTHER, after=both.id)["changed"][0]["rows"][0]["qualified"] == OTHER
+    assert [r["qualified"] for r in read(a=OTHER, after=both.id)["changed"][0]["rows"]] == [
+        MAIN, OTHER], "all mail with one name carries every row of its messages"
+
+
+def test_all_mail_with_one_name_refreshes_every_recipients_row(rig, today):
+    """In `All mail with` a message's every recipient is shown, so a refresh carries
+    each one's row: a message by `a` to another name clears when that name reads it."""
+    sent = post(rig, at(today, 1, 1), "to the other", to=(OTHER,), by=MAIN)
+    among = post(rig, at(today, 1, 2), "to both", to=(MAIN, OTHER), by=PLANNER)
+    post(rig, at(today, 1, 3), "elsewhere", to=(OTHER,), by=PLANNER)
+    for mid in (sent.id, among.id):
+        assert wait_until(lambda mid=mid: queued(mid, OTHER))
+    assert wait_until(lambda: queued(among.id, MAIN))
+    drop_row(among.id, MAIN)
+    newest = read(a=MAIN)["messages"][-1]["message_id"]
+    assert newest == among.id
+    changed = {c["message_id"]: [(r["qualified"], r["state"]) for r in c["rows"]]
+               for c in read(a=MAIN, after=newest)["changed"]}
+    assert changed == {sent.id: [(OTHER, "waiting")], among.id: [(OTHER, "waiting")]}
+    drop_row(sent.id, OTHER)
+    changed = read(a=MAIN, after=newest)["changed"]
+    assert [c["message_id"] for c in changed] == [among.id], "read by the other: cleared"
+    assert read(a=MAIN, b=PLANNER, after=newest)["changed"] == [], (
+        "a thread between two names carries only their rows")
 
 
 # --- the query and the store -------------------------------------------------------------

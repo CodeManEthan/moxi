@@ -63,8 +63,9 @@
   newest `limit` (6 by default, at most 100) below the message id `before`, with
   `earlier`, how many of theirs came before and the oldest one's time, and
   `count_today`. With `after`, the newest message id the page holds, it reads only the
-  messages above it and adds `changed`: the two names' rows in the delivery books for
-  the messages at or below it. It asks the daemon nothing.
+  messages above it and adds `changed`: for the messages at or below it, the two names'
+  rows in the delivery books, or, with one name, every row of that name's messages. It
+  asks the daemon nothing.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the
