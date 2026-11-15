@@ -70,7 +70,9 @@ test("his messages read you, a message to him reads to you, a withdrawn one take
   assert.equal(his.name, "you");
   assert.equal(his.where, "to reviewer · taken back");
   assert.equal(his.text, "Review from\\n the branch head. Thanks");
-  const toHim = messageRow(message("2", { author: "reviewer", to: ["operator"] }), readers(), when);
+  // His own copy has no read state: he is reading it.
+  const toHim = messageRow(message("2", { author: "reviewer", to: ["operator"], rows: [waiting("operator")] }),
+                           readers(), when);
   assert.deepEqual([toHim.where, toHim.thread], ["to you", { a: "reviewer", b: "operator" }]);
   const many = messageRow(message("3", { to: ["builder-1", "reviewer"], rows: [waiting("builder-1"), waiting("reviewer")] }),
                           readers(), when);

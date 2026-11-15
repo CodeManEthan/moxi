@@ -77,7 +77,7 @@ test("the header: one message, none today, nobody owing; an unbound reader and n
 
 test("with him: you, you owe one reply, no Message to yourself; another recipient's row is not this thread's", () => {
   const asks = message("1000000000000000020", { author: "reviewer", to: ["operator", "planner"],
-                                                rows: [waiting("planner")] });
+                                                rows: [waiting("operator"), waiting("planner")] });
   const mine = message("1000000000000000021", { author: "operator", author_tier: "operator", to: ["reviewer"],
                                                 posture: "none", reply_to: null, withdrawn: true });
   const view = threadView(held([asks, mine], { count_today: 2 }),

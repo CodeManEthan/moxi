@@ -196,7 +196,9 @@ export function threadView(held: ThreadHeld, facts: ThreadFacts): ThreadView {
   const owes = b === null ? null : owesWords(a, b, facts);
   if (owes !== null) parts.push(owes);
   const bound = (qualified: string): boolean => facts.roster.some((row) => row.qualified === qualified && row.live);
-  const shown = (row: Delivery): boolean => b === null || row.qualified === a || row.qualified === b;
+  // His own copy has no read state on his page: he is reading it.
+  const shown = (row: Delivery): boolean => !him.has(row.qualified)
+    && (b === null || row.qualified === a || row.qualified === b);
   const messages = held.messages.map((message): ThreadMessage => {
     const said = message.withdrawn ? [TAKEN_BACK]
       : [...new Set(message.rows.filter(shown).map((row) => readWords(row, { bound: bound(row.qualified),
