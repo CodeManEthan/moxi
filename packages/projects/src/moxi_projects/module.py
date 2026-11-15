@@ -1,11 +1,12 @@
 """The announcement of Moxi's projects module, which moxi.modules reads.
 
-It offers interface 1, the read API in `moxi_projects.api`, the verb `moxi projects`, and,
-with the `ui` extra, a page in the browser UI shell and three components other pages may
-place: a project picker, a project's card and the add form.
+It offers interfaces 1 and 2 of the read API in `moxi_projects.api` (2 is 1 and
+`for_paths`), the verb `moxi projects`, and, with the `ui` extra, a page in the browser UI
+shell and three components other pages may place: a project picker, a project's card and
+the add form.
 """
 
-INTERFACES = frozenset({1})
+INTERFACES = frozenset({1, 2})
 API = "moxi_projects.api"
 #: What `moxi projects` runs, in process, as `main(argv, prog="moxi projects")`.
 CLI = "moxi_projects.cli:main"
