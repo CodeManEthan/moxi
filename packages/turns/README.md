@@ -63,6 +63,8 @@ its switch, for example `moxi config set turns guards.removal true`:
   approval even in bypass mode, where an unattended agent would sit blocked. Its rules
   are coarse text rules: an `rm` or `rmdir` beside a `cd` and a `*`, beside a word that is
   not a plain path, beside more than 64 substitutions, or inside a shell's `-c` script.
+  It skips the body of a quoted heredoc (`<<'EOF'`) fed to `cat`, `tee`, `python3 -` or
+  `node -`, so file content can go there.
 - **The no-nested-agents guard** (`turns.no-nested-agents`, switch
   `guards.no_nested_agents`): refuses a subagent's call to start a subagent of its own
   (Claude Code's `Agent` and `Task`, Codex's `spawn_agent`), and tells it to report to

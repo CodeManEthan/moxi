@@ -8,6 +8,9 @@ The rows are those of the shell hook the guard was ported from, run against Clau
 2.1.289: what Claude Code's own removal check stops for approval, and what the guard
 refuses. Rule C keeps only its removal arm here, so a shell with -c and no removal word
 passes where the hook refused it.
+
+The heredoc rows are the later hook's, which cuts a file-writing heredoc's body before its
+rule reads the command; the guard makes the same cut.
 """
 
 CWD = "/home/user/proj/agents"
@@ -63,7 +66,8 @@ case("row 21 (second scan)", "c''d t && rm -rf sub/*", "T")
 case("row 22 (second scan)", r"cd t && r\m -rf sub/*", "TW")
 
 # Rule T refuses more than Claude Code stops (rows 23 to 31): Claude Code runs these.
-case("row 23", "cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", "TW")
+# Row 23's body is a quoted heredoc fed to cat, which the heredoc cut takes out.
+case("row 23", "cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", "pass")
 case("row 24", 'git commit -m "cd x && rm *"', "TW")
 case("row 25a", "cd t && rm -f *.txt", "TW")
 case("row 25b", "cd t && rm -rf s*", "TW")
@@ -557,6 +561,60 @@ case("C: no -c passes", "bash x.sh $X {a,b} $'x'", "pass")
 case("C: no shell name passes", "python3 -c 'print(1)' $X {a,b}", "pass")
 
 
+
+
+# The heredoc cut: the body of a quoted heredoc fed to cat, tee, python3 - or node - is cut
+# before any rule reads the command. These pass; the "heredoc kept" rows below are still
+# read whole, and refuse as they did before the cut.
+case("heredoc: cat > f <<'EOF'", "cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: cat > f <<"EOF"', 'cat > s.sh <<"EOF"\ncd x\nrm -rf *\nEOF', 'pass')
+case('heredoc: cat >> f', "cat >> s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case("heredoc: cat <<'EOF' > f", "cat <<'EOF' > s.sh\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: a space before the delimiter', "cat > s.sh << 'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: \\EOF is quoted', 'cat > s.sh <<\\EOF\ncd x\nrm -rf *\nEOF', 'pass')
+case('heredoc: tee', "tee s.sh <<'EOF' >/dev/null\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: tee -a', "tee -a s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: /usr/bin/cat', "/usr/bin/cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: an assignment before cat', "LC_ALL=C cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: python3 -', "python3 - <<'PY'\nimport os\nos.chdir('t')\nos.system('rm -rf *')\nPY", 'pass')
+case('heredoc: python3 -I - with an argument', "python3 -I - /home/user/proj/agents <<'PY'\nos.chdir('t'); os.system('rm -rf *')\nPY", 'pass')
+case('heredoc: node -', "node - <<'JS'\nprocess.chdir('t'); run('rm -rf *')\nJS", 'pass')
+case('heredoc: <<- with tab-indented closing line', "cat > s.sh <<-'EOF'\n\tcd x\n\trm -rf *\n\tEOF", 'pass')
+case('heredoc: after a cd elsewhere on the line, no rm or star outside', "cd t && cat > s.sh <<'EOF'\nrm -rf *\nEOF", 'pass')
+case('heredoc: two file bodies', "cat > a <<'A'\ncd x && rm -rf *\nA\ncat > b <<'B'\nrm *\nB", 'pass')
+case('heredoc: two on one line', "cat > a <<'A'; cat > b <<'B'\ncd x\nA\nrm -rf *\nB", 'pass')
+case('heredoc: inside $( )', "x=$(cat <<'EOF'\ncd x\nrm -rf *\nEOF\n)", 'pass')
+case("heredoc: after $'...' with an escaped quote", "echo $'it\\'s'; cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: after a comment with an apostrophe', "# don't\ncat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: an unquoted one before it holds an apostrophe', "cat > a <<A\ndon't\nA\ncat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: then && bash on the same line', "cat > s.sh <<'EOF' && bash s.sh\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: { before cat', "{ cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF\n}", 'pass')
+case('heredoc: ! before cat', "! cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: do before cat', "for f in a; do cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF\ndone", 'pass')
+case('heredoc: then before cat', "if true; then cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF\nfi", 'pass')
+case('heredoc: else before cat', "if false; then :; else cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF\nfi", 'pass')
+case('heredoc: time before cat', "time cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc: leading words and an assignment together', "! time LC_ALL=C cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'pass')
+case('heredoc kept: unquoted delimiter', 'cat > s.sh <<EOF\ncd x\nrm -rf *\nEOF', 'TW')
+case("heredoc kept: bash <<'EOF'", "bash <<'EOF'\ncd x\nrm -rf *\nEOF", 'TW')
+case("heredoc kept: sh -s <<'EOF'", "sh -s <<'EOF'\ncd x\nrm -rf *\nEOF", 'TW')
+case('heredoc kept: python3 with no - argument', "python3 <<'PY'\nos.chdir('t'); os.system('rm -rf *')\nPY", 'TW')
+case('heredoc kept: git commit -F -', "git commit -F - <<'EOF'\ncd x && rm -rf *\nEOF", 'TW')
+case('heredoc kept: cat piped to bash', "cat <<'EOF' | bash\ncd x\nrm -rf *\nEOF", 'TW')
+case('heredoc kept: cat piped on with /&', "cat <<'EOF' |& bash\ncd x\nrm -rf *\nEOF", 'TW')
+case('heredoc kept: no closing line', "cat > s.sh <<'EOF'\ncd x\nrm -rf *\n", 'TW')
+case('heredoc kept: closing line indented without <<-', "cat > s.sh <<'EOF'\ncd x\nrm -rf *\n  EOF", 'TW')
+case('heredoc kept: operator inside double quotes', 'cat "<<\'E\'"\ncd t && rm -rf *\nE', 'TW')
+case('heredoc kept: operator inside single quotes', 'bash -c \'cat > f <<"E"\ncd t; rm -rf *\nE\n\'', 'TWC')
+case('heredoc kept: a live line after an operator inside single quotes', 'echo \'; cat > f <<"E"\'\ncd t && rm -rf *\nE', 'TW')
+case('heredoc kept: sudo is not a leading word', "sudo cat > s.sh <<'EOF'\ncd x\nrm -rf *\nEOF", 'TW')
+case('heredoc kept: operator in a comment', "# cat > f <<'E'\ncd t && rm -rf *\nE", 'TW')
+case('heredoc kept: <<< is a here-string', "cat <<<'E'\ncd t && rm -rf *\nE", 'TW')
+case('heredoc kept: a cd glob removal after the body', "cat > s.sh <<'EOF'\nx\nEOF\ncd t && rm -rf *", 'TW')
+case("heredoc kept: a cd glob removal on the operator's line", "cd t && rm -rf * && cat > s.sh <<'EOF'\nx\nEOF", 'TW')
+case('heredoc kept: the second of two, fed to bash', "cat > a <<'A'\ncd x\nA\nbash <<'B'\ncd t; rm -rf *\nB", 'TW')
+case("heredoc kept: row 17's unquoted body", 'cat > s.sh <<EOF\n$(cd t && rm -rf sub/*)\nEOF', 'TW')
+case('extra: CLAUDE.md heredoc exemption, python3 -', "python3 - <<'EOF'\nimport os; os.chdir('/x'); os.system('rm -rf *')\nEOF", 'pass')
 
 # With HOME unset a ~ word refuses (57, 59b.2), and an upper-case home (53i) cannot be
 # known as home; from a cwd outside home it then passes. Every other "row" case reads the

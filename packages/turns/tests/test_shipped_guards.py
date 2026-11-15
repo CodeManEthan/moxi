@@ -212,6 +212,18 @@ def test_rule_cs_gate(text, want):
     assert removal.shell_c(text) is want
 
 
+@pytest.mark.parametrize("text,want", [
+    ("cat > s <<'E'\nrm *\nE\necho", "cat > s <<'E'\nE\necho"),
+    ("cat > s <<-'E'\n\trm *\n\tE", "cat > s <<-'E'\n\tE"),
+    ("cat > a <<'A'; tee b <<\\B\nx\nA\ny\nB", "cat > a <<'A'; tee b <<\\B\nA\nB"),
+    ("cat <<'E' | sh\nrm *\nE", "cat <<'E' | sh\nrm *\nE"),
+    ("cat > s <<'E' || true\nrm *\nE", "cat > s <<'E' || true\nE"),
+    ("cat > s <<E\nrm *\nE", "cat > s <<E\nrm *\nE"),
+    ("cat > s <<'E'\nrm *\n", "cat > s <<'E'\nrm *\n")])
+def test_the_heredoc_cut(text, want):
+    assert removal.cut_heredocs(text) == want
+
+
 def test_the_four_reasons_join_in_order_and_name_no_ones_paths():
     command = "cd t && rm -rf * ; bash -c 'echo hi' ; " + rc.subs("$(", ")", 65)
     answer = removal.judge(call_for(command))
