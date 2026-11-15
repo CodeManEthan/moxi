@@ -107,6 +107,8 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
   together, in milliseconds. Default 300.
 - `question_mode.origins`: the prompt origins question mode counts as yours. Default
   `["composer"]`, a prompt typed at this terminal.
+- `question_mode.prose_words`: words that ask for prose: a prompt holding one gets no
+  question-mode reminder. Default `["prose"]`.
 
 `hold.wait_ms` is retired: a file that still sets it is told to set
 `stop_handler.wait_ms` instead.

@@ -380,7 +380,14 @@ def test_the_real_argument_reader_reads_a_process():
     ("  <task-notification>go through open questions</task-notification>", False),
     ("say hi", False), ("", False), (None, False), (["go through open questions"], False)])
 def test_nudges(text, want):
-    assert qm.nudges(text) is want
+    assert qm.nudges(text, ("prose",)) is want
+
+
+def test_nudges_reads_the_prose_words_it_is_given():
+    text = "go through open questions in pros"
+    assert qm.nudges(text, ("prose",)) is True
+    assert qm.nudges(text, ("prose", "pros")) is False
+    assert qm.nudges("go through open questions in prose", ()) is True
 
 
 def prompt_event(text, origin, env=None) -> SessionEvent:
@@ -403,6 +410,19 @@ def test_the_reminder_comes_only_with_question_mode_on_and_a_counted_origin(turn
                             '[question_mode]\norigins = ["plugin"]\n')
     assert qm.on_prompt(prompt_event(text, "plugin")) == qm.REMINDER
     assert qm.on_prompt(prompt_event(text, "composer")) is None
+
+
+def test_the_reminder_reads_the_prose_words_setting(turns_env):
+    text = "let's go through the open questions in pros"
+    write_config(turns_env, "[guards]\nquestion_mode = true\n")
+    assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
+    write_config(turns_env, '[guards]\nquestion_mode = true\n'
+                            '[question_mode]\nprose_words = ["Prose", "PROS"]\n')
+    assert qm.on_prompt(prompt_event(text, "composer")) is None
+    assert qm.on_prompt(prompt_event("go through the open questions in prose",
+                                     "composer")) is None
+    assert qm.on_prompt(prompt_event("go through the open questions",
+                                     "composer")) == qm.REMINDER
 
 
 def test_the_reminder_names_no_one():

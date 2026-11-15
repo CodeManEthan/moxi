@@ -91,6 +91,13 @@ default = ["composer"]
 doc = "The prompt origins question mode counts as the person's own (composer is a prompt typed at this terminal)."
 read = "use"
 
+[question_mode.prose_words]
+type = "list"
+items = "str"
+default = ["prose"]
+doc = "Words that ask for prose: a prompt holding one gets no question-mode reminder."
+read = "use"
+
 # Keys an earlier turns read, kept declared so a file that still sets one is told what to
 # do rather than refused as unknown.
 
