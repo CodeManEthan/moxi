@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from moxi_rounds import (api, asking, closing, dropping, freezing, holds, log, opening,
-                         ruling, state, verdicts)
+from moxi_rounds import (api, asking, closing, dropping, freezing, holds, log, numbers,
+                         opening, ruling, state, verdicts)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
 
@@ -139,14 +139,16 @@ def test_a_round_that_builds_nothing_closes_on_the_verdict_that_verifies_its_des
     assert status(folder) == "closed"
 
 
-def test_the_closing_event_is_the_verb_s_own_and_holds_nothing_more(folder):
+def test_the_closing_event_is_the_verb_s_own_and_holds_the_round_s_numbers(folder):
     fold(folder)
     verdict(folder)
 
     recorded, closed = events(folder)[-2:]
 
     assert closed == {"v": 1, "n": recorded["n"] + 1, "at": closed["at"],
-                      "actor": "critic", "type": "round.closed"}
+                      "actor": "critic", "type": "round.closed",
+                      "numbers": numbers.of(state.fold(events(folder)[:-1]))}
+    assert closed["numbers"]["design_passes"] == 1 and closed["numbers"]["folds"] == 1
 
 
 def test_a_verdict_that_sends_the_design_back_closes_nothing(folder):

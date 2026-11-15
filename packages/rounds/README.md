@@ -38,7 +38,7 @@ It does not yet do the rest of a round:
 
 - removing a finished build's worktree, scratch folder and branch;
 - decisions a build records for the operator to ratify;
-- the retrospective, and the numbers of a round that ended;
+- the retrospective, `retro.md` and `list --numbers`;
 - answers prepared ahead for a sitting with the operator;
 - parent rounds.
 
@@ -609,7 +609,14 @@ build is ruled, and every finished build has a report that declares its decision
 build report, or a majors report naming its stage). The operator's skip of `ratify`, or
 the project's `ratify = "off"`, lets the decisions past. While a major decision of a
 finished build is unruled, `next`, `show` and `list` give the round's `ratify` step as
-ready and the operator's, with the command that rules each. A flow with a `retro` step
+ready and the operator's, with the command that rules each.
+
+The event that ends a round, its close or its drop, holds the round's numbers, counted
+from its log: design passes, `fold-first` verdicts, folds and records-only folds, the
+lead's decisions on a thread, findings by severity, re-checks and drift re-checks,
+failed check runs, questions by where they came from, decisions accepted and rejected,
+skips, step-ups, repairs, corrections, dropped builds, cleared locks, and reports
+flagged `extra-full-pass` or `model-below-tier`. A flow with a `retro` step
 waits for it too, until that step is skipped; the retro report is not in this version.
 
 ## Dropping a round

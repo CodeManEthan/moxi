@@ -162,7 +162,7 @@ TYPES = _types(
     # None for a branch that is not there), and, for a round, where the questions
     # went.
     EventType("build.dropped", ("stage", "by", "record", "tips", "questions")),
-    EventType("round.dropped", ("by", "record", "tips", "questions")),
+    EventType("round.dropped", ("by", "record", "tips", "questions", "numbers")),
     # A thread of design verification was closed or its risk accepted.
     EventType("thread.decided", ("thread", "decision", "record")),
     # A record was derived again: what (`base`, the base of the open build of

@@ -9,8 +9,8 @@ import json
 import pytest
 from moxi import cli
 
-from moxi_rounds import (asking, dropping, holds, index, log, marking, moving, opening,
-                         questions, ruling, state, write)
+from moxi_rounds import (asking, dropping, holds, index, log, marking, moving, numbers,
+                         opening, questions, ruling, state, write)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, Locked, NoRound, Refused
 
@@ -103,7 +103,8 @@ def test_the_operator_drops_a_round_that_holds_his_rulings(rounds, capsys):
     [event] = added(round_log(rounds), before)
     assert event == {"actor": "curator", "type": "round.dropped", "at": event["at"],
                      "by": "operator", "record": "comms:30", "tips": [],
-                     "questions": {}}
+                     "questions": {},
+                     "numbers": numbers.of(state.fold(log.read(round_log(rounds))[:-1]))}
     found = held(round_log(rounds))
     assert found.status == state.DROPPED
     assert found.ended == state.Ended(how="dropped", by="operator", record="comms:30",

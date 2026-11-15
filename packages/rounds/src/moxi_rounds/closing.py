@@ -33,8 +33,8 @@ prints.
 A finished build reads as done in every step of its stage without a read of git, so
 the close reads no git.
 
-The closing event holds nothing yet: `entry` is where what a round is closed with is
-added.
+The closing event holds the round's numbers (`numbers.of`), counted from its log as the
+close finds it.
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ from collections.abc import Callable, Iterator
 from . import builds as built
 from . import decisions, findings, flows, folders, holds, questions, report_block, skips
 from . import stages, steps, write
+from . import numbers as counted
 from . import settings as own
 from . import waits as waiting_items
 from . import state as states
@@ -173,7 +174,9 @@ def is_due(state: states.State, *, ratify: str | None = None) -> bool:
 def entry(state: states.State, *, ratify: str | None = None) -> write.Entry | None:
     """The event that closes the round `state` is of, or None while it is not to be
     closed: it has ended, or its close waits for something."""
-    return write.Entry(CLOSED, {}) if is_due(state, ratify=ratify) else None
+    if not is_due(state, ratify=ratify):
+        return None
+    return write.Entry(CLOSED, {"numbers": counted.of(state)})
 
 
 def said(waited: tuple[str, ...] | list[str]) -> str:

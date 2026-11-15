@@ -56,6 +56,7 @@ from pathlib import Path
 
 from . import (builds, checking, ending, folders, index, moving, open_builds, pointers,
                questions, removal, sweeping, waits, write)
+from . import numbers as counted
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadName, NoLog, NoRound, RoundsError, Unmet
@@ -223,7 +224,7 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
         entries.append(write.Entry("round.dropped", {
             "by": by, "record": record,
             "tips": [_tip(one) for one in builds.builds(view.state) if one.ended is None],
-            "questions": went}))
+            "questions": went, "numbers": counted.of(view.state)}))
         return entries
 
     try:
