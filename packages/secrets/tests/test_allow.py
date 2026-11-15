@@ -340,7 +340,7 @@ def test_the_private_file_elsewhere_is_refused(tmp_path, config_dir):
     assert len(Allowlist.read(tmp_path / "missing", None)) == 0
 
 
-def test_the_callers_git_directory_counts_whatever_its_name(tmp_path):
+def test_the_callers_git_dir_counts_whatever_its_name(tmp_path):
     # A bare clone's directory, or one made with --separate-git-dir, isn't named .git.
     common = tmp_path / "proj-a-bare"
     common.mkdir()

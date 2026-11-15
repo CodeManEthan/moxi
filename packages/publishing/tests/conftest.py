@@ -25,12 +25,12 @@ GITCONFIG = ("[user]\n\tname = operator\n\temail = operator@example.test\n"
 
 
 def git(cwd: Path, *args: str, check: bool = True, env: dict | None = None,
-        input: str | None = None) -> subprocess.CompletedProcess:
+        stdin_data: str | None = None) -> subprocess.CompletedProcess:
     """Run git in `cwd` with this process's (fenced) environment plus `env`."""
     full = dict(os.environ)
     full.update(env or {})
     done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                          env=full, timeout=60, input=input)
+                          env=full, timeout=60, input=stdin_data)
     if check and done.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed ({done.returncode}):\n"
                              f"{done.stdout}{done.stderr}")
@@ -273,7 +273,7 @@ def served(fake, monkeypatch):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802 - the name http.server calls
+        def do_GET(self):  # noqa: N802 -- the name http.server calls
             status, data = fake.answer(self.path)
             body = json.dumps(data).encode() if data is not None else b""
             self.send_response(status)

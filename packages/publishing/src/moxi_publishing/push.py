@@ -339,7 +339,7 @@ class _Push(_Reader):
                                         "object")
                     continue
             if ref.startswith(_HEADS):
-                self.judge_branch(u, ref[len(_HEADS):], deleting, creating, here)
+                self.judge_branch(u, ref[len(_HEADS):], deleting=deleting, creating=creating, here=here)
                 continue
             if ref.startswith(_TAGS):
                 if creating and not deleting:
@@ -384,7 +384,7 @@ class _Push(_Reader):
         verdict = tags.gate(self.git, name, where=where, tag_object=local_sha)
         self.reasons += [f"{_TAGS}{name}: {line}" for line in verdict.refusals()]
 
-    def judge_branch(self, u, branch: str, deleting: bool, creating: bool, here) -> None:
+    def judge_branch(self, u, branch: str, *, deleting: bool, creating: bool, here) -> None:
         ref = u.remote_ref
         if deleting:
             if branch == self.main or branch in self.protected:

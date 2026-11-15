@@ -619,7 +619,7 @@ def _run_once(plan: ReleaseTest, resolution: str, *, uv: str, run, web) -> tuple
                    timeout_s=INSTALL_TIMEOUT_S)
         if done.returncode != 0:
             return False, [f"{resolution}: the venv can't be made: {_err(done)}"]
-        index = tags.index_from_environment()
+        index = tags.index_from_env()
         wanted = [f"{plan.dist}[{','.join(plan.extras)}] @ {Path(plan.wheel).resolve().as_uri()}"
                   if plan.extras else f"{plan.dist} @ {Path(plan.wheel).resolve().as_uri()}"]
         # The siblings are named as well, so the lowest resolution reaches them: it lowers

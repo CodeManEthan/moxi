@@ -151,8 +151,8 @@ def private_place_ok(path: Path, *, git_dir: Path | None = None) -> bool:
 def _read_file(path: Path) -> str | None:
     """`path`'s text as its bytes decode, line ends kept; None when it does not exist."""
     try:
-        with path.open(encoding="utf-8", newline="") as handle:
-            return handle.read()
+        with path.open(encoding="utf-8", newline="") as fh:
+            return fh.read()
     except FileNotFoundError:
         return None
     except UnicodeDecodeError:
@@ -162,7 +162,7 @@ def _read_file(path: Path) -> str | None:
 def _lines_of(content: str, where: str, *, public: bool) -> list[_Line]:
     lines = []
     for n, raw in enumerate(_translated(content).split("\n"), 1):
-        parsed = _parse(raw, where, n, public)
+        parsed = _parse(raw, where, n, public=public)
         if parsed is not None:
             lines.append(parsed)
     return lines

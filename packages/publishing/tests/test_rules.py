@@ -55,7 +55,7 @@ def test_every_rule_applies_somewhere():
 
 # -- the ruling tag's start set -------------------------------------------------------------
 
-def _starts(items, ignorecase: bool) -> set[str]:
+def _starts(items, *, ignorecase: bool) -> set[str]:
     """Every character a match of the parsed pattern `items` can start with; fails on a
     construct this reader doesn't know, so a new branch can't slip past it."""
     import re
@@ -84,11 +84,11 @@ def _starts(items, ignorecase: bool) -> set[str]:
             _group, add, remove, inner = av
             on = (ignorecase or bool(add & c.SRE_FLAG_IGNORECASE)) and not (
                 remove & c.SRE_FLAG_IGNORECASE)
-            return _starts(inner, on)
+            return _starts(inner, ignorecase=on)
         if op is c.BRANCH:
-            return set().union(*(_starts(branch, ignorecase) for branch in av[1]))
+            return set().union(*(_starts(branch, ignorecase=ignorecase) for branch in av[1]))
         if op in (c.MAX_REPEAT, c.MIN_REPEAT) and av[0] >= 1:
-            return _starts(av[2], ignorecase)
+            return _starts(av[2], ignorecase=ignorecase)
         raise AssertionError(f"a branch starts with {op}, which this reader can't follow")
     raise AssertionError("a branch can match empty")
 
@@ -96,7 +96,7 @@ def _starts(items, ignorecase: bool) -> set[str]:
 def test_the_ruling_tags_start_set_is_its_branches_first_characters():
     from re import _parser
 
-    assert _starts(_parser.parse(rules._RULING_TAG), False) == set(rules._RULING_TAG_START)
+    assert _starts(_parser.parse(rules._RULING_TAG), ignorecase=False) == set(rules._RULING_TAG_START)
 
 
 def test_the_lookahead_changes_no_match():

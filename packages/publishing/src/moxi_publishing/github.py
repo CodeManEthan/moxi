@@ -33,7 +33,7 @@ from moxi_publishing.release import Result
 #: How long one `gh api` call may take.
 GH_TIMEOUT_S = 30.0
 #: The environment the release workflow's publish job runs in.
-ENVIRONMENT = "pypi"
+DEPLOYMENT = "pypi"
 #: The release tags the environment may deploy from: `<distribution>-v<version>`.
 RELEASE_TAGS = "*-v*"
 #: The release workflow, as a trusted publisher on the package index names it.
@@ -71,7 +71,7 @@ class State:
 
     repo: dict
     rulesets: list[dict]
-    environment: dict | None
+    deployment: dict | None
     tag_policies: list[dict] | None
     account: dict
     notes: list[str] = field(default_factory=list)
@@ -181,17 +181,17 @@ def read(gh: Gh, github: str) -> State:
         full = gh.get(f"repos/{github}/rulesets/{summary['id']}")
         if full is not None:
             rulesets.append(full)
-    environment = gh.get(f"repos/{github}/environments/{ENVIRONMENT}")
+    deployment = gh.get(f"repos/{github}/environments/{DEPLOYMENT}")
     policies = None
-    if environment is not None and (environment.get("deployment_branch_policy") or {}).get(
+    if deployment is not None and (deployment.get("deployment_branch_policy") or {}).get(
             "custom_branch_policies"):
-        found = gh.get(f"repos/{github}/environments/{ENVIRONMENT}"
+        found = gh.get(f"repos/{github}/environments/{DEPLOYMENT}"
                        "/deployment-branch-policies?per_page=100")
         policies = (found or {}).get("branch_policies", [])
     account = gh.get("user")
     if not account:
         raise Failure("gh is signed in to no account; run gh auth login", 1)
-    return State(repo=repo, rulesets=rulesets, environment=environment,
+    return State(repo=repo, rulesets=rulesets, deployment=deployment,
                  tag_policies=policies, account=account)
 
 
@@ -232,18 +232,18 @@ def _ruleset_differences(github: str, have: dict | None, want: dict) -> list[Dif
     return found
 
 
-def _environment_differences(github: str, state: State) -> list[Difference]:
-    subject = f"environment {ENVIRONMENT}"
+def _deployment_differences(github: str, state: State) -> list[Difference]:
+    subject = f"environment {DEPLOYMENT}"
     account = state.account
-    put = Request("PUT", f"repos/{github}/environments/{ENVIRONMENT}", {
+    put = Request("PUT", f"repos/{github}/environments/{DEPLOYMENT}", {
         "reviewers": [{"type": "User", "id": account["id"]}],
         "prevent_self_review": False,
         "deployment_branch_policy": {"protected_branches": False,
                                      "custom_branch_policies": True},
     })
-    policies = f"repos/{github}/environments/{ENVIRONMENT}/deployment-branch-policies"
+    policies = f"repos/{github}/environments/{DEPLOYMENT}/deployment-branch-policies"
     add_tag = Request("POST", policies, {"name": RELEASE_TAGS, "type": "tag"})
-    env = state.environment
+    env = state.deployment
     if env is None:
         return [Difference(subject, "missing", (put, add_tag))]
     found = []
@@ -312,7 +312,7 @@ def differences(github: str, state: State, *, main: str) -> list[Difference]:
                 left=f"delete it on GitHub, or: gh api --method DELETE "
                      f"repos/{github}/rulesets/{ruleset.get('id')}"))
     found += _security_differences(github, state.repo)
-    found += _environment_differences(github, state)
+    found += _deployment_differences(github, state)
     default = state.repo.get("default_branch")
     if default and default != main:
         found.append(Difference(
@@ -347,7 +347,7 @@ def _publisher_line(root: str, github: str) -> str:
     which = f" ({', '.join(dists)})" if dists else ""
     return (f"PyPI trusted publisher: can't be read from GitHub; on pypi.org each "
             f"distribution{which} needs one for owner {owner}, repository {name}, "
-            f"workflow {WORKFLOW}, environment {ENVIRONMENT}")
+            f"workflow {WORKFLOW}, environment {DEPLOYMENT}")
 
 
 def show(path: str, *, run=None) -> Result:
@@ -386,5 +386,5 @@ def apply(path: str, *, run=None) -> Result:
     return Result(lines, 0)
 
 
-__all__ = ["ENVIRONMENT", "RELEASE_TAGS", "WORKFLOW", "Request", "Difference", "State",
+__all__ = ["DEPLOYMENT", "RELEASE_TAGS", "WORKFLOW", "Request", "Difference", "State",
            "Gh", "expected_rulesets", "read", "differences", "show", "apply"]

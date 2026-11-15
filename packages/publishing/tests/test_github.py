@@ -105,7 +105,7 @@ def test_show_reads_every_field_of_a_ruleset(gh_repo):
     assert lines[4].startswith("PyPI")
 
 
-def test_show_says_when_the_environment_or_a_ruleset_is_missing(gh_repo):
+def test_show_says_when_the_deployment_or_a_ruleset_is_missing(gh_repo):
     gh = FakeGh("settled.json")
     del gh.answers[f"GET {REPO}/environments/pypi"]
     listing = gh.answers[f"GET {REPO}/rulesets?includes_parents=false&per_page=100"]

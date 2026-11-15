@@ -11,7 +11,7 @@ from moxi_publishing import cli
 def twin(repo, rev: str, name: str, text: str) -> str:
     """A commit with `rev`'s parents and message, whose tree has `name` holding `text`."""
     git(repo, "read-tree", rev)
-    blob = git(repo, "hash-object", "-w", "--stdin", input=text).stdout.strip()
+    blob = git(repo, "hash-object", "-w", "--stdin", stdin_data=text).stdout.strip()
     git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{name}")
     tree = git(repo, "write-tree").stdout.strip()
     git(repo, "read-tree", "HEAD")

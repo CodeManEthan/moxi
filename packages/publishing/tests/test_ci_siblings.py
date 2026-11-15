@@ -77,9 +77,9 @@ class Runner:
         return [c for c in self.of("pip", "install") if "--no-deps" in c["argv"]]
 
 
-def wheel(directory: Path, dist: str = "proj_a_extra", version: str = "0.2.0") -> Path:
-    directory.mkdir(exist_ok=True)
-    path = directory / f"{dist}-{version}-py3-none-any.whl"
+def wheel(wheel_dir: Path, dist: str = "proj_a_extra", version: str = "0.2.0") -> Path:
+    wheel_dir.mkdir(exist_ok=True)
+    path = wheel_dir / f"{dist}-{version}-py3-none-any.whl"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(f"{dist}/__init__.py", "")
         archive.writestr("helper.py", "")
@@ -245,7 +245,7 @@ def test_a_failed_install_fails_the_run(tagged, fake):
     assert result.lines[-1] == "highest: the install failed: it broke"
 
 
-def test_an_index_from_the_environment_is_installed_from(tagged, fake, monkeypatch):
+def test_an_index_from_the_env_is_installed_from(tagged, fake, monkeypatch):
     repo, artifact = tagged
     monkeypatch.setenv("MOXI_PUBLISHING_PYPI_URL", "http://index.example.test/")
     runner = Runner({"proj-a": ["0.0.9", []]})

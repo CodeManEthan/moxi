@@ -372,7 +372,7 @@ def _workspace(read, dirs, commit: str, label: str) -> Workspace:
 
 # -- GitHub and the package index -----------------------------------------------------------
 
-def index_from_environment() -> str | None:
+def index_from_env() -> str | None:
     """The package index the environment names in place of pypi.org, or None."""
     return os.environ.get(PYPI_ENV) or None
 
@@ -567,27 +567,27 @@ def gate(git, tag: str, *, where: Where, tag_object: str | None = None,
     if tag_object is not None:
         commit, why = peel(git, tag_object)
         if commit is None:
-            verdict.checks.append(Check(1, False, f"{tag}: {why}"))
+            verdict.checks.append(Check(1, passed=False, said=f"{tag}: {why}"))
             return verdict
     verdict.commit = commit
     try:
         ws = workspace(git, commit)
     except ReleaseError as exc:
-        verdict.checks.append(Check(1, False, f"the workspace at {commit[:12]} can't be "
+        verdict.checks.append(Check(1, passed=False, said=f"the workspace at {commit[:12]} can't be "
                                               f"read: {exc}"))
         return verdict
     parsed = parse_tag(tag, ws.members)
     if parsed is None:
-        verdict.checks.append(Check(1, False, f"{tag} names no member and version at "
+        verdict.checks.append(Check(1, passed=False, said=f"{tag} names no member and version at "
                                               f"{commit[:12]}"))
         return verdict
     dist, version = verdict.dist, verdict.version = parsed
     member = ws.members[dist]
     if member.version is None or not same_version(member.version, version):
-        verdict.checks.append(Check(1, False, f"{dist}'s project.version at {commit[:12]} "
+        verdict.checks.append(Check(1, passed=False, said=f"{dist}'s project.version at {commit[:12]} "
                                               f"is {member.version}, not {version}"))
     else:
-        verdict.checks.append(Check(1, True, f"{tag} releases {dist} {version} from "
+        verdict.checks.append(Check(1, passed=True, said=f"{tag} releases {dist} {version} from "
                                              f"{commit[:12]}"))
     web = web if web is not None else default_web()
     for number, run in ((2, _changelog), (3, _main), (4, _ready), (5, _siblings),
@@ -714,13 +714,13 @@ def _siblings(*, ws, member, web, verdict, **_):
                   + (f" ({', '.join(seen)})" if seen else " (it requires none)"))
 
 
-def file_hashes(directory: str) -> dict[str, str]:
-    """{sha256: file name} of every file in `directory`."""
+def file_hashes(artifact_dir: str) -> dict[str, str]:
+    """{sha256: file name} of every file in `artifact_dir`."""
     import hashlib
 
     out = {}
-    for name in sorted(os.listdir(directory)):
-        path = os.path.join(directory, name)
+    for name in sorted(os.listdir(artifact_dir)):
+        path = os.path.join(artifact_dir, name)
         if os.path.isfile(path):
             digest = hashlib.sha256()
             with open(path, "rb") as fh:
@@ -796,7 +796,7 @@ def _catalogue(*, git, ws, member, where, web, **_):
 
 __all__ = ["CORE", "CATALOGUE", "CHANGELOG", "SEPARATOR", "TABLE", "NOT_READY",
            "CHECK_WORKFLOW", "CHECK_JOB", "GITHUB_API_ENV", "PYPI_ENV", "READY",
-           "index_from_environment", "READ_TIMEOUT_S",
+           "index_from_env", "READ_TIMEOUT_S",
            "CHECKS", "ReleaseError", "normalised", "tag_name", "parse_tag", "Heading",
            "version_headings", "first_version_heading", "same_version",
            "changelog_section", "Member", "Workspace", "repo_git", "read_file",

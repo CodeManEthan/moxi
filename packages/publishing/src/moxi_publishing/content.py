@@ -82,7 +82,7 @@ class FileChange:
 
     __slots__ = ("path", "new", "lines")
 
-    def __init__(self, path: str, new: bool = False):
+    def __init__(self, path: str, *, new: bool = False):
         self.path, self.new, self.lines = path, new, []
 
 
