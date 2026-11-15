@@ -78,12 +78,16 @@ On every commit, the piece reads what the commit adds as git stores it: every ad
 whatever `.gitattributes`, diff drivers, text conversion or colour config say, a moved
 file whole (renames are off), and each new path's name. Each goes through secrets'
 `credentials` and `private-names` sets and the provenance rules for files. A refusal names
-`path:line: set/rule`; a provenance hit shows its line too, a secrets hit never does. A hit
-in a new path's name prints the path with the hit replaced by its rule.
+`path:line: set/rule`; a provenance hit shows its line too, with any secrets hit on it
+replaced by its rule, and a secrets hit alone never shows. A hit in a new path's name
+prints the path with the hit replaced by its rule.
 
 A merge is judged by its own lines only: a line counts when it is added against every
 parent, and a path when no parent has it. Lines a merge brings in from its other parents
 were judged when those commits were made, and are judged again when they are pushed.
+git runs `pre-merge-commit`, not `pre-commit`, for a merge that needs no hand changes, so
+the piece doesn't run there. Such a merge's lines all come from its parents unless a merge
+driver (`merge=` in `.gitattributes`) writes new ones, and those are read at push.
 
 Every tracked path is scanned. A hit someone has judged and kept goes in an allowlist,
 read from the index, so an allowance counts only once it is staged:
@@ -92,8 +96,9 @@ read from the index, so an allowance counts only once it is staged:
 - `.residue-allow` at the repo's root: `path TAB exact text TAB why`, letting that
   provenance text stand in that file (`@path` for a path name). The provenance rules skip
   this file itself, since it spells what it lets stand; the secrets sets still read it.
-- `secrets-allow-private` in the repo's common git directory: lines of every set, private
-  names among them, where git never tracks them.
+- `secrets-allow-private` in the repo's common git directory (whatever that directory is
+  named, a bare clone's say): lines of every set, private names among them, where git
+  never tracks them.
 
 A malformed allowlist, a secrets set that can't run or a failed git read refuses the
 commit, naming why.
@@ -149,9 +154,10 @@ per hit and exits 3 when there is one, 1 when the tree can't be read. `--ci` lea
 private names list and the private allowlist, which exist only on your machine, for a scan
 run on a server.
 
-The pieces and the scan read git objects. A file stored with Git LFS is a small pointer in
-git; its content goes to the LFS server through git-lfs's own pre-push hook, and nothing
-here reads it.
+The pieces and the scan read git objects, with replace refs off (`git replace` changes
+what most git reads see, but a push sends the objects themselves). A file stored with Git
+LFS is a small pointer in git; its content goes to the LFS server through git-lfs's own
+pre-push hook, and nothing here reads it.
 
 ## Releases
 
