@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bandEntries, bandTab, isCurrent, loadPanel, pageName, where } from "../src/shell.ts";
+import { bandEntries, bandTab, isCurrent, loadPanel, pageName, settingsShown, where } from "../src/shell.ts";
 
 test("the URL names the module and the route", () => {
   assert.deepEqual(where("/m/ui/"), { module: "ui", route: "" });
@@ -80,6 +80,19 @@ test("the page's name on every route, and none where the shell shows a message",
   assert.equal(name("/m/nopage/"), null);
   assert.equal(name("/m/missing/"), null);
   assert.equal(name("/elsewhere"), null);
+});
+
+test("the top line's Settings is hidden on the Settings page and on the phone, and shown elsewhere", () => {
+  const shown = (path, gateway = false) => settingsShown(gateway, where(path));
+  for (const path of ["/m/ui/", "/m/ui/modules", "/m/alpha/", "/m/ui/settingsx", "/elsewhere"]) {
+    assert.equal(shown(path), true, path);
+    assert.equal(shown(path, true), false, path);
+  }
+  for (const path of ["/m/ui/settings", "/m/ui/settings/", "/m/ui/settings/alpha/more", "/m/ui/settings/changed"]) {
+    assert.equal(shown(path), false, path);
+  }
+  // Tab skips it as where it is hidden on the phone.
+  assert.equal(bandTab(3, 4, false, shown("/m/ui/settings")), "close");
 });
 
 /** A `place` that gives each answer in turn, counting its calls. */

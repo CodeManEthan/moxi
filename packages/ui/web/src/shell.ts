@@ -99,6 +99,12 @@ export function pageName(at: { module: string; route: string } | null, modules: 
   return modules.find((item) => item.name === at.module)?.page?.title ?? null;
 }
 
+/** Whether the top line shows its right-hand `Settings`: not on the phone, which only the
+ * desk reaches, and not on the Settings page itself. */
+export function settingsShown(gateway: boolean, at: { module: string; route: string } | null): boolean {
+  return !gateway && !(at !== null && at.module === "ui" && pageName(at, []) === "Settings");
+}
+
 /** Where the focus is when Tab is pressed with the band open: the page-name button,
  * `Settings`, the band's name at that index, or elsewhere (null). */
 export type TabFrom = "button" | "settings" | number | null;
@@ -257,11 +263,8 @@ export function boot(deps: ShellDeps): void {
         return box;
       });
     band.replaceChildren(...groups);
-    if (at !== null && at.module === "ui" && pageName(at, []) === "Settings") {
-      settings.setAttribute("aria-current", "page");
-    } else {
-      settings.removeAttribute("aria-current");
-    }
+    // On the Settings page the top line's `Settings` is hidden, and Tab skips it.
+    settings.hidden = !settingsShown(deps.gateway, at);
   };
 
   const isOpen = (): boolean => !band.hidden;
@@ -338,7 +341,6 @@ export function boot(deps: ShellDeps): void {
     reads.hidden = !deps.gateway || !signedIn;
     if (signedIn) void renderPanel();
   });
-  settings.hidden = deps.gateway;
   // The phone's every page says, first under the top line, that it only reads there.
   reads.hidden = !deps.gateway;
   name(pageName(where(location.pathname), deps.modules()));

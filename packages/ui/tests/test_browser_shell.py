@@ -279,17 +279,19 @@ def test_the_top_line_names_the_page_on_every_route(ui_shell, ui_page):
     expect(_modules(ui_page).locator(".card[data-module=fixture]")).to_be_visible()
     _pick(ui_page, "fixture")
     shows("Fixture", "Fixture - Moxi", "Fixture")
-    # On the settings no name in the band is current; the top line's Settings is.
-    expect(settings).not_to_have_attribute("aria-current", "page")
+    # On the settings no name in the band is current, and the top line hides its Settings.
+    expect(settings).to_be_visible()
     settings.click()
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings")
     shows("Settings", "Settings - Moxi", None)
-    expect(settings).to_have_attribute("aria-current", "page")
+    expect(settings).to_be_hidden()
     ui_page.goto("/m/ui/settings/fixture")
     shows("Settings", "Settings - Moxi", None)
+    expect(settings).to_be_hidden()
     # A deeper route of a module's page keeps the page's name.
     ui_page.goto("/m/fixture/deep/route")
     shows("Fixture", "Fixture - Moxi", "Fixture")
+    expect(settings).to_be_visible()
     # Where the panel holds a message and no page, the button reads Pages.
     for path in ("/m/nosuch/", "/m/ui/elsewhere"):
         ui_page.goto(path)
