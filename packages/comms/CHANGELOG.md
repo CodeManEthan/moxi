@@ -21,8 +21,19 @@
   no live session holds, newest `since` last. `name` is the part before `@`, or the
   qualified name when two names listed share it. `state` and `detail` are as
   `/api/roster`'s. It is the one route of comms the phone's gateway serves; it carries
-  names, counts and times, and no message text. `/api/roster` and its stream don't
-  change.
+  names, counts and times, and no message text.
+- `moxi_comms.api.RosterRow` has a new field, `cache`: a live name's cache as the
+  daemon's `session` answer reads it, a `CacheFact(kind, until)` with `kind` `warm` or
+  `cold` and `until` when it goes cold or went cold (epoch seconds, rounded to the whole
+  second); None for a standing row, any other read, and every row on a box without the
+  cache module. `moxi comms agents --json` prints it on each row, `{kind, until}` or
+  null.
+- `moxi_comms.api.roster_rows()` takes `with_roster=True` and then returns `(rows,
+  roster)`, the `Roster` the rows were joined from, from the one `agents` call.
+- comms' page server's `/api/roster` carries `today`, the server's local date
+  (`YYYY-MM-DD`), and, with its `roster` topic, `waiting`: `{qualified, count, since}`
+  for every name with mail queued, bound or not, oldest `since` first. Each row carries
+  `cache`, `{kind, until}` or null, as `RosterRow`'s.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the
