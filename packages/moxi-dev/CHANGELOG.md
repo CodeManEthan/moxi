@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The tag check reads its shapes from moxi-publishing's `ruling-tag` and `round-pointer`
+  rules, adding only the D-number and finding-id shapes, so it refuses what publishing's
+  scan refuses. It now refuses more: among others, `round` and any home and slug joined by
+  a slash, plain words included, and a memory key.
 - The release step wants a README link to a file in the repository to name the
   package's own release tag at its current version (`.../blob/moxi-comms-v0.3.0/...`),
   not `main`; a relative link's fix gives that form. moxi-dev now requires

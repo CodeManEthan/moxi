@@ -103,7 +103,7 @@ def test_the_lookahead_changes_no_match():
     import random
     import re
 
-    plain, scan = re.compile(rules._RULING_TAG), re.compile(rules._RULING_TAG_SCAN)
+    plain, scan = re.compile(rules._RULING_TAG), re.compile(rules.RULING_TAG)
     # Joined at run time, so this file spells no tag whole.
     words = [("RU", "LE "), ("des", "ign v"), ("bui", "ld verif"), ("re-", "check v"),
              ("B4", " verification"), ("MIN", "OR "), ("Find", "ing 3 ("),

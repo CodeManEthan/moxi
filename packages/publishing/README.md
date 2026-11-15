@@ -342,7 +342,7 @@ that run.
 | `message-id` | messages | `comms:` and digits, `msg` and digits, or 12 or more digits |
 | `quoted-ruling` | messages | a ruling tag on a line that also holds a quoted passage |
 | `ruling-tag` | files | a design or review tag |
-| `round-pointer` | files | `round <home>/<slug>`, or a memory key |
+| `round-pointer` | files | `round <home>/<slug>`, or a memory key (moxi-dev's tag check reads this rule and `ruling-tag`) |
 
 ## Install
 

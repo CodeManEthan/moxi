@@ -51,7 +51,16 @@ _RULING_TAG = (
 #: start with a word boundary, so without the lookahead every branch was tried at every
 #: position of a file. A test holds this set to the pattern's branches.
 _RULING_TAG_START = "[(R\u00a7dbrBMFpowW\u27d0\u2691"
-_RULING_TAG_SCAN = "(?=[" + re.escape(_RULING_TAG_START) + "])(?:" + _RULING_TAG + ")"
+#: The ruling-tag rule's pattern source, which `moxi-dev`'s tag check also reads, so the
+#: two checks refuse the same shapes.
+RULING_TAG = "(?=[" + re.escape(_RULING_TAG_START) + "])(?:" + _RULING_TAG + ")"
+
+#: The round-pointer rule's pattern source, which `moxi-dev`'s tag check also reads:
+#: `round` and a home and slug joined by a slash (any case, the home without digits), or,
+#: either one hyphenated, `round` or `Round` with digits allowed; and a memory key.
+ROUND_POINTER = (r"(?i:\bround [a-z-]+/[a-z0-9-]+)"
+                 r"|\b[Rr]ound (?:[a-z0-9]+-[a-z0-9-]+/[a-z0-9-]+|[a-z0-9-]+/[a-z0-9]+-[a-z0-9-]+)"
+                 r"|\bmem [a-z0-9]+-[a-z0-9-]+")
 
 #: A quoted passage: straight or curly double quotes around at least one word character.
 _QUOTED = "\"[^\"]*\\w[^\"]*\"|\u201c[^\u201d]*\\w[^\u201d]*\u201d"
@@ -66,10 +75,9 @@ _SHAPES: dict[str, tuple[frozenset[str], str, int]] = {
                    r"comms:\s*\d+|\bmsg\s*[#:]?\s*\d+"
                    r"|(?<![0-9A-Za-z])\d{12,}(?![0-9A-Za-z])", re.IGNORECASE),
     # Matched as a pair below: the tag and a quoted passage on one line.
-    "quoted-ruling": (frozenset({MESSAGES}), _RULING_TAG_SCAN, 0),
-    "ruling-tag": (frozenset({FILES}), _RULING_TAG_SCAN, 0),
-    "round-pointer": (frozenset({FILES}),
-                      r"(?i:\bround [a-z-]+/[a-z0-9-]+)|\bmem [a-z0-9]+-[a-z0-9-]+", 0),
+    "quoted-ruling": (frozenset({MESSAGES}), RULING_TAG, 0),
+    "ruling-tag": (frozenset({FILES}), RULING_TAG, 0),
+    "round-pointer": (frozenset({FILES}), ROUND_POINTER, 0),
 }
 
 #: Every rule's name, in the order a refusal names them.
@@ -122,4 +130,5 @@ def enabled_rules() -> tuple[str, ...]:
     return tuple(settings.load()[settings.RULES])
 
 
-__all__ = ["FILES", "MESSAGES", "NAMES", "applies", "enabled_rules", "hits"]
+__all__ = ["FILES", "MESSAGES", "NAMES", "ROUND_POINTER", "RULING_TAG", "applies",
+           "enabled_rules", "hits"]

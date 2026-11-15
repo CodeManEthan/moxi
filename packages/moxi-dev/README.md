@@ -127,7 +127,10 @@ Code, tests and docs in this repository give their reasons in plain words. The t
 check, which `moxi-dev check` runs over every text file git doesn't ignore, refuses short
 reference ids that point into notes a reader of the repository can't see: a capital
 letter and a number in square brackets, a section sign with a number, a severity word
-with a number, and a few more shapes listed in `moxi_dev/tags.py`. Its line names the
+with a number, and a few more. Those are the shapes of moxi-publishing's `ruling-tag` and
+`round-pointer` rules, read from `moxi_publishing.rules`, so this check and publishing's
+scan of a public repo refuse the same text; to them it adds two shapes only this
+repository's own records use, a D-number and a finding id (below). Its line names the
 file, the line and the text it refused. Write the reason the id stood for instead.
 
 Some text has to look like an id because it is data, such as the input a test feeds the

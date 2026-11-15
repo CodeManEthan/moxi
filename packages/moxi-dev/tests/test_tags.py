@@ -27,7 +27,7 @@ def test_each_shape_is_a_tag(tag):
     "a list [a1] of things", "version 3.12", "X11 sockets", "around home/slug",
     "@pytest.mark.finding(\"L50\")", "pytest.mark.finding('L7')",
     "@pytest.mark.finding('L7', \"L8\")", "@pytest.mark.finding( 'L7' , )",
-    "a round trip/second", "around home-one/slug", "D07bc",
+    "around home-one/slug", "D07bc",
 ])
 def test_plain_text_and_a_finding_mark_are_not_tags(text):
     assert tags_in(text) == []
@@ -118,3 +118,47 @@ def test_the_allow_file_lets_exact_text_stand_in_one_file(repo):
 def test_a_hit_reads_as_path_line_and_text():
     assert str(Hit("a.py", 3, "D07")) == "a.py:3: tag 'D07'"
 
+
+
+#: One sample of each shape publishing's ruling-tag and round-pointer rules hold, written
+#: with a "~" that is taken out before use, so this file spells none of them whole.
+SHARED = [
+    "[B~5]", "[rt~3]", "[bv~2a]", "(R~5)", "RULE~ A3", "\u00a7~5", "design~ v4",
+    "build~-verif", "re-check~ v2", "B3~ verification", "MAJOR~ 2", "Finding 3~ (",
+    "probe trial~ 2", "operator~ ruling", "operator,~ 2026-", "ruled on 20~26-11",
+    "\u27d0~[R3", "[12|~abcdef]",
+    "round~ home/slug", "ROUND~ home/slug", "round~ ab1-cd/ef", "Round~ ab/c1-d",
+    "mem~ proj-a-note",
+]
+#: Text neither check refuses.
+NEITHER = ["x[0] = y[1]", "version 3.12", "around home/slug", "a round of home-two",
+           "rounds ab1-cd/ef", "D3 and D100"]
+
+
+@pytest.mark.parametrize("sample", SHARED)
+def test_publishings_shapes_are_matched_alike_by_both_checks(sample):
+    from moxi_publishing import rules
+
+    tag = sample.replace("~", "")
+    line = f"a line that cites {tag} in passing"
+    theirs = [text for _, text in rules.hits(line, rules.FILES,
+                                             ("ruling-tag", "round-pointer"), every=True)]
+    assert theirs, tag
+    assert [text for _, text in tags_in(line)] == theirs
+
+
+@pytest.mark.parametrize("text", NEITHER)
+def test_text_neither_check_refuses(text):
+    from moxi_publishing import rules
+
+    assert tags_in(text) == []
+    assert rules.hits(text, rules.FILES, ("ruling-tag", "round-pointer")) == []
+
+
+@pytest.mark.parametrize("sample", ["D~07", "D~07b", "L~12"])
+def test_the_d_numbers_and_finding_ids_are_this_repositorys_own(sample):
+    from moxi_publishing import rules
+
+    tag = sample.replace("~", "")
+    assert tags_in(f"see {tag} here") == [(1, tag)]
+    assert rules.hits(f"see {tag} here", rules.FILES) == []
