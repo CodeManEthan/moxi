@@ -32,7 +32,9 @@ moxi repo git-hooks list                         # every repo repo has written t
 - `moxi repo git-hooks [list] [PATH] [--projects] [--json]` lists each repo repo has
   written to, or the one at PATH: git's version and the mode, each event's pieces in
   order (id, fail policy, enabled, settings), the existing git hook, and problems. Its
-  JSON also gives the doctor records repo has open for each repo.
+  JSON also gives the doctor records repo has open for each repo, and each event's
+  `command`: the text git runs for it as repo wrote it (the config entry's command, the
+  shim or the launcher).
 - `moxi repo git-hooks available [--json]` lists the pieces installed modules declare: id,
   event, fail policy, the settings each takes, and one line about it.
 - `moxi repo git-hooks add PATH [PIECE...] [--mode auto|config|shim] [--set KEY=VALUE]...`
