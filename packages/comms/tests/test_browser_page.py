@@ -124,17 +124,32 @@ def running_entry(request_id: str, session_id: str, name: str, *, slot_number: s
 class LauncherStub:
     """Launcher's `running` and `keep-warm` routes, answered in the browser: `sessions` is
     what `running` lists, `presses` each body `keep-warm` was posted, `answer` its reply,
-    and `pressed`, when set, the sessions `running` lists from the next press on."""
+    and `pressed`, when set, the sessions `running` lists from the next press on. Between
+    `hold()` and `release()` a read of `running` waits unanswered."""
 
     def __init__(self, page: Any, sessions: list[dict]) -> None:
         self.sessions = sessions
         self.presses: list[dict] = []
         self.answer: dict = {"refused": None}
         self.pressed: list[dict] | None = None
+        self.held: list[Any] | None = None
         page.route("**/m/launcher/api/running", self._running)
         page.route("**/m/launcher/api/keep-warm", self._keep_warm)
 
+    def hold(self) -> None:
+        """Answer no read of `running` until `release()`."""
+        self.held = []
+
+    def release(self) -> None:
+        """Answer each read of `running` held since `hold()`, and every later one at once."""
+        held, self.held = self.held or [], None
+        for route in held:
+            self._running(route)
+
     def _running(self, route: Any) -> None:
+        if self.held is not None:
+            self.held.append(route)
+            return
         body = {"state": "up", "detail": None, "count": len(self.sessions), "sessions": self.sessions}
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
@@ -339,11 +354,16 @@ def test_keep_warm_presses_launcher_and_a_refusal_leads_line_three(page_shell, r
     expect(press).to_have_attribute("title", re.compile(r"at most 3 in a row"))
     stub.answer = {"refused": {"code": "gone", "row": None, "problem": "the launch has ended",
                                "hint": "Launch it again."}}
+    # The page also reads `running` on its own: on the roster stream's first value, which
+    # can come late, and on its timer. Any value after the answer takes the note, so no
+    # read is answered until the note has been seen.
+    stub.hold()
     press.click()
     expect(row).to_have_attribute("note", re.compile(r"^Not kept warm: the launch has ended"))
     expect(press).to_be_disabled()
     assert stub.presses == [{"request_id": "r-planner"}]
     # The next value of `running` takes the note away and lets the act be pressed again.
+    stub.release()
     roster_kit.show_tab(page)
     expect(row).not_to_have_attribute("note", re.compile(r"Not kept warm"))
     expect(press).to_be_enabled()
