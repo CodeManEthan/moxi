@@ -4,6 +4,7 @@ with each build's state, whether it is idle, and the builds it shares commits wi
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -86,6 +87,9 @@ def test_an_open_build_is_given_with_its_state_read_from_git(repo, logs):
         "hand_merge": None, "idle": True, "drop_by": "operator", "shares": [],
         "problem": None}]
     assert json.loads(json.dumps(found)) == found
+    # The read API's docstring names every key a build's data holds.
+    named = re.search(r'Each of `builds` is `\{(.*?)\}`', api.builds.__doc__, re.S)
+    assert re.findall(r'"(\w+)"', named.group(1)) == list(found["builds"][0])
 
 
 def test_only_the_last_open_build_of_each_stage_of_an_open_round_is_listed(repo, logs):

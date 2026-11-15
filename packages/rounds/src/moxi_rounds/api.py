@@ -131,13 +131,16 @@ def builds(repo: str | None = None) -> dict:
 
     Each of `builds` is `{"round", "stage", "repo", "branch", "target", "base",
     "state", "by", "why", "head", "target_head", "target_before", "merge_base",
-    "has_own_commits", "hand_merge", "idle", "shares", "problem"}`. `state` is `gone`,
-    `empty`, `building`, `merged` or `unclear`, and `by` and `why` say what gave it.
+    "has_own_commits", "hand_merge", "idle", "drop_by", "shares", "problem"}`. `state`
+    is `gone`, `empty`, `building`, `merged` or `unclear`, and `by` and `why` say what
+    gave it.
     `head` is the build's head, `target_head` the target's, `target_before` what the
     target was when the build reached it, `merge_base` the merge base of a head off
     the target, and `hand_merge` the merge that brought a head merged by hand.
     `has_own_commits` is true for an `empty` build that holds commits of its own. `idle`
     is true for a `building` build whose head is older than its round's `idle_days`.
+    `drop_by` says who may drop it: `lead` for one with no work a drop could lose, else
+    `operator`, as for one that can't be read.
     `shares` holds `{"round", "stage"}` for each open build of the same repo and
     target that shares commits with it. A build that can't be read has its
     `{"reason", "fix"}` in `problem`, and None for each field of its state.
