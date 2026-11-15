@@ -162,7 +162,9 @@ There are two files, read with `Allowlist.read(public, private)`:
 - The private file takes lines of every set, and `text:` lines for private names. It must
   lie inside a directory named `.git` (a repo's own is `<git common dir>/secrets-allow-private`)
   or in secrets' config directory, checked after every link is resolved, so git never
-  tracks it.
+  tracks it. A caller judging a repo passes its common git dir as `git_dir`, which counts
+  whatever it is named (a bare clone's, say). A private file that doesn't exist adds no
+  line, wherever it would be.
 
 `Allowlist.from_text(public_text, private)` takes the public file's content as text
 instead, for a caller that judges a snapshot rather than the work tree: a git hook reads

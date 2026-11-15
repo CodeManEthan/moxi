@@ -132,13 +132,15 @@ def _parse(raw: str, where: str, n: int, public: bool) -> _Line | None:
     return _Line(path, set_name, rule, kind, value)
 
 
-def private_place_ok(path: Path) -> bool:
-    """True when `path`, resolved, lies inside a `.git` directory or secrets' config
-    directory."""
+def private_place_ok(path: Path, *, git_dir: Path | None = None) -> bool:
+    """True when `path`, resolved, lies inside a `.git` directory, inside `git_dir` (a
+    repo's common git directory, whatever its name) or in secrets' config directory."""
     from pathlib import Path
 
     resolved = Path(path).resolve()
     if ".git" in resolved.parent.parts:
+        return True
+    if git_dir is not None and resolved.is_relative_to(Path(git_dir).resolve()):
         return True
     from moxi.paths import Layout
 
@@ -166,20 +168,22 @@ def _lines_of(content: str, where: str, *, public: bool) -> list[_Line]:
     return lines
 
 
-def _read_private(private: Path | None) -> tuple[list[_Line], str | None]:
-    """The private file's lines and its text, once its place is checked."""
+def _read_private(private: Path | None, git_dir: Path | None = None
+                  ) -> tuple[list[_Line], str | None]:
+    """The private file's lines and its text, once its place is checked. A file that
+    does not exist adds no line, wherever it would be."""
     if private is None:
         return [], None
     from pathlib import Path
 
     private = Path(private)
-    if not private_place_ok(private):
-        raise AllowlistError(f"{private}: the private allowlist must lie inside a .git "
-                             "directory or the secrets config directory, where git never "
-                             "tracks it")
     content = _read_file(private)
     if content is None:
         return [], None
+    if not private_place_ok(private, git_dir=git_dir):
+        raise AllowlistError(f"{private}: the private allowlist must lie inside a .git "
+                             "directory, the repo's git directory or the secrets config "
+                             "directory, where git never tracks it")
     return _lines_of(content, str(private), public=False), content
 
 
@@ -202,8 +206,11 @@ class Allowlist:
         return f"Allowlist({len(self._lines)} lines)"
 
     @classmethod
-    def read(cls, public: Path | None = None, private: Path | None = None) -> Allowlist:
-        """Read either file or both. A file that does not exist adds no line."""
+    def read(cls, public: Path | None = None, private: Path | None = None, *,
+             git_dir: Path | None = None) -> Allowlist:
+        """Read either file or both. A file that does not exist adds no line. `git_dir`,
+        the common git directory of the repo the caller judges, is a place the private
+        file may lie in, whatever that directory is named."""
         from pathlib import Path
 
         lines = []
@@ -211,17 +218,18 @@ class Allowlist:
             content = _read_file(Path(public))
             if content is not None:
                 lines += _lines_of(content, str(public), public=True)
-        private_lines, own_text = _read_private(private)
+        private_lines, own_text = _read_private(private, git_dir)
         return cls(lines + private_lines, own_text)
 
     @classmethod
     def from_text(cls, public_text: str | bytes | None, private: Path | None = None, *,
-                  public_name: str = ".secrets-allow") -> Allowlist:
+                  public_name: str = ".secrets-allow",
+                  git_dir: Path | None = None) -> Allowlist:
         """The public file's lines from `public_text`, its content as the caller read it
         (from git's index or a commit, say, so the allowances judged are those of the
-        snapshot judged), and the private file read from `private` as `read` reads it.
-        `public_text` None adds no line; bytes are read as UTF-8. An error names the
-        public text `public_name`."""
+        snapshot judged), and the private file read from `private` (with `git_dir`) as
+        `read` reads it. `public_text` None adds no line; bytes are read as UTF-8. An
+        error names the public text `public_name`."""
         lines = []
         if public_text is not None:
             if isinstance(public_text, bytes):
@@ -230,7 +238,7 @@ class Allowlist:
                 except UnicodeDecodeError:
                     raise AllowlistError(f"{public_name}: is not UTF-8") from None
             lines += _lines_of(public_text, public_name, public=True)
-        private_lines, own_text = _read_private(private)
+        private_lines, own_text = _read_private(private, git_dir)
         return cls(lines + private_lines, own_text)
 
     def keeps(self, hit, text: str, path: str | None) -> bool:

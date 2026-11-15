@@ -324,14 +324,33 @@ def test_the_private_file_elsewhere_is_refused(tmp_path, config_dir):
     link.symlink_to(in_tree)
     linked_dir = config_dir / "linked"
     linked_dir.symlink_to(repo, target_is_directory=True)
+    loose = tmp_path / "loose.txt"
+    other = config_dir.parent / "other-module" / "allow"
+    other.parent.mkdir(parents=True, exist_ok=True)
+    for path in (loose, other):
+        path.write_text(private_line(), encoding="utf-8")
     for path in (in_tree, repo / ".git" / ".." / "allow.txt", named_git / "allow",
-                 tmp_path / "loose.txt", link, linked_dir / "allow.txt",
-                 config_dir.parent / "other-module" / "allow"):
+                 loose, link, linked_dir / "allow.txt", other):
         with pytest.raises(AllowlistError) as caught:
             Allowlist.read(None, path)
         assert "private" in str(caught.value), path
+    # A file that isn't there adds no line, wherever it would be.
+    assert len(Allowlist.read(None, tmp_path / "missing.txt")) == 0
     # The same file is fine as a public file: only the private one has a place.
     assert len(Allowlist.read(tmp_path / "missing", None)) == 0
+
+
+def test_the_callers_git_directory_counts_whatever_its_name(tmp_path):
+    # A bare clone's directory, or one made with --separate-git-dir, isn't named .git.
+    common = tmp_path / "proj-a-bare"
+    common.mkdir()
+    (common / "allow").write_text(private_line(), encoding="utf-8")
+    assert len(Allowlist.read(None, common / "allow", git_dir=common)) == 1
+    assert len(Allowlist.from_text(None, common / "allow", git_dir=common)) == 1
+    with pytest.raises(AllowlistError):
+        Allowlist.read(None, common / "allow")
+    with pytest.raises(AllowlistError):
+        Allowlist.read(None, common / "allow", git_dir=tmp_path / "elsewhere")
 
 
 def test_a_git_directory_reached_through_a_link_is_still_a_git_directory(tmp_path):
@@ -368,8 +387,10 @@ def test_from_text_keeps_the_private_files_own_entries_and_its_place_rule(
     path = private(line("*", "private-names/*", "text:x"))
     assert len(Allowlist.from_text(None, path)) == 1
     assert len(Allowlist.from_text(None, path.parent / "missing")) == 0
+    loose = tmp_path / "loose.txt"
+    loose.write_text(line("*", "private-names/*", "text:x") + "\n", encoding="utf-8")
     with pytest.raises(AllowlistError) as caught:
-        Allowlist.from_text(None, tmp_path / "loose.txt")
+        Allowlist.from_text(None, loose)
     assert "private" in str(caught.value)
 
 
