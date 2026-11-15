@@ -1,9 +1,10 @@
 """The Projects page's folders that are not projects in a browser, on the fixture install of
 projects_page_kit.py: the fixture's loose folder under the list as one line, `Not a
 project`, with its parts, its time and `Add`, which opens the Add panel with the folder
-and the name filled and adds it; `Worked in this week` under the empty list; five rows,
-then how many more with `Show`, which shows every row held; and a folder the fixture
-dates without being an activity source, which shows nothing.
+and the name filled and adds it, the row going once the add answers; `Worked in this
+week` under the empty list; five rows, then how many more with `Show`, which shows every
+row held; and a folder the fixture dates without being an activity source, which shows
+nothing.
 """
 
 from __future__ import annotations
@@ -127,6 +128,9 @@ def test_a_place_worked_in_is_one_line_under_the_list_and_its_add_makes_it_a_pro
     assert saved(fixture_shell, "finch-scripts") == {"key": "finch-scripts", "root": loose(fixture_shell),
                                                       "kind": "project"}
     expect(panel.locator('moxi-ui-row[data-key="finch-scripts"]')).to_have_count(1)
+    # The project now holds the folder, so its row goes though the report still lists it.
+    expect_loose(panel, [])
+    expect(loose_part(panel)).to_have_count(0)
 
 
 def test_with_no_project_the_places_worked_in_follow_the_empty_sentence(fixture_shell, fixture_page):

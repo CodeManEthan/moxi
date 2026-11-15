@@ -349,11 +349,13 @@ export function folderAsk(row: FolderRow): { mode: "add"; folder: string; name: 
  * only an activity source may. Newest first, then by folder. Five rows, then `<n> more
  * folders · Show`, `<n>` the rows held past five plus the largest `more_folders` of any
  * activity source; with `showAll`, every row held, and a dim `<n> more folders` for those
- * no report listed. Null when no row shows.
+ * no report listed. A folder that is a held project's root (`roots`) is no row: an add
+ * holds it before its module reports again. Null when no row shows.
  */
-export function folderGroup(reports: readonly Report[], { home, now, hasProjects, showAll, clock = LOCAL }:
+export function folderGroup(reports: readonly Report[], { home, now, hasProjects, showAll, roots, clock = LOCAL }:
                             { home: string | null; now: number; hasProjects: boolean; showAll: boolean;
-                              clock?: Clock }): FolderGroup | null {
+                              roots: readonly string[]; clock?: Clock }): FolderGroup | null {
+  const projects = new Set(roots);
   const held = new Map<string, { at: number | null; texts: string[] }>();
   let unlisted = 0;
   for (const report of inOrder(reports)) {
@@ -373,7 +375,7 @@ export function folderGroup(reports: readonly Report[], { home, now, hasProjects
   }
   const rows: FolderRow[] = [];
   for (const [folder, row] of held) {
-    if (row.at === null) continue;
+    if (row.at === null || projects.has(folder)) continue;
     rows.push({ folder, name: homeForm(folder, home), where: row.texts.length === 0 ? null : row.texts.join(JOIN),
                 fact: lastActive(row.at, now, clock), at: row.at });
   }

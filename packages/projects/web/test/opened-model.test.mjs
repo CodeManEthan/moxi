@@ -307,7 +307,7 @@ test("the empty sentence joins what each report gathers, in order", () => {
 
 const folders = (order, rows, extra = {}) => readReport({ version: 1, order, folders: rows, ...extra }, [], null).report;
 const group = (reports, over = {}) => folderGroup(reports, { home: HOME, now: NOW, hasProjects: true, showAll: false,
-                                                             clock: UTC, ...over });
+                                                             roots: [], clock: UTC, ...over });
 
 test("a folder row shows only once a report gives it an at", () => {
   const usage = folders(40, [{ folder: `${HOME}/code/finch-scripts`, parts: [{ text: "$0.82" }] }]);
@@ -326,6 +326,15 @@ test("a folder row shows only once a report gives it an at", () => {
 test("an at from a report with no activity is dropped, so its folder doesn't show", () => {
   const read = readReport({ version: 1, order: 40, folders: [{ folder: "/w/x", at: NOW, parts: [] }] }, [], null);
   assert.equal(group([read.report]), null);
+});
+
+test("a folder that is a held project's root is no row", () => {
+  const sessions = folders(20, [{ folder: `${HOME}/code/finch-scripts`, at: 100, parts: [] },
+                                { folder: `${HOME}/code/orbit-cli`, at: 90, parts: [] }], { activity: "all" });
+  const got = group([sessions], { roots: [`${HOME}/code/finch-scripts`, `${HOME}/code/atlas-api`] });
+  assert.deepEqual(got.rows.map((row) => row.folder), [`${HOME}/code/orbit-cli`]);
+  assert.equal(group([sessions], { roots: [`${HOME}/code/finch-scripts`, `${HOME}/code/orbit-cli`] }), null,
+               "every folder held: no group");
 });
 
 test("folder rows: newest first, then by folder, the newest at of any report", () => {

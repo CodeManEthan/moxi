@@ -706,7 +706,8 @@ export class ProjectsPage extends LitElement {
     const open = state.acts ? this.#open : null;
     const now = Date.now() / 1000;
     const folders = listing === null ? null : folderGroup(reports, {
-      home: listing.home, now, hasProjects: listing.projects.length > 0, showAll: this.#foldersShown });
+      home: listing.home, now, hasProjects: listing.projects.length > 0, showAll: this.#foldersShown,
+      roots: listing.projects.map((project) => project.root) });
     return html`<section data-part="list" data-state=${state.state}>
       ${state.line !== null ? html`<p class="state ${state.state === "loading" ? "dim" : ""}"
         data-line=${state.state === "loading" ? "reading" : "failed"} role="status">${state.line}</p>` : nothing}
