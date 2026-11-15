@@ -48,7 +48,7 @@ SESSIONS = [
 ]
 
 #: Writes the sessions of the JSON list in argv[1] under the harness roots of the
-#: environment it runs in: three requests each, the newest a minute old.
+#: environment it runs in: three requests each, the newest a minute old and kept on today.
 SEED = """
 import json, sys, time
 from pathlib import Path
@@ -56,7 +56,8 @@ from moxi_sessions import api as sessions
 T = sessions.testing
 now = time.time()
 for spec in json.loads(sys.argv[1]):
-    start = now - spec["days_ago"] * 86400 - 60
+    start = (T.today_at(60, oldest_s=60, now=now) if spec["days_ago"] == 0
+             else now - spec["days_ago"] * 86400 - 60)
     cwd = "/work/" + spec["project"]
     if spec["harness"] == "codex":
         r = T.CodexRollout(Path(sessions.root("codex")), thread_id=spec["session"], cwd=cwd,
@@ -150,6 +151,8 @@ def cost_figures(panel) -> list[str]:
 
 def test_the_filter_line_sits_under_cost_and_opens_on_the_last_30_days_by_cost(page):
     panel = open_page(page)
+    # The part under the filter line is drawn once the chart's or a section's read answers.
+    expect(panel.locator("[data-part=below]")).to_have_count(1)
     order = panel.evaluate("""el => [...el.shadowRoot.children]
         .filter((node) => node.dataset && node.dataset.part).map((node) => node.dataset.part)""")
     assert order[:3] == ["top", "filters", "below"], order
