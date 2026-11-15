@@ -33,6 +33,12 @@ The interface, in full:
                                                               between `after` and
                                                               `before`; with a limit,
                                                               the newest `limit` of them
+                 count_before(channel_id, timestamp)
+                     -> (count, first_timestamp, last_timestamp, last_id)
+                                                           -- the messages before a time
+                                                              whose line zero leads with
+                                                              the sigil; zero and Nones
+                                                              in a room with none
                  get_message(message_id) -> Message | None
                  max_message_id(channel_id=None) -> str | None
                  since(channel_id, timestamp) -> [Message]  (the daemon's boot read of

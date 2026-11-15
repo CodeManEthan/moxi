@@ -61,7 +61,7 @@ from pathlib import Path
 from moxi.store import transaction
 
 from .config import LOCAL_RETAIN_DAYS
-from .machine_line import parse as parse_machine_line
+from .machine_line import SIGIL, parse as parse_machine_line
 from .record import (
     AUTHOR_IDENTITY,
     AUTHOR_OPERATOR,
@@ -428,6 +428,32 @@ class LocalRecord:
             f"SELECT {self._COLUMNS} FROM messages WHERE room_id = ? AND timestamp >= ? "
             "ORDER BY id", (str(channel_id), str(timestamp))).fetchall()
         return [self._message(r) for r in rows]
+
+    def count_before(self, channel_id: str,
+                     timestamp: str) -> tuple[int, str | None, str | None, str | None]:
+        """`(count, first_timestamp, last_timestamp, last_id)` of the messages in
+        `channel_id` before `timestamp` whose line zero starts with the machine line's
+        sigil: how many, the oldest one's time, the newest one's time and id. A room with
+        none answers `(0, None, None, None)`.
+
+        A message without the sigil is prose, which the history reads leave out, so it is
+        not counted. The test is the parser's own leading one, spaces and tabs then the
+        sigil, without case (SQLite's LIKE is case-blind for ASCII); a line that starts
+        with the sigil and goes wrong further on is counted. One statement: the count and
+        the two ends by id over the room, then each end's time by its key, so the newest
+        time and the newest id are one message's.
+        """
+        row = self._conn().execute(
+            "WITH ends AS (SELECT COUNT(*) AS n, MIN(id) AS lo, MAX(id) AS hi "
+            "FROM messages WHERE room_id = ? AND timestamp < ? "
+            "AND ltrim(content, ' ' || char(9)) LIKE ?) "
+            "SELECT n, (SELECT timestamp FROM messages WHERE id = lo), "
+            "(SELECT timestamp FROM messages WHERE id = hi), hi FROM ends",
+            (str(channel_id), str(timestamp), SIGIL + "%")).fetchone()
+        count, first, last, last_id = row
+        if not count:
+            return 0, None, None, None
+        return count, first, last, str(last_id)
 
     def trim(self, retain_days: int | None = None, *, keep=()) -> int:
         """Delete messages older than `retain_days`; `0` disables.

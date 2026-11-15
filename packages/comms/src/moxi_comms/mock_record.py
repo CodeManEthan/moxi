@@ -31,6 +31,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from .machine_line import leads_with_sigil
 from .record import (
     AUTHOR_IDENTITY,
     AUTHOR_OPERATOR,
@@ -279,6 +280,17 @@ class MockRecord:
         """Every message in `channel_id` at or after `timestamp`, no bound: the local
         record's boot read of the sent index, on the double."""
         return [m for m in self.history(channel_id) if m.timestamp >= str(timestamp)]
+
+    def count_before(self, channel_id: str,
+                     timestamp: str) -> tuple[int, str | None, str | None, str | None]:
+        """The local record's count on the double: the messages before `timestamp` whose
+        line zero leads with the sigil, the oldest one's time, the newest one's time and
+        id, or `(0, None, None, None)`."""
+        kept = [m for m in self.history(channel_id)
+                if m.timestamp < str(timestamp) and leads_with_sigil(m.content)]
+        if not kept:
+            return 0, None, None, None
+        return len(kept), kept[0].timestamp, kept[-1].timestamp, kept[-1].id
 
     def get_message(self, message_id: str) -> Message | None:
         with self._txn() as st:
