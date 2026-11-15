@@ -117,7 +117,8 @@ the item again with the same sentence; it is the same item. Each
 B<n>.M<k>=accept|reject --record PTR`; a later report may list it again as heavy or
 heavier, never lighter. A rejected decision owes a fix, a waiting item `B<n>.M<k>`
 until `mark ... --done --record PTR` names it. A report of `kind = "majors"`, by a
-checker who built none of the round, declares the decisions no build report carries.
+checker who built none of the stages it names, declares the decisions no build report
+carries.
 The lead repairs a record by deriving it again, never by giving a value: `mark ROUND
 B<n> --resync` moves the base of the stage's open build to the newest commit of it the
 target still has, only after the target's history was rewritten under it; `mark ROUND

@@ -493,8 +493,8 @@ stage. A later report may list it again with the same sentence, as heavy or heav
 never lighter; another sentence under its id is refused. He rules it
 with `rule ROUND B1.M1=accept|reject --record PTR`; a rejected one is also a waiting
 item, `B1.M1`, until `mark ROUND B1.M1 --done --record PTR` names the fix. A report of
-`kind = "majors"`, by a checker who built none of the round, declares decisions no
-build report carries, each with its `stage`, and names the builds it covers in
+`kind = "majors"`, by a checker who built none of the stages it names, declares
+decisions no build report carries, each with its `stage`, and names the builds it covers in
 `stages`. `list --waiting` and a project's export list each unruled major.
 
 A round's export has two views. The docket (`--view docket`) is its open questions and,

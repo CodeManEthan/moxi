@@ -336,7 +336,9 @@ def test_a_majors_report_by_a_builder_or_of_a_stage_never_built_is_refused(built
     never = refused(verdicts.record, ROUND, majors(round_dir, stages=("B1", "B2")),
                     by="reviewer")
 
-    assert "the report is by coder, who built B1" in by_builder
+    assert ("the report is by coder, who built B1: a majors report is written by a "
+            "checker who built none of the stages it names") in by_builder
+    assert "have a checker who built none of B1 write it" in by_builder
     assert "B2 of proj-a/a-round was never commissioned" in never
     assert raw(round_dir) == before
 

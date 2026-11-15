@@ -26,7 +26,8 @@ a step's included.
 
 **A majors report** declares the decisions no build report will carry, each with its
 stage, and names in `stages` the builds it covers, so it can say a build has none. Each
-stage it names has a build, and its author built none of the round's builds.
+stage it names has a build, and its author built none of the stages it names: a
+builder of another stage of the round may write it.
 
 **A report of a build** reads one build, the stage's open one, at a head that is the
 tip of its branch or an ancestor of it. The verdict is recorded against the head it
@@ -444,9 +445,8 @@ def _of_majors(state: states.State, block: report_block.ReportBlock, *, name: st
     if block.by in builders:
         unmet.append(Unmet(
             f"the report is by {block.by}, who built {builders[block.by]}: a majors "
-            "report is written by a checker who built none of the round",
-            "have a checker who is neither the lead nor a builder of the round write "
-            "it"))
+            "report is written by a checker who built none of the stages it names",
+            f"have a checker who built none of {', '.join(block.stages)} write it"))
     unmet += _decisions_unmet(state, [(one.stage, one) for one in block.decisions])
     unmet += _again(state, block, shown)
     if unmet:
