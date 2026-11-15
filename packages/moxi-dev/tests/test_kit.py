@@ -1,5 +1,6 @@
-"""The kit's helpers: served, wait_for, param ids, the fsync and port seams, the SQLite
-writer, the symlink probe, the markers, and the contract module's public names."""
+"""The kit's helpers: served, wait_for, param ids, the timed slack, the fsync and port
+seams, the SQLite writer, the symlink probe, the markers, and the contract module's
+public names."""
 
 from __future__ import annotations
 
@@ -118,6 +119,47 @@ def test_param_id_is_the_same_every_run(value, expected):
 
 
 # --- the fsync seam --------------------------------------------------------------------
+
+# --- timed_slack -------------------------------------------------------------------------
+
+SLACK_PROBE = """
+import os
+
+from moxi_dev.testing import TIMED_SLACK_ENV, timed_slack
+
+
+def test_the_factor(fence):
+    assert TIMED_SLACK_ENV not in os.environ
+    print(f"slack={timed_slack()!r}")
+"""
+
+
+@pytest.fixture
+def slack_probe(pytester):
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makepyfile(test_slack=SLACK_PROBE)
+    return pytester
+
+
+@pytest.mark.parametrize(("value", "factor"), [(None, 1.0), ("2", 2.0), (" 1.5 ", 1.5)])
+def test_a_fenced_test_sees_the_slack_its_run_started_with(slack_probe, monkeypatch,
+                                                          value, factor):
+    if value is not None:
+        monkeypatch.setenv(testing.TIMED_SLACK_ENV, value)
+    result = slack_probe.runpytest_subprocess("-p", "no:cacheprovider", "-s")
+    result.assert_outcomes(passed=1)
+    assert f"slack={factor!r}" in result.stdout.str()
+
+
+@pytest.mark.parametrize("value", ["0.5", "0", "x", "nan", "inf"])
+def test_a_slack_that_is_not_a_factor_of_at_least_one_stops_the_run(slack_probe,
+                                                                    monkeypatch, value):
+    monkeypatch.setenv(testing.TIMED_SLACK_ENV, value)
+    result = slack_probe.runpytest_subprocess("-p", "no:cacheprovider")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert testing.TIMED_SLACK_ENV in result.stderr.str()
+    assert repr(value) in result.stderr.str()
+
 
 def test_fsync_is_a_no_op_in_a_plain_test(tmp_path):
     assert os.fsync is not testing._REAL_FSYNC

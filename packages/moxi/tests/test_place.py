@@ -24,7 +24,7 @@ import moxi.paths
 from conftest import DIR_LINK, WINDOWS, is_link, link_dir, link_text
 from moxi import place
 from moxi.place import Item
-from moxi_dev.testing import can_symlink, need_symlinks
+from moxi_dev.testing import can_symlink, need_symlinks, timed_slack
 
 
 @pytest.fixture(autouse=True)
@@ -579,7 +579,7 @@ def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
     for s in steps:
         assert s.reason == (f"{s.target} is a folder the placer did not mark; git did not "
                             f"answer in time, so whether it tracks it is unknown")
-    assert took < (2 if how == "git_s" else 4), took
+    assert took < (2 if how == "git_s" else 4) * timed_slack(), took
 
 
 def test_git_s_must_be_a_number(skill):

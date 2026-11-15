@@ -19,6 +19,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import timed_slack
 from conftest import wait_until, write_config
 
 import moxi_turns
@@ -523,7 +524,7 @@ def test_the_contributor_and_listener_import_light():
     the import costs; a quiet machine passes on the first. A machine shared with other
     work slows every run, so the bound sits a quarter over the budget: a cost that grew
     by more than that still fails."""
-    bound = 10_000 * 1.25
+    bound = 10_000 * 1.25 * timed_slack()
     mods = ("moxi_comms", "moxi_comms.mcp", "moxi_comms.mcp.additions",
             "moxi_comms.listener")
     code = ("import sys, moxi_comms.mcp.additions as a, moxi_comms.listener\n"

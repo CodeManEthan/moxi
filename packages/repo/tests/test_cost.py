@@ -9,6 +9,7 @@ import sys
 import time
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_repo import api
 from tests.conftest import POSIX_ONLY, git
@@ -51,7 +52,7 @@ def test_the_runner_imports_in_under_10_ms(demo):
         if statistics.median(times) < 10_000:
             break
         time.sleep(1)
-    assert statistics.median(times) < 10_000, times
+    assert statistics.median(times) < 10_000 * timed_slack(), times
 
 
 def _import_times(python: str) -> list[int]:

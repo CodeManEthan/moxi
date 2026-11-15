@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_sessions import catalog as catalog_module
 from moxi_sessions.catalog import Catalog
@@ -136,8 +137,8 @@ def test_the_list_answers_5000_sessions_in_3_s_cold_and_1_s_once_read(big_home,
     assert (cat.head_reads, cat.tail_reads) == (heads, tails)
     assert 0 < prompts <= tails and cat.prompt_reads == prompts
     assert again["total"] == SESSIONS
-    assert cold_s < 3.0
-    assert again_s < 1.0
+    assert cold_s < 3.0 * timed_slack()
+    assert again_s < 1.0 * timed_slack()
 
 
 # --- long sessions that grow between two lists -----------------------------------------------
@@ -234,4 +235,4 @@ def test_eight_long_sessions_that_grew_are_listed_in_1_s_from_their_new_bytes(
     assert cat.prompt_whole == LONG                  # no file was read whole again
     assert cat.prompt_bytes - sum(sizes) == grown    # only the bytes each one grew by
     assert LONG * GROWTH <= grown < LONG * GROWTH * 1.25
-    assert again_s < 1.0
+    assert again_s < 1.0 * timed_slack()

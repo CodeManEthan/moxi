@@ -121,6 +121,15 @@ deadline or timeout that fired from one that never did (a 0.3 s timeout that mus
 in under 0.9 s) is not timed. A plain `pytest`, with neither of the values below, runs a
 timed test where it falls, like any other.
 
+`MOXI_TEST_TIMED_SLACK=<factor>`, read once from the environment pytest starts with, is
+how much slower than the machine that set the budgets this one may be: a finite number
+of at least 1, else the run stops; unset, 1. `timed_slack()` returns it, inside a fenced
+test too. In a `timed` test, every upper bound on a wall-clock measurement of the run
+itself (an elapsed time, a per-call cost, a median, a percentile) is multiplied by
+`timed_slack()`. Lower bounds (a wait that must have happened), ratios between two
+measurements of the same run and counts are left alone: a slower machine slows both
+sides of a ratio. A test marked `timed` follows this rule whenever it is marked.
+
 Selection. Five variables, read from the environment pytest starts with, change what
 runs; `moxi-dev check` sets them for each suite, and a contributor may set them by hand:
 
@@ -167,6 +176,7 @@ import dataclasses
 import functools
 import ipaddress
 import json
+import math
 import ntpath
 import os
 import re
@@ -225,6 +235,9 @@ DURATIONS_ENV = "MOXI_TEST_DURATIONS"
 #: `hold` or `only`: what a run does with the `timed` tests (module doc, Selection).
 TIMED_ENV = "MOXI_TEST_TIMED"
 TIMED_MODES = ("hold", "only")
+#: A factor of at least 1 for every upper bound of a `timed` test (module doc, Timed
+#: tests).
+TIMED_SLACK_ENV = "MOXI_TEST_TIMED_SLACK"
 #: Tiers this run never puts back, comma-separated (module doc, Selection).
 LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
 
@@ -687,9 +700,33 @@ def pytest_configure(config: pytest.Config) -> None:
     # Read once, from the environment this process started with: a pytest run inside a
     # test (pytester's in-process run) already sees the fenced one.
     _SESSION.setdefault("live", os.environ.get(LIVE_ENV) == "1")
+    _SESSION.setdefault("timed_slack", _timed_slack(os.environ))
     _SESSION.setdefault("modules", _modules())
     _SESSION.setdefault("uv", _uv_dirs(os.environ, os.path.expanduser("~")))
     _install()
+
+
+def _timed_slack(env: Mapping[str, str]) -> float:
+    """The factor `env` sets for timed bounds: 1.0 when unset; a value that is not a
+    finite number of at least 1 stops the run."""
+    raw = env.get(TIMED_SLACK_ENV, "").strip()
+    if not raw:
+        return 1.0
+    try:
+        factor = float(raw)
+    except ValueError:
+        factor = math.nan
+    if not math.isfinite(factor) or factor < 1:
+        raise pytest.UsageError(f"{TIMED_SLACK_ENV} is a finite number of at least 1, or "
+                                f"unset; it is {raw!r}")
+    return factor
+
+
+def timed_slack() -> float:
+    """What every upper bound on a wall-clock measurement in a `timed` test is multiplied
+    by: `MOXI_TEST_TIMED_SLACK` as this run started with it, 1.0 when unset (module doc,
+    Timed tests)."""
+    return _SESSION.get("timed_slack", 1.0)
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -1298,7 +1335,8 @@ def _statements(script: str) -> Iterator[str]:
 __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence",
            "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV",
            "MARKERS", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam", "Selection", "TIERS",
-           "TIERS_ENV", "TIMED", "TIMED_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
+           "TIERS_ENV", "TIMED", "TIMED_ENV", "TIMED_SLACK_ENV", "WINDOWS_HOMES",
+           "WINDOWS_KEPT_ENV",
            "console_script", "fence", "findings_of", "param_id", "selection", "served",
-           "short_dir", "terminal_record", "touches_match", "uv_env", "wait_for",
+           "short_dir", "terminal_record", "timed_slack", "touches_match", "uv_env", "wait_for",
            "write_sqlite"]

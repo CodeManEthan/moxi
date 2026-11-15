@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # GitHub's runners are slower than the machine the timed tests' budgets were set on:
+  # every upper bound of a timed test is multiplied by this factor.
+  MOXI_TEST_TIMED_SLACK: "2"
+
 jobs:
   linux:
     runs-on: ubuntu-latest

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `MOXI_TEST_TIMED_SLACK=<factor>`, read once when pytest starts, is how much slower than
+  the machine that set the budgets this one may be; `timed_slack()` returns it (1.0 when
+  unset), inside a fenced test too. Every upper bound on a wall-clock measurement in a
+  `timed` test is multiplied by it; lower bounds, ratios and counts are not. A value that
+  is not a finite number of at least 1 stops the run.
+
 ## 0.1.1 (2026-11-08)
 
 - `moxi-dev check` now runs Ruff's N, A and FBT rules over the repository, reports Ruff
