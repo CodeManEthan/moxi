@@ -34,7 +34,7 @@ read = "start"
 type = "list"
 items = "str"
 default = ["launcher", "comms", "notes"]
-doc = "What adds start context, in order: module names and file paths; setting it replaces the whole list."
+doc = "What adds start context, in order: module names, file paths and run entries (run:<path>, a program whose output is added); setting it replaces the whole list."
 read = "start"
 
 [start.limit_chars]

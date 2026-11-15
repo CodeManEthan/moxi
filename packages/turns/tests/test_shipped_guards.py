@@ -71,7 +71,8 @@ def test_the_declarations_match_the_design():
     assert (q.calls, q.who, q.wants, q.on_error, q.switch) == (
         {"claude": ("AskUserQuestion",)}, "any", ("prompts",), "deny", "guards.question_mode")
     assert q.judge == "moxi_turns.guards.question:judge"
-    assert guards.LISTENERS == ((("prompt",), "moxi_turns.guards.question:on_prompt"),)
+    assert guards.LISTENERS == ((("prompt",), "moxi_turns.guards.question:on_prompt"),
+                                (("start",), "moxi_turns.startline:answer"))
 
 
 def test_each_judge_target_imports():
@@ -101,12 +102,36 @@ def test_the_real_loader_finds_them_off_and_the_switch_or_list_turns_each_on(tur
                                                  ("turns.no-nested-agents", ("list",))}
 
 
-def test_the_listener_row_loads_from_the_group():
+def test_the_listener_rows_load_from_the_group():
     reg = listeners.load(entries=[SimpleNamespace(name="turns", load=lambda: guards)],
                          order=())
     assert [(ls.module, ls.events, ls.target) for ls in reg.listeners] == [
-        ("turns", frozenset({"prompt"}), "moxi_turns.guards.question:on_prompt")]
+        ("turns", frozenset({"prompt"}), "moxi_turns.guards.question:on_prompt"),
+        ("turns", frozenset({"start"}), "moxi_turns.startline:answer")]
     assert not reg.broken
+
+
+# -- the session id start line ---------------------------------------------------------------
+
+@pytest.mark.parametrize("source", ["startup", "resume", "clear", "compact"])
+def test_the_start_line_gives_the_sessions_id_at_every_source(source):
+    reg = listeners.load(entries=[SimpleNamespace(name="turns", load=lambda: guards)],
+                         order=("turns",))
+    got = listeners.ask(reg, SessionEvent("ready", "claude", "s-9", source=source), 2.0)
+    assert got == (f"This session's id is s-9 (as of this {source}). It replaces any "
+                   "session id given at launch, which a clear makes stale.")
+
+
+def test_the_start_line_says_nothing_without_an_id_or_off_the_list():
+    on = listeners.load(entries=[SimpleNamespace(name="turns", load=lambda: guards)],
+                        order=("turns",))
+    assert listeners.ask(on, SessionEvent("ready", "claude", None, source="clear"), 2.0) \
+        is None
+    off = listeners.load(entries=[SimpleNamespace(name="turns", load=lambda: guards)],
+                         order=None, limit=0)
+    assert "turns" not in off.start_order()
+    assert listeners.ask(off, SessionEvent("ready", "claude", "s-9", source="clear"),
+                         2.0) is None
 
 
 # -- the removal judge -------------------------------------------------------------------

@@ -89,7 +89,10 @@ def test_the_start_list_rows(turns_env, registry, tmp_path, monkeypatch):
     registry["entries"] = [Entry("comms", [("start", "listener_targets:comms")]),
                            Entry("other", [("start", "listener_targets:cache")])]
     missing = tmp_path / "gone.md"
-    write_config(turns_env, f"[start]\norder = ['comms', 'notes', '{missing}']\n")
+    unrunnable = tmp_path / "plain"
+    unrunnable.write_text("#!/bin/sh\n")
+    write_config(turns_env, f"[start]\norder = ['comms', 'notes', '{missing}', "
+                            f"'run:{unrunnable}']\n")
     rows = rows_by_name()
     assert rows["start list"].state == "ok"
     assert rows["start list"].detail.startswith("asks comms; skipped ")
@@ -98,6 +101,9 @@ def test_the_start_list_rows(turns_env, registry, tmp_path, monkeypatch):
     assert off.state == "warn" and off.fix == "add it to start.order"
     assert rows[f"start list: {missing}"].state == "warn"
     assert "does not exist" in rows[f"start list: {missing}"].detail
+    run_row = rows[f"start list: run:{unrunnable}"]
+    assert run_row.state == "warn"
+    assert run_row.detail == "this run entry adds nothing: is not executable"
 
 
 def test_the_listener_rows(turns_env, registry):

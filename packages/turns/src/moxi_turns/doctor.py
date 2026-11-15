@@ -116,6 +116,10 @@ def _start_list(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
             yield moxi_doctor.Row(MODULE, f"start list: {entry}", "warn",
                                   f"this file entry adds nothing: {why}",
                                   "correct the path in start.order, or remove it")
+        elif listeners.is_run_entry(entry):
+            yield moxi_doctor.Row(MODULE, f"start list: {entry}", "warn",
+                                  f"this run entry adds nothing: {why}",
+                                  "correct the path in start.order, or remove it")
 
 
 def _listener_rows(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:

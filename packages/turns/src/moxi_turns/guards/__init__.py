@@ -52,7 +52,8 @@ module that imports it pays for nothing else; the loader reaches the core only w
 runs.
 
 It also holds turns' own `GUARDS`, the three it ships (removal, no-nested-agents and
-question mode, each off by default), and `LISTENERS`, question mode's prompt reminder.
+question mode, each off by default), and `LISTENERS`, question mode's prompt reminder and
+the session id start line (`moxi_turns.startline`).
 Their judges live in `removal` and `question` beside it, imported only when asked.
 """
 
@@ -772,9 +773,12 @@ GUARDS = (
               "about a question."),
 )
 
-#: turns' listener rows (the group `moxi.turns.listeners`): question mode's reminder.
+#: turns' listener rows (the group `moxi.turns.listeners`): question mode's reminder at
+#: each prompt, and the session's own id at each start, which speaks only while `turns` is
+#: on `start.order`.
 LISTENERS = (
     (("prompt",), "moxi_turns.guards.question:on_prompt"),
+    (("start",), "moxi_turns.startline:answer"),
 )
 
 

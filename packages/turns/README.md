@@ -100,8 +100,14 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
 - `listen.wait_ms`: how long an event waits for the registered listeners, in
   milliseconds. Default 2000.
 - `start.order`: what adds context when a session starts, resumes, is cleared or is
-  compacted, in order: module names and file paths. A module not installed is skipped.
-  Default `["launcher", "comms", "notes"]`; setting it replaces the whole list.
+  compacted, in order: module names, file paths and run entries. A module not installed
+  is skipped. A run entry, `run:<path>`, runs that program at each start, with the
+  start's source as its argument and the session's facts as JSON on stdin; what it prints
+  on exit 0 is added. It has the listeners' `listen.wait_ms` to finish and is then
+  killed, so a program with longer work starts it in a session of its own and exits.
+  Default `["launcher", "comms", "notes"]`; setting it replaces the whole list. Add
+  `turns` to the list to give each session its own id at every start, resume, clear and
+  compaction.
 - `start.limit_chars`: the most start context a session gets, in characters; 0 means the
   harness's own ceiling. Default 0.
 - `guards.run`: the guards that run besides those switched on: guard ids and paths to
