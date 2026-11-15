@@ -71,7 +71,7 @@ def test_every_action_is_pinned_to_a_commit(name):
 def test_the_release_jobs_run_in_order_publish_before_release():
     text = release.template("release.yml").decode()
     found = jobs(text)
-    order = ["gate", "scan", "build", "siblings", "publish", "release"]
+    order = ["gate", "scan", "build", "siblings", "verify", "publish", "release"]
     assert list(found) == order
     assert [needs(found[job]) for job in order] == [None] + order[:-1]
     assert 'tags: ["*-v*"]' in text and "workflow_dispatch:" in text
@@ -82,14 +82,14 @@ def test_the_build_is_made_once_and_passed_on():
     built = [job for job, block in found.items() if "uv build" in block]
     assert built == ["build"]
     assert "actions/upload-artifact@" in found["build"]
-    for job in ("siblings", "publish", "release"):
+    for job in ("siblings", "verify", "publish", "release"):
         assert "actions/download-artifact@" in found[job], job
         assert "name: dist" in found[job]
     assert "--artifact dist" in found["siblings"]
     assert "ci siblings \"$TAG\" --artifact dist --resolution highest" in found["build"]
     # A publish that stopped halfway goes on: the gate compares the index's files with
     # the build's, and the upload skips the ones there.
-    assert "ci gate \"$TAG\" --github \"$GITHUB_REPOSITORY\" --artifact dist" in found["publish"]
+    assert "ci gate \"$TAG\" --github \"$GITHUB_REPOSITORY\" --artifact dist" in found["verify"]
     assert "skip-existing: true" in found["publish"]
     assert "attestations: true" in found["publish"]
 
@@ -101,16 +101,30 @@ def test_each_job_holds_only_the_permissions_it_needs():
     assert [job for job, b in found.items() if "id-token: write" in b] == ["publish"]
     assert [job for job, b in found.items() if "contents: write" in b] == ["release"]
     assert sorted(job for job, b in found.items() if "actions: read" in b) == [
-        "gate", "publish"]
+        "gate", "verify"]
     assert [job for job, b in found.items() if "environment: pypi" in b] == ["publish"]
     # The job holding the write token runs no code of the repo's.
     assert "uv " not in found["release"] and "actions/checkout" not in found["release"]
 
 
+def test_the_job_that_can_get_an_upload_token_runs_only_pinned_actions():
+    found = jobs(release.template("release.yml").decode())
+    publish = found["publish"]
+    steps = [line.strip() for line in publish.split("\n")
+             if re.match(r"^      - ", line)]
+    assert steps and all(PIN.match(step) for step in steps), steps
+    assert not re.search(r"^\s+(- )?run:", publish, re.M)
+    assert "actions/checkout" not in publish and "uv " not in publish
+    assert [step.split("@")[0] for step in steps] == [
+        "- uses: actions/download-artifact", "- uses: pypa/gh-action-pypi-publish"]
+    # The gate the upload needs runs in a job that holds no upload token.
+    assert "id-token" not in found["verify"] and "environment:" not in found["verify"]
+
+
 def test_the_release_file_says_which_rerun_is_for_which_failure():
     text = release.template("release.yml").decode()
-    for words in ("Re-run failed jobs", "never \"Re-run all jobs\"", "gh workflow run",
-                  "release job", "used up"):
+    for words in ("Re-run failed jobs", "never \"Re-run all\n#   jobs\"", "gh workflow run",
+                  "re-run the verify job", "release job", "used up"):
         assert words in text
 
 

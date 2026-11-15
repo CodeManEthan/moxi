@@ -235,15 +235,18 @@ It prints each check, and exits 3 when the gate refuses.
 - `release.yml` runs on a pushed release tag, or on `gh workflow run release.yml --ref
   <tag>`. Its jobs run in order, each needing the one before: the gate; the public scan of
   the tagged tree; one build of the sdist and wheel, tested from a fresh install; the
-  published-siblings test of that build; the upload to the index, in the `pypi`
-  environment; and the GitHub Release, with the CHANGELOG section as its notes. The
-  file's opening comment says which re-run is for which failure.
+  published-siblings test of that build; the gate again, judging the files the index may
+  already hold against that build; the upload to the index, in the `pypi` environment;
+  and the GitHub Release, with the CHANGELOG section as its notes. The file's opening
+  comment says which re-run is for which failure.
 
 Each job holds `contents: read` only, but for `actions: read` where the gate runs,
 `id-token: write` for the upload and `contents: write` for the GitHub Release. The
 upload uses no stored token: it needs a trusted publisher on the index for each package
 (this repo, `release.yml`, environment `pypi`), and a `pypi` environment on GitHub whose
-required reviewer approves each upload.
+required reviewer approves each upload. The upload job runs none of the repo's code,
+only the pinned actions that fetch the build and upload it: the one job that can get an
+upload token runs nothing a commit changes but the workflow file itself.
 
 The gate in CI is a third check, not a wall: the run uses the workflow file and the code
 of the tagged commit, so a bad commit can change both. What holds against one is the
@@ -255,7 +258,7 @@ The steps the workflow runs:
 
 - `moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]`: the gate, with
   main read from `origin/<the default branch>`. Without `--artifact` a version the index
-  already holds files of passes check 6, since the upload job runs the gate again with
+  already holds files of passes check 6, since the verify job runs the gate again with
   the build's files.
 - `moxi publishing ci notes TAG`: the tag's CHANGELOG section.
 - `moxi publishing ci siblings TAG --artifact DIR [--resolution highest|lowest-direct]`:

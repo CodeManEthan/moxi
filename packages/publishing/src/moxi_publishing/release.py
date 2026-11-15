@@ -289,7 +289,7 @@ def ci_gate(path: str, name: str, *, github: str | None = None,
             artifact: str | None = None, remote: str = REMOTE, web=None) -> Result:
     """`moxi publishing ci gate TAG`: the gate on a pushed tag, with main read from
     `<remote>/<the repository's default branch>`. Without `artifact`, check 6 lets a
-    version the index holds files of pass, since the publish job runs the gate again with
+    version the index holds files of pass, since the verify job runs the gate again with
     the build's files."""
     from moxi_publishing import flag, tags
 
