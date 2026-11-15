@@ -368,8 +368,12 @@ def _warnings(found: showing.Shown) -> list[dict]:
         unseen = [one for one in state.rulings
                   if not showings.is_shown(one, found.register)]
         if unseen:
-            said = "; ".join(f"{name} {one.id} {one.rules if one.text is None else one.text}"
-                             for one in unseen)
+            # A ruling's text is a sentence; its full stop goes, so the list reads
+            # "... the settings; proj-a/r2 C2 ..." and not "the settings.; ...".
+            said = "; ".join(
+                f"{name} {one.id} "
+                f"{one.rules if one.text is None else one.text.removesuffix('.')}"
+                for one in unseen)
             ids = ",".join(one.id for one in unseen)
             warnings.append(_warning(
                 NOT_SHOWN, f"not yet shown to the operator: {said}",

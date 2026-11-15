@@ -514,7 +514,8 @@ def test_the_data_holds_each_group_and_each_warning(opened, capsys):
         "close": {"waits": list(closing.waits(showing.show(ROUND).state))},
         "warnings": [
             {"what": "not-shown",
-             "text": f"not yet shown to the operator: {ROUND} {made} {SAID}",
+             "text": f"not yet shown to the operator: {ROUND} {made} "
+                     "Agent-read times follow the settings",
              "fix": f"moxi rounds mark {ROUND} {made} --shown --record PTR"}]}
 
 
@@ -644,8 +645,8 @@ def test_a_ruling_not_yet_shown_is_warned_of_until_the_printed_mark_is_run(
     printed = lines(capsys)
 
     assert said(printed, "warning:") == [
-        f"not yet shown to the operator: {ROUND} {first} {SAID}; {ROUND} {second} "
-        "Times are shown in UTC."]
+        f"not yet shown to the operator: {ROUND} {first} Agent-read times follow the "
+        f"settings; {ROUND} {second} Times are shown in UTC"]
     do(capsys, said(printed, "  fix:")[0], PTR="comms:7654321")
     assert warned(capsys, "not-shown") == []
 
