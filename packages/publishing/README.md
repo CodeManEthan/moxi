@@ -190,6 +190,18 @@ with the token `gh auth token` gives where there is one (sent to api.github.com 
 read that fails refuses. `MOXI_PUBLISHING_GITHUB_API_URL` and `MOXI_PUBLISHING_PYPI_URL`
 point the reads elsewhere.
 
+### Setting the next version
+
+A build writes its CHANGELOG lines under `## Unreleased` and leaves `version` alone; the
+release sets the version. `moxi publishing bump PACKAGE... [--part patch|minor|major]`
+(default `patch`), run on a build branch, makes one commit's worth of edits and leaves them
+unstaged: each package's `[project] version` goes to the next one; its CHANGELOG's
+`## Unreleased` heading becomes `## <version> (<today>)` under a new empty `## Unreleased`;
+each README link into the repository moves from the old release tag to the new one; then
+`uv lock` runs. It refuses, changing nothing, a CHANGELOG with no `## Unreleased` heading,
+and a requirement another package places on a bumped one (a ceiling such as `<0.2`) that
+admits the old version but not the new; change that requirement in the same commit.
+
 ### Making a release tag
 
 `moxi publishing tag PACKAGE [--at REV] [--remote NAME]` runs the gate at REV (default:

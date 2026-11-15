@@ -25,4 +25,6 @@ The first version.
   and the tag gate's seven checks, run by `moxi publishing tag`, the push piece (which now
   lets a release tag be created when it passes) and `moxi publishing ci gate`.
 - `moxi publishing tag`: the gate at main's tip, then the annotated release tag.
+- `moxi publishing bump`: the next version, the dated CHANGELOG heading, the README
+  links and `uv lock`, left unstaged.
 - `moxi publishing ci notes`: a tag's CHANGELOG section.

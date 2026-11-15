@@ -1,5 +1,12 @@
 """Releasing a package: `moxi publishing bump`, `tag` and the `ci` steps.
 
+`bump` sets the next version of each package named, in edits it leaves unstaged for one
+commit: its `[project] version`; its CHANGELOG, whose `## Unreleased` heading becomes the
+version's dated heading under a new empty `## Unreleased`; each README link into the
+repository from the old release tag to the new one; then `uv lock`. It refuses, writing
+nothing, a package whose CHANGELOG has no `## Unreleased`, and a requirement another
+member places on a bumped package that the new version would no longer meet.
+
 `tag` runs the tag gate (`moxi_publishing.tags.gate`) at a commit of main and makes the
 package's annotated release tag only when every check passes; it pushes nothing. The
 `ci` steps are the release workflow's: `ci gate` runs the gate on a pushed tag, `ci
@@ -15,6 +22,12 @@ from moxi_publishing.flag import Failure
 
 #: The remote whose tracking refs hold main, unless `--remote` names another.
 REMOTE = "origin"
+#: The parts of a version `bump --part` may raise.
+PARTS = ("patch", "minor", "major")
+#: The CHANGELOG heading a build writes its lines under.
+UNRELEASED = "## Unreleased"
+#: How long `uv lock` may take.
+LOCK_TIMEOUT_S = 300.0
 #: The push piece's setting that names the main branch.
 MAIN_KEY = "moxi-repo.piece.publishing/push.main"
 GITHUB_KEY = "moxi-publishing.github"
@@ -42,6 +55,159 @@ def _github(root: str, given: str | None) -> str | None:
     from moxi_publishing import flag
 
     return given or flag.config_get(root, GITHUB_KEY)
+
+
+# -- bump -----------------------------------------------------------------------------------
+
+def next_version(version: str, part: str) -> str:
+    """The version after `version` when `part` is raised; lower parts start again at 0."""
+    from packaging.version import Version
+
+    major, minor, micro = (list(Version(version).release) + [0, 0])[:3]
+    if part == "major":
+        return f"{major + 1}.0.0"
+    if part == "minor":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{micro + 1}"
+
+
+def _set_version(text: str, old: str, new: str) -> str | None:
+    """`text` (a pyproject.toml) with `[project] version` set to `new`, or None when no
+    such line holds `old`."""
+    import re
+
+    lines = text.split("\n")
+    table = None
+    for i, line in enumerate(lines):
+        header = re.match(r"^\s*\[([^\[\]]+)\]\s*(#.*)?$", line)
+        if header:
+            table = header.group(1).strip()
+            continue
+        if table == "project":
+            match = re.match(r'^(\s*version\s*=\s*)(["\'])([^"\']*)\2(.*)$', line)
+            if match and match.group(3) == old:
+                lines[i] = f"{match.group(1)}{match.group(2)}{new}{match.group(2)}{match.group(4)}"
+                return "\n".join(lines)
+    return None
+
+
+def _date_changelog(text: str, version: str, date: str) -> str | None:
+    """`text` with its `## Unreleased` heading become `## <version> (<date>)` under a new
+    empty `## Unreleased`, or None when it has no such heading."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.rstrip() == UNRELEASED:
+            lines[i:i + 1] = [UNRELEASED, "", f"## {version} ({date})"]
+            return "\n".join(lines)
+    return None
+
+
+def bump(path: str, packages, *, part: str = "patch", today: str | None = None,
+         lock: bool = True) -> Result:
+    """`moxi publishing bump PACKAGE... [--part patch|minor|major]` in the work tree at
+    `path`. Raises `Failure`."""
+    import datetime
+    import os
+    import shutil
+
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    from moxi import files
+    from moxi_publishing import flag, tags
+
+    if part not in PARTS:
+        raise Failure(f"--part is one of {', '.join(PARTS)}", 2)
+    root = flag.work_tree(path)
+    try:
+        ws = tags.work_tree_workspace(root)
+    except tags.ReleaseError as exc:
+        raise Failure(f"the workspace can't be read: {exc}", 1) from None
+    date = today or datetime.date.today().isoformat()
+    plan: dict[str, str] = {}
+    problems: list[str] = []
+    for package in packages:
+        dist = canonicalize_name(package)
+        member = ws.members.get(dist)
+        if member is None:
+            raise Failure(f"{package} is no workspace member", 2)
+        if member.version is None:
+            raise Failure(f"{member.file('pyproject.toml')} has no static version", 1)
+        plan[dist] = next_version(member.version, part)
+    edits: dict[str, bytes] = {}
+    for dist, new in plan.items():
+        member = ws.members[dist]
+        old = member.version
+        changelog = member.file(tags.CHANGELOG)
+        text = _read(root, changelog)
+        dated = None if text is None else _date_changelog(text, new, date)
+        if dated is None:
+            problems.append(f"{changelog} has no {UNRELEASED} heading to release")
+        else:
+            edits[changelog] = dated.encode("utf-8")
+        pyproject = member.file("pyproject.toml")
+        versioned = _set_version(_read(root, pyproject) or "", old, new)
+        if versioned is None:
+            problems.append(f"{pyproject}: no [project] version = \"{old}\" line to set")
+        else:
+            edits[pyproject] = versioned.encode("utf-8")
+        readme = member.project.get("readme")
+        readme = readme if isinstance(readme, str) else "README.md"
+        readme_path = member.file(readme)
+        text = _read(root, readme_path)
+        if text is not None:
+            old_tag, new_tag = tags.tag_name(dist, old), tags.tag_name(dist, new)
+            moved = text.replace(f"/blob/{old_tag}/", f"/blob/{new_tag}/").replace(
+                f"/tree/{old_tag}/", f"/tree/{new_tag}/")
+            if moved != text:
+                edits[readme_path] = moved.encode("utf-8")
+    for other in ws.members.values():
+        reqs = list(other.project.get("dependencies") or [])
+        extras = other.project.get("optional-dependencies") or {}
+        reqs += [r for group in extras.values() if isinstance(group, list) for r in group]
+        for text in reqs:
+            try:
+                req = Requirement(text)
+            except (InvalidRequirement, TypeError):
+                continue
+            name = canonicalize_name(req.name)
+            if name not in plan:
+                continue
+            was = ws.members[name].version
+            if req.specifier.contains(was, prereleases=True) and not req.specifier.contains(
+                    plan[name], prereleases=True):
+                problems.append(f"{other.file('pyproject.toml')}: {text!r} would not admit "
+                                f"{name} {plan[name]}; change it in the same commit")
+    if problems:
+        return Result(problems + ["nothing was changed"], 3)
+    for rel, data in edits.items():
+        target = os.path.join(root, rel)
+        files.atomic_write(target, data, mode=os.stat(target).st_mode & 0o777)
+    result = Result([f"{dist}: {ws.members[dist].version} -> {new}"
+                     for dist, new in plan.items()])
+    if lock:
+        from moxi import proc
+
+        uv = shutil.which("uv")
+        if uv is None:
+            raise Failure("the versions are set, but uv is not on PATH to run uv lock", 1)
+        done = proc.run([uv, "lock"], cwd=root, timeout_s=LOCK_TIMEOUT_S)
+        if done.returncode != 0:
+            err = (done.stderr or b"").decode("utf-8", "replace").strip()
+            raise Failure(f"the versions are set, but uv lock failed: {err}", 1)
+        result.lines.append("uv.lock updated")
+    result.lines.append("the edits are left unstaged for one commit")
+    return result
+
+
+def _read(root: str, rel: str) -> str | None:
+    import os
+
+    try:
+        with open(os.path.join(root, rel), encoding="utf-8") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
 
 
 # -- tag ------------------------------------------------------------------------------------
@@ -170,4 +336,4 @@ def ci_notes(path: str, name: str) -> Result:
     return Result(section.split("\n"))
 
 
-__all__ = ["REMOTE", "Result", "main_branch", "tag", "tag_message", "ci_gate", "ci_notes"]
+__all__ = ["REMOTE", "PARTS", "UNRELEASED", "Result", "next_version", "bump", "main_branch", "tag", "tag_message", "ci_gate", "ci_notes"]

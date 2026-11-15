@@ -303,3 +303,10 @@ def test_each_problem_names_member_field_and_fix(ws):
     assert (problem.member, problem.field, problem.said) == (
         "packages/alpha", "CHANGELOG.md", "missing")
     assert problem.fix.startswith("add one")
+
+
+def test_the_cores_spelling_of_its_release_tags_is_publishings():
+    from moxi import catalogue
+    from moxi_publishing import tags
+
+    assert catalogue.TAG_PREFIX == tags.tag_name(tags.CORE, "")

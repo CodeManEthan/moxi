@@ -4,6 +4,7 @@
     moxi publishing disable PATH
     moxi publishing list [--json]
     moxi publishing scan [PATH] [--rev REV] [--ci]
+    moxi publishing bump PACKAGE... [--part patch|minor|major] [--path PATH]
     moxi publishing tag PACKAGE [--at REV] [--remote NAME] [--path PATH]
     moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]
     moxi publishing ci notes TAG
@@ -68,6 +69,19 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                    help="leave out the private names list and the private allowlist, "
                         "which only your machine has")
     p = verbs.add_parser(
+        "bump", help="set the next version of packages, for one commit",
+        description="For each PACKAGE: set its project.version to the next one, date its "
+                    "CHANGELOG's ## Unreleased section and open a new one above it, move "
+                    "its README's links into the repository to the new release tag; then "
+                    "run uv lock. The edits are left unstaged. Refuses, changing nothing, "
+                    "a CHANGELOG with no ## Unreleased heading, or a requirement another "
+                    "package places on one that the new version would not meet.")
+    p.add_argument("packages", metavar="PACKAGE", nargs="+")
+    p.add_argument("--part", choices=("patch", "minor", "major"), default="patch",
+                   help="the part of the version to raise (default: patch)")
+    p.add_argument("--path", default=".", metavar="PATH",
+                   help="a path inside the work tree, or a project key (default: here)")
+    p = verbs.add_parser(
         "tag", help="run the tag gate and make a package's release tag",
         description="Run the tag gate for PACKAGE at REV (default: the tip of main as "
                     "the remote's tracking ref has it) and, when every check passes, make "
@@ -104,7 +118,9 @@ def _release(args, prog: str) -> int:
     from moxi_publishing import flag, release
 
     try:
-        if args.verb == "tag":
+        if args.verb == "bump":
+            result = release.bump(args.path, args.packages, part=args.part)
+        elif args.verb == "tag":
             result = release.tag(args.path, args.package, at=args.at, remote=args.remote)
         elif args.step == "gate":
             result = release.ci_gate(".", args.tag, github=args.github,
@@ -163,7 +179,7 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
     args = _parser(prog).parse_args(argv)
     if args.verb == "scan":
         return _scan(args, prog)
-    if args.verb in ("tag", "ci"):
+    if args.verb in ("bump", "tag", "ci"):
         return _release(args, prog)
     try:
         if args.verb == "enable":

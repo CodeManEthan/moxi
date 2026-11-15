@@ -296,8 +296,3 @@ def test_the_token_goes_only_to_githubs_own_api():
     assert seen["https://api.github.com/repos/o/r"]["Authorization"] == "Bearer secret-value"
     assert "Authorization" not in seen["http://github.example.test/repos/o/r"]
 
-
-def test_the_cores_spelling_of_its_release_tags_is_the_schemes():
-    from moxi import catalogue
-
-    assert catalogue.TAG_PREFIX == tags.tag_name(tags.CORE, "")

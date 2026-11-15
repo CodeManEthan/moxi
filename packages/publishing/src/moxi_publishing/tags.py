@@ -258,13 +258,56 @@ def read_file(git, commit: str, path: str) -> bytes | None:
 def workspace(git, commit: str) -> Workspace:
     """The workspace members and the release settings at `commit`. A root with no
     `[tool.uv.workspace]` is its own one member. Raises `ReleaseError`."""
+    from moxi_publishing.content import ScanError, read_blobs
+
+    def read(paths):
+        specs = {p: f"{commit}:{p}" for p in paths}
+        try:
+            blobs = read_blobs(git, specs.values())
+        except ScanError as exc:
+            raise ReleaseError(str(exc)) from None
+        return {p: blobs[spec] for p, spec in specs.items()}
+
+    def dirs():
+        done = git("ls-tree", "-r", "-d", "-z", "--name-only", commit)
+        return [d.decode("utf-8", "surrogateescape") for d in done.stdout.split(b"\0") if d]
+
+    return _workspace(read, dirs, commit, f"{commit[:12]}:")
+
+
+def work_tree_workspace(root: str) -> Workspace:
+    """The workspace members and release settings as the files in the work tree at
+    `root` have them. Raises `ReleaseError`."""
+    def read(paths):
+        out = {}
+        for path in paths:
+            try:
+                with open(os.path.join(root, path), "rb") as fh:
+                    out[path] = fh.read()
+            except FileNotFoundError:
+                out[path] = None
+            except OSError as exc:
+                raise ReleaseError(f"{path} can't be read: {exc}") from None
+        return out
+
+    def dirs():
+        found = []
+        for top, subdirs, _files in os.walk(root):
+            subdirs[:] = [d for d in subdirs if not d.startswith(".")]
+            rel = os.path.relpath(top, root)
+            if rel != ".":
+                found.append(rel.replace(os.sep, "/"))
+        return found
+
+    return _workspace(read, dirs, "", "")
+
+
+def _workspace(read, dirs, commit: str, label: str) -> Workspace:
     from fnmatch import fnmatchcase
 
     from packaging.utils import canonicalize_name
 
-    from moxi_publishing.content import ScanError, read_blobs
-
-    root = _toml(read_file(git, commit, "pyproject.toml"), f"{commit[:12]}:pyproject.toml")
+    root = _toml(read(["pyproject.toml"])["pyproject.toml"], f"{label}pyproject.toml")
     table = _table(root, "tool", TABLE)
     names = _table(root, "tool", "uv", "workspace").get("members")
     globbed = False
@@ -276,24 +319,19 @@ def workspace(git, commit: str) -> Workspace:
         paths = [n.strip("/") for n in names]
         globbed = any(ch in n for n in paths for ch in "*?[")
     if globbed:
-        done = git("ls-tree", "-r", "-d", "-z", "--name-only", commit)
-        dirs = [d.decode("utf-8", "surrogateescape") for d in done.stdout.split(b"\0") if d]
-        paths = [d for p in paths for d in (sorted(d for d in dirs if fnmatchcase(d, p))
+        found = dirs()
+        paths = [d for p in paths for d in (sorted(d for d in found if fnmatchcase(d, p))
                                             if any(ch in p for ch in "*?[") else [p])]
-    specs = {p: f"{commit}:{'pyproject.toml' if p == '.' else p + '/pyproject.toml'}"
-             for p in paths}
-    try:
-        blobs = read_blobs(git, specs.values())
-    except ScanError as exc:
-        raise ReleaseError(str(exc)) from None
+    files = {p: "pyproject.toml" if p == "." else p + "/pyproject.toml" for p in paths}
+    blobs = read(files.values())
     members: dict[str, Member] = {}
-    for path, spec in specs.items():
-        if blobs[spec] is None and globbed:
+    for path, file in files.items():
+        if blobs[file] is None and globbed:
             continue  # a glob may match a directory that is no package
-        project = _table(_toml(blobs[spec], spec), "project")
+        project = _table(_toml(blobs[file], label + file), "project")
         dist = project.get("name")
         if not isinstance(dist, str):
-            raise ReleaseError(f"{spec} names no project")
+            raise ReleaseError(f"{label}{file} names no project")
         version = project.get("version")
         members[canonicalize_name(dist)] = Member(
             path, canonicalize_name(dist), version if isinstance(version, str) else None,
@@ -713,5 +751,5 @@ __all__ = ["CORE", "CATALOGUE", "CHANGELOG", "SEPARATOR", "TABLE", "NOT_READY",
            "CHECKS", "ReleaseError", "normalised", "tag_name", "parse_tag", "Heading",
            "version_headings", "first_version_heading", "same_version",
            "changelog_section", "Member", "Workspace", "repo_git", "read_file",
-           "workspace", "Web", "gh_token", "default_web", "Check", "Verdict", "Where",
+           "workspace", "work_tree_workspace", "Web", "gh_token", "default_web", "Check", "Verdict", "Where",
            "peel", "resolve", "gate", "admitted", "file_hashes", "released"]
