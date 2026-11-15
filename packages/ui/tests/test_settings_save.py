@@ -69,7 +69,7 @@ def test_a_key_the_read_does_not_list_is_refused_and_nothing_runs():
         result, run = _save_one(key, "1")
         assert result == {"key": key, "outcome": "refused",
                           "problem": "is not a setting of demo", "fix": None, "mark": None,
-                          "warning": None, "lines": []}
+                          "warning": None, "lines": [], "finished": True}
         assert run.writes == []
 
 
@@ -153,18 +153,20 @@ def test_each_exit_of_the_command_answers_its_outcome(code, stdout, stderr, expe
     result, _ = _save_one("count", "5", was=_was("count"),
                           run=Run(code=code, stdout=stdout, stderr=stderr))
     base = {"key": "count", "outcome": None, "problem": None, "fix": None,
-            "mark": settings.MARK_NEXT_START, "warning": None, "lines": []}
+            "mark": settings.MARK_NEXT_START, "warning": None, "lines": [], "finished": True}
     assert result == {**base, **expected}
     project(result, settings.RESULT_SHAPE, strict=True)
 
 
-def test_a_run_that_does_not_end_is_failed_with_no_problem_and_no_warning():
+def test_a_run_that_does_not_end_is_failed_and_not_finished():
     result, run = _save_one("count", "5", was=_was("count"),
                             run=Run(raises=subprocess.TimeoutExpired("x", 20)))
-    assert result["outcome"] == "failed"
+    assert result["outcome"] == "failed" and result["finished"] is False
     assert result["problem"] is None and result["warning"] is None
+    project(result, settings.RESULT_SHAPE, strict=True)
     result, _ = _save_one("count", "5", was=_was("count"), run=Run(raises=OSError("gone")))
     assert result["outcome"] == "failed" and "could not run: gone" in result["problem"]
+    assert result["finished"] is True
 
 
 def test_a_write_may_run_past_the_files_lock_wait_and_a_read_may_not():
@@ -319,7 +321,7 @@ def test_a_module_the_listing_does_not_hold_runs_nothing(shell, monkeypatch):
     assert status == 200 and ran == []
     assert data["results"] == [{"key": "a", "outcome": "refused",
                                 "problem": "is not a setting of nosuch", "fix": None,
-                                "mark": None, "warning": None, "lines": []}]
+                                "mark": None, "warning": None, "lines": [], "finished": True}]
 
 
 def test_a_failed_schema_read_fails_every_change_and_writes_nothing(shell, monkeypatch):

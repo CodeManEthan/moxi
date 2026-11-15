@@ -42,11 +42,11 @@ one `moxi config set --json` or `unset --json`, and nothing is rolled back. A ch
 `was` is not the value the read holds is `moved` and not written, with `problem` the value
 now read, as JSON text. Each answers one result: `saved`, `unchanged`, `refused` (with the
 command's `problem` and `fix`), `moved`, `busy` (the file's lock was held) or `failed`. A
-`failed` result with a `warning` was written and applying the module's units failed
-(`lines` are theirs, `fix` is `moxi install <module>`); with no `problem` and no
-`warning`, the command did not finish and may or may not have written; else `problem`
-says why nothing was written. When the schema read fails, every change is `failed` with
-its error and nothing runs.
+`failed` result with `finished` false is a command stopped before it ended, which may or
+may not have written; every other result has `finished` true. A `failed` result with a
+`warning` was written and applying the module's units failed (`lines` are theirs, `fix`
+is `moxi install <module>`); else `problem` says why nothing was written. When the schema
+read fails, every change is `failed` with its error and nothing runs.
 
 On `set` and `unset`, a write that `moxi config` refuses (exit 2 or 3) is a 422 with the
 command's text and fix; a settings file that stays locked (exit 75) is a 409. Exit 1 means
@@ -187,10 +187,11 @@ SETTINGS_SHAPE = {"sections": Out("list", items=SECTION_SHAPE), "listed": _STRIN
 CHANGE_SHAPE = {"ok": Out("bool"), "lines": _STRINGS, "warning": _STRING, "fix": _STRING}
 
 #: One change's result in a save: `outcome` is `saved`, `unchanged`, `refused`, `moved`,
-#: `busy` or `failed`; `mark` the key's mark, when the module's schema names it.
+#: `busy` or `failed`; `mark` the key's mark, when the module's schema names it;
+#: `finished` false when the command was stopped before it ended.
 RESULT_SHAPE = Out("table", items={
     "key": Out("string"), "outcome": Out("string"), "problem": _STRING, "fix": _STRING,
-    "mark": _STRING, "warning": _STRING, "lines": _STRINGS,
+    "mark": _STRING, "warning": _STRING, "lines": _STRINGS, "finished": Out("bool"),
 })
 
 SAVE_SHAPE = {"saved_at": Out("float"), "results": Out("list", items=RESULT_SHAPE)}
@@ -722,9 +723,9 @@ def section_modules(listing: Iterable[Mapping[str, Any]]) -> list[str]:
 
 def _result(key: str, outcome: str, *, problem: str | None = None, fix: str | None = None,
             mark: str | None = None, warning: str | None = None,
-            lines: Sequence[str] = ()) -> dict[str, Any]:
+            lines: Sequence[str] = (), finished: bool = True) -> dict[str, Any]:
     return {"key": key, "outcome": outcome, "problem": problem, "fix": fix, "mark": mark,
-            "warning": warning, "lines": list(lines)}
+            "warning": warning, "lines": list(lines), "finished": finished}
 
 
 def _parsed(text: str) -> tuple[bool, Any]:
@@ -799,8 +800,8 @@ def save_one(module: str, key: str, *, value: str, reset: bool, was: str,
     try:
         done = run(argv, timeout_s=WRITE_TIMEOUT, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
-        # It may or may not have written: no problem and no warning say so.
-        return _result(key, "failed", mark=mark)
+        # Stopped before it ended, so it may or may not have written.
+        return _result(key, "failed", mark=mark, finished=False)
     except OSError as exc:
         return _result(key, "failed", mark=mark, problem=f"moxi config could not run: {exc}")
     ok, answer = _parsed(_decode(done.stdout).strip())
