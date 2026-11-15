@@ -1,10 +1,11 @@
 // The runner's guards: the shared matching cases, the data-only refusal, the ask and its
-// answer, a trip that fails or overruns, the catch, and the prompt list each ask carries.
+// answer, a trip that fails or overruns, the catch, the prompt list each ask carries, and
+// the ask step at a permission request.
 
 import { describe, expect, test } from 'claude-code/testing'
 import { world } from './world'
 import type { World } from './world'
-import { catchRefuses, decide, globRegex, parseTable } from '../hooks/register'
+import { catchRefuses, catchRefusesAsk, decide, globRegex, parseTable } from '../hooks/register'
 import TABLE from './guard-cases'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,10 +99,10 @@ describe('the table', () => {
     expect((await $.tool.call({ tool: 'Bash', command: 'ls' })).deny).toBe('no c')
   })
 
-  test('an endpoint at leg 2 is one the runner does not speak', async ($: E, on) => {
+  test('an endpoint at leg 3, which has no ask step, is one the runner does not speak', async ($: E, on) => {
     const w = world(on)
     await start($)
-    await w.line({ op: 'hello', leg: 2, mod_sock: '/x/mod.sock', stop_wait_ms: 2000, listen_wait_ms: 2000 })
+    await w.line({ op: 'hello', leg: 3, mod_sock: '/x/mod.sock', stop_wait_ms: 2000, listen_wait_ms: 2000 })
     await turnStart($, 't1')
     expect(w.got).toEqual([])
   })
@@ -597,5 +598,69 @@ describe('the prompt list', () => {
     expect(await promptsNow($, w)).toEqual([{ origin: 'composer', text: 'a typed question' }])
     enter({ text: 'a typed question' })
     await pending
+  })
+})
+
+describe('the ask step', () => {
+  const permission = ($: E, fields: Json = {}) => $.classic.PermissionRequest({
+    session_id: 's1', transcript_path: '/t/s1.jsonl', cwd: '/work/t', permission_mode: 'bypassPermissions',
+    tool_name: 'Bash', tool_input: { command: 'cd t && rm -rf *' }, ...fields,
+  })
+
+  test('nothing covering the ask: no trip, and the ask goes on to Claude Code', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [entry('t.call', { judge: false, deny: 'not at a call' })])
+    const r = await permission($)
+    expect(r.decision).toBeUndefined()
+    expect(asks(w)).toEqual([])
+  })
+
+  test('a data-only ask entry denies the ask with no trip, and never touches a tool call', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [entry('t.asks', { step: 'ask', judge: false, deny: 'nobody is there to ask' })])
+    expect((await permission($)).decision).toEqual({ behavior: 'deny', message: 'nobody is there to ask' })
+    expect(asks(w)).toEqual([])
+    expect((await $.tool.call({ tool: 'Bash', command: 'ls' })).deny).toBeUndefined()
+    expect(ran(w)).toEqual(['Bash'])
+  })
+
+  test('a judge entry is asked with the step, the mode and the record path; its deny denies', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [entry('t.ask', { step: 'ask' })])
+    w.answers['/ask/guard'] = { ok: true, deny: 'refused in bypass', lines: [], broken: [] }
+    expect((await permission($, { agent_id: 'a1' })).decision).toEqual({ behavior: 'deny', message: 'refused in bypass' })
+    expect(asks(w)).toEqual([{
+      call: { tool: 'Bash', input: { command: 'cd t && rm -rf *' }, agentId: 'a1', permission_mode: 'bypassPermissions', transcript_path: '/t/s1.jsonl', cwd: '/work/t' },
+      guards: ['t.ask'], step: 'ask',
+    }])
+  })
+
+  test('an answer with no deny leaves the ask to Claude Code: nothing approves it', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [entry('t.ask', { step: 'ask' })])
+    w.answers['/ask/guard'] = { ok: true, lines: ['an allow line'], broken: [] }
+    expect((await permission($)).decision).toBeUndefined()
+    expect(asks(w)).toHaveLength(1)
+  })
+
+  test('a failed trip leaves the ask, or denies it when an asked entry declared on_error deny', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [entry('t.soft', { step: 'ask' }), entry('t.hard', { step: 'ask', calls: ['Write'], on_error: 'deny' })])
+    w.answers['/ask/guard'] = 'fail'
+    expect((await permission($)).decision).toBeUndefined()
+    const r = await permission($, { tool_name: 'Write', tool_input: { file_path: '/a' } })
+    expect(r.decision.behavior).toBe('deny')
+    expect(r.decision.message).toMatch(/^turns could not check this call with guard t\.hard \(the trip failed: .+\)$/)
+  })
+
+  test('the catch refuses an ask only when a covering ask entry declared on_error deny', () => {
+    const table = parseTable([
+      entry('t.call', { on_error: 'deny' }),
+      entry('t.ask', { step: 'ask', calls: ['Write'], on_error: 'deny' }),
+    ])!
+    expect(catchRefusesAsk(table, { tool_name: 'Bash', tool_input: { command: 'ls' } })).toBe(false)
+    expect(catchRefusesAsk(table, { tool_name: 'Write', tool_input: { file_path: '/a' } })).toBe(true)
+    expect(catchRefuses(table, { tool: 'Write', file_path: '/a' })).toBe(false)
+    expect(decide(table, 'Bash', null, {}, 'ask').covering).toEqual([])
   })
 })

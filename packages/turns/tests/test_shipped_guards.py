@@ -71,7 +71,8 @@ def test_the_declarations_match_the_design():
     assert (q.calls, q.who, q.wants, q.on_error, q.switch) == (
         {"claude": ("AskUserQuestion",)}, "any", ("prompts",), "deny", "guards.question_mode")
     assert q.judge == "moxi_turns.guards.question:judge"
-    assert guards.LISTENERS == ((("prompt",), "moxi_turns.guards.question:on_prompt"),)
+    assert guards.LISTENERS == ((("prompt",), "moxi_turns.guards.question:on_prompt"),
+                                (("start",), "moxi_turns.startline:answer"))
 
 
 def test_each_judge_target_imports():
@@ -101,53 +102,66 @@ def test_the_real_loader_finds_them_off_and_the_switch_or_list_turns_each_on(tur
                                                  ("turns.no-nested-agents", ("list",))}
 
 
-def test_the_listener_row_loads_from_the_group():
+def test_the_listener_rows_load_from_the_group():
     reg = listeners.load(entries=[SimpleNamespace(name="turns", load=lambda: guards)],
                          order=())
     assert [(ls.module, ls.events, ls.target) for ls in reg.listeners] == [
-        ("turns", frozenset({"prompt"}), "moxi_turns.guards.question:on_prompt")]
+        ("turns", frozenset({"prompt"}), "moxi_turns.guards.question:on_prompt"),
+        ("turns", frozenset({"start"}), "moxi_turns.startline:answer")]
     assert not reg.broken
+
+
+# -- the session id start line ---------------------------------------------------------------
+
+@pytest.mark.parametrize("source", ["startup", "resume", "clear", "compact"])
+def test_the_start_line_gives_the_sessions_id_at_every_source(source):
+    reg = listeners.load(entries=[SimpleNamespace(name="turns", load=lambda: guards)],
+                         order=("turns",))
+    got = listeners.ask(reg, SessionEvent("ready", "claude", "s-9", source=source), 2.0)
+    assert got == (f"This session's id is s-9 (as of this {source}). It replaces any "
+                   "session id given at launch, which a clear makes stale.")
+
+
+def test_the_start_line_says_nothing_without_an_id_or_off_the_list():
+    on = listeners.load(entries=[SimpleNamespace(name="turns", load=lambda: guards)],
+                        order=("turns",))
+    assert listeners.ask(on, SessionEvent("ready", "claude", None, source="clear"), 2.0) \
+        is None
+    off = listeners.load(entries=[SimpleNamespace(name="turns", load=lambda: guards)],
+                         order=None, limit=0)
+    assert "turns" not in off.start_order()
+    assert listeners.ask(off, SessionEvent("ready", "claude", "s-9", source="clear"),
+                         2.0) is None
 
 
 # -- the removal judge -------------------------------------------------------------------
 
-def call_for(command, cwd=rc.CWD, home=rc.HOME, *, agent=None) -> ToolCall:
-    env = {} if home is rc.UNSET else {"HOME": home}
-    return ToolCall("claude", "s-1", agent, "Bash", "tu-1", {"command": command}, cwd, None,
-                    env)
+def call_for(command, *, agent=None) -> ToolCall:
+    return ToolCall("claude", "s-1", agent, "Bash", "tu-1", {"command": command}, rc.CWD,
+                    None, {"HOME": rc.HOME})
 
 
 def verdict(answer) -> str:
     if answer is None:
         return "pass"
     assert isinstance(answer, Deny)
-    parts = answer.reason.split(removal.JOIN)
-    return "".join(LETTERS[p] for p in parts)
+    return LETTERS[answer.reason]
 
 
 def test_the_case_labels_are_unique():
     labels = [c[0] for c in rc.CASES]
-    assert len(labels) == len(set(labels)) and len(labels) > 500
+    assert len(labels) == len(set(labels)) and len(labels) > 250
 
 
-@pytest.mark.parametrize("label,command,expect,cwd,home", rc.CASES, ids=[c[0] for c in rc.CASES])
-def test_a_removal_case(label, command, expect, cwd, home):
-    assert verdict(removal.judge(call_for(command, cwd, home))) == expect
+@pytest.mark.parametrize("label,command,expect", rc.CASES, ids=[c[0] for c in rc.CASES])
+def test_a_removal_case(label, command, expect):
+    assert verdict(removal.judge(call_for(command))) == expect
     if expect != "pass":
         assert FILTER.search(command), "the filter must pass every call the judge refuses"
 
 
-ROWS = [c for c in rc.CASES if c[0].startswith("row ") and c[4] is rc.HOME]
-
-
-@pytest.mark.parametrize("label,command,expect,cwd,home", ROWS, ids=[c[0] for c in ROWS])
-def test_a_removal_row_with_home_unset(label, command, expect, cwd, home):
-    want = rc.HOME_UNSET.get(label, expect)
-    assert verdict(removal.judge(call_for(command, cwd, rc.UNSET))) == want
-
-
 def test_a_subagents_call_is_judged_the_same():
-    assert verdict(removal.judge(call_for("cd t && rm -rf *", agent="a-1"))) == "TW"
+    assert verdict(removal.judge(call_for("cd t && rm -rf *", agent="a-1"))) == "T"
 
 
 @pytest.mark.parametrize("given", [{}, {"command": ["cd t && rm -rf *"]}, {"command": None},
@@ -156,81 +170,59 @@ def test_input_the_judge_cant_read_passes(given):
     assert removal.judge(ToolCall("claude", "s", None, "Bash", input=given)) is None
 
 
-@pytest.mark.parametrize("text", [r"r\m -rf /x", "r''m -rf /x", "r{}m -rf /x", "r$'m' -rf /x",
-                                  "R''M -rf /x", "rm''dir x", "r\"m\"d'i'r x"])
-def test_the_filter_passes_a_removal_word_split_by_quotes_braces_and_dollars(text):
-    assert FILTER.search(text)
-    # In a shell -c script, rule C reads each of them as a removal word.
-    wrapped = f"bash -c '{text}'"
-    assert "C" in verdict(removal.judge(call_for(wrapped)))
-    assert FILTER.search(wrapped)
+@pytest.mark.parametrize("text", [r"r\m", "r''m", "R''M", "rm''dir", "r\"m\"d'i'r"])
+def test_the_filter_passes_a_removal_word_split_by_quotes_and_backslashes(text):
+    command = f"cd t && {text} -rf x/*"
+    assert FILTER.search(command)
+    # Rule T reads the text with every quote and backslash deleted, and is case-sensitive.
+    assert verdict(removal.judge(call_for(command))) == ("pass" if "R" in text else "T")
 
 
-def test_the_filter_passes_over_commands_no_rule_could_refuse():
+def test_the_filter_passes_over_commands_the_rule_could_not_refuse():
     for text in ["ls -la", "git status", "echo arm farm", "rmx sub/*", "cd t && ls *",
-                 "bash -c 'echo $X'"]:
+                 "bash -c 'echo $X'", "cd t && r{}m -rf *", "cd t && r$'m' -rf *"]:
         assert not FILTER.search(text)
         assert removal.judge(call_for(text)) is None
 
 
 def test_the_filter_passes_every_command_the_judge_refuses_over_random_text():
     rng = random.Random(8)
-    alphabet = list("rmdiRMDI'\"\\{}$ -c*/.;~ab") + ["bash ", "sh ", " -c ", "cd ", "rm",
-                                                       "rmdir", "ı", "ſ", "K"]
+    # Rule T needs all three of a cd, an rm and a *, so those come up more often.
+    alphabet = list("rmdiRMDI'\"\\{}$ -c*/.;~ab") + ["bash ", "sh ", " -c ", "rmdir", "ı",
+                                                       "ſ", "K"] + ["cd ", "rm", " *"] * 4
     refused = 0
     for _ in range(4000):
         text = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 14)))
-        for cwd, home in ((rc.CWD, rc.HOME), (None, rc.UNSET), ("/", rc.HOME)):
-            if removal.judge(call_for(text, cwd, home)) is not None:
-                refused += 1
-                assert FILTER.search(text), text
-    assert refused > 500
-
-
-def test_a_removal_word_in_another_script_is_not_one():
-    # The letters are ASCII only, so the filter and the judge agree on a dotless i.
-    assert removal.judge(call_for("bash -c 'rmdır zz'")) is None
-    assert not FILTER.search("bash -c 'rmdır zz'")
-    # A letter that folds into ASCII still counts as a letter beside the word, so rule C
-    # finds no removal word there; rule W, whose letters are ASCII, refuses the non-ASCII
-    # word.
-    assert verdict(removal.judge(call_for("bash -c 'rm\u212a zz'"))) == "W"
-    assert verdict(removal.judge(call_for("bash -c 'rm zz'"))) == "C"
+        if removal.judge(call_for(text)) is not None:
+            refused += 1
+            assert FILTER.search(text), text
+    assert refused > 200
 
 
 @pytest.mark.parametrize("text,want", [
-    ("rm zz", True), ('r""m zz', True), ("r{m} zz", True), ("RM zz", True), ("rm2 zz", True),
-    ("arm zz", False), ("rmx zz", False), ("rm_x zz", False), ("echo 2rm", False),
-    ("{a,b} $'x' $X", False)])
-def test_rule_cs_removal_arm(text, want):
-    assert removal.c_removal(text) is want
+    ("cat > s <<'E'\nrm *\nE\necho", "cat > s <<'E'\nE\necho"),
+    ("cat > s <<-'E'\n\trm *\n\tE", "cat > s <<-'E'\n\tE"),
+    ("cat > a <<'A'; tee b <<\\B\nx\nA\ny\nB", "cat > a <<'A'; tee b <<\\B\nA\nB"),
+    ("cat <<'E' | sh\nrm *\nE", "cat <<'E' | sh\nrm *\nE"),
+    ("cat > s <<'E' || true\nrm *\nE", "cat > s <<'E' || true\nE"),
+    ("cat > s <<E\nrm *\nE", "cat > s <<E\nrm *\nE"),
+    ("cat > s <<'E'\nrm *\n", "cat > s <<'E'\nrm *\n")])
+def test_the_heredoc_cut(text, want):
+    assert removal.cut_heredocs(text) == want
 
 
-@pytest.mark.parametrize("text,want", [
-    ('bash "-c"', True), ('ba"s"h -c', True), ("bash --norc -x", False), ("python3 -c", False)])
-def test_rule_cs_gate(text, want):
-    assert removal.shell_c(text) is want
-
-
-def test_the_four_reasons_join_in_order_and_name_no_ones_paths():
-    command = "cd t && rm -rf * ; bash -c 'echo hi' ; " + rc.subs("$(", ")", 65)
-    answer = removal.judge(call_for(command))
-    assert verdict(answer) == "TWSC"
-    parts = answer.reason.split("\n\n")
-    assert parts == [removal.REASON_T, removal.REASON_W, removal.REASON_S, removal.REASON_C]
-    assert all(p.startswith("Refused before it ran (turns removal guard") for p in parts)
-    assert "(1) Drop the cd and use full paths" in parts[0]
-    assert "(2) If the text is file content" in parts[0]
-    assert parts[1].startswith("Refused before it ran (turns removal guard): you are removing "
-                               "your working directory or a directory above it")
-    assert parts[2].endswith("run it with `bash /full/path/script.sh`.")
-    assert "brace" not in parts[3] and "$ variable" not in parts[3]
-    for p in parts:
-        assert "/home/" not in p and "operator" not in p and "hook" not in p
+def test_the_reason_gives_two_fixes_and_names_no_ones_paths():
+    answer = removal.judge(call_for("cd t && rm -rf *"))
+    assert answer.reason == removal.REASON_T and removal.REASONS == {"T": removal.REASON_T}
+    assert answer.reason.startswith("Refused before it ran (turns removal guard")
+    assert "(1) Drop the cd and use full paths" in answer.reason
+    assert "(2) If the text is file content" in answer.reason
+    assert "/home/" not in answer.reason and "operator" not in answer.reason
+    assert "hook" not in answer.reason
 
 
 def test_the_checked_claude_code_version_is_a_constant():
-    assert removal.CHECKED_CLAUDE == "2.1.316"
+    assert removal.CHECKED_CLAUDE == "2.1.325"
 
 
 # -- no-nested-agents ----------------------------------------------------------------------
@@ -368,7 +360,14 @@ def test_the_real_argument_reader_reads_a_process():
     ("  <task-notification>go through open questions</task-notification>", False),
     ("say hi", False), ("", False), (None, False), (["go through open questions"], False)])
 def test_nudges(text, want):
-    assert qm.nudges(text) is want
+    assert qm.nudges(text, ("prose",)) is want
+
+
+def test_nudges_reads_the_prose_words_it_is_given():
+    text = "go through open questions in pros"
+    assert qm.nudges(text, ("prose",)) is True
+    assert qm.nudges(text, ("prose", "pros")) is False
+    assert qm.nudges("go through open questions in prose", ()) is True
 
 
 def prompt_event(text, origin, env=None) -> SessionEvent:
@@ -391,6 +390,19 @@ def test_the_reminder_comes_only_with_question_mode_on_and_a_counted_origin(turn
                             '[question_mode]\norigins = ["plugin"]\n')
     assert qm.on_prompt(prompt_event(text, "plugin")) == qm.REMINDER
     assert qm.on_prompt(prompt_event(text, "composer")) is None
+
+
+def test_the_reminder_reads_the_prose_words_setting(turns_env):
+    text = "let's go through the open questions in pros"
+    write_config(turns_env, "[guards]\nquestion_mode = true\n")
+    assert qm.on_prompt(prompt_event(text, "composer")) == qm.REMINDER
+    write_config(turns_env, '[guards]\nquestion_mode = true\n'
+                            '[question_mode]\nprose_words = ["Prose", "PROS"]\n')
+    assert qm.on_prompt(prompt_event(text, "composer")) is None
+    assert qm.on_prompt(prompt_event("go through the open questions in prose",
+                                     "composer")) is None
+    assert qm.on_prompt(prompt_event("go through the open questions",
+                                     "composer")) == qm.REMINDER
 
 
 def test_the_reminder_names_no_one():
@@ -442,7 +454,7 @@ def test_end_to_end_the_switched_on_guards_reach_the_table_and_judge(endpoint, a
     refused = fake.post(leg.PATH_GUARD, {
         "call": {"tool": "Bash", "tool_use_id": "tu-1", "input": {"command": "cd t && rm -rf *"}},
         "guards": ["turns.removal"]})
-    assert refused["deny"] == removal.REASON_T + removal.JOIN + removal.REASON_W
+    assert refused["deny"] == removal.REASON_T
     ran = fake.post(leg.PATH_GUARD, {
         "call": {"tool": "Bash", "input": {"command": "rm -rf ~/tmp/x/*"}},
         "guards": ["turns.removal"]})
@@ -462,28 +474,6 @@ def test_end_to_end_the_switched_on_guards_reach_the_table_and_judge(endpoint, a
                                             "text": "go through the open questions",
                                             "origin": "composer"})
     assert reminded["context"] == qm.REMINDER
-
-
-@pytest.mark.parametrize(("cwd", "refused"), [
-    ("/home", True),             # a cd moved the shell: `user` is the home
-    ("/home/user", False),       # `user` is a directory under the home
-    ("/home/", True),            # absolute, and judged as its normal form
-    (None, False),               # no cwd: judged against the launch directory
-    ("home", False),             # a relative cwd counts as none
-], ids=["moved-to-home-parent", "moved-to-home", "trailing-slash", "none", "relative"])
-def test_end_to_end_a_relative_removal_is_judged_against_the_asks_cwd(endpoint, cwd,
-                                                                       refused):
-    fake = endpoint("[guards]\nremoval = true\n")
-    call = {"tool": "Bash", "input": {"command": "rm -rf user"}}
-    if cwd is not None:
-        call["cwd"] = cwd
-    answer = fake.post(leg.PATH_GUARD, {"call": call, "guards": ["turns.removal"]})
-    if refused:
-        assert answer["deny"] == removal.REASON_W
-    else:
-        assert "deny" not in answer and answer["broken"] == []
-    # Against the launch directory alone, the same word passes.
-    assert removal.rules("rm -rf user", "/home/user/proj", "/home/user") == ""
 
 
 def test_end_to_end_a_subagents_agent_call_is_refused_without_a_trip(endpoint):

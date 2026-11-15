@@ -210,9 +210,11 @@ update. With no launch log it gives none; a log held past `timeout_s` (1 second)
 A handoff is a short file a session writes for the next session of its seat. Its key is
 the session's comms name without its scope, else the seat's name, else the project key; it
 is filed as `<YYYY-MM-DD>-<key>.md` (then `-2`, `-3`) in the handoff folder. With turns,
-a seat's next start is pointed to its newest waiting handoff. A handoff counts as used only
-when the launcher gave it to a launch of its seat or showed it to one, so a session started
-by hand never hides a seat's handoff. The launcher ships a `moxi-handoff` skill, which
+a seat's next start or resume is pointed to its newest waiting handoff, then shown one
+line for each other seat's waiting handoff in the same folder (newest first, at most 5, then
+how many more). A session with no key gets only those lines. A handoff counts as used only
+when the launcher gave it to a launch of its seat or showed it to one as that seat's own,
+so a session started by hand, or another seat, never hides a seat's handoff. The launcher ships a `moxi-handoff` skill, which
 `moxi install launcher` offers to place for Claude Code and Codex.
 
 `moxi launcher handoffs` lists this session's handoffs, in its own folder. With `--key KEY`
@@ -539,7 +541,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 
 | Module | With it | Without it |
 |---|---|---|
-| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
+| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff lines at a seat's start or resume; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
 | comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
