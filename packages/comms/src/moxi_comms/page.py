@@ -5,14 +5,18 @@
     GET /api/events   the stream; its one topic, `roster`, is the same without `now` and
                       the date
     GET /api/mail     Home's Comms row: the names with mail waiting that no session holds
+    GET /api/messages one day's messages, newest first, each with its rows in the books,
+                      and how many messages came before that day
 
 The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
 --json` prints, and the `Roster` it was joined from; the mail read from one
-`api.roster()`. `/api/roster`'s `today` is the page server's local date, `YYYY-MM-DD`,
+`api.roster()`. The message reads ask the daemon nothing: they read comms' record and
+books in the page server's process on connections that can't write (`pagereads`), so
+they answer with the daemon down. `/api/roster`'s `today` is the page server's local date, `YYYY-MM-DD`,
 which the page words a day against; the topic leaves it out, so it publishes only when a
 row or the mail waiting changes. Every route is a read. `/api/mail` is the one route the
 gateway reaches: it holds names, counts and times, and no message text or path, so it
-carries no mark.
+carries no mark. Every message's `text` is marked `redact`.
 
 The browser UI shell starts the page server on the first request for comms' page, and
 loopback stops it when it has been idle. Only that server and loopback's export command
@@ -85,6 +89,61 @@ MAIL = {
     })),
 }
 
+#: One recipient's row of a message in the books. `state` is the queue row's
+#: `waiting` (nothing holds it yet), `handed` or `in_digest` (in its session, read when
+#: the turn ends), or the reason the message left the queue undelivered: `withdrawn`,
+#: `expired` or `reserved`. `held` is the queue row's hold for the next turn; `takeable`
+#: says the row has never been in a digest, so its author can still take it back. A
+#: recipient with no row has had the message.
+DELIVERY = lb.Out("table", items={
+    "qualified": lb.Out("string"),
+    "state": lb.Out("string"),
+    "held": lb.Out("bool"),
+    "takeable": lb.Out("bool"),
+})
+
+#: One message as every message read sends it. `message_id` and `reply_to` are strings
+#: of digits, which the browser never does arithmetic on; `at` is the record's time,
+#: epoch seconds. `author` is the attribution's qualified name and `author_tier` its tier
+#: (`operator` is the operator, whatever name the directory gives him). `to` is the
+#: recipient tags as line zero writes them; `text` the body with line zero removed.
+#: `withdrawn` says the record marks it withdrawn; `rows` are its rows in the books, by
+#: qualified name.
+MESSAGE = lb.Out("table", items={
+    "message_id": lb.Out("string"),
+    "at": lb.Out("float"),
+    "author": lb.Out("string"),
+    "author_tier": lb.Out("string"),
+    "to": lb.Out("list", items=lb.Out("string")),
+    "posture": lb.Out("string", nullable=True),
+    "reply_to": lb.Out("string", nullable=True),
+    "text": lb.Out("string", mark="redact"),
+    "withdrawn": lb.Out("bool"),
+    "rows": lb.Out("list", items=DELIVERY),
+})
+
+#: `/api/messages`: the messages of `day` (a local date, `YYYY-MM-DD`) below the query's
+#: `before`, newest first, at most `limit`; `more`, how many of the day's are below the
+#: last one sent; `earlier`, the messages before the day, or null when there are none:
+#: how many, the local day of the newest, the oldest one's time, and `before`, the
+#: cursor (a message id, as a string) whose read with that `day` lists them.
+#: `today` is the page server's local date. `state` is `up` or `error`, `detail` null
+#: unless `error`; an error answers no message.
+MESSAGES = {
+    "state": lb.Out("string"),
+    "detail": lb.Out("string", nullable=True),
+    "today": lb.Out("string"),
+    "day": lb.Out("string"),
+    "messages": lb.Out("list", items=MESSAGE),
+    "more": lb.Out("int"),
+    "earlier": lb.Out("table", nullable=True, items={
+        "day": lb.Out("string"),
+        "count": lb.Out("int"),
+        "first_at": lb.Out("float"),
+        "before": lb.Out("string"),
+    }),
+}
+
 PAGE = lb.Page(
     routes=(
         lb.Route("/api/roster", "read", "moxi_comms.pagehandlers:roster",
@@ -93,8 +152,13 @@ PAGE = lb.Page(
                  gateway=True),
         lb.Route("/api/events", "read", "moxi_comms.pagehandlers:events", stream=True,
                  topics={"roster": lb.Out("table", items=ROSTER)}),
+        lb.Route("/api/messages", "read", "moxi_comms.pagereads:messages",
+                 query={"day": lb.Field("string", required=False, max=10),
+                        "before": lb.Field("string", required=False, max=20),
+                        "limit": lb.Field("int", required=False, max=500)},
+                 returns=MESSAGES),
     ),
     assets="web",
 )
 
-__all__ = ["MAIL", "PAGE", "ROSTER", "ROW"]
+__all__ = ["DELIVERY", "MAIL", "MESSAGE", "MESSAGES", "PAGE", "ROSTER", "ROW"]

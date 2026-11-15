@@ -34,6 +34,17 @@
   (`YYYY-MM-DD`), and, with its `roster` topic, `waiting`: `{qualified, count, since}`
   for every name with mail queued, bound or not, oldest `since` first. Each row carries
   `cache`, `{kind, until}` or null, as `RosterRow`'s.
+- comms' page server has a new read, `GET /api/messages?day=&before=&limit=`: one day's
+  messages (today by default; an earlier day is read back from the message id `before`),
+  newest first, at most `limit` (12 by default, at most 500), each with its author and
+  tier, recipients, posture, reply, text, whether it was withdrawn, and each recipient's
+  row in the delivery books (`waiting`, `handed`, `in_digest`, or why it left:
+  `withdrawn`, `expired`, `reserved`); `more`, how many of the day's are left; and
+  `earlier`, how many messages came before the day and the cursor that reads the newest
+  of them. Message ids are strings. It reads comms' record and books on connections that
+  can't write and asks the daemon nothing, so it answers with the daemon down; a store
+  comms' daemon has not yet moved or migrated answers `state` `error`. The phone's
+  gateway does not reach it.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the
