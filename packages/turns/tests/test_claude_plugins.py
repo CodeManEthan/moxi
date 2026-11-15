@@ -39,6 +39,23 @@ def test_the_runner_reports_the_version_its_manifest_names():
     assert f"const MOD_VERSION = '{manifest['version']}'" in source
 
 
+#: The runner version that speaks each leg. Claude Code runs a user-scope plugin from a
+#: cache kept per version, so a runner on a new leg needs a new version, or an install
+#: made before it keeps running the old leg.
+RUNNER_VERSION_OF_LEG = {4: "0.2.0"}
+
+
+def test_the_runner_speaks_the_endpoints_leg_under_the_version_named_for_it():
+    from moxi_turns import claude_setup
+    from moxi_turns.claude_leg import LEG
+
+    manifest = json.loads((CLAUDE_DIR / "moxi-turns" / ".claude-plugin" / "plugin.json").read_text())
+    source = (CLAUDE_DIR / "moxi-turns" / "hooks" / "register.ts").read_text()
+    found = claude_setup._LEG_LINE.search(source)       # as the doctor reads a cached copy
+    assert found is not None and int(found.group(1)) == LEG
+    assert manifest["version"] == RUNNER_VERSION_OF_LEG[LEG]
+
+
 def test_endpoint_json_is_never_tracked():
     ignore = (Path(__file__).parents[1] / ".gitignore").read_text().splitlines()
     assert "src/moxi_turns/claude/moxi-turns/endpoint.json" in ignore

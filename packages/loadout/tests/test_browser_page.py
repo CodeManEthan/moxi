@@ -402,13 +402,20 @@ def test_turn_off_goes_through_the_sheet_with_a_new_key_each_time(
     panel = open_panel(page)
     glob = panel.locator('section[data-part="global"]')
     expect(glob).to_have_attribute("data-chosen", "false")
-    posts = posts_to(page, "api/global-off")
+    posts = posts_to(page, "api/global-remove")
+    (loadout_dir / "global.claude.md").write_text("Claude only.\n", encoding="utf-8")
 
     for _ in range(2):
         glob.get_by_role("button", name="Managed").click()
         job_done(panel)
         expect(glob).to_have_attribute("data-mode", "managed")
         expect(glob.locator(f'li[data-file="{claude_md}"]')).to_have_count(1)
+        # Each harness file lists the parts it reads: Claude's its own, Codex's none.
+        expect(glob.locator(f'li[data-file="{claude_md}"] [data-line="parts"]')).to_have_text(
+            f"claude reads {loadout_dir / 'global.md'} and {loadout_dir / 'global.claude.md'}")
+        codex_md = Path(shell.env["HOME"]) / ".codex" / "AGENTS.md"
+        expect(glob.locator(f'li[data-file="{codex_md}"] [data-line="parts"]')).to_have_text(
+            f"codex reads {loadout_dir / 'global.md'}, no part")
         assert f"@{loadout_dir / 'global.md'}" in claude_md.read_text()
         written_under_home(shell)
 
@@ -450,7 +457,7 @@ def every_control(panel, *, enabled: bool) -> None:
     # Install, Remove, a switch, Add with its fields, both mode buttons, Turn off and
     # Replace are all on the panel.
     for name in ("install:", "remove:", "add:", "Kind:", "Name:", "Section:",
-                 "Sections to install:", "mode:managed", "mode:if-absent", "global-off:",
+                 "Sections to install:", "mode:managed", "mode:if-absent", "global-remove:",
                  "replace:"):
         assert name in found, (name, sorted(found))
     assert any(name.startswith("Turn ") for name in found), sorted(found)

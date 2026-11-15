@@ -31,7 +31,7 @@ posix_only = pytest.mark.skipif(WINDOWS, reason="POSIX modes and ttys")
     "MOXI_CACHE_DEVICE", "MOXI_LOADOUT_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
     "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "HOME", "USERPROFILE",
     "HOMEDRIVE", "HOMEPATH", "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA",
-    "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PATH", "PATHEXT"])
+    "CLAUDE_CONFIG_DIR", "CODEX_HOME", "OPENCODE_CONFIG_DIR", "PATH", "PATHEXT"])
 def test_the_set_holds_each_name_the_resolvers_read(name):
     assert in_set(name, fold=False)
 

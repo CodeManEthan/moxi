@@ -9,7 +9,7 @@ moved forward with `moxi.store.migrate`, and every write runs in one
 - `session_ids`, every session id a launch is known by (the one minted for it, and those a
   sender or the ready recorder learned), so `resolve` finds a launch from any of them;
 - `events`, things that happened to a launch or a session, each a `kind` and a JSON detail;
-- `picks`, the handoffs a launch was given or shown at startup.
+- `picks`, the handoffs a launch was given or shown at startup or resume.
 
 Schema version 2 adds the acts on a launched session and changes two things of version 1:
 
@@ -86,7 +86,7 @@ LEAVES = {
 UNDER_WAY = ("spawning", "sending")
 #: Where a session id came from.
 SOURCES = ("minted", "sender", "startup", "resume", "clear", "compact")
-#: How a handoff reached a launch: handed to it at insert, or shown at startup.
+#: How a handoff reached a launch: handed to it at insert, or shown at startup or resume.
 HOWS = ("given", "shown")
 #: The facts a write may set whatever the state.
 FACTS = ("pid", "pid_started", "pane_id", "slot")

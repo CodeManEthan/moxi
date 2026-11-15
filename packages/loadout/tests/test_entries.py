@@ -356,6 +356,17 @@ def test_status_says_which_harness_facts_no_run_has_confirmed(lo):
     assert len(notes) == 2
     assert any("hooks.json" in n and "rules" in n and "trust" in n for n in notes)
     assert any("opencode.json" in n for n in notes)
+    assert not any("AGENTS.md" in n for n in notes)
+
+
+def test_no_opencode_note_while_loadout_writes_only_its_agents_md(lo):
+    opencode_row()
+    write(lo, '[global]\nmode = "managed"\n')
+    (lo / "global.md").write_text("Be brief.\n")
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert harness.global_file("opencode").exists()
+    assert not [n for n in install.status().notes if "not yet confirmed" in n]
 
 
 def test_another_value_under_the_key_is_blocked_then_taken_over(lo):

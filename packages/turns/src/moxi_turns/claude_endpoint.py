@@ -495,8 +495,9 @@ class ClaudeHarness(Harness):
         raise leg.BadRequest(f"unknown context event {event!r}")
 
     def _guard(self, body: dict[str, Any]) -> dict[str, Any]:
-        """`/ask/guard`: judge one tool call by the guards the runner names. Holds this
-        request's thread until the largest named deadline at most."""
+        """`/ask/guard`: judge one tool call, or at `step` `ask` one permission ask, by the
+        guards the runner names. Holds this request's thread until the largest named
+        deadline at most."""
         call, ids = body.get("call"), body.get("guards")
         if not isinstance(call, dict) or not isinstance(call.get("tool"), str) \
                 or not call["tool"]:
@@ -506,12 +507,20 @@ class ClaudeHarness(Harness):
         given = call.get("input")
         if given is not None and not isinstance(given, dict):
             raise leg.BadRequest('"input" must be an object')
+        step = body.get("step", "call")
+        if step not in ("call", "ask"):
+            raise leg.BadRequest('"step" must be "call" or "ask"')
         ep = self.endpoint
+        record_path = self.record_path
+        mode = None
+        if step == "ask":
+            record_path = _opt_str(call, "transcript_path") or record_path
+            mode = _opt_str(call, "permission_mode")
         tc = ToolCall(self.name, ep.ledger.session_id, _opt_str(call, "agentId"),
                       call["tool"], _opt_str(call, "tool_use_id"), dict(given or {}),
-                      self._call_cwd(call), self.record_path, ep.env,
-                      prompts_of(call.get("prompts")))
-        return self.guards.ask(tc, ids).to_leg()
+                      self._call_cwd(call), record_path, ep.env,
+                      prompts_of(call.get("prompts")), mode)
+        return self.guards.ask(tc, ids, step).to_leg()
 
     def _call_cwd(self, call: dict[str, Any]) -> str:
         """The directory a call runs in: the ask's `cwd` when it is an absolute path, else

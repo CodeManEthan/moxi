@@ -36,16 +36,31 @@ row. An option this turns doesn't know is ignored and named in the doctor. A row
 only by optional trailing items; this turns reads a longer row as its first three items
 and says so in the doctor.
 
-The start list is turns' config key `start.order`: module names and file paths, in
-order. A module entry adds the answers of its `start` rows, joined in the order its
-`LISTENERS` declares them; a module that is not installed, or has no `start` row, is
+The start list is turns' config key `start.order`: module names, file paths and run
+entries, in order. A module entry adds the answers of its `start` rows, joined in the order
+its `LISTENERS` declares them; a module that is not installed, or has no `start` row, is
 skipped. A file entry (one holding a path separator or starting with `~`) adds the file's
 text, read at each start; a missing or unreadable file adds nothing and is logged once
-per endpoint. The total is `start.limit_chars`, at most the harness's ceiling. Each entry on the
+per endpoint.
+
+A run entry starts with `run:`, and the rest is a program's absolute path (`~` expanded);
+the `run:` test comes first, so `run:~/x` is a run entry, not a file. At each start, turns
+runs the program with argv the path and then the start's source (`startup`, `resume`,
+`clear`, `compact`), on stdin one JSON object with `harness`, `session_id`, `source` and
+`cwd`, in the session's environment and its launch directory, in a process group of its
+own. Its stdout, on exit 0, is the entry's text; empty output adds nothing. A non-zero
+exit, a missing or non-executable path, or output that is not UTF-8 adds nothing and is
+logged once per endpoint. It runs inside the same `listen.wait_ms` bound as the other
+entries: when the bound passes first, turns stops waiting and kills the program's process
+group. A program with work past the bound starts that work in a session of its own and
+exits, and gives it other output than its own stdout: turns reads stdout until it closes,
+so a program that exits while a process it started holds stdout open adds nothing, and the
+log says so. The total is `start.limit_chars`, at most the harness's ceiling. Each entry on the
 effective list gets an equal share; in list order, an answer shorter than what it holds
 passes the rest on to the entries after it, and one longer is cut on a line boundary,
 with a last line `[turns: <entry> cut at <n> characters]`. `start_plan` reads the list
-and its shares as a session of a harness would get them, running nothing.
+and its shares as a session of a harness would get them, running nothing: no listener and
+no run entry.
 
 Asking: every function that names the event runs in its own thread; all start together
 and are bounded together by one `listen.wait_ms`. An exception or a late answer is logged
@@ -77,10 +92,13 @@ import builtins
 import concurrent.futures
 import importlib
 import itertools
+import json
 import logging
 import os
 import queue
 import re
+import signal
+import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -322,19 +340,33 @@ def _options(row, options) -> tuple[str | None, list[str]]:
 
 # -- the start list ----------------------------------------------------------------------
 
+#: What a run entry on the start list starts with.
+RUN = "run:"
+
+
+def is_run_entry(entry: str) -> bool:
+    """A start-list entry naming a program to run: it starts with `run:`."""
+    return entry.startswith(RUN)
+
+
 def is_file_entry(entry: str) -> bool:
-    """A start-list entry naming a file: it holds a path separator or starts with `~`."""
+    """A start-list entry naming a file: not a run entry, and it holds a path separator or
+    starts with `~`."""
+    if is_run_entry(entry):
+        return False
     return entry.startswith("~") or "/" in entry or os.sep in entry \
         or bool(os.altsep and os.altsep in entry)
 
 
 @dataclass(frozen=True)
 class Entry:
-    """One entry of the effective start list: a module with `start` rows, or a file."""
+    """One entry of the effective start list: a module with `start` rows, a file, or a
+    program to run."""
 
     entry: str
     rows: tuple[Listener, ...] = ()
     path: Path | None = None
+    program: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -350,7 +382,8 @@ class Plan:
 def plan(registry: Registry, *, present: Callable[[str], bool] | None = None) -> Plan:
     """The effective start list. A module entry is skipped when it has no `start` row
     (`present`, when given, tells "not installed" from "installed, with no start row");
-    a file entry when it is not an absolute path to a readable file."""
+    a file entry when it is not an absolute path to a readable file; a run entry when it is
+    not an absolute path to an executable file."""
     entries: list[Entry] = []
     skipped: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -360,6 +393,13 @@ def plan(registry: Registry, *, present: Callable[[str], bool] | None = None) ->
             skipped.append((entry, "listed twice; the first counts"))
             continue
         seen.add(entry)
+        if is_run_entry(entry):
+            program, why = _program(entry)
+            if why is None:
+                entries.append(Entry(entry, program=program))
+            else:
+                skipped.append((entry, why))
+            continue
         if is_file_entry(entry):
             path, why = _file(entry)
             if why is None:
@@ -394,13 +434,13 @@ def start_total(registry: Registry, harness: str) -> int:
 class StartEntry:
     """One entry of a start plan.
 
-    `kind` is `"file"` or `"listener"` (a module's `start` rows). `share` is what the entry
+    `kind` is `"file"`, `"run"` or `"listener"` (a module's `start` rows). `share` is what the entry
     holds when every entry before it fills its own: the total split equally as the start
     does it, the first entry taking the remainder and each later one giving up the
     two-character separator before it. It is a floor, not a promise: an earlier entry
     that answers short passes its room on. `size` is a file's present length in
     characters, read up to the total (a longer file reads as the total; one that cannot
-    be read now as 0), and None for a listener entry, whose length is known only by
+    be read now as 0), and None for a listener or run entry, whose length is known only by
     running it.
     """
 
@@ -446,6 +486,9 @@ def start_plan(harness: str, env=None) -> StartPlan:
     entries: list[StartEntry] = []
     for i, e in enumerate(the_plan.entries):
         held = share + (total - share * count) if i == 0 else max(0, share - len(JOIN))
+        if e.program is not None:
+            entries.append(StartEntry(e.entry, "run", held))
+            continue
         if e.path is None:
             entries.append(StartEntry(e.entry, "listener", held))
             continue
@@ -470,6 +513,20 @@ def _file(entry: str) -> tuple[Path | None, str | None]:
             return None, "does not exist" if not path.exists() else "is not a file"
         if not os.access(path, os.R_OK):
             return None, "cannot be read"
+    except OSError as exc:
+        return None, f"cannot be read: {exc}"
+    return path, None
+
+
+def _program(entry: str) -> tuple[Path | None, str | None]:
+    path = Path(entry[len(RUN):]).expanduser()
+    if not path.is_absolute():
+        return None, "not an absolute path; write it from / or ~"
+    try:
+        if not path.is_file():
+            return None, "does not exist" if not path.exists() else "is not a file"
+        if not os.access(path, os.X_OK):
+            return None, "is not executable"
     except OSError as exc:
         return None, f"cannot be read: {exc}"
     return path, None
@@ -565,14 +622,16 @@ def _start(registry: Registry, event: SessionEvent, wait_s: float,
         _launch(ready, replace(event, event="ready"), after)
     the_plan = plan(registry)
     for entry, why in the_plan.skipped:
-        if is_file_entry(entry) and entry not in registry._logged:
-            registry._logged.add(entry)
-            log.warning("start list entry %s adds nothing: %s", entry, why)
+        if is_file_entry(entry) or is_run_entry(entry):
+            _log_once(registry, entry, why)
     if not the_plan.entries:
         return None
     start = replace(event, event="start")
     rows = [ls for e in the_plan.entries for ls in e.rows]
     answers, done, threads = _launch(rows, start, after) if rows else ([], [], [])
+    ran: dict[str, str | None] = {}
+    threads += [_run_thread(registry, e, start, wait_s, ran) for e in the_plan.entries
+                if e.program is not None]
     total = start_total(registry, event.harness)
     files: dict[str, str | None] = {}
     for e in the_plan.entries:
@@ -581,10 +640,7 @@ def _start(registry: Registry, event: SessionEvent, wait_s: float,
                 files[e.entry] = _read_file(e.path, total)
             except (OSError, UnicodeError) as exc:
                 files[e.entry] = None
-                if e.entry not in registry._logged:
-                    registry._logged.add(e.entry)
-                    log.warning("start list entry %s adds nothing: it cannot be read: %s",
-                                e.entry, exc)
+                _log_once(registry, e.entry, f"it cannot be read: {exc}")
     _join(threads, wait_s)
     texts = {id(ls): _text(ls, start, answers[i], done=done[i], wait_s=wait_s)
              for i, ls in enumerate(rows)}
@@ -592,10 +648,91 @@ def _start(registry: Registry, event: SessionEvent, wait_s: float,
     for e in the_plan.entries:
         if e.path is not None:
             per_entry.append((e.entry, files.get(e.entry)))
+        elif e.program is not None:
+            per_entry.append((e.entry, ran.get(e.entry)))
         else:
             joined = JOIN.join(t for t in (texts[id(ls)] for ls in e.rows) if t)
             per_entry.append((e.entry, joined or None))
     return share_out(per_entry, total)
+
+
+def _log_once(registry: Registry, entry: str, why: str) -> None:
+    if entry not in registry._logged:
+        registry._logged.add(entry)
+        log.warning("start list entry %s adds nothing: %s", entry, why)
+
+
+def _run_thread(registry: Registry, e: Entry, event: SessionEvent, wait_s: float,
+                ran: dict[str, str | None]) -> threading.Thread:
+    t = threading.Thread(target=_run, args=(registry, e, event, wait_s, ran),
+                         name=f"turns-run-{e.program.name}", daemon=True)
+    t.start()
+    return t
+
+
+def _run(registry: Registry, e: Entry, event: SessionEvent, wait_s: float,
+         ran: dict[str, str | None]) -> None:
+    """Run a run entry's program within `wait_s`; its text goes in `ran` on exit 0."""
+    stdin = json.dumps({"harness": event.harness, "session_id": event.session_id,
+                        "source": event.source, "cwd": event.cwd}).encode()
+    group = ({"process_group": 0} if os.name == "posix"
+             else {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)})
+    cwd = event.cwd if event.cwd and os.path.isdir(event.cwd) else None
+    try:
+        proc = subprocess.Popen([str(e.program), event.source or ""], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                env=dict(event.env) or None, cwd=cwd, **group)
+    except OSError as exc:
+        _log_once(registry, e.entry, f"it cannot start: {exc}")
+        return
+    try:
+        out, _ = proc.communicate(stdin, timeout=max(0.0, wait_s))
+    except subprocess.TimeoutExpired:
+        _kill_group(proc)
+        _log_once(registry, e.entry, _past_bound(proc.returncode, wait_s))
+        return
+    if proc.returncode != 0:
+        _log_once(registry, e.entry, f"it exited with {proc.returncode}")
+        return
+    try:
+        text = out.decode("utf-8")
+    except UnicodeDecodeError:
+        _log_once(registry, e.entry, "its output is not UTF-8")
+        return
+    ran[e.entry] = text or None
+
+
+def _past_bound(code: int | None, wait_s: float) -> str:
+    """Why a run entry still read at the bound adds nothing, from its exit code after the
+    kill. A program can exit while a process it started still holds its stdout open: turns
+    never sees the output close, and the entry's text is dropped."""
+    ms = int(wait_s * 1000)
+    if code == 0:
+        return (f"it exited, but its output stayed open past {ms} ms "
+                "(a process it started still holds it)")
+    if os.name == "posix" and code is not None and code > 0:
+        return (f"it exited with {code}, and its output stayed open past {ms} ms "
+                "(a process it started still holds it)")
+    return f"it ran past {ms} ms and was stopped"
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """Kill `proc`'s process group, and stop reading it: a child that left the group may
+    still hold its output open."""
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except OSError:
+        pass
+    proc.wait()
+    for pipe in (proc.stdin, proc.stdout):
+        try:
+            if pipe is not None:
+                pipe.close()
+        except OSError:
+            pass
 
 
 def _launch(chosen: list[Listener], event: SessionEvent, after: After | None = None):

@@ -135,8 +135,7 @@ def places(*, reads: Sequence[str] = ()) -> Places:
                  "Moxi's state folder": core().state_dir(env),
                  "Moxi's settings file": core().config_file(env)}
         found.update(place.harness_dirs(env))
-        found.update({f"{NAMES[h]}'s home": harness.home(h, env)
-                      for h in harness.HARNESSES})
+        found.update({f"{NAMES[h]}'s home": harness.home(h, env) for h in harness.HARNESSES})
         for m in modules:
             theirs, whose = Layout(m), m + ("'" if m.endswith("s") else "'s")
             found[f"{whose} data folder"] = theirs.data_dir(env)

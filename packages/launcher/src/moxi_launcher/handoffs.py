@@ -2,8 +2,8 @@
 which handoffs are still waiting for their seat.
 
 A handoff is a short file a session writes for the next session of its seat. The launcher
-points a seat to its waiting handoff at the seat's next start (`listen_handoff`) and gives
-a handoff to a launch as its first turn.
+points a seat to its waiting handoff at the seat's next start or resume (`listen_handoff`),
+and gives a handoff to a launch as its first turn.
 
 **The key.** For a launch, from its row: the comms identity without its `@scope`; else the
 seat's name; else the project key. For a session the launcher did not start: the comms name
@@ -17,11 +17,23 @@ folder in its data directory. A key named from outside its sessions (`handoffs -
 read in the folder of its newest launch, else in the caller's directory's folder.
 
 **The file name.** `<YYYY-MM-DD>-<key>.md`, then `-2`, `-3` before `.md` when the day's name
-is taken. Files sort by their date, then that count.
+is taken. Files sort by their date, then that count. Read without a key (`others`), a name's
+trailing `-<n>` (n of 2 or more) is the count only when the same date holds the name
+without it; otherwise it is part of the key.
+
+The rule is ambiguous for a key that itself ends in `-<n>`: `2026-10-29-lead-2.md` is both
+seat `lead`'s second handoff of that day and seat `lead-2`'s first. A seat reads names
+for its own key (`parse`), so seats `lead` and `lead-2` each take that file as their own
+waiting handoff, and `lead`'s other-seat lines leave it out even on a date with no
+`2026-10-29-lead.md`. Only a read without a key uses the same-date test above.
+
+**Other seats' handoffs.** A seat's start also lists the handoffs other keys have waiting
+in its folder (`others`), newest first, at most `OTHERS_SHOWN` lines, then how many more.
+Listing one picks nothing: it waits for its own seat.
 
 **A handoff is used up only by the seat it was written for.** It counts as picked when the
-launcher gave it to a launch, or showed it at startup to a session that claimed a launch of
-the same key. A handoff waits while it is newer than the newest handoff of its key a pick
+launcher gave it to a launch, or showed it at startup or resume to a session that claimed a
+launch of the same key. A handoff waits while it is newer than the newest handoff of its key a pick
 names.
 """
 
@@ -56,6 +68,8 @@ def comms_name_env() -> str | None:
 #: What a key may be: it is part of a file name.
 _KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _DATE = r"(\d{4}-\d{2}-\d{2})"
+#: How many other seats' handoffs a start lists before it counts the rest.
+OTHERS_SHOWN = 5
 
 
 class NoKey(Exception):
@@ -220,7 +234,10 @@ def file_name(key: str, date: str, count: int = 1) -> str:
 
 
 def parse(path: str | Path, key: str) -> Handoff | None:
-    """The handoff `path` names when its file name is one of `key`'s, else None."""
+    """The handoff `path` names when its file name is one of `key`'s, else None. A
+    trailing `-<n>` is read as `key`'s count whether or not the date holds the name
+    without it, so `<date>-<key>-<n>.md` is `key`'s even when a seat named `<key>-<n>`
+    wrote it (the module's note on the file name)."""
     match = re.fullmatch(_DATE + "-" + re.escape(key) + r"(?:-([2-9]|[1-9]\d+))?\.md",
                          Path(path).name)
     if match is None:
@@ -258,6 +275,72 @@ def waiting(conn, where: str | Path, key: str) -> Handoff | None:
 def pointer(handoff: Handoff) -> str:
     """The line a seat's start shows for its waiting handoff."""
     return f"Handoff waiting: {handoff.path} ({handoff.date}). Read it before other work."
+
+
+def keyed(where: str | Path) -> list[tuple[str, Handoff]]:
+    """Every handoff file in folder `where` with the key its name gives: the date, then
+    the key, then an optional `-<n>` count that is a count only when the same date also
+    holds the name without it. Names that give no usable key are left out."""
+    try:
+        paths = [p for p in Path(where).iterdir() if p.is_file()]
+    except OSError:
+        return []
+    names = {p.name for p in paths}
+    out: list[tuple[str, Handoff]] = []
+    for path in paths:
+        match = re.fullmatch(_DATE + r"-(.+)\.md", path.name)
+        if match is None:
+            continue
+        date, rest = match.group(1), match.group(2)
+        key, count = rest, 1
+        counted = re.fullmatch(r"(.+)-([2-9]|[1-9]\d+)", rest)
+        if counted is not None and f"{date}-{counted.group(1)}.md" in names:
+            key, count = counted.group(1), int(counted.group(2))
+        if _KEY.fullmatch(key):
+            out.append((key, Handoff(path, date, count)))
+    return out
+
+
+def others(conn, where: str | Path, key: str | None) -> list[tuple[str, Handoff]]:
+    """Each other key's newest handoff still waiting in folder `where`, as `(key,
+    handoff)`, newest first (by date, then when the file was last written). `key` is the
+    asking seat's, left out with every file its own names read as; None leaves out
+    nothing. `conn` is the launch log, or None when it was never made."""
+    from . import store
+
+    grouped: dict[str, list[Handoff]] = {}
+    for other, found in keyed(where):
+        if other == key or (key is not None and parse(found.path, key) is not None):
+            continue
+        grouped.setdefault(other, []).append(found)
+    out: list[tuple[str, Handoff]] = []
+    for other, found in grouped.items():
+        picked = store.picked(conn, other) if conn is not None else []
+        named = [h.order for p in picked if (h := parse(p, other)) is not None]
+        newest = max(named) if named else None
+        left = [h for h in found if newest is None or h.order > newest]
+        if left:
+            out.append((other, max(left, key=lambda h: h.order)))
+    return sorted(out, key=lambda item: (item[1].date, _mtime(item[1].path), item[0]),
+                  reverse=True)
+
+
+def other_lines(found: list[tuple[str, Handoff]], shown: int | None = None) -> list[str]:
+    """The lines a seat's start shows for other keys' waiting handoffs: at most `shown`
+    (`OTHERS_SHOWN`), then one line counting the rest."""
+    shown = OTHERS_SHOWN if shown is None else shown
+    lines = [f"Another seat's handoff: {h.path} ({other}, {h.date})"
+             for other, h in found[:shown]]
+    if len(found) > shown:
+        lines.append(f"\u2026 and {len(found) - shown} more")
+    return lines
+
+
+def _mtime(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
 
 
 # -- the current session -----------------------------------------------------------------
@@ -306,7 +389,7 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
     return Current(key, handoff_dir(cwd if cwd is not None else Path.cwd(), create=create), None)
 
 
-__all__ = ["comms_name_env", "HANDOFFS_DIR", "Current", "Handoff", "KeyFolder", "NoKey", "check_key",
-           "current", "file_name", "handoff_dir", "handoff_dir_of_key", "handoff_dir_of_row", "handoffs",
-           "key_of_env", "key_of_row", "newest_launch", "own_handoffs_dir", "parse", "pointer",
-           "unpicked", "waiting"]
+__all__ = ["comms_name_env", "HANDOFFS_DIR", "OTHERS_SHOWN", "Current", "Handoff", "KeyFolder",
+           "NoKey", "check_key", "current", "file_name", "handoff_dir", "handoff_dir_of_key",
+           "handoff_dir_of_row", "handoffs", "key_of_env", "key_of_row", "keyed", "newest_launch",
+           "other_lines", "others", "own_handoffs_dir", "parse", "pointer", "unpicked", "waiting"]

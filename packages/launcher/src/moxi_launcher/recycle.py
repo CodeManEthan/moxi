@@ -40,8 +40,9 @@ Each ask ends one way:
 **A repeated `blocked` updates one run** (`store.end_blocked`), so a draft left in an idle
 session is one run whose start is when the block began.
 
-**Recycle at limit.** `on_crossing` is called in turns' endpoint once per rise of the main
-session's context past the launch's `limit_at` mark, with at most 200 ms to answer. It
+**Recycle at limit.** `on_crossing` is the launcher's entry on usage's `moxi.usage.crossings`
+group. usage calls it in turns' endpoint once per rise of the main session's context past
+the launch's `limit_at` mark, with at most 200 ms to answer. It
 reads the store, writes at most one row, and returns; it never waits on the session.
 `relaunch` writes an event and returns a line that tells the agent to recycle itself;
 `compact` writes a compact run and spawns its job, which waits for the session to be idle

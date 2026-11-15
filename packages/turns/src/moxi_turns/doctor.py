@@ -10,12 +10,12 @@ and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, the placed 
 has no doctor command of its own.
 
 The guard rows read the list as an endpoint would, in the doctor's own process: `guards`
-names each guard on, what turned it on and where it runs on each harness; `guard <id>`
-is `off` for an available guard nobody turned on, `fail` for one on the list that does
-not load, whose judge does not import or whose `match` does not compile, and for a
+names each guard on, its step, what turned it on and where it runs on each harness;
+`guard <id>` is `off` for an available guard nobody turned on, `fail` for one on the list
+that does not load, whose judge does not import or whose `match` does not compile, and for a
 switch that fails the core's check, listed or not, and `warn` for one on the list whose
 module is not installed, whose import took over `IMPORT_WARN_MS`, or (the removal guard)
-when the installed Claude Code is newer than the one its rules were checked against;
+when the installed Claude Code is newer than the one its rule was checked against;
 `guard <id>: <harness>` says, as information, that a guard on covers no call there or
 that the harness has no pre-tool point. A guard's breaks are records the core shows.
 The doctor adds readings and denies nothing.
@@ -116,6 +116,10 @@ def _start_list(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
             yield moxi_doctor.Row(MODULE, f"start list: {entry}", "warn",
                                   f"this file entry adds nothing: {why}",
                                   "correct the path in start.order, or remove it")
+        elif listeners.is_run_entry(entry):
+            yield moxi_doctor.Row(MODULE, f"start list: {entry}", "warn",
+                                  f"this run entry adds nothing: {why}",
+                                  "correct the path in start.order, or remove it")
 
 
 def _listener_rows(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
@@ -207,12 +211,13 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
             if newer:
                 warns.setdefault(o.id, []).append(
                     f"the installed Claude Code is {newer}, newer than "
-                    f"{removal.CHECKED_CLAUDE}, which its rules were checked against; "
+                    f"{removal.CHECKED_CLAUDE}, which its rule was checked against; "
                     "Claude Code's own removal handling may have moved")
 
     if loaded.on:
         yield Row("guards", ok=True, detail="; ".join(
-            f"{o.id} (on by {' and '.join(_BY.get(b, b) for b in o.by)}): runs "
+            f"{o.id} ({o.guard.step} step, on by "
+            f"{' and '.join(_BY.get(b, b) for b in o.by)}): runs "
             f"{', '.join(places.get(o.id) or ['nowhere'])}" for o in loaded.on))
     else:
         yield Row("guards", ok=True, detail="no guard is on")

@@ -9,6 +9,8 @@
   not read.
 - The catalogue gains `rounds` (`moxi-rounds`), so `moxi install rounds` and `moxi
   modules --available` know it by name. Its version is 3.
+- The terminal record's set holds `OPENCODE_CONFIG_DIR`, so a page check can compare
+  OpenCode's home.
 
 ## 0.1.7 (2026-11-08)
 

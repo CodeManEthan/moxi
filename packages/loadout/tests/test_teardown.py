@@ -127,6 +127,7 @@ def test_uninstall_takes_out_everything_loadout_wrote(lo):
     assert not harness.rules_file().exists()
     assert harness.global_file("claude").read_text() == MINE
     assert not harness.global_file("codex").exists()
+    assert not harness.global_file("opencode").exists()
     opencode = harness.settings_file("opencode")
     assert not opencode.exists() or "instructions" not in read(opencode)
     assert "opencode" not in place.harnesses()[0]
@@ -199,10 +200,18 @@ def test_a_global_line_the_user_had_naming_the_loadout_dir_is_named(lo):
     line = f"@{lo / 'global.md'}"
     harness.global_file("claude").parent.mkdir(parents=True, exist_ok=True)
     harness.global_file("claude").write_text(MINE + line + "\n")
+    assert install.install().code == 0
+    # The user's own OpenCode instructions entry, recorded as theirs: an older install
+    # recorded one so, and the block form never writes one.
     opencode = harness.settings_file("opencode")
     opencode.parent.mkdir(parents=True, exist_ok=True)
     opencode.write_text(json.dumps({"instructions": [str(lo / "global.md")]}))
-    assert install.install().code == 0
+    data = ledger.read()
+    data["entries"].append({"item": "global:global", "harness": "opencode",
+                            "file": str(opencode), "kind": "instructions",
+                            "key": ["instructions", str(lo / "global.md")],
+                            "written": str(lo / "global.md"), "prior": True})
+    ledger.write(data)
     assert {r["prior"] for r in ledger.read()["entries"]
             if r["kind"] in ("global-line", "instructions")} == {True}
     lines, say = said()

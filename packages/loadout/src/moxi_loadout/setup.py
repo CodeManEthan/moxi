@@ -47,12 +47,14 @@ EXAMPLE_DIRS = ("skills", "agents")
 
 MODE_QUESTION = """\
 loadout: the global instruction file, global.md in your loadout folder, can reach every
-session of every harness. Choose how:
+session of every harness, with global.<harness>.md beside it for one harness's own text
+(global.claude.md, global.codex.md, global.opencode.md). Choose how:
   off        loadout touches no global file (the default)
-  managed    your own CLAUDE.md and AGENTS.md stay; loadout adds a line or a block that
-             brings global.md in, and global remove takes exactly that out
-  if-absent  global.md is placed where a harness has no global file; an existing one
-             is left alone
+  managed    your own CLAUDE.md and AGENTS.md stay; loadout adds lines or a block that
+             bring in global.md and the harness's part, and global remove takes exactly
+             that out
+  if-absent  where a harness has no global file, global.md is placed there, or a file
+             of global.md and its part; an existing one is left alone
 Global mode [off]: """
 #: What setup says when nobody is at the keyboard to answer.
 NO_ANSWER = ("loadout: the global file is off: the manifest sets no [global] mode; "

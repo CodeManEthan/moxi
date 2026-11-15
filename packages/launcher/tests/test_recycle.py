@@ -1,8 +1,8 @@
 """Recycle against fakes of turns, slots and cache: the timer's subscription, the expiry
 ask's reads in order and every verdict (quiet, blocked, failed, unconfirmed, cleared,
 compacted), the background shells a clear stops after an idle hour, a repeated block as
-one run, the crossing handler in both modes, a pending compact taken up by a run's end,
-and the limit compact's job."""
+one run, the crossing handler in both modes and reached through usage's crossing group, a
+pending compact taken up by a run's end, and the limit compact's job."""
 
 from __future__ import annotations
 
@@ -603,6 +603,54 @@ def test_a_compact_job_that_does_not_start_ends_its_run_failed(conn, script):
     recycle.crossing_line(conn, crossing(), pid=os.getpid(), spawn=Spawned(OSError("no")))
     [run] = store.runs(conn, request_id="r1")
     assert (run.state, run.outcome, run.word) == ("ended", "failed", "not-started")
+
+
+def test_the_crossing_handler_is_found_through_usage_s_entry_point_group():
+    found = [e for e in modules.extensions("moxi.usage.crossings") if e.module == "launcher"]
+    assert [e.target for e in found] == ["moxi_launcher.recycle:on_crossing"]
+    assert found[0].load() is recycle.on_crossing
+
+
+@pytest.fixture
+def usage_group(tmp_path, monkeypatch):
+    """usage's crossing group read afresh, over a launch log in its default place under
+    a home of the test's own, holding launch r1 claimed by this process."""
+    mark = pytest.importorskip("moxi_usage.mark", reason="usage is not installed")
+    monkeypatch.delenv("MOXI_LAUNCHER_HOME", raising=False)
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
+    assert store.path().is_relative_to(tmp_path)
+    connection = store.connect()
+    launched(connection)
+    mark.reset()
+    yield SimpleNamespace(mark=mark, conn=connection)
+    mark.reset()
+    connection.close()
+
+
+def through_usage(group, at):
+    crossing = group.mark.Crossing("claude", SID, "1x", 900, 800, "opus", at)
+    return group.mark.run_handlers(crossing, wait=5.0)
+
+
+def test_a_relaunch_crossing_reaches_the_launcher_through_usage_s_group_once(usage_group):
+    limit(usage_group.conn, "relaunch")
+    assert recycle.RELAUNCH_LINE in through_usage(usage_group, 1761904800.0)
+    assert recycle.RELAUNCH_LINE not in through_usage(usage_group, 1761904800.0)
+    told = [e for e in store.events(usage_group.conn, "r1") if e.kind == "recycle-told"]
+    assert len(told) == 1
+
+
+def test_a_compact_crossing_reaches_the_launcher_through_usage_s_group_and_is_recorded(
+        usage_group, script, monkeypatch):
+    limit(usage_group.conn, "compact")
+    spawn = Spawned()
+    monkeypatch.setattr(proc, "spawn", spawn)
+    assert recycle.COMPACT_LINE in through_usage(usage_group, 1761904800.0)
+    [run] = store.runs(usage_group.conn, request_id="r1")
+    assert (run.kind, run.mode, run.state) == ("compact", "limit", "armed")
+    assert run.crossing_key == f"{SID}|1x|1761904800.0"
+    [(argv, _)] = spawn.calls
+    assert argv == ["/venv/bin/moxi-launcher-job", "compact", run.run_id]
 
 
 def open_run(conn, kind="relaunch", mode="self"):

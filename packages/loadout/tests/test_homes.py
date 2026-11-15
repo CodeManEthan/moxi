@@ -136,6 +136,19 @@ def test_a_job_under_another_harness_home_is_refused(
     assert ledger.read() == before
 
 
+def test_a_job_setting_opencode_config_dir_the_terminal_lacked_is_refused(
+        lo, monkeypatch, tmp_path, terminal_record):
+    terminal_record()
+    before = ledger.read()
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(tmp_path / "elsewhere"))
+    page(monkeypatch)
+    assert pagejob.run("j1", ["add", "skill", "review", "--user"]) == 3
+    line = refused("j1", lo)
+    assert f"OpenCode's home here is {tmp_path / 'elsewhere'}" in line
+    assert "Take OPENCODE_CONFIG_DIR out of the browser shell's environment" in line
+    assert ledger.read() == before
+
+
 def test_a_job_whose_path_has_no_git_is_refused_when_the_terminals_had_it(
         lo, monkeypatch, terminal_record):
     terminal_record()
@@ -295,7 +308,7 @@ def test_the_places_follow_the_mapping_not_this_process(lo, monkeypatch, tmp_pat
     poison = tmp_path / "poison"
     for name in [n for n in honest if terminal.in_set(n) and n != "PATH"]:
         monkeypatch.setenv(name, str(poison / name))
-    for name in ("MOXI_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+    for name in ("MOXI_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "OPENCODE_CONFIG_DIR"):
         monkeypatch.setenv(name, str(poison / name))
     got = places(honest)
     assert got == expected

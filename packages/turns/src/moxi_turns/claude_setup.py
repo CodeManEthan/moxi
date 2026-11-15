@@ -23,7 +23,10 @@ an absolute path is no endpoint; the runner does not fall back to the file then.
    version that placed the copy. Every run rewrites it, so a changed key or a moved
    environment takes effect at the next `moxi install turns`.
 3. `claude plugin marketplace add <placed folder>`, then install both plugins at user
-   scope, skipping each one already done. A marketplace of the same name added from a
+   scope, skipping each one already done. Claude Code runs a user-scope plugin from its
+   own cache, one folder per version, so a plugin installed at another version than the
+   placed copy's manifest names is updated (`claude plugin update`), and its new cache
+   folder is read from the placed copy. A marketplace of the same name added from a
    package's own folder (a path ending in `moxi_turns/claude`, as an older turns added
    it) is removed and added again from the placed folder, and both plugins are installed
    again. One added from any other folder is refused.
@@ -50,6 +53,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -391,17 +395,32 @@ def install_plugins(root: Path | None = None) -> list[str]:
         lines.append(f"moved the marketplace {MARKETPLACE} from {where} to {marketplace_dir}")
     else:
         lines.append(f"the marketplace {MARKETPLACE} is already added")
-    installed = set() if moved else {
-        p.get("id") for p in _json_list(claude, "list")
+    installed = {} if moved else {
+        p.get("id"): p.get("version") for p in _json_list(claude, "list")
         if isinstance(p, dict) and p.get("scope") == "user"}
     for plugin in (RUNNER, GATE):
         ident = f"{plugin}@{MARKETPLACE}"
-        if ident in installed:
-            lines.append(f"{ident} is already installed")
+        if ident not in installed:
+            _must(claude, "install", ident)
+            lines.append(f"installed {ident}")
             continue
-        _must(claude, "install", ident)
-        lines.append(f"installed {ident}")
+        have, want = installed[ident], _manifest_version(plugin_dir(plugin, root))
+        if isinstance(have, str) and want is not None and have != want:
+            _must(claude, "update", ident, "--scope", "user")
+            lines.append(f"updated {ident} from {have} to {want}")
+            continue
+        lines.append(f"{ident} is already installed")
     return lines
+
+
+def _manifest_version(folder: Path) -> str | None:
+    """The version a plugin folder's manifest names, or None when it names none."""
+    try:
+        version = json.loads((folder / ".claude-plugin" / "plugin.json")
+                             .read_text("utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return version if isinstance(version, str) else None
 
 
 def setup() -> int:
@@ -472,8 +491,9 @@ def teardown() -> int:
 def rows() -> list:
     """`check()`'s Claude rows: each plugin's presence and version in the folders a launch
     would use, the placed copy against the package, whether the placed `endpoint.json`
-    names the command the config and the environment give now, and the Claude Code
-    version against the ones the probes passed.
+    names the command the config and the environment give now, the leg of the runner
+    Claude Code runs at user scope (its cached copy) against the endpoint's, and the
+    Claude Code version against the ones the probes passed.
 
     A missing or stale `endpoint.json` fails when the runner is installed at user scope,
     since every such session then runs without turns and nothing but SETUP rewrites the
@@ -517,13 +537,14 @@ def rows() -> list:
                        f"names {written.get('command')!r}, but the config and this "
                        f"environment give {want!r}")
             out.append(_endpoint_file_row(Row, MODULE, problem))
+    out.extend(_installed_runner_rows(Row, MODULE))
     out.append(_version_row(Row, MODULE))
     return out
 
 
-def _user_scope_runner() -> bool | None:
-    """Whether the runner is installed at user scope, as SETUP reads it; None when
-    `claude` is not on PATH or the call fails."""
+def _user_scope_entry() -> dict | None:
+    """The runner's user-scope entry in `claude plugin list`, {} when it is not installed
+    at user scope, or None when `claude` is not on PATH or the call fails."""
     claude = _claude()
     if claude is None:
         return None
@@ -531,8 +552,53 @@ def _user_scope_runner() -> bool | None:
         listed = _json_list(claude, "list")
     except (SetupError, OSError, subprocess.TimeoutExpired):
         return None
-    return any(isinstance(p, dict) and p.get("scope") == "user"
-               and p.get("id") == f"{RUNNER}@{MARKETPLACE}" for p in listed)
+    return next((p for p in listed if isinstance(p, dict) and p.get("scope") == "user"
+                 and p.get("id") == f"{RUNNER}@{MARKETPLACE}"), {})
+
+
+def _user_scope_runner() -> bool | None:
+    """Whether the runner is installed at user scope, as SETUP reads it; None when
+    `claude` is not on PATH or the call fails."""
+    entry = _user_scope_entry()
+    return None if entry is None else bool(entry)
+
+
+#: How the runner's source names the leg it speaks.
+_LEG_LINE = re.compile(r"^const LEG = (\d+)\s*$", re.MULTILINE)
+
+
+def _installed_runner_rows(Row, module) -> list:
+    """The runner Claude Code runs at user scope is its cached copy, not the placed one:
+    one row comparing that copy's leg with the endpoint's. No row when the runner is not
+    installed at user scope or Claude Code cannot say."""
+    from .claude_leg import LEG
+
+    entry = _user_scope_entry()
+    if not entry:
+        return []
+    name = "claude installed runner"
+    where = entry.get("installPath")
+    if not isinstance(where, str) or not where:
+        return [Row(module, name, "warn",
+                    f"Claude Code names no folder for {RUNNER}@{MARKETPLACE}, so its leg "
+                    "cannot be read")]
+    try:
+        found = _LEG_LINE.search((Path(where) / "hooks" / "register.ts").read_text("utf-8"))
+    except (OSError, UnicodeError) as exc:
+        found, why = None, f"cannot be read: {exc}"
+    else:
+        why = "names no leg"
+    if found is None:
+        return [Row(module, name, "warn", f"the runner at {where} {why}")]
+    have = int(found.group(1))
+    if have == LEG:
+        return [Row(module, name, "ok",
+                    f"version {entry.get('version', '?')} at {where}, leg {have} as the "
+                    "endpoint")]
+    return [Row(module, name, "fail",
+                f"version {entry.get('version', '?')} at {where} speaks leg {have}, the "
+                f"endpoint leg {LEG}: every session it loads in runs without turns",
+                "moxi install turns")]
 
 
 def _endpoint_file_row(row_type, module, problem: str):
