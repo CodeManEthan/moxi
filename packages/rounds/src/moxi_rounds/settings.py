@@ -11,6 +11,8 @@ what a flow and a project table may hold is checked here.
 A setting is read for a round or for a build. `round_setting` reads one of `ROUND_KEYS`
 for the round's home project; `build_setting` reads one of `BUILD_KEYS` for the build's
 repo. Each takes the project's own table first, then `defaults`.
+The `sweep` keys are this machine's and belong to no project, so they are read as
+they stand (`settings["sweep.armed"]`).
 
 A project's table is `[projects.<key>]`, and its name finds the project the way the
 projects list finds one: ignoring case. So `project_table` gives the same table for
@@ -62,6 +64,7 @@ def check(settings):
                       settings["defaults.sitting_at"])
     _check_disposable(settings.file, "defaults.disposable",
                       settings["defaults.disposable"])
+    _check_grace(settings.file, "sweep.grace_hours", settings["sweep.grace_hours"])
     named: dict[str, str] = {}
     for name, table in settings["projects"].items():
         first = named.setdefault(name.casefold(), name)
@@ -202,6 +205,13 @@ def _check_sitting_at(file, where, value) -> None:
         raise ConfigError(file, where, f"is {value}, below 0",
                           "give the count of open questions at which a sitting is "
                           "suggested, or 0 to suggest none")
+
+
+def _check_grace(file, where, value) -> None:
+    if value < 1:
+        raise ConfigError(file, where, f"is {value}, below 1",
+                          "give the hours nothing in a leftover folder must have changed "
+                          "before the sweep takes it, 1 or more")
 
 
 def _check_disposable(file, where, value) -> None:

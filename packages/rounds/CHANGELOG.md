@@ -153,6 +153,13 @@ does not yet build.
   the folders of the builds they end. A folder kept is named with the check that kept
   it. `defaults.disposable` sets the globs. The finish gate on the worktree reads git
   the same way.
+- `drop --leftovers [--remove] [--json]`, the sweep of the folders ended builds left on
+  this machine: candidates only from finished and dropped builds' records, the removal
+  rule's two halves, then every log read, no process using the folder (through psutil,
+  now a dependency) and nothing in it changed within `sweep.grace_hours`. A dry run
+  until `sweep.armed` is true; one run at a time, starting no removal after 60 seconds;
+  each removal and trash move and delete is a line of `sweep.jsonl`, the store `sweeps`.
+  The doctor's `leftovers` row is its dry run.
 - `mark ROUND B<n> --brief FILE` sizes a worker's brief: its data block names one
   slice of the stage within `slice_minutes`, or one verification, or neither for a
   stage that declares no slices, which is one slice; the pass is recorded as

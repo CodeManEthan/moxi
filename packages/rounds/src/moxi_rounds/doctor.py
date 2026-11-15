@@ -24,6 +24,10 @@ be, with the right mode and size. These look at what rounds needs and keeps:
   writes has a holder and a time to read; whatever else a repo's `lock_ref` points at
   is another tool's, and not judged here. A project whose root git can't read has no
   locks to look at.
+- leftovers: the sweep's dry run (`sweeping.account`). `ok` when no folder of an ended
+  build and no trash entry is left on this machine; else `warn` with each folder,
+  whether it would go or the check that keeps it, and the command that removes what
+  would go. Like every row it only reads: it takes no lock and removes nothing.
 
 The doctor only reads. It writes nothing in a rounds folder and nothing in the index:
 an index that is behind is reported, and left for the command that brings it up.
@@ -72,6 +76,7 @@ def rows() -> Iterator[Row]:
     yield _index(homes)
     yield from _ci()
     yield from _locks()
+    yield from _leftovers()
 
 
 # -- ci ----------------------------------------------------------------------------------
@@ -151,6 +156,40 @@ def _locks() -> Iterator[Row]:
         yield Row(MODULE, "finish locks", "ok",
                   f"no finish lock older than an hour in the {read} "
                   f"repo{'' if read == 1 else 's'} read")
+
+
+# -- leftovers -------------------------------------------------------------------------------
+
+def _leftovers() -> Iterator[Row]:
+    from . import settings as own
+    from . import sweeping
+
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        # The settings' own row says what is wrong with them.
+        return
+    try:
+        swept = sweeping.account(settings=settings)
+    except (RoundsError, OSError) as error:
+        yield Row(MODULE, "leftovers", "warn", "the sweep's dry run could not read what "
+                  f"ended builds left: {getattr(error, 'reason', error)}")
+        return
+    if swept.clear:
+        yield Row(MODULE, "leftovers", "ok",
+                  "no folder of an ended build is left on this machine")
+        return
+    lines = swept.lines()
+    more = len(lines) - _NAMED
+    detail = "; ".join(lines[:_NAMED]) + (f"; and {more} more" if more > 0 else "")
+    goes = swept.would_go or any(one.fate == sweeping.WOULD_DELETE
+                                 for one in swept.trash)
+    fix = None
+    if goes:
+        fix = (sweeping.REMOVE if swept.armed else "read the dry run with "
+               f"{sweeping.DRY_RUN}, set armed = true under [sweep] in rounds' config, "
+               f"then: {sweeping.REMOVE}")
+    yield Row(MODULE, "leftovers", "warn", detail, fix)
 
 
 # -- git -----------------------------------------------------------------------------------

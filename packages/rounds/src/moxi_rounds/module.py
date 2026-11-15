@@ -23,12 +23,18 @@ SESSION_ENV = {}
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text.
 CONFIG_CHECK = "moxi_rounds.settings:check_text"
-#: The module's own doctor checks: git, each project's rounds folder, each log, the index.
+#: The module's own doctor checks: git, each project's rounds folder, each log, the
+#: index, CI, finish locks and the sweep's dry run.
 DOCTOR = "moxi_rounds.doctor:rows"
 SETUP = None
 SEGMENT = None
-#: The one store: a cache of what the rounds' logs say, made by the first write and built
-#: again from the logs whenever it is missing. The logs themselves are the user's files,
-#: in the folders the user chose, and the lock files hold nothing, so neither is a store.
+#: The stores: the index, a cache of what the rounds' logs say, made by the first write and
+#: built again from the logs whenever it is missing; and the sweep's log, its account of
+#: each folder it removed, which nothing else holds, kept to a size. The logs themselves
+#: are the user's files, in the folders the user chose, and the lock files hold nothing,
+#: so neither is a store.
 STORES = {"index": {"root": "data", "path": "index.db", "kind": "sqlite", "private": True,
-                    "retention": "keep", "rebuildable": True, "lazy": True}}
+                    "retention": "keep", "rebuildable": True, "lazy": True},
+          "sweeps": {"root": "state", "path": "sweep.jsonl", "kind": "jsonl",
+                     "private": True, "retention": "2M", "rebuildable": False,
+                     "lazy": True}}

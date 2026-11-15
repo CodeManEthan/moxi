@@ -68,7 +68,7 @@ import fnmatch
 import os
 import stat
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -556,24 +556,55 @@ def _reparse(found: os.stat_result) -> bool:
 # -- the removal -------------------------------------------------------------------------
 
 def _remove(proven: Proven, env=None) -> Path | Kept:
+    return take(proven, env=env)
+
+
+def take(proven: Proven, *, env=None, on_rename: Callable[[Path], None] | None = None,
+         on_delete: Callable[[Path, bool], None] | None = None) -> Path | Kept:
+    """Remove the folder `proven`, which the caller has just judged: the place removed,
+    or `Kept` when the removal itself fails. A scratch folder's trash entry is given to
+    `on_rename` before the rename, and to `on_delete` after its delete with whether the
+    entry is gone, so a log of them can tell a later run which entries are its own."""
     if proven.kind == WORKTREE:
         try:
             _B1Git(proven.root)._run("worktree", "remove", str(proven.place))
         except GitError as error:
             return Kept(proven.place, "removal", f"git did not remove it: {error.reason}")
         return proven.place
-    trash = paths.cache_dir(env) / TRASH_DIR
+    trash = trash_dir(env)
     entry = trash / proven.build
     try:
         trash.mkdir(parents=True, exist_ok=True)
         if os.path.lexists(entry):
             raise FileExistsError(entry)
+        if on_rename is not None:
+            on_rename(entry)
         os.rename(proven.place, entry)
     except OSError as error:
         return Kept(proven.place, "removal", f"it could not be moved into {trash}: "
                     f"{error.strerror or error}")
-    _delete(entry, os.lstat(entry).st_dev)
+    delete(entry)
+    if on_delete is not None:
+        on_delete(entry, not os.path.lexists(entry))
     return proven.place
+
+
+def trash_dir(env=None) -> Path:
+    """The folder a scratch folder is renamed into before its delete."""
+    return paths.cache_dir(env) / TRASH_DIR
+
+
+def delete(folder: Path) -> None:
+    """Delete the folder at `folder`, following no link and leaving an entry on another
+    device than the folder's, with the folders above it. What can't be deleted stays, and
+    so does a `folder` that is a link."""
+    try:
+        found = os.lstat(folder)
+    except OSError:
+        return
+    if not stat.S_ISDIR(found.st_mode) or _reparse(found):
+        return
+    _delete(folder, found.st_dev)
 
 
 def _delete(folder: Path, device: int) -> None:
@@ -603,4 +634,4 @@ def _delete(folder: Path, device: int) -> None:
 
 __all__ = ["WORKTREE", "SCRATCH", "TRASH_DIR", "B1_CONFIG", "B1_STATUS", "OWN_REFS",
            "STAYING_REFS", "Kept", "Proven", "Removed", "judge", "remove", "removes",
-           "checkout_removal", "changes", "mount_points"]
+           "checkout_removal", "changes", "mount_points", "take", "trash_dir", "delete"]

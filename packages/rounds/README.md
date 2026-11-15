@@ -104,6 +104,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds list ROUND\|PROJECT --questions [--view docket\|ratify] [--json] [--out DIR]` | the questions written out as markdown; `--out` writes `questions.md` and `questions.json` into DIR; a round's two views are both given when `--view` is left out |
 | `moxi rounds drop ROUND --by operator\|lead --record PTR [--withdraw-questions]` | end a round short of its work |
 | `moxi rounds drop ROUND B<n> --by operator\|lead --record PTR` | drop the open build of one stage; the stage stays owed |
+| `moxi rounds drop --leftovers [--remove] [--json]` | sweep the worktrees and scratch folders ended builds left on this machine: what would go, and what stays and why; `--remove` takes what may go, once `sweep.armed` is true |
 
 No command closes a round: a round closes itself (see Closing).
 
@@ -646,6 +647,29 @@ left, named with the check that kept it, for a later sweep. Finish's worktree ga
 the worktree with the same git read, so an untracked file stays a change whatever the
 user's git config says.
 
+**The sweep of leftover folders.** `moxi rounds drop --leftovers` finds the folders that
+ended builds left on this machine: each worktree and scratch folder that the record of
+a finished or dropped build names and that is still there. A folder no record names is
+never looked at. It reads the removal rule for each, and then three rules of its own,
+since it runs later and unattended: no log of any round is unreadable, as one might
+record an open build at the place; no process of yours has its working folder, an open
+file, a mapped file, an argument or an environment value in it (read through psutil);
+and its marker was written, and nothing in it changed, more than `sweep.grace_hours`
+(2) ago. A worktree that a finish with no merge kept stays until its branch's tip is on
+the target. It prints each folder with whether it would go or the check that keeps it,
+and for a worktree kept for its work, the paths that are work.
+
+Every sweep is a dry run until `sweep.armed` is true in rounds' config. `--remove`
+while unarmed prints the dry run and is refused; once you have read it, arm it, and
+`--remove` takes each folder every rule lets go, reading the rules again just before
+each removal. A worktree goes by `git worktree remove` and its branch stays; a scratch
+folder is moved into the trash and deleted there. A run starts no removal after 60
+seconds, and one run goes at a time. The sweep writes no round's log; each removal,
+trash move and trash delete is a line of `sweep.jsonl` in rounds' state directory. A
+trash entry the sweep moved and did not delete, because a run stopped, is deleted by
+the next run; anything else in the trash is reported and left. The doctor's
+`leftovers` row is the same dry run.
+
 A build is `unclear` when its target was fast-forwarded onto its work and nothing on
 record says the branch held that work first. The operator either drops it or credits
 it: `rule ROUND credit:B<n> --record PTR` records the head as the build's work, and the
@@ -689,8 +713,13 @@ directories):
   not read every log. Deleting it loses nothing: `moxi rounds list` builds it again from
   the logs.
 - Lock files in its state directory, `locks/projects/<key>.lock` for a project's log and
-  `locks/rounds/<key>/<slug>.lock` for a round's. They hold nothing but the pid of the
-  process writing, and are never in a rounds folder, so none is backed up or pushed.
+  `locks/rounds/<key>/<slug>.lock` for a round's, and `locks/sweep.lock` for the sweep.
+  They hold nothing but the pid of the process writing, and are never in a rounds
+  folder, so none is backed up or pushed.
+- `sweep.jsonl` in its state directory: a line for each folder the sweep of leftover
+  folders removed and each trash entry it moved or deleted, kept to about a megabyte and
+  one older file. It is this machine's alone, and `sweep.started` beside it holds when
+  the last removing run began.
 
 A log that two machines both appended to, or one with a line this version can't read, is
 not used at all: every verb on it refuses and names the file, the line and the way back.
@@ -758,7 +787,9 @@ now. The full check, run with `check --full`, meets the step whatever CI reads. 
 `defaults.sitting_at`, `defaults.disposable` (the name globs of ignored paths a
 worktree's removal may lose; an entry that is empty, holds a `/`, or would match every
 name is refused), and in a project's table `finish`, `keep_branch` and `lock_ref`. They are checked when the file is read, and nothing in this version acts on
-them. A project's `shared_paths` lists globs of paths every build of its repo shares,
+them. The `[sweep]` table is this machine's and set in no project's table: `armed`
+(false: every sweep of leftover folders is a dry run), `at_start` (false) and
+`grace_hours` (2, at least 1). A project's `shared_paths` lists globs of paths every build of its repo shares,
 beside the common lockfiles: a change to one on the target owes a build a re-check.
 
 `models` maps each tier a step names to a model per harness. The order the tiers are
@@ -818,6 +849,7 @@ its call raises as a `moxi_rounds.errors.RoundsError`, with `reason`, `fix` and
 | `logs` | fails for each log that can't be read, with the file, the line and the way back |
 | `index` | warns when the index says something else than the logs do; `moxi rounds list` brings it up to them |
 | `finish locks` | warns for each finish lock older than an hour in a project's repo, with its holder and the one git command that clears it, for you to run after asking the holder |
+| `leftovers` | the sweep's dry run: warns with each folder an ended build left on this machine, whether it would go or the check that keeps it, and the command that removes what would go |
 
 The doctor only reads.
 

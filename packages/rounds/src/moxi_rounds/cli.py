@@ -35,6 +35,7 @@
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
                      [--as NAME]
     moxi rounds drop ROUND B<n> --by lead|operator --record PTR [--as NAME]
+    moxi rounds drop --leftovers [--remove] [--json]
     moxi rounds next [ROUND] [--json]
     moxi rounds next --schema design|build|step|majors|retro
     moxi rounds show ROUND [--json]
@@ -182,8 +183,10 @@ correction of one of its rulings is still recorded, and `mark --shown` still mar
 its rulings. The builds still open end with it, each branch's tip recorded.
 `drop ROUND B<n>` drops the open build of one stage: the lead's only when git reads
 it `gone`, or `empty` with no commit of its own, sharing with no other build; any
-other is the operator's. The stage stays owed. A drop deletes no branch and removes
-no folder. `rule ROUND credit:B<n>` is the operator's word that what the target
+other is the operator's. The stage stays owed. A drop deletes no branch; it removes
+the folders of the builds it ends where the removal rule proves they may go, and
+`drop --leftovers` sweeps what that kept once it may: a dry run until `sweep.armed` is
+true, and with `--remove` the removal. `rule ROUND credit:B<n>` is the operator's word that what the target
 gained under the head of a build `unclear` by a fast-forward is that build's work:
 it then reads `merged`, owing its check, verification and ratification, until
 `revoke:` takes the credit back.
@@ -247,7 +250,7 @@ from collections.abc import Callable, Sequence
 from moxi import exit as codes
 from moxi.config import ConfigError
 
-from .errors import BadArgument, Refused, RoundsError
+from .errors import BadArgument, Refused, RoundsError, Unmet
 
 
 # -- what every writing verb shares ------------------------------------------------------
@@ -1381,13 +1384,17 @@ def _declare_drop(verbs) -> None:
             "up nothing, or with --withdraw-questions are withdrawn. A dropped round "
             "takes no new work; a correction of one of its rulings is still recorded, "
             "and its rulings are still marked as shown. A dropped build's stage stays "
-            "owed. No branch is deleted and no folder removed.")
+            "owed. No branch is deleted; the ended builds' folders are removed where "
+            "the removal rule proves they may go. With --leftovers: the sweep of the "
+            "folders ended builds left on this machine, a dry run until sweep.armed is "
+            "true.")
     parser = verbs.add_parser("drop", help=said, description=said)
-    parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")
+    parser.add_argument("round", metavar="ROUND", nargs="?",
+                        help="the round, <project>/<slug>")
     parser.add_argument("stage", metavar="STAGE", nargs="?",
                         help="the stage, B<n>, whose open build is dropped; left out, "
                              "the whole round is")
-    parser.add_argument("--by", choices=("lead", "operator"), required=True,
+    parser.add_argument("--by", choices=("lead", "operator"),
                         help="whose drop it is: the operator's, of any round or "
                              "build, or the lead's, of a round that holds no ruling, "
                              "no skip, no question asked with the operator's "
@@ -1406,12 +1413,29 @@ def _declare_drop(verbs) -> None:
                         help="withdraw the round's open and parked questions, where "
                              "they would go to the project's list; the operator's "
                              "alone")
+    parser.add_argument("--leftovers", action="store_true",
+                        help="sweep the worktrees and scratch folders that ended builds "
+                             "left on this machine: say what would go, and what stays "
+                             "and why; it takes no round, --by or --record")
+    parser.add_argument("--remove", action="store_true",
+                        help="with --leftovers, remove what would go; refused, after "
+                             "the dry run, until sweep.armed is true")
+    parser.add_argument("--json", dest="as_json", action="store_true",
+                        help="with --leftovers, print the account as JSON")
     _writes(parser)
 
 
 def _drop(args, out) -> int:
     from . import dropping
 
+    if args.leftovers:
+        return _leftovers(args, out)
+    if args.remove or args.as_json:
+        raise BadArgument("--remove and --json are for the sweep of leftover folders",
+                          "add --leftovers, or leave them out")
+    if args.round is None or args.by is None:
+        raise BadArgument("a drop names the round and whose drop it is",
+                          "moxi rounds drop ROUND [B<n>] --by lead|operator --record PTR")
     if args.stage is not None:
         return _drop_build(args, out)
     dropped = dropping.drop(args.round, by=args.by, record=args.record,
@@ -1457,6 +1481,60 @@ def _drop_build(args, out) -> int:
     _cleanup_lines(dropped.removed, dropped.kept, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
+
+
+def _leftovers(args, out) -> int:
+    """`drop --leftovers [--remove]`: the sweep of ended builds' folders."""
+    import json
+
+    from . import sweeping
+
+    given = [flag for flag, value in (("ROUND", args.round), ("--by", args.by),
+                                      ("--record", args.record), ("--as", args.actor))
+             if value is not None]
+    if args.withdraw_questions:
+        given.append("--withdraw-questions")
+    if given:
+        raise BadArgument(f"the sweep changes no record of any round, so it takes no "
+                          f"{', '.join(given)}", f"{sweeping.DRY_RUN} [--remove]")
+    swept = sweeping.run(remove=args.remove)
+    if args.as_json:
+        print(json.dumps(swept.as_json(), indent=2), file=out)
+    else:
+        _account_lines(swept, out)
+    if args.remove and not swept.armed:
+        raise Refused([Unmet("the sweep is not armed (sweep.armed is false), so it "
+                             "removes nothing; above is what it would remove",
+                             "read the dry run, then set armed = true under [sweep] in "
+                             "rounds' config (moxi config rounds shows the file), and "
+                             f"run {sweeping.REMOVE}")])
+    return codes.OK
+
+
+def _account_lines(swept, out) -> None:
+    """The sweep's account: each leftover folder and trash entry, what became of it, and
+    the command that removes what would go."""
+    from . import sweeping
+
+    if swept.removing:
+        print("leftover folders of ended builds on this machine", file=out)
+    else:
+        why = "" if swept.armed else ": sweep.armed is false"
+        print(f"leftover folders of ended builds on this machine (dry run{why})",
+              file=out)
+    for line in swept.lines():
+        print(line, file=out)
+    if swept.clear:
+        print("no folder of an ended build is left on this machine", file=out)
+    if swept.timed_out:
+        print("the run stopped starting removals after "
+              f"{sweeping.TIME_LIMIT_S:g} seconds; run it again for the rest", file=out)
+    goes = swept.would_go or [one for one in swept.trash
+                              if one.fate == sweeping.WOULD_DELETE]
+    if goes and not swept.removing:
+        arm = "" if swept.armed else ("set armed = true under [sweep] in rounds' config, "
+                                      "then: ")
+        print(f"then: {arm}{sweeping.REMOVE}", file=out)
 
 
 def _cleanup_lines(removed, kept, out) -> None:

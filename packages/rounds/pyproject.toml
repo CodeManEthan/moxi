@@ -17,8 +17,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development",
 ]
-# projects names a round's home and the repo each build is in.
-dependencies = ["moxi>=0.1.7,<0.2", "moxi-projects>=0.1.4,<0.2"]
+# projects names a round's home and the repo each build is in; psutil reads which
+# processes use a leftover folder before the sweep removes it, on every platform.
+dependencies = ["moxi>=0.1.7,<0.2", "moxi-projects>=0.1.4,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # notes: with it, a project that names no notes folder gets notes' default one, so its

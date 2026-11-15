@@ -90,6 +90,24 @@ default = [".venv", "__pycache__", "*.pyc", ".pytest_cache", ".ruff_cache", ".my
 doc = "Name globs for ignored files a build's worktree may lose when rounds removes it. A worktree holding any other ignored file is kept. An entry holds no path separator and can't match every name."
 read = "use"
 
+[sweep.armed]
+type = "bool"
+default = false
+doc = "Lets the sweep of leftover folders remove what it proves may go. Until then every sweep is a dry run: read what it would remove first, with moxi rounds drop --leftovers."
+read = "use"
+
+[sweep.at_start]
+type = "bool"
+default = false
+doc = "With turns installed and the sweep armed, sweep leftover folders at each session's start."
+read = "use"
+
+[sweep.grace_hours]
+type = "int"
+default = 2
+doc = "How long nothing in a leftover folder must have changed before the sweep takes it. At least 1."
+read = "use"
+
 [projects]
 type = "table"
 default = {}

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 from moxi import cli, modules
 
 import moxi_rounds.api
-from moxi_rounds import module, paths
+from moxi_rounds import module, paths, sweeping
 
 
 def test_the_module_loads_at_interface_one_with_its_read_api():
@@ -37,13 +40,24 @@ def test_the_announcement_declares_no_variable_of_its_own():
     assert dict(found.internal_env) == {} and dict(found.session_env) == {}
 
 
-def test_the_index_is_the_one_store_and_can_be_rebuilt():
+def test_the_stores_are_the_index_which_can_be_rebuilt_and_the_sweeps_log():
     found = modules.load("rounds")
-    assert set(found.stores) == {"index"}
+    assert set(found.stores) == {"index", "sweeps"}
     index = found.stores["index"]
     assert (index["root"], index["path"], index["kind"]) == ("data", "index.db", "sqlite")
     assert index["rebuildable"] is True and index["lazy"] is True
     assert index["path"] == paths.INDEX_FILE
+    sweeps = found.stores["sweeps"]
+    assert (sweeps["root"], sweeps["path"], sweeps["kind"]) == ("state", "sweep.jsonl",
+                                                                "jsonl")
+    assert sweeps["rebuildable"] is False and sweeps["retention"] != "keep"
+    assert sweeps["path"] == sweeping.LOG_FILE
+
+
+def test_the_package_declares_psutil_itself():
+    project = tomllib.loads((Path(module.__file__).parents[2] / "pyproject.toml")
+                            .read_text(encoding="utf-8"))["project"]
+    assert any(one.startswith("psutil>=") for one in project["dependencies"])
 
 
 def test_the_announcement_defines_only_names_the_core_knows():
