@@ -13,10 +13,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from moxi import files
 from moxi.config import ConfigError
 
 from moxi_rounds import (builds, checking, commissioning, dropping, log, opening, places,
-                         removal)
+                         removal, sweeping)
 from moxi_rounds import settings as own
 from moxi_rounds import state as states
 
@@ -359,6 +360,21 @@ def test_a_build_drop_removes_its_folders_and_keeps_its_branch(made, repo):
     assert dropped.removed == (Path(event["worktree"]), Path(event["scratch"]))
     assert dropped.kept == ()
     assert repo.git("branch", "--list", "work").strip().endswith("work")
+
+
+def test_a_build_drop_writes_its_trash_entry_to_the_sweeps_log_proving_a_and_b(made):
+    _path, _tree, event = made
+    dropping.drop_build(ROUND, "B1", by="operator", record=POINTER, actor="planner")
+
+    found = files.read_records(sweeping.log_file())
+
+    assert [(one["act"], one["kind"], one["entry"]) for one in found] == [
+        ("renamed", "scratch", event["build"]), ("deleted", "scratch", event["build"])]
+    assert found[0]["place"] == event["scratch"] and found[1]["gone"] is True
+    for one in found:
+        assert (one["round"], one["stage"], one["repo"], one["branch"], one["build"]) == (
+            ROUND, "B1", "proj-a", "work", event["build"])
+        assert one["proven"] == ["A", "B"]
 
 
 def test_a_round_drop_keeps_a_worktree_holding_an_ignored_env_and_says_b3(made):

@@ -85,7 +85,7 @@ from moxi import exit as exits
 from moxi import proc
 
 from . import (builds, checking, finish_actions, finish_gates, finish_lock, folders,
-               gitreads, open_builds, places, questions, removal, write)
+               gitreads, open_builds, places, questions, removal, sweeping, write)
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, Refused, Unmet
@@ -333,7 +333,8 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
              if commissioned.get(kind) and Path(str(commissioned[kind])).is_dir()}
     if not merged:
         cleaned = removal.removes(name, commissioned, (removal.SCRATCH,),
-                                  settings=settings, env=env)
+                                  settings=settings, env=env,
+                                  **sweeping.trash_log(name, commissioned, env=env))
         stays = tuple(removal.Kept(there[kind], "no merge", "no merge action put the "
                                    "work on the target, so the worktree and the "
                                    "branch stay", kind=kind)
@@ -352,7 +353,8 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
                                    for kind, place in there.items()))
     keep_branch = own.build_setting(settings, build.repo, "keep_branch")
     cleaned = removal.removes(name, commissioned, settings=settings, env=env,
-                              deletes=None if keep_branch else build.branch)
+                              deletes=None if keep_branch else build.branch,
+                              **sweeping.trash_log(name, commissioned, env=env))
     if keep_branch:
         return _Cleaned(cleaned.removed, cleaned.kept)
     if any(one.kind == removal.WORKTREE for one in cleaned.kept):

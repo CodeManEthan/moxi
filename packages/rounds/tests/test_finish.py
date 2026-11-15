@@ -6,6 +6,7 @@ released, and every refusal writing nothing."""
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import stat
 import subprocess
@@ -13,9 +14,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from moxi import files
 
 from moxi_rounds import (asking, builds, checking, commissioning, finish_lock, finishing,
-                         log, next_step, opening, places, verdicts)
+                         log, next_step, opening, places, removal, sweeping, verdicts)
 from moxi_rounds import settings as own
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
@@ -372,6 +374,44 @@ def test_the_cleanup_removes_both_folders_and_deletes_the_merged_branch(ready, r
     assert (done.removed, done.kept, done.branch) == ((worktree, scratch), (), "deleted")
     assert not worktree.exists() and not scratch.exists()
     assert repo.git("branch", "--list", "work") == ""
+
+
+def test_the_cleanup_writes_the_scratch_folders_trash_entry_to_the_sweeps_log(ready):
+    path, _tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+
+    finishing.finish(ROUND, "B1", actor="coder")
+
+    found = files.read_records(sweeping.log_file())
+    assert [(one["act"], one["entry"], one["proven"]) for one in found] == [
+        ("renamed", made["build"], ["A", "B"]), ("deleted", made["build"], ["A", "B"])]
+
+
+class _Stopped(BaseException):
+    """A stop between the trash rename and its delete, as a killed process leaves it."""
+
+
+def test_a_trash_entry_a_stopped_finish_left_is_deleted_by_the_next_armed_sweep(
+        ready, configure, monkeypatch):
+    path, _tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+
+    def stop(_folder):
+        raise _Stopped
+
+    with monkeypatch.context() as patched:
+        patched.setattr(removal, "delete", stop)
+        with pytest.raises(_Stopped):
+            finishing.finish(ROUND, "B1", actor="coder")
+    entry = removal.trash_dir() / made["build"]
+    assert entry.is_dir() and not Path(made["scratch"]).exists()
+    assert len(of_type(path, "finish.done")) == 1
+
+    configure("\n[sweep]\narmed = true")
+    swept = sweeping.run(remove=True)
+
+    assert [(one.name, one.fate) for one in swept.trash] == [(made["build"], "deleted")]
+    assert not os.path.lexists(entry)
 
 
 def test_with_keep_branch_the_cleanup_removes_the_folders_and_keeps_the_branch(

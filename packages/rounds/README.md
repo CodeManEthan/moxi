@@ -642,10 +642,11 @@ and its own refs name is on a branch, tag or remote ref that stays; no submodule
 checked out in it; it is not locked; and no other filesystem is mounted inside either
 folder. The scratch folder is disposable whole. The second half is read again just
 before the removal. A worktree goes by `git worktree remove`, never forced; a scratch
-folder is moved into rounds' trash and deleted there. A folder either half keeps is
-left, named with the check that kept it, for a later sweep. Finish's worktree gate reads
-the worktree with the same git read, so an untracked file stays a change whatever the
-user's git config says.
+folder is moved into rounds' trash and deleted there, each step a line of the sweep's
+log (below), so an entry a stopped `finish` or `drop` left is the sweep's to delete. A
+folder either half keeps is left, named with the check that kept it, for a later sweep.
+Finish's worktree gate reads the worktree with the same git read, so an untracked file
+stays a change whatever the user's git config says.
 
 **The sweep of leftover folders.** `moxi rounds drop --leftovers` finds the folders that
 ended builds left on this machine: each worktree and scratch folder that the record of
@@ -666,9 +667,9 @@ each removal. A worktree goes by `git worktree remove` and its branch stays; a s
 folder is moved into the trash and deleted there. A run starts no removal after 60
 seconds, and one run goes at a time. The sweep writes no round's log; each removal,
 trash move and trash delete is a line of `sweep.jsonl` in rounds' state directory. A
-trash entry the sweep moved and did not delete, because a run stopped, is deleted by
-the next run; anything else in the trash is reported and left. The doctor's
-`leftovers` row is the same dry run.
+trash entry the sweep, a finish or a drop moved and did not delete, because a run
+stopped, is deleted by the next run; anything else in the trash is reported and left.
+The doctor's `leftovers` row is the same dry run.
 
 With turns installed, `sweep.at_start = true` and the sweep armed, each session's start
 (and resume, clear or compaction) starts the sweep in a detached process of its own,
@@ -722,9 +723,9 @@ directories):
   They hold nothing but the pid of the process writing, and are never in a rounds
   folder, so none is backed up or pushed.
 - `sweep.jsonl` in its state directory: a line for each folder the sweep of leftover
-  folders removed and each trash entry it moved or deleted, kept to about a megabyte and
-  one older file. It is this machine's alone, and `sweep.started` beside it holds when
-  the last removing run began.
+  folders removed and each trash entry it, a finish or a drop moved or deleted, kept to
+  about a megabyte and one older file. It is this machine's alone, and `sweep.started`
+  beside it holds when the last removing run began.
 
 A log that two machines both appended to, or one with a line this version can't read, is
 not used at all: every verb on it refuses and names the file, the line and the way back.

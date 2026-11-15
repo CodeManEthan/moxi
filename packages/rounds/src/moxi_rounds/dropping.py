@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import (builds, checking, ending, folders, index, moving, open_builds, pointers,
-               questions, removal, waits, write)
+               questions, removal, sweeping, waits, write)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadName, NoLog, NoRound, RoundsError, Unmet
@@ -333,8 +333,9 @@ def _remove_folders(state: states.State, name: str, ended, settings) -> removal.
     removal rule. No branch is deleted, so B reads every branch as staying."""
     removed, kept = [], []
     for build in ended:
-        done = removal.removes(name, checking.commission_of(state, build),
-                               settings=settings)
+        commissioned = checking.commission_of(state, build)
+        done = removal.removes(name, commissioned, settings=settings,
+                               **sweeping.trash_log(name, commissioned))
         removed += done.removed
         kept += done.kept
     return removal.Removed(tuple(removed), tuple(kept))

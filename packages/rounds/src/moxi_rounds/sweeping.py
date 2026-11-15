@@ -44,7 +44,9 @@ with `remove` writes its start time to `sweep.started`.
 **The trash.** Before a scratch folder's rename the sweep logs the trash entry's name, and
 after its delete a second line. A later run deletes only an entry its log names with no
 second line, which is what a run stopped between the two leaves; anything else in the
-trash is reported and left.
+trash is reported and left. `finish` and `drop` write the same two lines for the scratch
+folder of the build they end (`trash_log`), naming A and B as proven, so an entry one of
+them left when stopped is the sweep's to delete too.
 
 **What it records.** Nothing in any round's log, which machines share. Each removal, each
 trash rename and each trash delete is one line of `sweep.jsonl` in rounds' state
@@ -98,6 +100,8 @@ DELETED = "deleted"
 
 #: The rules a removal proved, as its log line names them.
 PROVEN = ("A", "B", "C", "D", "E")
+#: The rules `finish` and `drop` prove for the folders of the build they end.
+FINISH_PROVEN = ("A", "B")
 #: The acts of the sweep's log.
 RENAMED = "renamed"
 _TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -133,10 +137,14 @@ class Candidate:
 
     def names(self) -> dict:
         """The build the folder is of, as the account and the log name it."""
-        return {"round": self.name, "stage": str(self.commissioned.get("stage")),
-                "repo": str(self.commissioned.get("repo")),
-                "branch": str(self.commissioned.get("branch")),
-                "build": str(self.commissioned.get("build"))}
+        return _names(self.name, self.commissioned)
+
+
+def _names(name: str, commissioned: Mapping) -> dict:
+    return {"round": name, "stage": str(commissioned.get("stage")),
+            "repo": str(commissioned.get("repo")),
+            "branch": str(commissioned.get("branch")),
+            "build": str(commissioned.get("build"))}
 
 
 @dataclass(frozen=True)
@@ -334,10 +342,37 @@ def _remove(candidate: Candidate, found: removal.Proven, settings) -> Leftover:
     return Leftover(candidate, REMOVED, found.place)
 
 
-def _log(act: str, place: Path, names: Mapping, **more) -> None:
-    files.append_record(log_file(), {"at": log.stamp(), "act": act, "place": str(place),
-                                     **names, **more, "proven": list(PROVEN)},
+def _log(act: str, place: Path, names: Mapping, *, proven: Iterable[str] = PROVEN,
+         env=None, **more) -> None:
+    files.append_record(log_file(env), {"at": log.stamp(), "act": act, "place": str(place),
+                                        **names, **more, "proven": list(proven)},
                         max_bytes=LOG_MAX_BYTES, durable=True)
+
+
+def trash_log(name: str, commissioned: Mapping, *, env=None) -> dict:
+    """The `on_rename` and `on_delete` of `removal.take` for `finish` and `drop`, which
+    remove a build's scratch folder through the trash under A and B: they write its
+    trash entry's lines in this log as a sweep writes its own, so the account names the
+    entry and a later sweep deletes one a stopped run left."""
+    names = _names(name, commissioned)
+    place = Path(str(commissioned.get(removal.SCRATCH)))
+
+    def on_rename(entry: Path) -> None:
+        # Raised here, the rename is not made and the folder is kept.
+        _log(RENAMED, place, names, proven=FINISH_PROVEN, env=env,
+             kind=removal.SCRATCH, entry=entry.name)
+
+    def on_delete(entry: Path, gone: bool) -> None:
+        try:
+            _log(DELETED, entry, names, proven=FINISH_PROVEN, env=env,
+                 kind=removal.SCRATCH, entry=entry.name, gone=gone)
+        except OSError:
+            # The folder is already out of its place; with no second line a later
+            # sweep deletes what is left of the entry, and a line naming a gone entry
+            # is never read.
+            pass
+
+    return {"on_rename": on_rename, "on_delete": on_delete}
 
 
 # -- the records ---------------------------------------------------------------------------
@@ -698,6 +733,6 @@ def _real_folder(path: Path) -> bool:
 
 __all__ = ["REMOVE", "DRY_RUN", "TIME_LIMIT_S", "LOCK_FILE", "STARTED_FILE", "LOG_FILE",
            "LOG_MAX_BYTES", "WOULD_GO", "REMOVED", "KEPT", "LEFT", "WOULD_DELETE",
-           "DELETED", "RENAMED", "PROVEN", "Running", "Candidate", "Leftover",
-           "TrashEntry", "Swept", "lock_file", "started_file", "log_file", "account",
-           "run"]
+           "DELETED", "RENAMED", "PROVEN", "FINISH_PROVEN", "Running", "Candidate",
+           "Leftover", "TrashEntry", "Swept", "lock_file", "started_file", "log_file",
+           "account", "run", "trash_log"]

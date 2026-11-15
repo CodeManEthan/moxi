@@ -159,7 +159,9 @@ does not yet build.
   now a dependency) and nothing in it changed within `sweep.grace_hours`. A dry run
   until `sweep.armed` is true; one run at a time, starting no removal after 60 seconds;
   each removal and trash move and delete is a line of `sweep.jsonl`, the store `sweeps`.
-  The doctor's `leftovers` row is its dry run.
+  `finish` and `drop` write a line there for each trash move and delete of theirs, so a
+  trash entry one of them left when stopped is deleted by the next sweep. The doctor's
+  `leftovers` row is its dry run.
 - The sweep at a session's start: with turns installed, a listener on `ready` starts the
   sweep in a detached process when `sweep.at_start` and `sweep.armed` are both on and
   the last removing run began more than ten minutes ago, and returns at once.

@@ -161,10 +161,12 @@ def judge(name: str, commissioned: Mapping, kind: str, *, settings, env=None,
 
 
 def remove(name: str, commissioned: Mapping, kind: str, *, settings, env=None,
-           deletes: str | None = None) -> Path | Kept | None:
+           deletes: str | None = None, on_rename: Callable[[Path], None] | None = None,
+           on_delete: Callable[[Path, bool], None] | None = None) -> Path | Kept | None:
     """Remove the `kind` folder of the build `commissioned` when `judge` proves it may
     go, reading B again just before the removal call: the place removed, `Kept` with
-    the check that keeps it, or None when nothing is at its place."""
+    the check that keeps it, or None when nothing is at its place. `on_rename` and
+    `on_delete` are `take`'s."""
     found = judge(name, commissioned, kind, settings=settings, env=env, deletes=deletes)
     if not isinstance(found, Proven):
         return found
@@ -172,18 +174,20 @@ def remove(name: str, commissioned: Mapping, kind: str, *, settings, env=None,
     again = _no_lost_work(found)
     if again is not None:
         return again
-    return _remove(found, env=env)
+    return take(found, env=env, on_rename=on_rename, on_delete=on_delete)
 
 
 def removes(name: str, commissioned: Mapping, kinds: Iterable[str] = (WORKTREE, SCRATCH),
-            *, settings, env=None, deletes: str | None = None) -> Removed:
+            *, settings, env=None, deletes: str | None = None,
+            on_rename: Callable[[Path], None] | None = None,
+            on_delete: Callable[[Path, bool], None] | None = None) -> Removed:
     """`remove` for each of `kinds` of the build `commissioned` of the round `name`, in
     that order."""
     removed, kept = [], []
     for kind in kinds:
         try:
             found = remove(name, commissioned, kind, settings=settings, env=env,
-                           deletes=deletes)
+                           deletes=deletes, on_rename=on_rename, on_delete=on_delete)
         except RoundsError as error:
             # What can't be read counts as work.
             found = Kept(Path(str(commissioned.get(kind) or "")), "read", error.reason)
@@ -205,7 +209,7 @@ def checkout_removal(root: Path, place: Path, *, settings, repo: str) -> Kept | 
         found = _no_lost_work(proven)
         if found is not None:
             return found
-        removed = _remove(proven)
+        removed = take(proven)
     except RoundsError as error:
         return Kept(Path(place), "B1", error.reason)
     return removed if isinstance(removed, Kept) else None
@@ -554,10 +558,6 @@ def _reparse(found: os.stat_result) -> bool:
 
 
 # -- the removal -------------------------------------------------------------------------
-
-def _remove(proven: Proven, env=None) -> Path | Kept:
-    return take(proven, env=env)
-
 
 def take(proven: Proven, *, env=None, on_rename: Callable[[Path], None] | None = None,
          on_delete: Callable[[Path, bool], None] | None = None) -> Path | Kept:
