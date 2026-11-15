@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   addChoices, canReplace, cellLine, choiceScope, commandLine, countLine, driftView, exitLine,
-  globalOffSheet, globalView, installAct, installChoices, itemAct, itemsView, jobPathOf, jobView,
+  globalRemoveSheet, globalView, installAct, installChoices, itemAct, itemsView, jobPathOf, jobView,
   jobRefusal, parseKept, readState, replaceAct, replaceValue, saidOf, startedOf, toggleAct,
 } from "../src/views.ts";
 
@@ -167,6 +167,23 @@ test("replace names the item for its harness, or the target, in the row's sectio
   assert.equal(canReplace(row({ state: "would-commit" })), false);
 });
 
+test("a global file's Replace runs the whole install, the one run that writes it", () => {
+  const edited = row({ kind: "global", name: "global", state: "modified",
+                       target: "/h/.claude/CLAUDE.md", replaceable: true });
+  assert.equal(canReplace(edited), true);
+  assert.deepEqual(replaceAct(edited).body, { replace: ["global:global@claude"] });
+});
+
+test("a global file's Replace sheet says the edit goes to loadout's backups", () => {
+  const edited = row({ kind: "global", name: "global", state: "modified",
+                       target: "/h/.claude/CLAUDE.md", replaceable: true });
+  const { sheet } = replaceAct(edited);
+  assert.equal(sheet.length, 2);
+  assert.match(sheet[0], /--replace global:global@claude, a whole install/);
+  assert.match(sheet[1], /\/h\/\.claude\/CLAUDE\.md is backed up to loadout's backups/);
+  assert.doesNotMatch(sheet.join(" "), /displaced/);
+});
+
 test("Replace is offered where status says --replace places over the row, and only there", () => {
   // A blocked row --replace doesn't fix (another module's placement, a CLI not found).
   assert.equal(canReplace(row({ state: "blocked", reason: "it is ext's placement" })), false);
@@ -196,9 +213,11 @@ test("the global view offers the modes not in force, and off unless chosen off",
 });
 
 test("the global remove sheet says what leaves each file", () => {
-  const lines = globalOffSheet({ problem: null, mode: "managed", chosen: true, files: [
-    { file: "/h/.claude/CLAUDE.md", changes: false, diff: "", placed: false, state: null },
-    { file: "/h/.codex/AGENTS.md", changes: false, diff: "", placed: true, state: "ok" }] });
+  const lines = globalRemoveSheet({ problem: null, mode: "managed", chosen: true, files: [
+    { file: "/h/.claude/CLAUDE.md", harness: "claude", parts: ["/l/global.md"], changes: false,
+      diff: "", placed: false, state: null },
+    { file: "/h/.codex/AGENTS.md", harness: "codex", parts: ["/l/global.md"], changes: false,
+      diff: "", placed: true, state: "ok" }] });
   assert.match(lines[0], /global remove/);
   assert.deepEqual(lines.slice(1), ["/h/.claude/CLAUDE.md: loadout's part comes out.",
                                     "/h/.codex/AGENTS.md: the copy loadout placed is removed."]);

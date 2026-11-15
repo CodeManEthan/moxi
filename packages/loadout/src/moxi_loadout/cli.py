@@ -13,8 +13,9 @@ applies the steps in scope (all of them without a flag). `--replace` takes a pat
 `status` prints one line per item that is not `ok`, then notes, then a count. `add` and
 `remove` write a section's list, `enable` and `disable` its `disabled` ids, then each
 installs with that item's steps as the scope. `list` prints every item with its kind,
-scope, harnesses and source. `global show` prints, for each harness, its global file and
-what the next install makes of it (`--diff` as a diff); `global mode MODE` writes the mode
+scope, harnesses and source. `global show` prints, for each harness, the files it reads
+through loadout (the shared file, then its part or "no part"), its global file and what
+the next install makes of it (`--diff` as a diff); `global mode MODE` writes the mode
 (off, managed or if-absent) and installs the global file alone; `global remove` sets `off`
 and takes loadout's part out, leaving the user's own text.
 
@@ -277,6 +278,9 @@ def _global_show(args) -> int:
         return codes.OK
     print(f"global mode {preview['mode']}")
     for f in preview["files"]:
+        if f["parts"]:
+            names = " and ".join(f["parts"]) + ("" if len(f["parts"]) > 1 else ", no part")
+            print(f"{f['harness']} reads {names}")
         if f.get("placed"):
             print(f"{f['file']}: {f['state']}" + (f" ({f['diff']})" if f["diff"] else ""))
         elif not f["changes"]:

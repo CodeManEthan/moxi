@@ -17,7 +17,7 @@
                           (202)
     POST /api/install     `moxi loadout install [--user] [--project P]...`, as a job (202)
     POST /api/replace     `moxi loadout install --replace ID...`, confirmed, as a job (202)
-    POST /api/global-off  `moxi loadout global remove`, confirmed, as a job (202)
+    POST /api/global-remove  `moxi loadout global remove`, confirmed, as a job (202)
 
 **An act from the page does what the same verb does in the user's terminal, or refuses
 before writing.** Every act starts a page job (`moxi_loadout.pagejob`), which runs the
@@ -26,7 +26,7 @@ job's status path, `/api/job?job=<id>`. The page server's threads never install.
 reads run here, take no lock and bound every git call as the doctor does.
 
 `global mode off` is the same command as `global remove`, so the page reaches it only
-through the confirmed `/api/global-off`.
+through the confirmed `/api/global-remove`.
 
 Every value that can hold a path carries a mark: a file or a target is `path`, and a
 sentence, a section's name or an item's source that can name a path is `redact`. Only the
@@ -129,11 +129,15 @@ SECTION = lb.Out("table", items={
     "root": _MAYBE_PATH,
 })
 
-#: One global file: `changes` whether the next install changes it; `diff` a unified diff
+#: One global file: the `harness` that reads it and the `parts` it reads through loadout
+#: (the shared file, then the harness's part while in use); `changes` whether the next
+#: install changes it; `diff` a unified diff
 #: of that change. A file `if-absent` places has `placed` true, its `state`, and in
 #: `diff` the reason that state isn't `ok`.
 GLOBAL_FILE = lb.Out("table", items={
     "file": _PATH,
+    "harness": _TEXT,
+    "parts": lb.Out("list", items=_PATH),
     "changes": lb.Out("bool"),
     "diff": _SAYS,
     "placed": lb.Out("bool"),
@@ -225,7 +229,7 @@ PAGE = lb.Page(
                                            items=lb.Field("string", max=PATH_MAX)),
                        "user": _USER, "projects": _SECTIONS},
                  confirmed=True, status=JOB_ROUTE),
-        lb.Route("/api/global-off", "act", _target("global_off"), returns={},
+        lb.Route("/api/global-remove", "act", _target("global_remove"), returns={},
                  confirmed=True, status=JOB_ROUTE),
     ),
 )

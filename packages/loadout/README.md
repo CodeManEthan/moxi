@@ -34,7 +34,16 @@ and `moxi loadout status` says what has drifted.
 5. The global instruction file, `global.md` in your folder, reaches every session in one
    of three modes: `off` (the default), `managed` (a line or a marked block added to your
    own file, which `moxi loadout global remove` takes out exactly) or `if-absent` (placed
-   only where a harness has none). `global show --diff` previews the next install.
+   only where a harness has none). Text for one harness goes beside it in
+   `global.claude.md`, `global.codex.md` or `global.opencode.md`: each harness reads
+   `global.md` and its own part, never another's. Claude gets an `@` line per file; Codex
+   and OpenCode get one marked block in their `AGENTS.md`, rewritten by each install; in
+   `if-absent` a harness with a part gets a generated file of both. OpenCode's `AGENTS.md`
+   is under `OPENCODE_CONFIG_DIR` when that is set, else `XDG_CONFIG_HOME/opencode` or
+   `~/.config/opencode`; while it exists OpenCode doesn't read Claude's
+   `~/.claude/CLAUDE.md`, so text for OpenCode goes in `global.md` or its part. Use absolute paths for
+   `@` imports in the global text, since a relative one resolves against the file Claude
+   reads. `global show --diff` previews the next install and names each harness's parts.
 6. No placement lands where git would commit it. In a project tree it writes a
    `.gitignore` of its own, which ignores itself, before it places anything there; where
    a `.gitignore` of yours would leave a target committed, the target is not placed and
@@ -116,7 +125,9 @@ and links to the page. An item counts once, however many of its harnesses aren't
   the rows where something else stands in the way and the ones edited by hand since
   loadout wrote them. A `would-commit` row whose path holds a copy the project's git
   tracks is one: the copy is moved aside, so git shows it deleted, and the row reads
-  `would-commit` until you commit that.
+  `would-commit` until you commit that. A global file's row runs the whole install,
+  since only a whole install writes the global file, and its edited text goes to
+  loadout's backups rather than Moxi's displaced folder.
 - **The global instruction file.** The mode, and what the next install does to each
   global file, with its diff. Managed and Only where absent run `moxi loadout global
   mode`. Turn off runs `moxi loadout global remove` once you confirm on the sheet.

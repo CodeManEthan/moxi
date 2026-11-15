@@ -12,6 +12,8 @@
 - A catalogue entry may say `unreleased = true`; `moxi install NAME` then refuses with
   "not on PyPI yet; install it from a checkout with --from" unless `--from` gives its
   source. `moxi.catalogue.Entry` gains `unreleased`.
+- The terminal record's set holds `OPENCODE_CONFIG_DIR`, so a page check can compare
+  OpenCode's home.
 
 ## 0.1.7 (2026-11-08)
 
