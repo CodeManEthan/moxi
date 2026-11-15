@@ -201,6 +201,7 @@ def _release(args, prog: str) -> int:
 
 
 def _scan(args, prog: str) -> int:
+    from moxi.config import ConfigError
     from moxi_secrets import AllowlistError, SetUnavailable
 
     from moxi_publishing import content, flag, tags
@@ -215,7 +216,7 @@ def _scan(args, prog: str) -> int:
     except flag.Failure as exc:
         print(f"{prog}: {exc.text}", file=sys.stderr)
         return exc.code
-    except (content.ScanError, SetUnavailable, AllowlistError, OSError) as exc:
+    except (content.ScanError, SetUnavailable, AllowlistError, ConfigError, OSError) as exc:
         print(f"{prog}: the tree can't be scanned: {exc}", file=sys.stderr)
         return codes.ERROR
     for line in refused:

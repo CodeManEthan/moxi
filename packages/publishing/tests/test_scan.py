@@ -4,7 +4,7 @@ of that tree; `--ci` without the private names or the private allowlist."""
 from __future__ import annotations
 
 import pytest
-from conftest import fingerprint, git, token
+from conftest import fingerprint, git, token, write_config
 
 from moxi_publishing import cli
 
@@ -173,3 +173,11 @@ def test_text_below_a_scissors_line_is_read(repo, names, capsys):
         "docs-1", base)
     code, out, _ = scan(capsys, str(repo), "--rev", "refs/tags/docs-1", "--ci")
     assert code == 3 and "tag refs/tags/docs-1 message line 3, credentials/" in out
+
+
+def test_a_config_that_will_not_load_is_one_line(repo, names, capsys):
+    write_config("publishing", 'provenance.rules = ["no-such-rule"]\n')
+    code, out, err = scan(capsys, str(repo))
+    assert code == 1 and out == ""
+    assert err.startswith("moxi publishing: the tree can't be scanned: ")
+    assert "Traceback" not in err and len(err.splitlines()) == 1
