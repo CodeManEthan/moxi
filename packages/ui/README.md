@@ -72,7 +72,8 @@ side panel's event.
 ## The row of a list
 
 `<moxi-ui-row>` is the two-line row a list page draws: a name, where it is and a fact at
-the right end; under them a leading phrase, a time, what was last said and the row's acts;
+the right end, with any act of line one after it; under them a leading phrase, a time,
+what was last said and the row's acts;
 and an opened state for content under the row. `/m/ui/client.js` defines it, so a page
 places it with attributes and bundles nothing. It draws nothing for an attribute that is
 unset, and a row opens by its lines only when it carries `toggles`.
