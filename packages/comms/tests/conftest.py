@@ -668,6 +668,11 @@ def write_transcript(session_id: str, age: float | None = 0, *, root: Path | Non
 #: its own short timeout.
 WAIT = 10.0
 
+#: How long a wait gives something that must happen: a bind after a reconnect, a post,
+#: a frame. The test proves that it happens, not how fast, so the bound is long; it
+#: costs time only when a test is failing.
+LIVE_S = 30.0
+
 
 def wait_until(predicate, timeout: float = WAIT, interval: float = 0.01):
     deadline = time.monotonic() + timeout
