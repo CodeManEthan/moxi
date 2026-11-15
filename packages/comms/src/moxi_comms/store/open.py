@@ -212,7 +212,9 @@ def open_read(target=None, *, env=None, timeout: float = 5.0,
               check_same_thread: bool = False,
               check_step: bool = False) -> sqlite3.Connection:
     """Open comms.db read-only: an existing store, opened as it is, whose connection
-    refuses every write (`query_only`). Takes no lock.
+    refuses every write (`query_only`) and never checkpoints the WAL as it closes, so a
+    read that is the last connection on the store leaves `comms.db` and its `-wal` as a
+    writer left them. Takes no lock.
 
     Raises `Unmoved` while comms 0.2's files wait to be moved, and
     `sqlite3.OperationalError` for a store that is missing or can't be opened. With
@@ -235,6 +237,7 @@ def open_read(target=None, *, env=None, timeout: float = 5.0,
     conn = _store.connect(target, create=False, timeout_s=timeout,
                           check_same_thread=check_same_thread)
     try:
+        conn.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
         conn.execute("PRAGMA query_only = ON")
         if check_step:
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])

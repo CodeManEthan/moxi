@@ -357,6 +357,29 @@ def test_the_reader_writes_nothing():
         conn.close()
 
 
+def test_the_reader_leaves_a_wal_its_writer_left_unflushed_as_it_is():
+    # A writer that exited without checkpointing, as one stopped or crashed does.
+    writer = store.open_write()
+    target = paths.comms_db()
+    writer.execute("PRAGMA wal_autocheckpoint = 0")
+    with transaction(writer):
+        writer.execute("INSERT INTO meta(key, value) VALUES ('left', 'in the wal')")
+    writer.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
+    writer.close()
+    wal = target.with_name(target.name + "-wal")
+    before, wal_before = target.read_bytes(), wal.read_bytes()
+    assert wal_before
+
+    conn = store.open_read()
+    try:
+        found = conn.execute("SELECT value FROM meta WHERE key = 'left'").fetchone()
+    finally:
+        conn.close()
+    assert found == ("in the wal",)
+    assert target.read_bytes() == before
+    assert wal.read_bytes() == wal_before
+
+
 def test_the_reader_of_a_missing_store_gets_sqlites_error():
     with pytest.raises(sqlite3.OperationalError):
         store.open_read()
