@@ -209,7 +209,11 @@ def test_the_fixtures_times_order_the_list_with_bad_news_first(fixture_shell, fi
 @pytest.mark.parametrize("route", ["open/kestrel-web", "edit/kestrel-web", "remove/harbor-infra"])
 def test_a_row_opened_by_its_address_takes_its_place_once_the_first_order_applies(
         fixture_shell, fixture_page, route):
-    kit.say(fixture_shell, kit.full_report(fixture_shell))
+    now = time.time()
+    kit.say(fixture_shell, kit.full_report(fixture_shell, now))
+    # The page's clock stands still, so its first order is let go by the fixture's report
+    # and never by the hold's time running out, however slow the machine.
+    fixture_page.clock.set_fixed_time(now)
     fixture_page.goto(f"/m/projects/{route}")
     panel = fixture_page.locator("#moxi-panel > moxi-projects-page")
     expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
