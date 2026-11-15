@@ -4,6 +4,8 @@ with each build's state, whether it is idle, and the builds it shares commits wi
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -148,6 +150,55 @@ def test_only_a_building_build_reads_idle(repo, logs):
 
     [one] = open_builds.read(now=LATER).builds
     assert (one.status.state, one.idle) == ("empty", False)
+
+
+def _signed_commit(git_repo, tmp_path, name: str) -> str:
+    """Commit `name` signed with a fresh SSH key, in a repo whose config shows each
+    commit's signature check wherever git prints a commit."""
+    key = tmp_path / "signing-key"
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "coder",
+                    "-f", str(key)], check=True, capture_output=True)
+    git_repo.git("config", "gpg.format", "ssh")
+    git_repo.git("config", "user.signingkey", str(key))
+    git_repo.git("config", "log.showSignature", "true")
+    (git_repo.root / name).write_text(name + "\n", encoding="utf-8")
+    git_repo.git("add", "--", name)
+    git_repo.git("commit", "-q", "-S", "-m", f"change {name}")
+    return git_repo.rev()
+
+
+@pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_signed_head_shown_with_its_signature_still_reads_idle(repo, logs, tmp_path):
+    from moxi_rounds import open_builds
+
+    commission(logs[A], base=repo.rev("main"))
+    commission(logs[B], base=repo.rev("main"), branch="other")
+    repo.switch("work", new_from="main")
+    _signed_commit(repo, tmp_path, "feature.txt")
+    repo.switch("other", new_from="main")
+    repo.commit("other.txt")
+
+    found = open_builds.read(now=LATER).builds
+
+    assert [(one.status.state, one.idle, one.problem) for one in found] == [
+        ("building", True, None), ("building", True, None)]
+
+
+@pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_signed_commit_s_date_is_read_whatever_git_shows_with_it(git_repo, tmp_path):
+    from moxi_rounds.gitreads import Git
+
+    signed = _signed_commit(git_repo, tmp_path, "feature.txt")
+
+    assert Git(git_repo.root).committed_at(signed) == int(
+        git_repo.git("log", "-1", "--no-show-signature", "--format=%ct", signed))
+
+
+def test_a_commit_git_lacks_has_no_date_and_says_so(git_repo):
+    from moxi_rounds.gitreads import Git, GitError
+
+    with pytest.raises(GitError):
+        Git(git_repo.root).committed_at("0" * 40)
 
 
 # -- sharing and landings across rounds ---------------------------------------------------

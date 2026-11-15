@@ -149,7 +149,19 @@ class Git:
 
     def committed_at(self, commit: str) -> int:
         """When `commit` was committed: its committer date, in seconds since the epoch."""
-        return int(self._run("show", "-s", "--format=%ct", commit)[1].strip())
+        # The raw commit object, not `show`: a user's config can make `show` print a
+        # signature check before the date, and nothing decorates `cat-file`.
+        argv = ["git", "-C", str(self.root), "cat-file", "commit", commit]
+        out = self._run("cat-file", "commit", commit)[1]
+        for line in out.split("\n"):
+            if not line:
+                break
+            if line.startswith("committer "):
+                stamp = line.rsplit(" ", 2)[-2:]
+                if len(stamp) == 2 and stamp[0].isdigit():
+                    return int(stamp[0])
+                break
+        raise GitError(argv, "gave a commit with no committer date git could read")
 
     def parents(self, commit: str) -> tuple[str, ...]:
         """The parents of `commit`, the first first."""
