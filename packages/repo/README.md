@@ -295,8 +295,9 @@ on every line and check nothing), is refused by `add` before anything is written
 A check that judges commits after they were made, such as a push guard reading the commits
 it sends, applies the same rules with `moxi_repo.commit_rules_problems(root, text)`: the
 problems the piece would print for message `text`, read with the piece's settings and the
-comment and trailer config of the repo at `root`, and none where the piece is not
-registered or is disabled.
+trailer config of the repo at `root`, and none where the piece is not registered or is
+disabled. Every line of `text` is judged, comment-prefixed lines and lines below a
+scissors line included, since a made commit keeps whatever git's cleanup left.
 
 ## The command `moxi repo rules`
 

@@ -4,7 +4,8 @@
 
 - `moxi_repo.commit_rules_problems(root, text)`: the commit-rules piece's rules applied
   to a message after the commit was made, with the piece's settings in the repo at
-  `root`; empty where the piece is not registered or is disabled.
+  `root`; empty where the piece is not registered or is disabled. Every line of the
+  message is judged, comment-prefixed or below a scissors line alike.
 - `moxi_repo.api` also hands out `interpreter`, `resolve_project`,
   `ProjectUnavailable`, `resolve_repo` (a repo's paths from a path in any of its work
   trees), `NotARepo`, `comment_prefix` and `quote_arg`.

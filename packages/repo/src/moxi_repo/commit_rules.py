@@ -120,7 +120,10 @@ def commit_rules_problems(root, text: str) -> list[str]:
     `root`, read with the settings the piece has in that repo's git config and the repo's
     comment and trailer config; empty when the piece is not registered there, or is
     disabled. For a check that judges a commit after it was made (a push guard reading the
-    commits it sends) by the rules its commit-msg event applied. One `git config` call."""
+    commits it sends) by the rules its commit-msg event applied. Every line of `text` is
+    read: git strips comment lines and cuts at a scissors line only while a message is
+    edited, so in a made commit those lines are the message's own. One `git config`
+    call."""
     from moxi_repo.gitrun import git
     from moxi_repo.run import PIECE_PREFIX, enabled, parse_config, pieces_of, settings_of
 
@@ -134,10 +137,11 @@ def commit_rules_problems(root, text: str) -> list[str]:
     if piece is None or not enabled(piece):
         return []
     settings = settings_of(piece)
-    comment, configured, separators = _read_settings(
+    _comment, configured, separators = _read_settings(
         [(k, v) for k, v in pairs if not k.startswith(PIECE_PREFIX)])
+    # No comment prefix: nothing is skipped and no line reads as the scissors line.
     return check_message(text, refused=settings.get(REFUSED_TRAILER, ()),
-                         patterns=settings.get(TAG_PATTERN, ()), comment=comment,
+                         patterns=settings.get(TAG_PATTERN, ()), comment="",
                          root=str(root), configured=configured, separators=separators)
 
 

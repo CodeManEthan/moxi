@@ -526,9 +526,12 @@ def test_commit_rules_problems_reads_the_piece_settings_of_the_repo(demo):
     assert any('line 1 has "TAG-12"' in p for p in problems), problems
     assert any("Round" in p for p in problems), problems
     assert moxi_repo.commit_rules_problems(repo, "Fix it\n\nBody.\n") == []
-    # The repo's comment prefix is read: a line it starts is no part of the message.
+    # A made commit's every line is its own: git kept a comment-prefixed line and anything
+    # below a scissors line, so both are judged.
     git(repo, "config", "core.commentChar", ";")
-    assert moxi_repo.commit_rules_problems(repo, "Fix it\n; TAG-12 here\n") == []
+    assert moxi_repo.commit_rules_problems(repo, "Fix it\n; TAG-12 here\n") != []
     assert moxi_repo.commit_rules_problems(repo, "Fix it\n# TAG-12 here\n") != []
+    scissors = "; " + "-" * 24 + " >8 " + "-" * 24
+    assert moxi_repo.commit_rules_problems(repo, f"Fix it\n{scissors}\nTAG-12\n") != []
     api.disable(repo, PIECE)
     assert moxi_repo.commit_rules_problems(repo, message) == []
