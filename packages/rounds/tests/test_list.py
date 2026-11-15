@@ -96,10 +96,10 @@ def test_the_open_rounds_of_every_project_are_listed_with_flow_and_counts(
         f"{A}   open   flow fix   step commission of B1, waiting   "
         "open questions: 2   parked: 1   "
         "rulings not shown: 2\n"
-        f"{B}   open   flow fix   step commission, not-built   "
+        f"{B}   open   flow fix   step commission, ready   "
         "open questions: 0   parked: 0   "
         "rulings not shown: 0\n"
-        f"{C}   open   flow fix   step commission, not-built   "
+        f"{C}   open   flow fix   step commission, waiting   "
         "open questions: 1   parked: 0   "
         "rulings not shown: 0\n")
 
@@ -121,13 +121,13 @@ def test_the_rounds_as_data_are_the_rounds_as_lines(rounds, capsys):
          "ended": None},
         {"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),
          "status": "open", "flow": "fix",
-         "step": {"step": "commission", "stage": None, "state": "not-built"},
+         "step": {"step": "commission", "stage": None, "state": "ready"},
          "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
          "ended": None},
         {"name": C, "project": "proj-b",
          "folder": str(rounds.parent.parent / "notes-b" / "rounds" / "c-round"),
          "status": "open", "flow": "fix",
-         "step": {"step": "commission", "stage": None, "state": "not-built"},
+         "step": {"step": "commission", "stage": None, "state": "ready"},
          "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
          "ended": None}]
 
@@ -137,7 +137,7 @@ def test_a_project_named_keeps_the_rounds_to_its_own(rounds, capsys):
     assert [one["name"] for one in data(capsys, "proj-b")["rounds"]] == [C]
     assert data(capsys, "proj-b")["project"] == "proj-b"
     assert printed(capsys, "proj-b").splitlines() == [
-        f"{C}   open   flow fix   step commission, not-built   "
+        f"{C}   open   flow fix   step commission, ready   "
         "open questions: 0   parked: 0   "
         "rulings not shown: 0"]
 

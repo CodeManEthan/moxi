@@ -54,7 +54,7 @@ def find(path: str | os.PathLike, *, verb: str, settings=None) -> Found:
     if repo is None:
         raise BadArgument(f"no round is named and {top} is in no project of the "
                           "projects list, so no build is found by its branch", instead)
-    found, unread = _open_builds(repo, branch, settings)
+    found, unread = open_on(repo, branch, settings=settings)
     if len(found) == 1:
         return found[0]
     if not found:
@@ -68,9 +68,11 @@ def find(path: str | os.PathLike, *, verb: str, settings=None) -> Found:
                       f"and branch {branch}: {named}", instead)
 
 
-def _open_builds(repo: str, branch: str, settings) -> tuple[list[Found], list[str]]:
-    """Each open build of the repo `repo` on the branch `branch`, in any round of any
-    project, and a line for each round whose log can't be read."""
+def open_on(repo: str, branch: str, *,
+            settings=None) -> tuple[list[Found], list[str]]:
+    """Each open build of the repo `repo` (its key, in any case) on the branch
+    `branch`, in any round of any project, as the index has them, and a line for each
+    round whose log can't be read. Nothing is read from git."""
     homes, _unresolved = folders.homes(settings)
     found, unread = [], []
     for home in homes:
@@ -85,4 +87,4 @@ def _open_builds(repo: str, branch: str, settings) -> tuple[list[Found], list[st
     return found, unread
 
 
-__all__ = ["Found", "find"]
+__all__ = ["Found", "find", "open_on"]

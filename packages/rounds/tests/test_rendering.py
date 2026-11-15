@@ -102,7 +102,7 @@ a placeholder round
 
 fix: {steps(B)}
 
-- step: commission, not-built
+- step: commission, ready
 - close waits for: a finished stage, which this version does not build, so the round does not close in it
 
 ## Builds
@@ -165,7 +165,9 @@ a placeholder round
 
 fix: {steps()}
 
-- step: commission, not-built
+- step: commission, waiting
+- waits for: Q3 holds every stage, so it holds B1 the moment commission declares it: {THIRD}
+- fix: the operator rules it (moxi rounds rule proj-a/a-round Q3 --text TEXT --record PTR), withdraws or parks it (moxi rounds rule proj-a/a-round withdraw:Q3 --record PTR, or park:Q3 --until WHAT), or narrows it (moxi rounds rule proj-a/a-round narrow:Q3=LIST|none --record PTR)
 - close waits for: a finished stage, which this version does not build, so the round does not close in it
 
 ## Builds

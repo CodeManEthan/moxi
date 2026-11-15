@@ -1,15 +1,24 @@
-"""`commission`: the round's act of authorizing one build of a stage the plan holds.
+"""`commission`: the round's act of authorizing one build of a stage.
 
-`commission(name, stage, builder=...)` runs the write path. Under the round's lock it
-reads the round, its project's log and git, and refuses, having made nothing, while any
-of these does not hold:
+`commission(name, stage, builder=...)` builds a stage the plan holds.
+`commission(name, repo=..., branch=..., builder=...)`, in a flow that does not verify
+its design, declares the stage as it commissions it: under the lowest `B<n>` the round
+has not used, with no `after`, and with the slices given. Either runs the write path.
+Under the round's lock it reads the round, its project's log and git, and refuses,
+having made nothing, while any of these does not hold:
 
 - the round has not ended, and its flow has a `build` step;
 - the stage is one of the plan's, not one that left it, and stands for a build rather
-  than a child round;
-- the stage's `commission` step waits for nothing (`steps`), and has no build that is
-  open or finished; where the flow has a design step, `design.md` holds the bytes its
-  last version was frozen from;
+  than a child round; a stage declared here is in a flow that does not verify its
+  design, and the repo has no stage of the plan without an open or finished build,
+  which is commissioned by its id instead;
+- the stage's `commission` step waits for nothing (`steps`), read for a stage declared
+  here as if it were declared, and has no build that is open or finished; where the
+  flow has a design step, `design.md` holds the bytes its last version was frozen from;
+  a question whose `blocks` is every stage holds a stage the moment it is declared, so
+  while one is open nothing is declared, and the refusal names the operator's ways
+  past it;
+- no open build of any round is on the repo's branch already;
 - the target can be read: the repo's `into` setting, else the branch checked out at
   the project's root, which must not be a detached head or an open build's branch;
   the target branch is in the repo, and its head is the build's **base**;
@@ -23,7 +32,8 @@ from the base, and its worktree, in one git call, at `<worktree_dir>/<repo>/<bra
 the worktree's marker, in the worktree's own git folder; the scratch folder,
 `<cache dir>/scratch/<repo>/<branch>/<build id>`, with a create that fails on a folder
 already there, and its marker first in it. Then it appends `build.commissioned` with
-both folders, the build id and this machine's host name. A branch is percent-encoded in
+both folders, the build id and this machine's host name, after the `stage.declared` of
+a stage declared here. A branch is percent-encoded in
 both paths (`places.encode`).
 
 **A rerun after a stop.** A run stopped before its append left folders and no event. A
@@ -35,22 +45,32 @@ stopped run cut the branch from: a build's base never moves, even when the targe
 between the runs. Any other folder at either place is refused, naming it: one with no
 marker (a stop between its create and its marker), and a worktree whose marker names a
 recorded build. rounds never adopts or removes a folder it can't tell it made; the user
-looks at it, removes it, and runs `commission` again.
+looks at it, removes it, and runs `commission` again. A stage declared here is declared
+in the same append as its build, so a rerun of the same command declares the same id
+and adopts its own stopped run's worktree.
+
+**Again after a drop.** A dropped build counts for nothing: its stage is commissioned
+again under the same id, with `existing` on the branch the drop kept or on a fresh
+branch once that one is deleted. Its worktree, if kept, is refused until it is gone.
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
+from collections.abc import Sequence
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from moxi import proc
 
-from . import (builds, commission_block, ending, folders, gitreads, index, open_builds,
-               paths, places, pointers, skips, stages, stepping, steps, versions, write)
+from . import (builds, by_branch, commission_block, design_block, ending, folders,
+               gitreads, index, open_builds, paths, places, pointers, skips, stages,
+               stepping, steps, versions, write)
 from . import settings as own
+from . import state as states
 from .errors import BadArgument, RoundsError, Unmet
 from .gitreads import Git, GitError
 
@@ -92,6 +112,7 @@ class _Look:
     and for a commission that may go ahead what it is made from."""
 
     unmet: list[Unmet] = field(default_factory=list)
+    stage: str | None = None
     root: Path | None = None
     repo: str | None = None
     branch: str | None = None
@@ -101,32 +122,60 @@ class _Look:
     adopt: str | None = None
     #: Whether a folder at either place was refused.
     unmet_place: bool = False
+    #: The stage this commission declares, in the form that declares one.
+    declared: states.Stage | None = None
 
 
-def commission(name: str, stage_id: str, *, builder: str, actor: str,
-               record: str | None = None, existing: bool = False, settings=None,
-               wait_s: float = write.WAIT_S, at: str | None = None,
-               env=None) -> Commissioned:
-    """Commission the stage `stage_id` of the round `name`, `<project>/<slug>`.
+@dataclass(frozen=True)
+class Declaring:
+    """What `commission` with no stage declares: the `repo` and `branch` of the build,
+    and its `slices`, each `{"id", "what", "minutes"}`."""
 
+    repo: str
+    branch: str
+    slices: tuple[dict, ...] = ()
+
+
+def commission(name: str, stage_id: str | None = None, *, builder: str, actor: str,
+               repo: str | None = None, branch: str | None = None,
+               slices: Sequence[tuple[str, str, int]] = (), record: str | None = None,
+               existing: bool = False, settings=None, wait_s: float = write.WAIT_S,
+               at: str | None = None, env=None) -> Commissioned:
+    """Commission the stage `stage_id` of the round `name`, `<project>/<slug>`; or, with
+    no stage, declare one as it is commissioned.
+
+    - `repo` and `branch`: with no stage, the project the build is in, by key, and its
+      branch; `slices`: with no stage, each worker's piece of it as `(id, what,
+      minutes)`. All three are refused with a stage.
     - `builder`: who builds it; `actor`: who commissions it, the event's actor.
     - `record`: the pointer to the operator's go, when there was one.
     - `existing`: build on a branch that is already there, in place of cutting one.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
       out; `wait_s`: how long to wait for the round's lock; `at`: the event's time.
 
-    Raises `BadArgument` for a builder with no name, `BadName`, `UnknownProject`,
+    Raises `BadArgument` for a builder with no name, for a stage given with a repo,
+    branch or slices, for no stage without both a repo and a branch, and for a slice
+    that can't be one, `BadName`, `UnknownProject`,
     `NoFolder` or `NoRound` for a round that can't be found, `Refused` with every
     condition that does not hold, and `RoundsError` when git or the file system fails
     to make a folder. A refusal makes nothing and writes nothing."""
     if not isinstance(builder, str) or not builder.strip():
         raise BadArgument("the build has no builder", "name who builds it: --builder NAME")
+    declaring = _declaring(name, stage_id, repo=repo, branch=branch, slices=slices)
     project, slug = folders.split(name)
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
     folder = home.round_folder(slug)
-    again = f"moxi rounds commission {name} {stage_id} --builder {builder}"
+    if declaring is None:
+        again = f"moxi rounds commission {name} {stage_id} --builder {builder}"
+    else:
+        again = shlex.join([
+            "moxi", "rounds", "commission", name, "--repo", declaring.repo, "--branch",
+            declaring.branch, "--builder", builder,
+            *(word for one in declaring.slices
+              for word in ("--slice", f"{one['id']}={one['what']}", "--minutes",
+                           str(one["minutes"])))])
     if existing:
         again += " --existing"
     looked: dict[int, _Look] = {}
@@ -135,6 +184,7 @@ def commission(name: str, stage_id: str, *, builder: str, actor: str,
         # One look for one reading of the log: each gate and the act speak of it.
         if id(view) not in looked:
             looked[id(view)] = _look(view, name=name, folder=folder, stage_id=stage_id,
+                                     declaring=declaring, builder=builder, actor=actor,
                                      existing=existing, settings=settings, again=again,
                                      env=env)
         return looked[id(view)]
@@ -151,7 +201,7 @@ def commission(name: str, stage_id: str, *, builder: str, actor: str,
     def make(view) -> tuple[str, Path, bool]:
         found = look(view)
         build_id = found.adopt or places.new_build_id()
-        names = {"round": name, "stage": stage_id, "repo": found.repo,
+        names = {"round": name, "stage": found.stage, "repo": found.repo,
                  "branch": found.branch}
         if found.adopt is None:
             _add_worktree(found, existing=existing)
@@ -166,28 +216,37 @@ def commission(name: str, stage_id: str, *, builder: str, actor: str,
             _make_scratch(scratch, places.marker(build_id, **names), again)
         return build_id, scratch, found.adopt is not None
 
-    def event(view, result) -> write.Entry:
+    def event(view, result) -> list[write.Entry]:
         found = look(view)
         build_id, scratch, _adopted = result
-        fields = {"stage": stage_id, "repo": found.repo, "branch": found.branch,
+        entries = []
+        if found.declared is not None:
+            stage = found.declared
+            entries.append(write.Entry("stage.declared", {
+                "id": stage.id, "repo": stage.repo, "branch": stage.branch, "after": [],
+                "slices": [dict(one) for one in stage.slices]}))
+        fields = {"stage": found.stage, "repo": found.repo, "branch": found.branch,
                   "base": found.base, "target": found.target,
                   "worktree": str(found.worktree), "scratch": str(scratch),
                   "builder": builder, "host": places.host(), "build": build_id}
         if record is not None:
             fields["record"] = record
-        return write.Entry("build.commissioned", fields)
+        return [*entries, write.Entry("build.commissioned", fields)]
 
     written = write.record(
         write.Where(home.project, home.folder, slug), actor=actor,
         gates=[ending.takes_new_work(name, "a new build"), ready, has_a_pointer],
         act=make, event=event, wait_s=wait_s, at=at)
-    one = written.events[0]
+    one = written.events[-1]
+    # The state the block is read from is the log as it stood under the lock with
+    # this verb's own events: a stage declared here is in it.
+    after = states.fold([*written.view.events, *written.events])
     made = commission_block.block(
-        written.view.state, written.view.project_state, name=name, stage=stage_id,
+        after, written.view.project_state, name=name, stage=one["stage"],
         repo=one["repo"], branch=one["branch"], base=one["base"], target=one["target"],
         worktree=Path(one["worktree"]), scratch=Path(one["scratch"]), settings=settings)
     return Commissioned(
-        name=name, stage=stage_id, repo=one["repo"], branch=one["branch"],
+        name=name, stage=one["stage"], repo=one["repo"], branch=one["branch"],
         base=one["base"], target=one["target"], worktree=Path(one["worktree"]),
         scratch=Path(one["scratch"]), build=one["build"], host=one["host"],
         builder=builder, record=record, adopted=written.result[2], event=one,
@@ -196,12 +255,68 @@ def commission(name: str, stage_id: str, *, builder: str, actor: str,
 
 # -- what is read under the lock ---------------------------------------------------------
 
-def _look(view, *, name: str, folder: Path, stage_id: str, existing: bool, settings,
-          again: str, env) -> _Look:
+def _declaring(name: str, stage_id: str | None, *, repo: str | None, branch: str | None,
+               slices: Sequence[tuple[str, str, int]]) -> Declaring | None:
+    """What the form with no stage declares, or None for the form that names one.
+    Raises `BadArgument` for a mix of the two forms or a slice that can't be one."""
+    if stage_id is not None:
+        if repo is not None or branch is not None or slices:
+            raise BadArgument(
+                f"{stage_id} is a stage of the plan, and --repo, --branch and --slice "
+                "declare a stage of their own",
+                f"moxi rounds commission {name} {stage_id} --builder NAME, or leave "
+                "the stage out to declare one")
+        return None
+    if not repo or not branch:
+        raise BadArgument(
+            "no stage is named, so the stage is declared here, and that needs both "
+            "the repo and the branch",
+            f"moxi rounds commission {name} --repo KEY --branch NAME --builder NAME, "
+            f"or name a stage of the plan: moxi rounds commission {name} B<n> "
+            "--builder NAME")
+    found: list[dict] = []
+    for slice_id, what, minutes in slices:
+        if not isinstance(slice_id, str) or not design_block.SLICE_ID.fullmatch(slice_id):
+            raise BadArgument(f"{slice_id!r} is no slice id: letters, digits, '.', '_' "
+                              "and '-', starting with a letter or digit",
+                              "--slice ID=TEXT, as --slice 1a=the log")
+        if any(one["id"] == slice_id for one in found):
+            raise BadArgument(f"the slice {slice_id} is given twice",
+                              "give each slice once, under an id of its own")
+        if not isinstance(what, str) or not what.strip() or "\n" in what:
+            raise BadArgument(f"the slice {slice_id} says nothing it builds",
+                              f"--slice {slice_id}=TEXT, one line")
+        if isinstance(minutes, bool) or not isinstance(minutes, int) or minutes < 1:
+            raise BadArgument(f"the slice {slice_id} is given {minutes!r} minutes, and "
+                              "a slice is given a whole number of minutes, 1 or more",
+                              f"--slice {slice_id}=TEXT --minutes N")
+        found.append({"id": slice_id, "what": what.strip(), "minutes": minutes})
+    return Declaring(repo=repo, branch=branch, slices=tuple(found))
+
+
+def _look(view, *, name: str, folder: Path, stage_id: str | None,
+          declaring: Declaring | None, builder: str, actor: str, existing: bool,
+          settings, again: str, env) -> _Look:
     found = _Look()
     state = view.state
-    stage = stages.find(state, stage_id)
     show = f"moxi rounds show {name}"
+    if not stepping.has_step(state, BUILD):
+        flow = stepping.current(state).name
+        found.unmet.append(Unmet(
+            f"the flow {flow} of {name} has no {BUILD} step, so nothing in it is "
+            "built; a flow that has one is the lead's to move it to",
+            f"moxi rounds mark {name} --flow NAME"))
+        return found
+    if declaring is not None:
+        stage = _to_declare(found, state, name=name, declaring=declaring,
+                            builder=builder, actor=actor)
+        if stage is None:
+            return found
+        found.declared = stage
+        state = stages.with_stage(state, stage)
+        stage_id = stage.id
+    stage = stages.find(state, stage_id)
+    found.stage = stage_id
     if stage is None:
         found.unmet.append(Unmet(f"{stage_id} is not a stage of {name}", show))
         return found
@@ -215,13 +330,6 @@ def _look(view, *, name: str, folder: Path, stage_id: str, existing: bool, setti
             f"{stage_id} stands for the round {stage.round}, which is run as a round "
             "of its own and has no build", f"moxi rounds next {stage.round}"))
         return found
-    if not stepping.has_step(state, BUILD):
-        flow = stepping.current(state).name
-        found.unmet.append(Unmet(
-            f"the flow {flow} of {name} has no {BUILD} step, so nothing in it is "
-            "built; a flow that has one is the lead's to move it to",
-            f"moxi rounds mark {name} --flow NAME"))
-        return found
     step = steps.one(state, steps.COMMISSION, stage_id, name=name,
                      register=view.project_state)
     if step is not None and step.state == steps.DONE:
@@ -230,7 +338,14 @@ def _look(view, *, name: str, folder: Path, stage_id: str, existing: bool, setti
             "one build at a time", show))
         return found
     if step is not None:
-        found.unmet += step.waits
+        waits = list(step.waits)
+        if found.declared is not None:
+            # A question holds a stage the moment it is declared, and nothing records a
+            # skip of a stage that is not declared: say the operator's ways past it.
+            held = set(steps.held_by(state, stage_id, name=name))
+            waits = [one for one in waits if one not in held]
+            waits += steps.held_unbuilt(state, stage_id, name=name)
+        found.unmet += waits
     if (stepping.has_step(state, steps.DESIGN)
             and not skips.is_skipped(state, steps.DESIGN)
             and versions.current(state) is not None):
@@ -240,6 +355,35 @@ def _look(view, *, name: str, folder: Path, stage_id: str, existing: bool, setti
     found.unmet += _git(found, view, name=name, stage=stage, existing=existing,
                         settings=settings, again=again, env=env)
     return found
+
+
+def _to_declare(found: _Look, state: states.State, *, name: str,
+                declaring: Declaring, builder: str, actor: str) -> states.Stage | None:
+    """The stage the form with no stage declares, or None with what refuses it in
+    `found`."""
+    if stepping.has_step(state, stages.VERIFIES):
+        found.unmet.append(Unmet(
+            f"the flow {state.flow} of {name} verifies its design, so each of its "
+            "stages is declared in the design and commissioned by its id",
+            f"give {versions.DESIGN_FILE} a [[stage]] for it, then moxi rounds fold "
+            f"{name}"))
+        return None
+    try:
+        repo, _root = folders.root(declaring.repo)
+    except RoundsError as error:
+        found.unmet.append(Unmet(error.reason, error.fix or "moxi projects list"))
+        return None
+    unbuilt = stages.unbuilt_in(state, repo)
+    if unbuilt is not None:
+        found.unmet.append(Unmet(
+            f"{unbuilt.id} is a stage of {name} in {repo} with no open or finished "
+            "build, and a declared stage is commissioned by its id: a second stage "
+            "would be the same work twice",
+            f"moxi rounds commission {name} {unbuilt.id} --builder {builder}"))
+        return None
+    return states.Stage(id=stages.next_id(state), repo=repo, branch=declaring.branch,
+                        round=None, after=(), slices=declaring.slices, why=None,
+                        version=None, actor=actor, at="")
 
 
 def _git(found: _Look, view, *, name: str, stage, existing: bool, settings, again: str,
@@ -269,6 +413,13 @@ def _read_git(found: _Look, git: Git, view, *, name: str, stage, existing: bool,
         return [Unmet(f"{branch!r}, the branch of {stage.id}, is not a name git takes "
                       "for a branch; different work is a new stage",
                       f"moxi rounds show {name}")]
+    holders, _unread = by_branch.open_on(repo, branch, settings=settings)
+    if holders:
+        holder = holders[0]
+        return [Unmet(f"the branch {branch} of {repo} is the branch of the open build "
+                      f"{holder.stage} of {holder.round}, and a repo's branch has one "
+                      "open build at a time: that build is finished or dropped from "
+                      "its own round first", f"moxi rounds show {holder.round}")]
     open_now: open_builds.OpenBuilds | None = None
 
     def opened() -> open_builds.OpenBuilds:

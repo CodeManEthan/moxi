@@ -171,8 +171,8 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
 def test_the_calls_say_what_step_a_round_is_at(rounds):
     assert [one["step"] for one in api.rounds()["rounds"]] == [
         {"step": "commission", "stage": "B1", "state": "waiting"},
-        {"step": "commission", "stage": None, "state": "not-built"},
-        {"step": "commission", "stage": None, "state": "not-built"}]
+        {"step": "commission", "stage": None, "state": "ready"},
+        {"step": "commission", "stage": None, "state": "waiting"}]
     assert api.rounds(status="closed")["rounds"][0]["step"] is None
     at = api.round(A)["step"]
     assert (at["step"], at["stage"], at["state"]) == ("commission", "B1", "waiting")

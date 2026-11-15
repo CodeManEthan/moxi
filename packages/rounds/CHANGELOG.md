@@ -48,6 +48,11 @@ does not yet build.
   operator has not been shown and which standing rulings in the repo's scope no row
   cites. `next` tells an open build each ruling recorded since its block that reaches
   its stage.
+- `commission ROUND --repo KEY --branch NAME`, in a flow that does not verify its
+  design, declares the stage as it commissions it, with `--slice ID=TEXT --minutes N`.
+  Such a flow builds one stage in a repo. A repo's branch has one open build across
+  every round. A stage whose build was dropped is commissioned again under its id.
+  `next` points a plan of five or more builds at child rounds.
 - `ask ROUND TEXT --build B<n>`: the lead asks a question that came up in a build; it
   comes from the build at its branch's tip, and is listed as asked by the lead for the
   builder.

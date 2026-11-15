@@ -100,13 +100,12 @@ def test_a_build_is_found_from_a_folder_inside_its_worktree(opened):
 
 def test_the_branch_checked_out_picks_the_build_among_rounds(opened):
     opened(ROUND, (("B1", "work"),))
-    opened(OTHER, (("B1", "other-work"), ("B2", "more-work")))
+    opened(OTHER, (("B1", "other-work"),))
     commission(ROUND, "B1")
-    commission(OTHER, "B1")
-    made = commission(OTHER, "B2")
+    made = commission(OTHER, "B1")
 
     assert by_branch.find(made.worktree, verb="next") == by_branch.Found(
-        OTHER, "B2", "proj-a", "more-work")
+        OTHER, "B1", "proj-a", "other-work")
 
 
 # -- refused -----------------------------------------------------------------------------

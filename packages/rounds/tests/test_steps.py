@@ -469,8 +469,21 @@ def test_a_round_that_builds_nothing_is_at_no_step_once_its_design_is_verified(o
     assert list(steps.at(folded(folder))) == []
 
 
-def test_a_round_on_the_lightest_flow_starts_at_a_step_that_is_not_built(opened):
-    assert at(opened("fix")) == ("commission", None, steps.NOT_BUILT)
+def test_a_round_on_the_lightest_flow_starts_at_the_commission_that_declares_a_stage(
+        opened):
+    assert at(opened("fix")) == ("commission", None, steps.READY)
+
+
+def test_with_no_stage_planned_in_a_flow_that_verifies_its_design_commission_waits(
+        folder):
+    fold(folder)
+    verdict(folder, "publishable")
+    found = steps.one(folded(folder), "commission", name=ROUND)
+    assert found.state == steps.WAITING
+    assert [one.reason for one in found.waits] == [
+        "no stage is planned: in a flow that verifies its design, the design declares "
+        "each stage it builds"]
+    assert found.waits[0].fix == f"give design.md a [[stage]], then moxi rounds fold {ROUND}"
 
 
 def test_a_round_that_has_ended_is_at_no_step(folder):
@@ -501,7 +514,7 @@ def test_the_index_names_the_rounds_a_parked_question_waits_for(folder):
     verdict(folder, "publishable")
     rule("park:Q1", until="round:proj-a/another")
     assert list(steps.at(folded(folder))) == [
-        ("step", {"step": "commission", "stage": None, "state": steps.NOT_BUILT,
+        ("step", {"step": "commission", "stage": None, "state": steps.WAITING,
                   "until": ["proj-a/another"]})]
 
 
@@ -537,7 +550,7 @@ def test_a_skipped_step_is_passed_wherever_the_step_is_shown(folder, capsys):
     assert listed()["step"] == "commission"
     assert api.round(ROUND)["step"]["step"] == "commission"
     assert main(["show", ROUND]) == 0
-    assert "step: commission, not-built\n" in capsys.readouterr().out
+    assert "step: commission, waiting" in capsys.readouterr().out
 
 
 def test_a_round_at_no_step_and_one_that_ended_are_listed_at_none(opened, capsys):
@@ -574,3 +587,48 @@ def test_the_list_reads_the_log_again_once_a_round_a_question_waits_for_closed(
      "commission of B2, not-built")])
 def test_a_step_in_words(found, expected):
     assert steps.said(found) == expected
+
+
+# -- commission: one build to a repo in a light flow, and the form that declares ----------
+
+def commissioned(folder, stage_id="B1") -> None:
+    log.append(log.round_log(folder), "build.commissioned",
+               {"stage": stage_id, "repo": "proj-a", "branch": f"branch-{stage_id.lower()}",
+                "base": "0" * 40, "target": "main"}, actor="planner")
+
+
+def test_a_flow_that_verifies_its_design_may_build_two_stages_in_one_repo(folder):
+    fold(folder, stage("B1"), stage("B2"))
+    verdict(folder, "publishable")
+    commissioned(folder)
+
+    assert step(folder, "commission", "B2").state == steps.READY
+
+
+def test_a_light_flow_waits_on_the_one_build_in_a_repo(opened):
+    folder = opened("fix")
+    for stage_id in ("B1", "B2"):
+        log.append(log.round_log(folder), "stage.declared",
+                   {"id": stage_id, "repo": "proj-a", "branch": f"branch-{stage_id}",
+                    "after": []}, actor="planner")
+    commissioned(folder)
+
+    found = step(folder, "commission", "B2")
+
+    assert found.state == steps.WAITING
+    assert [one.reason for one in found.waits] == [
+        "B1 has a build in proj-a that is open or finished, and the flow fix does not "
+        "verify its design: such a round builds one stage in a repo"]
+
+
+def test_the_commission_that_declares_waits_for_a_frozen_design_and_an_open_question(
+        opened):
+    folder = opened("small")
+    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+
+    found = step(folder, "commission")
+
+    assert found.state == steps.WAITING
+    assert [one.reason for one in found.waits] == [
+        "no version of the design is frozen",
+        f"Q1 holds every stage, so it holds B1 the moment commission declares it: {ASKED}"]

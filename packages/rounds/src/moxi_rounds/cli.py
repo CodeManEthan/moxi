@@ -4,6 +4,8 @@
     moxi rounds fold ROUND [--records-only --record PTR] [--as NAME]
     moxi rounds verdict ROUND REPORT.md [--as NAME]
     moxi rounds commission ROUND STAGE --builder NAME [--record PTR] [--existing]
+    moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME
+                           [--slice ID=TEXT --minutes N]... [--record PTR] [--existing]
                            [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
@@ -86,7 +88,14 @@ stage's branch from it and adds its worktree under `worktree_dir` as
 `<repo>/<branch>`, makes its scratch folder in rounds' cache directory, writes a
 marker naming the build in each, and records the build. A `/` or `%` in a branch is
 written `%2F` or `%25` in a path. `--existing` builds on a branch that is there, and
-is refused when it shares commits with another open build. A commission stopped before
+is refused when it shares commits with another open build. A repo's branch has one
+open build at a time, across every round. In a flow that does not verify its design,
+a round builds one stage in a repo, and `commission ROUND --repo KEY --branch NAME`
+declares the stage as it commissions it, under the lowest `B<n>` the round has not
+used, with the slices `--slice ID=TEXT --minutes N` give; it is refused while the repo
+has a stage with no open or finished build, which is commissioned by its id, and
+while a question open on every stage would hold the new one. A stage whose build was
+dropped is commissioned again under its id. A commission stopped before
 it recorded the build is run again: it keeps the worktree whose marker names its own
 stopped run, and refuses any other folder at either place, naming it. It prints the
 commission block, which goes first in the builder's brief: the build's folders, the
@@ -864,11 +873,27 @@ def _verdict(args, out) -> int:
 def _declare_commission(verbs) -> None:
     said = ("Commission a stage of the round's plan: cut its branch from the target, "
             "add its worktree and make its scratch folder, each with a marker naming "
-            "the build, and record the build.")
+            "the build, and record the build. With --repo and --branch in place of a "
+            "stage, in a flow that does not verify its design, the stage is declared "
+            "as it is commissioned, under the lowest B<n> the round has not used.")
     parser = verbs.add_parser("commission", help=said, description=said)
     parser.add_argument("round", metavar="ROUND",
                         help="the round's name, <project>/<slug>")
-    parser.add_argument("stage", metavar="STAGE", help="the stage to build, B<n>")
+    parser.add_argument("stage", metavar="STAGE", nargs="?",
+                        help="the stage to build, B<n>; left out with --repo and "
+                             "--branch")
+    parser.add_argument("--repo", metavar="KEY",
+                        help="with no stage: the project whose repo the stage is "
+                             "built in, by key")
+    parser.add_argument("--branch", metavar="NAME",
+                        help="with no stage: the stage's branch")
+    parser.add_argument("--slice", metavar="ID=TEXT", action="append", default=[],
+                        dest="slices",
+                        help="with no stage: one worker's piece of it, its id and "
+                             "what it builds; each is followed by its --minutes")
+    parser.add_argument("--minutes", metavar="N", action="append", default=[],
+                        type=int, dest="minutes",
+                        help="how many minutes the --slice before it is given")
     parser.add_argument("--builder", metavar="NAME", required=True,
                         help="who builds it")
     parser.add_argument("--record", metavar="PTR",
@@ -883,9 +908,21 @@ def _declare_commission(verbs) -> None:
 def _commission(args, out) -> int:
     from . import commissioning
 
+    if len(args.slices) != len(args.minutes):
+        raise BadArgument(f"{len(args.slices)} --slice and {len(args.minutes)} "
+                          "--minutes are given, and each slice has its minutes",
+                          "follow each --slice ID=TEXT with its --minutes N")
+    slices = []
+    for given, minutes in zip(args.slices, args.minutes, strict=True):
+        slice_id, equals, what = given.partition("=")
+        if not equals:
+            raise BadArgument(f"--slice {given!r} gives no text after an id and '='",
+                              "--slice ID=TEXT, as --slice 1a=the log")
+        slices.append((slice_id.strip(), what, minutes))
     made = commissioning.commission(args.round, args.stage, builder=args.builder,
-                                    actor=_actor(args), record=args.record,
-                                    existing=args.existing)
+                                    actor=_actor(args), repo=args.repo,
+                                    branch=args.branch, slices=slices,
+                                    record=args.record, existing=args.existing)
     for line in made.block.lines:
         print(line, file=out)
     print("", file=out)

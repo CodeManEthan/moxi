@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from moxi_rounds import commissioning, log, opening, places, steps, write
+from moxi_rounds import by_branch, commissioning, log, opening, places, steps, write
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
-from moxi_rounds.errors import Refused
+from moxi_rounds.errors import BadArgument, Refused
 
 ROUND = "proj-a/a-round"
 OTHER = "proj-a/b-round"
@@ -112,10 +112,11 @@ def test_each_folder_carries_a_marker_naming_the_build(repo, opened):
 
 
 def test_a_branch_with_a_slash_or_a_percent_is_encoded_in_both_paths(repo, opened):
-    opened(stages=(("B1", "release/1.0"), ("B2", "release%2F")))
+    opened(stages=(("B1", "release/1.0"),))
+    opened(OTHER, stages=(("B1", "release%2F"),))
 
     one = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
-    two = commissioning.commission(ROUND, "B2", builder="coder", actor="planner")
+    two = commissioning.commission(OTHER, "B1", builder="coder", actor="planner")
 
     assert one.worktree.name == "release%2F1.0"
     assert two.worktree.name == "release%252F"
@@ -491,3 +492,235 @@ def test_the_round_note_lists_the_build_and_names_no_folder_of_this_machine(
             "builder coder; empty\n") in note
     assert "  - go: comms:1234567" in note
     assert str(made.worktree) not in note and str(made.scratch) not in note
+
+
+# -- one build to a repo's branch, one to a repo in a light flow --------------------------
+
+def ask_on(path, blocks, question_id="Q1") -> None:
+    log.append(path, "question.asked",
+               {"id": question_id, "text": "Which name?", "from": "comms:1234567",
+                "blocks": blocks, "state": "open", "asked_by": "planner",
+                "asked_at": "2026-01-02T03:04:05Z"}, actor="planner")
+
+
+def drop_build(path, stage="B1") -> None:
+    log.append(path, "build.dropped", {"stage": stage, "by": "lead",
+                                       "record": "comms:1234567", "tips": {},
+                                       "questions": []}, actor="planner")
+
+
+def test_a_branch_another_round_builds_on_is_refused_naming_that_round(repo, opened):
+    opened()
+    opened(name=OTHER, stages=(("B1", "work"),))
+    commissioning.commission(OTHER, "B1", builder="coder", actor="planner")
+
+    assert refused() == [f"the branch work of proj-a is the branch of the open build B1 "
+                         f"of {OTHER}, and a repo's branch has one open build at a "
+                         "time: that build is finished or dropped from its own round "
+                         "first"]
+
+
+def test_a_light_flow_builds_one_stage_in_a_repo_and_a_dropped_build_does_not_count(
+        repo, opened):
+    path = opened(stages=(("B1", "work"), ("B2", "more")))
+    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+
+    with pytest.raises(Refused) as caught:
+        commissioning.commission(ROUND, "B2", builder="coder", actor="planner")
+    [unmet] = caught.value.unmet
+    assert unmet.reason == ("B1 has a build in proj-a that is open or finished, and the "
+                            "flow fix does not verify its design: such a round builds "
+                            "one stage in a repo")
+    assert unmet.fix.endswith(f"moxi rounds mark {ROUND} --flow NAME")
+
+    drop_build(path)
+    made = commissioning.commission(ROUND, "B2", builder="coder", actor="planner")
+    assert made.stage == "B2"
+
+
+def test_a_finished_build_counts_for_the_one_build_in_a_repo(repo, opened):
+    path = opened(stages=(("B1", "work"), ("B2", "more")))
+    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    log.append(path, "finish.done", {"stage": "B1", "tip": repo.rev("work")},
+               actor="coder")
+
+    [reason] = refused(stage="B2")
+
+    assert reason.startswith("B1 has a build in proj-a that is open or finished")
+
+
+# -- a stage declared at commission ------------------------------------------------------
+
+def declare(name=ROUND, **given):
+    return commissioning.commission(name, builder="coder", actor="planner", **given)
+
+
+def refused_declaring(name=ROUND, **given) -> list:
+    with pytest.raises(Refused) as caught:
+        declare(name, **given)
+    return caught.value.unmet
+
+
+def test_a_light_flow_declares_the_stage_as_it_commissions_it(repo, opened, capsys):
+    path = opened(stages=())
+
+    assert run(ROUND, "--repo", "PROJ-A", "--branch", "work", "--builder", "coder",
+               "--slice", "1a=the log", "--minutes", "30",
+               "--slice", "1b=the fold", "--minutes", "20") == 0
+
+    declared, commissioned = [one for one in log.read(path)
+                              if one["type"] in ("stage.declared", "build.commissioned")]
+    assert declared["n"] + 1 == commissioned["n"]
+    assert {key: declared[key] for key in ("id", "repo", "branch", "after", "slices")} == {
+        "id": "B1", "repo": "proj-a", "branch": "work", "after": [],
+        "slices": [{"id": "1a", "what": "the log", "minutes": 30},
+                   {"id": "1b", "what": "the fold", "minutes": 20}]}
+    assert (commissioned["stage"], commissioned["branch"]) == ("B1", "work")
+    said = capsys.readouterr().out
+    assert f"round {ROUND}   stage B1   flow fix\n" in said
+    assert "slices: 1a the log (30 min); 1b the fold (20 min)" in said
+    assert steps.one(states.fold(log.read(path)), "commission", "B1").state == steps.DONE
+
+
+def test_the_stage_declared_takes_the_lowest_id_the_round_has_not_used(repo, opened):
+    path = opened(stages=())
+    log.append(path, "stage.declared", {"id": "B1", "round": "proj-a/child", "after": []},
+               actor="planner")
+
+    made = declare(repo="proj-a", branch="work")
+
+    assert made.stage == "B2"
+    assert made.block.lines[0] == f"round {ROUND}   stage B2   flow fix"
+
+
+def test_declaring_in_a_flow_that_verifies_its_design_is_refused(repo, opened):
+    opened(flow="full", stages=())
+
+    [unmet] = refused_declaring(repo="proj-a", branch="work")
+
+    assert unmet.reason == (f"the flow full of {ROUND} verifies its design, so each of "
+                            "its stages is declared in the design and commissioned by "
+                            "its id")
+
+
+def test_declaring_while_the_repo_has_an_unbuilt_stage_names_that_stage(repo, opened):
+    path = opened(stages=(("B1", "work"),))
+    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    drop_build(path)
+
+    [unmet] = refused_declaring(repo="proj-a", branch="other")
+
+    assert unmet.reason.startswith(f"B1 is a stage of {ROUND} in proj-a with no open or "
+                                   "finished build")
+    assert unmet.fix == f"moxi rounds commission {ROUND} B1 --builder coder"
+
+
+def test_declaring_a_second_stage_in_a_repo_with_a_build_is_refused(repo, opened):
+    opened(stages=())
+    declare(repo="proj-a", branch="work")
+
+    [unmet] = refused_declaring(repo="proj-a", branch="other")
+
+    assert unmet.reason.startswith("B1 has a build in proj-a that is open or finished")
+
+
+def test_a_question_on_every_stage_holds_the_stage_declaring_would_make(repo, opened):
+    path = opened(stages=())
+    ask_on(path, "all")
+    before = path.read_bytes()
+
+    [unmet] = refused_declaring(repo="proj-a", branch="work")
+
+    assert unmet.reason == ("Q1 holds every stage, so it holds B1 the moment commission "
+                            "declares it: Which name?")
+    for way in (f"moxi rounds rule {ROUND} Q1 --text TEXT --record PTR",
+                "withdraw:Q1", "park:Q1 --until WHAT", "narrow:Q1=LIST|none"):
+        assert way in unmet.fix
+    assert path.read_bytes() == before
+
+
+def test_a_question_narrowed_off_the_stage_lets_it_be_declared(repo, opened):
+    path = opened(stages=())
+    ask_on(path, ["B5"])
+
+    assert declare(repo="proj-a", branch="work").stage == "B1"
+
+
+def test_a_rerun_of_a_stopped_declaring_commission_declares_one_stage(
+        repo, opened, monkeypatch):
+    path = opened(stages=())
+    real = _stop_before_the_append(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        declare(repo="proj-a", branch="work")
+    monkeypatch.setattr(write, "_append", real)
+
+    made = declare(repo="proj-a", branch="work")
+
+    assert made.adopted and made.stage == "B1"
+    assert [one["id"] for one in events(path, "stage.declared")] == ["B1"]
+    assert len(events(path, "build.commissioned")) == 1
+
+
+@pytest.mark.parametrize("given, said", [
+    ({"stage_id": "B1", "repo": "proj-a"}, "declare a stage of their own"),
+    ({"repo": "proj-a"}, "needs both the repo and the branch"),
+    ({"repo": "proj-a", "branch": "work", "slices": [("1 a", "x", 5)]}, "no slice id"),
+    ({"repo": "proj-a", "branch": "work", "slices": [("1a", "x", 5), ("1a", "y", 5)]},
+     "given twice"),
+    ({"repo": "proj-a", "branch": "work", "slices": [("1a", " ", 5)]}, "says nothing"),
+    ({"repo": "proj-a", "branch": "work", "slices": [("1a", "x", 0)]}, "whole number"),
+])
+def test_a_form_that_mixes_or_lacks_what_declaring_needs_is_bad_arguments(
+        repo, opened, given, said):
+    path = opened(stages=())
+    before = path.read_bytes()
+
+    with pytest.raises(BadArgument) as caught:
+        commissioning.commission(ROUND, builder="coder", actor="planner", **given)
+
+    assert said in caught.value.reason
+    assert path.read_bytes() == before
+
+
+def test_each_slice_needs_its_minutes(repo, opened, capsys):
+    opened(stages=())
+
+    assert run(ROUND, "--repo", "proj-a", "--branch", "work", "--builder", "coder",
+               "--slice", "1a=the log") == 2
+
+    assert "each slice has its minutes" in capsys.readouterr().err
+
+
+# -- a stage commissioned again after a drop ---------------------------------------------
+
+def test_a_dropped_build_s_stage_is_commissioned_again_under_its_id(repo, opened):
+    path = opened()
+    first = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    drop_build(path)
+
+    # The dropped build's worktree was kept, and its place is used once it is gone.
+    [reason] = refused()
+    assert f"{first.worktree} holds the worktree of the build {first.build}" in reason
+    repo.git("worktree", "remove", "--force", str(first.worktree))
+    [reason] = refused()
+    assert "the branch work is in proj-a already" in reason
+
+    again = commissioning.commission(ROUND, "B1", builder="coder", actor="planner",
+                                     existing=True)
+
+    assert again.build != first.build and again.stage == "B1"
+    assert [one["build"] for one in events(path, "build.commissioned")] == [
+        first.build, again.build]
+    assert by_branch.find(again.worktree, verb="next").stage == "B1"
+
+
+def test_a_dropped_build_s_stage_meets_the_hold_again_at_commission(repo, opened):
+    path = opened()
+    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    ask_on(path, ["B1"])
+    drop_build(path)
+    repo.git("worktree", "remove", "--force",
+             str(places.worktree_place({"worktree_dir": None}, "proj-a", "work")))
+    repo.git("branch", "-D", "work")
+
+    assert refused() == ["Q1 holds B1: Which name?"]

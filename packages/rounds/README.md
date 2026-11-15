@@ -85,6 +85,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND B<n> --after B<m>[,...]` | make a stage wait for more stages |
 | `moxi rounds mark ROUND thread:NAME --close\|--accept-risk --record PTR` | the lead's decision on a design that was sent back twice in a row |
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
+| `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
@@ -334,14 +335,35 @@ design that left it out; it does not come back, and its id is not used again.
 do; only the operator takes one off, with `unafter:B<n>=B<m>`. A wait is added only
 while it can still be met: `mark --after` and `fold` both refuse one for a stage that
 left the plan, and one that closes a circle with the waits on record; `fold` also
-refuses one for a stage its own block leaves out, unless that stage is finished. In a
-round whose
-flow does not verify its design, a second stage in one repo is refused.
+refuses one for a stage its own block leaves out, unless that stage is finished.
+
+A round whose flow does not verify its design builds one stage in a repo: `fold`
+refuses a second stage in one repo, and `commission` refuses a second build in a repo
+where the round has one open or finished. Such a round may also leave its stages out
+of the design and declare each as it commissions it:
+
+```text
+$ moxi rounds commission alpha/typo --repo alpha --branch fix-typo --builder coder \
+      --slice 1a="the heading" --minutes 10
+```
+
+The stage takes the lowest `B<n>` the round has not used. This is refused while the
+repo has a stage with no open or finished build (commission that one by its id), and
+while an open question holds every stage, since it would hold the new one the moment
+it is declared: the operator rules, withdraws or parks the question, or narrows it.
+
+A dropped build counts for nothing. Its stage is commissioned again under the same id,
+with `--existing` on the branch the drop kept, or on a fresh branch once that one is
+deleted; a worktree the drop kept is removed first. Whatever held the stage still
+holds it. A repo's branch has one open build at a time, across every round: a
+commission on a branch another round's open build is on is refused, naming that round.
+`next` warns once a round plans five or more stages that are builds, and refuses
+nothing for it: a part of the work that stands on its own can be a child round.
 
 Once a round has stages, a question may hold up some of them (`ask --blocks B1,B2`,
 `narrow:Q<n>=B2`), be parked until one is finished (`park:Q<n> --until B2`), and a
-ruling may apply to some (`rule --stages B1`). This version builds no stage: `next`
-prints a stage's steps as not built, with the questions that hold the stage.
+ruling may apply to some (`rule --stages B1`). `next` prints a stage's steps this
+version does not build as not built, with the questions that hold the stage.
 
 ## Questions
 

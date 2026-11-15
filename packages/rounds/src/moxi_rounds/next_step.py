@@ -22,7 +22,9 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 - `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
   is printed for a round at no step, where nothing else says why it is still open.
 - `warnings`: what the lead should know beside the steps: a ruling that holds a stage
-  until the design has a row for it is said here as well as in that stage's wait.
+  until the design has a row for it is said here as well as in that stage's wait, and
+  a plan of `MANY_BUILDS` or more stages that are builds is pointed at child rounds,
+  which refuses nothing.
 
 A step with no row in `steps.ROWS` is printed as not built in this version, with the
 holds on its stage. **A later step's lines** are a row of `LINES`: the step's name ->
@@ -43,8 +45,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import (brake, closing, commission_block, model_tiers, report_block, showing,
-               stages, steps, tracing, versions)
+from . import (brake, closing, commission_block, flows, model_tiers, report_block,
+               showing, stages, steps, tracing, versions)
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -65,6 +67,10 @@ NOT_SHOWN = "not-shown"
 STALE_ROW = "stale-row"
 HOLDS_STAGE = "holds-stage"
 READ_BACK_UNKNOWN = "read-back-unknown"
+MANY_STAGES = "many-stages"
+
+#: How many stages that are builds a round plans before `next` points at child rounds.
+MANY_BUILDS = 5
 
 
 # -- the schema --------------------------------------------------------------------------
@@ -132,8 +138,14 @@ def _docket(found: showing.Shown, step: steps.Step) -> dict:
 
 
 def _commission(found: showing.Shown, step: steps.Step) -> dict:
-    return {"then": [f"moxi rounds commission {found.name} {step.stage} "
-                     "--builder NAME"]}
+    if step.stage is not None:
+        return {"then": [f"moxi rounds commission {found.name} {step.stage} "
+                         "--builder NAME"]}
+    if flows.has(found.state.steps, steps.VERIFIES):
+        # The design declares the stage; nothing is commissioned until it does.
+        return {}
+    return {"then": [f"moxi rounds commission {found.name} --repo KEY --branch NAME "
+                     "--builder NAME [--slice ID=TEXT --minutes N]..."]}
 
 
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
@@ -230,6 +242,14 @@ def _warnings(found: showing.Shown) -> list[dict]:
                        f"{tracing.stale_line(tracing.stale_data(one))}",
             f"give {versions.DESIGN_FILE} the row of the ruling that stands, then "
             f"{fold}"))
+    planned = [stage.id for stage in stages.in_plan(state) if stage.round is None]
+    if len(planned) >= MANY_BUILDS:
+        warnings.append(_warning(
+            MANY_STAGES, f"{name} plans {len(planned)} stages that are builds "
+                         f"({', '.join(planned)}); a part of the work that stands on "
+                         "its own can be a child round, run as a round of its own",
+            f"plan it in {versions.DESIGN_FILE} as a [[stage]] with round = "
+            "\"<project>/<slug>\", then " + fold))
     for stage in stages.in_plan(state):
         if stages.build_of(state, stage.id) is not None:
             continue

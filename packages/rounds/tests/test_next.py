@@ -742,3 +742,33 @@ def test_a_project_s_key_is_bad_arguments_and_names_the_listing(folder, capsys):
     assert main(["next", "proj-a"]) == 2
 
     assert "moxi rounds list proj-a" in capsys.readouterr().err
+
+
+# -- commission ---------------------------------------------------------------------------
+
+def test_a_light_flow_with_no_stage_names_the_commission_that_declares_one(opened,
+                                                                          capsys):
+    opened("fix")
+
+    printed = lines(capsys)
+
+    assert printed[0].startswith(f"round {ROUND}   flow fix   step commission")
+    assert said(printed, "then:") == [
+        f"moxi rounds commission {ROUND} --repo KEY --branch NAME --builder NAME "
+        "[--slice ID=TEXT --minutes N]..."]
+    assert "waits: nothing" in printed
+
+
+def test_five_stages_that_are_builds_point_at_child_rounds_and_four_do_not(folder,
+                                                                          capsys):
+    fold(folder, *(stage(f"B{n}") for n in range(1, 5)))
+    assert not [line for line in lines(capsys) if "child round" in line]
+
+    fold(folder, *(stage(f"B{n}") for n in range(1, 6)))
+
+    [warning] = said(lines(capsys), "warning:")
+    assert warning == (f"{ROUND} plans 5 stages that are builds (B1, B2, B3, B4, B5); a "
+                       "part of the work that stands on its own can be a child round, "
+                       "run as a round of its own")
+    data = json.loads(run(capsys, "next", ROUND, "--json"))
+    assert [one["what"] for one in data["warnings"]] == [next_step.MANY_STAGES]

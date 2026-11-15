@@ -79,7 +79,7 @@ def test_a_round_just_opened_is_shown_with_what_it_is_for_and_its_flow(rounds, c
 round {B}   open   flow fix ({names})
 description: a placeholder round
 folder: {rounds / "b-round"}
-step: commission, not-built
+step: commission, ready
 close waits for: a finished stage, which this version does not build, so the round does not close in it
 
 builds: 0
@@ -106,7 +106,7 @@ history: 1 event
         "ended": None, "description": "a placeholder round", "parent": None,
         "inherits": [], "flow": "fix",
         "steps": steps,
-        "step": {"step": "commission", "stage": None, "state": "not-built",
+        "step": {"step": "commission", "stage": None, "state": "ready",
                  "waits": [], "questions": []},
         "close": {"waits": ["a finished stage, which this version does not build, so "
                             "the round does not close in it"]},
@@ -418,7 +418,7 @@ def test_a_log_changed_outside_this_machine_is_shown_with_the_notice(rounds, cap
     notice = found["notice"]
     assert notice.startswith("log changed outside this machine since ")
     assert found["description"] == "another placeholder"
-    assert printed(capsys, A).splitlines()[5] == notice
+    assert notice in printed(capsys, A).splitlines()
     # It stays through every showing, until the next write here.
     assert data(capsys)["notice"] == notice
     ask(text=OTHER, at=T3)

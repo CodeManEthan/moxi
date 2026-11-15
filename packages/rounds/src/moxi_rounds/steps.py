@@ -43,9 +43,15 @@ other, so its row says when the stage reads as skipped.
 - `commission` of a stage: done once the stage has a build that is open or finished.
   Until then it waits for a frozen design where the flow has a design step, a
   verified one where it verifies the design (each step skipped counts as done), no
-  question holding the stage, every stage in its `after` finished, and, where the
-  trace check was asked for, a row for every ruling that applies to the stage. Asked
-  with no stage, or of a stage that stands for a child round, it is not built.
+  question holding the stage, every stage in its `after` finished, where the trace
+  check was asked for a row for every ruling that applies to the stage, and, in a
+  flow that does not verify its design, no other stage of its repo with a build that
+  is open or finished. Of a stage that stands for a child round it is not built.
+  Asked with no stage (the plan holds none), it waits in a flow that verifies its
+  design for the design to declare one; in any other flow it is the form that
+  declares the stage as it commissions it, and waits for a frozen design where the
+  flow has a design step and for no question that would hold the stage
+  (`held_unbuilt`).
 
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
@@ -191,10 +197,11 @@ COMMISSION = "commission"
 
 
 def _commission(state: states.State, about: Asked) -> Step:
-    stage = None if about.stage is None else stages.find(state, about.stage)
+    if about.stage is None:
+        return _declaring(state, about)
+    stage = stages.find(state, about.stage)
     if stage is None or stage.round is not None:
-        # The step with no stage is the form that declares one as it commissions it,
-        # and a stage that stands for a child round has no build: neither is built.
+        # A stage that stands for a child round has no build: it is not built here.
         return Step(COMMISSION, NOT_BUILT, stage=about.stage,
                     waits=() if stage is None else held_by(
                         state, stage.id, name=about.name, closed=about.closed))
@@ -202,6 +209,15 @@ def _commission(state: states.State, about: Asked) -> Step:
         return Step(COMMISSION, DONE, stage=stage.id)
     name = about.name
     waits: list[Unmet] = []
+    if not flows.has(state.steps, VERIFIES) and stage.repo is not None:
+        other = stages.built_in(state, stage.repo, besides=stage.id)
+        if other is not None:
+            waits.append(Unmet(
+                f"{other.id} has a build in {stage.repo} that is open or finished, and "
+                f"the flow {state.flow} does not verify its design: such a round builds "
+                "one stage in a repo",
+                f"move the round up to a flow that has a {VERIFIES} step: moxi rounds "
+                f"mark {name} --flow NAME"))
     if not is_settled(state, DESIGN, closed=about.closed):
         waits.append(Unmet("no version of the design is frozen",
                            f"moxi rounds fold {name}"))
@@ -220,6 +236,27 @@ def _commission(state: states.State, about: Asked) -> Step:
               for one in tracing.holding(state, stage.id, about.register)]
     return Step(COMMISSION, WAITING if waits else READY, stage=stage.id,
                 waits=tuple(waits))
+
+
+def _declaring(state: states.State, about: Asked) -> Step:
+    """`commission` with no stage: the round's plan holds none. In a flow that does
+    not verify its design, `commission` declares the stage as it commissions it, and
+    the step waits for what that stage would: a frozen design where the flow has a
+    design step, and no question that would hold it. In a flow that verifies its
+    design, the design declares each stage and nothing can be commissioned until a
+    version does."""
+    name = about.name
+    fold = f"moxi rounds fold {name}"
+    if flows.has(state.steps, VERIFIES):
+        return Step(COMMISSION, WAITING, waits=(
+            Unmet("no stage is planned: in a flow that verifies its design, the "
+                  "design declares each stage it builds",
+                  f"give {versions.DESIGN_FILE} a [[stage]], then {fold}"),))
+    waits: list[Unmet] = []
+    if not is_settled(state, DESIGN, closed=about.closed):
+        waits.append(Unmet("no version of the design is frozen", fold))
+    waits += held_unbuilt(state, stages.next_id(state), name=name, closed=about.closed)
+    return Step(COMMISSION, WAITING if waits else READY, waits=tuple(waits))
 
 
 #: The function that says each step's state. A step with no row reads `NOT_BUILT`,
@@ -247,6 +284,26 @@ def held_by(state: states.State, stage: str, *, name: str = "ROUND",
     return tuple(
         Unmet(f"{one.id} holds {stage}: {one.text}", answer(name, one))
         for one in holds.on_stage(state, stage, closed=closed))
+
+
+def held_unbuilt(state: states.State, stage: str, *, name: str = "ROUND",
+                 closed: Callable[[str], bool] | None = None) -> tuple[Unmet, ...]:
+    """What the questions that would hold the stage `stage`, not declared yet, make a
+    `commission` that declares it wait for: a question whose `blocks` is every stage
+    holds a stage the moment it is declared, so nothing is declared while one is
+    open. Each names the operator's ways past it."""
+    found = []
+    for one in holds.on_stage(state, stage, closed=closed):
+        said = ("holds every stage" if one.blocks == questions.ALL
+                else f"names {stage}")
+        found.append(Unmet(
+            f"{one.id} {said}, so it holds {stage} the moment commission declares it: "
+            f"{one.text}",
+            f"the operator rules it ({answer(name, one)}), withdraws or parks it "
+            f"(moxi rounds rule {name} withdraw:{one.id} --record PTR, or "
+            f"park:{one.id} --until WHAT), or narrows it (moxi rounds rule {name} "
+            f"narrow:{one.id}=LIST|none --record PTR)"))
+    return tuple(found)
 
 
 # -- the steps of a round ----------------------------------------------------------------
@@ -371,5 +428,6 @@ def said(step: Mapping | None) -> str:
 
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
-           "SETTLED", "HELD", "COMMISSION", "Asked", "Step", "Row", "ROWS", "answer", "held_by", "order", "of",
-           "one", "is_settled", "current", "at", "said"]
+           "SETTLED", "HELD", "COMMISSION", "Asked", "Step", "Row", "ROWS", "answer",
+           "held_by", "held_unbuilt", "order", "of", "one", "is_settled", "current", "at",
+           "said"]
