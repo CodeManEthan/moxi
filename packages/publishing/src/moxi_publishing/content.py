@@ -237,10 +237,16 @@ def read_blobs(git, specs) -> dict[str, bytes | None]:
 def allowlists(blobs: dict[str, bytes | None], public_spec: str, residue_spec: str,
                private: str | None):
     """(secrets' allowlist, the residue pairs) from the blobs read at those specs and the
-    private file at `private` (None: no private file). Raises `AllowlistError`."""
+    private file at `private` (None: no private file), which lies in the repo's common git
+    dir: that directory is a place git never tracks, whatever it is named. Raises
+    `AllowlistError`."""
+    import os
+
     from moxi_secrets import Allowlist
 
-    allow = Allowlist.from_text(blobs.get(public_spec), private, public_name=public_spec)
+    git_dir = None if private is None else os.path.dirname(private)
+    allow = Allowlist.from_text(blobs.get(public_spec), private, public_name=public_spec,
+                                git_dir=git_dir)
     return allow, residue_allowed(blobs.get(residue_spec), residue_spec)
 
 

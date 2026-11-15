@@ -197,6 +197,21 @@ def test_a_private_name_allowed_in_the_private_file_passes(pub):
     assert done.returncode != 0
 
 
+def test_a_git_dir_not_named_dot_git_holds_the_private_file(repo, names, tmp_path):
+    # A bare clone with a linked worktree: the common git dir is proj-a.git.
+    bare, work = tmp_path / "proj-a.git", tmp_path / "wt"
+    git(tmp_path, "clone", "-q", "--bare", str(repo), str(bare))
+    git(bare, "worktree", "add", "-q", str(work), "main")
+    public_repo(work, PIECE)
+    assert commit(work, "Add").returncode == 0
+    done = commit(work, "Add", text="bobsecret\n")
+    assert done.returncode != 0 and "private-names/private-name" in done.stderr
+    (bare / "secrets-allow-private").write_text(
+        allow_line("note.md", "private-names/*", "text:bobsecret"), encoding="utf-8")
+    # The refused line is still staged; the allowance there lets it through.
+    assert commit(work, "Add").returncode == 0
+
+
 def test_a_provenance_text_allowed_in_the_index_passes(pub):
     (pub / ".residue-allow").write_text(f"note.md\t{POINTER}\tmade-up reason\n",
                                         encoding="utf-8")

@@ -99,6 +99,13 @@ def test_a_linked_worktree_scans_its_own_head(repo, names, capsys, tmp_path):
     assert scan(capsys, str(tmp_path / "side"))[0] == 3
 
 
+def test_a_bare_clones_worktree_scans(repo, names, capsys, tmp_path):
+    bare, work = tmp_path / "proj-a.git", tmp_path / "wt"
+    git(tmp_path, "clone", "-q", "--bare", str(repo), str(bare))
+    git(bare, "worktree", "add", "-q", str(work), "main")
+    assert scan(capsys, str(work)) == (0, "", "")
+
+
 @pytest.mark.parametrize("args", [("--rev", "no-such-rev"), ()])
 def test_a_tree_that_cannot_be_read_fails(tmp_path, gitenv, names, capsys, args):
     repo = tmp_path / "proj-b"
