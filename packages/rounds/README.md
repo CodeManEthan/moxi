@@ -27,26 +27,39 @@ it.
 
 ## What this version does
 
-This version keeps the record of a round and takes it through its design: a round's log,
-its questions and rulings, the frozen versions of its design, the verdicts of the
-reports that verify it, the stages the design plans, a project's own list of questions
-and its register of standing rulings, and the files generated from them. Its verbs are
-`open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`, `mark`,
-`next`, `show`, `list` and `drop`.
+This version takes a round from its design to its close: the round's log, its questions
+and rulings, the frozen versions of its design and the verdicts of the reports that
+verify it, and the stages the design plans. Each stage is built on a branch of its own,
+with a worktree and a scratch folder; checked by the repo's check or by CI; verified,
+with findings, waiting items and decisions; and finished, where the repo's finish
+actions merge or push it and `finish` then removes what the build left. The operator ratifies the decisions that
+reached the target, and the round closes itself with its numbers and, where its flow
+has one, a retrospective. Beside the rounds are a project's own list of questions, its
+register of standing rulings, the files generated from them, and the sweep of folders
+ended builds left. Its verbs are `open`, `fold`, `verdict`, `commission`, `check`,
+`finish`, `ask`, `rule`, `mark`, `next`, `show`, `list` and `drop`.
 
-It does not yet do the rest of a round:
+A stage's `build` step is ready once it is commissioned and done once git reads its
+branch as holding work (`building`) or merged; `next`, `show` and `list` read git for
+it, and for every other state of a build.
 
-- removing a finished build's worktree, scratch folder and branch;
-- decisions a build records for the operator to ratify;
-- answers prepared ahead for a sitting with the operator;
-- parent rounds.
+rounds ships one skill, `moxi-rounds`, which `moxi install rounds` offers to place for
+Claude Code and Codex. It holds the judgment the gates leave to the lead and the
+checkers: when a design needs another pass, which tier does which step, when a decision
+is major, how to cut slices, how to write a ruling or a question that reads cold, and
+what a re-check reads. The commands themselves come from `next`, the refusals and
+`--help`.
 
-So a round moves through its design, the design's verification and its questions, has
-each stage commissioned, built and checked, and stops there: `next` prints each later
-step as not built. A stage's `build` step is ready once it is commissioned and done once
-git reads its branch as holding work (`building`) or merged; `next`, `show` and `list`
-read git for it. A round closes itself (see Closing). Config keys that belong to the parts
-above are declared and checked, and nothing reads them yet (see Config).
+This version does not yet do:
+
+- answers prepared ahead for a question, and the suggestion of a sitting with the
+  operator;
+- parent and child rounds: a design may plan a stage that stands for a child round,
+  and `next` prints that stage's steps as not built;
+- `list --dormant`, the rounds that have gone quiet.
+
+`defaults.dormant_days` and `defaults.sitting_at` belong to those parts: they are
+declared and checked, and nothing reads them yet (see Config).
 
 ## Commands
 
@@ -80,6 +93,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds rule ROUND skip-action:B<n>=ID --record PTR` | say that the finish action `ID` is not run for one stage: `finish` treats it as done and writes no record of it; the way out of a command that ran but whose result was lost, or that can't pass again |
 | `moxi rounds rule ROUND flow:NAME --record PTR` | move the round to another flow, whichever it is |
 | `moxi rounds rule ROUND credit:B<n> --record PTR` | credit to a stage's open build what its target gained by a fast-forward no reading of the build's explains: the build then reads `merged`, until `revoke:` takes the credit back |
+| `moxi rounds rule ROUND B<n>.M<k>=accept\|reject --record PTR [--text TEXT]` | rule a decision a build's report declared; a rejected one is a waiting item until its fix is marked done |
 | `moxi rounds rule ROUND unstage:B<n> --record PTR` | take a stage out of the plan |
 | `moxi rounds rule ROUND unafter:B<n>=B<m> --record PTR` | make a stage wait for one stage fewer |
 | `moxi rounds mark ROUND Q<n> --blocks B<n>[,...]\|all`, `mark ROUND Q<n> --reopen` | make a question hold up more stages, or reopen a parked one |
@@ -408,8 +422,8 @@ build's briefs are not its successor's.
 
 Once a round has stages, a question may hold up some of them (`ask --blocks B1,B2`,
 `narrow:Q<n>=B2`), be parked until one is finished (`park:Q<n> --until B2`), and a
-ruling may apply to some (`rule --stages B1`). `next` prints a stage's steps this
-version does not build as not built, with the questions that hold the stage.
+ruling may apply to some (`rule --stages B1`). `next` gives each stage's steps with
+what each waits for, the questions that hold the stage among them.
 
 ### Verifying a build
 
@@ -579,7 +593,7 @@ no `build` step the close waits for:
 
 - every step of the flow to be done or skipped;
 - every question to be ruled or withdrawn, the parked ones included;
-- every stage to have left the plan, since this version builds none.
+- every stage to have left the plan, since a flow with no `build` step builds none.
 
 ```text
 $ moxi rounds rule alpha/ranking Q1 --chose b --record comms:21
@@ -815,11 +829,15 @@ setting names now, and the local run passed at the tip with the command it decla
 now. The full check, run with `check --full`, meets the step whatever CI reads. A
 `ci` in a project with no `check` is refused. `defaults.ratify` (and a project's
 `ratify`) picks what a round's ratification view puts to the operator. It also takes
-`defaults.check_on`, `defaults.dormant_days`, `defaults.slice_minutes` and
-`defaults.sitting_at`, `defaults.disposable` (the name globs of ignored paths a
-worktree's removal may lose; an entry that is empty, holds a `/`, or would match every
-name is refused), and in a project's table `finish`, `keep_branch` and `lock_ref`. They are checked when the file is read, and nothing in this version acts on
-them. The `[sweep]` table is this machine's and set in no project's table: `armed`
+`defaults.check_on` (`merged`: a build's tip must hold the target to finish; `tip`:
+only where CI alone met the check), `defaults.slice_minutes` (45: over it, `fold` and
+`commission` warn of a slice and `mark --brief` refuses its brief),
+`defaults.disposable` (the name globs of ignored paths a worktree's removal may lose;
+an entry that is empty, holds a `/`, or would match every name is refused), and in a
+project's table `finish`, the list of finish actions, `keep_branch`, which keeps a
+finished build's branch, and `lock_ref`, the ref of the repo's finish lock.
+`defaults.dormant_days` and `defaults.sitting_at` are checked when the file is read,
+and nothing in this version reads them. The `[sweep]` table is this machine's and set in no project's table: `armed`
 (false: every sweep of leftover folders is a dry run), `at_start` (false) and
 `grace_hours` (2, at least 1). A project's `shared_paths` lists globs of paths every build of its repo shares,
 beside the common lockfiles: a change to one on the target owes a build a re-check.
@@ -880,6 +898,7 @@ its call raises as a `moxi_rounds.errors.RoundsError`, with `reason`, `fix` and
 | `rounds folders` | warns for each project whose rounds folder can't be worked out or is another project's too, with the setting that fixes it |
 | `logs` | fails for each log that can't be read, with the file, the line and the way back |
 | `index` | warns when the index says something else than the logs do; `moxi rounds list` brings it up to them |
+| `ci <repo>` | for each repo that declares `ci`: warns when the commands that read CI are not on PATH, or, with the default `gh` commands, when `gh auth status` does not exit 0, with `check --full` as the way through; says so when the repo meets the check gate on CI alone |
 | `finish locks` | warns for each finish lock older than an hour in a project's repo, with its holder and the one git command that clears it, for you to run after asking the holder |
 | `leftovers` | the sweep's dry run: warns with each folder an ended build left on this machine, whether it would go or the check that keeps it, and the command that removes what would go |
 
@@ -907,8 +926,8 @@ moxi install rounds
 ```
 
 The first line installs `moxi`, Moxi's core, which provides the `moxi` command; the
-second adds rounds beside it, with the projects module it needs, and offers its optional
-extra, `notes`. The repository's README, at
+second adds rounds beside it, with the projects module it needs, offers its optional
+extras, `notes` and `turns`, and offers to place its skill. The repository's README, at
 [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
 lists the other modules.
 

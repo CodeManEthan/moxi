@@ -7,8 +7,8 @@
     moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME
                            [--slice ID=TEXT --minutes N]... [--record PTR] [--existing]
                            [--as NAME]
-    moxi rounds check [ROUND STAGE] [--timeout-s N] [--as NAME]
-    moxi rounds finish [ROUND STAGE] [--as NAME]
+    moxi rounds check [ROUND STAGE] [--step NAME | --full] [--timeout-s N] [--as NAME]
+    moxi rounds finish [ROUND STAGE] [--again ID] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND TEXT --build B<n> [--blocks LIST|none] [--option K=TEXT]...
@@ -88,8 +88,9 @@ the version before. A question since ruled or withdrawn that the block leaves ou
 no difference.
 `verdict` records the verdict of a report, run by whoever wrote it: it reads the
 report's data block and records it against the version of the design the report says
-its pass read, whatever was frozen or edited since. A report of a design and a report
-of a build are the kinds recorded. A verdict that finds its version publishable takes
+its pass read, whatever was frozen or edited since. A report of a design, of a build,
+of a report step of your own, a majors report and a retro report are the kinds
+recorded. A verdict that finds its version publishable takes
 out of the round what that version's block took away; one that sends the design back
 takes out nothing. The design's standing is the newest verdict of its current version,
 and `none` after a design is frozen again. One full pass reads a design; a second
@@ -164,8 +165,10 @@ it takes the repo's finish lock (a ref, `refs/rounds/finishing/<into>` or the re
 finish actions in order, each recorded under its id before the next starts, and records
 the finish when the gates read on the log still hold. The merge action merges the tip,
 by its commit id, into the target with a merge commit. A failed action is recorded and
-undoes nothing; a conflict is aborted and refused with the way through. Run with no
-round in a build's worktree, it finishes that build.
+undoes nothing; a conflict is aborted and refused with the way through. After a merge
+it removes the build's worktree, scratch folder and branch where rounds made them and
+nothing would be lost, and with no merge only the scratch folder. Run with no round in
+a build's worktree, it finishes that build.
 `mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no
@@ -175,7 +178,8 @@ nothing to wait for: in a flow with no `build` step, every step done or skipped,
 question open or parked, and no stage left in its plan. `show` says what the close
 of an open round waits for. A round whose flow has a `build` step closes once every
 stage is finished, no build is open, and every major decision of a finished build is
-ruled, unless `ratify` is skipped or off.
+ruled, unless `ratify` is skipped or off; in a flow with a `retro` step, it also
+waits for the retro report.
 `drop` ends a round short of its work: the operator drops any round, and the lead one
 that holds none of the operator's acts. Its open and parked questions go to the
 project's list, where they hold up nothing, and `open` of a later round of the project
@@ -222,11 +226,13 @@ block of a report of that kind, a comment on each key. Run with no round in a
 build's worktree, `next` finds the open build on the branch checked out there and
 prints its round's next step. `next` records nothing.
 `show` shows one round: what it is for, its flow, the step it is at, what its close
-waits for, its questions by state, its rulings and whether each was shown to him, and
-its history. `list` with no flag lists the open
-rounds, each with its flow and its counts, and with `--closed` the rounds that have
-ended; `list --waiting` lists what waits on the operator, the open and the parked
-questions and the rulings not yet shown to him; `list --numbers` sums the numbers of
+waits for, its stages and builds with their checks, verdicts, findings, waiting items
+and decisions, its questions by state, its rulings and whether each was shown to him,
+its history and, once it has ended, its numbers. `list` with no flag lists the open
+rounds, each with its flow, its step and its counts, and with `--closed` the rounds
+that have ended; `list --waiting` lists what waits on the operator: the open and the
+parked questions, the open waiting items, the unruled major decisions, the builds to
+look at and the rulings not yet shown to him; `list --numbers` sums the numbers of
 the closed rounds. Each is of every project, or of the
 one named, and `--json` gives it as data. `show` and `list` record nothing. A verb
 that writes takes `--as NAME`, who is doing it; without it that is the user the
@@ -1259,7 +1265,10 @@ def _declare_finish(verbs) -> None:
             "take the repo's finish lock, run the repo's finish actions in order, each "
             "recorded under its id before the next starts, and record the finish. The "
             "merge action merges the tip into the target with a merge commit. A failed "
-            "action is recorded and undoes nothing; run finish again once it is fixed.")
+            "action is recorded and undoes nothing; run finish again once it is fixed. "
+            "After a merge, the build's worktree, scratch folder and branch are "
+            "removed where rounds made them and nothing would be lost; with no merge, "
+            "only its scratch folder.")
     parser = verbs.add_parser("finish", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", nargs="?",
                         help="the round, <project>/<slug>; left out in a build's "
@@ -1591,9 +1600,12 @@ def _next(args, out) -> int:
 
 def _declare_show(verbs) -> None:
     said = ("Show one round: what it is for, its status, its flow and the steps "
-            "recorded for it, its questions by state, its rulings with whether each "
-            "was shown to the operator, and its history. Nothing is recorded. A "
-            "project's rounds are listed with list.")
+            "recorded for it, the step it is at and what its close waits for, its "
+            "design, its stages and builds with their checks, verdicts, findings, "
+            "waiting items and decisions, its questions by state, its rulings with "
+            "whether each was shown to the operator, its history and, once it has "
+            "ended, its numbers. Nothing is recorded. A project's rounds are listed "
+            "with list.")
     parser = verbs.add_parser("show", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", help="the round, <project>/<slug>")
     parser.add_argument("--json", dest="as_json", action="store_true",
@@ -1612,14 +1624,16 @@ def _show(args, out) -> int:
 
 def _declare_list(verbs) -> None:
     said = ("List rounds, or what waits on the operator. With no option: the open "
-            "rounds of every project, or of the one named, each with its flow and how "
-            "many questions it has open and parked and how many of its rulings were "
-            "not yet shown to him; with --closed, the rounds that have ended. With "
-            "--waiting: every open question, every parked one, and the rulings not "
-            "yet shown to him. With --numbers: the numbers of the closed rounds, "
-            "summed. With --questions: the questions of one round or one "
-            "project written out, the open ones, then the parked ones, then the "
-            "rulings not yet shown. Nothing is recorded.")
+            "rounds of every project, or of the one named, each with its flow, the "
+            "step it is at, how many questions it has open and parked and how many of "
+            "its rulings were not yet shown to him; with --closed, the rounds that "
+            "have ended. With --waiting: every open question, every parked one, the "
+            "open waiting items, the unruled major decisions, the builds to look at "
+            "and the rulings not yet shown to him. With --numbers: the numbers of the "
+            "closed rounds, summed. With --questions: the questions of one round or "
+            "one project written out, the open ones, then the parked ones, then the "
+            "rulings not yet shown; a round's in two views, its docket and its "
+            "ratification. Nothing is recorded.")
     parser = verbs.add_parser("list", help=said, description=said)
     parser.add_argument("name", metavar="ROUND|PROJECT", nargs="?",
                         help="a project's key, to keep the listing to that project; "

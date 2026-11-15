@@ -2,11 +2,12 @@
 
 ## 0.1.0 (unreleased)
 
-The first version. It keeps the record of a round and takes it through its design; it
-does not yet build.
+The first version. It keeps the record of a round and takes it from its design through
+its builds, their checks, verification and finish, to the ratification of their
+decisions and the round's close.
 
-- `moxi rounds open`, `fold`, `verdict`, `ask`, `rule`, `mark`, `next`, `show`, `list`
-  and `drop`.
+- `moxi rounds open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`,
+  `mark`, `next`, `show`, `list` and `drop`.
 - A round's log and a project's log, in the project's rounds folder, with the generated
   `round-note.md`, `rulings.md` and `questions.md` beside them.
 - Questions with options, in a round or on a project's list, adopted into a round and
@@ -220,11 +221,15 @@ does not yet build.
   close waits for, and `list --closed` lists a closed round with when it closed.
 - The read API, interface 1: `rounds`, `round`, `waiting`, `questions`, and `builds`,
   each open build with its state read from git.
-- Doctor rows for git, each project's rounds folder, each log and the index.
+- Doctor rows for git, each project's rounds folder, each log, the index, CI in each
+  repo that declares it, finish locks and the sweep's dry run.
+- One shipped skill, `moxi-rounds`, placed for each harness at install: the judgment the
+  gates leave to the lead and the checkers, with no command manual.
 - Config: `defaults.dir`, `defaults.flow`, `defaults.trace`, `defaults.idle_days`, `flows`,
-  `tiers`, `models` and per-project tables. The keys of the parts not built yet are declared and checked,
-  and nothing reads them.
-- Not in this version: builds, checks, verifying and finishing a build, decisions, the
-  retrospective and a round's numbers, prepared answers and parent rounds.
+  `tiers`, `models` and per-project tables. `defaults.dormant_days` and
+  `defaults.sitting_at`, for parts not built yet, are declared and checked, and nothing
+  reads them.
+- Not in this version: prepared answers, the suggestion of a sitting, parent and child
+  rounds, and `list --dormant`.
 - rounds needs moxi 0.1.7 or later and moxi-projects 0.1.4 or later. The `notes` extra
   gives a project that names no notes folder notes' default one.
