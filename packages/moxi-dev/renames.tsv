@@ -1323,6 +1323,7 @@ comms	packages/comms/src/moxi_comms/sending.py	marks.update(cap=cap, no_cap=no_c
 comms	packages/comms/src/moxi_comms/sending.py	marks.update(open_mark=True, cap=cap, no_cap=no_cap)	keep	no_cap	no_cap
 comms	packages/comms/src/moxi_comms/sending.py	names = {k: exc.data.get(k) for k in ("delivered", "expired")}	keep	delivered	delivered
 comms	packages/comms/src/moxi_comms/sending.py	names = {k: exc.data.get(k) for k in ("delivered", "expired")}	keep	expired	expired
+comms	packages/comms/src/moxi_comms/sending.py	new=new_flag()))	keep	new	new
 comms	packages/comms/src/moxi_comms/sending.py	original = ctx.record.get_message(args.message_id)	keep	record	record
 comms	packages/comms/src/moxi_comms/sending.py	others=len(set(resolved)) > len({s.target for s in refused})))	keep	set	set
 comms	packages/comms/src/moxi_comms/sending.py	parent = ctx.record.get_message(cml.reply_to)	keep	record	record
@@ -1333,7 +1334,9 @@ comms	packages/comms/src/moxi_comms/sending.py	return _OK, client.delete(who, to
 comms	packages/comms/src/moxi_comms/sending.py	return max(0, math.floor(t_ask - state.age_seconds + state.ttl_seconds))	use	state.age_seconds	state.age_s
 comms	packages/comms/src/moxi_comms/sending.py	return max(0, math.floor(t_ask - state.age_seconds + state.ttl_seconds))	use	state.ttl_seconds	state.ttl_s
 comms	packages/comms/src/moxi_comms/sending.py	return self._client.connect()	keep	_client	_client
+comms	packages/comms/src/moxi_comms/sending.py	root=root, cap=thread.closed_cap, names=names_text, new=new_flag())	keep	new	new
 comms	packages/comms/src/moxi_comms/sending.py	root=root, closer=closer, id=closed_by, names=names_text, new=new_flag())	keep	id	id
+comms	packages/comms/src/moxi_comms/sending.py	root=root, names=names_text, new=new_flag())	keep	new	new
 comms	packages/comms/src/moxi_comms/sending.py	run	name	e	exc
 comms	packages/comms/src/moxi_comms/sending.py	run_reserved	name	e	exc
 comms	packages/comms/src/moxi_comms/sending.py	seen, tags = set(), []	keep	set	set
@@ -1341,6 +1344,7 @@ comms	packages/comms/src/moxi_comms/sending.py	self._client = daemon	keep	_clien
 comms	packages/comms/src/moxi_comms/sending.py	thread.note = THREAD_NOTE_MISSING.format(id=cml.reply_to)	keep	id	id
 comms	packages/comms/src/moxi_comms/sending.py	thread.note = THREAD_NOTE_MISSING.format(id=reply_to)	keep	id	id
 comms	packages/comms/src/moxi_comms/sending.py	waiting = set(answer.get("waiting") or ())	keep	set	set
+comms	packages/comms/src/moxi_comms/sending.py	what=what, names=names_text, new=new_flag()))	keep	new	new
 comms	packages/comms/src/moxi_comms/store/books.py	"""Why `message_id` left `name`'s queue undelivered (`withdrawn` or `expired`), from	keep	expired	expired
 comms	packages/comms/src/moxi_comms/store/books.py	"""`ids` may no longer go to `name`'s model (`reason`, `withdrawn` or `expired`):	keep	expired	expired
 comms	packages/comms/src/moxi_comms/store/books.py	"""`withdrawn` or `expired` for a message that may no longer be delivered; None	keep	expired	expired
@@ -2635,6 +2639,7 @@ comms	packages/comms/tests/test_surface.py	OPTIONAL_COLUMN = {"no-reply": "refus
 comms	packages/comms/tests/test_surface.py	add_standing(rig.record, conn, "curator")	keep	record	record
 comms	packages/comms/tests/test_surface.py	if OPTIONAL_COLUMN[kind] == "refused":	keep	refused	refused
 comms	packages/comms/tests/test_surface.py	note = cli.THREAD_NOTE_MISSING.format(id="1400000009999")	keep	id	id
+comms	packages/comms/tests/test_surface.py	once = cli.ONCE_NOT_OPEN.format(what=cli.ONCE_ASK, names="x", new="")	keep	new	new
 comms	packages/comms/tests/test_surface.py	return rig.record.history(rig.names_channel)	keep	record	record
 comms	packages/comms/tests/test_token_store.py	-	name	test_a_loose_file_is_REFUSED_not_warned_about	test_a_loose_file_is_refused_not_warned_about
 comms	packages/comms/tests/test_token_store.py	-	name	test_a_loose_store_directory_is_refused_too	test_a_loose_store_dir_is_refused_too
@@ -5315,6 +5320,8 @@ moxi	packages/moxi/src/moxi/_watch.py	held: set[int] = set()	keep	set	set
 moxi	packages/moxi/src/moxi/_watch.py	seen = set(roots)	keep	set	set
 moxi	packages/moxi/src/moxi/_win.py	_bind	name	P	void_pointer
 moxi	packages/moxi/src/moxi/_win.py	_bind	name	PP	void_pointer_pointer
+moxi	packages/moxi/src/moxi/catalogue.py	found = set()	keep	set	set
+moxi	packages/moxi/src/moxi/catalogue.py	return isinstance(files, list) and any(	keep	any	any
 moxi	packages/moxi/src/moxi/catalogue.py	seen: set[str] = set()	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	_DONE = {"set": "set", "unset": "unset", "add": "added to", "remove": "removed from"}	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	_paths_of	name	directories	store_dirs
@@ -5456,6 +5463,7 @@ moxi	packages/moxi/src/moxi/install.py	parser.add_argument("--without", action="
 moxi	packages/moxi/src/moxi/install.py	parser.add_argument("module", help="the module, by its name (comms, cache, ...)")	keep	help	help
 moxi	packages/moxi/src/moxi/install.py	run	name	environ	process_env
 moxi	packages/moxi/src/moxi/install.py	run_settle	name	skills	install_skills
+moxi	packages/moxi/src/moxi/install.py	sourced = any(normalize(req.name) == own for req in self.froms)	keep	any	any
 moxi	packages/moxi/src/moxi/install.py	sources = [k for k in ("specifier", "path", "directory", "url", "git", "editable")	keep	directory	directory
 moxi	packages/moxi/src/moxi/install.py	unknown = sorted(set(entry) - _ENTRY_KEYS)	keep	set	set
 moxi	packages/moxi/src/moxi/install.py	unknown = sorted(set(tool) - _TOOL_KEYS)	keep	set	set
@@ -5748,6 +5756,7 @@ moxi	packages/moxi/src/moxi/units/_schtasks.py	ran = fence.run("tasks", env=env)
 moxi	packages/moxi/src/moxi/units/_schtasks.py	return path.startswith(TASK_DIR.casefold()) or path.startswith(self.folder.casefold())	use	self.folder	self.task_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	return self.folder if tag is None else f"{self.folder}{tag}\\"	use	self.folder	self.task_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	self.folder = task_dir	use	self.folder	self.task_dir
+moxi	packages/moxi/src/moxi/units/_schtasks.py	state, detail, more = "active", f"running (pid {pid})", dict(pid=pid, since=since)	keep	since	since
 moxi	packages/moxi/src/moxi/units/_status.py	argv("systemd", "show", "--property=Id", *unit.ids)	keep	show	show
 moxi	packages/moxi/src/moxi/units/_status.py	return _Runs().of(module, f"{module}/{timer}")[-n:]	keep	draft	draft
 moxi	packages/moxi/src/moxi/units/_systemd.py	"""One `show` over every id of `units`, and, when a foreign timer came without the	keep	show	show
@@ -5828,6 +5837,7 @@ moxi	packages/moxi/tests/test_announcement.py	unit("timer", "row", {"command": "
 moxi	packages/moxi/tests/test_announcement.py	unit(kind, "row", entry, runtime=True)	use	runtime=	is_runtime=
 moxi	packages/moxi/tests/test_catalogue.py	"sessions", "slots", "tunnel", "turns", "ui", "usage"]	keep	sessions	sessions
 moxi	packages/moxi/tests/test_catalogue.py	assert catalogue.shipped().suggest("sesions") == ["sessions"]	keep	sessions	sessions
+moxi	packages/moxi/tests/test_catalogue.py	not_ready = set(table.get("not-ready", []))	keep	set	set
 moxi	packages/moxi/tests/test_cli.py	"mode": "0600" if sys.platform != "win32" else by_name["record"]["mode"]}	keep	record	record
 moxi	packages/moxi/tests/test_cli.py	"name": "record", "path": str(db), "root": "state", "kind": "sqlite",	keep	record	record
 moxi	packages/moxi/tests/test_cli.py	-	name	test_paths_gives_the_directories_and_each_store	test_paths_gives_the_dirs_and_each_store
@@ -5942,6 +5952,7 @@ moxi	packages/moxi/tests/test_install.py	self.interrupt: set[str] = set()	keep	s
 moxi	packages/moxi/tests/test_install_uv.py	-	name	test_install_in_a_plain_environment	test_install_in_a_plain_env
 moxi	packages/moxi/tests/test_install_uv.py	-	name	test_install_in_a_uv_tool_environment	test_install_in_a_uv_tool_env
 moxi	packages/moxi/tests/test_install_uv.py	-	name	test_uninstall_in_a_uv_tool_environment_keeps_what_the_module_pulled_in	test_uninstall_in_a_uv_tool_env_keeps_what_the_module_pulled_in
+moxi	packages/moxi/tests/test_install_uv.py	cached.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi	packages/moxi/tests/test_install_uv.py	uv_env["HOME"] = str(tmp_path / "home")	keep	HOME	HOME
 moxi	packages/moxi/tests/test_ipc_client.py	" 'peer': c.call('peer', timeout=10), 'push': c.call('push', timeout=10),"	use	timeout=	timeout_s=
 moxi	packages/moxi/tests/test_ipc_client.py	1002, "refused", ["why"])	keep	refused	refused
@@ -7469,6 +7480,150 @@ projects	packages/projects/tests/test_remove_status.py	test_a_store_locked_past_
 projects	packages/projects/tests/test_rules.py	-	name	test_absolutize_expands_home_and_joins_the_working_directory	test_absolutize_expands_home_and_joins_the_working_dir
 projects	packages/projects/tests/test_store.py	-	name	test_the_store_is_in_the_modules_data_directory	test_the_store_is_in_the_modules_data_dir
 projects	packages/projects/tests/test_store.py	test_a_write_locked_out_past_the_wait_is_busy_with_exit_75	name	holder	holder_conn
+publishing	packages/publishing/src/moxi_publishing/cli.py	"bump", help="set the next version of packages, for one commit",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"enable", help="mark a repo public and register the three guards",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"gate", help="run the tag gate on a pushed tag",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"scan", help="scan a commit's whole tree for text a public repo can't hold",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"siblings", help="test the built package against its published siblings",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"tag", help="run the tag gate and make a package's release tag",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"write", help="write the release and public scan workflow files",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	("show", "print how GitHub differs from what a public repo expects",	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="a path inside the repo, or a project key (default: here)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="a path inside the work tree, or a project key (default: here)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="also read each commit of REV..--rev whole: its message and every "	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="leave out the private names list and the private allowlist, "	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="run once, at this resolution only (default: both)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="the GitHub repo (default: moxi-publishing.github)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="the GitHub repo (default: read from origin when it is GitHub)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="the directory of the build's files")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="the part of the version to raise (default: patch)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help="the remote whose tracking ref holds main (default: origin)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	help=_SETS_HELP)	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("ci", help="the release workflow's steps",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("disable", help="remove the three guards, then the public flag",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("github", help="the GitHub rulesets and settings of a public repo",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("list", help="every repo marked public, with its pieces",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("workflows", help="the workflow files of a public repo",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--part", choices=("patch", "minor", "major"), default="patch",	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--path", default=".", metavar="PATH",	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--remote", default="origin", metavar="NAME",	keep	NAME	NAME
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--remote", default="origin", metavar="NAME",	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--rev", default="HEAD", help="the commit or tree (default: HEAD)")	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--rev", default="HEAD", help="the commit or tree (default: HEAD)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--rev", metavar="REV", help="the commit to tag (default: main's tip)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--set", dest="sets", action="append", default=[], metavar="KEY=VALUE",	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("path", metavar="PATH", nargs="?", default=".",	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/cli.py	result = (github.show if args.step == "show" else github.apply)(args.path)	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser("notes", help="print the CHANGELOG section of a tag's version",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser(step, help=short, description=text)	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s.add_argument("--artifact", metavar="DIR", help="the directory of the build's files")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s.add_argument("--artifact", metavar="DIR", required=True,	keep	required	required
+publishing	packages/publishing/src/moxi_publishing/cli.py	s.add_argument("path", metavar="PATH", nargs="?", default=".",	keep	default	default
+publishing	packages/publishing/src/moxi_publishing/content.py	"fail": "closed",	keep	closed	closed
+publishing	packages/publishing/src/moxi_publishing/content.py	FileChange.__init__	kwonly	new	new
+publishing	packages/publishing/src/moxi_publishing/content.py	f"{hit.path}:{hit.line}: {hit.hit.set}/{hit.hit.rule}"))	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/content.py	f"{shown} (path name): {hit.set}/{hit.rule}"))	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/content.py	pairs = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/content.py	seen, out = set(), []	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/doctor.py	+ (f"names {CHECKED_TRAILER}" if values and any(v.strip() for v in values)	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(row.state == "fail" for row in problems):	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/doctor.py	if not any(v.casefold() == CHECKED_TRAILER.casefold() for v in passing):	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/doctor.py	return not named or any(v.casefold() == CHECKED_TRAILER.casefold() for v in named)	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/github.py	"""Every field of `state` unlike what a public repo expects, in `show`'s order."""	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	"""Everything `show` compares, read from GitHub."""	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	"""What `show` read from GitHub."""	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	"Gh", "expected_rulesets", "read", "differences", "show", "apply"]	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	#: The two kinds of ref a ruleset may target that `show` judges.	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	-	name	ENVIRONMENT	GITHUB_ENVIRONMENT
+publishing	packages/publishing/src/moxi_publishing/github.py	-	name	_environment_differences	_github_environment_differences
+publishing	packages/publishing/src/moxi_publishing/github.py	Each ruleset is active with no bypass actors. `show` prints each difference field by	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/github.py	State	name	environment	github_environment
+publishing	packages/publishing/src/moxi_publishing/github.py	env = state.environment	use	state.environment	state.github_environment
+publishing	packages/publishing/src/moxi_publishing/github.py	gh.send(request)	keep	fail	fail
+publishing	packages/publishing/src/moxi_publishing/github.py	if not any(p.get("name") == RELEASE_TAGS and p.get("type", "branch") == "tag"	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/github.py	read	name	environment	github_environment
+publishing	packages/publishing/src/moxi_publishing/github.py	show; `show` says so.	keep	show	show
+publishing	packages/publishing/src/moxi_publishing/message.py	"fail": "closed",	keep	closed	closed
+publishing	packages/publishing/src/moxi_publishing/message.py	gone: set[int] = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/message.py	if any(os.path.exists(os.path.join(git_dir, name))	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/message.py	refusals.append((hit.line, f"line {hit.line}, {hit.hit.set}/{hit.hit.rule}"))	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/push.py	"fail": "closed",	keep	closed	closed
+publishing	packages/publishing/src/moxi_publishing/push.py	_Push.judge_branch	kwonly	creating	creating
+publishing	packages/publishing/src/moxi_publishing/push.py	_Push.judge_branch	kwonly	deleting	deleting
+publishing	packages/publishing/src/moxi_publishing/push.py	_Push.judge_branch	kwonly	here	here
+publishing	packages/publishing/src/moxi_publishing/push.py	judge_history	name	since	from_rev
+publishing	packages/publishing/src/moxi_publishing/push.py	return any(fnmatchcase(ref, pattern) for pattern in patterns)	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/push.py	return sorted(set(tracking) | self.present(tips))	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/push.py	seen = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/push.py	self.reasons.append(f"the ref name {shown}: {hit.set}/{hit.rule}")	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/push.py	self.reasons.append(f"{where} {name} header: {hit.hit.set}/{hit.hit.rule}")	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/push.py	shas = [s for s in set(shas) if not _zero(s)]	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/release.py	cwd=os.path.join(plan.root, plan.member_path), env=env,	keep	env	env
+publishing	packages/publishing/src/moxi_publishing/release.py	f"{req.specifier or 'any'} admits; {got[0]} was installed, raised by "	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/release.py	found = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/release.py	tag	name	at	rev
+publishing	packages/publishing/src/moxi_publishing/release.py	tools, unpinned, named, fence = [], [], set(), None	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/rules.py	#: `round` and a home and slug joined by a slash (any case, the home without digits), or,	keep	round	round
+publishing	packages/publishing/src/moxi_publishing/rules.py	#: either one hyphenated, `round` or `Round` with digits allowed; and a memory key.	keep	round	round
+publishing	packages/publishing/src/moxi_publishing/site_check.py	if not any(where.startswith(root + os.sep) for root in roots):	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/tags.py	"""{sha256: file name} of every file in `directory`."""	use	`directory`	`artifact_dir`
+publishing	packages/publishing/src/moxi_publishing/tags.py	"peel", "resolve", "gate", "admitted", "file_hashes", "released"]	keep	released	released
+publishing	packages/publishing/src/moxi_publishing/tags.py	-	name	index_from_environment	index_from_env
+publishing	packages/publishing/src/moxi_publishing/tags.py	f"{'ok' if self.passed else 'refused'}: {self.said}")	keep	refused	refused
+publishing	packages/publishing/src/moxi_publishing/tags.py	file_hashes	name	directory	artifact_dir
+publishing	packages/publishing/src/moxi_publishing/tags.py	globbed = any(ch in n for n in paths for ch in "*?[")	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/tags.py	how = ("moxi publishing bump writes it" if any(	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/tags.py	if any(ch in p for ch in "*?[") else [p])]	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/tags.py	return [v for v, files in releases.items() if isinstance(files, list) and any(	keep	any	any
+publishing	packages/publishing/src/moxi_publishing/tags.py	return self._listed(NOT_READY) or set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/tags.py	seen = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/tags.py	tagged = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/tags.py	verdict.checks.append(Check(1, False, f"the workspace at {commit[:12]} can't be "	use	1, False, f	1, passed=False, said=f
+publishing	packages/publishing/src/moxi_publishing/tags.py	verdict.checks.append(Check(1, False, f"{dist}'s project.version at {commit[:12]} "	use	1, False, f	1, passed=False, said=f
+publishing	packages/publishing/src/moxi_publishing/tags.py	verdict.checks.append(Check(1, False, f"{tag} names no member and version at "	use	1, False, f	1, passed=False, said=f
+publishing	packages/publishing/src/moxi_publishing/tags.py	verdict.checks.append(Check(1, False, f"{tag}: {why}"))	use	1, False, f	1, passed=False, said=f
+publishing	packages/publishing/src/moxi_publishing/tags.py	verdict.checks.append(Check(1, True, f"{tag} releases {dist} {version} from "	use	1, True, f	1, passed=True, said=f
+publishing	packages/publishing/tests/conftest.py	"GIT_CONFIG_NOSYSTEM": "1", "HOME": str(where)}	keep	HOME	HOME
+publishing	packages/publishing/tests/conftest.py	git	name	input	stdin_data
+publishing	packages/publishing/tests/conftest.py	if any(path.startswith(p) for p in self.broken):	keep	any	any
+publishing	packages/publishing/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/conftest.py	self.broken: set[str] = set()                      # path prefixes answering 500	keep	set	set
+publishing	packages/publishing/tests/conftest.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/cost_driver.py	return {"s": took, "secrets_loaded": any(name.startswith("moxi_secrets")	keep	any	any
+publishing	packages/publishing/tests/test_ci_siblings.py	-	name	test_an_index_from_the_environment_is_installed_from	test_an_index_from_the_env_is_installed_from
+publishing	packages/publishing/tests/test_ci_siblings.py	assert any(a.startswith("proj-a-extra[more] @ file:") for a in argv)	keep	any	any
+publishing	packages/publishing/tests/test_ci_siblings.py	assert any(line.startswith("floor raised: proj-a 0.0.9") for line in result.lines)	keep	any	any
+publishing	packages/publishing/tests/test_ci_siblings.py	wheel	name	directory	wheel_dir
+publishing	packages/publishing/tests/test_ci_siblings.py	wheel_dir.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_content.py	(repo / name).parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_content.py	assert not any(value in line for line in out)	keep	any	any
+publishing	packages/publishing/tests/test_cost.py	"branch", "record", "with", "read", "write", "when", "rule", "piece", "module",	keep	record	record
+publishing	packages/publishing/tests/test_cost.py	path.parent.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_cost.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_doctor.py	hook.parent.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_enable.py	assert any("no GitHub repo is known" in line for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_enable.py	assert any("private names list is empty" in line for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_enable.py	assert not any("no GitHub repo is known" in line for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_enable.py	assert not any("private names" in line for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_github.py	-	name	test_show_says_when_the_environment_or_a_ruleset_is_missing	test_show_says_when_the_github_environment_or_a_ruleset_is_missing
+publishing	packages/publishing/tests/test_github.py	assert cli.main(["github", "show", str(repo)]) == 2	keep	show	show
+publishing	packages/publishing/tests/test_github.py	assert not any(path.endswith("/rulesets/102") for _, path, _ in gh.writes)	keep	any	any
+publishing	packages/publishing/tests/test_push.py	assert set(log_lines()[-1]["commits"]) == set(	keep	set	set
+publishing	packages/publishing/tests/test_push.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_replace_refs.py	assert "bobsecret" not in git(repo, "show", "HEAD:note.md").stdout	keep	show	show
+publishing	packages/publishing/tests/test_replace_refs.py	blob = git(repo, "hash-object", "-w", "--stdin", input=text).stdout.strip()	use	input=	stdin_data=
+publishing	packages/publishing/tests/test_rules.py	("round" + " proj-a/first-pass", "round-pointer"),	keep	round	round
+publishing	packages/publishing/tests/test_rules.py	_starts	kwonly	ignorecase	ignorecase
+publishing	packages/publishing/tests/test_rules.py	assert _starts(_parser.parse(rules._RULING_TAG), ignorecase=False) == set(rules._RULING_TAG_START)	keep	set	set
+publishing	packages/publishing/tests/test_rules.py	found = set()	keep	set	set
+publishing	packages/publishing/tests/test_rules.py	return set().union(*(_starts(branch, ignorecase=ignorecase) for branch in av[1]))	keep	set	set
+publishing	packages/publishing/tests/test_scan.py	assert any(f"message line 3, session-pointer: see {POINTER}" in line for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_scan.py	assert any(line.endswith("author header: private-names/private-name") for line in lines)	keep	any	any
+publishing	packages/publishing/tests/test_scan.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_tag.py	assert any("check 4 (ready): refused" in line for line in made.lines)	keep	any	any
+publishing	packages/publishing/tests/test_tag.py	assert any(line.startswith("check 3 (main and green): refused") for line in result.lines)	keep	any	any
+publishing	packages/publishing/tests/test_tags.py	assert any("extra more" in note for note in verdict.notes)	keep	any	any
 repo	packages/repo/src/moxi_repo/_records.py	- `<cgd>::piece::<id>`: a piece's last run broke, or a post-* piece returned `record`.	keep	record	record
 repo	packages/repo/src/moxi_repo/_records.py	if any(e.get("kind") == "piece" for e in entries.values()):	keep	any	any
 repo	packages/repo/src/moxi_repo/_records.py	specs_of: set[str] = set()	keep	set	set
@@ -7684,6 +7839,8 @@ repo	packages/repo/tests/test_commit_records.py	release.set()	keep	set	set
 repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="backup", min_interval=3600)	use	min_interval=	min_interval_s=
 repo	packages/repo/tests/test_commit_records.py	s = spec(repo, push="origin", min_interval=3600)	use	min_interval=	min_interval_s=
 repo	packages/repo/tests/test_commit_records.py	took.set()	keep	set	set
+repo	packages/repo/tests/test_commit_rules.py	assert any("Round" in p for p in problems), problems	keep	any	any
+repo	packages/repo/tests/test_commit_rules.py	assert any('line 1 has "TAG-12"' in p for p in problems), problems	keep	any	any
 repo	packages/repo/tests/test_commit_rules.py	imported = set()	keep	set	set
 repo	packages/repo/tests/test_commit_rules.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 repo	packages/repo/tests/test_commit_rules.py	refused = ["Co-Authored-By", "round"]	keep	round	round
@@ -9486,9 +9643,11 @@ secrets	packages/secrets/src/moxi_secrets/_generate.py	unknown = sorted(set(tabl
 secrets	packages/secrets/src/moxi_secrets/allow.py	Allowlist.read	name	handle	fh
 secrets	packages/secrets/src/moxi_secrets/allow.py	__slots__ = ("path", "set", "rule", "kind", "value")	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/allow.py	_parse	kwonly	public	public
+secrets	packages/secrets/src/moxi_secrets/allow.py	_read_file	name	handle	fh
 secrets	packages/secrets/src/moxi_secrets/allow.py	if any(line.keeps(hit, text, path) for line in self._lines):	keep	any	any
 secrets	packages/secrets/src/moxi_secrets/allow.py	if hit.set != self.set or (self.rule != "*" and hit.rule != self.rule):	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/allow.py	if self.set != "*":	keep	set	set
+secrets	packages/secrets/src/moxi_secrets/allow.py	parsed = _parse(raw, where, n, public)	use	n, public)	n, public=public)
 secrets	packages/secrets/src/moxi_secrets/allow.py	return (hit.set == "private-names" and text in self._own_texts	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/allow.py	return hit.set == "private-names" and \	keep	set	set
 secrets	packages/secrets/src/moxi_secrets/allow.py	self.path, self.set, self.rule, self.kind, self.value = (path, set_name, rule,	keep	set	set
@@ -9525,9 +9684,11 @@ secrets	packages/secrets/src/moxi_secrets/scan.py	self.set = set_name	keep	set	s
 secrets	packages/secrets/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 secrets	packages/secrets/tests/corpus.py	words += " " + make(r) + " " + chars(r, 4, string.ascii_lowercase)	keep	start	start
 secrets	packages/secrets/tests/test_allow.py	-	name	test_a_git_directory_reached_through_a_link_is_still_a_git_directory	test_a_git_dir_reached_through_a_link_is_still_a_git_dir
+secrets	packages/secrets/tests/test_allow.py	-	name	test_the_callers_git_directory_counts_whatever_its_name	test_the_callers_git_dir_counts_whatever_its_name
 secrets	packages/secrets/tests/test_allow.py	-	name	test_the_private_file_may_lie_in_a_git_directory_or_the_config_directory	test_the_private_file_may_lie_in_a_git_dir_or_the_config_dir
 secrets	packages/secrets/tests/test_allow.py	assert [h.set for h in known] == ["known"]	keep	set	set
 secrets	packages/secrets/tests/test_allow.py	gitdir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+secrets	packages/secrets/tests/test_allow.py	other.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 secrets	packages/secrets/tests/test_allow.py	path.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 secrets	packages/secrets/tests/test_allow.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 secrets	packages/secrets/tests/test_cost.py	child_times	kwonly	hide_re2	hide_re2
@@ -13544,6 +13705,7 @@ usage	packages/usage/src/moxi_usage/reports.py	read	name	folder	work_dir
 usage	packages/usage/src/moxi_usage/reports.py	removed keeps its key, so a caller that groups by folder asks by `folder`.	use	`folder`	`work_dir`
 usage	packages/usage/src/moxi_usage/reports.py	report	name	folder	work_dir
 usage	packages/usage/src/moxi_usage/reports.py	requests	name	folder	work_dir
+usage	packages/usage/src/moxi_usage/reports.py	result = fn(conn, since=since, until=until, harness=harness, project=project,	keep	since	since
 usage	packages/usage/src/moxi_usage/reports.py	return _report("sessions", query, out, total)	keep	sessions	sessions
 usage	packages/usage/src/moxi_usage/reports.py	row = rows[k] = make(values(found, extra))	keep	start	start
 usage	packages/usage/src/moxi_usage/reports.py	row the `projects` report shows under a `cwd` can be asked for by that `cwd`. `folder` is	use	`folder`	`work_dir`

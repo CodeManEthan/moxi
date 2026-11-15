@@ -17,6 +17,7 @@ members = [
     "moxi-loadout",
     "moxi-notes",
     "moxi-projects",
+    "moxi-publishing",
     "moxi-repo",
     "moxi-rounds",
     "moxi-secrets",
@@ -931,6 +932,7 @@ dependencies = [
     { name = "deptry" },
     { name = "import-linter" },
     { name = "moxi" },
+    { name = "moxi-publishing" },
     { name = "packaging" },
     { name = "pytest" },
     { name = "pytest-timeout" },
@@ -948,6 +950,7 @@ requires-dist = [
     { name = "deptry" },
     { name = "import-linter" },
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-publishing", editable = "packages/publishing" },
     { name = "packaging" },
     { name = "pytest" },
     { name = "pytest-timeout" },
@@ -1147,6 +1150,37 @@ dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
     { name = "playwright", specifier = ">=1.56,<2" },
+    { name = "pytest" },
+]
+
+[[package]]
+name = "moxi-publishing"
+version = "0.1.0"
+source = { editable = "packages/publishing" }
+dependencies = [
+    { name = "moxi" },
+    { name = "moxi-repo" },
+    { name = "moxi-secrets" },
+    { name = "packaging" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-repo", editable = "packages/repo" },
+    { name = "moxi-secrets", editable = "packages/secrets" },
+    { name = "packaging" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "pytest" },
 ]
 

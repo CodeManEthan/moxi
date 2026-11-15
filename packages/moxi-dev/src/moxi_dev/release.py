@@ -1,7 +1,7 @@
 """The release step of `moxi-dev check`: what every package must hold before it is published.
 
 It reads the root `pyproject.toml`'s workspace members and each member's own
-`pyproject.toml`, whatever the change touched, and checks three things:
+`pyproject.toml`, whatever the change touched, and checks four things:
 
 1. The catalogue, `catalogue.toml` in the core's package (the member named `moxi`),
    lists exactly the members that declare a `moxi.modules` entry point: one line for
@@ -16,7 +16,14 @@ It reads the root `pyproject.toml`'s workspace members and each member's own
    is its `version`, and which its sdist's `only-include`, when it sets one, names; and
    its README links to nothing by a relative path, `](LICENSE)` included. PyPI shows
    the README as the project's page, where a relative link leads nowhere. A link to a
-   heading of the same page (`#...`) is let through.
+   heading of the same page (`#...`) is let through. A link to a file in the repository
+   (`<Repository URL>/blob/<ref>/<path>`) names the member's own release tag at its
+   current version as the ref, `<distribution>-v<version>`, so the page PyPI shows for a
+   version links to the files of that version. moxi-publishing owns the tag scheme and
+   the CHANGELOG heading reader, and this step takes both from it.
+4. When the root's `[tool.moxi-publishing]` keeps a `ready` list, every member is on
+   exactly one of it and `not-ready`, so a member added to the workspace is never ready
+   until a commit says so. The reading is moxi-publishing's, the one its tag gate uses.
 
 Each problem names the member, the field and the fix. `scan` returns them all.
 """
@@ -31,6 +38,8 @@ from pathlib import Path
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
+
+from moxi_publishing import tags
 
 #: The core's distribution name; its package holds the catalogue.
 CORE = "moxi"
@@ -81,7 +90,22 @@ def scan(root: Path) -> list[Problem]:
     problems += requirement_problems(members)
     for member in members:
         problems += metadata_problems(member)
+    problems += readiness_problems(root)
     return problems
+
+
+def readiness_problems(root: Path) -> list[Problem]:
+    """Each member on neither or both of the not-ready and ready lists, where the root
+    keeps a ready list."""
+    where = f"[tool.{tags.TABLE}]"
+    try:
+        wrong = tags.work_tree_workspace(str(root)).unlisted()
+    except tags.ReleaseError as exc:
+        return [Problem("pyproject.toml", where, f"can't be read ({exc})",
+                        f"make {tags.NOT_READY} and {tags.READY} lists of distribution names")]
+    return [Problem("pyproject.toml", where, f"{dist} is {said}",
+                    f"put {dist} on {tags.NOT_READY}, or on {tags.READY} once it is confirmed")
+            for dist, said in wrong.items()]
 
 
 def _read_member(root: Path, name: str, problems: list[Problem]) -> _Member | None:
@@ -227,9 +251,6 @@ def requirement_problems(members: list[_Member]) -> list[Problem]:
 
 # --- 3. the metadata PyPI shows ---------------------------------------------------------------
 
-#: A heading whose text starts with a version, such as `## 0.1.4 (2026-11-08)` or
-#: `## [0.1.4]`.
-_VERSION_HEADING = re.compile(r"^#{1,6}[ \t]+\[?v?(\d+(?:\.\d+)*[^\s\]()]*)")
 _FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(`+).*?\1")
 _LINKS = (
@@ -240,10 +261,8 @@ _LINKS = (
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
-def relative_links(text: str) -> list[tuple[int, str]]:
-    """(line number, target) for each link in Markdown `text` that names its target by a
-    relative path. Absolute URLs, `mailto:` and the like, and links to a heading of the
-    same page (`#...`) are left out, as is anything in code."""
+def links(text: str) -> list[tuple[int, str]]:
+    """(line number, target) for each link in Markdown `text`, outside code."""
     found = []
     fence = None
     for number, line in enumerate(text.splitlines(), 1):
@@ -258,22 +277,22 @@ def relative_links(text: str) -> list[tuple[int, str]]:
         line = _CODE_SPAN.sub("", line)
         for pattern in _LINKS:
             for match in pattern.finditer(line):
-                target = match.group(1)
-                if target and not _SCHEME.match(target) and not target.startswith("#"):
-                    found.append((number, target))
+                if match.group(1):
+                    found.append((number, match.group(1)))
     return found
 
 
+def relative_links(text: str) -> list[tuple[int, str]]:
+    """(line number, target) for each link in Markdown `text` that names its target by a
+    relative path. Absolute URLs, `mailto:` and the like, and links to a heading of the
+    same page (`#...`) are left out, as is anything in code."""
+    return [(number, target) for number, target in links(text)
+            if not _SCHEME.match(target) and not target.startswith("#")]
+
+
 def _first_version_heading(text: str) -> str | None:
-    fence = False
-    for line in text.splitlines():
-        if _FENCE.match(line):
-            fence = not fence
-            continue
-        match = None if fence else _VERSION_HEADING.match(line)
-        if match:
-            return match.group(1)
-    return None
+    heading = tags.first_version_heading(text)
+    return None if heading is None else heading.version
 
 
 def _same_version(heading: str, version: Version) -> bool:
@@ -283,15 +302,46 @@ def _same_version(heading: str, version: Version) -> bool:
         return False
 
 
+def _repository(member: _Member) -> str | None:
+    urls = member.project.get("urls", {})
+    repository = urls.get("Repository") if isinstance(urls, dict) else None
+    return repository.rstrip("/") if isinstance(repository, str) else None
+
+
+def _release_tag(member: _Member) -> str:
+    """The member's release tag at its current version, or a description of one."""
+    if member.dist is None or member.version is None:
+        return "<distribution>-v<version>"
+    return tags.tag_name(member.dist, str(member.version))
+
+
 def _absolute(member: _Member, target: str) -> str:
     """The absolute URL a relative link to `target` should be, read from the member's
     Repository URL, or a description of one when it has none."""
-    urls = member.project.get("urls", {})
-    repository = urls.get("Repository") if isinstance(urls, dict) else None
-    if not isinstance(repository, str):
+    repository = _repository(member)
+    if repository is None:
         return "an absolute URL"
     path = (Path(member.name) / target.split("#")[0]).as_posix()
-    return f"{repository.rstrip('/')}/blob/main/{path}"
+    return f"{repository}/blob/{_release_tag(member)}/{path}"
+
+
+def _blob_refs(member: _Member, readme_file: str, text: str) -> list[Problem]:
+    """A link to a file in the repository whose ref is not the member's release tag."""
+    repository = _repository(member)
+    if repository is None:
+        return []
+    prefix, want = f"{repository}/blob/", _release_tag(member)
+    problems = []
+    for number, target in links(text):
+        if not target.startswith(prefix):
+            continue
+        ref, _, rest = target[len(prefix):].partition("/")
+        if ref != want:
+            problems.append(Problem(
+                member.name, f"{readme_file}:{number}",
+                f"links to {target}, at {ref} rather than this version's release tag",
+                f"link to {prefix}{want}/{rest} instead"))
+    return problems
 
 
 #: The site of the sdist's file list in a member's pyproject.toml.
@@ -345,6 +395,7 @@ def metadata_problems(member: _Member) -> list[Problem]:
                     name, f"{readme_file}:{number}",
                     f"links to {target} by a relative path, which leads nowhere on PyPI",
                     f"link to {_absolute(member, target)} instead"))
+            problems += _blob_refs(member, readme_file, text)
     return problems
 
 

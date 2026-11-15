@@ -32,7 +32,9 @@ moxi repo git-hooks list                         # every repo repo has written t
 - `moxi repo git-hooks [list] [PATH] [--projects] [--json]` lists each repo repo has
   written to, or the one at PATH: git's version and the mode, each event's pieces in
   order (id, fail policy, enabled, settings), the existing git hook, and problems. Its
-  JSON also gives the doctor records repo has open for each repo.
+  JSON also gives the doctor records repo has open for each repo, and each event's
+  `command`: the text git runs for it as repo wrote it (the config entry's command, the
+  shim or the launcher).
 - `moxi repo git-hooks available [--json]` lists the pieces installed modules declare: id,
   event, fail policy, the settings each takes, and one line about it.
 - `moxi repo git-hooks add PATH [PIECE...] [--mode auto|config|shim] [--set KEY=VALUE]...`
@@ -292,6 +294,13 @@ pattern that won't compile, or that matches the empty string (it would find an e
 on every line and check nothing), is refused by `add` before anything is written, and by
 `moxi config` in the config file.
 
+A check that judges commits after they were made, such as a push guard reading the commits
+it sends, applies the same rules with `moxi_repo.commit_rules_problems(root, text)`: the
+problems the piece would print for message `text`, read with the piece's settings and the
+trailer config of the repo at `root`, and none where the piece is not registered or is
+disabled. Every line of `text` is judged, comment-prefixed lines and lines below a
+scissors line included, since a made commit keeps whatever git's cleanup left.
+
 ## The command `moxi repo rules`
 
 `moxi repo rules [PATH]` prints what a committer must know before committing in the repo
@@ -444,6 +453,10 @@ repo keys every repo by its path. With the projects module installed
 A projects error leaves the key column empty with one line; a listing never fails because
 of it. Without projects, paths work as before. The git hooks never ask projects anything.
 
+Another module resolves its own PATH arguments the same way with
+`moxi_repo.api.resolve_project(arg)`, which raises `moxi_repo.api.ProjectUnavailable`
+with the exit code in `code`.
+
 ## Doctor checks, upgrades and uninstall
 
 ### What `moxi doctor` shows
@@ -580,4 +593,4 @@ The `ui` extra (`moxi-ui`, the browser UI shell) adds the git hooks page; see
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/repo/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-repo-v0.1.2/packages/repo/LICENSE).

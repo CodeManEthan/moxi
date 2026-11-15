@@ -127,5 +127,10 @@ def _unavailable(found, exc: Exception, arg: str) -> Unavailable:
     return Unavailable(_reason(exc), 1)
 
 
-__all__ = ["INSTALL", "Unavailable", "api", "installed", "key_for", "looks_like_key",
-           "project_roots", "resolve", "why_off"]
+#: The names `moxi_repo.api` hands other modules for the resolver, which say what they
+#: resolve beside the API's own verbs.
+resolve_project = resolve
+ProjectUnavailable = Unavailable
+
+__all__ = ["INSTALL", "ProjectUnavailable", "Unavailable", "api", "installed", "key_for",
+           "looks_like_key", "project_roots", "resolve", "resolve_project", "why_off"]

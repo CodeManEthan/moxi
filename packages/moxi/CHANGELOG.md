@@ -9,6 +9,17 @@
   not read.
 - The catalogue gains `rounds` (`moxi-rounds`), so `moxi install rounds` and `moxi
   modules --available` know it by name. Its version is 3.
+- `moxi modules --available --refresh` fetches the catalogue a released core shipped,
+  not main's: it lists the `moxi-v<version>` tags and, from the highest down, at most
+  three, takes the first whose version PyPI has. No released version keeps the shipped
+  copy, as a missing file did. `moxi.catalogue.URL` is gone; `TAGS_URL`, `INDEX_URL`
+  and `FILE_URL` name the three reads.
+- A catalogue entry may say `unreleased = true`; `moxi install NAME` then refuses with
+  "not on PyPI yet; install it from a checkout with --from" unless `--from` gives its
+  source. `moxi.catalogue.Entry` gains `unreleased`.
+- Every catalogue entry says `unreleased = true`, since no module has a released version
+  yet; a core release after a module's first release drops its mark. The catalogue's
+  version is 5.
 - The terminal record's set holds `OPENCODE_CONFIG_DIR`, so a page check can compare
   OpenCode's home.
 
