@@ -69,7 +69,7 @@ class Script:
         out, err = self.capsys.readouterr()
         assert got == code, f"moxi rounds {shlex.join(argv)} exited {got}:\n{out}{err}"
         assert not re.search(r"\bNone\b", self._plain(out)), out
-        self.transcript.append(f"$ moxi rounds {shlex.join(argv)}\n{self._plain(out)}")
+        self.transcript.append(self._plain(f"$ moxi rounds {shlex.join(argv)}\n{out}"))
         return out
 
     def read(self, *argv: str, cwd: Path | None = None) -> str:
