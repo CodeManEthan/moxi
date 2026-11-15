@@ -337,4 +337,4 @@ parses no module's printed output.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/notes/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-notes-v0.1.1/packages/notes/LICENSE).

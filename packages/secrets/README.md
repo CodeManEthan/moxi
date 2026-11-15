@@ -243,5 +243,5 @@ modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/secrets/LICENSE). The vendored gitleaks rules are gitleaks' own, under its MIT
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-secrets-v0.1.0/packages/secrets/LICENSE). The vendored gitleaks rules are gitleaks' own, under its MIT
 licence in `src/moxi_secrets/rules/upstream/LICENSE`.

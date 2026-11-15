@@ -241,7 +241,31 @@ def test_a_relative_readme_link_fails_and_names_the_absolute_one(ws):
     assert problems(ws) == [
         "packages/alpha: README.md:3: links to LICENSE by a relative path, which leads "
         "nowhere on PyPI; link to "
-        "https://github.com/example/moxi/blob/main/packages/alpha/LICENSE instead"]
+        "https://github.com/example/moxi/blob/moxi-alpha-v0.2.0/packages/alpha/LICENSE "
+        "instead"]
+
+
+def test_a_link_into_the_repo_names_this_versions_release_tag(ws):
+    base = "https://github.com/example/moxi"
+    (ws / "packages/alpha/README.md").write_text(
+        f"# alpha\n\n[ok]({base}/blob/moxi-alpha-v0.2.0/packages/alpha/LICENSE), "
+        f"[tree]({base}/tree/main/packages), [other](https://example.com/blob/main/x)\n"
+        f"[old]({base}/blob/main/packages/alpha/LICENSE)\n"
+        f"[label]: {base}/blob/moxi-alpha-v0.1.9/CONTRIBUTING.md\n")
+    assert problems(ws) == [
+        f"packages/alpha: README.md:4: links to {base}/blob/main/packages/alpha/LICENSE, at "
+        f"main rather than this version's release tag; link to "
+        f"{base}/blob/moxi-alpha-v0.2.0/packages/alpha/LICENSE instead",
+        f"packages/alpha: README.md:5: links to {base}/blob/moxi-alpha-v0.1.9/"
+        f"CONTRIBUTING.md, at moxi-alpha-v0.1.9 rather than this version's release tag; "
+        f"link to {base}/blob/moxi-alpha-v0.2.0/CONTRIBUTING.md instead"]
+
+
+def test_the_heading_reader_and_the_scheme_are_publishings():
+    from moxi_publishing import tags
+
+    assert release.tags is tags
+    assert release._first_version_heading("## Unreleased\n\n## 1.2 (2026-01-01)\n") == "1.2"
 
 
 def test_a_missing_readme_file_fails(ws):

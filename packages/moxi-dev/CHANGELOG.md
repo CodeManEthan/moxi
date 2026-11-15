@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The release step wants a README link to a file in the repository to name the
+  package's own release tag at its current version (`.../blob/moxi-comms-v0.3.0/...`),
+  not `main`; a relative link's fix gives that form. moxi-dev now requires
+  moxi-publishing, whose tag scheme and CHANGELOG heading reader it uses.
+
 ## 0.1.1 (2026-11-08)
 
 - `moxi-dev rename` can apply a real table: it is fast; reads tests, conftest and

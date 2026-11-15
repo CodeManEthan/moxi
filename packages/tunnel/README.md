@@ -272,4 +272,4 @@ The `tailscale.binary` setting overrides the search.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/tunnel/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-tunnel-v0.2.0/packages/tunnel/LICENSE).

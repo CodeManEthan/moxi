@@ -144,4 +144,4 @@ shortcut file, or reinstall.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/moxi/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-v0.1.8/packages/moxi/LICENSE).

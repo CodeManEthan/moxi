@@ -25,7 +25,7 @@ your home directory, and the CLI and the adapters reach the daemon over Unix soc
 The daemon also serves comms' tools to sessions over MCP on `127.0.0.1:8450`, a loopback
 TCP port on by default; every request needs the token minted for one session, and
 `[mcp] enabled = false` in the config file and a daemon restart turn it off. Any account
-on the machine can connect to that port, so read [docs/security.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/security.md)
+on the machine can connect to that port, so read [docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/security.md)
 before using comms on a machine other people log in to.
 
 ```
@@ -219,7 +219,7 @@ too.
 
 ## Other agents (experimental)
 
-[docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/adapters.md) says what each adapter supports, what makes a CLI
+[docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/adapters.md) says what each adapter supports, what makes a CLI
 a harness comms can reach, and how to add one.
 
 comms reads a Codex agent's cache from its thread's rollout and an OpenCode agent's
@@ -227,7 +227,7 @@ from `opencode.db`, for the lifetime its harness, provider and model have in the
 comms ships. Under the cold-cache rule above, a message to one is delivered while its
 cache counts warm and held once it is cold, as for a Claude session; an OpenCode agent
 on one of Zen's free models is reached at any age, and so is one on a model the table
-has no row for, which comms has no clock for. [docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/adapters.md) has
+has no row for, which comms has no clock for. [docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/adapters.md) has
 the detail.
 
 - **Codex**: `moxi comms codex --name <name>` launches one identity's thread through Moxi
@@ -280,7 +280,7 @@ route of comms the phone's gateway serves, so the row shows on the phone too.
 A name is a claim made by a process running as your user. comms keeps agents from
 confusing each other and shows who said what, but any process running as you can speak
 as any name, read the token store, or write comms' store. It is not access control. Read
-[docs/security.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/security.md) before running agents you don't trust, and before
+[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/security.md) before running agents you don't trust, and before
 using comms on a machine other people log in to: it also covers the tools' loopback port
 and the OpenCode adapter's server.
 
@@ -288,7 +288,7 @@ and the OpenCode adapter's server.
 
 Nothing needs configuring for the default path. Everything that can be set, every
 environment variable and every key of the one config file, is in
-[docs/configuration.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/configuration.md); `moxi config comms` shows each key with
+[docs/configuration.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/configuration.md); `moxi config comms` shows each key with
 its value. By default:
 
 - data: `~/.local/share/moxi/comms/`
@@ -297,7 +297,7 @@ its value. By default:
 - sockets: `$XDG_RUNTIME_DIR/moxi/comms/`
 
 How messages are routed, delivered and attributed is in
-[docs/protocol.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/protocol.md).
+[docs/protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/protocol.md).
 
 ## Troubleshooting
 
@@ -308,13 +308,13 @@ How messages are routed, delivered and attributed is in
   restart comms/daemon`, or with the supervisor (`systemctl --user restart` on its unit).
   Or run the daemon in a terminal: `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"`.
 - **The daemon refuses to start because a token is missing.** The token store lost
-  credentials the store expects; see [docs/security.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/docs/security.md).
+  credentials the store expects; see [docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/security.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/CONTRIBUTING.md). Changes are listed in
-[CHANGELOG.md](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/CHANGELOG.md).
+See [CONTRIBUTING.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/CONTRIBUTING.md). Changes are listed in
+[CHANGELOG.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/CHANGELOG.md).
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/comms/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/LICENSE).

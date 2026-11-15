@@ -159,4 +159,4 @@ under projects, and the `ui` extra (`moxi-ui`, the browser UI shell) adds the pa
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/services/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-services-v0.1.2/packages/services/LICENSE).
