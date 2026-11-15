@@ -1,4 +1,4 @@
-"""Dropping a round: ending it short of its work.
+"""Dropping a round, or one build of it: ending it short of its work.
 
 `drop("<project>/<slug>", by=..., record=..., run_by=...)` withdraws a round. From then
 on the round is dropped, which is not closed: it stays on record as it was, takes no
@@ -9,8 +9,9 @@ is the pointer to where he said so. The lead drops only a round that holds none 
 operator's acts, and `record` points to why. What counts as his (`his_acts`): a ruling,
 a skip among them; a question asked with his pointer; an opening on his go; a list of
 stages he gave when a question was adopted; a build that reached its target or may
-have; a decision on such a build; a waiting item that is still open. A round that holds
-any of these is his to drop, and the lead's drop is refused with the list.
+have; a decision on such a build; a waiting item that is still open; an open build
+that is not the lead's to drop, read from git now (below). A round that holds any of
+these is his to drop, and the lead's drop is refused with the list.
 
 **Its questions.** Every question that is open or parked goes to the project's list in
 the state it has, with where it came from and what it held up kept, and holds up
@@ -20,13 +21,27 @@ have them withdrawn instead (`withdraw_questions`).
 **What is written.** The project's log gets one `question.asked` for each question
 that goes to its list, exactly as a move of the question writes it. The round's log
 gets one event, `round.dropped`, which is the whole of the drop there: who, the
-pointer, and where each question went. The questions are appended first, and both
-locks are held throughout, the round's taken first.
+pointer, the branch and tip of each build still open, which ends with it, and where
+each question went. The questions are appended first, and both locks are held
+throughout, the round's taken first.
 
 **A call that was stopped.** Stopped before `round.dropped`, the round is still open
 and its questions are asked in both logs, so nothing was let go. The same call run
 again finds each question already on the list by the record it names, appends what is
 missing and then the drop: no question is brought twice.
+
+**One build.** `drop_build(round, stage, by=..., record=..., actor=...)` drops the open
+build of one stage, and the round goes on. Who may drop it is read from git now, as
+every reader of a build's state reads it (`open_builds`): the lead, a build with no
+work a drop could lose (`gone`, or `empty` holding no commit of its own, sharing with
+none); the operator, any build, and one git can't read. One `build.dropped` event is
+the whole drop: who, the pointer, and the branch's tip. It changes no question and no
+hold, and the stage stays owed: it is commissioned again, or taken out of the plan.
+
+**What goes.** A drop deletes no branch, so the work can be commissioned again. Once
+its event is on the log, the worktree and scratch folder of each build it ended are
+removed under the removal rule (`removal`), and those the rule keeps are named with
+why (`kept`) and left for a later sweep.
 
 `left_behind` gives the questions on a project's list that came from a round since
 dropped, for the opening of a later round to print: whoever takes that work up adopts
@@ -35,17 +50,21 @@ them.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
-from . import ending, folders, index, moving, pointers, questions, write
+from . import (builds, checking, closing, ending, folders, index, log, moving, open_builds,
+               pointers, questions, removal, sweeping, waits, write)
+from . import numbers as counted
 from . import settings as own
 from . import state as states
-from .errors import BadArgument, BadName, NoLog, NoRound, Unmet
+from .errors import BadArgument, BadName, NoLog, NoRound, RoundsError, Unmet
+from .gitreads import Git
 
 #: Who a drop is by.
-LEAD = "lead"
-OPERATOR = "operator"
+LEAD = builds.LEAD
+OPERATOR = builds.OPERATOR
 
 #: Where a drop says a question went when it was withdrawn with its round.
 WITHDRAWN = questions.WITHDRAWN
@@ -53,8 +72,6 @@ WITHDRAWN = questions.WITHDRAWN
 #: The states of a finish action that may have put a build on its target: only one
 #: that failed is known not to have.
 _MAY_HAVE_LANDED = ("started", "ok", "found")
-#: The state a waiting item is marked with when it is done.
-_DONE = "done"
 
 
 @dataclass(frozen=True)
@@ -63,8 +80,9 @@ class Dropped:
     where each of its open and parked questions `went` (`(Q<n>, P<n>)`, or
     `(Q<n>, WITHDRAWN)`), the `event` that dropped it and every one of the `events`
     written. `finished` says the call completed a drop that an earlier call was stopped
-    in the middle of. `failed` pairs each after-append callback that raised with what
-    it raised."""
+    in the middle of. `removed` and `kept` hold the folders of the builds that ended
+    with it that the removal rule took and kept.
+    `failed` pairs each after-append callback that raised with what it raised."""
 
     name: str
     by: str
@@ -73,6 +91,25 @@ class Dropped:
     event: dict
     events: tuple[dict, ...]
     finished: bool = False
+    removed: tuple[Path, ...] = ()
+    kept: tuple[removal.Kept, ...] = ()
+    failed: tuple[tuple[Callable, Exception], ...] = ()
+
+
+@dataclass(frozen=True)
+class BuildDropped:
+    """One build as it was dropped: the round's `name`, the `stage`, who it was `by`
+    and the `record` given, the `event` written, and the build's folders the removal
+    rule `removed` and `kept`.
+    `failed` pairs each after-append callback that raised with what it raised."""
+
+    name: str
+    stage: str
+    by: str
+    record: str
+    event: dict
+    removed: tuple[Path, ...] = ()
+    kept: tuple[removal.Kept, ...] = ()
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
@@ -142,7 +179,7 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
     def is_the_leads_to_drop(view):
         if by != LEAD:
             return None
-        held = his_acts(view.state, view.project_state, name)
+        held = his_acts(view.state, view.project_state, name, settings=settings)
         if not held:
             return None
         return Unmet(f"{name} holds acts of the operator's, so it is his to drop and "
@@ -183,9 +220,15 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
             # open, its questions are asked in both logs, and nothing was let go.
             entries += [one.entry for one in found if one.entry is not None]
             went = {one.question: one.became for one in found}
-        # One event is the whole of the drop in the round's log.
-        entries.append(write.Entry("round.dropped", {"by": by, "record": record,
-                                                     "questions": went}))
+        # One event is the whole of the drop in the round's log. It is stamped here,
+        # so the round's time in its last step runs to the event's own time.
+        when = log.stamp() if at is None else at
+        entries.append(write.Entry("round.dropped", {
+            "by": by, "record": record,
+            "tips": [_tip(one) for one in builds.builds(view.state) if one.ended is None],
+            "questions": went, "numbers": counted.of(
+                view.state, ended_at=when, ratify=closing.ratify_of(settings, name))},
+            at=when))
         return entries
 
     try:
@@ -198,18 +241,155 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
         # Only a round's log can be missing here: a project's reads as empty.
         raise NoRound(name) from None
     event = written.events[-1]
+    ended = [one for one in builds.builds(written.view.state) if one.ended is None]
+    cleaned = _remove_dirs(written.view.state, name, ended, settings)
     return Dropped(name=name, by=by, record=record,
                    went=tuple(event["questions"].items()), event=event,
-                   events=written.events, finished=finished[0], failed=written.failed)
+                   events=written.events, finished=finished[0],
+                   removed=cleaned.removed, kept=cleaned.kept,
+                   failed=written.failed)
+
+
+def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by: str,
+               settings=None, wait_s: float = write.WAIT_S,
+               at: str | None = None) -> BuildDropped:
+    """Drop the open build of the stage `stage_id` of the round `name`.
+
+    `by` is `OPERATOR` or `LEAD`; `record` the operator's pointer to where he dropped
+    it, or for the lead's drop a pointer to why; `run_by` who runs it. `settings`,
+    `wait_s` and `at` are as for `drop`.
+
+    Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject`,
+    `NoFolder` or `NoRound` for a round that can't be found, and `Refused` when the
+    round has ended, there is no pointer or one of no known shape, the stage has no
+    open build, or the lead drops a build that is not his to drop. A refusal leaves
+    the log as it was.
+    """
+    if not isinstance(name, str) or "/" not in name:
+        raise BadArgument(f"{name!r} is not a round",
+                          "name the round the build is of, as <project>/<slug>")
+    if not questions.STAGE.fullmatch(stage_id or ""):
+        raise BadArgument(f"{stage_id!r} is not a stage's id",
+                          "name the stage as B<n>: drop ROUND B<n>")
+    if by not in (LEAD, OPERATOR):
+        raise BadArgument(f"--by {by!r} names neither who may drop a build",
+                          f"say --by {LEAD} or --by {OPERATOR}")
+    project, slug = folders.split(name)
+    settings = own.load() if settings is None else settings
+    home = folders.home(project, settings)
+    name = f"{home.project}/{slug}"
+    his = f"moxi rounds drop {name} {stage_id} --by {OPERATOR} --record PTR"
+    again = f"moxi rounds drop {name} {stage_id} --by {by} --record PTR"
+
+    def has_a_pointer(view):
+        if record is None:
+            whose = ("to where the operator dropped it" if by == OPERATOR else
+                     "to why it is dropped")
+            return Unmet(f"a drop carries a pointer {whose}; PTR below is one token: "
+                         f"{pointers.SHAPES}", again)
+        return pointers.unmet(record, again)
+
+    def has_an_open_build(view):
+        build = builds.current(view.state, stage_id)
+        if build is not None and build.ended is None:
+            return None
+        if questions.unrecorded((stage_id,), view.state):
+            return Unmet(f"{stage_id} is not a stage of {name}: "
+                         f"{questions.stages_said(view.state)}", f"moxi rounds show {name}")
+        how = ("has no build" if build is None
+               else f"has no open build: its last was {build.ended}")
+        return Unmet(f"{stage_id} {how}, and only an open build is dropped",
+                     f"moxi rounds show {name}")
+
+    def is_the_leads_to_drop(view):
+        build = builds.current(view.state, stage_id)
+        if by != LEAD or build is None or build.ended is not None:
+            return None
+        why = _not_the_leads(view.state, name, build, settings)
+        if why is None:
+            return None
+        return Unmet(f"{stage_id}'s build {why}, so it is the operator's to drop and not "
+                     "the lead's. PTR below is the pointer to where he dropped it", his)
+
+    def dropped(view, result):
+        build = builds.current(view.state, stage_id)
+        # One event is the whole of the drop: no question or hold changes with it.
+        return write.Entry("build.dropped", {"stage": stage_id, "by": by,
+                                             "record": record, "tips": [_tip(build)]})
+
+    try:
+        written = write.record(
+            write.Where(home.project, home.rounds_dir, slug), by=run_by,
+            gates=[ending.takes_new_work(name, "a drop of a build"), has_a_pointer,
+                   has_an_open_build, is_the_leads_to_drop],
+            event=dropped, wait_s=wait_s, at=at)
+    except NoLog:
+        raise NoRound(name) from None
+    build = builds.current(written.view.state, stage_id)
+    return BuildDropped(name=name, stage=stage_id, by=by, record=record,
+                        event=written.events[0],
+                        **vars(_remove_dirs(written.view.state, name, [build],
+                                               settings)),
+                        failed=written.failed)
+
+
+def _remove_dirs(state: states.State, name: str, ended, settings) -> removal.Removed:
+    """Remove the folders of the builds `ended`, which the drop just ended, under the
+    removal rule. No branch is deleted, so B reads every branch as staying."""
+    removed, kept = [], []
+    for build in ended:
+        commissioned = checking.commission_of(state, build)
+        done = removal.removes(name, commissioned, settings=settings,
+                               **sweeping.trash_log(name, commissioned))
+        removed += done.removed
+        kept += done.kept
+    return removal.Removed(tuple(removed), tuple(kept))
+
+
+def _tip(build: builds.Build) -> dict:
+    """The branch of an open build and its tip as git has it now, None when the branch
+    is not there or its repo can't be read."""
+    try:
+        _key, root = folders.root(build.repo)
+        tip = Git(root).branch(build.branch)
+    except RoundsError:
+        tip = None
+    return {"stage": build.stage, "repo": build.repo, "branch": build.branch, "tip": tip}
+
+
+def _not_the_leads(round_state: states.State, name: str, build: builds.Build, settings,
+                   read: Mapping[str, open_builds.OpenBuild] | None = None) -> str | None:
+    """Why the open `build` of the round `name` is not the lead's to drop, in words
+    that follow its name; None when it is. `read` is the round's open builds as
+    `open_builds.of_round` gives them, read now when left out."""
+    if read is None:
+        read = open_builds.of_round(name, [build.repo], settings=settings)
+    found = read.get(build.stage)
+    if found is None or found.build.n != build.n:
+        return "can't be read from git, so nothing says a drop would lose no work"
+    if found.problem is not None:
+        return (f"can't be read from git ({found.problem.reason}), so nothing says a "
+                "drop would lose no work")
+    if builds.drop_by(found.status, found.shares) == LEAD:
+        return None
+    said = found.status.state
+    if found.status.has_own_commits:
+        said += " with commits of its own"
+    if found.shares:
+        said += ", sharing with " + ", ".join(f"{other} {stage}"
+                                              for other, stage in found.shares)
+    return f"reads {said} ({found.status.why}), and a drop could lose its work"
 
 
 # -- what makes a round the operator's to drop ---------------------------------------------
 
-def his_acts(round_state: states.State, project_state: states.State,
-             name: str) -> list[str]:
+def his_acts(round_state: states.State, project_state: states.State, name: str, *,
+             settings=None) -> list[str]:
     """What the round `name` holds that is the operator's, each in words; none for a
     round the lead may drop. `round_state` and `project_state` are the two logs'
-    states. This is the one place that says what makes a round his to drop."""
+    states; the round's open builds are read from git now, with `settings` as
+    `settings.load()` gives them, read now when left out. This is the one place that
+    says what makes a round his to drop."""
     held = []
     for event in round_state.history:
         if event["type"] == "round.opened" and event.get("record") is not None:
@@ -233,13 +413,23 @@ def his_acts(round_state: states.State, project_state: states.State,
                     f"{name}:"):
                 held.append(f"{change.moved_to.rpartition(':')[2]}, adopted with the "
                             f"list he gave ({change.ruling} of the project's register)")
-    return [*held, *_from_builds(round_state)]
+    return [*held, *_from_builds(round_state, name, settings)]
 
 
-def _from_builds(round_state: states.State) -> list[str]:
+def _from_builds(round_state: states.State, name: str, settings) -> list[str]:
     """What a round's builds make his: a build that reached its target or may have, a
-    decision on such a build, and a waiting item that is still open."""
+    decision on such a build, a waiting item that is still open, and an open build that
+    is not the lead's to drop."""
     held = []
+    still_open = [one for one in builds.builds(round_state) if one.ended is None]
+    if still_open:
+        settings = own.load() if settings is None else settings
+        read = open_builds.of_round(name, [one.repo for one in still_open],
+                                    settings=settings)
+        for one in still_open:
+            why = _not_the_leads(round_state, name, one, settings, read)
+            if why is not None:
+                held.append(f"the open build of {one.stage}, which {why}")
     finished = questions.finished_stages(round_state)
     may_have = {event.get("stage") for event in round_state.history
                 if event["type"] == "finish.action" and event.get("kind") == "merge"
@@ -248,19 +438,14 @@ def _from_builds(round_state: states.State) -> list[str]:
     held += [f"the build of {stage}, whose merge may have reached its target"
              for stage in sorted(may_have)]
     reached = finished | may_have
-    waits: dict[str, bool] = {}
-    for event in round_state.history:
+    for event in states.with_rereads(round_state):
         if event["type"] == "verdict.recorded":
             for decision in event.get("decisions") or ():
                 stage = decision.get("stage") or event.get("stage")
                 if stage in reached:
                     held.append(f"the decision {stage}.{decision.get('id')}, on a "
                                 "build that reached its target")
-            for wait in event.get("waits") or ():
-                waits.setdefault(f"{event.get('stage')}.{wait.get('id')}", True)
-        elif event["type"] == "wait.marked" and event.get("id") in waits:
-            waits[event["id"]] = event.get("state") != _DONE
-    still = [wait for wait, is_open in waits.items() if is_open]
+    still = [wait.key for wait in waits.open_of(round_state)]
     if still:
         held.append(f"the open waiting item{_s(still)} {', '.join(still)}")
     return held
@@ -310,5 +495,5 @@ def left_behind(project_state: states.State, home: folders.Home, *,
     return tuple(left)
 
 
-__all__ = ["LEAD", "OPERATOR", "WITHDRAWN", "Dropped", "Left", "drop", "his_acts",
-           "left_behind"]
+__all__ = ["LEAD", "OPERATOR", "WITHDRAWN", "Dropped", "BuildDropped", "Left", "drop",
+           "drop_build", "his_acts", "left_behind"]

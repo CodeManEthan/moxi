@@ -17,6 +17,7 @@ members = [
     "moxi-loadout",
     "moxi-notes",
     "moxi-projects",
+    "moxi-publishing",
     "moxi-repo",
     "moxi-rounds",
     "moxi-secrets",
@@ -931,6 +932,7 @@ dependencies = [
     { name = "deptry" },
     { name = "import-linter" },
     { name = "moxi" },
+    { name = "moxi-publishing" },
     { name = "packaging" },
     { name = "pytest" },
     { name = "pytest-timeout" },
@@ -948,6 +950,7 @@ requires-dist = [
     { name = "deptry" },
     { name = "import-linter" },
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-publishing", editable = "packages/publishing" },
     { name = "packaging" },
     { name = "pytest" },
     { name = "pytest-timeout" },
@@ -1151,6 +1154,37 @@ dev = [
 ]
 
 [[package]]
+name = "moxi-publishing"
+version = "0.1.0"
+source = { editable = "packages/publishing" }
+dependencies = [
+    { name = "moxi" },
+    { name = "moxi-repo" },
+    { name = "moxi-secrets" },
+    { name = "packaging" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-repo", editable = "packages/repo" },
+    { name = "moxi-secrets", editable = "packages/secrets" },
+    { name = "packaging" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "pytest" },
+]
+
+[[package]]
 name = "moxi-repo"
 version = "0.1.2"
 source = { editable = "packages/repo" }
@@ -1197,11 +1231,15 @@ source = { editable = "packages/rounds" }
 dependencies = [
     { name = "moxi" },
     { name = "moxi-projects" },
+    { name = "psutil" },
 ]
 
 [package.optional-dependencies]
 notes = [
     { name = "moxi-notes" },
+]
+turns = [
+    { name = "moxi-turns" },
 ]
 
 [package.dev-dependencies]
@@ -1215,8 +1253,10 @@ requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", editable = "packages/projects" },
+    { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
+    { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["notes"]
+provides-extras = ["notes", "turns"]
 
 [package.metadata.requires-dev]
 dev = [

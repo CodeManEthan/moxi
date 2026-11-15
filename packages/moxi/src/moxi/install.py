@@ -631,10 +631,15 @@ class Installer:
         except (OSError, catalogue.CatalogueError) as exc:
             raise InstallError(f"Moxi's catalogue cannot be read ({exc}); reinstall moxi")
         self.listed = listed.get(module)
-        if self.listed is not None:
-            return
         own = normalize(names.distribution(module))
-        if any(normalize(req.name) == own for req in self.froms):
+        sourced = any(normalize(req.name) == own for req in self.froms)
+        if self.listed is not None:
+            if self.listed.unreleased and not sourced:
+                raise InstallError(
+                    f"{module} is not on PyPI yet; install it from a checkout with --from",
+                    exit_code=3)
+            return
+        if sourced:
             return
         if modules.load(module).state != modules.ABSENT:
             return

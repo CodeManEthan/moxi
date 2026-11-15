@@ -23,13 +23,18 @@ in its own event. `waits_for` gives the ones not finished yet.
 
 **One stage to a repo** in a round whose flow does not verify its design: a design
 that would add a second stage in a repo is refused there, since the second could never
-be commissioned. The way on is a flow that verifies the design.
+be commissioned. The way on is a flow that verifies the design. There a stage may
+also be declared by `commission` itself, under the lowest `B<n>` the round has not
+used (`next_id`); it is refused while the repo has a stage of the plan with no open
+or finished build (`unbuilt_in`), which is commissioned by its id, and the one build
+in a repo is counted by `built_in`.
 
 `CHECKS` are the three refusals a freezing makes of a design's block.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -113,6 +118,44 @@ def build_of(state: states.State, stage_id: str) -> str | None:
         elif event["type"] == "finish.done":
             found = FINISHED
     return found
+
+
+def next_id(state: states.State) -> str:
+    """The id a stage declared at `commission` takes: the lowest `B<n>` the round has
+    not used, counting the stages that left the plan, whose ids never come back."""
+    used = {stage.id for stage in state.stages}
+    n = 1
+    while f"B{n}" in used:
+        n += 1
+    return f"B{n}"
+
+
+def with_stage(state: states.State, stage: states.Stage) -> states.State:
+    """The round's state as it would be with `stage` declared: what a commission that
+    declares its stage reads its gates from before it writes anything."""
+    return dataclasses.replace(state, stages=[*state.stages, stage])
+
+
+def unbuilt_in(state: states.State, repo: str) -> states.Stage | None:
+    """The first stage of the plan built in the repo `repo` (its key, in any case)
+    that has no build that is open or finished, or None."""
+    for stage in in_plan(state):
+        if (stage.repo is not None and stage.repo.casefold() == repo.casefold()
+                and build_of(state, stage.id) is None):
+            return stage
+    return None
+
+
+def built_in(state: states.State, repo: str, *, besides: str) -> states.Stage | None:
+    """The first stage other than `besides` built in the repo `repo` (its key, in any
+    case) whose build is open or finished, or None. A dropped build counts for
+    nothing."""
+    for stage in state.stages:
+        if (stage.id != besides and stage.repo is not None
+                and stage.repo.casefold() == repo.casefold()
+                and build_of(state, stage.id) is not None):
+            return stage
+    return None
 
 
 def waits_for(state: states.State, stage_id: str) -> tuple[str, ...]:

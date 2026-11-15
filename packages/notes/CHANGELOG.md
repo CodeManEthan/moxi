@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A notes repo whose git dir isn't a folder named `.git` (made with
+  `git init --separate-git-dir`, or backed by a bare `notes.git`) still has no private
+  allowlist, but while no private file is there its judges apply the public
+  `.secrets-allow` and the doctor's `allowlist` row passes. A private file put there is
+  refused as before: no allowance applies and the row fails.
+
 ## 0.1.1 (2026-11-08)
 
 - Config keys `max_mb`, `snapshot.interval` and `snapshot.auto` are now `max_mib`,

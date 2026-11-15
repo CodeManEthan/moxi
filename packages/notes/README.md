@@ -177,8 +177,10 @@ the doctor names the file and the line.
 **A notes repo whose git dir isn't a folder named `.git` has no private allowlist.**
 secrets reads the private file only from inside a `.git` folder or its own config folder,
 so a notes repo made with `git init --separate-git-dir`, or one whose common git dir is a
-bare `notes.git`, can't keep one. That fails closed: no private allowance applies, every
-file with a private name stays left out, every push with one is refused, and the doctor's
+bare `notes.git`, can't keep one. That fails closed: no private allowance applies, and
+every file with a private name stays left out and every push with one is refused. While
+no private file is there, the public `.secrets-allow` still applies. A private file put
+there is refused: every judge then reads no allowances at all, and the doctor's
 `allowlist` row fails. Keep the notes repo's git dir at `<notes>/.git`.
 
 ### What a hit does
@@ -337,4 +339,4 @@ parses no module's printed output.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/notes/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-notes-v0.1.1/packages/notes/LICENSE).

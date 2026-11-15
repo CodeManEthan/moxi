@@ -25,6 +25,11 @@ DEFAULTS = {
     "defaults.dormant_days": 30,
     "defaults.slice_minutes": 45,
     "defaults.sitting_at": 10,
+    "defaults.disposable": [".venv", "__pycache__", "*.pyc", ".pytest_cache", ".ruff_cache",
+                            ".mypy_cache", "node_modules", "*.egg-info"],
+    "sweep.armed": False,
+    "sweep.at_start": False,
+    "sweep.grace_hours": 2,
     "projects": {},
 }
 
@@ -33,7 +38,8 @@ TYPES = {
     "defaults.flow": "string", "defaults.dir": "string", "defaults.ratify": "enum",
     "defaults.trace": "bool", "defaults.check_on": "enum", "defaults.idle_days": "int",
     "defaults.dormant_days": "int", "defaults.slice_minutes": "int",
-    "defaults.sitting_at": "int", "projects": "table",
+    "defaults.sitting_at": "int", "defaults.disposable": "list", "sweep.armed": "bool",
+    "sweep.at_start": "bool", "sweep.grace_hours": "int", "projects": "table",
 }
 
 FLOWS = """\

@@ -39,7 +39,13 @@ withdrawn takes none of the four.
 
 **Skips and the flow.** `skip:<step>`, or `skip:<step>:<stage>` for a step of one
 stage, says the step is not done; `skips` has what may be skipped and what a skip of
-the questions step lets its stage past. `flow:<name>` moves the round to another flow,
+the questions step lets its stage past. `skip-action:<stage>=<id>` says one finish
+action is not run for one stage and counts as done. `credit:<stage>` is his word that
+what the target gained under the head of the stage's open build is the build's work,
+taken only for a build `unclear` because its target was fast-forwarded with no reading
+of the build's (`builds.credit_refusal`); it records the head it credits, and the build
+reads `merged` from then on, owing all a merged build owes. It is taken back with
+`revoke:`, never replaced. `flow:<name>` moves the round to another flow,
 with that flow's steps as the config has them then; `stepping` has the rules. A change
 of flow is corrected by another change of flow, and is neither replaced nor taken
 back. Both are acts on the process, of a round.
@@ -61,6 +67,11 @@ it. Both rulings stay in the log. A correction recorded on a round that was clos
 dropped is recorded and reopens nothing. Any other ruling of such a round's own is
 refused: it would be new work, and that is for a new round.
 
+**Decisions.** `B2.M1=accept` or `B2.M1=reject` rules a decision a report declared
+(`decisions`): of substance, applying to no stage, with or without a sentence. A
+second ruling of it replaces the first and names it, and one taken back leaves the
+decision open.
+
 **Shown.** A ruling is recorded by someone else than the operator, so what is returned
 holds the sentence as the appended event has it, and the sentence of the question it
 answers, for whoever recorded it to put in front of him; `shown` has the mark that says
@@ -76,12 +87,13 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
-from . import (corrections, ending, folders, log, pointers, questions, shown, skips,
-               stages, stepping, write)
+from . import (builds, corrections, decisions, ending, folders, log, open_builds,
+               pointers, questions, shown, skips, stages, stepping, write)
 from . import options as choices
 from . import settings as own
 from . import state as states
-from .errors import BadArgument, NoLog, NoRound, Refused, Unmet
+from .errors import BadArgument, NoLog, NoRound, Refused, RoundsError, Unmet
+from .gitreads import Git
 
 #: The kind of a ruling that says what is built.
 SUBSTANCE = "substance"
@@ -223,6 +235,7 @@ def rule(target: str, *, by: str, record: str | None = None, text: str | None = 
     that is never skipped or that the round's flow does not have, a flow the config
     does not have or that the round follows already, a stage to take out that has
     an open or finished build or that left already, a wait a stage does not have, a
+    credit of a build that is not unclear by a fast-forward with no reading, a
     key the
     question does not offer, a second ruling of a thing that does not name the first,
     a correction of a ruling that is of the other log, that the log does not hold,
@@ -323,6 +336,10 @@ def rule(target: str, *, by: str, record: str | None = None, text: str | None = 
             # him the sentence recorded.
             asked_as = questions.find(held, form.rules)
             answers[0] = None if asked_as is None else (asked_as.id, asked_as.text)
+        elif decisions.item(form.rules) is not None:
+            # So does a decision, with what he chose of it.
+            decided = decisions.find(held, decisions.item(form.rules))
+            answers[0] = None if decided is None else (decided.key, decided.text)
         if corrects and not standing:
             # Recorded all the same: it changes what is read, and reopens nothing.
             ended[0] = corrections.ended(view.state)
@@ -650,6 +667,47 @@ def _revoke(item: str, asked: Asked) -> Form | None:
                                                            ruling_id))
 
 
+# -- a decision --------------------------------------------------------------------------
+
+def _decide(item: str, asked: Asked) -> Form | None:
+    """His ruling of a decision: `accept` or `reject`, of substance, applying to no
+    stage, since a decision holds none. Its sentence is optional."""
+    matched = decisions.ITEM.fullmatch(item)
+    if matched is None:
+        return None
+    key, chose = matched.groups()
+    if chose not in (decisions.ACCEPT, decisions.REJECT):
+        raise BadArgument(f"{chose!r} is not what is ruled of a decision",
+                          f"rule {key}={decisions.ACCEPT} or {key}={decisions.REJECT}")
+    _of_the_round(asked, "a ruling of a decision")
+    for flag, given in (("--stages", asked.stages is not None),
+                        ("--scope", asked.scoped),
+                        ("--standing", asked.standing)):
+        if given:
+            raise BadArgument(f"{flag} is for a plain ruling; a ruling of a decision "
+                              "is the round's and applies to no stage",
+                              f"leave {flag} out")
+    if asked.text is not None and not asked.text.strip():
+        raise BadArgument("--text says nothing", "give the sentence, or leave --text "
+                                                 "out")
+
+    def is_on_record(view):
+        held = decisions.find(view.state, key)
+        if held is None:
+            return Unmet(f"{asked.name} has no decision {key}",
+                         f"moxi rounds show {asked.name}")
+        if held.ruling is None or held.ruling == asked.supersedes:
+            return None
+        return Unmet(f"{key} is already ruled, {held.chose}, by {held.ruling}; a second "
+                     "ruling replaces the first and names it",
+                     f"moxi rounds rule {asked.name} {item} --record PTR --supersedes "
+                     f"{held.ruling}")
+
+    return Form(kind=SUBSTANCE, rules=item,
+                fields={**_said(asked), "chose": chose, "stages": decisions.BLOCKS},
+                gates=(is_on_record,))
+
+
 # -- skips, and the flow -----------------------------------------------------------------
 
 def _of_the_round(asked: Asked, what: str) -> None:
@@ -682,6 +740,21 @@ def _skip(item: str, asked: Asked) -> Form | None:
                 found=lambda view: skips.fields(step, stage, view, asked.supersedes))
 
 
+def _skip_action(item: str, asked: Asked) -> Form | None:
+    """A skip of one finish action for one stage: `finish` does not run it and treats
+    it as done. The ruling's event is the whole of it."""
+    parsed = skips.parse_action(item)
+    if parsed is None:
+        return None
+    stage, action = parsed
+    _of_the_round(asked, "a skip of a finish action")
+    settings = own.load() if asked.settings is None else asked.settings
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=tuple(skips.action_gates(stage, action, name=asked.name,
+                                               settings=settings,
+                                               supersedes=asked.supersedes)))
+
+
 def _flow(item: str, asked: Asked) -> Form | None:
     """A move of the round to another flow, any the config has: the event holds the
     new name and its steps, and is the whole of the move."""
@@ -702,6 +775,68 @@ def _flow(item: str, asked: Asked) -> Form | None:
                     again=f"moxi rounds rule {asked.name} {stepping.FLOW}NAME "
                           "--record PTR")),
                 found=lambda view: stepping.fields(flow, view, asked.settings))
+
+
+# -- the operator's credit of a fast-forward --------------------------------------------
+
+def _credit(item: str, asked: Asked) -> Form | None:
+    """His credit of a fast-forward to the open build of a stage: the build is read
+    from git under the lock, and the event holds the build's line and the head it
+    credits, which is the whole of it."""
+    if not item.startswith(corrections.CREDIT):
+        return None
+    stage_id = item[len(corrections.CREDIT):]
+    if not STAGE.fullmatch(stage_id):
+        raise BadArgument(f"{item!r} names no stage",
+                          f"say {corrections.CREDIT}B<n>, the stage whose build he "
+                          "credits")
+    _of_the_round(asked, "a credit of a fast-forward")
+    if asked.supersedes is not None:
+        raise BadArgument("a credit is taken back with revoke:, and no ruling replaces "
+                          "it", "leave --supersedes out")
+    settings = own.load() if asked.settings is None else asked.settings
+    looked: dict[int, tuple[builds.Build, builds.Status] | Unmet] = {}
+    show = f"moxi rounds show {asked.name}"
+
+    def look(view):
+        if id(view) not in looked:
+            looked[id(view)] = _credited(view.state, asked.name, stage_id, settings,
+                                         show)
+        return looked[id(view)]
+
+    def credits_a_fast_forward(view):
+        found = look(view)
+        return found if isinstance(found, Unmet) else None
+
+    def fields(view):
+        build, status = look(view)
+        return {"build": build.n, "head": status.head}
+
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=(credits_a_fast_forward,), found=fields)
+
+
+def _credited(state: states.State, name: str, stage_id: str, settings,
+              show: str) -> tuple[builds.Build, builds.Status] | Unmet:
+    """The open build of the stage and its state as read now, when the credit is
+    taken for it; else why not."""
+    build = builds.current(state, stage_id)
+    if build is None or build.ended is not None:
+        if questions.unrecorded((stage_id,), state):
+            return Unmet(f"{stage_id} is not a stage of {name}: "
+                         f"{questions.stages_said(state)}", show)
+        return Unmet(f"{stage_id} has no open build to credit", show)
+    found = open_builds.of_round(name, [build.repo], settings=settings).get(stage_id)
+    if found is None or found.build.n != build.n or found.problem is not None:
+        said = "" if found is None or found.problem is None else f": {found.problem.reason}"
+        return Unmet(f"{stage_id}'s build can't be read from git{said}", show)
+    try:
+        why = builds.credit_refusal(Git(folders.root(build.repo)[1]), build, found.status)
+    except RoundsError as exc:
+        return Unmet(f"{stage_id}'s build can't be read from git: {exc.reason}", show)
+    if why is not None:
+        return Unmet(f"{stage_id}'s build is not credited: {why}", show)
+    return build, found.status
 
 
 # -- a stage out of the plan, and a wait off a stage -------------------------------------
@@ -771,8 +906,8 @@ def _readback(item: str, asked: Asked) -> Form | None:
 #: The builders of the forms that rule an item, each `fn(item, asked) -> Form | None`,
 #: None when the item is not its own. The first that knows the item builds the form.
 _ITEM_FORMS: tuple[Callable[[str, Asked], Form | None], ...] = (
-    _answer, _park, _narrow, _withdraw, _revoke, _readback, _skip, _flow, _unstage,
-    _unafter)
+    _answer, _park, _narrow, _withdraw, _revoke, _readback, _skip, _skip_action, _flow,
+    _credit, _unstage, _unafter, _decide)
 
 
 def _form(item: str | None, asked: Asked) -> Form:

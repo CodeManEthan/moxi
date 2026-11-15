@@ -13,6 +13,7 @@ SUMMARY = ("A piece of work tracked from design to landing: its questions, rulin
 OPTIONAL = {
     "notes": "Gives the default notes folder of a project that names none, for a "
              "relative rounds folder.",
+    "turns": "Runs the leftover sweep at a session's start, when sweep.at_start is on.",
 }
 GATED = {}
 #: rounds reads its root locators through `moxi.paths` and no other variable.
@@ -23,12 +24,22 @@ SESSION_ENV = {}
 SETTINGS = "settings.toml"
 #: The module's whole loader over a config text.
 CONFIG_CHECK = "moxi_rounds.settings:check_text"
-#: The module's own doctor checks: git, each project's rounds folder, each log, the index.
+#: The module's own doctor checks: git, each project's rounds folder, each log, the
+#: index, CI, finish locks and the sweep's dry run.
 DOCTOR = "moxi_rounds.doctor:rows"
+#: The one shipped skill, moxi-rounds, one subfolder: the judgment a round leaves to its
+#: lead and checkers, placed for each harness at install. It holds no command manual,
+#: since the verbs print their own commands.
+SKILLS = "skills"
 SETUP = None
 SEGMENT = None
-#: The one store: a cache of what the rounds' logs say, made by the first write and built
-#: again from the logs whenever it is missing. The logs themselves are the user's files,
-#: in the folders the user chose, and the lock files hold nothing, so neither is a store.
+#: The stores: the index, a cache of what the rounds' logs say, made by the first write and
+#: built again from the logs whenever it is missing; and the sweep's log, its account of
+#: each folder it removed, which nothing else holds, kept to a size. The logs themselves
+#: are the user's files, in the folders the user chose, and the lock files hold nothing,
+#: so neither is a store.
 STORES = {"index": {"root": "data", "path": "index.db", "kind": "sqlite", "private": True,
-                    "retention": "keep", "rebuildable": True, "lazy": True}}
+                    "retention": "keep", "rebuildable": True, "lazy": True},
+          "sweeps": {"root": "state", "path": "sweep.jsonl", "kind": "jsonl",
+                     "private": True, "retention": "2M", "rebuildable": False,
+                     "lazy": True}}

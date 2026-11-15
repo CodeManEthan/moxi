@@ -100,6 +100,38 @@ def test_run_without_capture_leaves_output_alone(tmp_path):
     assert (done.stdout, done.stderr) == (None, None)
 
 
+def test_run_with_output_writes_both_streams_to_the_file_and_keeps_none(tmp_path):
+    out = tmp_path / "logs" / "run.log"
+    code = "import sys; print('out', flush=True); print('err', file=sys.stderr)"
+
+    done = proc.run([PY, "-c", code], timeout_s=30, output=out)
+
+    assert (done.stdout, done.stderr) == (None, None)
+    assert sorted(out.read_text().split()) == ["err", "out"]
+    if sys.platform != "win32":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_run_with_output_appends_to_a_file_that_is_there(tmp_path):
+    out = tmp_path / "run.log"
+    out.write_text("before\n")
+
+    proc.run([PY, "-c", "print('after')"], timeout_s=30, output=out)
+
+    assert out.read_text().split() == ["before", "after"]
+
+
+def test_a_timed_out_run_with_output_kills_the_tree_and_keeps_the_file(tmp_path):
+    out = tmp_path / "run.log"
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        proc.run([PY, script(tmp_path, "tree.py", TREE)], timeout_s=3, output=out)
+    assert caught.value.output is None
+    word, pid = out.read_text().split()
+    assert word == "ready"
+    assert wait_for(lambda: proc.identity(int(pid)) is None
+                    or not proc.alive(proc.identity(int(pid))), 10)
+
+
 def test_run_refuses_a_single_string():
     with pytest.raises(TypeError):
         proc.run("echo hi", timeout_s=5)

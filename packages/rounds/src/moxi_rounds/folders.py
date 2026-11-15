@@ -122,6 +122,32 @@ def notes_dir(project: str) -> Path:
     return _notes_dir(_record(_projects().get, project))
 
 
+def root(project: str) -> tuple[str, Path]:
+    """The key of the project `project` (its key, in any case) as the projects list
+    stores it, and the folder its record names as its root: for a build's repo, where
+    git is run. Raises `UnknownProject`."""
+    record = _record(_projects().get, project)
+    return record.key, Path(os.path.expanduser(record.root))
+
+
+def roots() -> list[tuple[str, Path]]:
+    """Each project of the projects list, by key, with the folder its record names as
+    its root."""
+    return [(record.key, Path(os.path.expanduser(record.root)))
+            for record in _records(_projects())]
+
+
+def project_at(path: str | os.PathLike) -> str | None:
+    """The key of the project the folder `path` is in, or None when it is in none. A
+    linked git worktree is in the project of the work tree it was added from."""
+    api = _projects()
+    try:
+        found = api.for_path(os.fspath(path))
+    except api.ProjectsError as exc:
+        raise RoundsError(f"the projects list can't be read: {exc}") from None
+    return None if found is None else found.key
+
+
 def slugs(rounds_dir: Path) -> list[str]:
     """The slug of each round in the rounds folder `rounds_dir`, sorted: every folder there
     that holds a round's log and whose name is a slug. A rounds folder that does not
@@ -213,5 +239,5 @@ def _notes_dir(record) -> Path:
     return Path(found)
 
 
-__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "slugs",
-           "names"]
+__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "root",
+           "slugs", "names"]

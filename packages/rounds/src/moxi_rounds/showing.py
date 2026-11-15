@@ -13,7 +13,7 @@ the operator was shown it; and its history, every event, oldest first.
 
 A round that is open is shown with what its close waits for, since no verb closes a
 round: it closes on the write that leaves nothing waited for. A round that has ended
-is shown with how it ended. A question whose record still reads
+is shown with how it ended and the numbers its ending event holds. A question whose record still reads
 as open or parked there (a correction made after the end can leave one so) is shown as
 waiting for a new round, apart from the open and the parked ones: it is put to nobody
 on a round that has ended.
@@ -25,9 +25,21 @@ says so.
 
 A project is not shown: its rounds are listed.
 
+Its builds are shown each with what its commission recorded, the newest run of its
+repo's check, of each command step of the user's own and of the local part of a check by
+CI, its newest read of CI, and, while it is open, its state as read from git now (`open_builds`):
+whether it is idle, the builds it shares commits with, or what kept it from being read;
+and, once a report of it is recorded, how far the target moved under it since and
+whether that owes a re-check (`drift`). Each build carries its stage's slices, each
+with the sized brief that counts for it, and the verifications a brief was sized for
+(`sizing`); the lines say which slices of an open build have a sized brief and which
+have none. Each of the lead's repairs is shown with what
+it derived again and the old and new value of each field it changed.
+
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
 its key, what it reads from a `Shown`, and how that reads as lines. What a round is
-doing now, its current step, is in the head as `steps.current` gives it.
+doing now, its current step, is in the head as `steps.current` gives it, with each open
+build read from git for the steps whose state git says.
 """
 
 from __future__ import annotations
@@ -40,11 +52,16 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (closing, folders, index, log, questions, shown, skips, steps, tracing,
-               versions)
+from . import (builds, checking, ci, closing, decisions, drift, findings, finish_actions,
+               folders,
+               index, log, numbers,
+               open_builds, questions, shown, sizing, skips, steps, tracing, versions,
+               waits)
 from . import settings as own
 from . import state as states
-from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
+from .errors import (BadArgument, NoLog, NoRound, Refused, RoundsError, Unmet,
+                     Unreadable)
+from .gitreads import Git
 
 #: The order the states of a question are shown in.
 _STATES = (questions.OPEN, questions.PARKED, questions.LEFT, questions.RULED,
@@ -59,7 +76,8 @@ class Shown:
 
     A round whose log can't be read has its error in `unreadable` and no `state`. When
     only the project's log can't be read, `register` is None and its error is in
-    `register_unreadable`. `on_closed` answers whether a round, by name, is closed."""
+    `register_unreadable`. `on_closed` answers whether a round, by name, is closed, and
+    `settings` are rounds' settings, read when a build's state is (None: read then)."""
 
     name: str
     project: str
@@ -71,6 +89,7 @@ class Shown:
     unreadable: Unreadable | None = None
     register_unreadable: Unreadable | None = None
     on_closed: Callable[[str], bool] | None = None
+    settings: object = None
 
 
 def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
@@ -115,7 +134,8 @@ def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
         register_unreadable = exc
     return Shown(**found, state=state, register=register,
                  register_unreadable=register_unreadable,
-                 on_closed=lambda round_name: questions.is_closed(round_name, settings))
+                 on_closed=lambda round_name: questions.is_closed(round_name, settings),
+                 settings=settings)
 
 
 def _refreshed(home: folders.Home, slug: str) -> index.Summary:
@@ -147,6 +167,8 @@ def _questions(found: Shown) -> list:
                 "blocks": (None if question.blocks is None
                            else questions.stored(question.blocks)),
                 "state": state, "by": question.by, "at": question.at}
+        if question.builder is not None:
+            data["builder"] = question.builder
         if state != reads:
             # What its record reads as, in a round that has ended.
             data["left_as"] = reads
@@ -178,7 +200,8 @@ def _question_lines(listed: list) -> list[str]:
     for state in states_found:
         for one in (one for one in listed if one["state"] == state):
             said = [f"from: {one['from']}", f"blocks: {_blocks(one['blocks'])}",
-                    f"state: {questions.called(state)}", f"by: {one['by']}",
+                    f"state: {questions.called(state)}",
+                    f"by: {questions.asker(one['by'], one.get('builder'))}",
                     f"at: {one['at']}"]
             if "left_as" in one:
                 said.append(f"reads as {one['left_as']}, and the round has ended")
@@ -273,8 +296,22 @@ def history_of(event: dict) -> str | None:
         of = f"v{event.get('version')}"
     if event.get("type") == "thread.decided":
         of = f"{event.get('thread')}, {event.get('decision')}"
+    if event.get("type") == "repair":
+        of = repair_of(event)
+    if event.get("type") == finish_actions.ACTION:
+        landed = ("" if event.get("landing") is None
+                  else f", landing {str(event.get('landing'))[:12]}")
+        of = (f"{event.get('stage')} {event.get('id')}: {event.get('state')}{landed}")
+    if event.get("type") == "lock.cleared":
+        of = f"{event.get('ref')}, held by {event.get('holder')}"
+    if event.get("type") == sizing.SIZED:
+        piece = sizing.piece_of(event.get("slice"), event.get("verify"))
+        of = f"{event.get('stage')} {piece}, {event.get('brief')}"
     if event.get("type") == "verdict.recorded" and event.get("design") is not None:
         of = f"{event.get('verdict')} for v{event.get('design')}"
+    if event.get("type") == "verdict.recorded" and event.get("stage") is not None:
+        of = (f"{event.get('verdict')} for {event.get('stage')} at "
+              f"{str(event.get('head'))[:7]}")
     return of if isinstance(of, str) and of else None
 
 
@@ -323,11 +360,387 @@ def verdict_lines(listed: list) -> list[str]:
     return lines
 
 
+def repair_of(event: dict) -> str:
+    """What a repair derived again, in a few words: `base of B2`, or `verdict on line
+    12`."""
+    if event.get("what") == states.BASE:
+        return f"base of {event.get('stage')}"
+    return f"verdict on line {event.get('verdict')}"
+
+
+def _repairs(found: Shown) -> list:
+    """Each repair of the round, oldest first: what it derived again, each field's
+    old and new value, what it read, and who made it and when."""
+    return [{"n": event.get("n"), "at": event.get("at"), "actor": event.get("actor"),
+             "what": event.get("what"), "stage": event.get("stage"),
+             "verdict": event.get("verdict"), "fields": event.get("fields"),
+             "read": event.get("read")}
+            for event in found.state.history if event.get("type") == "repair"]
+
+
+def repair_line(one: dict) -> str:
+    """A repair in words: `base of B2: 1a2b3c4d5e6f to 0f9e8d7c6b5a`, or `verdict on
+    line 12 (designs/r.md): added finding L<n>, waiting item W<n>`."""
+    fields = one["fields"] if isinstance(one.get("fields"), dict) else {}
+    if one.get("what") == states.BASE:
+        change = fields.get("base") or {}
+        return (f"base of {one.get('stage')}: {str(change.get('was'))[:12]} to "
+                f"{str(change.get('now'))[:12]}")
+    added = []
+    for key, called in (("findings", "finding"), ("waits", "waiting item"),
+                        ("decisions", "decision")):
+        change = fields.get(key) or {}
+        had = {entry.get("id") for entry in change.get("was") or ()
+               if isinstance(entry, dict)}
+        ids = [str(entry.get("id")) for entry in change.get("now") or ()
+               if isinstance(entry, dict) and entry.get("id") not in had]
+        if ids:
+            added.append(f"{called}{'' if len(ids) == 1 else 's'} {', '.join(ids)}")
+    read = one["read"] if isinstance(one.get("read"), dict) else {}
+    return (f"verdict on line {one.get('verdict')} ({read.get('report')}): added "
+            f"{'; '.join(added) or 'nothing'}")
+
+
+def _repair_lines(listed: list) -> list[str]:
+    lines = [f"repairs: {len(listed) or 'none'}"]
+    lines += [f"  {one['n']}  {one['at']}  {one['actor']}  {repair_line(one)}"
+              for one in listed]
+    return lines
+
+
 #: The kinds of record a round is shown with, in the order they are shown.
+def _builds(found: Shown) -> list:
+    """Each build of the round in the order commissioned: what its commission
+    recorded, how it ended when it did, and for an open build its state as read from
+    git now, whether it is idle and the builds it shares commits with, or the problem
+    that kept it from being read."""
+    every = builds.builds(found.state)
+    if not every:
+        return []
+    events = {event["n"]: event for event in found.state.history}
+    read = open_builds.of_round(found.name, [one.repo for one in every if one.ended is None],
+                                settings=found.settings)
+    listed = []
+    for one in every:
+        event = events.get(one.n, {})
+        row = {"stage": one.stage, "repo": one.repo, "branch": one.branch,
+               "base": one.base, "target": one.target, "n": one.n,
+               **{key: event.get(key) for key in ("builder", "record", "worktree",
+                                                  "scratch", "host", "build", "at")},
+               "ended": one.ended, "state": one.ended, "by": None, "why": None,
+               "head": None, "idle": False, "shares": [], "problem": None,
+               "drop_by": None, "drop": None, "credit": None,
+               "check": _check_run(found.state, one),
+               "step_runs": [run for run in (
+                   _check_run(found.state, one, step)
+                   for step in [*_command_steps(found.state), ci.LOCAL])
+                   if run is not None],
+               "ci": _ci_read(found.state, one),
+               "verdict": _build_verdict(found.state, one),
+               "findings": [finding.data()
+                            for finding in findings.of_build(found.state, one)],
+               "slices": sizing.slices_of(found.state, one),
+               "briefs": sizing.verifications_of(found.state, one),
+               "drift": None, "finish": []}
+        now = read.get(one.stage) if one.ended is None else None
+        if now is not None and now.build.n == one.n:
+            data = now.data()
+            row.update({key: data[key] for key in ("state", "by", "why", "head", "idle",
+                                                   "shares", "problem", "drop_by")})
+            row["drop"] = (f"moxi rounds drop {found.name} {one.stage} --by "
+                           f"{data['drop_by']} --record PTR")
+            if data["state"] == builds.UNCLEAR and data["by"] == builds.FAST_FORWARD:
+                row["credit"] = (f"moxi rounds rule {found.name} {builds.CREDIT}"
+                                 f"{one.stage} --record PTR")
+            row["drift"] = _drift(found, one, now.status)
+            row["finish"] = _finish_actions(found.state, one, data["head"])
+        elif one.ended is None:
+            row["problem"] = {"reason": f"the repo {one.repo} could not be read",
+                              "fix": "moxi projects list"}
+        listed.append(row)
+    return listed
+
+
+def _finish_actions(state: states.State, build: builds.Build,
+                    head: str | None) -> list[dict]:
+    """For a build not finished, the newest record of each of its finish actions at
+    its head, as `{"id", "kind", "state", "landing", "n", "at"}`: what a finish did so
+    far, and a failed action, which the build's state from git does not show."""
+    if build.ended is not None or head is None:
+        return []
+    return [{"id": event["id"], "kind": event.get("kind"), "state": event.get("state"),
+             "landing": event.get("landing"), "n": event["n"], "at": event.get("at")}
+            for event in finish_actions.records(state, build, head).values()]
+
+
+def finish_action_line(one: dict) -> str:
+    """A finish action's newest record in words: `finish: merge ok, landing 1a2b3c4d5e6f
+    (line 12)`."""
+    landed = "" if one["landing"] is None else f", landing {str(one['landing'])[:12]}"
+    return f"finish: {one['id']} {one['state']}{landed} (line {one['n']})"
+
+
+def _drift(found: Shown, build: builds.Build, status: builds.Status | None) -> dict | None:
+    """The drift of an open build at its head now, against its newest build verdict,
+    as data; None with no such verdict or nothing read from git; `{"problem": ...}`
+    when git could not answer."""
+    if status is None or drift.newest_verdict(found.state, build) is None:
+        return None
+    try:
+        _key, root = folders.root(build.repo)
+        settings = own.load() if found.settings is None else found.settings
+        read = drift.of_build(found.state, build, status, Git(root), settings=settings)
+    except RoundsError as exc:
+        return {"problem": {"reason": exc.reason, "fix": exc.fix}}
+    return None if read is None else read.data()
+
+
+def drift_line(stage: str, one: dict) -> str:
+    """A build's drift in words, or what kept it from being read."""
+    if "problem" in one:
+        return f"drift not read: {one['problem']['reason']}"
+    return drift.line(stage, one)
+
+
+def _build_verdict(state: states.State, build: builds.Build) -> dict | None:
+    """The newest verdict recorded for `build`, as data: its word, the pass, the head
+    it read and that head's merge-base with the target, who wrote the report with
+    which model, the report's file and digest, what is noted of it, and when it was
+    recorded; None with none."""
+    one = drift.newest_verdict(state, build)
+    if one is None:
+        return None
+    return {"n": one.n, "verdict": one.verdict, "pass": one.pass_, "head": one.head,
+            "merge_base": one.merge_base, "by": one.by, "model": one.model,
+            "report": one.report, "sha256": one.sha256, "flags": list(one.flags),
+            "at": one.at}
+
+
+def build_verdict_line(one: dict) -> str:
+    """A build's newest verdict in words: `verdict fold-first at 81c7f5b, full pass by
+    critic, model opus`."""
+    flags = f", flags: {', '.join(one['flags'])}" if one["flags"] else ""
+    return (f"verdict {one['verdict']} at {str(one['head'])[:7]}, {one['pass']} pass by "
+            f"{one['by']}, model {one['model']}{flags}")
+
+
+def finding_line(one: dict) -> str:
+    """A finding in words: `finding B<n>.L<n>: major, open: the text`."""
+    return f"finding {one['id']}: {one['severity']}, {one['state']}: {one['text']}"
+
+
+def _ci_read(state: states.State, build: builds.Build) -> dict | None:
+    """The newest read of CI recorded for `build`, as data: its commit, the whole
+    reading, each workflow with its reading and url, and when it was recorded; None
+    with no read."""
+    found = None
+    for event in state.history:
+        if (event["n"] > build.n and event.get("stage") == build.stage
+                and event["type"] == "build.commissioned"):
+            break
+        if (event["n"] > build.n and event["type"] == ci.READ
+                and event.get("stage") == build.stage):
+            found = event
+    if found is None:
+        return None
+    return {key: found.get(key) for key in ("commit", "reading", "workflows", "at")}
+
+
+def ci_line(read: dict) -> str:
+    """The newest read of CI for a build in words: `ci green at 81c7f5b`."""
+    return f"ci {read['reading']} at {str(read['commit'])[:7]}"
+
+
+def _command_steps(state: states.State) -> list[str]:
+    """The command steps of the user's own the round's flow lists, in its order."""
+    return [str(entry.get("step")) for entry in state.steps
+            if checking.step_entry(state, str(entry.get("step"))) is not None]
+
+
+def _check_run(state: states.State, build: builds.Build,
+               step: str = checking.CHECK) -> dict | None:
+    """The newest run of `step` (the repo's check unless named) recorded for `build`, as
+    data: the step, its commit, exit code, duration, output file and when it was
+    recorded; None with no run."""
+    found = None
+    for event in state.history:
+        if (event["n"] > build.n and event["type"] == checking.RAN
+                and event.get("stage") == build.stage
+                and event.get("step") == step):
+            found = event
+        if (event["n"] > build.n and event.get("stage") == build.stage
+                and event["type"] == "build.commissioned"):
+            break
+    if found is None:
+        return None
+    return {key: found.get(key) for key in ("step", "commit", "exit_code", "duration_s",
+                                            "output", "at")}
+
+
+def check_line(run: dict) -> str:
+    """The newest run of a step for a build in words: `check passed at 81c7f5b` or
+    `staging failed (exit 1) at 81c7f5b`."""
+    code = run["exit_code"]
+    how = ("passed" if code == 0 else "ended at its time limit" if code is None
+           else f"failed (exit {code})")
+    return f"{run.get('step') or checking.CHECK} {how} at {str(run['commit'])[:7]}"
+
+
+def build_line(one: dict) -> str:
+    """A build in a line: `B1: proj-a on work, base 81c7f5b, target main, builder
+    coder; building, idle, shares with proj-a/b-round B2`."""
+    line = (f"{one['stage']}: {one['repo']} on {one['branch']}, base "
+            f"{(one['base'] or '')[:7]}, target {one['target']}, builder "
+            f"{one['builder']}; ")
+    if one["problem"] is not None:
+        return line + f"not read: {one['problem']['reason']}"
+    line += str(one["state"])
+    if one["idle"]:
+        line += ", idle"
+    if one["shares"]:
+        line += ", shares with " + ", ".join(f"{other['round']} {other['stage']}"
+                                             for other in one["shares"])
+    return line
+
+
+def _build_lines(listed: list) -> list[str]:
+    lines = [f"builds: {len(listed)}"]
+    for one in listed:
+        lines.append(f"  {build_line(one)}")
+        lines += [f"    {key}: {one[key]}" for key in ("worktree", "scratch")
+                  if one[key] is not None]
+        for run in [one.get("check"), *one.get("step_runs", ())]:
+            if run is not None:
+                lines.append(f"    {check_line(run)}, output {run['output']}")
+        if one.get("ci") is not None:
+            lines.append(f"    {ci_line(one['ci'])}")
+            lines += [f"      {flow['path']}: {flow['reading']}"
+                      + ("" if flow.get("url") is None else f"   {flow['url']}")
+                      for flow in one["ci"]["workflows"] or ()]
+        if one.get("verdict") is not None:
+            lines.append(f"    {build_verdict_line(one['verdict'])}")
+            lines.append(f"      report: {one['verdict']['report']}")
+        if one.get("drift") is not None:
+            lines.append(f"    {drift_line(one['stage'], one['drift'])}")
+        lines += [f"    {finish_action_line(action)}" for action in one.get("finish", ())]
+        lines += [f"    {finding_line(finding)}" for finding in one.get("findings", ())]
+        if one["ended"] is None:
+            lines += [f"    {line}" for line in briefs_lines(one)]
+        lines += [f"    {line}" for line in drop_lines(one)]
+        if one["record"] is not None:
+            lines.append(f"    go: {one['record']}")
+    return lines
+
+
+def drop_lines(one: dict) -> list[str]:
+    """For an open build that is looked at (gone, empty, unclear, idle, sharing or
+    not read), why, and who may drop it with the command; for one unclear by a
+    fast-forward with no reading, also the operator's credit."""
+    if one.get("drop") is None or not (
+            one["state"] in (builds.GONE, builds.EMPTY, builds.UNCLEAR)
+            or one["idle"] or one["shares"] or one["problem"] is not None):
+        return []
+    lines = []
+    if one.get("why"):
+        lines.append(f"why: {one['why']}")
+    if one.get("credit") is not None:
+        lines.append(f"the operator credits it: {one['credit']}")
+    lines.append(f"the {one['drop_by']} drops it: {one['drop']}")
+    return lines
+
+
+def briefs_lines(one: dict) -> list[str]:
+    """Which slices of a build have a sized brief, and which verifications:
+    `slices: 2a sized, 2b not sized` (`slices: one slice sized` for a stage that
+    declares none) and `verification briefs sized: build`."""
+    lines = []
+    if one.get("slices"):
+        lines.append("slices: " + ", ".join(
+            f"{sizing.ONE_SLICE if piece['id'] is None else piece['id']} "
+            f"{'not sized' if piece['sized'] is None else 'sized'}"
+            for piece in one["slices"]))
+    if one.get("briefs"):
+        lines.append("verification briefs sized: "
+                     + ", ".join(str(brief["verify"]) for brief in one["briefs"]))
+    return lines
+
+
+def _waits(found: Shown) -> list:
+    """Every waiting item of the round, in the order declared, open or done; an open
+    one with `once_done`, the command that marks it done."""
+    return [{**one.data(),
+             "once_done": waits.mark_line(found.name, one.key) if one.open else None}
+            for one in waits.of_round(found.state)]
+
+
+def wait_line(one: dict) -> str:
+    """A waiting item in words: `waiting item B1.W1, open: the text`."""
+    return f"waiting item {one['id']}, {one['state']}: {one['text']}"
+
+
+def wait_facts(one: dict) -> list[str]:
+    """What is known of a waiting item beyond its line: the report that declared it,
+    and how it was marked done or the command that marks it."""
+    said = [waits.origin_line(one)]
+    if one["state"] == waits.DONE:
+        said.append(f"done: {one['done_at']} by {one['done_by']}   record: "
+                    f"{one['record']}")
+    else:
+        said.append(f"once done: {one['once_done']}")
+    return said
+
+
+def _wait_lines(listed: list) -> list[str]:
+    lines = [f"waiting items: {len(listed) or 'none'}"]
+    for one in listed:
+        lines.append(f"  {wait_line(one)}")
+        lines += [f"    {line}" for line in wait_facts(one)]
+    return lines
+
+
+def _decisions(found: Shown) -> list:
+    """Every decision of the round, in the order declared, open or ruled; an open one
+    with `to_rule`, the command that records his ruling."""
+    return [{**one.data(),
+             "to_rule": (decisions.rule_line(found.name, one.key)
+                         if one.state == decisions.OPEN else None)}
+            for one in decisions.of_round(found.state)]
+
+
+def decision_line(one: dict) -> str:
+    """A decision in words: `decision B1.M1: major, forecloses, open: the text`."""
+    weight = one["weight"] + (", forecloses" if one["forecloses"] else "")
+    return f"decision {one['id']}: {weight}, {one['state']}: {one['text']}"
+
+
+def decision_facts(one: dict) -> list[str]:
+    """What is known of a decision beyond its line: where it came from, and his
+    ruling or the command that records it."""
+    said = [f"from: {one['from']}   by: {one['by']}   at: {one['at']}"]
+    if one["ruling"] is not None:
+        said.append(f"ruled: {one['chose']} by {one['ruling']}   record: "
+                    f"{one['record']}")
+    else:
+        said.append(f"his to rule: {one['to_rule']}")
+    return said
+
+
+def _decision_lines(listed: list) -> list[str]:
+    lines = [f"decisions: {len(listed) or 'none'}"]
+    for one in listed:
+        lines.append(f"  {decision_line(one)}")
+        lines += [f"    {line}" for line in decision_facts(one)]
+    return lines
+
+
 SECTIONS: tuple[Section, ...] = (
+    Section("builds", _builds, _build_lines),
+    Section("waits", _waits, _wait_lines),
+    Section("decisions", _decisions, _decision_lines),
     Section("questions", _questions, _question_lines),
     Section("rulings", _rulings, _ruling_lines),
     Section("verdicts", _verdicts, verdict_lines),
+    Section("repairs", _repairs, _repair_lines),
     Section("history", _history, _history_lines))
 
 
@@ -342,14 +755,19 @@ def _head(found: Shown) -> dict:
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
     state = found.state
-    at = steps.current(state, name=found.name, on_closed=found.on_closed)
+    settings = own.load() if found.settings is None else found.settings
+    seen = checking.seen_of(state, found.name, settings=settings)
+    at = steps.current(state, name=found.name, on_closed=found.on_closed,
+                       register=found.register, seen=seen)
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "inherits": list(state.inherits),
             "flow": state.flow, "steps": state.steps,
             "step": None if at is None else at.data(),
             "close": (None if state.status != states.OPEN
-                      else {"waits": list(closing.waits(state, on_closed=found.on_closed))}),
+                      else {"waits": list(closing.waits(
+                          state, on_closed=found.on_closed,
+                          ratify=closing.ratify_of(settings, found.name), seen=seen))}),
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
             "trace": tracing.shown(state, found.register),
@@ -461,9 +879,11 @@ def version_lines(listed: list[dict], standing: str | None = None,
 
 
 def _skips(state: states.State) -> list[dict]:
-    """The skips that stand: the ruling, the step, its stage for a step of one stage,
-    the pointer and when; a skip of the questions step with the questions it lets its
-    stage past now, and the ones it listed and lets past no longer."""
+    """The skips that stand, oldest first: the ruling, the step, its stage for a step
+    of one stage, the pointer and when; a skip of the questions step with the
+    questions it lets its stage past now, and the ones it listed and lets past no
+    longer. A skip of a finish action is one of `finish` for its stage, with the
+    `action`'s id; it skips that action, not the step."""
     listed = []
     for skip in skips.live(state):
         one = {"id": skip.id, "step": skip.step, "stage": skip.stage,
@@ -471,12 +891,18 @@ def _skips(state: states.State) -> list[dict]:
         if skip.step == skips.QUESTIONS:
             one.update(covers=list(skip.covers), let_go=list(skip.let_go))
         listed.append(one)
-    return listed
+    for skip in skips.action_live(state):
+        listed.append({"id": skip.id, "step": findings.FINISH, "stage": skip.stage,
+                       "action": skip.action, "record": skip.record, "at": skip.at})
+    return sorted(listed, key=lambda one: one["at"])
 
 
 def skip_line(one: dict) -> str:
     """A skip that stands, in a line: `check for B2, by C3 (record comms:12)`, and
     for the questions step what it lets its stage past."""
+    if "action" in one:
+        return (f"the finish action {one['action']} for {one['stage']}, by {one['id']} "
+                f"(record {one['record']})")
     line = f"{skips.said(one['step'], one['stage'])}, by {one['id']}"
     if "covers" in one:
         line += f", past {', '.join(one['covers']) or 'no question'}"
@@ -487,13 +913,14 @@ def skip_line(one: dict) -> str:
 
 def _ended(state: states.State) -> dict | None:
     """How the round ended, or None while it is open: the status it has since, whose
-    act it was and the pointer it carried, who recorded it and when, and where each
-    question that was open or parked went."""
+    act it was and the pointer it carried, who recorded it and when, where each
+    question that was open or parked went, and the round's numbers as the event that
+    ended it holds them."""
     end = state.ended
     if end is None:
         return None
     return {"how": end.how, "by": end.by, "record": end.record, "actor": end.actor,
-            "at": end.at, "questions": dict(end.questions)}
+            "at": end.at, "questions": dict(end.questions), "numbers": end.numbers}
 
 
 def ended_line(ended: dict) -> str:
@@ -548,6 +975,9 @@ def as_text(found: Shown) -> str:
         lines.append(f"inherits: {', '.join(shown_as['inherits'])}")
     if shown_as["ended"] is not None:
         lines.append(f"ended: {ended_line(shown_as['ended'])}")
+        if shown_as["ended"]["numbers"] is not None:
+            lines += ["numbers:", *(f"  {line}" for line in
+                                    numbers.lines(shown_as["ended"]["numbers"]))]
     if found.notice is not None:
         lines.append(found.notice)
     if found.register_unreadable is not None:
@@ -558,5 +988,7 @@ def as_text(found: Shown) -> str:
     return "\n".join(lines) + "\n"
 
 
-__all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "skip_line", "stage_line", "step_lines", "version_lines", "thread_line", "verdict_lines", "history_of"]
+__all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
+           "ended_line", "skip_line", "stage_line", "build_line", "build_verdict_line",
+           "finding_line", "drift_line", "step_lines", "version_lines", "thread_line",
+           "verdict_lines", "history_of", "repair_of", "repair_line"]

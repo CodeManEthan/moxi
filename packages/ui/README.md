@@ -65,7 +65,7 @@ Home, at `/m/ui/`, shows one main piece and a row per module with something to r
 module takes a seat there by announcing a component with `home_as` (`"main"` or `"row"`)
 and an `order`; a row component reports its line with a `moxi-home-row` event and Home
 draws it. A main piece that opens a panel at the window's right edge sends
-`moxi-home-side` with the panel's width, and Home moves its column aside. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/home.md)
+`moxi-home-side` with the panel's width, and Home moves its column aside. [docs/home.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/home.md)
 has the fields, how rows are ordered and opened, the `needs` and `order` scales and the
 side panel's event.
 
@@ -76,7 +76,7 @@ the right end; under them a leading phrase, a time, what was last said and the r
 and an opened state for content under the row. `/m/ui/client.js` defines it, so a page
 places it with attributes and bundles nothing. It draws nothing for an attribute that is
 unset, and a row opens by its lines only when it carries `toggles`.
-[docs/row.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/row.md)
+[docs/row.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/row.md)
 has every attribute, the slots and the `moxi-row-toggle` event.
 
 ## Confirmed acts in a page
@@ -84,7 +84,7 @@ has every attribute, the slots and the `moxi-row-toggle` event.
 An act the user should confirm a second time, such as stopping a service or removing a
 project, is a confirmed act: it runs at most once, and only after the user says yes on a
 sheet the shell draws. The page declares it in its route table with `confirmed=True` and
-the status route it reports on; [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/loopback.md), "Confirmed acts",
+the status route it reports on; [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/loopback.md), "Confirmed acts",
 has the route's whole shape. For example:
 
 ```python
@@ -213,7 +213,7 @@ too, and names the step: install or update moxi-ui.
 The shell starts each module's page server on the first request for its page, as
 `python -P -m moxi_ui.loopback.serve <module>`, and reads every module's route table with
 `python -P -m moxi_ui.loopback.export <module>...`. Both run on loopback, ui's
-page-server base: [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/docs/loopback.md) has the request check, how a page
+page-server base: [docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/loopback.md) has the request check, how a page
 is declared, and the runner's rules.
 
 ## Testing a module's pages
@@ -250,4 +250,4 @@ and `psutil`, which the shell uses to watch its page servers.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/ui/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/LICENSE).

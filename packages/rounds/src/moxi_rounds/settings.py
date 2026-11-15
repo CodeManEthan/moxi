@@ -11,6 +11,8 @@ what a flow and a project table may hold is checked here.
 A setting is read for a round or for a build. `round_setting` reads one of `ROUND_KEYS`
 for the round's home project; `build_setting` reads one of `BUILD_KEYS` for the build's
 repo. Each takes the project's own table first, then `defaults`.
+The `sweep` keys are this machine's and belong to no project, so they are read as
+they stand (`settings["sweep.armed"]`).
 
 A project's table is `[projects.<key>]`, and its name finds the project the way the
 projects list finds one: ignoring case. So `project_table` gives the same table for
@@ -60,6 +62,9 @@ def check(settings):
     flows.check(settings)
     _check_sitting_at(settings.file, "defaults.sitting_at",
                       settings["defaults.sitting_at"])
+    _check_disposable(settings.file, "defaults.disposable",
+                      settings["defaults.disposable"])
+    _check_grace(settings.file, "sweep.grace_hours", settings["sweep.grace_hours"])
     named: dict[str, str] = {}
     for name, table in settings["projects"].items():
         first = named.setdefault(name.casefold(), name)
@@ -80,8 +85,8 @@ def check(settings):
 ROUND_KEYS = ("flow", "dir", "ratify", "trace", "idle_days", "dormant_days",
               "slice_minutes", "sitting_at")
 #: The keys read for a build, from the build's repo.
-BUILD_KEYS = ("into", "check", "finish", "check_on", "shared_paths", "keep_branch",
-              "lock_ref", "brief")
+BUILD_KEYS = ("into", "check", "ci", "finish", "check_on", "shared_paths", "keep_branch",
+              "lock_ref", "brief", "disposable")
 
 #: What a finish action does.
 MERGE = "merge"
@@ -93,7 +98,7 @@ DEFAULT_FINISH = ({"do": MERGE},)
 #: A project's own keys, which `defaults` does not hold, each with what it reads when the
 #: project's table leaves it out. No `into` means the branch checked out at the repo's
 #: root, and no `lock_ref` rounds' own name for the lock.
-_PROJECT_ONLY = {"into": None, "check": None, "finish": DEFAULT_FINISH,
+_PROJECT_ONLY = {"into": None, "check": None, "ci": None, "finish": DEFAULT_FINISH,
                  "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": ()}
 
 
@@ -161,8 +166,16 @@ def _check_project(file, name, table) -> None:
             _PROJECT_CHECKS[other](file, where, value)
         elif other != "dir":
             _check_as_default(file, where, other, value)
+    if "ci" in table and "check" not in table:
+        raise ConfigError(
+            file, f"{key}.ci", "is set in a project that declares no check, and the full "
+            "check is the way past a CI run that is red or absent",
+            f'declare the full check too: check = {{ command = "...", timeout_s = N }} '
+            f"in [{key}]")
     if "sitting_at" in table:
         _check_sitting_at(file, f"{key}.sitting_at", table["sitting_at"])
+    if "disposable" in table:
+        _check_disposable(file, f"{key}.disposable", table["disposable"])
     if "dir" in table:
         _check_dir(file, f"{key}.dir", name, table["dir"])
 
@@ -172,6 +185,9 @@ def _check_as_default(file, where, name, value) -> None:
     that key."""
     declared = schema().keys[f"defaults.{name}"]
     kind = declared.type
+    if kind == "list":
+        _check_strings(file, where, value)
+        return
     if kind == "enum":
         if value not in declared.values:
             raise ConfigError(file, where, f"is {value!r}, which it cannot be",
@@ -189,6 +205,50 @@ def _check_sitting_at(file, where, value) -> None:
         raise ConfigError(file, where, f"is {value}, below 0",
                           "give the count of open questions at which a sitting is "
                           "suggested, or 0 to suggest none")
+
+
+def _check_grace(file, where, value) -> None:
+    if value < 1:
+        raise ConfigError(file, where, f"is {value}, below 1",
+                          "give the hours nothing in a leftover folder must have changed "
+                          "before the sweep takes it, 1 or more")
+
+
+def _check_disposable(file, where, value) -> None:
+    """Refuse a `disposable` entry that is empty, holds a path separator, or would match
+    every name: one with no character outside `*`, `?` and bracket expressions."""
+    for entry in value:
+        if not entry or "/" in entry or "\\" in entry:
+            raise ConfigError(file, where, f"holds {entry!r}, which is not a name glob",
+                              "give each entry as a glob for one part of a path, such "
+                              "as .venv or *.pyc")
+        if not _fixed_part(entry):
+            raise ConfigError(file, where, f"holds {entry!r}, which matches every name, "
+                              "so no ignored file would keep a worktree",
+                              "name what may be lost, such as .venv or *.pyc")
+
+
+def _fixed_part(glob: str) -> bool:
+    """Whether `glob` holds a character outside `*`, `?` and bracket expressions, read
+    as `fnmatch` reads them."""
+    at = 0
+    while at < len(glob):
+        char = glob[at]
+        if char in "*?":
+            at += 1
+            continue
+        if char == "[":
+            end = at + 1
+            if end < len(glob) and glob[end] == "!":
+                end += 1
+            if end < len(glob) and glob[end] == "]":
+                end += 1
+            end = glob.find("]", end)
+            if end != -1:
+                at = end + 1
+                continue
+        return True
+    return False
 
 
 def _check_dir(file, where, project, value) -> None:
@@ -302,6 +362,58 @@ def _check_check(file, where, value) -> None:
     flows.check_timeout(file, f"{where}.timeout_s", value.get("timeout_s"))
 
 
+#: The keys of `ci`.
+_CI_KEYS = ("workflows", "local", "remote", "status", "ids", "status_timeout_s")
+
+
+def _check_ci(file, where, value) -> None:
+    """CI in place of the full check: the workflow files, the local part, and the
+    commands that read a commit's runs."""
+    from pathlib import PurePosixPath
+
+    if not isinstance(value, dict):
+        raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a table",
+                          'write it as { workflows = [".github/workflows/ci.yml"], '
+                          'local = "none" }')
+    for other in value:
+        if other not in _CI_KEYS:
+            raise ConfigError(file, f"{where}.{other}", "is not a key of ci",
+                              "remove it; ci takes " + ", ".join(_CI_KEYS))
+    workflows = value.get("workflows")
+    if not isinstance(workflows, list) or not workflows:
+        raise ConfigError(file, f"{where}.workflows",
+                          "is missing" if workflows is None else "names no workflow",
+                          "name each workflow by its file's path in the repo: "
+                          'workflows = [".github/workflows/ci.yml"]')
+    for path in workflows:
+        parts = PurePosixPath(path).parts if isinstance(path, str) else ()
+        if (not isinstance(path, str) or not path.strip() or path.startswith(("/", "\\"))
+                or ".." in parts or ":" in path.split("/")[0]):
+            raise ConfigError(file, f"{where}.workflows",
+                              f"names {path!r}, which is not a path inside the repo",
+                              "give each workflow's path relative to the repo's root, "
+                              "with no .. part")
+    local = value.get("local")
+    if local is None:
+        raise ConfigError(file, f"{where}.local", "is missing",
+                          'declare the short local run of what CI can\'t do: local = '
+                          '{ command = "...", timeout_s = N }, or local = "none" where '
+                          "CI does all of it")
+    if local != "none":
+        if not isinstance(local, dict):
+            raise ConfigError(file, f"{where}.local",
+                              f"is {local!r}, neither a command table nor \"none\"",
+                              'write local = { command = "...", timeout_s = N } or '
+                              'local = "none"')
+        _check_check(file, f"{where}.local", local)
+    if "remote" in value:
+        _check_string(file, f"{where}.remote", value["remote"])
+    for key in ("status", "ids"):
+        if key in value:
+            flows.check_argv(file, f"{where}.{key}", value[key])
+    flows.check_timeout(file, f"{where}.status_timeout_s", value.get("status_timeout_s"))
+
+
 def _check_finish(file, where, value) -> None:
     """The repo's finish actions: each one well formed, and no two under one id."""
     if not isinstance(value, list):
@@ -351,7 +463,8 @@ def _check_finish(file, where, value) -> None:
 _ACTION_KEYS = {MERGE: ("do", "id"), PUSH: ("do", "id", "remote"),
                 COMMAND: ("do", "id", "argv", "timeout_s", "repeat")}
 
-_PROJECT_CHECKS = {"into": _check_string, "check": _check_check, "finish": _check_finish,
+_PROJECT_CHECKS = {"into": _check_string, "check": _check_check, "ci": _check_ci,
+                   "finish": _check_finish,
                    "shared_paths": _check_strings, "keep_branch": _check_bool,
                    "lock_ref": _check_string, "brief": _check_strings}
 

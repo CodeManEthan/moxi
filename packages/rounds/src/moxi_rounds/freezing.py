@@ -59,6 +59,12 @@ where it does not, the event says the check was not asked for. A version that fa
 is frozen all the same: the result is a record, and what waits on it reads it there.
 The setting is read at the freezing, so a change to it reaches the next version and
 no version already frozen.
+
+**Slices over the limit.** A freezing records each stage's slices as the block gives
+them, and says which of the block's slices are given more minutes than the round's
+project allows one (`slice_minutes`, read at the freezing): `Frozen.oversized`. That is
+a warning and refuses nothing: whether each slice is one piece is the design pass's
+judgment, and a brief for a slice over the limit is refused when it is sized.
 """
 
 from __future__ import annotations
@@ -148,6 +154,20 @@ class Frozen:
     standing: versions.Standing | None = None
     trace: dict | None = None
     failed: tuple[tuple[Callable, Exception], ...] = ()
+    #: Each slice of the block over the limit, as `{"stage", "slice", "minutes"}`.
+    oversized: tuple[dict, ...] = ()
+    #: The limit of one slice's minutes, as the freezing read it.
+    slice_minutes: int | None = None
+
+
+def oversized(declared: dict, limit: int) -> tuple[dict, ...]:
+    """Each slice of a block as an event declares it whose minutes are over `limit`,
+    in the block's order."""
+    return tuple({"stage": stage.get("id"), "slice": piece.get("id"),
+                  "minutes": piece.get("minutes")}
+                 for stage in declared.get("stage") or ()
+                 for piece in stage.get("slices") or ()
+                 if isinstance(piece.get("minutes"), int) and piece["minutes"] > limit)
 
 
 # -- what a block declares ---------------------------------------------------------------
@@ -561,12 +581,15 @@ def freeze(name: str, *, by: str, records_only: bool = False,
         raise NoRound(name) from None
     number, target = written.result
     after = states.fold(written.round_events)
+    limit = own.round_setting(settings, home.project, "slice_minutes")
     return Frozen(name=name, version=number, file=target,
                   digest=written.events[0]["digest"], plan=planned(written.view),
                   event=written.events[0],
                   standing=versions.standing(after),
                   trace=tracing.shown(after, written.view.project_state),
-                  failed=written.failed)
+                  failed=written.failed,
+                  oversized=oversized(written.events[0].get("declared") or {}, limit),
+                  slice_minutes=limit)
 
 
-__all__ = ["DESIGN", "CHECKS", "KeptOff", "Plan", "Frozen", "plan", "freeze"]
+__all__ = ["DESIGN", "CHECKS", "KeptOff", "Plan", "Frozen", "oversized", "plan", "freeze"]

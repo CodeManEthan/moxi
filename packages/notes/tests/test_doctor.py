@@ -248,8 +248,15 @@ def test_allowlist_fails_closed_for_a_separate_git_dir(tmp_path):
     sh(tmp_path, "init", "-q", f"--separate-git-dir={tmp_path / 'store' / 'notes.git'}",
        str(root))
     assert setup.setup(out=io.StringIO()) == 0
+    # With no private file there is nothing to refuse: secrets reads a missing file as
+    # no lines wherever it would be, so only the public file's allowances apply.
+    assert rows()["allowlist"].state == "ok"
+    private = tmp_path / "store" / "notes.git" / "secrets-allow-private"
+    private.write_text(allow_line("*", "private-names/private-name", "text:quillon"),
+                       encoding="utf-8")
     row = rows()["allowlist"]
     assert row.state == "fail" and "is not a folder named .git" in row.detail
+    assert str(private) in row.detail
 
 
 # -- topics -------------------------------------------------------------------------------

@@ -1,0 +1,49 @@
+# The public scan, on every push to any branch and every tag: `moxi publishing scan --ci`
+# reads the whole tree at the pushed commit, every file as git stores it whatever
+# attributes say, and every path name; it also reads the message and every header of each
+# commit the push brings, and a pushed tag's message and tagger. It runs the credentials
+# set with .secrets-allow and the provenance rules with .residue-allow. The private names
+# list exists only on a contributor's machine, so it is not read here.
+# A hit fails this check; it blocks nothing.
+# Written by `moxi publishing workflows write`; the doctor warns when this file differs.
+# Actions are pinned to a release commit, with its version beside it.
+
+name: publishing
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      # The commits the push brings are before..after. A new ref has no before (all
+      # zeros), and a forced push's before may be gone from the history: then they are
+      # the commits not on the default branch.
+      - name: scan the tree and the commits the push brings
+        env:
+          BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          rev="$GITHUB_SHA"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then rev="$GITHUB_REF"; fi
+          base="$BEFORE"
+          if [ -z "$base" ] || [ -z "${base//0/}" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="origin/$DEFAULT_BRANCH"
+          fi
+          uv run --locked moxi publishing scan --ci --rev "$rev" --from "$base"

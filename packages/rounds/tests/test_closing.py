@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from moxi_rounds import (api, asking, closing, dropping, freezing, holds, log, opening,
-                         ruling, state, verdicts)
+from moxi_rounds import (api, asking, closing, dropping, freezing, holds, log, numbers,
+                         opening, rendering, ruling, state, verdicts)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
 
@@ -16,7 +16,6 @@ ROUND = "proj-a/a-round"
 ASKED = "Do agent-read times follow the settings?"
 PTR = "comms:1234567"
 SHOWN = "comms:1234599"
-BUILDS = "a finished stage, which this version does not build, so the round does not close in it"
 
 FLOWS = """\
     [flows.paper]
@@ -140,14 +139,17 @@ def test_a_round_that_builds_nothing_closes_on_the_verdict_that_verifies_its_des
     assert status(round_dir) == "closed"
 
 
-def test_the_closing_event_is_the_verb_s_own_and_holds_nothing_more(round_dir):
+def test_the_closing_event_is_the_verb_s_own_and_holds_the_round_s_numbers(round_dir):
     fold(round_dir)
     verdict(round_dir)
 
     recorded, closed = events(round_dir)[-2:]
 
     assert closed == {"v": 1, "n": recorded["n"] + 1, "at": closed["at"],
-                      "actor": "critic", "type": "round.closed"}
+                      "actor": "critic", "type": "round.closed",
+                      "numbers": numbers.of(state.fold(events(round_dir)[:-1]),
+                                            ended_at=closed["at"])}
+    assert closed["numbers"]["design_passes"] == 1 and closed["numbers"]["folds"] == 1
 
 
 def test_a_verdict_that_sends_the_design_back_closes_nothing(round_dir):
@@ -217,7 +219,7 @@ def test_a_round_whose_flow_ends_in_a_retro_closes_on_the_skip_of_it(opened):
     round_dir = opened("review")
     fold(round_dir)
     assert status(round_dir) == "open"
-    assert waits(round_dir) == ("step retro, not-built",)
+    assert waits(round_dir) == ("step retro, ready",)
 
     rule("skip:retro")
 
@@ -239,10 +241,11 @@ def test_a_skipped_retro_reads_the_same_in_every_place_that_shows_it(opened, cap
     round_dir = opened("review")
     fold(round_dir, question("Q1", blocks='"none"'))
     before = run(capsys, "show", ROUND)
-    assert "step: retro, not-built\n" in before
-    assert "close waits for: step retro, not-built; question Q1, open\n" in before
-    assert run(capsys, "next", ROUND).splitlines() == [
-        f"round {ROUND}   flow review   step retro   not built in this version"]
+    # Not due while the question holds the close.
+    assert "step: retro, not-due\n" in before
+    assert "close waits for: step retro, not-due; question Q1, open\n" in before
+    assert run(capsys, "next", ROUND).splitlines()[0] == (
+        f"round {ROUND}   flow review   step retro   by worker")
 
     rule("skip:retro")
 
@@ -266,8 +269,8 @@ def test_a_skip_of_the_retro_taken_back_keeps_the_round_open_again(opened, capsy
 
     rule("revoke:C1")
 
-    assert waits(round_dir) == ("step retro, not-built", "question Q1, open")
-    assert "step: retro, not-built\n" in run(capsys, "show", ROUND)
+    assert waits(round_dir) == ("step retro, not-due", "question Q1, open")
+    assert "step: retro, not-due\n" in run(capsys, "show", ROUND)
     rule("Q1", text="They do.")
     assert status(round_dir) == "open"
 
@@ -294,18 +297,99 @@ def test_a_stage_in_the_plan_keeps_a_round_that_builds_nothing_open(round_dir):
 
 # -- a flow that builds ------------------------------------------------------------------
 
-@pytest.mark.parametrize("flow", ["full", "small", "fix"])
-def test_a_round_whose_flow_builds_does_not_close(opened, capsys, flow):
-    round_dir = opened(flow)
-    if flow != "fix":
-        fold(round_dir)
-    if flow == "full":
-        verdict(round_dir)
+BASE = "0" * 40
+TIP = "1" * 40
 
-    assert waits(round_dir) == (BUILDS,)
-    assert status(round_dir) == "open"
-    assert "round.closed" not in types(round_dir)
-    assert f"close waits for: {BUILDS}\n" in run(capsys, "show", ROUND)
+
+def built(round_dir, *, finished=True, decisions=(), report="build"):
+    """B1 declared, commissioned and, when `finished`, finished, through the log, with
+    a report of kind `report` (none when None) listing `decisions` (`(id, weight)`)."""
+    path = log.round_log(round_dir)
+    log.append(path, "stage.declared",
+               {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+               by="planner")
+    log.append(path, "build.commissioned",
+               {"stage": "B1", "repo": "proj-a", "branch": "work", "base": BASE,
+                "target": "main", "builder": "coder", "build": "0123456789abcdef"},
+               by="planner")
+    listed = [{"id": id_, "text": "a choice", "weight": weight, "forecloses": False}
+              for id_, weight in decisions]
+    if report == "build":
+        log.append(path, "verdict.recorded",
+                   {"kind": "build", "verdict": "publishable", "pass": "full",
+                    "stage": "B1", "head": TIP, "by": "critic", "decisions": listed},
+                   by="critic")
+    elif report == "majors":
+        log.append(path, "verdict.recorded",
+                   {"kind": "majors", "stages": ["B1"], "by": "critic",
+                    "decisions": [{**one, "stage": "B1"} for one in listed]},
+                   by="critic")
+    if finished:
+        log.append(path, "finish.done", {"stage": "B1", "tip": TIP}, by="coder")
+
+
+def test_a_round_that_builds_waits_for_its_open_build(opened):
+    round_dir = opened("fix")
+    built(round_dir, finished=False)
+    assert {"stage B1, not finished", "build of B1, open"} <= set(waits(round_dir))
+
+
+def test_a_round_that_builds_with_nothing_planned_waits_for_a_finished_stage(opened):
+    round_dir = opened("fix")
+    assert "a finished stage: the plan holds none" in waits(round_dir)
+
+
+def test_a_finished_build_whose_report_declares_no_decision_leaves_nothing_to_wait_for(
+        opened):
+    round_dir = opened("fix")
+    built(round_dir)
+    assert waits(round_dir) == ()
+
+
+@pytest.mark.parametrize("report", [None, "majors"])
+def test_a_finished_build_with_no_report_declaring_its_decisions_holds_the_close(
+        opened, report):
+    round_dir = opened("fix")
+    built(round_dir, report=report)
+    if report is None:
+        assert waits(round_dir) == ("a report that declares the decisions of B1's build: a "
+                                 "build report, or a majors report naming B1",)
+        assert closing.waits(folded(round_dir), ratify="off") == ()
+    else:
+        assert waits(round_dir) == ()
+
+
+def test_an_unruled_major_decision_holds_the_close_and_its_ruling_closes_the_round(
+        opened):
+    round_dir = opened("fix")
+    built(round_dir, decisions=[("M1", "major"), ("M2", "minor")])
+    assert waits(round_dir) == ("decision B1.M1, major and not yet ruled",)
+
+    rule("B1.M1=accept")
+
+    assert status(round_dir) == "closed"
+
+
+@pytest.mark.parametrize("past", ["off", "skip"])
+def test_a_ratify_setting_of_off_or_a_skip_of_ratify_lets_an_unruled_major_past(
+        opened, write_config, past):
+    round_dir = opened("fix")
+    built(round_dir, decisions=[("M1", "major")])
+    if past == "off":
+        write_config(FLOWS + '\n[defaults]\nratify = "off"\n')
+        assert closing.waits(folded(round_dir), ratify="off") == ()
+        # The next write reads the setting and closes the round.
+        rule(text="a placeholder ruling")
+    else:
+        rule("skip:ratify")
+    assert status(round_dir) == "closed"
+
+
+def test_a_round_with_a_retro_step_waits_for_it_after_its_build(opened):
+    round_dir = opened("small")
+    fold(round_dir)
+    built(round_dir)
+    assert waits(round_dir) == ("step retro, ready",)
 
 
 # -- the verb whose write closes a round says so -----------------------------------------
@@ -414,7 +498,7 @@ def test_a_close_that_failed_is_reported_and_made_by_the_next_write(
         round_dir, monkeypatch, capsys):
     fold(round_dir)
     with monkeypatch.context() as patched:
-        def fails(_state):
+        def fails(_state, **_given):
             raise OSError("no room")
         patched.setattr(closing, "entry", fails)
         made = rule("skip:verify-design")
@@ -434,7 +518,7 @@ def test_a_verb_stopped_before_the_close_leaves_it_to_the_next_write(
         round_dir, monkeypatch, capsys):
     fold(round_dir)
     with monkeypatch.context() as patched:
-        def stops(_state):
+        def stops(_state, **_given):
             raise KeyboardInterrupt
         patched.setattr(closing, "entry", stops)
         with pytest.raises(KeyboardInterrupt):
@@ -450,7 +534,7 @@ def test_a_write_that_appends_nothing_still_makes_a_close_that_stopped_short(
         round_dir, monkeypatch, capsys):
     fold(round_dir)
     with monkeypatch.context() as patched:
-        def fails(_state):
+        def fails(_state, **_given):
             raise OSError("no room")
         patched.setattr(closing, "entry", fails)
         rule("skip:verify-design")
@@ -474,7 +558,7 @@ def test_every_step_of_the_flow_keeps_a_round_open_not_only_the_design_s(
     verdict(round_dir)
 
     assert types(round_dir)[-1] == "verdict.recorded" and status(round_dir) == "open"
-    assert waits(round_dir) == ("step retro, not-built",)
+    assert waits(round_dir) == ("step retro, ready",)
     rule("skip:retro")
     assert status(round_dir) == "closed"
 
@@ -512,7 +596,7 @@ def test_a_write_to_a_closed_round_does_not_close_it_again(closed, capsys):
 def test_a_dropped_round_is_not_closed_by_a_later_write(round_dir, monkeypatch, capsys):
     fold(round_dir)
     with monkeypatch.context() as patched:
-        patched.setattr(closing, "entry", lambda _state: None)
+        patched.setattr(closing, "entry", lambda _state, **_given: None)
         rule("skip:verify-design")
         dropping.drop(ROUND, by="operator", record=PTR, run_by="planner")
 
@@ -534,7 +618,9 @@ def test_a_closed_round_is_shown_as_closed_with_when(closed, capsys):
     assert found["status"] == "closed" and found["close"] is None
     assert found["step"] is None
     assert found["ended"] == {"how": "closed", "by": None, "record": None,
-                              "actor": "planner", "at": at, "questions": {}}
+                              "actor": "planner", "at": at, "questions": {},
+                              "numbers": events(closed)[-1]["numbers"]}
+    assert "\nnumbers:\n  design: passes 0, folds 1 (records only 0)" in shown
     assert shown.splitlines()[-1].endswith("  planner  round.closed")
 
 
@@ -548,8 +634,10 @@ def test_a_closed_round_is_listed_with_the_ended_ones(closed, capsys):
     assert api.rounds()["rounds"] == []
     (found,) = api.rounds(status="closed")["rounds"]
     assert (found["name"], found["status"], found["step"]) == (ROUND, "closed", None)
-    assert found["ended"] == {"how": "closed", "by": None, "record": None, "at": at}
+    assert found["ended"] == {"how": "closed", "by": None, "record": None, "at": at,
+                              "numbers": events(closed)[-1]["numbers"]}
     assert api.round_data(ROUND)["close"] is None
+    assert api.round_data(ROUND)["ended"]["numbers"] == events(closed)[-1]["numbers"]
 
 
 def test_a_closed_round_s_note_and_its_export_say_so(closed, capsys):
@@ -653,10 +741,24 @@ def test_what_a_close_waits_for_is_read_from_the_state_alone(round_dir):
 
 def test_a_part_added_to_the_condition_is_asked_with_the_rest(round_dir, monkeypatch):
     fold(round_dir)
-    monkeypatch.setattr(closing, "CONDITIONS",
-                        (*closing.CONDITIONS, lambda _state, _closed: iter(["a placeholder"])))
+    def placeholder(_state, _closed, _ratify):
+        return iter(["a placeholder"])
+
+    monkeypatch.setattr(closing, "CONDITIONS", (*closing.CONDITIONS, placeholder))
 
     rule("skip:verify-design")
 
     assert waits(round_dir) == ("a placeholder",)
     assert status(round_dir) == "open"
+
+
+def test_a_closed_round_s_numbers_are_written_beside_its_note(closed):
+    closing_event = events(closed)[-1]
+
+    text = (closed / rendering.RETRO_FILE).read_text(encoding="utf-8")
+
+    assert "\nstatus: closed\n" in text
+    assert f"\n- ended: closed at {closing_event['at']}\n" in text
+    assert "\n- skips 1, step-ups 0, repairs 0, corrections 0, dropped builds 0, " \
+           "cleared locks 0\n" in text
+    assert text == rendering.retro("proj-a", "a-round", events(closed))

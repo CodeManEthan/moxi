@@ -34,22 +34,31 @@ it: `holding` gives the rulings that hold up one stage. A ruling that replaces a
 is such a ruling. A row gone stale holds up nothing by itself; `stale` lists the rows
 as they read now.
 
-**What a build is given.** `given` lists the rulings the current version cites for one
-stage, each as it stands now: a cited ruling that was replaced is given as the ruling
-that stands in its place, and one that was taken back is not given.
+**What a build is given.** `given` lists the rulings a build of one stage follows, each
+as it stands now, and `follows` says whether one ruling is among them, standing or not;
+the commission block prints the first, and what `next` tells an open build of later
+rulings reads the second, so the two never disagree. In a round whose flow has a
+design step they are the rulings the current version cites for the stage: a cited
+ruling that was replaced is given as the ruling that stands in its place, and one that
+was taken back is not given. In a round with no design step, or one the operator
+skipped, there are no rows to read, so they are the round's own rulings that say what
+is built and name every stage or this one; the project's standing rulings reach such a
+build only as the lead's scope warning.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 
-from . import corrections, design_block, pointers, questions, ruling, versions
+from . import (corrections, design_block, flows, pointers, questions, ruling, skips,
+               versions)
 from . import state as states
 
 _STANDING = "S"
 _ROUND = "C"
 _EVERY = ruling.EVERY_STAGE
+_DESIGN = "design"
 
 
 @dataclass(frozen=True)
@@ -287,13 +296,45 @@ def unrowed(state: states.State, stage: str) -> tuple[states.Ruling, ...]:
                  and applies_to(one, stage))
 
 
-def holding(state: states.State, stage: str) -> tuple[states.Ruling, ...]:
+def holding(state: states.State, stage: str,
+            register: states.State | None = None) -> tuple[states.Ruling, ...]:
     """The rulings that hold up the stage `stage` until a version of the design cites
-    them: what `unrowed` gives, where the check was asked for when the current
-    version was frozen, and nothing where it was not. A ruling recorded after the
-    freezing is such a ruling, a replacement among them; a ruling that only changed a
-    record is never one, and a row gone stale holds up nothing."""
-    return unrowed(state, stage) if is_asked(state) else ()
+    them, where the check was asked for when the current version was frozen, and
+    nothing where it was not: each id of the trace set as it stands now that has no
+    row in the current version and applies to the stage. A round's ruling applies
+    when it names every stage or this one; a standing ruling when it has no scope or
+    its scope names the repo the stage builds in. So a ruling recorded after the
+    freezing holds, and so does one that replaced a ruling the round was opened with.
+    A ruling that only changed a record is never one, and a row gone stale holds up
+    nothing by itself.
+
+    `register` is the state of the project's log; with None, only the round's own
+    rulings are read."""
+    if not is_asked(state):
+        return ()
+    cited = {one["id"] for one in rows(state)}
+    found = []
+    for ruling_id in trace_set(state, register):
+        if ruling_id in cited:
+            continue
+        one = _find(state, register, ruling_id)
+        if one is None:
+            continue
+        if ruling_id.startswith(_STANDING):
+            if scope_reaches(one, state, stage):
+                found.append(one)
+        elif applies_to(one, stage):
+            found.append(one)
+    return tuple(found)
+
+
+def scope_reaches(one: states.Ruling, state: states.State, stage: str) -> bool:
+    """Whether the repos of the scope of `one`, a standing ruling, name the repo the
+    stage builds in: always, for a ruling with no scope."""
+    if not one.scope:
+        return True
+    repo = next((had.repo for had in state.stages if had.id == stage), None)
+    return repo is not None and any(part.get("repo") == repo for part in one.scope)
 
 
 # -- what is shown ------------------------------------------------------------------------
@@ -354,21 +395,16 @@ class Given:
     replaces: str | None = None
 
 
-def given(state: states.State, register: states.State | None,
-          stage: str) -> tuple[Given, ...]:
-    """The rulings a build of `stage` is given, in the order the current version's
-    rows cite them: each standing ruling and ruling of the round with a `carried` or
-    `amended` row that names no stage or names this one.
+def designed(state: states.State) -> bool:
+    """Whether the rulings a build follows are read from a design's rows: whether the
+    round's flow has a design step the operator did not skip."""
+    return flows.has(state.steps, _DESIGN) and not skips.is_skipped(state, _DESIGN)
 
-    Each is given as it stands now. A cited ruling that was replaced is given as the
-    ruling that stands in its place, with the id the row cites, and only when that
-    ruling's own scope does not leave the stage out: a round's ruling names every
-    stage or this one, a standing ruling names no repo or the repo the stage builds
-    in. A cited ruling that was taken back is not given, and neither is one whose
-    replacement was.
-    """
-    found: list[Given] = []
-    seen: set[str] = set()
+
+def _cited(state: states.State, register: states.State | None,
+           stage: str) -> Iterator[states.Ruling]:
+    """The rulings that say what is built and that a `carried` or `amended` row of the
+    current version cites for `stage`, naming no stage or this one, in row order."""
     for one in rows(state):
         if one.get("as") not in (design_block.CARRIED, design_block.AMENDED):
             continue
@@ -376,8 +412,32 @@ def given(state: states.State, register: states.State | None,
         if named and stage not in named:
             continue
         cited = _find(state, register, one["id"])
-        if cited is None or cited.kind != ruling.SUBSTANCE:
-            continue
+        if cited is not None and cited.kind == ruling.SUBSTANCE:
+            yield cited
+
+
+def given(state: states.State, register: states.State | None,
+          stage: str) -> tuple[Given, ...]:
+    """The rulings a build of `stage` follows, each as it stands now.
+
+    With a design step: in the order the current version's rows cite them, each
+    standing ruling and ruling of the round with a `carried` or `amended` row that
+    names no stage or names this one. A cited ruling that was replaced is given as the
+    ruling that stands in its place, with the id the row cites, and only when that
+    ruling's own scope does not leave the stage out: a round's ruling names every
+    stage or this one, a standing ruling names no repo or the repo the stage builds
+    in. A cited ruling that was taken back is not given, and neither is one whose
+    replacement was.
+
+    With no design step, or a skipped one: the round's rulings that say what is built, stand, and
+    name every stage or this one, oldest first. No standing ruling is given.
+    """
+    if not designed(state):
+        return tuple(Given(one) for one in corrections.live(state.rulings)
+                     if one.kind == ruling.SUBSTANCE and applies_to(one, stage))
+    found: list[Given] = []
+    seen: set[str] = set()
+    for cited in _cited(state, register, stage):
         last = _last(state, register, cited)
         if not corrections.stands(last) or last.id in seen:
             continue
@@ -388,16 +448,48 @@ def given(state: states.State, register: states.State | None,
     return tuple(found)
 
 
+def follows(state: states.State, register: states.State | None,
+            one: states.Ruling, stage: str) -> bool:
+    """Whether `one` is among the rulings a build of `stage` follows as `given` reads
+    them, whether or not it stands now: with a design step, a ruling a row cites
+    for the stage, or one that replaced it, directly or through others, and whose own
+    scope reaches the stage; with none, a ruling of the round that says what is built
+    and names every stage or this one."""
+    if one.id is None or one.kind != ruling.SUBSTANCE:
+        return False
+    if not designed(state):
+        return one.id.startswith(_ROUND) and applies_to(one, stage)
+    for cited in _cited(state, register, stage):
+        if cited.id == one.id:
+            return True
+        if _replaced_into(state, register, cited, one.id):
+            return _reaches(one, state, stage)
+    return False
+
+
+def _replaced_into(state: states.State, register: states.State | None,
+                   cited: states.Ruling, ruling_id: str) -> bool:
+    """Whether the ruling `ruling_id` replaced `cited`, directly or through others."""
+    seen = {cited.id}
+    while cited.replaced_by is not None and cited.replaced_by not in seen:
+        if cited.replaced_by == ruling_id:
+            return True
+        later = _find(state, register, cited.replaced_by)
+        if later is None:
+            return False
+        seen.add(later.id)
+        cited = later
+    return False
+
+
 def _reaches(one: states.Ruling, state: states.State, stage: str) -> bool:
     """Whether the scope of `one`, a ruling that replaced a cited one, names `stage`."""
     if one.stages is not None:
         return applies_to(one, stage)
-    if not one.scope:
-        return True
-    repo = next((had.repo for had in state.stages if had.id == stage), None)
-    return repo is not None and any(part.get("repo") == repo for part in one.scope)
+    return scope_reaches(one, state, stage)
 
 
 __all__ = ["Stale", "Result", "Given", "NOT_ASKED", "trace_set", "rows", "check",
            "stale", "stale_data", "recorded", "passes", "is_asked", "applies_to",
-           "unrowed", "holding", "given", "shown", "lines", "stale_line"]
+           "unrowed", "holding", "scope_reaches", "designed", "given", "follows",
+           "shown", "lines", "stale_line"]

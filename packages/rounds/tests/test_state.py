@@ -63,6 +63,12 @@ def test_the_history_is_every_event_in_order():
     assert state.fold(log_events).history == log_events
 
 
+def test_folding_gives_after_each_event_the_state_that_events_prefix_folds_to():
+    events_ = [opened(), event(2, "round.closed", numbers={})]
+    seen = [copy.deepcopy(one) for one in state.folding(events_)]
+    assert seen == [state.fold(events_[:1]), state.fold(events_)]
+
+
 def test_the_same_log_folds_to_the_same_state():
     log_events = [opened(), event(2, "ruling.recorded", id="C1", text="a ruling",
                                   record="comms:12")]
@@ -880,8 +886,10 @@ def test_a_verdict_joins_the_verdicts_and_changes_nothing_else():
     before, after = state.fold(start), state.fold([*start, later])
 
     assert after.verdicts == [state.Verdict(
-        n=4, kind="design", pass_="full", verdict="fold-first", design=1,
-        model="a-model", by="critic", report="report.md", sha256="0" * 64,
+        n=4, kind="design", pass_="full", verdict="fold-first", step=None, design=1,
+        stage=None,
+        head=None, merge_base=None, model="a-model", by="critic", report="report.md",
+        sha256="0" * 64,
         findings=(found,), flags=("a-flag",), applied=(), not_applied=(),
         actor="planner", at=AT)]
     assert dataclasses.replace(after, verdicts=[], history=before.history) == before
