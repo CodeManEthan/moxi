@@ -44,6 +44,12 @@ block took away, and the fold takes it out from that event: a question is withdr
 question holds up fewer stages, a stage waits for fewer. A stage it takes out of the
 plan keeps its record, as one the operator rules out does.
 
+A reread of a recorded report is one event too, and it only adds: the findings,
+waiting items and decisions it found in the report's block and the verdict's record
+lacked join that verdict's lists, at the verdict's place in the log. `with_rereads`
+gives the history with each verdict's event as its rereads left it, for every reader
+of a verdict's lists.
+
 A round that was dropped is `DROPPED` from that event on, and the event is the whole of
 the drop in the round's log: it says who dropped the round, and where each question
 that was open or parked went, which the fold applies to the question as a change. A
@@ -378,6 +384,9 @@ class State:
     verdicts: list[Verdict] = field(default_factory=list)
     #: The lead's decisions on threads of the design's verification, oldest first.
     threads: list[Decided] = field(default_factory=list)
+    #: What rereads added to the lists of a verdict, by the line of its event: each
+    #: list's name, and the entries added to it, oldest first.
+    reread: dict[int, dict[str, list[dict]]] = field(default_factory=dict)
     #: Every event, oldest first.
     history: list[dict] = field(default_factory=list)
 
@@ -817,6 +826,60 @@ def _thread_decided(state: State, event: dict) -> None:
         actor=event["actor"], at=event["at"]))
 
 
+#: What a repair re-derives: the base of an open build, or the record of a verdict.
+BASE = "base"
+REPORT = "report"
+#: The lists of a verdict's event a reread may add to.
+REREAD_LISTS = ("findings", "waits", "decisions")
+
+
+def _repair(state: State, event: dict) -> None:
+    """A reread adds to the lists of the verdict it names the entries the record
+    lacked, an id the list holds already being kept as it is. A repair of a base is
+    read where builds are (`builds.builds`)."""
+    if event.get("what") != REPORT:
+        return
+    n = event.get("verdict")
+    at = next((i for i, one in enumerate(state.verdicts) if one.n == n), None)
+    recorded = next((one for one in state.history
+                     if one.get("type") == "verdict.recorded" and one.get("n") == n), None)
+    fields = event.get("fields")
+    if at is None or recorded is None or not isinstance(fields, dict):
+        return
+    added = state.reread.setdefault(n, {})
+    for name in REREAD_LISTS:
+        change = fields.get(name)
+        now = change.get("now") if isinstance(change, dict) else None
+        have = {one.get("id") for one in
+                [*(recorded.get(name) or ()), *added.get(name, ())]
+                if isinstance(one, dict)}
+        for one in now if isinstance(now, list) else ():
+            if isinstance(one, dict) and isinstance(one.get("id"), str) \
+                    and one["id"] not in have:
+                added.setdefault(name, []).append(copy.deepcopy(one))
+                have.add(one["id"])
+    findings = added.get("findings", [])
+    if findings:
+        verdict = state.verdicts[at]
+        known = {one.get("id") for one in verdict.findings}
+        state.verdicts[at] = replace(verdict, findings=verdict.findings + tuple(
+            copy.deepcopy(one) for one in findings if one.get("id") not in known))
+
+
+def with_rereads(state: State) -> Iterable[dict]:
+    """Every event of the history, oldest first, each verdict's event with what
+    rereads added to its lists: what every reader of a verdict's findings, waiting
+    items and decisions reads."""
+    for event in state.history:
+        added = (state.reread.get(event.get("n"))
+                 if event.get("type") == "verdict.recorded" else None)
+        if not added:
+            yield event
+            continue
+        yield {**event, **{name: [*(event.get(name) or ()), *entries]
+                           for name, entries in added.items()}}
+
+
 #: The handler of each event type. Every type in `events.TYPES` has a row.
 _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.opened": _round_opened,
@@ -841,10 +904,11 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "build.dropped": _kept,
     "round.dropped": _round_dropped,
     "thread.decided": _thread_decided,
-    "repair": _kept,
+    "repair": _repair,
     "round.closed": _round_closed,
 }
 
 __all__ = ["OPEN", "DROPPED", "CLOSED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
            "Ended", "Ruling", "Change", "Question", "Stage", "Pending", "Version",
-           "Decided", "Verdict", "State", "fold", "without"]
+           "Decided", "Verdict", "State", "fold", "without", "BASE", "REPORT",
+           "REREAD_LISTS", "with_rereads"]

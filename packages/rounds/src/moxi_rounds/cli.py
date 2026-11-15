@@ -27,6 +27,8 @@
     moxi rounds mark ROUND B<n>.W<k>|B<n>.M<k> --done --record PTR [--as NAME]
     moxi rounds mark ROUND thread:NAME --close|--accept-risk --record PTR [--as NAME]
     moxi rounds mark ROUND C<n>[,C<n>...] --shown --record PTR [--as NAME]
+    moxi rounds mark ROUND B<n> --resync [--as NAME]
+    moxi rounds mark ROUND REPORT.md --reread [--as NAME]
     moxi rounds mark PROJECT S<n>[,S<n>...] --shown --record PTR [--as NAME]
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
                      [--as NAME]
@@ -106,6 +108,13 @@ B<n>.M<k>=accept|reject --record PTR`; a later report may list it again as heavy
 heavier, never lighter. A rejected decision owes a fix, a waiting item `B<n>.M<k>`
 until `mark ... --done --record PTR` names it. A report of `kind = "majors"`, by a
 checker who built none of the round, declares the decisions no build report carries.
+The lead repairs a record by deriving it again, never by giving a value: `mark ROUND
+B<n> --resync` moves the base of the stage's open build to the newest commit of it the
+target still has, only after the target's history was rewritten under it; `mark ROUND
+REPORT.md --reread` reads a recorded report again at the bytes its verdict recorded
+and adds the findings, waiting items and decisions its record lacks, and is refused
+when it would take away or change anything. Neither names a ruling, a skip or a
+verdict word.
 `commission` authorizes the build of a stage of the plan once its step waits for
 nothing: it reads the target (the repo's `into` setting, else the branch checked out
 at the project's root) and takes the target's head as the build's base, cuts the
@@ -631,8 +640,9 @@ def _declare_mark(verbs) -> None:
             "question of a round hold up more stages, reopen a parked one, make a "
             "stage wait for more stages, mark a minor finding of a build fixed, mark "
             "a waiting item done, move a round up to a heavier flow, decide a thread of the design's "
-            "verification, or say that rulings were shown to the "
-            "operator as recorded, with a pointer to where.")
+            "verification, say that rulings were shown to the "
+            "operator as recorded, with a pointer to where, or repair a record: "
+            "read a build's base again from git, or a recorded report again.")
     parser = verbs.add_parser("mark", help=said, description=said)
     parser.add_argument("target", metavar="ROUND|PROJECT",
                         help="the round, <project>/<slug>; with --shown, the round "
@@ -647,8 +657,9 @@ def _declare_mark(verbs) -> None:
                              "of the design's verification, thread:NAME, the name "
                              "in letters, digits and . _ -; with --shown, the "
                              "rulings, C<n> of a round or S<n> of a project, "
-                             "several separated by commas; left out with --flow, "
-                             "which marks the round")
+                             "several separated by commas; with --resync, a stage, "
+                             "B<n>; with --reread, a recorded report's file; left "
+                             "out with --flow, which marks the round")
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--blocks", metavar="LIST|all",
                       help="the stages the question holds up from now on, as B2,B3, "
@@ -687,6 +698,18 @@ def _declare_mark(verbs) -> None:
     form.add_argument("--shown", action="store_true",
                       help="the rulings were put in front of the operator as "
                            "recorded; needs --record")
+    form.add_argument("--resync", action="store_true",
+                      help="read git again for the base of the open build of the "
+                           "stage B<n>: when the target's history was rewritten so "
+                           "the base is no longer on it, move the base to the newest "
+                           "commit of it the target still has; else change nothing "
+                           "and say so")
+    form.add_argument("--reread", action="store_true",
+                      help="parse the recorded report REPORT.md again, at the bytes "
+                           "its verdict recorded, and add to that verdict's record "
+                           "the findings, waiting items and decisions its block "
+                           "holds and the record lacks; refused when it would take "
+                           "away or change anything")
     parser.add_argument("--commit", metavar="SHA", action="append", default=[],
                         help="with --fixed, a commit of the fix, on the build's "
                              "branch; once for each")
@@ -724,6 +747,8 @@ def _mark(args, out) -> int:
         raise BadArgument("--commit and --no-behaviour-change go with --fixed, the "
                           "lead's mark of a finding", "leave them out, or mark the "
                           "finding with --fixed")
+    if args.resync or args.reread:
+        return _mark_repair(args, out)
     if args.fixed:
         return _mark_fixed(args, out)
     if args.done:
@@ -746,6 +771,22 @@ def _mark(args, out) -> int:
     print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
           file=out)
     _warn_of(marked.failed, args.prog, args.verb)
+    return codes.OK
+
+
+def _mark_repair(args, out) -> int:
+    """`mark B<n> --resync` and `mark REPORT.md --reread`: the lead's repairs."""
+    from . import repairs
+
+    if args.record is not None:
+        raise BadArgument("a repair derives a record again from git or from a report, "
+                          "and carries no pointer", "leave --record out")
+    if args.resync:
+        done = repairs.resync(args.target, args.id, actor=_actor(args))
+    else:
+        done = repairs.reread(args.target, args.id, actor=_actor(args))
+    print(f"{done.name}: {done.said}", file=out)
+    _warn_of(done.failed, args.prog, args.verb)
     return codes.OK
 
 

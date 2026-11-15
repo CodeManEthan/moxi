@@ -160,9 +160,12 @@ TYPES = _types(
     EventType("round.dropped", ("by", "record", "tips", "questions")),
     # A thread of design verification was closed or its risk accepted.
     EventType("thread.decided", ("thread", "decision", "record")),
-    # A record was derived again: what, each field's old and new value, and what was
-    # read to derive it.
-    EventType("repair", ("what", "fields", "read")),
+    # A record was derived again: what (`base`, the base of the open build of
+    # `stage`, or `report`, the record of the verdict on line `verdict`), each
+    # field's old and new value, and what was read to derive it: git's answer, or
+    # the report's file and digest.
+    EventType("repair", ("what", "stage", "verdict", "fields", "read"),
+              required=("what", "fields")),
     # The round ended, with its numbers.
     EventType("round.closed", ("numbers",)),
 )

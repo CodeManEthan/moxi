@@ -206,7 +206,7 @@ def _entry(one: states.Pending) -> dict:
     return entry
 
 
-def _path(report: Path, folder: Path) -> str:
+def path(report: Path, folder: Path) -> str:
     """The report's file as the log names it: from the round's folder when it is in
     it, so the record reads the same wherever the folder is, else the whole path."""
     whole = Path(os.path.abspath(report))
@@ -347,18 +347,29 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
         "pass": block.pass_, "verdict": block.verdict,
         "stage": stage, "head": block.head, "merge_base": merge_base,
         "model": block.model, "by": block.by,
-        "report": report, "sha256": block.sha256,
-        "findings": [{"id": one.id, "severity": one.severity, "state": one.state,
-                      "text": one.text} for one in block.findings]}
-    if block.waits:
-        fields["waits"] = [{"id": one.id, "text": one.text} for one in block.waits]
-    if block.decisions:
-        fields["decisions"] = [_decision(one) for one in block.decisions]
+        "report": report, "sha256": block.sha256}
+    fields |= lists(block)
     noted = model_tiers.flags(settings["models"], state.steps, step,
                               pass_=block.pass_, model=block.model)
     if noted:
         fields["flags"] = noted
     return fields
+
+
+def lists(block: report_block.ReportBlock) -> dict[str, list[dict]]:
+    """The findings, waiting items and decisions of a report's block as its verdict's
+    event holds them, each list its kind carries; a design or build report's findings
+    even when it has none, and its waiting items and decisions only when it lists
+    some."""
+    said: dict[str, list[dict]] = {}
+    if block.kind != report_block.MAJORS:
+        said["findings"] = [{"id": one.id, "severity": one.severity, "state": one.state,
+                             "text": one.text} for one in block.findings]
+    if block.waits:
+        said["waits"] = [{"id": one.id, "text": one.text} for one in block.waits]
+    if block.decisions:
+        said["decisions"] = [_decision(one) for one in block.decisions]
+    return said
 
 
 def _decision(one: report_block.Decision) -> dict:
@@ -470,10 +481,10 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
         if block.kind in (report_block.BUILD, report_block.STEP):
             return write.Entry("verdict.recorded", _of_build(
                 state, block, name=name, settings=settings,
-                report=_path(report, folder)))
+                report=path(report, folder)))
         if block.kind == report_block.MAJORS:
             return write.Entry("verdict.recorded", _of_majors(
-                state, block, name=name, report=_path(report, folder)))
+                state, block, name=name, report=path(report, folder)))
         if block.kind != report_block.DESIGN:
             raise Refused([Unmet(
                 f"{report} is a {block.kind} report, and only a report of a design, "
@@ -502,9 +513,8 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
         fields: dict[str, object] = {
             "kind": block.kind, "pass": block.pass_, "verdict": block.verdict,
             "design": block.design, "model": block.model, "by": block.by,
-            "report": _path(report, folder), "sha256": block.sha256,
-            "findings": [{"id": one.id, "severity": one.severity, "state": one.state,
-                          "text": one.text} for one in block.findings]}
+            "report": path(report, folder), "sha256": block.sha256,
+            **lists(block)}
         if block.verdict == report_block.PUBLISHABLE:
             applied, left = applies(state, block.design, name=name)
             fields["applied"] = [_entry(one) for one in applied]
@@ -562,4 +572,4 @@ def finish_waits(state: states.State, stage: str, *, name: str,
     return tuple(lines)
 
 
-__all__ = ["VERIFIES", "Recorded", "applies", "finish_waits", "record"]
+__all__ = ["VERIFIES", "Recorded", "applies", "finish_waits", "lists", "path", "record"]

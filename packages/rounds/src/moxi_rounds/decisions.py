@@ -131,7 +131,7 @@ def of_round(state: states.State) -> tuple[Decision, ...]:
     """Every decision of the round, in the order declared, as the reports and the
     rulings that stand leave it."""
     found: dict[str, Decision] = {}
-    for event in state.history:
+    for event in states.with_rereads(state):
         if event.get("type") != "verdict.recorded":
             continue
         for stage, one in listed(event):
@@ -165,7 +165,8 @@ def of_build(state: states.State, build: builds.Build) -> tuple[Decision, ...]:
     """The decisions of the round that a report recorded while `build` was its stage's
     build declared or listed again, in the order declared."""
     keys = {f"{stage}.{one['id']}"
-            for event in state.history if event.get("type") == "verdict.recorded"
+            for event in states.with_rereads(state)
+            if event.get("type") == "verdict.recorded"
             and findings.within(state, build, event.get("n"))
             for stage, one in listed(event) if stage == build.stage}
     return tuple(one for one in of_round(state) if one.key in keys)

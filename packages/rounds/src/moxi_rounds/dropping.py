@@ -246,7 +246,7 @@ def _from_builds(round_state: states.State) -> list[str]:
     held += [f"the build of {stage}, whose merge may have reached its target"
              for stage in sorted(may_have)]
     reached = finished | may_have
-    for event in round_state.history:
+    for event in states.with_rereads(round_state):
         if event["type"] == "verdict.recorded":
             for decision in event.get("decisions") or ():
                 stage = decision.get("stage") or event.get("stage")

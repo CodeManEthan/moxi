@@ -195,7 +195,7 @@ def taken(state: states.State, stage: str) -> frozenset[str]:
     """Every finding, waiting item and decision id a report of any build of `stage`
     used, a dropped build's included."""
     used = set()
-    for event in state.history:
+    for event in states.with_rereads(state):
         if event.get("type") != "verdict.recorded":
             continue
         for name in _LISTS:

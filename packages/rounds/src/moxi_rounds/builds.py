@@ -4,7 +4,9 @@
 it was open: from its own `build.commissioned` up to its drop, its finish, or the next
 commission of the stage. A stage commissioned again after a drop is a new build, and the
 dropped build's records count for nothing in it. `builds(state)` gives every build of a
-round's log, `current(state, stage)` the last one of a stage.
+round's log, `current(state, stage)` the last one of a stage. Its base is the target's
+head at its commission, until a repair moves it while the build is open: the lead's
+resync after the target was rewritten, which names the base it moves.
 
 **Its landings.** Each merge a finish recorded for the build, as made (`ok`) or as
 found already on the target (`found`), is a landing: the commit the target's head
@@ -267,6 +269,9 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
                 and event.get("state") in LANDED
                 and all(is_id(event.get(name)) for name in _LANDING)):
             one["landings"].append(event)
+        if (kind == "repair" and event.get("what") == states.BASE
+                and _base_of(one) == _was(event)):
+            one["base"] = event["fields"]["base"]["now"]
         if kind in ("build.dropped", "finish.done"):
             one["ended"] = DROPPED if kind == "build.dropped" else FINISHED
             del open_by_stage[stage]
@@ -327,6 +332,22 @@ def _reading(event: dict) -> Reading | None:
     return Reading(event["type"], event["n"], commit, base if is_id(base) else None)
 
 
+def _was(event: dict) -> str | None:
+    """The base a repair of a build's base moved, when it holds a full commit id for
+    both the old base and the new; else None, and nothing moves."""
+    change = (event.get("fields") or {}).get("base") if isinstance(
+        event.get("fields"), dict) else None
+    if (isinstance(change, dict) and is_id(change.get("was"))
+            and is_id(change.get("now"))):
+        return change["was"]
+    return None
+
+
+def _base_of(one: dict) -> str:
+    base = one.get("base", one["event"].get("base"))
+    return base if isinstance(base, str) else ""
+
+
 def _build(one: dict) -> Build:
     event = one["event"]
 
@@ -341,7 +362,7 @@ def _build(one: dict) -> Build:
                 target_before=merge["target_before"], tip=merge["tip"])
         for merge in one["landings"])
     return Build(stage=event["stage"], repo=repo, branch=text("branch"),
-                 base=text("base"), target=target, n=event["n"],
+                 base=_base_of(one), target=target, n=event["n"],
                  readings=tuple(one["readings"]), tips=tuple(one["tips"]),
                  landings=landed, ended=one["ended"])
 

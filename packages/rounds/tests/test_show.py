@@ -94,6 +94,8 @@ rulings: none
 
 verdicts: none
 
+repairs: none
+
 history: 1 event
   1  {T1}  planner  round.opened
 """
@@ -104,7 +106,7 @@ history: 1 event
                            "stages", "versions", "standing", "trace", "threads",
                            "register_unreadable", "builds", "waits", "decisions",
                            "questions",
-                           "rulings", "verdicts", "history"]
+                           "rulings", "verdicts", "repairs", "history"]
     assert {key: found[key] for key in list(found)[:21]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
         "folder": str(rounds / "b-round"), "notice": None, "status": "open",

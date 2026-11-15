@@ -328,6 +328,16 @@ def _history(shown_as: dict) -> list[str]:
     return lines
 
 
+def _repairs(shown_as: dict) -> list[str]:
+    listed = shown_as["repairs"]
+    if not listed:
+        return ["No repair."]
+    lines = []
+    for one in listed:
+        lines += _item(f"{showing.repair_line(one)}, {one['at']} by {one['actor']}")
+    return lines
+
+
 def _builds(shown_as: dict) -> list[str]:
     # A build's folders and host are this machine's, and a file names no machine.
     listed = shown_as["builds"]
@@ -387,6 +397,7 @@ PARTS: tuple[Part, ...] = (
     Part("Questions", _questions),
     Part("Rulings", _rulings),
     Part("Verdicts", _verdicts),
+    Part("Repairs", _repairs),
     Part("History", _history))
 
 

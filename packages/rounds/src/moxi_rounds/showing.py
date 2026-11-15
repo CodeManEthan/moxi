@@ -30,7 +30,8 @@ repo's check, of each command step of the user's own and of the local part of a 
 CI, its newest read of CI, and, while it is open, its state as read from git now (`open_builds`):
 whether it is idle, the builds it shares commits with, or what kept it from being read;
 and, once a report of it is recorded, how far the target moved under it since and
-whether that owes a re-check (`drift`).
+whether that owes a re-check (`drift`). Each of the lead's repairs is shown with what
+it derived again and the old and new value of each field it changed.
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
 its key, what it reads from a `Shown`, and how that reads as lines. What a round is
@@ -290,6 +291,8 @@ def history_of(event: dict) -> str | None:
         of = f"v{event.get('version')}"
     if event.get("type") == "thread.decided":
         of = f"{event.get('thread')}, {event.get('decision')}"
+    if event.get("type") == "repair":
+        of = repair_of(event)
     if event.get("type") == "verdict.recorded" and event.get("design") is not None:
         of = f"{event.get('verdict')} for v{event.get('design')}"
     if event.get("type") == "verdict.recorded" and event.get("stage") is not None:
@@ -340,6 +343,54 @@ def verdict_lines(listed: list) -> list[str]:
         lines += [f"    applied: {taken['said']}" for taken in one["applied"]]
         lines += [f"    not applied: {taken['said']}: {taken['why']}"
                   for taken in one["not_applied"]]
+    return lines
+
+
+def repair_of(event: dict) -> str:
+    """What a repair derived again, in a few words: `base of B2`, or `verdict on line
+    12`."""
+    if event.get("what") == states.BASE:
+        return f"base of {event.get('stage')}"
+    return f"verdict on line {event.get('verdict')}"
+
+
+def _repairs(found: Shown) -> list:
+    """Each repair of the round, oldest first: what it derived again, each field's
+    old and new value, what it read, and who made it and when."""
+    return [{"n": event.get("n"), "at": event.get("at"), "actor": event.get("actor"),
+             "what": event.get("what"), "stage": event.get("stage"),
+             "verdict": event.get("verdict"), "fields": event.get("fields"),
+             "read": event.get("read")}
+            for event in found.state.history if event.get("type") == "repair"]
+
+
+def repair_line(one: dict) -> str:
+    """A repair in words: `base of B2: 1a2b3c4d5e6f to 0f9e8d7c6b5a`, or `verdict on
+    line 12 (designs/r.md): added finding L3, waiting item W1`."""
+    fields = one["fields"] if isinstance(one.get("fields"), dict) else {}
+    if one.get("what") == states.BASE:
+        change = fields.get("base") or {}
+        return (f"base of {one.get('stage')}: {str(change.get('was'))[:12]} to "
+                f"{str(change.get('now'))[:12]}")
+    added = []
+    for key, called in (("findings", "finding"), ("waits", "waiting item"),
+                        ("decisions", "decision")):
+        change = fields.get(key) or {}
+        had = {entry.get("id") for entry in change.get("was") or ()
+               if isinstance(entry, dict)}
+        ids = [str(entry.get("id")) for entry in change.get("now") or ()
+               if isinstance(entry, dict) and entry.get("id") not in had]
+        if ids:
+            added.append(f"{called}{'' if len(ids) == 1 else 's'} {', '.join(ids)}")
+    read = one["read"] if isinstance(one.get("read"), dict) else {}
+    return (f"verdict on line {one.get('verdict')} ({read.get('report')}): added "
+            f"{'; '.join(added) or 'nothing'}")
+
+
+def _repair_lines(listed: list) -> list[str]:
+    lines = [f"repairs: {len(listed) or 'none'}"]
+    lines += [f"  {one['n']}  {one['at']}  {one['actor']}  {repair_line(one)}"
+              for one in listed]
     return lines
 
 
@@ -610,6 +661,7 @@ SECTIONS: tuple[Section, ...] = (
     Section("questions", _questions, _question_lines),
     Section("rulings", _rulings, _ruling_lines),
     Section("verdicts", _verdicts, verdict_lines),
+    Section("repairs", _repairs, _repair_lines),
     Section("history", _history, _history_lines))
 
 
@@ -846,4 +898,4 @@ def as_text(found: Shown) -> str:
 __all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
            "ended_line", "skip_line", "stage_line", "build_line", "build_verdict_line",
            "finding_line", "drift_line", "step_lines", "version_lines", "thread_line",
-           "verdict_lines", "history_of"]
+           "verdict_lines", "history_of", "repair_of", "repair_line"]

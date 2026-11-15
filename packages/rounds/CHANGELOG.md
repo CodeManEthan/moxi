@@ -110,6 +110,13 @@ does not yet build.
   findings are the build's, kept with the step that raised them; a step's report lists
   and sets only its own step's findings; the step is done once its own newest report
   is `publishable` and counts at the tip.
+- The lead's two repairs, each one `repair` event, shown in `show` and the round note:
+  `mark ROUND B<n> --resync` reads git again for the base of the stage's open build
+  and, only once the target's history was rewritten under it, moves it to the newest
+  commit of it the target still has; `mark ROUND REPORT.md --reread` reads a recorded
+  report again at the bytes its verdict recorded and adds the findings, waiting items
+  and decisions the record lacks, refused when it would take away or change anything.
+  Neither names a ruling, a skip or a verdict word.
 - A round's export has two views, both when `--view` is left out: `docket`, its open
   and parked questions, and `ratify`, the unruled decisions of its finished builds,
   which it names under `covers`, as the project's `ratify` setting picks them (`majors`,

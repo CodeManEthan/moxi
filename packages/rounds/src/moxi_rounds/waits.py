@@ -102,7 +102,7 @@ def of_round(state: states.State) -> tuple[Wait, ...]:
     """Every waiting item of the round `state` is of, in the order declared, as the
     marks left each."""
     found: dict[str, Wait] = {}
-    for event in state.history:
+    for event in states.with_rereads(state):
         if event.get("type") == "verdict.recorded":
             stage = event.get("stage")
             listed = event.get("waits")
