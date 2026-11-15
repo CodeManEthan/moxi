@@ -17,6 +17,11 @@ INTERNAL_ENV = {
                                  "approved, which the push piece checks against "
                                  "push.word_pattern and logs, in a repo whose "
                                  "word-required setting is true",
+    "MOXI_PUBLISHING_GITHUB_API_URL": "where the tag gate reads GitHub's API, when not "
+                                      "api.github.com: a test's fake, or a GitHub "
+                                      "Enterprise host",
+    "MOXI_PUBLISHING_PYPI_URL": "where the tag gate reads the package index's JSON API, "
+                                "when not pypi.org: a test's fake, or a mirror",
 }
 SETTINGS = "settings.toml"
 # The schema can't tell a rule name from a typo, nor a pattern that won't compile.

@@ -4,6 +4,9 @@
     moxi publishing disable PATH
     moxi publishing list [--json]
     moxi publishing scan [PATH] [--rev REV] [--ci]
+    moxi publishing tag PACKAGE [--at REV] [--remote NAME] [--path PATH]
+    moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]
+    moxi publishing ci notes TAG
 
 PATH is a path inside the repo; with the projects module installed it may also be a
 project key. Exit codes: 0 done, 1 failed, 2 usage, 3 refused.
@@ -64,7 +67,56 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--ci", action="store_true",
                    help="leave out the private names list and the private allowlist, "
                         "which only your machine has")
+    p = verbs.add_parser(
+        "tag", help="run the tag gate and make a package's release tag",
+        description="Run the tag gate for PACKAGE at REV (default: the tip of main as "
+                    "the remote's tracking ref has it) and, when every check passes, make "
+                    "its annotated release tag, <distribution>-v<version>, whose message "
+                    "is the CHANGELOG section. Pushes nothing. Exits 3 when the gate "
+                    "refuses.")
+    p.add_argument("package", metavar="PACKAGE")
+    p.add_argument("--at", metavar="REV", help="the commit to tag (default: main's tip)")
+    p.add_argument("--remote", default="origin", metavar="NAME",
+                   help="the remote whose tracking ref holds main (default: origin)")
+    p.add_argument("--path", default=".", metavar="PATH",
+                   help="a path inside the repo, or a project key (default: here)")
+    p = verbs.add_parser("ci", help="the release workflow's steps",
+                         description="The steps the release workflow runs on a tag.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    s = steps.add_parser(
+        "gate", help="run the tag gate on a pushed tag",
+        description="Run the tag gate on TAG, with main read from origin/<the "
+                    "repository's default branch>. Given --artifact, the index may hold "
+                    "files of the version only when each is one of the build's.")
+    s.add_argument("tag", metavar="TAG")
+    s.add_argument("--github", metavar="OWNER/REPO",
+                   help="the GitHub repo (default: moxi-publishing.github)")
+    s.add_argument("--artifact", metavar="DIR", help="the directory of the build's files")
+    s = steps.add_parser("notes", help="print the CHANGELOG section of a tag's version",
+                         description="Print the CHANGELOG section of TAG's version, read "
+                                     "at the tagged commit.")
+    s.add_argument("tag", metavar="TAG")
     return parser
+
+
+def _release(args, prog: str) -> int:
+    from moxi_publishing import flag, release
+
+    try:
+        if args.verb == "tag":
+            result = release.tag(args.path, args.package, at=args.at, remote=args.remote)
+        elif args.step == "gate":
+            result = release.ci_gate(".", args.tag, github=args.github,
+                                     artifact=args.artifact)
+        else:
+            result = release.ci_notes(".", args.tag)
+    except flag.Failure as exc:
+        print(f"{prog}: {exc.text}", file=sys.stderr)
+        return exc.code
+    for line in result.lines:
+        print(line)
+    return result.code
 
 
 def _scan(args, prog: str) -> int:
@@ -111,6 +163,8 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
     args = _parser(prog).parse_args(argv)
     if args.verb == "scan":
         return _scan(args, prog)
+    if args.verb in ("tag", "ci"):
+        return _release(args, prog)
     try:
         if args.verb == "enable":
             lines = flag.enable(args.path, github=args.github, sets=args.sets)

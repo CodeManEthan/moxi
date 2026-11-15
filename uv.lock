@@ -1157,6 +1157,7 @@ dependencies = [
     { name = "moxi" },
     { name = "moxi-repo" },
     { name = "moxi-secrets" },
+    { name = "packaging" },
 ]
 
 [package.dev-dependencies]
@@ -1170,6 +1171,7 @@ requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-repo", editable = "packages/repo" },
     { name = "moxi-secrets", editable = "packages/secrets" },
+    { name = "packaging" },
 ]
 
 [package.metadata.requires-dev]

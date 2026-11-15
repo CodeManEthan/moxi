@@ -135,3 +135,162 @@ def remote(repo, tmp_path) -> Path:
     git(repo, "remote", "add", "origin", str(bare))
     git(repo, "push", "-q", "origin", "main")
     return bare
+
+
+# -- releases: a workspace, and GitHub and the package index faked -------------------------
+
+ROOT_TOML = """[tool.uv.workspace]
+members = ["packages/a", "packages/a-extra"]
+
+[tool.moxi-publishing]
+not-ready = {not_ready}
+check-workflow = "ci.yml"
+check-job = "linux"
+"""
+
+
+def member_toml(name: str, version: str, deps=(), extras=None) -> str:
+    text = (f'[project]\nname = "{name}"\nversion = "{version}"\n'
+            f"dependencies = {list(deps)!r}\n".replace("'", '"'))
+    if extras:
+        text += "[project.optional-dependencies]\n" + "".join(
+            f"{k} = {v!r}\n".replace("'", '"') for k, v in extras.items())
+    return text
+
+
+def write(repo: Path, path: str, text: str) -> None:
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+
+
+class Fake:
+    """GitHub's API and the package index, answering from what a test sets."""
+
+    def __init__(self):
+        self.default_branch = "main"
+        self.runs: dict[str, list[tuple[str, str]]] = {}   # commit: [(job, conclusion)]
+        self.index: dict[str, dict[str, list[dict]]] = {}  # dist: {version: [file]}
+        self.tags: list[str] = []
+        self.broken: set[str] = set()                      # path prefixes answering 500
+        self.asked: list[str] = []
+
+    def publish(self, dist: str, version: str, *, sha256: str = "0" * 64,
+                filename: str | None = None, yanked: bool = False) -> None:
+        self.index.setdefault(dist, {}).setdefault(version, []).append(
+            {"filename": filename or f"{dist.replace('-', '_')}-{version}.tar.gz",
+             "digests": {"sha256": sha256}, "yanked": yanked})
+
+    def green(self, commit: str, job: str = "linux", conclusion: str = "success") -> None:
+        self.runs.setdefault(commit, []).append((job, conclusion))
+
+    def answer(self, url: str) -> tuple[int, object]:
+        from urllib.parse import parse_qs, urlsplit
+
+        parts = urlsplit(url)
+        path, query = parts.path, parse_qs(parts.query)
+        self.asked.append(path)
+        if any(path.startswith(p) for p in self.broken):
+            return 500, None
+        bits = path.strip("/").split("/")
+        if bits[0] == "pypi":
+            files = self.index.get(bits[1])
+            if files is None:
+                return 404, None
+            if len(bits) == 3:
+                return 200, {"releases": files}
+            return (200, {"urls": files[bits[2]]}) if bits[2] in files else (404, None)
+        rest = bits[3:]
+        if not rest:
+            return 200, {"default_branch": self.default_branch}
+        if rest[:2] == ["actions", "workflows"]:
+            sha = query.get("head_sha", [""])[0]
+            runs = [{"id": sha, "head_sha": sha, "event": "push",
+                     "head_branch": self.default_branch}] if sha in self.runs else []
+            return 200, {"workflow_runs": runs}
+        if rest[:2] == ["actions", "runs"]:
+            return 200, {"jobs": [{"name": n, "conclusion": c}
+                                  for n, c in self.runs.get(rest[2], [])]}
+        if rest[:3] == ["git", "matching-refs", "tags"]:
+            prefix = "/".join(rest[3:])
+            return 200, [{"ref": f"refs/tags/{t}"} for t in self.tags if t.startswith(prefix)]
+        return 404, None
+
+
+def fake_web(fake: Fake):
+    """A `tags.Web` that asks `fake` instead of the network."""
+    import json
+
+    from moxi_publishing import tags
+
+    class FakeWeb(tags.Web):
+        def fetch(self, url, headers):
+            status, data = fake.answer(url)
+            return status, json.dumps(data).encode() if data is not None else b""
+
+    return FakeWeb(github_api="http://github.example.test", pypi="http://pypi.example.test")
+
+
+@pytest.fixture
+def fake():
+    return Fake()
+
+
+@pytest.fixture
+def served(fake, monkeypatch):
+    """`fake` on a loopback port, with the environment pointing the gate at it, for a git
+    hook running in its own process."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - the name http.server calls
+            status, data = fake.answer(self.path)
+            body = json.dumps(data).encode() if data is not None else b""
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    monkeypatch.setenv("MOXI_PUBLISHING_GITHUB_API_URL", base)
+    monkeypatch.setenv("MOXI_PUBLISHING_PYPI_URL", base)
+    yield fake
+    server.shutdown()
+    server.server_close()
+
+
+def release_files(repo: Path, *, not_ready=(), a_version="0.1.0",
+                  a_heading="## 0.1.0 (2026-01-05)") -> None:
+    """Write the release workspace: `proj-a` and `proj-a-extra`, which requires
+    `proj-a>=0.0.9` and has an extra wanting `proj-a>=0.9`."""
+    write(repo, "pyproject.toml", ROOT_TOML.format(not_ready=repr(list(not_ready))
+                                                   .replace("'", '"')))
+    write(repo, "packages/a/pyproject.toml", member_toml("proj-a", a_version))
+    write(repo, "packages/a/CHANGELOG.md",
+          f"# Changelog\n\n## Unreleased\n\n{a_heading}\n\n- First.\n\n### Fixed\n\n- A fix.\n"
+          "\n## 0.0.9 (2026-01-01)\n\n- Older.\n")
+    write(repo, "packages/a-extra/pyproject.toml",
+          member_toml("proj-a-extra", "0.2.0", ["proj-a>=0.0.9"], {"more": ["proj-a>=0.9"]}))
+    write(repo, "packages/a-extra/CHANGELOG.md", "## 0.2.0 (2026-01-06)\n\n- Extra.\n")
+
+
+@pytest.fixture
+def released_repo(repo, remote, fake):
+    """`repo` holding the release workspace on main, pushed to `origin`, with its check
+    green there and `proj-a` 0.0.9 on the index."""
+    release_files(repo)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "The workspace")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "config", "moxi-publishing.github", "operator/proj-a")
+    fake.green(git(repo, "rev-parse", "HEAD").stdout.strip())
+    fake.publish("proj-a", "0.0.9")
+    return repo

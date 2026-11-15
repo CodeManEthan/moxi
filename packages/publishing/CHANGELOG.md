@@ -20,3 +20,9 @@ The first version.
 - `moxi publishing scan`: a commit's whole tree and its path names, judged the same way;
   `--ci` without the private names.
 - The six provenance rules, each switched off through `provenance.rules`.
+- Release tags, `<distribution>-v<version>`, read against the workspace members; the
+  `[tool.moxi-publishing]` release settings (`not-ready`, `check-workflow`, `check-job`);
+  and the tag gate's seven checks, run by `moxi publishing tag`, the push piece (which now
+  lets a release tag be created when it passes) and `moxi publishing ci gate`.
+- `moxi publishing tag`: the gate at main's tip, then the annotated release tag.
+- `moxi publishing ci notes`: a tag's CHANGELOG section.

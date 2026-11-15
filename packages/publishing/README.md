@@ -102,7 +102,7 @@ Nothing leaves a public repo unless every ref the push moves follows these rules
 |---|---|
 | a branch created or moved | the remote's tip is an ancestor of the new one: a public branch is never rewritten |
 | a branch deleted | it is not `main` or on `protected`, and the remote's tip, as this repo has it, is in the tracking ref of `main`; otherwise "fetch first" |
-| a tag shaped like a release tag (`<package>-v<version>`) | never moved or deleted; this version creates none, since it runs no release gate |
+| a tag shaped like a release tag (`<package>-v<version>`) | never moved or deleted; created only when it is a release tag of a member at its commit and passes the tag gate ([Releases](#releases)), read against the tracking ref of `main` |
 | any other tag or ref | a `free-ref` pattern names it; then it is created, moved or deleted freely |
 
 Every ref pushed points at a commit or a tag of one, a push creates at most three tags
@@ -141,6 +141,67 @@ commit adds, with the allowlists of that tree. It prints one line per hit and ex
 there is one, 1 when the tree can't be read. `--ci` leaves out the private names list and
 the private allowlist, which exist only on your machine, for a scan run on a server.
 
+## Releases
+
+Each package of a repo goes to the package index on its own tag, `<distribution>-v<version>`
+(`moxi-v0.1.7`, `moxi-comms-v0.3.1`). A tag is read against the workspace members at the
+commit it names: the distribution is the member whose name, plus `-v`, is the tag's
+longest matching prefix, and the rest is a version in its normalised spelling. A version
+is *published* when the index has a file of it that isn't yanked, and *released* when it
+is published and tagged.
+
+The repo's release settings sit in its root `pyproject.toml`, so CI reads what your
+machine reads:
+
+```toml
+[tool.moxi-publishing]
+not-ready = ["proj-a", "proj-b"]   # never released from a commit that lists them
+check-workflow = "ci.yml"          # the workflow of the check that must pass on main
+check-job = "linux"                # that check's job
+```
+
+A package on `not-ready` is still built and tested; it leaves the list by its own commit
+once you have confirmed it. `check-workflow` and `check-job` have no default: without
+them nothing is released, and the gate names the missing key.
+
+### The tag gate
+
+One gate decides whether a tag may release, run alike by `moxi publishing tag`, the push
+piece and the release workflow's `ci gate`. For a tag on commit C naming package D at
+version V:
+
+1. **shape**: the tag is annotated and peels, through tag objects only, to C; D is a
+   member at C and V is its `project.version` there;
+2. **changelog**: D's `CHANGELOG.md` at C has `## V (YYYY-MM-DD)` as its first version
+   heading;
+3. **main and green**: C is on the first-parent line of main, and GitHub has a
+   successful run of `check-job` in `check-workflow` from a push to main at C;
+4. **ready**: D is not on `not-ready` at C;
+5. **siblings**: each requirement D places on another member admits at least one
+   published version of it (an extra's are reported, not checked);
+6. **new**: the index has no file of D at V; or, when the release workflow has built the
+   files, every file the index holds at V is one of them, so a release that stopped
+   halfway can be run again;
+7. **catalogue**, for the core `moxi` only: every entry of its catalogue has a released
+   version or says `unreleased = true`.
+
+Checks 3, 5, 6 and 7 read GitHub's API and the package index, ten seconds at most each,
+with the token `gh auth token` gives where there is one (sent to api.github.com only); a
+read that fails refuses. `MOXI_PUBLISHING_GITHUB_API_URL` and `MOXI_PUBLISHING_PYPI_URL`
+point the reads elsewhere.
+
+### Making a release tag
+
+`moxi publishing tag PACKAGE [--at REV] [--remote NAME]` runs the gate at REV (default:
+the tip of main as `refs/remotes/origin/<main>` has it, so fetch first) and, when every
+check passes, makes the annotated tag, whose message is the package's CHANGELOG section.
+It pushes nothing: `git push origin <tag>` does, and the push piece runs the gate again.
+It prints each check, and exits 3 when the gate refuses.
+
+The release workflow's steps are `moxi publishing ci gate TAG [--github OWNER/REPO]
+[--artifact DIR]`, the gate with main read from `origin/<the default branch>`, and `moxi
+publishing ci notes TAG`, which prints the tag's CHANGELOG section.
+
 ## Provenance rules
 
 Shapes that point into notes, sessions or messages a reader of the public repo can't
@@ -172,4 +233,4 @@ which holds the pattern sets and lists the pieces read.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/publishing/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-publishing-v0.1.0/packages/publishing/LICENSE).

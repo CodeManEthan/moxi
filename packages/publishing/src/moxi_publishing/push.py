@@ -15,8 +15,9 @@ Nothing leaves unless every ref the push moves follows these rules:
 - a branch is deleted only when it is not `main` or protected, and the remote's tip, read
   locally, is an ancestor of the tracking ref of `main`; a tip not here, or no tracking
   ref, refuses with "fetch first";
-- a tag shaped like a release tag is never moved or deleted, and is not created by this
-  version, which runs no release gate;
+- a tag shaped like a release tag is never moved or deleted; one created must be a release
+  tag of a member at its commit and pass the tag gate (`moxi_publishing.tags.gate`), read
+  against `<remote>/<main>`;
 - any other ref, another tag among them, moves only when a `free-ref` pattern names it;
 - every ref pushed points at a commit, or at a tag whose chain ends at one;
 - a push creates at most three tags, since GitHub sends no push event for any tag of a
@@ -243,9 +244,7 @@ class _Push:
                     created_tags += 1
                 if looks_like_release_tag(ref[len(_TAGS):]):
                     if creating and not deleting:
-                        self.reasons.append(
-                            f"{ref}: a release tag is made public only through the tag "
-                            "gate, which this version of moxi-publishing doesn't run")
+                        self.judge_release_tag(u.local_sha, ref[len(_TAGS):])
                     else:
                         self.reasons.append(f"{ref}: a release tag is never moved or "
                                             "deleted")
@@ -259,6 +258,29 @@ class _Push:
             self.reasons.append(f"the push creates {created_tags} tags; push at most "
                                 f"{MAX_TAGS} at once, since GitHub starts nothing for a "
                                 "push that creates more")
+
+    def judge_release_tag(self, local_sha: str, name: str) -> None:
+        """A tag shaped like a release tag, created: the tag gate when the scheme reads it
+        as one at its commit; refused when it doesn't, since the shape keeps it from
+        `free-ref`."""
+        from moxi_publishing import flag, tags
+
+        commit, why = tags.peel(self.git, local_sha)
+        parsed = None
+        if commit is not None:
+            try:
+                parsed = tags.parse_tag(name, tags.workspace(self.git, commit).members)
+            except tags.ReleaseError as exc:
+                why = f"the workspace at {commit[:12]} can't be read: {exc}"
+        if parsed is None:
+            why = why or "it names no member and version at its commit"
+            self.reasons.append(f"{_TAGS}{name}: shaped like a release tag, but {why}; a "
+                                "release tag names a member and its version")
+            return
+        where = tags.Where(f"refs/remotes/{self.remote}/{self.main}", self.main,
+                           flag.config_get(self.ctx.root, "moxi-publishing.github"))
+        verdict = tags.gate(self.git, name, where=where, tag_object=local_sha)
+        self.reasons += [f"{_TAGS}{name}: {line}" for line in verdict.refusals()]
 
     def judge_branch(self, u, branch: str, deleting: bool, creating: bool, here) -> None:
         ref = u.remote_ref

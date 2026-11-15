@@ -141,10 +141,10 @@ def test_a_tag_needs_free_ref_and_a_release_tag_is_never_freed(repo, names, remo
     passed(push(repo, "-f", "origin", "docs/one"))
     passed(push(repo, "origin", ":refs/tags/docs/one"))
     git(repo, "tag", "proj-a-v0.1.0")
-    refused(push(repo, "origin", "proj-a-v0.1.0"), "tag gate")
+    refused(push(repo, "origin", "proj-a-v0.1.0"), "shaped like a release tag")
     # A pattern written by hand that names release tags still frees none of them.
     git(repo, "config", "--add", "moxi-repo.piece.publishing/push.free-ref", "refs/tags/*")
-    refused(push(repo, "origin", "proj-a-v0.1.0"), "tag gate")
+    refused(push(repo, "origin", "proj-a-v0.1.0"), "shaped like a release tag")
     refused(push(repo, "origin", ":refs/tags/proj-a-v0.0.9"), "never moved or deleted")
 
 
