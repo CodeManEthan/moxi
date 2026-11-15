@@ -27,11 +27,20 @@ resolved. A file that is a link to the shared file, to its own harness's part, o
 own generated file is left. Two harness files that are one real file other than the
 shared file, and a harness file that is another harness's part or generated file, are
 blocked, since one harness would read the other's part.
+
+An OpenCode `instructions` entry that names the shared file or a part (`instructions`):
+OpenCode would read that text twice, or another harness's part. Both `opencode.json` and
+`opencode.jsonc` in OpenCode's home are read, never written: an entry is expanded (`~`,
+then a relative path against OpenCode's home), its globs applied, and it matches when a
+path it names is the shared file or a part by real path. A file that can't be read or
+parsed is skipped; its own refusal line, if any, says so.
 """
 
 from __future__ import annotations
 
+import glob
 import hashlib
+import json
 import os
 import re
 from collections.abc import Iterable
@@ -199,6 +208,83 @@ def crossed(shared: str | os.PathLike, harnesses: Iterable[str]) -> dict[str, Cr
     return out
 
 
+# -- OpenCode `instructions` entries naming the global text -------------------------------
+
+#: The OpenCode config files an `instructions` entry is read from, in its home.
+OPENCODE_CONFIGS = ("opencode.json", "opencode.jsonc")
+
+
+def instructions(shared: str | os.PathLike, home: str | os.PathLike,
+                 user_home: str | os.PathLike) -> list[tuple[Path, str]]:
+    """Each `(config file, entry)` among OpenCode's `instructions` in `home` that names the
+    shared file or a part, by real path. `user_home` is what `~` expands to."""
+    ours = {os.path.realpath(shared)}
+    ours |= {os.path.realpath(part_path(shared, h)) for h in hz.HARNESSES}
+    out = []
+    for name in OPENCODE_CONFIGS:
+        config = Path(home) / name
+        try:
+            data = json.loads(_plain_json(config.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        entries = data.get("instructions") if isinstance(data, dict) else None
+        for entry in entries if isinstance(entries, list) else ():
+            if isinstance(entry, str) and ours & _named(entry, home, user_home):
+                out.append((config, entry))
+    return out
+
+
+def _named(entry: str, home, user_home) -> set[str]:
+    """The real paths an `instructions` entry names."""
+    path = entry
+    if path == "~" or path.startswith("~/"):
+        path = os.path.join(str(user_home), path[2:])
+    path = os.path.join(str(home), path)   # an absolute path stays as it is
+    if glob.has_magic(path):
+        return {os.path.realpath(p) for p in glob.glob(path, recursive=True)}
+    return {os.path.realpath(path)}
+
+
+def _plain_json(text: str) -> str:
+    """`text` with JSONC's comments and trailing commas taken out, strings kept as they
+    are."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        elif c == ",":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            rest = text[j:]
+            while rest.startswith(("//", "/*")):
+                k = text.find("\n" if rest.startswith("//") else "*/", j)
+                j = n if k < 0 else k + (1 if rest.startswith("//") else 2)
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                rest = text[j:]
+            if not rest.startswith(("}", "]")):
+                out.append(c)
+            i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 __all__ = ["MARKER", "GENERATED_MARKER", "END", "part_path", "parts", "read", "assemble",
            "named", "block", "generated_path", "generated_bytes", "generated_state",
-           "is_generated", "mistyped", "Crossing", "crossed"]
+           "is_generated", "mistyped", "Crossing", "crossed", "OPENCODE_CONFIGS",
+           "instructions"]

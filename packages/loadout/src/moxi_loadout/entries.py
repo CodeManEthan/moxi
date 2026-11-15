@@ -281,6 +281,8 @@ def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
         for p in globalfile.mistyped(path, rows):
             run.notes.append(f"{p} is named like a part of the global file but isn't one, "
                              "so nothing reads it")
+    if mode != "off" and path is not None:
+        run.notes += _instructions_notes(path, records)
     recorded = {r.get("harness") for r in records if r.get("item") == "global:global"}
     # OpenCode's global entry is its `instructions` path in `opencode.json`, not a line in
     # its `AGENTS.md`, so that file is never edited here.
@@ -336,6 +338,23 @@ def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
                              "instructions", ["instructions", os.path.abspath(path)],
                              os.path.abspath(path)))
     return out
+
+
+def _instructions_notes(path, records) -> list[str]:
+    """A line for each OpenCode `instructions` entry naming the shared file or a part
+    (`moxi_loadout.globalfile.instructions`), recorded or not, but for one loadout holds
+    a record of its own for (not the user's first): the run keeps or removes that one."""
+    try:
+        user_home = hz._home(None)
+    except LookupError:
+        return []
+    ours = {(r.get("file"), r.get("key", [None])[-1]) for r in records
+            if r.get("kind") == "instructions" and not r.get("prior")
+            and isinstance(r.get("key"), list)}
+    return [f"{config}: the instructions entry {entry!r} names the global text, so "
+            "OpenCode reads it twice, or another harness's part; delete that entry by hand"
+            for config, entry in globalfile.instructions(path, hz.opencode_home(), user_home)
+            if (str(config), entry) not in ours]
 
 
 # -- reading an entry in its file ----------------------------------------------------------

@@ -586,3 +586,84 @@ def test_if_absent_to_managed_keeps_an_edited_generated_file_placed(lo):
         teardown.teardown(say=lambda line: None)
     assert "global:global@claude" in str(exc.value)
     assert _gen("claude").read_bytes() == edited
+
+
+# -- moving an existing install ------------------------------------------------------------
+
+def _instructions_notes(out):
+    return [n for n in out.notes if "instructions entry" in n]
+
+
+def test_an_instructions_entry_naming_the_global_text_is_noted_and_left(lo):
+    (lo / "global.codex.md").write_text("Codex only.\n")
+    home = harness.opencode_home()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "rules.md").write_text("Theirs.\n")
+    jsonc = home / "opencode.jsonc"
+    tilde = "~/" + os.path.relpath(lo / "global.codex.md", os.path.expanduser("~"))
+    body = ('{\n  // the user\'s own config\n  "instructions": [\n'
+            f'    "{tilde}",  /* a part, by ~ */\n    "rules.md",\n  ],\n}}\n')
+    jsonc.write_text(body)
+    plain = home / "opencode.json"
+    plain.write_text(json.dumps({"instructions": [str(lo / "global.*")]}) + "\n")
+    before = plain.read_bytes()
+    mode(lo, "if-absent")
+    out = install.install()
+    assert out.code == 0, out.text()
+    notes = _instructions_notes(out)
+    assert len(notes) == 2, notes
+    assert any(str(jsonc) in n and tilde in n for n in notes)
+    assert any(str(plain) in n and "global.*" in n for n in notes)
+    assert not any("rules.md" in n for n in notes)
+    # Read, never written; and noted again on a later status.
+    assert jsonc.read_text() == body and plain.read_bytes() == before
+    assert len(_instructions_notes(install.status())) == 2
+
+
+def test_a_relative_instructions_entry_resolves_against_the_opencode_home(lo):
+    home = harness.opencode_home()
+    home.mkdir(parents=True, exist_ok=True)
+    os.symlink(lo, home / "folder")
+    (home / "opencode.json").write_text('{"instructions": ["folder/global.md"]}\n')
+    mode(lo, "managed")
+    assert len(_instructions_notes(install.status())) == 1
+    mode(lo, "off")
+    assert _instructions_notes(install.status()) == []
+
+
+def test_an_instructions_entry_loadout_recorded_is_not_noted(lo):
+    # The built managed form records the shared path in instructions; leaving managed
+    # removes it, with no note to delete it by hand.
+    mode(lo, "managed")
+    install.install()
+    mode(lo, "if-absent")
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert _instructions_notes(out) == []
+    assert "instructions" not in json.loads(harness.settings_file("opencode").read_text())
+
+
+def test_the_built_claude_and_codex_forms_take_their_parts_in_one_install(lo):
+    claude = harness.global_file("claude")
+    claude.parent.mkdir(parents=True)
+    mine = "# Mine\n"
+    claude.write_text(mine)
+    codex = harness.global_file("codex")
+    codex.parent.mkdir(parents=True)
+    codex.write_text("# Codex mine\n")
+    mode(lo, "managed")
+    assert install.install().code == 0    # the shared-only form, as built
+    built = codex.read_text()
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    (lo / "global.codex.md").write_text("Codex only.\n")
+    out = install.install()
+    assert out.code == 0, out.text()
+    shared, cpart, xpart = (str(lo / n) for n in ("global.md", "global.claude.md",
+                                                  "global.codex.md"))
+    assert claude.read_text() == mine + f"@{shared}\n@{cpart}\n"
+    assert built.startswith("# Codex mine\n\n<!-- moxi loadout: from ")
+    assert codex.read_text() == "# Codex mine\n\n" + (
+        f"<!-- moxi loadout: from {shared} and {xpart}; edit there -->\n"
+        "Be brief.\n\nCodex only.\n<!-- moxi loadout end -->\n")
+    assert cli.main(["global", "remove"]) == 0
+    assert claude.read_text() == mine and codex.read_text() == "# Codex mine\n"
