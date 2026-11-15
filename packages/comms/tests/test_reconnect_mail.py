@@ -12,6 +12,11 @@ registration.
 Each test forces that order with no load: it holds the supervisor for a second between
 the bind's answer and the install, while the mail waits. Both ports that flush through
 `HarnessAdapter.flush` are driven: OpenCode and Codex.
+
+Codex has a second path. While a turn runs, its interrupt mail goes into the turn by
+`steer`, and that holds while the adapter is offline too. Mail the daemon releases at a
+bind is marked held and never steers, so the steer's window is live interrupt mail that
+arrives after the bind's answer and before the install; its test sends it then.
 """
 
 from __future__ import annotations
@@ -81,15 +86,22 @@ def opencode_port(rig, tmp_path, request):
     return adapter, carried
 
 
-def codex_port(rig, tmp_path, request):
-    """A Codex adapter over a fake hosted session, and how many hand-ins carry `MARK`."""
-    session = FakeSession()
+def codex_session(rig, tmp_path, request, **kw):
+    """A Codex adapter over a fake hosted session, and the session (`kw` goes to
+    `FakeSession`)."""
+    session = FakeSession(**kw)
     agent = CodexAgent(qualified="planner@proj-a", name="planner", scope="proj-a",
                        cwd=str(tmp_path), thread_file=codex_threads.path("planner@proj-a"),
                        directors=[])
     adapter = CodexAdapter(agent, find=fake_find(session), autoreconnect=True,
                            backoff=itertools.repeat(FAST), clock=rig.clock)
     request.addfinalizer(lambda: session.gone("the test ended"))
+    return adapter, session
+
+
+def codex_port(rig, tmp_path, request):
+    """A Codex adapter over a fake hosted session, and how many hand-ins carry `MARK`."""
+    adapter, session = codex_session(rig, tmp_path, request)
 
     def carried() -> int:
         return sum(MARK in handed.text for handed in session.delivered)
@@ -109,10 +121,14 @@ def port(request, rig, tmp_path):
 
 class InstallHold:
     """Holds a register for `HOLD_S` between the daemon's answer and the install, once
-    armed. `released_at` is when the held register went on to install."""
+    armed. `holding` is set when the hold starts; with `go` given, the hold first waits
+    for it (at most `LIVE_S`). `released_at` is when the held register went on to
+    install."""
 
     def __init__(self, monkeypatch):
         self.armed = threading.Event()
+        self.holding = threading.Event()
+        self.go: threading.Event | None = None
         self.released_at: float | None = None
         original = binding.register_and_install
 
@@ -124,6 +140,9 @@ class InstallHold:
                     inner(resp)
                 if self.armed.is_set():          # read at the answer, not at the call
                     self.armed.clear()
+                    self.holding.set()
+                    if self.go is not None:
+                        self.go.wait(LIVE_S)
                     time.sleep(HOLD_S)
                     self.released_at = time.monotonic()
 
@@ -177,3 +196,51 @@ def test_mail_waiting_at_a_reconnect_is_delivered_once_after_the_install(
         "delivered on the installed connection, not before it"
     assert not wait_until(lambda: carried() > 1, timeout=0.5), \
         f"delivered once, not {carried()} times"
+
+
+def test_interrupt_mail_in_a_reconnect_s_gap_is_steered_once_after_the_install(
+        rig, tmp_path, request, hold):
+    """A Codex adapter mid turn reconnects. Interrupt mail sent after the bind's answer
+    and before the install is handed on the new connection and queued; the install is
+    held a second past it. The message goes into the running turn by `steer`, once,
+    after the install."""
+    adapter, session = codex_session(rig, tmp_path, request, turn_open=True)
+    request.addfinalizer(adapter.stop)
+    steered_at: list = []
+    session_steer = session.steer
+
+    def steer(text, *, ref=None):
+        if MARK in text:
+            steered_at.append(time.monotonic())
+        return session_steer(text, ref=ref)
+
+    session.steer = steer
+
+    def carried() -> list:
+        return [handed for handed in session.delivered if MARK in handed.text]
+
+    adapter.start()
+    qualified = adapter.agent.qualified
+    assert wait_until(lambda: not adapter.offline and not adapter.replaying, LIVE_S)
+    assert wait_until(lambda: adapter.turn_open, LIVE_S)
+
+    rig.daemon.stop()
+    assert wait_until(lambda: adapter.offline, LIVE_S)
+    hold.go = threading.Event()
+    hold.armed.set()
+    rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
+                                   start_trim_thread=False).start()
+    assert hold.holding.wait(LIVE_S), "the reconnect reached the bind's answer"
+    code, out = rig.send(qualified, MARK, "--interrupt",
+                         sender=dict(name="main", scope="proj-a"))
+    hold.go.set()
+    assert code == 0, out
+
+    assert wait_until(lambda: carried(), LIVE_S), \
+        "the interrupt mail sent in the reconnect's gap was delivered"
+    assert all(handed.steer for handed in carried()), "it went into the running turn"
+    assert hold.released_at is not None, "the install was held past the bind's answer"
+    assert steered_at and steered_at[0] >= hold.released_at, \
+        "steered on the installed connection, not before it"
+    assert not wait_until(lambda: len(carried()) > 1, timeout=0.5), \
+        f"delivered once, not {len(carried())} times"

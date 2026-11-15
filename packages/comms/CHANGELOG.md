@@ -7,7 +7,9 @@
   reconnect, and the adapter could try to deliver it before it had switched to the new
   connection. It then dropped the message, which did not arrive until the agent's next
   reconnect or relaunch while newer mail went through. The adapter now holds delivery
-  until the new connection is in place.
+  until the new connection is in place. The same applies to interrupt mail that reaches
+  a Codex agent mid turn while it reconnects: it is no longer dropped, and goes into the
+  running turn once the new connection is in place.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
 - comms has a row on Home in the browser UI shell, the `mail` component
