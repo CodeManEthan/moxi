@@ -6,7 +6,8 @@
 // - One row per agent name, the part of an address before `@`. A row gathers every address
 //   the page knows with that name: the roster's rows and `waiting` names, and the authors
 //   of `owed` messages. A name none of whose addresses has a session, mail or an `owed`
-//   message is no row.
+//   message is no row. The operator is never a row: an address the server marks as his
+//   is left out, though mail to him still shows in the message lists.
 // - The lead address is the one the row's single facts speak for: line one's `where` and
 //   cache fact, the bound cases of line two and the box's `to`.
 // - A row's case is the highest of `CASES` any of its addresses meets; the bound cases are
@@ -118,6 +119,8 @@ export interface MailState {
   owed: Owed[];
   asks: Ask[];
   last: Last[];
+  /** The names that are the operator. */
+  operator_names: string[];
 }
 
 const isId = (value: unknown): value is string => isString(value) && /^\d+$/.test(value);
@@ -140,7 +143,7 @@ export function parseMailState(data: unknown): MailState | null {
   if (state !== "up" && state !== "error") return null;
   if (detail !== null && detail !== undefined && !isString(detail)) return null;
   const empty = { state: state as MailState["state"], detail: detail ?? null, today: isDay(today) ? today : null };
-  if (state === "error") return { ...empty, queued: [], owed: [], asks: [], last: [] };
+  if (state === "error") return { ...empty, queued: [], owed: [], asks: [], last: [], operator_names: [] };
   return {
     ...empty,
     queued: keep(data.queued, ({ qualified, waiting, handed, from }) =>
@@ -153,7 +156,17 @@ export function parseMailState(data: unknown): MailState | null {
       (isString(asker) && isString(awaited) && isId(message_id) && finite(at) && (read === false || read === null)
         ? { asker, awaited, message_id, at, read } : null)),
     last: keep(data.last, ({ qualified, at }) => (isString(qualified) && finite(at) ? { qualified, at } : null)),
+    operator_names: Array.isArray(data.operator_names) ? data.operator_names.filter(isString) : [],
   };
+}
+
+/** The addresses the server marks as the operator: its `operator_names`, and every author
+ * of waiting mail it marks. Empty before the mail state is read. */
+export function operatorAddresses(mail: MailState | null): Set<string> {
+  if (mail === null || mail.state !== "up") return new Set();
+  const marked = mail.queued.flatMap((entry) => entry.from.filter((author) => author.operator))
+    .map((author) => author.qualified);
+  return new Set([...mail.operator_names, ...marked]);
 }
 
 /** What launcher says of the launch running at an address, joined by its session: where it
@@ -306,9 +319,10 @@ function factOf(address: Address, now: number, when: (at: number) => string): Fa
   return address.launched?.fact ?? cacheWords(address.row?.cache ?? null, now, when);
 }
 
-/** The addresses of every name the page knows, by name. */
+/** The addresses of every name the page knows, by name, but the operator's. */
 function gather(roster: PageRoster, mail: MailState | null, launched: ReadonlyMap<string, Launched> | null)
   : Map<string, Address[]> {
+  const him = operatorAddresses(mail);
   const addresses = new Map<string, Address>();
   const address = (qualified: string): Address => {
     let found = addresses.get(qualified);
@@ -319,13 +333,15 @@ function gather(roster: PageRoster, mail: MailState | null, launched: ReadonlyMa
     }
     return found;
   };
-  for (const row of roster.rows) {
+  for (const row of roster.rows.filter((entry) => !him.has(entry.qualified))) {
     const found = address(row.qualified);
     found.row = row;
     found.bound = row.live;
   }
-  for (const entry of roster.waiting) address(entry.qualified).waiting = entry;
-  for (const entry of mail?.owed ?? []) address(entry.author).owed.push(entry);
+  for (const entry of roster.waiting.filter((waiting) => !him.has(waiting.qualified))) {
+    address(entry.qualified).waiting = entry;
+  }
+  for (const entry of (mail?.owed ?? []).filter((owed) => !him.has(owed.author))) address(entry.author).owed.push(entry);
   const known = (qualified: string): Address | undefined => addresses.get(qualified);
   for (const entry of mail?.queued ?? []) {
     const found = known(entry.qualified);

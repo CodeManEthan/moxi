@@ -169,7 +169,10 @@ MESSAGES = {
 #: operator that no later message of his answers, oldest first. `asks`: each open ask
 #: between two agents, the newest per pair; `read` is false while the books hold the
 #: awaited name's row for it, else null. `last`: each address's newest message, by it or
-#: to it. `state` and `detail` are as `MESSAGES`'; an error answers empty lists.
+#: to it. `operator_names`: the names that are the operator, `operator` and each name the
+#: directory gives him, in name order; the page makes no agent row of them. `state` and
+#: `detail` are as `MESSAGES`'; an error answers empty lists and `operator_names` as
+#: `["operator"]`.
 MAIL_STATE = {
     "state": lb.Out("string"),
     "detail": lb.Out("string", nullable=True),
@@ -200,6 +203,7 @@ MAIL_STATE = {
         "qualified": lb.Out("string"),
         "at": lb.Out("float"),
     })),
+    "operator_names": lb.Out("list", items=lb.Out("string")),
 }
 
 #: `/api/queue?name=`: the messages the address `name` has a row for in the books'

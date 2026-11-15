@@ -409,11 +409,11 @@ def sent_entry(r: Read, who: Authored) -> SentEntry:
 
 
 def mail_state(call: Any) -> dict[str, Any]:
-    """`GET /api/mail-state`: `queued`, `owed`, `asks` and `last` (`page.MAIL_STATE`),
-    from the books and one read of the record's last `ASK_TTL`. It asks the daemon
-    nothing. A failure is a 200 with `state` `error`, never a 500."""
+    """`GET /api/mail-state`: `queued`, `owed`, `asks`, `last` and `operator_names`
+    (`page.MAIL_STATE`), from the books and one read of the record's last `ASK_TTL`. It
+    asks the daemon nothing. A failure is a 200 with `state` `error`, never a 500."""
     empty = {"today": _today().isoformat(), "queued": [], "owed": [], "asks": [],
-             "last": []}
+             "last": [], "operator_names": [OPERATOR_NAME]}
 
     def read() -> dict[str, Any]:
         out = dict(empty)
@@ -436,6 +436,7 @@ def mail_state(call: Any) -> dict[str, Any]:
             out["owed"] = _owed(items, now)
             out["asks"] = _asks(items, now, {(name, str(mid)) for name, mid, _ in rows})
             out["last"] = _last(items)
+            out["operator_names"] = sorted(him)
         return out
 
     return answer(empty, read)

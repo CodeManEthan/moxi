@@ -9,7 +9,7 @@
 //   pending, and an address the page doesn't know gives a dim line at the foot.
 
 import type { Address } from "./address-model.ts";
-import { agentsOf, noteText } from "./agents-model.ts";
+import { agentsOf, noteText, operatorAddresses } from "./agents-model.ts";
 import type { AgentRow, Launched, MailState, OtherName, Owed, PageRoster } from "./agents-model.ts";
 import type { Failure } from "./feed.ts";
 import { LOCAL } from "./mail-model.ts";
@@ -253,7 +253,9 @@ export function frameModel(facts: FrameFacts, clock: Clock = LOCAL): Frame {
   if (placed.line !== null) lines.push({ key: "address", text: placed.line });
   const opened = stale ? { kind: "none" as const } : placed.opened;
 
-  const empty = up && value.rows.length === 0 && value.waiting.length === 0 && agents.rows.length === 0
+  const him = operatorAddresses(mailValue);
+  const empty = up && value.rows.length === 0 && value.waiting.every((entry) => him.has(entry.qualified))
+    && agents.rows.length === 0
     ? { line: NO_AGENTS, sentence: WHAT_AN_AGENT_IS, launch: facts.launcher, command: facts.launcher ? null : NAME_COMMAND }
     : null;
   const openName = opened.kind === "agent" || opened.kind === "mail" ? opened.name : null;

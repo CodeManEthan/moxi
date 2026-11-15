@@ -18,7 +18,7 @@ const bound = (qualified, fields = {}) =>
   row(qualified, { live: true, kind: null, tier: "worker", adapter: "claude", session_id: `s-${qualified}`,
                    bound_at: at("12:00"), ...fields });
 const roster = (rows, waiting = []) => ({ state: "up", detail: null, rows, waiting, today: "2026-11-12" });
-const mail = (fields = {}) => ({ state: "up", detail: null, today: "2026-11-12", queued: [], owed: [], asks: [], last: [],
+const mail = (fields = {}) => ({ state: "up", detail: null, today: "2026-11-12", queued: [], owed: [], asks: [], last: [], operator_names: ["operator"],
                                  ...fields });
 const message = (id, fields = {}) => ({
   message_id: id, at: at("18:28"), author: "planner", author_tier: "worker", to: ["builder-1"], posture: "once",

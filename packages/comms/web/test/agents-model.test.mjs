@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { agentsOf, authorsWords, cacheWords, CASES, leadOf, namedInFull, noteText, parseMailState,
+import { agentsOf, authorsWords, cacheWords, CASES, leadOf, namedInFull, noteText, operatorAddresses, parseMailState,
          parsePageRoster } from "../src/agents-model.ts";
 import { parseRoster } from "../src/feed.ts";
 
@@ -25,7 +25,7 @@ const author = (qualified, operator = qualified === "operator") => ({ qualified,
 const queued = (qualified, waiting, from = [], handed = 0) =>
   ({ qualified, waiting, handed, from: from.map((who) => (typeof who === "string" ? author(who) : who)) });
 const mail = (fields = {}) => ({ state: "up", detail: null, today: "2026-11-12", queued: [], owed: [], asks: [],
-                                 last: [], ...fields });
+                                 last: [], operator_names: ["operator"], ...fields });
 const owed = (author, hhmm, id = "1000000000000000001") =>
   ({ message_id: id, author, at: at(hhmm), text: "Is it ready?" });
 const warm = (hhmm) => ({ kind: "warm", until: at(hhmm) });
@@ -404,6 +404,25 @@ test("a bound row's newest message is the newest of any of its addresses", () =>
   const r = roster([bound("a"), bound("a@x"), bound("b")]);
   const m = mail({ last: [{ qualified: "a@x", at: at("18:00") }, { qualified: "b", at: at("17:00") }] });
   assert.deepEqual(agents(r, m).rows.map((x) => x.name), ["a", "b"]);
+});
+
+test("the operator is never a row: his names and the authors the server marks are left out", () => {
+  const r = roster([bound("planner"), row("the-desk")],
+                   [waiting("operator", 1, "17:40"), waiting("the-desk", 2, "17:50"), waiting("planner", 1, "18:00")]);
+  const m = mail({ operator_names: ["operator"],
+                   queued: [queued("the-desk", 2, [author("planner")]),
+                            queued("planner", 1, [author("the-desk", true)])] });
+  assert.deepEqual([...operatorAddresses(m)].sort(), ["operator", "the-desk"]);
+  const { rows, others } = agents(r, m);
+  assert.deepEqual(rows.map((x) => x.name), ["planner"]);
+  assert.deepEqual(others, []);
+  // His mail to an agent is still that agent's, by him.
+  assert.equal(rows[0].line.more, "from you 18:00");
+  // Before the mail state is read nothing is known of him.
+  assert.deepEqual(operatorAddresses(null), new Set());
+  assert.deepEqual(agents(r, null).rows.map((x) => x.name).sort(), ["operator", "planner", "the-desk"]);
+  assert.deepEqual(parseMailState({ ...m, operator_names: ["operator", 7] }).operator_names, ["operator"]);
+  assert.deepEqual(parseMailState({ ...m, operator_names: undefined }).operator_names, []);
 });
 
 test("a mail state that is an error reads as none", () => {

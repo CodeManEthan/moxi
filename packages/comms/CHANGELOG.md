@@ -51,7 +51,9 @@
   `operator` true for the operator, by the name `operator` or one the directory gives
   him); `owed`, the verified `[reply-once]` asks to the operator that no later message
   of his answers; `asks`, the open `[reply-once]` asks between agents, with whether the
-  awaited name has read it; and `last`, each name's newest message. An ask is answered by the rule the daemon's
+  awaited name has read it; `last`, each name's newest message; and `operator_names`,
+  the names that are the operator (`operator` and each the directory gives him), which
+  the page makes no agent row of. An ask is answered by the rule the daemon's
   `awaiting` uses, now one shared function: a later message to the asker threaded to the
   ask, or with any posture but `[no reply]`.
 - comms' page server has a new read, `GET /api/queue?name=`: the messages one name has

@@ -23,7 +23,7 @@ const bound = (qualified, fields = {}) =>
                    bound_at: at("12:00"), ...fields });
 const roster = (rows, waiting = [], fields = {}) => ({ state: "up", detail: null, rows, waiting, today: TODAY, ...fields });
 const read = (value, fields = {}) => ({ loading: false, gone: false, failure: null, value, ...fields });
-const mail = (fields = {}) => read({ state: "up", detail: null, today: TODAY, queued: [], owed: [], asks: [], last: [],
+const mail = (fields = {}) => read({ state: "up", detail: null, today: TODAY, queued: [], owed: [], asks: [], last: [], operator_names: ["operator"],
                                      ...fields });
 const owed = (author, hhmm, id) => ({ message_id: id, author, at: at(hhmm), text: "Is it ready?" });
 
@@ -121,6 +121,13 @@ test("empty: the sentence, with launcher a way to Home, without it the command",
   const asked = frame({ rosterValue: none, mail: mail({ owed: [owed("planner", "19:02", "7")] }) });
   assert.equal(asked.empty, null);
   assert.equal(asked.label, "1 agent");
+});
+
+test("mail to the operator alone is no row and leaves the page empty", () => {
+  const value = roster([], [{ qualified: "operator", count: 1, since: at("17:40") }]);
+  const f = frame({ rosterValue: value });
+  assert.equal(f.rows.length, 0);
+  assert.notEqual(f.empty, null);
 });
 
 test("a mail read that failed or answered error is a line; a 404 is none", () => {

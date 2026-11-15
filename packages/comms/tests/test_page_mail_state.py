@@ -28,7 +28,7 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="comms runs on Linux only")
 
 OTHER = "main@proj-b"
-KEYS = ["state", "detail", "today", "queued", "owed", "asks", "last"]
+KEYS = ["state", "detail", "today", "queued", "owed", "asks", "last", "operator_names"]
 
 
 def read() -> dict:
@@ -89,7 +89,8 @@ def test_the_route_is_a_read_with_no_query_and_marks_only_the_text():
 def test_an_empty_record_answers_up_with_empty_lists(rig, today):
     body = read()
     assert body == {"state": "up", "detail": None, "today": today.isoformat(),
-                    "queued": [], "owed": [], "asks": [], "last": []}
+                    "queued": [], "owed": [], "asks": [], "last": [],
+                    "operator_names": ["operator"]}
 
 
 # --- owed ------------------------------------------------------------------------------------
@@ -263,6 +264,12 @@ def test_queued_marks_his_own_waiting_message_as_the_operators(rig, today, name)
                                           {"qualified": name, "operator": True}]}]
 
 
+def test_operator_names_are_his_names_whatever_waits(rig, today):
+    assert read()["operator_names"] == ["operator"]
+    rename_operator("the-desk")
+    assert read()["operator_names"] == ["operator", "the-desk"]
+
+
 def test_last_is_each_addresss_newest_message_by_it_or_to_it(rig, today):
     post(rig, "a", to=(MAIN,), by=OTHER, ago_s=300)
     post(rig, "b", to=(MAIN, "herald"), by="planner@proj-a", ago_s=200)
@@ -292,8 +299,8 @@ def test_the_read_asks_the_daemon_nothing_and_answers_with_it_stopped(rig, today
 def test_no_store_is_up_and_empty(monkeypatch):
     monkeypatch.setattr(pagereads, "_today", lambda: dt.date(2026, 11, 15))
     body = read()
-    assert (body["state"], body["queued"], body["owed"], body["asks"], body["last"]) == (
-        "up", [], [], [], [])
+    assert (body["state"], body["queued"], body["owed"], body["asks"], body["last"],
+            body["operator_names"]) == ("up", [], [], [], [], ["operator"])
     assert not comms_db().exists()
 
 
