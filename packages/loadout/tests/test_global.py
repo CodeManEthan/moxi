@@ -817,9 +817,8 @@ def test_opencode_config_dir_moves_the_block_but_not_the_skills_row(lo, tmp_path
     assert "Be brief." in (elsewhere / "AGENTS.md").read_text()
     assert harness.settings_file("opencode") == elsewhere / "opencode.json"
     assert not (harness.opencode_xdg_home() / "AGENTS.md").exists()
-    # The page's comparison reads OpenCode's home in its XDG form: the core's record of a
-    # terminal holds no OPENCODE_CONFIG_DIR to compare with.
-    assert homes.places()(os.environ)["OpenCode's home"] == harness.opencode_xdg_home()
+    # The page's comparison reads OpenCode's home where its AGENTS.md goes.
+    assert homes.places()(os.environ)["OpenCode's home"] == elsewhere
     # The row's skills and agents folders keep the XDG form.
     assert harness_row.wanted()["skills"] == "~/.config/opencode/skills"
 

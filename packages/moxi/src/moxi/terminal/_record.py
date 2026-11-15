@@ -14,7 +14,7 @@ methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.harness_dirs` a
 - `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`,
   `XDG_RUNTIME_DIR`, `HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`,
   `WIN_PD_OVERRIDE_APPDATA` and `WIN_PD_OVERRIDE_LOCAL_APPDATA`;
-- `CLAUDE_CONFIG_DIR` and `CODEX_HOME`;
+- `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `OPENCODE_CONFIG_DIR`;
 - `PATH` and `PATHEXT`.
 
 What the core reads for other purposes (the stray check's `UV_TOOL_DIR` and `APPDATA`)
@@ -58,7 +58,7 @@ FIXED = frozenset({
     "XDG_RUNTIME_DIR",
     "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
     "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA",
-    "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+    "CLAUDE_CONFIG_DIR", "CODEX_HOME", "OPENCODE_CONFIG_DIR",
     "PATH", "PATHEXT",
 })
 

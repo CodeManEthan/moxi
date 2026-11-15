@@ -18,7 +18,8 @@
   `global.md` or `global.opencode.md`.
 - OpenCode's home is resolved as OpenCode does: `OPENCODE_CONFIG_DIR` when set, else
   `XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`, for its `AGENTS.md` and
-  `opencode.json`.
+  `opencode.json`. A page job whose `OPENCODE_CONFIG_DIR` differs from the terminal's is
+  refused.
 - If-absent mode: a harness with a part gets a generated file of the shared text and its
   part, under loadout's state folder, placed where its global file is absent; a harness
   with no part still gets a link to `global.md`. The generated file's first line names
@@ -35,6 +36,7 @@
   named like a mistyped part is noted.
 - The page's confirmed act is `POST /api/global-remove` (was `/api/global-off`), with no
   old route.
+- loadout needs moxi 0.1.8 or later, whose terminal record holds `OPENCODE_CONFIG_DIR`.
 
 ## 0.1.4 (2026-11-08)
 
