@@ -28,9 +28,9 @@ def repo(git_repo, tmp_path):
 
 
 @pytest.fixture
-def folder(repo, tmp_path, capsys):
+def round_dir(repo, tmp_path, capsys):
     """`a-round` opened in the full flow; returns its folder."""
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="full")
     capsys.readouterr()
     return tmp_path / "notes" / "rounds" / "a-round"
@@ -39,7 +39,7 @@ def folder(repo, tmp_path, capsys):
 def rule(item=None, target=ROUND, text=SAID, **more):
     if item is not None and item[0] not in "QP":
         text = None
-    return ruling.rule(target, item=item, record=PTR, actor="planner", text=text,
+    return ruling.rule(target, item=item, record=PTR, by="planner", text=text,
                        **more).id
 
 
@@ -57,11 +57,11 @@ STAGE = "\n".join(['[[stage]]', 'id = "B1"', 'repo = "proj-a"', 'branch = "work"
                    'after = ["B1"]', 'why = "it lands on its own"'])
 
 
-def fold(folder, *rows):
+def fold(round_dir, *rows):
     text = ("# A design\n\n```toml rounds\n" + "\n\n".join([STAGE, *rows])
             + "\n```\n")
-    (folder / "design.md").write_text(text, encoding="utf-8")
-    freezing.freeze(ROUND, actor="scout")
+    (round_dir / "design.md").write_text(text, encoding="utf-8")
+    freezing.freeze(ROUND, by="scout")
 
 
 def commission(capsys) -> str:
@@ -69,29 +69,29 @@ def commission(capsys) -> str:
     return capsys.readouterr().out
 
 
-def ready(folder, *rows):
+def ready(round_dir, *rows):
     """Freeze the design with `rows` and skip its verification, so B1 may be
     commissioned."""
-    fold(folder, *rows)
+    fold(round_dir, *rows)
     rule("skip:verify-design")
 
 
-def folded(folder):
-    return state.fold(log.read(log.round_log(folder)))
+def folded(round_dir):
+    return state.fold(log.read(log.round_log(round_dir)))
 
 
-def register(folder):
+def register(round_dir):
     try:
-        return state.fold(log.read(log.project_log(folder.parent)))
+        return state.fold(log.read(log.project_log(round_dir.parent)))
     except NoLog:
         return state.State()
 
 
 # -- what the block holds ----------------------------------------------------------------
 
-def test_the_block_says_the_build_its_folders_commands_and_who_finishes_after_what(
-        folder, repo, capsys):
-    ready(folder)
+def test_the_block_says_the_build_its_dirs_commands_and_who_finishes_after_what(
+        round_dir, repo, capsys):
+    ready(round_dir)
 
     said = commission(capsys).splitlines()
 
@@ -112,13 +112,13 @@ def test_the_block_says_the_build_its_folders_commands_and_who_finishes_after_wh
 
 
 def test_a_declared_check_and_the_repos_brief_lines_reach_the_block(
-        folder, write_config, capsys):
+        round_dir, write_config, capsys):
     write_config("""\
         [projects.proj-a]
         check = { command = "true", timeout_s = 60 }
         brief = ["Keep test data made up.", "Run tests bounded."]
         """)
-    ready(folder)
+    ready(round_dir)
 
     said = commission(capsys).splitlines()
 
@@ -134,10 +134,10 @@ def test_a_declared_check_and_the_repos_brief_lines_reach_the_block(
 # -- the rulings it gives ----------------------------------------------------------------
 
 def test_the_block_gives_the_live_text_of_a_replaced_ruling_and_leaves_out_a_revoked_one(
-        folder, capsys):
+        round_dir, capsys):
     first = rule()
     other = rule(text="Rows are sorted by name.")
-    ready(folder, row(first), row(other))
+    ready(round_dir, row(first), row(other))
     later = rule(text="Times are shown in UTC.", supersedes=first)
     rule(f"revoke:{other}")
 
@@ -148,14 +148,14 @@ def test_the_block_gives_the_live_text_of_a_replaced_ruling_and_leaves_out_a_rev
 
 
 def test_with_the_trace_check_on_the_block_gives_the_replacement_a_fold_cites(
-        folder, write_config, capsys):
+        round_dir, write_config, capsys):
     write_config("""\
         [projects.proj-a]
         trace = true
         """)
     first = rule()
     later = rule(text="Times are shown in UTC.", supersedes=first)
-    ready(folder, row(first), row(later))
+    ready(round_dir, row(first), row(later))
 
     said = commission(capsys)
 
@@ -163,20 +163,20 @@ def test_with_the_trace_check_on_the_block_gives_the_replacement_a_fold_cites(
     assert SAID not in said
 
 
-def test_a_row_for_another_stage_gives_its_ruling_to_that_stage_only(folder, capsys):
+def test_a_row_for_another_stage_gives_its_ruling_to_that_stage_only(round_dir, capsys):
     first = rule()
-    ready(folder, row(first, stages=["B2"]))
+    ready(round_dir, row(first, stages=["B2"]))
 
     assert "rulings this build follows: none\n" in commission(capsys)
 
 
 def test_the_lead_is_told_each_unshown_ruling_and_the_build_is_commissioned_anyway(
-        folder, tmp_path, capsys):
+        round_dir, tmp_path, capsys):
     first = rule()
     standing = rule(target="proj-a", text="Logs are kept a year.", standing=True)
-    ready(folder, row(first), row(standing))
+    ready(round_dir, row(first), row(standing))
     opening.open_round("proj-a/b-round", description="a placeholder round",
-                       actor="planner", flow="fix")
+                       by="planner", flow="fix")
 
     said = commission(capsys)
 
@@ -184,13 +184,13 @@ def test_the_lead_is_told_each_unshown_ruling_and_the_build_is_commissioned_anyw
             f"proj-a {standing} Logs are kept a year.\n") in said
     assert f"  then: moxi rounds mark {ROUND} {first} --shown --record PTR\n" in said
     assert f"  then: moxi rounds mark proj-a {standing} --shown --record PTR\n" in said
-    events = log.read(log.round_log(folder))
+    events = log.read(log.round_log(round_dir))
     assert [one["type"] for one in events].count("build.commissioned") == 1
 
 
-def test_a_ruling_marked_shown_is_not_listed_for_the_lead(folder, capsys):
+def test_a_ruling_marked_shown_is_not_listed_for_the_lead(round_dir, capsys):
     first = rule()
-    ready(folder, row(first))
+    ready(round_dir, row(first))
     assert main(["mark", ROUND, first, "--shown", "--record", "comms:2345678"]) == 0
     capsys.readouterr()
 
@@ -198,12 +198,12 @@ def test_a_ruling_marked_shown_is_not_listed_for_the_lead(folder, capsys):
 
 
 def test_a_standing_ruling_in_the_repos_scope_that_no_row_cites_is_named_to_the_lead(
-        folder, capsys):
+        round_dir, capsys):
     scoped = rule(target="proj-a", text="Logs are kept a year.", standing=True,
                   scope="proj-a")
     rule(target="proj-a", text="Pages load in a second.", standing=True,
          scope="proj-b")
-    ready(folder)
+    ready(round_dir)
 
     said = commission(capsys)
 
@@ -213,9 +213,9 @@ def test_a_standing_ruling_in_the_repos_scope_that_no_row_cites_is_named_to_the_
 
 # -- what changed since the block --------------------------------------------------------
 
-def test_next_tells_a_build_each_correction_recorded_since_its_block(folder, capsys):
+def test_next_tells_a_build_each_correction_recorded_since_its_block(round_dir, capsys):
     first, other = rule(), rule(text="Rows are sorted by name.")
-    ready(folder, row(first), row(other))
+    ready(round_dir, row(first), row(other))
     commission(capsys)
     later = rule(text="Times are shown in UTC.", supersedes=first)
     taken = rule(f"revoke:{other}")
@@ -235,9 +235,9 @@ def test_next_tells_a_build_each_correction_recorded_since_its_block(folder, cap
     assert [one["id"] for one in group["changed"]] == [later, taken, new]
 
 
-def test_nothing_recorded_before_the_block_is_told_as_changed(folder, capsys):
+def test_nothing_recorded_before_the_block_is_told_as_changed(round_dir, capsys):
     first = rule()
-    ready(folder, row(first))
+    ready(round_dir, row(first))
     commission(capsys)
 
     found = next_step.read(ROUND)
@@ -247,25 +247,25 @@ def test_nothing_recorded_before_the_block_is_told_as_changed(folder, capsys):
     assert "changed since your block" not in next_step.as_text(found)
 
 
-def test_a_correction_of_a_standing_ruling_the_block_gave_is_told(folder, capsys):
+def test_a_correction_of_a_standing_ruling_the_block_gave_is_told(round_dir, capsys):
     # Recorded a second before the block, as a register ruling of the block's own
     # second is told in case it came after.
     standing = rule(target="proj-a", text="Logs are kept a year.", standing=True,
                     at="2026-01-02T03:04:05Z")
-    ready(folder, row(standing))
+    ready(round_dir, row(standing))
     commission(capsys)
     later = rule(target="proj-a", text="Logs are kept a month.", standing=True,
                  supersedes=standing)
 
-    changed = commission_block.changed(folded(folder), register(folder), "B1")
+    changed = commission_block.changed(folded(round_dir), register(round_dir), "B1")
 
     assert [(one.ruling.id, one.replaces) for one in changed] == [(later, standing)]
 
 
-def test_a_stage_with_no_open_build_has_nothing_changed(folder):
+def test_a_stage_with_no_open_build_has_nothing_changed(round_dir):
     first = rule()
-    ready(folder, row(first))
+    ready(round_dir, row(first))
     rule(text="Times are shown in UTC.", supersedes=first)
 
-    assert commission_block.changed(folded(folder), register(folder), "B1") == ()
-    assert tracing.given(folded(folder), register(folder), "B1")[0].replaces == first
+    assert commission_block.changed(folded(round_dir), register(round_dir), "B1") == ()
+    assert tracing.given(folded(round_dir), register(round_dir), "B1")[0].replaces == first

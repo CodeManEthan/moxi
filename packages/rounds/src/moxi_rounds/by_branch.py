@@ -76,7 +76,7 @@ def open_on(repo: str, branch: str, *,
     homes, _unresolved = folders.homes(settings)
     found, unread = [], []
     for home in homes:
-        for summary in index.rounds(home.project, home.folder):
+        for summary in index.rounds(home.project, home.rounds_dir):
             if summary.unreadable is not None:
                 unread.append(summary.unreadable.reason)
                 continue

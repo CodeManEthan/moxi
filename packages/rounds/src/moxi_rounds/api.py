@@ -150,4 +150,4 @@ def builds(repo: str | None = None) -> dict:
     return open_builds.read(repo).data()
 
 
-__all__ = ["rounds", "round", "waiting", "questions", "builds"]
+__all__ = ["rounds", "round_data", "waiting", "questions", "builds"]

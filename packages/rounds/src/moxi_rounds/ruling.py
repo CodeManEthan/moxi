@@ -832,8 +832,8 @@ def _credited(state: states.State, name: str, stage_id: str, settings,
         return Unmet(f"{stage_id}'s build can't be read from git{said}", show)
     try:
         why = builds.credit_refusal(Git(folders.root(build.repo)[1]), build, found.status)
-    except RoundsError as error:
-        return Unmet(f"{stage_id}'s build can't be read from git: {error.reason}", show)
+    except RoundsError as exc:
+        return Unmet(f"{stage_id}'s build can't be read from git: {exc.reason}", show)
     if why is not None:
         return Unmet(f"{stage_id}'s build is not credited: {why}", show)
     return build, found.status

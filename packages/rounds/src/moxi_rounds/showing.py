@@ -75,7 +75,7 @@ class Shown:
 
     A round whose log can't be read has its error in `unreadable` and no `state`. When
     only the project's log can't be read, `register` is None and its error is in
-    `register_unreadable`. `closed` answers whether a round, by name, is closed, and
+    `register_unreadable`. `on_closed` answers whether a round, by name, is closed, and
     `settings` are rounds' settings, read when a build's state is (None: read then)."""
 
     name: str
@@ -87,7 +87,7 @@ class Shown:
     notice: str | None = None
     unreadable: Unreadable | None = None
     register_unreadable: Unreadable | None = None
-    closed: Callable[[str], bool] | None = None
+    on_closed: Callable[[str], bool] | None = None
     settings: object = None
 
 
@@ -133,7 +133,7 @@ def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
         register_unreadable = exc
     return Shown(**found, state=state, register=register,
                  register_unreadable=register_unreadable,
-                 closed=lambda round_name: questions.is_closed(round_name, settings),
+                 on_closed=lambda round_name: questions.is_closed(round_name, settings),
                  settings=settings)
 
 
@@ -465,8 +465,8 @@ def _drift(found: Shown, build: builds.Build, status: builds.Status | None) -> d
         _key, root = folders.root(build.repo)
         settings = own.load() if found.settings is None else found.settings
         read = drift.of_build(found.state, build, status, Git(root), settings=settings)
-    except RoundsError as error:
-        return {"problem": {"reason": error.reason, "fix": error.fix}}
+    except RoundsError as exc:
+        return {"problem": {"reason": exc.reason, "fix": exc.fix}}
     return None if read is None else read.data()
 
 
@@ -730,7 +730,7 @@ def _head(found: Shown) -> dict:
                                        "fix": error.fix}}
     state = found.state
     settings = own.load() if found.settings is None else found.settings
-    at = steps.current(state, name=found.name, closed=found.closed,
+    at = steps.current(state, name=found.name, on_closed=found.on_closed,
                        register=found.register,
                        seen=checking.seen_of(state, found.name, settings=settings))
     return {**head, "status": state.status, "ended": _ended(state),
@@ -740,7 +740,7 @@ def _head(found: Shown) -> dict:
             "step": None if at is None else at.data(),
             "close": (None if state.status != states.OPEN
                       else {"waits": list(closing.waits(
-                          state, closed=found.closed,
+                          state, on_closed=found.on_closed,
                           ratify=closing.ratify_of(settings, found.name)))}),
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),

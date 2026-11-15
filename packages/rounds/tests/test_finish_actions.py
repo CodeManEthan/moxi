@@ -54,22 +54,22 @@ def configure(write_config):
 @pytest.fixture
 def ready(repo, configure, tmp_path):
     """B1 built, checked and verified at its tip. Gives `(log, worktree repo)`."""
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     tree = type(repo)(made.worktree)
     tree.commit("work.txt", "the work")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     report = path.parent / "build-report.md"
     report.write_text("# report\n\n```toml rounds\n" + "\n".join([
         'kind = "build"', 'verdict = "publishable"', 'pass = "full"', 'by = "critic"',
         'model = "a-model"', 'stage = "B1"', f'head = "{tree.rev()}"']) + "\n```\n",
         encoding="utf-8")
-    verdicts.record(ROUND, report, actor="critic")
+    verdicts.record(ROUND, report, by="critic")
     return path, tree
 
 
@@ -104,7 +104,7 @@ def test_a_push_after_the_merge_pushes_the_target_at_its_landing(ready, repo, co
     path, _tree = ready
     configure('{ do = "merge" }', '{ do = "push", remote = "origin" }')
 
-    done = finishing.finish(ROUND, "B1", actor="coder")
+    done = finishing.finish(ROUND, "B1", by="coder")
 
     assert remote_rev(repo, "main") == repo.rev("main") == done.actions[0].landing
     assert actions_of(path) == [("merge", "ok"), ("push", "ok")]
@@ -116,19 +116,19 @@ def test_a_push_with_no_merge_pushes_the_branch_at_the_tip(ready, repo, configur
     configure('{ do = "push", remote = "origin" }')
     main_before = repo.rev("main")
 
-    finishing.finish(ROUND, "B1", actor="coder")
+    finishing.finish(ROUND, "B1", by="coder")
 
     assert remote_rev(repo, "work") == tree.rev()
     assert repo.rev("main") == main_before
     assert actions_of(path) == [("push", "ok")] and ended(path) == builds.FINISHED
 
 
-def test_with_no_merge_the_cleanup_removes_only_the_scratch_folder(ready, repo,
+def test_with_no_merge_the_cleanup_removes_only_the_scratch_dir(ready, repo,
                                                                    configure):
     _path, tree = ready
     configure('{ do = "push", remote = "origin" }')
 
-    done = finishing.finish(ROUND, "B1", actor="coder")
+    done = finishing.finish(ROUND, "B1", by="coder")
 
     (scratch,) = done.removed
     assert not scratch.exists() and tree.root.is_dir()
@@ -141,7 +141,7 @@ def test_a_push_git_refuses_is_recorded_failed(ready, repo, configure):
     configure('{ do = "merge" }', '{ do = "push", remote = "nowhere" }')
 
     with pytest.raises(finishing.ActionFailed) as failed:
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
 
     assert failed.value.id == "push" and "nowhere" in failed.value.output
     assert actions_of(path) == [("merge", "ok"), ("push", "failed")]
@@ -157,7 +157,7 @@ def test_a_command_runs_in_the_worktree_with_its_placeholders_after_its_start_is
     configure('{ do = "merge" }', command("pr", 0, said))
     tip, place = tree.rev(), tree.root.resolve()
 
-    finishing.finish(ROUND, "B1", actor="coder")
+    finishing.finish(ROUND, "B1", by="coder")
 
     words, cwd = json.loads(said.read_text())
     assert words == [ROUND, "B1", "work", tip, "main"]
@@ -174,7 +174,7 @@ def test_a_failing_second_action_is_recorded_and_its_rerun_leaves_the_first_alon
     configure('{ do = "merge" }', command("deploy", 3, said))
 
     with pytest.raises(finishing.ActionFailed) as failed:
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
     assert failed.value.id == "deploy" and "exited 3" in failed.value.output
     landing = repo.rev("main")
     assert actions_of(path) == [("merge", "ok"), ("deploy", "started"),
@@ -185,7 +185,7 @@ def test_a_failing_second_action_is_recorded_and_its_rerun_leaves_the_first_alon
     # each record stays with its id.
     configure(command("first", 0, tmp_path / "first.txt"), '{ do = "merge" }',
               command("deploy", 0, said))
-    done = finishing.finish(ROUND, "B1", actor="coder")
+    done = finishing.finish(ROUND, "B1", by="coder")
 
     assert [(one.id, one.state, one.ran) for one in done.actions] == [
         ("first", "ok", True), ("merge", "ok", False), ("deploy", "ok", True)]
@@ -209,14 +209,14 @@ def test_a_command_that_started_with_no_result_is_refused_naming_when(
 
     monkeypatch.setattr(finishing, "_command", stop)
     with pytest.raises(Stopped):
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
     monkeypatch.setattr(finishing, "_command", real)
     (started,) = [one for one in log.read_round(path)
                   if one["type"] == "finish.action" and one["state"] == "started"]
     before = log.read_round(path)
 
     with pytest.raises(Refused) as refused:
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
 
     (unmet,) = refused.value.unmet
     assert "deploy" in unmet.reason and started["at"] in unmet.reason
@@ -232,7 +232,7 @@ def test_a_command_whose_worktree_is_gone_is_refused_before_anything(
     before = log.read_round(path)
 
     with pytest.raises(Refused) as refused:
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
 
     assert any("worktree, which is gone" in one.reason for one in refused.value.unmet)
     assert log.read_round(path) == before

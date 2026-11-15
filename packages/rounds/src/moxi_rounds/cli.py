@@ -597,7 +597,7 @@ def _ask(args, out) -> int:
         raise BadArgument("--retire takes an option out of a question on record",
                           "name the question by its id in place of a sentence: "
                           f"{args.prog} ask {args.target} ID --retire K")
-    asked = asking.ask(args.target, args.text, actor=_actor(args), origin=args.origin,
+    asked = asking.ask(args.target, args.text, by=_actor(args), origin=args.origin,
                        record=args.record, build=args.build, blocks=args.blocks,
                        options=args.options)
     print(f"{asked.id}: {asked.text}", file=out)
@@ -834,9 +834,9 @@ def _mark_repair(args, out) -> int:
         raise BadArgument("a repair derives a record again from git or from a report, "
                           "and carries no pointer", "leave --record out")
     if args.resync:
-        done = repairs.resync(args.target, args.id, actor=_actor(args))
+        done = repairs.resync(args.target, args.id, by=_actor(args))
     else:
-        done = repairs.reread(args.target, args.id, actor=_actor(args))
+        done = repairs.reread(args.target, args.id, by=_actor(args))
     print(f"{done.name}: {done.said}", file=out)
     _warn_of(done.failed, args.prog, args.verb)
     return codes.OK
@@ -850,7 +850,7 @@ def _mark_fixed(args, out) -> int:
         raise BadArgument("the lead's mark of a finding carries no pointer: it names "
                           "the commits of the fix", "leave --record out")
     done = fixes.fix(args.target, args.id, args.commit,
-                     no_behaviour_change=args.no_behaviour_change, actor=_actor(args))
+                     no_behaviour_change=args.no_behaviour_change, by=_actor(args))
     found = done.finding
     print(f"finding {found.key}: {found.severity}, {found.state}   commits: "
           f"{', '.join(one[:12] for one in done.event['commits'])}", file=out)
@@ -862,7 +862,7 @@ def _mark_done(args, out) -> int:
     """`mark B<n>.W<k> --done`: a waiting item is done."""
     from . import waits
 
-    done = waits.done(args.target, args.id, record=args.record, actor=_actor(args))
+    done = waits.done(args.target, args.id, record=args.record, by=_actor(args))
     one = done.wait
     already = (f"   (done already, {one.done_at} by {one.done_by}: nothing was written)"
                if done.found else "")
@@ -916,7 +916,7 @@ def _mark_brief(args, out) -> int:
     if args.record is not None:
         raise BadArgument("a sized brief is the lead's check of a file, and carries no "
                           "pointer", "leave --record out")
-    done = sizing.size(args.target, args.id, args.brief, actor=_actor(args))
+    done = sizing.size(args.target, args.id, args.brief, by=_actor(args))
     one = done.sized
     within = ("" if done.limit is None
               else f" ({done.minutes} of {done.limit} minutes)")
@@ -1182,7 +1182,7 @@ def _commission(args, out) -> int:
                               "--slice ID=TEXT, as --slice 1a=the log")
         slices.append((slice_id.strip(), what, minutes))
     made = commissioning.commission(args.round, args.stage, builder=args.builder,
-                                    actor=_actor(args), repo=args.repo,
+                                    by=_actor(args), repo=args.repo,
                                     branch=args.branch, slices=slices,
                                     record=args.record, existing=args.existing)
     for line in made.block.lines:
@@ -1247,7 +1247,7 @@ def _check(args, out) -> int:
         raise BadArgument(f"{name} is named with no stage, and a check is of one build",
                           f"moxi rounds check {name} B<n>, or moxi rounds check in the "
                           "build's worktree")
-    ran = checking.check(name, stage, actor=_actor(args), step=args.step,
+    ran = checking.check(name, stage, by=_actor(args), step=args.step,
                          full=args.full, timeout_s=args.timeout_s)
     if isinstance(ran, checking.CiChecked):
         return _ci_checked(ran, args, out)
@@ -1312,11 +1312,11 @@ def _finish(args, out) -> int:
                   f"again, as {why}", file=out, flush=True)
 
     try:
-        done = finishing.finish(name, stage, actor=_actor(args), on_action=on_action,
+        done = finishing.finish(name, stage, by=_actor(args), on_action=on_action,
                                 again=args.again)
-    except finishing.ActionFailed as failed:
-        if failed.output:
-            print(failed.output, file=out)
+    except finishing.ActionFailed as exc:
+        if exc.output:
+            print(exc.output, file=out)
         raise
     print(f"finish {done.name} {done.stage} at {done.tip[:12]}", file=out)
     if done.cleared is not None:
@@ -1486,7 +1486,7 @@ def _drop_build(args, out) -> int:
         raise BadArgument("a build's drop changes no question: --withdraw-questions is "
                           "for a round's drop", "leave --withdraw-questions out")
     dropped = dropping.drop_build(args.round, args.stage, by=args.by,
-                                  record=args.record, actor=_actor(args))
+                                  record=args.record, run_by=_actor(args))
     [tip] = dropped.event["tips"]
     print(f"dropped {dropped.name} {dropped.stage}   by: {dropped.by}   record: "
           f"{dropped.record}", file=out)
@@ -1556,8 +1556,8 @@ def _account_lines(swept, out) -> None:
 def _cleanup_lines(removed, kept, out) -> None:
     """Say which of an ended build's folders were removed, and which the removal rule
     kept, with the check that kept each."""
-    for folder in removed:
-        print(f"removed {folder}", file=out)
+    for removed_dir in removed:
+        print(f"removed {removed_dir}", file=out)
     for one in kept:
         print(f"kept {one.place}: {one.line()}; it is left for the sweep of leftover "
               "folders", file=out)

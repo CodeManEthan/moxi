@@ -55,22 +55,22 @@ def configure(write_config):
 @pytest.fixture
 def ready(repo, configure, tmp_path, capsys):
     """B1 built, checked and verified at its tip. Gives the round's log."""
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     tree = type(repo)(made.worktree)
     tree.commit("work.txt", "the work")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     report = path.parent / "build-report.md"
     report.write_text("# report\n\n```toml rounds\n" + "\n".join([
         'kind = "build"', 'verdict = "publishable"', 'pass = "full"', 'by = "critic"',
         'model = "a-model"', 'stage = "B1"', f'head = "{tree.rev()}"']) + "\n```\n",
         encoding="utf-8")
-    verdicts.record(ROUND, report, actor="critic")
+    verdicts.record(ROUND, report, by="critic")
     capsys.readouterr()
     return path
 
@@ -99,7 +99,7 @@ def stop_during_the_command(monkeypatch) -> None:
 
     monkeypatch.setattr(finishing, "_command", stop)
     with pytest.raises(Stopped):
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
     monkeypatch.setattr(finishing, "_command", real)
 
 
@@ -130,7 +130,7 @@ def test_a_started_command_is_refused_with_both_ways_on_and_nothing_written(
     before = log.read_round(ready)
 
     with pytest.raises(Refused) as refused:
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
 
     (unmet,) = refused.value.unmet
     assert f"moxi rounds finish {ROUND} B1 --again deploy" in unmet.fix
@@ -178,7 +178,7 @@ def test_again_of_a_command_that_fails_records_the_failure(
     stop_during_the_command(monkeypatch)
 
     with pytest.raises(finishing.ActionFailed):
-        finishing.finish(ROUND, "B1", actor="coder", again="deploy")
+        finishing.finish(ROUND, "B1", by="coder", again="deploy")
 
     assert actions_of(ready)[-1] == ("deploy", "failed")
     assert ended(ready) is None
@@ -195,11 +195,11 @@ def test_again_is_refused_for_anything_but_a_started_command(
     configure('{ do = "merge" }', command("first", 0, tmp_path / "first.txt"),
               command("deploy", 3, tmp_path / "said.txt"))
     with pytest.raises(finishing.ActionFailed):
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
     before = log.read_round(ready)
 
     with pytest.raises(Refused) as refused:
-        finishing.finish(ROUND, "B1", actor="coder", again=again)
+        finishing.finish(ROUND, "B1", by="coder", again=again)
 
     assert any(words in one.reason for one in refused.value.unmet)
     assert log.read_round(ready) == before
@@ -208,7 +208,7 @@ def test_again_is_refused_for_anything_but_a_started_command(
 def test_again_is_refused_for_a_command_with_no_record(ready, configure, tmp_path):
     configure('{ do = "merge" }', command("deploy", 0, tmp_path / "said.txt"))
     with pytest.raises(Refused) as refused:
-        finishing.finish(ROUND, "B1", actor="coder", again="deploy")
+        finishing.finish(ROUND, "B1", by="coder", again="deploy")
     assert any("has no record" in one.reason and one.fix == f"moxi rounds finish {ROUND} B1"
                for one in refused.value.unmet)
     assert actions_of(ready) == []
@@ -241,7 +241,7 @@ def test_a_skipped_action_taken_back_is_refused_again(
                  "planner"]) == 0
 
     with pytest.raises(Refused) as refused:
-        finishing.finish(ROUND, "B1", actor="coder")
+        finishing.finish(ROUND, "B1", by="coder")
     assert "started at" in refused.value.unmet[0].reason
 
 
@@ -251,7 +251,7 @@ def test_again_is_refused_for_an_action_the_operator_skipped(
     stop_during_the_command(monkeypatch)
     assert skip() == 0
     with pytest.raises(Refused) as refused:
-        finishing.finish(ROUND, "B1", actor="coder", again="deploy")
+        finishing.finish(ROUND, "B1", by="coder", again="deploy")
     assert any("the operator skipped deploy for B1, by C1" in one.reason
                for one in refused.value.unmet)
 

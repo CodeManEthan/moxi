@@ -274,7 +274,7 @@ def _question(holder: str, item: index.Item, on_closed: Callable[[str], bool]) -
     return Entry(
         holder=holder, id=item.id, text=body.get("text"), origin=body.get("from"),
         blocks=_blocks(body.get("blocks")),
-        state=questions.listed(body, closed=closed), by=body.get("by"),
+        state=questions.listed(body, on_closed=on_closed), by=body.get("by"),
         at=body.get("at"), builder=body.get("builder"),
         until=body.get("until"),
         options=tuple(Option(one["key"], one["text"])
@@ -282,7 +282,7 @@ def _question(holder: str, item: index.Item, on_closed: Callable[[str], bool]) -
         moved_from=body.get("moved_from"), held=_blocks(body.get("held")))
 
 
-def _decision(holder: str, item: index.Item, closed: Callable[[str], bool]) -> Entry:
+def _decision(holder: str, item: index.Item, on_closed: Callable[[str], bool]) -> Entry:
     body = item.body
     return Entry(
         holder=holder, id=item.id, text=body.get("text"), origin=body.get("from"),
@@ -363,7 +363,7 @@ def waiting(home: folders.Home, *, settings=None, env=None) -> Rows:
             unreadable.append(summary.unreadable)
         elif summary.status == states.OPEN:
             # Of the decisions, only a major one waits on him here.
-            entries += [entry for entry in _entries(summary, closed)
+            entries += [entry for entry in _entries(summary, on_closed)
                         if entry.weight in (None, report_block.MAJOR)]
     return Rows(_ordered(entries), tuple(unreadable))
 

@@ -287,24 +287,24 @@ def test_a_copied_report_with_new_content_is_a_new_report(round_dir):
     assert len({one.sha256 for one in found}) == 3
 
 
-def test_a_retrospective_is_recorded_with_who_wrote_it_and_the_report(folder):
-    fold(folder, question("Q1"), stage("B1"))
-    path = other(folder, "retro")
+def test_a_retrospective_is_recorded_with_who_wrote_it_and_the_report(round_dir):
+    fold(round_dir, question("Q1"), stage("B1"))
+    path = other(round_dir, "retro")
 
     record(path)
 
-    event = events(folder)[-1]
+    event = events(round_dir)[-1]
     assert {key: event[key] for key in ("type", "kind", "by", "model", "report")} == {
         "type": "verdict.recorded", "kind": "retro", "by": "critic", "model": "a-model",
         "report": "retro.md"}
     assert "verdict" not in event and "pass" not in event
-    assert folded(folder).verdicts[-1].kind == "retro"
+    assert folded(round_dir).verdicts[-1].kind == "retro"
 
 
 def test_a_retrospective_is_refused_in_a_flow_with_no_retro_step(opened):
-    folder = opened("fix")
-    path = other(folder, "retro")
-    before = raw(folder)
+    round_dir = opened("fix")
+    path = other(round_dir, "retro")
+    before = raw(round_dir)
 
     with pytest.raises(Refused) as refused:
         record(path)
@@ -312,19 +312,19 @@ def test_a_retrospective_is_refused_in_a_flow_with_no_retro_step(opened):
     [unmet] = refused.value.unmet
     assert "the flow fix of proj-a/a-round has no retro step" in unmet.reason
     assert unmet.fix == "moxi rounds mark proj-a/a-round --flow NAME"
-    assert raw(folder) == before
+    assert raw(round_dir) == before
 
 
-def test_a_retrospective_recorded_already_is_refused(folder):
-    path = other(folder, "retro")
+def test_a_retrospective_recorded_already_is_refused(round_dir):
+    path = other(round_dir, "retro")
     record(path)
-    before = raw(folder)
+    before = raw(round_dir)
 
     with pytest.raises(Refused) as refused:
         record(path)
 
     assert "recorded already" in refused.value.unmet[0].reason
-    assert raw(folder) == before
+    assert raw(round_dir) == before
 
 
 def test_a_design_report_is_refused_where_the_flow_verifies_no_design(opened):
@@ -982,20 +982,20 @@ def built(git_repo, tmp_path, capsys):
     assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
     assert cli.main(["projects", "set", "proj-a", "--notes-root",
                      str(tmp_path / "notes")]) == 0
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
-    folder = tmp_path / "notes" / "rounds" / "a-round"
-    log.append(log.round_log(folder), "stage.declared",
+    round_dir = tmp_path / "notes" / "rounds" / "a-round"
+    log.append(log.round_log(round_dir), "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     tree = type(git_repo)(made.worktree)
     tree.commit("work.txt", "the work")
     capsys.readouterr()
-    return folder, git_repo, tree
+    return round_dir, git_repo, tree
 
 
-def of_build(folder, head, verdict="fold-first", *, findings=(), by="critic",
+def of_build(round_dir, head, verdict="fold-first", *, findings=(), by="critic",
              name="build-report.md", pass_="full", model="a-model", more=(),
              prose="What the pass found in the build."):
     """Write a report of B1 read at `head` in the round's folder and return its path."""
@@ -1003,7 +1003,7 @@ def of_build(folder, head, verdict="fold-first", *, findings=(), by="critic",
             f'by = "{by}"', f'model = "{model}"', 'stage = "B1"', f'head = "{head}"']
     text = (f"# A report\n\n{prose}\n\n```toml rounds\n" + "\n".join(keys)
             + "".join(f"\n\n{one}" for one in (*findings, *more)) + "\n```\n")
-    path = folder / name
+    path = round_dir / name
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -1015,12 +1015,12 @@ def refusal(path) -> str:
 
 
 def test_a_build_report_is_recorded_against_the_head_it_read(built):
-    folder, repo, tree = built
-    path = of_build(folder, tree.rev(), findings=[finding("L1", "major")])
+    round_dir, repo, tree = built
+    path = of_build(round_dir, tree.rev(), findings=[finding("L1", "major")])
 
     done = record(path)
 
-    [event] = [one for one in events(folder) if one["type"] == "verdict.recorded"]
+    [event] = [one for one in events(round_dir) if one["type"] == "verdict.recorded"]
     assert {key: event[key] for key in ("kind", "verdict", "pass", "stage", "head",
                                         "merge_base", "by", "report")} == {
         "kind": "build", "verdict": "fold-first", "pass": "full", "stage": "B1",
@@ -1033,41 +1033,41 @@ def test_a_build_report_is_recorded_against_the_head_it_read(built):
 
 
 def test_a_head_under_the_tip_is_recorded_after_the_branch_moved(built):
-    folder, _repo, tree = built
+    round_dir, _repo, tree = built
     read = tree.rev()
     tree.commit("fix.txt", "a fix made while the pass was written")
 
-    done = record(of_build(folder, read))
+    done = record(of_build(round_dir, read))
 
     assert done.verdict.head == read
 
 
 def test_a_head_that_is_not_a_commit_of_the_build_is_refused(built):
-    folder, repo, _tree = built
+    round_dir, repo, _tree = built
     repo.switch("elsewhere", new_from="main")
     stray = repo.commit("stray.txt")
     repo.switch("main")
-    before = raw(folder)
+    before = raw(round_dir)
 
-    said = refusal(of_build(folder, stray))
+    said = refusal(of_build(round_dir, stray))
 
     assert f"the report read {stray[:12]}, which is neither the tip of work" in said
-    assert "which proj-a does not hold" in refusal(of_build(folder, "f" * 40,
+    assert "which proj-a does not hold" in refusal(of_build(round_dir, "f" * 40,
                                                             name="other.md"))
-    assert raw(folder) == before
+    assert raw(round_dir) == before
 
 
 def test_the_builder_s_own_report_is_refused(built):
-    folder, _repo, tree = built
+    round_dir, _repo, tree = built
 
-    said = refusal(of_build(folder, tree.rev(), by="coder"))
+    said = refusal(of_build(round_dir, tree.rev(), by="coder"))
 
     assert "the report is by coder, who built B1" in said
 
 
 def test_a_report_of_a_stage_with_no_open_build_is_refused(built):
-    folder, _repo, tree = built
-    path = of_build(folder, tree.rev())
+    round_dir, _repo, tree = built
+    path = of_build(round_dir, tree.rev())
     text = path.read_text(encoding="utf-8").replace('stage = "B1"', 'stage = "B2"')
     path.write_text(text, encoding="utf-8")
 
@@ -1075,17 +1075,17 @@ def test_a_report_of_a_stage_with_no_open_build_is_refused(built):
 
 
 def test_a_build_report_lists_every_open_finding_and_sets_its_state(built):
-    folder, _repo, tree = built
-    record(of_build(folder, tree.rev(), findings=[finding("L1", "major"),
+    round_dir, _repo, tree = built
+    record(of_build(round_dir, tree.rev(), findings=[finding("L1", "major"),
                                                   finding("L2", "minor")]))
     tree.commit("fix.txt", "the fix")
 
-    left_out = of_build(folder, tree.rev(), "publishable", pass_="re-check",
+    left_out = of_build(round_dir, tree.rev(), "publishable", pass_="re-check",
                         findings=[finding("L1", "major", "fixed")], name="second.md")
     assert "the finding B1.L2 is open on B1's record and the report does not list it" in (
         refusal(left_out))
 
-    done = record(of_build(folder, tree.rev(), "publishable", pass_="re-check",
+    done = record(of_build(round_dir, tree.rev(), "publishable", pass_="re-check",
                            findings=[finding("L1", "major", "fixed"),
                                      finding("L2", "minor", "no-action")],
                            name="third.md"))
@@ -1096,10 +1096,10 @@ def test_a_build_report_lists_every_open_finding_and_sets_its_state(built):
 
 
 def test_a_finding_closed_by_a_report_may_be_left_out_of_the_next(built):
-    folder, _repo, tree = built
-    record(of_build(folder, tree.rev(), findings=[finding("L1", "minor", "fixed")]))
+    round_dir, _repo, tree = built
+    record(of_build(round_dir, tree.rev(), findings=[finding("L1", "minor", "fixed")]))
 
-    done = record(of_build(folder, tree.rev(), "publishable", pass_="re-check",
+    done = record(of_build(round_dir, tree.rev(), "publishable", pass_="re-check",
                            name="second.md"))
 
     assert [(one.key, one.state) for one in done.findings] == [("B1.L1", "fixed")]
@@ -1108,18 +1108,18 @@ def test_a_finding_closed_by_a_report_may_be_left_out_of_the_next(built):
 def test_an_id_a_dropped_build_s_report_used_is_refused_for_a_new_finding(built):
     from moxi_rounds import commissioning
 
-    folder, repo, tree = built
-    record(of_build(folder, tree.rev(), findings=[finding("L1", "major")]))
-    log.append(log.round_log(folder), "build.dropped", {"stage": "B1"}, actor="planner")
+    round_dir, repo, tree = built
+    record(of_build(round_dir, tree.rev(), findings=[finding("L1", "major")]))
+    log.append(log.round_log(round_dir), "build.dropped", {"stage": "B1"}, by="planner")
     repo.git("worktree", "remove", "--force", str(tree.root))
     repo.git("branch", "-D", "work")
-    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     again = type(repo)(made.worktree)
     again.commit("work.txt", "the work again")
 
-    said = refusal(of_build(folder, again.rev(), findings=[finding("L1", "minor")],
+    said = refusal(of_build(round_dir, again.rev(), findings=[finding("L1", "minor")],
                             name="second.md"))
-    done = record(of_build(folder, again.rev(), findings=[finding("L2", "minor")],
+    done = record(of_build(round_dir, again.rev(), findings=[finding("L2", "minor")],
                            name="third.md"))
 
     assert "the finding L1 is new to B1's build, and an earlier report of B1 used" in said
@@ -1128,19 +1128,19 @@ def test_an_id_a_dropped_build_s_report_used_is_refused_for_a_new_finding(built)
 
 
 def test_a_build_report_with_the_same_bytes_is_refused(built):
-    folder, _repo, tree = built
-    path = of_build(folder, tree.rev())
+    round_dir, _repo, tree = built
+    path = of_build(round_dir, tree.rev())
     record(path)
 
     assert "a report with these bytes was recorded already" in refusal(path)
 
 
 def test_a_verdict_on_a_build_merged_by_hand_reads_the_target_before_the_merge(built):
-    folder, repo, tree = built
+    round_dir, repo, tree = built
     before = repo.rev("main")
     repo.merge("work")
 
-    done = record(of_build(folder, tree.rev()))
+    done = record(of_build(round_dir, tree.rev()))
 
     # Against the target's head the tip would read as on the target; against the
     # target as it was before the merge it is the build's work.
@@ -1149,16 +1149,16 @@ def test_a_verdict_on_a_build_merged_by_hand_reads_the_target_before_the_merge(b
 
 def test_a_build_report_below_its_step_s_tier_is_flagged(built, write_config):
     write_config(TIERS)
-    folder, _repo, tree = built
+    round_dir, _repo, tree = built
 
-    done = record(of_build(folder, tree.rev(), model="model-four"))
+    done = record(of_build(round_dir, tree.rev(), model="model-four"))
 
     assert done.verdict.flags == ("model-below-tier",)
 
 
 def test_the_verb_prints_the_verdict_and_what_finish_waits_for(built, capsys):
-    folder, _repo, tree = built
-    path = of_build(folder, tree.rev(), findings=[finding("L1", "major")])
+    round_dir, _repo, tree = built
+    path = of_build(round_dir, tree.rev(), findings=[finding("L1", "major")])
 
     assert main(["verdict", ROUND, str(path), "--as", "critic"]) == 0
 
@@ -1172,13 +1172,13 @@ def test_the_verb_prints_the_verdict_and_what_finish_waits_for(built, capsys):
 def test_show_and_the_round_note_give_a_build_s_verdict_and_findings(built, capsys):
     from moxi_rounds import showing
 
-    folder, _repo, tree = built
-    record(of_build(folder, tree.rev(), findings=[finding("L1", "major")]))
+    round_dir, _repo, tree = built
+    record(of_build(round_dir, tree.rev(), findings=[finding("L1", "major")]))
 
     shown = showing.show(ROUND)
     [row] = showing.data(shown)["builds"]
     text = showing.as_text(shown)
-    note = (folder / "round-note.md").read_text(encoding="utf-8")
+    note = (round_dir / "round-note.md").read_text(encoding="utf-8")
 
     assert row["verdict"]["head"] == tree.rev()
     assert row["findings"] == [{"id": "B1.L1", "severity": "major", "state": "open",

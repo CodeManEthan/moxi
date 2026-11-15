@@ -139,15 +139,15 @@ def test_a_round_that_builds_nothing_closes_on_the_verdict_that_verifies_its_des
     assert status(round_dir) == "closed"
 
 
-def test_the_closing_event_is_the_verb_s_own_and_holds_the_round_s_numbers(folder):
-    fold(folder)
-    verdict(folder)
+def test_the_closing_event_is_the_verb_s_own_and_holds_the_round_s_numbers(round_dir):
+    fold(round_dir)
+    verdict(round_dir)
 
     recorded, closed = events(round_dir)[-2:]
 
     assert closed == {"v": 1, "n": recorded["n"] + 1, "at": closed["at"],
                       "actor": "critic", "type": "round.closed",
-                      "numbers": numbers.of(state.fold(events(folder)[:-1]),
+                      "numbers": numbers.of(state.fold(events(round_dir)[:-1]),
                                             ended_at=closed["at"])}
     assert closed["numbers"]["design_passes"] == 1 and closed["numbers"]["folds"] == 1
 
@@ -216,10 +216,10 @@ def test_a_skip_recorded_before_the_design_closes_on_the_freezing(round_dir):
 
 
 def test_a_round_whose_flow_ends_in_a_retro_closes_on_the_skip_of_it(opened):
-    folder = opened("review")
-    fold(folder)
-    assert status(folder) == "open"
-    assert waits(folder) == ("step retro, ready",)
+    round_dir = opened("review")
+    fold(round_dir)
+    assert status(round_dir) == "open"
+    assert waits(round_dir) == ("step retro, ready",)
 
     rule("skip:retro")
 
@@ -269,7 +269,7 @@ def test_a_skip_of_the_retro_taken_back_keeps_the_round_open_again(opened, capsy
 
     rule("revoke:C1")
 
-    assert waits(folder) == ("step retro, not-due", "question Q1, open")
+    assert waits(round_dir) == ("step retro, not-due", "question Q1, open")
     assert "step: retro, not-due\n" in run(capsys, "show", ROUND)
     rule("Q1", text="They do.")
     assert status(round_dir) == "open"
@@ -301,95 +301,95 @@ BASE = "0" * 40
 TIP = "1" * 40
 
 
-def built(folder, *, finished=True, decisions=(), report="build"):
+def built(round_dir, *, finished=True, decisions=(), report="build"):
     """B1 declared, commissioned and, when `finished`, finished, through the log, with
     a report of kind `report` (none when None) listing `decisions` (`(id, weight)`)."""
-    path = log.round_log(folder)
+    path = log.round_log(round_dir)
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
+               by="planner")
     log.append(path, "build.commissioned",
                {"stage": "B1", "repo": "proj-a", "branch": "work", "base": BASE,
                 "target": "main", "builder": "coder", "build": "0123456789abcdef"},
-               actor="planner")
+               by="planner")
     listed = [{"id": id_, "text": "a choice", "weight": weight, "forecloses": False}
               for id_, weight in decisions]
     if report == "build":
         log.append(path, "verdict.recorded",
                    {"kind": "build", "verdict": "publishable", "pass": "full",
                     "stage": "B1", "head": TIP, "by": "critic", "decisions": listed},
-                   actor="critic")
+                   by="critic")
     elif report == "majors":
         log.append(path, "verdict.recorded",
                    {"kind": "majors", "stages": ["B1"], "by": "critic",
                     "decisions": [{**one, "stage": "B1"} for one in listed]},
-                   actor="critic")
+                   by="critic")
     if finished:
-        log.append(path, "finish.done", {"stage": "B1", "tip": TIP}, actor="coder")
+        log.append(path, "finish.done", {"stage": "B1", "tip": TIP}, by="coder")
 
 
 def test_a_round_that_builds_waits_for_its_open_build(opened):
-    folder = opened("fix")
-    built(folder, finished=False)
-    assert {"stage B1, not finished", "build of B1, open"} <= set(waits(folder))
+    round_dir = opened("fix")
+    built(round_dir, finished=False)
+    assert {"stage B1, not finished", "build of B1, open"} <= set(waits(round_dir))
 
 
 def test_a_round_that_builds_with_nothing_planned_waits_for_a_finished_stage(opened):
-    folder = opened("fix")
-    assert "a finished stage: the plan holds none" in waits(folder)
+    round_dir = opened("fix")
+    assert "a finished stage: the plan holds none" in waits(round_dir)
 
 
 def test_a_finished_build_whose_report_declares_no_decision_leaves_nothing_to_wait_for(
         opened):
-    folder = opened("fix")
-    built(folder)
-    assert waits(folder) == ()
+    round_dir = opened("fix")
+    built(round_dir)
+    assert waits(round_dir) == ()
 
 
 @pytest.mark.parametrize("report", [None, "majors"])
 def test_a_finished_build_with_no_report_declaring_its_decisions_holds_the_close(
         opened, report):
-    folder = opened("fix")
-    built(folder, report=report)
+    round_dir = opened("fix")
+    built(round_dir, report=report)
     if report is None:
-        assert waits(folder) == ("a report that declares the decisions of B1's build: a "
+        assert waits(round_dir) == ("a report that declares the decisions of B1's build: a "
                                  "build report, or a majors report naming B1",)
-        assert closing.waits(folded(folder), ratify="off") == ()
+        assert closing.waits(folded(round_dir), ratify="off") == ()
     else:
-        assert waits(folder) == ()
+        assert waits(round_dir) == ()
 
 
 def test_an_unruled_major_decision_holds_the_close_and_its_ruling_closes_the_round(
         opened):
-    folder = opened("fix")
-    built(folder, decisions=[("M1", "major"), ("M2", "minor")])
-    assert waits(folder) == ("decision B1.M1, major and not yet ruled",)
+    round_dir = opened("fix")
+    built(round_dir, decisions=[("M1", "major"), ("M2", "minor")])
+    assert waits(round_dir) == ("decision B1.M1, major and not yet ruled",)
 
     rule("B1.M1=accept")
 
-    assert status(folder) == "closed"
+    assert status(round_dir) == "closed"
 
 
 @pytest.mark.parametrize("past", ["off", "skip"])
 def test_a_ratify_setting_of_off_or_a_skip_of_ratify_lets_an_unruled_major_past(
         opened, write_config, past):
-    folder = opened("fix")
-    built(folder, decisions=[("M1", "major")])
+    round_dir = opened("fix")
+    built(round_dir, decisions=[("M1", "major")])
     if past == "off":
         write_config(FLOWS + '\n[defaults]\nratify = "off"\n')
-        assert closing.waits(folded(folder), ratify="off") == ()
+        assert closing.waits(folded(round_dir), ratify="off") == ()
         # The next write reads the setting and closes the round.
         rule(text="a placeholder ruling")
     else:
         rule("skip:ratify")
-    assert status(folder) == "closed"
+    assert status(round_dir) == "closed"
 
 
 def test_a_round_with_a_retro_step_waits_for_it_after_its_build(opened):
-    folder = opened("small")
-    fold(folder)
-    built(folder)
-    assert waits(folder) == ("step retro, ready",)
+    round_dir = opened("small")
+    fold(round_dir)
+    built(round_dir)
+    assert waits(round_dir) == ("step retro, ready",)
 
 
 # -- the verb whose write closes a round says so -----------------------------------------
@@ -557,8 +557,8 @@ def test_every_step_of_the_flow_keeps_a_round_open_not_only_the_design_s(
 
     verdict(round_dir)
 
-    assert types(folder)[-1] == "verdict.recorded" and status(folder) == "open"
-    assert waits(folder) == ("step retro, ready",)
+    assert types(round_dir)[-1] == "verdict.recorded" and status(round_dir) == "open"
+    assert waits(round_dir) == ("step retro, ready",)
     rule("skip:retro")
     assert status(round_dir) == "closed"
 
@@ -636,8 +636,8 @@ def test_a_closed_round_is_listed_with_the_ended_ones(closed, capsys):
     assert (found["name"], found["status"], found["step"]) == (ROUND, "closed", None)
     assert found["ended"] == {"how": "closed", "by": None, "record": None, "at": at,
                               "numbers": events(closed)[-1]["numbers"]}
-    assert api.round(ROUND)["close"] is None
-    assert api.round(ROUND)["ended"]["numbers"] == events(closed)[-1]["numbers"]
+    assert api.round_data(ROUND)["close"] is None
+    assert api.round_data(ROUND)["ended"]["numbers"] == events(closed)[-1]["numbers"]
 
 
 def test_a_closed_round_s_note_and_its_export_say_so(closed, capsys):
@@ -739,8 +739,8 @@ def test_what_a_close_waits_for_is_read_from_the_state_alone(round_dir):
     assert not closing.is_due(found) and closing.entry(found) is None
 
 
-def test_a_part_added_to_the_condition_is_asked_with_the_rest(folder, monkeypatch):
-    fold(folder)
+def test_a_part_added_to_the_condition_is_asked_with_the_rest(round_dir, monkeypatch):
+    fold(round_dir)
     def placeholder(_state, _closed, _ratify):
         return iter(["a placeholder"])
 
@@ -748,8 +748,8 @@ def test_a_part_added_to_the_condition_is_asked_with_the_rest(folder, monkeypatc
 
     rule("skip:verify-design")
 
-    assert waits(folder) == ("a placeholder",)
-    assert status(folder) == "open"
+    assert waits(round_dir) == ("a placeholder",)
+    assert status(round_dir) == "open"
 
 
 def test_a_closed_round_s_numbers_are_written_beside_its_note(closed):

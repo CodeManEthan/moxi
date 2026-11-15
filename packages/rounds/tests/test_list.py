@@ -604,10 +604,10 @@ def test_help_says_what_each_listing_is(capsys):
 
 # -- the numbers -------------------------------------------------------------------------
 
-def close(folder, slug, held, *, at=T6):
+def close(round_dir, slug, held, *, at=T6):
     """End a round with a closing event that holds `held` as its numbers, or none."""
-    log.append(log.round_log(folder / slug), "round.closed",
-               {} if held is None else {"numbers": held}, actor="planner", at=at)
+    log.append(log.round_log(round_dir / slug), "round.closed",
+               {} if held is None else {"numbers": held}, by="planner", at=at)
 
 
 def test_the_numbers_of_the_closed_rounds_are_summed_and_a_dropped_one_s_are_not(
@@ -617,7 +617,7 @@ def test_the_numbers_of_the_closed_rounds_are_summed_and_a_dropped_one_s_are_not
     close(tmp_path / "notes-b" / "rounds", "c-round",
           {"folds": 2, "step_time_s": {"commission B1": 5, "build B1": 60},
            "findings": {"major": 0, "minor": 2}})
-    dropping.drop(B, by="operator", record="comms:30", actor="planner", at=T6)
+    dropping.drop(B, by="operator", record="comms:30", run_by="planner", at=T6)
 
     found = data(capsys, "--numbers")
 

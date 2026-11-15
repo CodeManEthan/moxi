@@ -93,7 +93,7 @@ def not_repaired(given: str, name: str) -> Refused | None:
     return None
 
 
-def resync(target: str, stage_id: str, *, actor: str, settings=None,
+def resync(target: str, stage_id: str, *, by: str, settings=None,
            wait_s: float = write.WAIT_S, at: str | None = None) -> Repaired:
     """Read git again for the base of the open build of `stage_id`, `B<n>`, of the
     round `target`, and move it when the target was rewritten under it.
@@ -143,10 +143,10 @@ def resync(target: str, stage_id: str, *, actor: str, settings=None,
                                 "repair, and nothing was written")
                 return None
             found = git.merge_bases(base, head) if present else ()
-        except RoundsError as error:
-            if isinstance(error, Refused):
+        except RoundsError as exc:
+            if isinstance(exc, Refused):
                 raise
-            raise Refused([Unmet(error.reason, error.fix or shown)]) from None
+            raise Refused([Unmet(exc.reason, exc.fix or shown)]) from None
         if len(found) != 1:
             answer = ("git no longer holds it" if not present else
                       f"git gives no merge base of it and {into}" if not found else
@@ -166,7 +166,7 @@ def resync(target: str, stage_id: str, *, actor: str, settings=None,
                      "output": list(found)}})
 
     try:
-        written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
+        written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
                                gates=[ending.takes_new_work(name, "a repair"),
                                       open_build],
                                event=repaired, wait_s=wait_s, at=at)
@@ -187,7 +187,7 @@ class _Read:
     error: RoundsError | None = None
 
 
-def reread(target: str, report: Path | str, *, actor: str, settings=None,
+def reread(target: str, report: Path | str, *, by: str, settings=None,
            wait_s: float = write.WAIT_S, at: str | None = None) -> Repaired:
     """Parse the recorded report `report` of the round `target` again with the current
     reader, and add to its verdict's record what its block holds and the record lacks.
@@ -205,7 +205,7 @@ def reread(target: str, report: Path | str, *, actor: str, settings=None,
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
-    folder = home.round_folder(slug)
+    round_dir = home.round_dir(slug)
     report = Path(report)
     again = f"moxi rounds verdict {name} {report}"
     went: dict[str, str] = {}
@@ -213,15 +213,15 @@ def reread(target: str, report: Path | str, *, actor: str, settings=None,
     def read(where) -> _Read:
         try:
             raw = report.read_bytes()
-        except OSError as error:
+        except OSError as exc:
             return _Read(error=RoundsError(
-                f"{report} can't be read: {error.strerror or error}",
+                f"{report} can't be read: {exc.strerror or exc}",
                 "name the report's file as it is on this machine"))
         found = _Read(sha256=hashlib.sha256(raw).hexdigest())
         try:
             found.block = report_block.read(report)
-        except BadBlock as error:
-            found.error = error
+        except BadBlock as exc:
+            found.error = exc
         return found
 
     def repaired(view, result):
@@ -232,7 +232,7 @@ def reread(target: str, report: Path | str, *, actor: str, settings=None,
         verdict = next((one for one in state.verdicts if one.sha256 == facts.sha256),
                        None)
         if verdict is None:
-            given = verdicts.path(report, folder)
+            given = verdicts.path(report, round_dir)
             was = next((one for one in state.verdicts if one.report == given), None)
             if was is not None:
                 raise Refused([Unmet(
@@ -269,7 +269,7 @@ def reread(target: str, report: Path | str, *, actor: str, settings=None,
             "read": {"report": verdict.report, "sha256": facts.sha256}})
 
     try:
-        written = write.record(write.Where(home.project, home.folder, slug), actor=actor,
+        written = write.record(write.Where(home.project, home.rounds_dir, slug), by=by,
                                gates=[ending.takes_new_work(name, "a repair")],
                                event=repaired, facts=read, wait_s=wait_s, at=at)
     except NoLog:

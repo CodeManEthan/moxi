@@ -91,12 +91,12 @@ class Holder:
         return (time.time() if now_s is None else now_s) - taken
 
 
-def holder(actor: str, name: str, stage: str, *, at: str | None = None,
+def holder(by: str, name: str, stage: str, *, at: str | None = None,
            pid: int | None = None, host: str | None = None) -> Holder:
-    """The holder's line of a finish of the round `name`'s `stage` run by `actor` in
+    """The holder's line of a finish of the round `name`'s `stage` run by `by` in
     this process, now (or `at`). Each run of whitespace in the actor's name is one space,
     so the line stays one line."""
-    return Holder(" ".join(actor.split()) or "-", os.getpid() if pid is None else pid,
+    return Holder(" ".join(by.split()) or "-", os.getpid() if pid is None else pid,
                   places.host() if host is None else host, stamp() if at is None else at,
                   name, stage)
 
@@ -155,14 +155,14 @@ class Taken:
     cleared: Holder | None = None
 
 
-def take(root: str | os.PathLike, ref: str, *, actor: str, name: str,
+def take(root: str | os.PathLike, ref: str, *, by: str, name: str,
          stage: str) -> Taken:
     """Take the finish lock `ref` in the repo at `root` for the finish of `name`'s
     `stage`. Raises `Refused` with what holds it and the command that clears it, when
     it is held by a live holder or by anything this does not clear, and `GitError` when
     git can't make the ref."""
     git = _LockGit(root)
-    mine = holder(actor, name, stage)
+    mine = holder(by, name, stage)
     blob = git.hash_blob(mine.line + "\n")
     for _ in range(_TRIES):
         if git.create(ref, blob):

@@ -188,9 +188,9 @@ def removes(name: str, commissioned: Mapping, kinds: Iterable[str] = (WORKTREE, 
         try:
             found = remove(name, commissioned, kind, settings=settings, env=env,
                            deletes=deletes, on_rename=on_rename, on_delete=on_delete)
-        except RoundsError as error:
+        except RoundsError as exc:
             # What can't be read counts as work.
-            found = Kept(Path(str(commissioned.get(kind) or "")), "read", error.reason)
+            found = Kept(Path(str(commissioned.get(kind) or "")), "read", exc.reason)
         if isinstance(found, Kept):
             kept.append(replace(found, kind=kind))
         elif found is not None:
@@ -210,8 +210,8 @@ def checkout_removal(root: Path, place: Path, *, settings, repo: str) -> Kept | 
         if found is not None:
             return found
         removed = take(proven)
-    except RoundsError as error:
-        return Kept(Path(place), "B1", error.reason)
+    except RoundsError as exc:
+        return Kept(Path(place), "B1", exc.reason)
     return removed if isinstance(removed, Kept) else None
 
 
@@ -258,7 +258,7 @@ def _owned(name: str, commissioned: Mapping, kind: str, *, settings, env):
                     f"build's {kind} at {built}")
     real = Path(os.path.realpath(base))
     place = real.joinpath(*built.relative_to(base).parts)
-    found = _real_folders(real, place)
+    found = _real_dirs(real, place)
     if found is not None:
         return None if found is _ABSENT else found
     names = {"round": name, "stage": str(commissioned.get("stage")), "repo": repo,
@@ -266,8 +266,8 @@ def _owned(name: str, commissioned: Mapping, kind: str, *, settings, env):
     try:
         marked = (_scratch_marked(place, names) if kind == SCRATCH
                   else _worktree_marked(place, Path(root), names))
-    except GitError as error:
-        return Kept(place, "A4", f"git in the repo's root can't read it: {error.reason}")
+    except GitError as exc:
+        return Kept(place, "A4", f"git in the repo's root can't read it: {exc.reason}")
     if marked is not None:
         return marked
     return place, (Path(root) if kind == WORKTREE else None)
@@ -276,7 +276,7 @@ def _owned(name: str, commissioned: Mapping, kind: str, *, settings, env):
 _ABSENT = object()
 
 
-def _real_folders(root: Path, place: Path):
+def _real_dirs(root: Path, place: Path):
     """A3: None when each folder from below `root` down to `place` is a real directory
     on the root's device; `_ABSENT` when one is not there; else `Kept`."""
     try:
@@ -290,8 +290,8 @@ def _real_folders(root: Path, place: Path):
             found = os.lstat(at)
         except FileNotFoundError:
             return _ABSENT
-        except OSError as error:
-            return Kept(place, "A3", f"{at} can't be read: {error.strerror}")
+        except OSError as exc:
+            return Kept(place, "A3", f"{at} can't be read: {exc.strerror}")
         if stat.S_ISLNK(found.st_mode) or _reparse(found):
             return Kept(place, "A3", f"{at} is a link, not a folder rounds made")
         if not stat.S_ISDIR(found.st_mode):
@@ -386,8 +386,8 @@ def _no_lost_work(proven: Proven) -> Kept | None:
             if found is not None:
                 return found
         return _walk(proven.place)
-    except GitError as error:
-        return Kept(proven.place, "B1", f"git can't read it: {error.reason}")
+    except GitError as exc:
+        return Kept(proven.place, "B1", f"git can't read it: {exc.reason}")
 
 
 def _worktree_work(proven: Proven) -> Kept | None:
@@ -485,31 +485,31 @@ def _walk(place: Path) -> Kept | None:
     an entry that can't be read."""
     try:
         device = os.lstat(place).st_dev
-    except OSError as error:
-        return Kept(place, "B7", f"it can't be read: {error.strerror}")
+    except OSError as exc:
+        return Kept(place, "B7", f"it can't be read: {exc.strerror}")
     mounted = mount_points(place)
     if mounted:
         return Kept(place, "B7", "another filesystem is mounted inside it",
                     tuple(mounted))
-    folders_left = [place]
-    while folders_left:
-        folder = folders_left.pop()
+    dirs_left = [place]
+    while dirs_left:
+        walked_dir = dirs_left.pop()
         try:
-            with os.scandir(folder) as entries:
+            with os.scandir(walked_dir) as entries:
                 listed = list(entries)
-        except OSError as error:
-            return Kept(place, "B7", f"{folder} can't be read: {error.strerror}")
+        except OSError as exc:
+            return Kept(place, "B7", f"{walked_dir} can't be read: {exc.strerror}")
         for entry in listed:
             try:
                 found = entry.stat(follow_symlinks=False)
-            except OSError as error:
-                return Kept(place, "B7", f"{entry.path} can't be read: {error.strerror}")
+            except OSError as exc:
+                return Kept(place, "B7", f"{entry.path} can't be read: {exc.strerror}")
             if found.st_dev != device:
                 return Kept(place, "B7", f"{entry.path} is on another device")
             if stat.S_ISDIR(found.st_mode) and _reparse(found):
                 return Kept(place, "B7", f"{entry.path} is a junction or mount point")
             if stat.S_ISDIR(found.st_mode):
-                folders_left.append(Path(entry.path))
+                dirs_left.append(Path(entry.path))
     return None
 
 
@@ -568,8 +568,8 @@ def take(proven: Proven, *, env=None, on_rename: Callable[[Path], None] | None =
     if proven.kind == WORKTREE:
         try:
             _B1Git(proven.root)._run("worktree", "remove", str(proven.place))
-        except GitError as error:
-            return Kept(proven.place, "removal", f"git did not remove it: {error.reason}")
+        except GitError as exc:
+            return Kept(proven.place, "removal", f"git did not remove it: {exc.reason}")
         return proven.place
     trash = trash_dir(env)
     entry = trash / proven.build
@@ -580,9 +580,9 @@ def take(proven: Proven, *, env=None, on_rename: Callable[[Path], None] | None =
         if on_rename is not None:
             on_rename(entry)
         os.rename(proven.place, entry)
-    except OSError as error:
+    except OSError as exc:
         return Kept(proven.place, "removal", f"it could not be moved into {trash}: "
-                    f"{error.strerror or error}")
+                    f"{exc.strerror or exc}")
     delete(entry)
     if on_delete is not None:
         on_delete(entry, not os.path.lexists(entry))
@@ -594,24 +594,24 @@ def trash_dir(env=None) -> Path:
     return paths.cache_dir(env) / TRASH_DIR
 
 
-def delete(folder: Path) -> None:
-    """Delete the folder at `folder`, following no link and leaving an entry on another
+def delete(target_dir: Path) -> None:
+    """Delete the folder at `target_dir`, following no link and leaving an entry on another
     device than the folder's, with the folders above it. What can't be deleted stays, and
-    so does a `folder` that is a link."""
+    so does a `target_dir` that is a link."""
     try:
-        found = os.lstat(folder)
+        found = os.lstat(target_dir)
     except OSError:
         return
     if not stat.S_ISDIR(found.st_mode) or _reparse(found):
         return
-    _delete(folder, found.st_dev)
+    _delete(target_dir, found.st_dev)
 
 
-def _delete(folder: Path, device: int) -> None:
-    """Delete the folder at `folder`, following no link and leaving an entry on another
+def _delete(target_dir: Path, device: int) -> None:
+    """Delete the folder at `target_dir`, following no link and leaving an entry on another
     device than `device`, with the folders above it. What can't be deleted stays."""
     try:
-        with os.scandir(folder) as entries:
+        with os.scandir(target_dir) as entries:
             listed = list(entries)
     except OSError:
         return
@@ -627,7 +627,7 @@ def _delete(folder: Path, device: int) -> None:
         except OSError:
             continue
     try:
-        os.rmdir(folder)
+        os.rmdir(target_dir)
     except OSError:
         pass
 

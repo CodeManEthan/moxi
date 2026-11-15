@@ -141,7 +141,7 @@ class Declaring:
     slices: tuple[dict, ...] = ()
 
 
-def commission(name: str, stage_id: str | None = None, *, builder: str, actor: str,
+def commission(name: str, stage_id: str | None = None, *, builder: str, by: str,
                repo: str | None = None, branch: str | None = None,
                slices: Sequence[tuple[str, str, int]] = (), record: str | None = None,
                existing: bool = False, settings=None, wait_s: float = write.WAIT_S,
@@ -152,7 +152,7 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, actor: s
     - `repo` and `branch`: with no stage, the project the build is in, by key, and its
       branch; `slices`: with no stage, each worker's piece of it as `(id, what,
       minutes)`. All three are refused with a stage.
-    - `builder`: who builds it; `actor`: who commissions it, the event's actor.
+    - `builder`: who builds it; `by`: who commissions it, the event's actor.
     - `record`: the pointer to the operator's go, when there was one.
     - `existing`: build on a branch that is already there, in place of cutting one.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
@@ -173,7 +173,7 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, actor: s
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
-    folder = home.round_folder(slug)
+    round_dir = home.round_dir(slug)
     if declaring is None:
         again = f"moxi rounds commission {name} {stage_id} --builder {builder}"
     else:
@@ -190,8 +190,8 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, actor: s
     def look(view) -> _Look:
         # One look for one reading of the log: each gate and the act speak of it.
         if id(view) not in looked:
-            looked[id(view)] = _look(view, name=name, folder=folder, stage_id=stage_id,
-                                     declaring=declaring, builder=builder, actor=actor,
+            looked[id(view)] = _look(view, name=name, round_dir=round_dir, stage_id=stage_id,
+                                     declaring=declaring, builder=builder, by=by,
                                      existing=existing, settings=settings, again=again,
                                      env=env)
         return looked[id(view)]
@@ -241,7 +241,7 @@ def commission(name: str, stage_id: str | None = None, *, builder: str, actor: s
         return [*entries, write.Entry("build.commissioned", fields)]
 
     written = write.record(
-        write.Where(home.project, home.folder, slug), actor=actor,
+        write.Where(home.project, home.rounds_dir, slug), by=by,
         gates=[ending.takes_new_work(name, "a new build"), ready, has_a_pointer],
         act=make, event=event, wait_s=wait_s, at=at)
     one = written.events[-1]
@@ -304,8 +304,8 @@ def _declaring(name: str, stage_id: str | None, *, repo: str | None, branch: str
     return Declaring(repo=repo, branch=branch, slices=tuple(found))
 
 
-def _look(view, *, name: str, folder: Path, stage_id: str | None,
-          declaring: Declaring | None, builder: str, actor: str, existing: bool,
+def _look(view, *, name: str, round_dir: Path, stage_id: str | None,
+          declaring: Declaring | None, builder: str, by: str, existing: bool,
           settings, again: str, env) -> _Look:
     found = _Look()
     state = view.state
@@ -319,7 +319,7 @@ def _look(view, *, name: str, folder: Path, stage_id: str | None,
         return found
     if declaring is not None:
         stage = _to_declare(found, state, name=name, declaring=declaring,
-                            builder=builder, actor=actor)
+                            builder=builder, by=by)
         if stage is None:
             return found
         found.declared = stage
@@ -359,7 +359,7 @@ def _look(view, *, name: str, folder: Path, stage_id: str | None,
     if (stepping.has_step(state, steps.DESIGN)
             and not skips.is_skipped(state, steps.DESIGN)
             and versions.current(state) is not None):
-        moved = versions.unchanged(state, folder, name)
+        moved = versions.unchanged(state, round_dir, name)
         if moved is not None:
             found.unmet.append(moved)
     found.unmet += _git(found, view, name=name, stage=stage, existing=existing,
@@ -368,7 +368,7 @@ def _look(view, *, name: str, folder: Path, stage_id: str | None,
 
 
 def _to_declare(found: _Look, state: states.State, *, name: str,
-                declaring: Declaring, builder: str, actor: str) -> states.Stage | None:
+                declaring: Declaring, builder: str, by: str) -> states.Stage | None:
     """The stage the form with no stage declares, or None with what refuses it in
     `found`."""
     if stepping.has_step(state, stages.VERIFIES):
@@ -380,8 +380,8 @@ def _to_declare(found: _Look, state: states.State, *, name: str,
         return None
     try:
         repo, _root = folders.root(declaring.repo)
-    except RoundsError as error:
-        found.unmet.append(Unmet(error.reason, error.fix or "moxi projects list"))
+    except RoundsError as exc:
+        found.unmet.append(Unmet(exc.reason, exc.fix or "moxi projects list"))
         return None
     unbuilt = stages.unbuilt_in(state, repo)
     if unbuilt is not None:
@@ -393,7 +393,7 @@ def _to_declare(found: _Look, state: states.State, *, name: str,
         return None
     return states.Stage(id=stages.next_id(state), repo=repo, branch=declaring.branch,
                         round=None, after=(), slices=declaring.slices, why=None,
-                        version=None, actor=actor, at="")
+                        version=None, actor=by, at="")
 
 
 def _git(found: _Look, view, *, name: str, stage, existing: bool, settings, again: str,
@@ -402,15 +402,15 @@ def _git(found: _Look, view, *, name: str, stage, existing: bool, settings, agai
     what is at the worktree's place. Fills `found` as it goes."""
     try:
         repo, root = folders.root(stage.repo)
-    except RoundsError as error:
-        return [Unmet(error.reason, error.fix or "moxi projects list")]
+    except RoundsError as exc:
+        return [Unmet(exc.reason, exc.fix or "moxi projects list")]
     found.repo, found.root, found.branch = repo, root, stage.branch
     git = Git(root)
     try:
         return _read_git(found, git, view, name=name, stage=stage, existing=existing,
                          settings=settings, again=again, env=env)
-    except GitError as error:
-        return [Unmet(error.reason, error.fix or again)]
+    except GitError as exc:
+        return [Unmet(exc.reason, exc.fix or again)]
 
 
 def _read_git(found: _Look, git: Git, view, *, name: str, stage, existing: bool,
@@ -574,9 +574,9 @@ def _add_worktree(found: _Look, *, existing: bool) -> None:
             str(found.worktree), *tail]
     try:
         done = proc.run(argv, timeout_s=gitreads.GIT_TIMEOUT_S,
-                        env=gitreads.environment(), stdin_data="")
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise GitError(argv, f"could not run: {error}") from None
+                        env=gitreads.git_env(), stdin_data="")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GitError(argv, f"could not run: {exc}") from None
     if done.returncode != 0:
         said = " ".join((done.stderr or "").split())[:200]
         raise GitError(argv, f"exited {done.returncode}" + (f": {said}" if said else ""))
@@ -585,8 +585,8 @@ def _add_worktree(found: _Look, *, existing: bool) -> None:
 def _mark(path: Path, marker: places.Marker, again: str) -> None:
     try:
         places.write_marker(path, marker)
-    except OSError as error:
-        raise RoundsError(f"the marker {path} can't be written: {error}",
+    except OSError as exc:
+        raise RoundsError(f"the marker {path} can't be written: {exc}",
                           f"look at the folder, remove it, then: {again}") from None
 
 
@@ -599,8 +599,8 @@ def _make_scratch(place: Path, marker: places.Marker, again: str) -> None:
     except FileExistsError:
         raise RoundsError(f"{place} is there already, and a build's scratch folder is "
                           "made new", f"look at {place}, remove it, then: {again}") from None
-    except OSError as error:
-        raise RoundsError(f"the scratch folder {place} can't be made: {error}",
+    except OSError as exc:
+        raise RoundsError(f"the scratch folder {place} can't be made: {exc}",
                           f"make {place.parent} one that can be written to, then: "
                           f"{again}") from None
     _mark(place / places.SCRATCH_MARKER, marker, again)

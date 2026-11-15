@@ -51,13 +51,13 @@ def made(repo, tmp_path, write_config):
     """B1 commissioned on `work` with one commit of work, still open. Returns `(log,
     worktree repo, commission event)`."""
     write_config("")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     event = commission(path)
     tree = type(repo)(Path(event["worktree"]))
     tree.commit("work.txt", "the work")
@@ -70,7 +70,7 @@ def ended(made, later):
     are left."""
     path, _tree, _event = made
     log.append(path, "build.dropped", {"stage": "B1", "by": "lead", "record": POINTER},
-               actor="planner")
+               by="planner")
     return made
 
 
@@ -95,7 +95,7 @@ def lines():
 
 # -- what is a candidate ---------------------------------------------------------------------
 
-def test_the_dry_run_names_both_folders_of_an_ended_build_and_changes_nothing(ended):
+def test_the_dry_run_names_both_dirs_of_an_ended_build_and_changes_nothing(ended):
     _path, _tree, event = ended
 
     swept = dry()
@@ -112,15 +112,15 @@ def test_an_open_build_is_never_a_candidate(made, later, write_config):
     assert Path(made[2]["worktree"]).is_dir() and Path(made[2]["scratch"]).is_dir()
 
 
-def test_an_open_build_recording_the_same_place_keeps_an_ended_ones_folder(ended,
+def test_an_open_build_recording_the_same_place_keeps_an_ended_ones_dir(ended,
                                                                               tmp_path):
     _path, _tree, event = ended
-    opening.open_round(OTHER, description="a placeholder round", actor="planner",
+    opening.open_round(OTHER, description="a placeholder round", by="planner",
                        flow="fix")
     fields = {key: value for key, value in event.items()
               if key not in ("v", "n", "at", "actor", "type")}
     log.append(log.round_log(tmp_path / "notes" / "rounds" / "b-round"),
-               "build.commissioned", fields, actor="planner")
+               "build.commissioned", fields, by="planner")
 
     found = fates(dry())
 
@@ -132,7 +132,7 @@ def test_a_record_from_another_host_is_kept_and_named(ended, monkeypatch):
     assert fates(dry()) == {"worktree": ("kept", "A1"), "scratch": ("kept", "A1")}
 
 
-def test_a_folder_no_record_names_is_never_a_candidate(ended, write_config):
+def test_a_dir_no_record_names_is_never_a_candidate(ended, write_config):
     _path, _tree, event = ended
     write_config(ARMED)
     stray = Path(event["worktree"]).parent / "not-recorded"
@@ -148,7 +148,7 @@ def test_a_folder_no_record_names_is_never_a_candidate(ended, write_config):
     assert (stray / ".rounds-build").is_file()
 
 
-def test_a_folder_already_gone_is_not_in_the_account(ended):
+def test_a_dir_already_gone_is_not_in_the_account(ended):
     _path, _tree, event = ended
     removal.delete(Path(event["scratch"]))
     assert set(fates(dry())) == {"worktree"}
@@ -156,7 +156,7 @@ def test_a_folder_already_gone_is_not_in_the_account(ended):
 
 # -- the removal rule's halves, in the account ------------------------------------------------
 
-def test_an_unmarked_folder_is_named_and_never_removed(ended, write_config):
+def test_an_unmarked_dir_is_named_and_never_removed(ended, write_config):
     _path, _tree, event = ended
     write_config(ARMED)
     (Path(event["scratch"]) / ".rounds-build").unlink()
@@ -186,7 +186,7 @@ def test_a_finish_with_no_merge_keeps_the_worktree_until_its_branch_is_on_the_ta
         made, later, repo):
     path, _tree, event = made
     log.append(path, "finish.done", {"stage": "B1", "tip": repo.rev("work")},
-               actor="planner")
+               by="planner")
 
     assert fates(dry())["worktree"] == ("kept", "B6")
 
@@ -196,14 +196,14 @@ def test_a_finish_with_no_merge_keeps_the_worktree_until_its_branch_is_on_the_ta
 
 # -- C, D, E ---------------------------------------------------------------------------------
 
-def test_a_log_that_cant_be_read_keeps_every_folder_and_is_named(ended, tmp_path,
+def test_a_log_that_cant_be_read_keeps_every_dir_and_is_named(ended, tmp_path,
                                                                  write_config):
     _path, _tree, event = ended
     write_config(ARMED)
-    opening.open_round(OTHER, description="a placeholder round", actor="planner",
+    opening.open_round(OTHER, description="a placeholder round", by="planner",
                        flow="fix")
-    with log.round_log(tmp_path / "notes" / "rounds" / "b-round").open("ab") as file:
-        file.write(b"not an event\n")
+    with log.round_log(tmp_path / "notes" / "rounds" / "b-round").open("ab") as fh:
+        fh.write(b"not an event\n")
 
     swept = sweeping.run(remove=True)
 
@@ -230,7 +230,7 @@ _LINUX_USERS = {
 
 @pytest.mark.parametrize("use", [*_USERS, *(_LINUX_USERS if sys.platform == "linux"
                                              else {})])
-def test_a_process_using_the_folder_keeps_it(ended, use):
+def test_a_process_using_the_dir_keeps_it(ended, use):
     _path, _tree, event = ended
     place = Path(event["scratch"])
     (place / "mapped.bin").write_bytes(b"\0" * 4096)
@@ -250,7 +250,7 @@ def test_a_process_using_the_folder_keeps_it(ended, use):
     assert f"pid {process.pid}" in scratch.kept.work[0]
 
 
-def test_a_file_changed_within_the_grace_keeps_the_folder(ended):
+def test_a_file_changed_within_the_grace_keeps_the_dir(ended):
     _path, _tree, event = ended
     written = Path(event["scratch"]) / "out.log"
     written.write_text("still being written\n", encoding="utf-8")
@@ -263,7 +263,7 @@ def test_a_file_changed_within_the_grace_keeps_the_folder(ended):
     assert scratch.kept.why == f"{written} changed within the grace of 2 hours"
 
 
-def test_a_marker_written_within_the_grace_keeps_the_folder(ended):
+def test_a_marker_written_within_the_grace_keeps_the_dir(ended):
     _path, _tree, event = ended
     marker = Path(event["scratch"]) / ".rounds-build"
     data = json.loads(marker.read_text(encoding="utf-8"))
@@ -279,7 +279,7 @@ def test_a_marker_written_within_the_grace_keeps_the_folder(ended):
 def test_a_modified_time_set_back_still_reads_by_the_change_time(made, monkeypatch):
     path, _tree, event = made
     log.append(path, "build.dropped", {"stage": "B1", "by": "lead", "record": POINTER},
-               actor="planner")
+               by="planner")
     place = Path(event["scratch"])
     marker = place / ".rounds-build"
     data = json.loads(marker.read_text(encoding="utf-8"))
@@ -357,7 +357,7 @@ def test_the_command_removes_and_prints_json(ended, write_config, capsys):
         ("worktree", "removed", event["worktree"]), ("scratch", "removed", event["scratch"])}
 
 
-def test_a_rename_into_a_trash_on_another_disk_keeps_the_folder(ended, write_config,
+def test_a_rename_into_a_trash_on_another_disk_keeps_the_dir(ended, write_config,
                                                                 monkeypatch):
     _path, _tree, event = ended
     write_config(ARMED)

@@ -420,8 +420,8 @@ def test_a_step_that_waits_says_each_thing_the_lines_before_did_not(opened, caps
 
 def test_a_step_that_is_not_built_says_only_the_holds_on_its_stage(opened, capsys,
                                                                    monkeypatch):
-    folder = opened("small")
-    fold(folder, stage("B1"))
+    round_dir = opened("small")
+    fold(round_dir, stage("B1"))
     monkeypatch.delitem(steps.ROWS, "commission")
 
     assert lines(capsys) == [
@@ -760,12 +760,12 @@ def test_a_light_flow_with_no_stage_names_the_commission_that_declares_one(opene
     assert "waits: nothing" in printed
 
 
-def test_five_stages_that_are_builds_point_at_child_rounds_and_four_do_not(folder,
+def test_five_stages_that_are_builds_point_at_child_rounds_and_four_do_not(round_dir,
                                                                           capsys):
-    fold(folder, *(stage(f"B{n}") for n in range(1, 5)))
+    fold(round_dir, *(stage(f"B{n}") for n in range(1, 5)))
     assert not [line for line in lines(capsys) if "child round" in line]
 
-    fold(folder, *(stage(f"B{n}") for n in range(1, 6)))
+    fold(round_dir, *(stage(f"B{n}") for n in range(1, 6)))
 
     [warning] = said(lines(capsys), "warning:")
     assert warning == (f"{ROUND} plans 5 stages that are builds (B1, B2, B3, B4, B5); a "

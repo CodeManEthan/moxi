@@ -181,7 +181,7 @@ class Done:
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
-def done(target: str, key: str, *, record: str | None, actor: str, settings=None,
+def done(target: str, key: str, *, record: str | None, by: str, settings=None,
          wait_s: float = write.WAIT_S, at: str | None = None) -> Done:
     """Mark the waiting item `key`, `B<n>.W<k>`, of the round `target` done, with
     `record` the pointer to what shows it done.
@@ -230,7 +230,7 @@ def done(target: str, key: str, *, record: str | None, actor: str, settings=None
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a mark"), held, has_a_pointer],
             event=marked, wait_s=wait_s, at=at)
     except NoLog:
@@ -253,8 +253,8 @@ def _commit(state: states.State, key: str, given: str) -> str | Unmet:
     try:
         _key, root = folders.root(build.repo)
         whole = Git(root).commit_of(given)
-    except RoundsError as error:
-        return Unmet(error.reason, error.fix or "give a pointer to what shows it done")
+    except RoundsError as exc:
+        return Unmet(exc.reason, exc.fix or "give a pointer to what shows it done")
     if whole is None:
         return Unmet(f"{given} names no one commit that {build.repo} holds",
                      "give the id of the commit that shows the item done, as git log "

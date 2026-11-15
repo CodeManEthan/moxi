@@ -40,7 +40,7 @@ def logs(repo, tmp_path):
     """The logs of two open rounds of `proj-a`, by name."""
     found = {}
     for name in (A, B):
-        opening.open_round(name, description="a placeholder round", actor="planner",
+        opening.open_round(name, description="a placeholder round", by="planner",
                            flow="fix", at=T1)
         slug = name.split("/")[1]
         found[name] = log.round_log(tmp_path / "notes-proj-a" / "rounds" / slug)
@@ -48,7 +48,7 @@ def logs(repo, tmp_path):
 
 
 def add(path: Path, type_: str, **fields) -> None:
-    log.append(path, type_, fields, actor="planner")
+    log.append(path, type_, fields, by="planner")
 
 
 def commission(path: Path, stage="B1", *, branch="work", base, repo="proj-a",
@@ -95,7 +95,7 @@ def test_only_the_last_open_build_of_each_stage_of_an_open_round_is_listed(repo,
     commission(logs[A], "B3", base=base, branch="finished")
     add(logs[A], "finish.done", stage="B3", tip=base)
     commission(logs[B], base=base, branch="in-a-dropped-round")
-    dropping.drop(B, by="operator", record="comms:7654321", actor="planner")
+    dropping.drop(B, by="operator", record="comms:7654321", run_by="planner")
 
     assert [(one["round"], one["stage"], one["branch"])
             for one in api.builds()["builds"]] == [(A, "B1", "again")]
@@ -217,8 +217,8 @@ def test_a_build_that_can_t_be_read_is_given_with_its_problem_and_the_rest_are_r
 def test_a_round_whose_log_can_t_be_read_is_named_and_its_builds_left_out(repo, logs):
     commission(logs[A], base=repo.rev("main"))
     commission(logs[B], base=repo.rev("main"))
-    with logs[B].open("ab") as file:
-        file.write(b"not an event\n")
+    with logs[B].open("ab") as fh:
+        fh.write(b"not an event\n")
 
     found = api.builds()
 
@@ -231,8 +231,8 @@ def test_a_round_whose_log_can_t_be_read_is_named_and_its_builds_left_out(repo, 
 
 def everything(tmp_path):
     return {str(path): (path.read_bytes(), path.stat().st_mtime_ns)
-            for folder in {tmp_path, Path.home(), paths.data_dir(), paths.state_dir()}
-            for path in sorted(folder.rglob("*")) if path.is_file()}
+            for checked_dir in {tmp_path, Path.home(), paths.data_dir(), paths.state_dir()}
+            for path in sorted(checked_dir.rglob("*")) if path.is_file()}
 
 
 @pytest.mark.parametrize("fresh", [False, True])

@@ -618,7 +618,7 @@ def test_a_ruling_of_a_kind_nothing_here_knows_is_neither_taken_back_nor_replace
         rounds):
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C1", "record": "comms:12", "kind": "process",
-                "rules": "hold:B2"}, actor="planner")
+                "rules": "hold:B2"}, by="planner")
     before = logs(rounds)
 
     with pytest.raises(Refused, match="C1 rules hold:B2, and nothing here says "
@@ -787,7 +787,7 @@ def test_a_kind_added_to_the_table_is_taken_back_and_replaced(rounds, monkeypatc
     monkeypatch.setattr(corrections, "KINDS", (*corrections.KINDS, hold))
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C1", "record": "comms:12", "kind": "process",
-                "rules": "hold:B2"}, actor="planner")
+                "rules": "hold:B2"}, by="planner")
 
     revoke("C1")
 

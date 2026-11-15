@@ -89,7 +89,7 @@ from . import (builds, checking, finish_actions, finish_gates, finish_lock, fold
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, Refused, Unmet
-from .gitreads import Git, GitError, environment
+from .gitreads import Git, GitError, git_env
 
 #: The event of one finish action's result, and of a whole finish done.
 ACTION = finish_actions.ACTION
@@ -182,7 +182,7 @@ class Finished:
     branch: str | None = None
 
 
-def finish(name: str, stage: str, *, actor: str, settings=None,
+def finish(name: str, stage: str, *, by: str, settings=None,
            wait_s: float = write.WAIT_S, at: str | None = None, env=None,
            on_action: Callable[[Action], None] | None = None,
            again: str | None = None) -> Finished:
@@ -201,7 +201,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
-    where = write.Where(home.project, home.folder, slug)
+    where = write.Where(home.project, home.rounds_dir, slug)
     rerun = f"moxi rounds finish {name} {stage}"
 
     view = write.look(where, wait_s=wait_s, env=env)
@@ -223,12 +223,12 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
 
     _key, root = folders.root(build.repo)
     taken = finish_lock.take(root, finish_lock.ref_of(settings, build.repo, build.target),
-                             actor=actor, name=name, stage=stage)
+                             by=by, name=name, stage=stage)
     released = None
     try:
         cleared = finish_lock.cleared_entry(taken)
         if cleared is not None:
-            write.record(where, actor=actor, event=lambda _view, _result: cleared,
+            write.record(where, by=by, event=lambda _view, _result: cleared,
                          wait_s=wait_s, at=at, env=env)
         view = write.look(where, wait_s=wait_s, env=env)
         read = open_builds.of_round(name, [build.repo], settings=settings)
@@ -260,7 +260,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                                    target_before=last.get("target_before")))
                 continue
             def append(result: Action) -> None:
-                write.record(where, actor=actor, event=lambda _view, _result: (
+                write.record(where, by=by, event=lambda _view, _result: (
                     write.Entry(ACTION, {"stage": stage, "tip": tip, "id": result.id,
                                          "kind": result.kind, "state": result.state,
                                          "landing": result.landing,
@@ -306,7 +306,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                 return None
             return write.Entry(DONE, {"stage": stage, "tip": tip})
 
-        written = write.record(where, actor=actor, gates=[after], event=event,
+        written = write.record(where, by=by, gates=[after], event=event,
                                wait_s=wait_s, at=at, env=env)
     finally:
         released = finish_lock.release(taken)
@@ -345,8 +345,8 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
         why = (f"the branch {build.branch} is gone" if now is None else
                f"the branch {build.branch} moved to {now[:12]} after the finish at "
                f"{tip[:12]}")
-    except GitError as error:
-        now, why = None, f"the branch {build.branch} can't be read: {error.reason}"
+    except GitError as exc:
+        now, why = None, f"the branch {build.branch} can't be read: {exc.reason}"
     if now != tip:
         return _Cleaned(kept=tuple(removal.Kept(place, "tip", f"{why}, so its folders "
                                                 "and the branch stay", kind=kind)
@@ -363,8 +363,8 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
                         "worktree has checked out")
     try:
         Git(root)._run("branch", "-d", build.branch)
-    except GitError as error:
-        return _Cleaned(cleaned.removed, cleaned.kept, f"kept: {error.reason}")
+    except GitError as exc:
+        return _Cleaned(cleaned.removed, cleaned.kept, f"kept: {exc.reason}")
     return _Cleaned(cleaned.removed, cleaned.kept, "deleted")
 
 
@@ -418,7 +418,7 @@ def _seen(view, name: str, stage: str, settings, *, refuse: bool = True,
 def _gates(view, name: str, stage: str, seen, tip: str, settings) -> tuple:
     return finish_gates.unmet(
         view.state, stage, seen=seen, tip=tip, name=name, register=view.project_state,
-        closed=lambda round_name: questions.is_closed(round_name, settings))
+        on_closed=lambda round_name: questions.is_closed(round_name, settings))
 
 
 def _moved(seen, tip: str, *, name: str, stage: str) -> list[Unmet]:
@@ -463,13 +463,13 @@ def _push(root: Path, build: builds.Build, tip: str, action: Mapping, *,
            else f"{tip}:refs/heads/{build.branch}")
     argv = ["git", "-C", str(root), "push", str(action["remote"]), ref]
     try:
-        done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.environment(),
+        done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.git_env(),
                         stdin_data="")
     except subprocess.TimeoutExpired:
         return Action(action["id"], own.PUSH, FAILED,
                       output=f"the push gave no answer in {PUSH_TIMEOUT_S:g} seconds")
-    except OSError as error:
-        return Action(action["id"], own.PUSH, FAILED, output=f"git could not run: {error}")
+    except OSError as exc:
+        return Action(action["id"], own.PUSH, FAILED, output=f"git could not run: {exc}")
     said = "\n".join(part.strip() for part in (done.stdout or "", done.stderr or "")
                      if part.strip())
     return Action(action["id"], own.PUSH, OK if done.returncode == 0 else FAILED,
@@ -483,14 +483,14 @@ def _command(state: states.State, name: str, build: builds.Build, root: Path, ti
     argv = checking.fill(action["argv"], checking.values(name, build, root=root, tip=tip))
     timeout_s = action.get("timeout_s")
     try:
-        done = proc.run(argv, timeout_s=timeout_s, env=gitreads.environment(),
+        done = proc.run(argv, timeout_s=timeout_s, env=gitreads.git_env(),
                         cwd=worktree, capture=False)
     except subprocess.TimeoutExpired:
         return Action(action["id"], own.COMMAND, FAILED,
                       output=f"{shlex.join(argv)} ran past {timeout_s:g} seconds")
-    except OSError as error:
+    except OSError as exc:
         return Action(action["id"], own.COMMAND, FAILED,
-                      output=f"{shlex.join(argv)} could not be started: {error}")
+                      output=f"{shlex.join(argv)} could not be started: {exc}")
     if done.returncode == 0:
         return Action(action["id"], own.COMMAND, OK)
     return Action(action["id"], own.COMMAND, FAILED,
@@ -597,12 +597,12 @@ class _MergeGit(Git):
         argv = ["git", "-C", str(self.root), "merge", "--no-ff", "--no-edit", "-m",
                 message, tip]
         try:
-            done = proc.run(argv, timeout_s=MERGE_TIMEOUT_S, env=environment(),
+            done = proc.run(argv, timeout_s=MERGE_TIMEOUT_S, env=git_env(),
                             stdin_data="")
         except subprocess.TimeoutExpired:
             return 124, f"the merge gave no answer in {MERGE_TIMEOUT_S:g} seconds"
-        except OSError as error:
-            raise GitError(argv, f"could not run: {error}") from None
+        except OSError as exc:
+            raise GitError(argv, f"could not run: {exc}") from None
         said = "\n".join(part.strip() for part in (done.stdout or "", done.stderr or "")
                          if part.strip())
         return done.returncode, said

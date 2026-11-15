@@ -296,7 +296,7 @@ def test_the_round_is_at_the_questions_step_once_its_design_is_verified(round_di
     verdict(round_dir, "publishable")
     assert at(round_dir) == ("docket", None, steps.READY)
     rule("Q1", text="They do.")
-    assert at(folder) == ("commission", "B1", steps.READY)
+    assert at(round_dir) == ("commission", "B1", steps.READY)
 
 
 # -- a skip ------------------------------------------------------------------------------
@@ -323,12 +323,12 @@ def test_a_skip_taken_back_leaves_the_step_as_it_was(round_dir):
     ("skip:retro", "retro", None),
 ])
 def test_a_skip_of_a_step_whose_row_is_not_built_is_read_all_the_same(
-        folder, item, name, stage_id, monkeypatch):
+        round_dir, item, name, stage_id, monkeypatch):
     # Every step of the vocabulary has a row; one is taken out to stand for a step
     # whose row is not built.
     monkeypatch.delitem(steps.ROWS, name)
-    fold(folder, stage("B1"), stage("B2"))
-    assert step(folder, name, stage_id).state == steps.NOT_BUILT
+    fold(round_dir, stage("B1"), stage("B2"))
+    assert step(round_dir, name, stage_id).state == steps.NOT_BUILT
 
     rule(item)
 
@@ -401,7 +401,7 @@ def test_a_question_asked_after_the_skip_holds_the_stage_again(round_dir):
     later = ask("B1")
     found = step(round_dir, "docket", "B1")
     assert (found.state, found.questions) == (steps.READY, (later,))
-    assert holds(step(folder, "commission", "B1")) == [f"{later} holds B1: {ASKED}"]
+    assert holds(step(round_dir, "commission", "B1")) == [f"{later} holds B1: {ASKED}"]
 
 
 def test_a_stage_no_question_holds_and_no_skip_names_is_done_with_its_questions(round_dir):
@@ -418,9 +418,9 @@ def holds(found) -> list[str]:
 
 
 def test_a_flow_with_no_questions_step_shows_the_hold_on_the_stage_it_stops(opened):
-    folder = opened("small")
-    fold(folder, question("Q1", blocks='["B1"]'), stage("B1"))
-    found = steps.current(folded(folder), name=ROUND)
+    round_dir = opened("small")
+    fold(round_dir, question("Q1", blocks='["B1"]'), stage("B1"))
+    found = steps.current(folded(round_dir), name=ROUND)
     assert (found.step, found.stage, found.state) == ("commission", "B1", steps.WAITING)
     assert [(one.reason, one.fix) for one in found.waits] == [
         (f"Q1 holds B1: {ASKED}", f"moxi rounds rule {ROUND} Q1 --text TEXT --record PTR")]
@@ -435,11 +435,11 @@ def test_a_flow_with_no_questions_step_shows_the_hold_on_the_stage_it_stops(open
 # -- a step with no row ------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", ["retro"])
-def test_a_step_with_no_row_is_not_built_and_never_read_as_done(folder, name,
+def test_a_step_with_no_row_is_not_built_and_never_read_as_done(round_dir, name,
                                                                   monkeypatch):
     monkeypatch.delitem(steps.ROWS, name)
-    fold(folder, stage("B1"))
-    found = step(folder, name)
+    fold(round_dir, stage("B1"))
+    found = step(round_dir, name)
     assert found.state == steps.NOT_BUILT
     assert steps.NOT_BUILT not in steps.STATES
     assert not found.settled
@@ -476,10 +476,10 @@ def test_a_round_on_the_lightest_flow_starts_at_the_commission_that_declares_a_s
 
 
 def test_with_no_stage_planned_in_a_flow_that_verifies_its_design_commission_waits(
-        folder):
-    fold(folder)
-    verdict(folder, "publishable")
-    found = steps.one(folded(folder), "commission", name=ROUND)
+        round_dir):
+    fold(round_dir)
+    verdict(round_dir, "publishable")
+    found = steps.one(folded(round_dir), "commission", name=ROUND)
     assert found.state == steps.WAITING
     assert [one.reason for one in found.waits] == [
         "no stage is planned: in a flow that verifies its design, the design declares "
@@ -514,7 +514,7 @@ def test_the_index_names_the_rounds_a_parked_question_waits_for(round_dir):
     fold(round_dir, question("Q1"))
     verdict(round_dir, "publishable")
     rule("park:Q1", until="round:proj-a/another")
-    assert list(steps.at(folded(folder))) == [
+    assert list(steps.at(folded(round_dir))) == [
         ("step", {"step": "commission", "stage": None, "state": steps.WAITING,
                   "until": ["proj-a/another"]})]
 
@@ -592,29 +592,29 @@ def test_a_step_in_words(found, expected):
 
 # -- commission: one build to a repo in a light flow, and the form that declares ----------
 
-def commissioned(folder, stage_id="B1") -> None:
-    log.append(log.round_log(folder), "build.commissioned",
+def commissioned(round_dir, stage_id="B1") -> None:
+    log.append(log.round_log(round_dir), "build.commissioned",
                {"stage": stage_id, "repo": "proj-a", "branch": f"branch-{stage_id.lower()}",
-                "base": "0" * 40, "target": "main"}, actor="planner")
+                "base": "0" * 40, "target": "main"}, by="planner")
 
 
-def test_a_flow_that_verifies_its_design_may_build_two_stages_in_one_repo(folder):
-    fold(folder, stage("B1"), stage("B2"))
-    verdict(folder, "publishable")
-    commissioned(folder)
+def test_a_flow_that_verifies_its_design_may_build_two_stages_in_one_repo(round_dir):
+    fold(round_dir, stage("B1"), stage("B2"))
+    verdict(round_dir, "publishable")
+    commissioned(round_dir)
 
-    assert step(folder, "commission", "B2").state == steps.READY
+    assert step(round_dir, "commission", "B2").state == steps.READY
 
 
 def test_a_light_flow_waits_on_the_one_build_in_a_repo(opened):
-    folder = opened("fix")
+    round_dir = opened("fix")
     for stage_id in ("B1", "B2"):
-        log.append(log.round_log(folder), "stage.declared",
+        log.append(log.round_log(round_dir), "stage.declared",
                    {"id": stage_id, "repo": "proj-a", "branch": f"branch-{stage_id}",
-                    "after": []}, actor="planner")
-    commissioned(folder)
+                    "after": []}, by="planner")
+    commissioned(round_dir)
 
-    found = step(folder, "commission", "B2")
+    found = step(round_dir, "commission", "B2")
 
     assert found.state == steps.WAITING
     assert [one.reason for one in found.waits] == [
@@ -624,10 +624,10 @@ def test_a_light_flow_waits_on_the_one_build_in_a_repo(opened):
 
 def test_the_commission_that_declares_waits_for_a_frozen_design_and_an_open_question(
         opened):
-    folder = opened("small")
-    asking.ask(ROUND, ASKED, origin="comms:11", actor="scout")
+    round_dir = opened("small")
+    asking.ask(ROUND, ASKED, origin="comms:11", by="scout")
 
-    found = step(folder, "commission")
+    found = step(round_dir, "commission")
 
     assert found.state == steps.WAITING
     assert [one.reason for one in found.waits] == [

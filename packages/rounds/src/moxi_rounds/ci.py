@@ -144,12 +144,12 @@ class Reading:
 
 def _json(argv: Sequence[str], *, cwd, timeout_s: float):
     try:
-        done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.environment(),
+        done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
                         cwd=cwd)
     except subprocess.TimeoutExpired:
         raise ReadFailed(argv, f"ran past its limit of {timeout_s:g} s") from None
-    except OSError as error:
-        raise ReadFailed(argv, f"could not be started: {error}") from None
+    except OSError as exc:
+        raise ReadFailed(argv, f"could not be started: {exc}") from None
     if done.returncode != 0:
         said = (done.stderr or b"").decode(errors="replace").strip().splitlines()
         tail = f": {said[-1]}" if said else ""

@@ -32,39 +32,39 @@ def built(git_repo, tmp_path, capsys):
     assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
     assert cli.main(["projects", "set", "proj-a", "--notes-root",
                      str(tmp_path / "notes")]) == 0
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
-    folder = tmp_path / "notes" / "rounds" / "a-round"
-    log.append(log.round_log(folder), "stage.declared",
+    round_dir = tmp_path / "notes" / "rounds" / "a-round"
+    log.append(log.round_log(round_dir), "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": [],
-                "slices": SLICES}, actor="planner")
-    log.append(log.round_log(folder), "stage.declared",
+                "slices": SLICES}, by="planner")
+    log.append(log.round_log(round_dir), "stage.declared",
                {"id": "B2", "repo": "proj-a", "branch": "more", "after": []},
-               actor="planner")
-    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     capsys.readouterr()
-    return folder
+    return round_dir
 
 
-def brief(folder, *keys, name="brief-1a.md"):
+def brief(round_dir, *keys, name="brief-1a.md"):
     """Write a brief in the round's folder whose block holds the lines `keys`, and
     return its path."""
-    path = folder / name
+    path = round_dir / name
     path.write_text("# A brief\n\nThe commission block goes here.\n\n```toml rounds\n"
                     + "\n".join(keys) + "\n```\n", encoding="utf-8")
     return path
 
 
 def size(path, stage="B1", **more):
-    return sizing.size(ROUND, stage, path, actor="planner", **more)
+    return sizing.size(ROUND, stage, path, by="planner", **more)
 
 
-def events(folder):
-    return log.read(log.round_log(folder))
+def events(round_dir):
+    return log.read(log.round_log(round_dir))
 
 
-def sized_events(folder):
-    return [one for one in events(folder) if one["type"] == sizing.SIZED]
+def sized_events(round_dir):
+    return [one for one in events(round_dir) if one["type"] == sizing.SIZED]
 
 
 # -- passing -----------------------------------------------------------------------------
@@ -92,7 +92,7 @@ def test_a_brief_for_one_verification_is_recorded_for_any_kind(built):
         (None, "build"), (None, "design"), (None, "retro")]
 
 
-def test_a_brief_outside_the_round_folder_is_named_by_its_whole_path(built, tmp_path):
+def test_a_brief_outside_the_round_dir_is_named_by_its_whole_path(built, tmp_path):
     elsewhere = tmp_path / "briefs"
     elsewhere.mkdir()
     path = brief(elsewhere, 'stage = "B1"', 'slice = "1b"')
@@ -191,10 +191,10 @@ def test_show_and_next_treat_the_one_slice_of_a_stage_like_any_other(built, tmp_
     from moxi_rounds import commissioning
 
     other = "proj-a/b-round"
-    opening.open_round(other, description="a placeholder round", actor="planner",
+    opening.open_round(other, description="a placeholder round", by="planner",
                        flow="fix")
     commissioning.commission(other, repo="proj-a", branch="more", builder="coder",
-                             actor="planner")
+                             by="planner")
     capsys.readouterr()
 
     def row():
@@ -261,7 +261,7 @@ def test_a_stage_the_round_does_not_have_is_refused(built):
 
 
 def test_a_stage_that_left_the_plan_is_refused(built):
-    ruling.rule(ROUND, item="unstage:B2", record="comms:1234567", actor="planner")
+    ruling.rule(ROUND, item="unstage:B2", record="comms:1234567", by="planner")
 
     with pytest.raises(Refused) as caught:
         size(brief(built, 'stage = "B2"', 'verify = "build"'), stage="B2")
@@ -391,24 +391,24 @@ def test_the_command_takes_no_pointer(built, capsys):
 def test_fold_records_a_slice_over_the_limit_and_warns_of_it(tmp_path, add_project,
                                                               capsys):
     add_project("proj-a", notes_root=tmp_path / "notes")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="full")
-    folder = tmp_path / "notes" / "rounds" / "a-round"
+    round_dir = tmp_path / "notes" / "rounds" / "a-round"
     block = "\n".join([
         "[[stage]]", 'id = "B1"', 'repo = "proj-a"', 'branch = "work"', "after = []",
         "  [[stage.slice]]", '  id = "1a"', '  what = "the log"', "  minutes = 40",
         "  [[stage.slice]]", '  id = "1b"', '  what = "the rest"', "  minutes = 50"])
-    (folder / "design.md").write_text(f"# A design\n\n```toml rounds\n{block}\n```\n",
+    (round_dir / "design.md").write_text(f"# A design\n\n```toml rounds\n{block}\n```\n",
                                       encoding="utf-8")
     capsys.readouterr()
 
-    frozen = freezing.freeze(ROUND, actor="planner")
+    frozen = freezing.freeze(ROUND, by="planner")
     assert frozen.oversized == ({"stage": "B1", "slice": "1b", "minutes": 50},)
     assert frozen.slice_minutes == 45
-    assert [one["id"] for one in state.fold(events(folder)).stages[0].slices] == [
+    assert [one["id"] for one in state.fold(events(round_dir)).stages[0].slices] == [
         "1a", "1b"]
 
-    (folder / "design.md").write_text(f"# A design, again\n\n```toml rounds\n{block}\n"
+    (round_dir / "design.md").write_text(f"# A design, again\n\n```toml rounds\n{block}\n"
                                       "```\n", encoding="utf-8")
     assert main(["fold", ROUND]) == 0
     assert ("warning: the slice 1b of B1 is given 50 minutes, over the 45 of "
@@ -420,5 +420,5 @@ def test_show_json_carries_the_sizing_through_the_read_api(built):
 
     size(brief(built, 'stage = "B1"', 'slice = "1a"'))
 
-    [row] = api.round(ROUND)["builds"]
+    [row] = api.round_data(ROUND)["builds"]
     assert json.loads(json.dumps(row["slices"]))[0]["sized"]["slice"] == "1a"

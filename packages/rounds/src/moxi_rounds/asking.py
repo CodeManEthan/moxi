@@ -61,7 +61,7 @@ class Asked:
     by: str | None = None
 
 
-def ask(target: str, text: str, *, actor: str, origin: str | None = None,
+def ask(target: str, text: str, *, by: str, origin: str | None = None,
         record: str | None = None, build: str | None = None,
         blocks: str | None = None, options: Sequence[str] = (), settings=None,
         wait_s: float = write.WAIT_S, at: str | None = None) -> Asked:
@@ -231,8 +231,8 @@ def _in_build(state, stage: str, *, name: str, again: str) -> _InBuild:
     try:
         _repo, root = folders.root(found.repo)
         tip = Git(root).branch(found.branch)
-    except RoundsError as error:
-        return _InBuild(Unmet(error.reason, error.fix or later))
+    except RoundsError as exc:
+        return _InBuild(Unmet(exc.reason, exc.fix or later))
     if tip is None:
         return _InBuild(Unmet(f"the branch {found.branch} of the build of {stage} is not "
                               f"in {found.repo}, so the tip the question came up at "

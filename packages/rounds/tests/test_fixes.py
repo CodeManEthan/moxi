@@ -25,20 +25,20 @@ def built(git_repo, tmp_path, capsys):
     assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
     assert cli.main(["projects", "set", "proj-a", "--notes-root",
                      str(tmp_path / "notes")]) == 0
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
-    folder = tmp_path / "notes" / "rounds" / "a-round"
-    log.append(log.round_log(folder), "stage.declared",
+    round_dir = tmp_path / "notes" / "rounds" / "a-round"
+    log.append(log.round_log(round_dir), "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     tree = type(git_repo)(made.worktree)
     tree.commit("work.txt", "the work")
     capsys.readouterr()
-    return folder, git_repo, tree
+    return round_dir, git_repo, tree
 
 
-def verify(folder, head, verdict="publishable", *, findings_=(), name="report.md"):
+def verify(round_dir, head, verdict="publishable", *, findings_=(), name="report.md"):
     """Record a report of B1 read at `head`, written as `name`, listing `findings_`,
     each `(id, severity, state)`."""
     keys = ['kind = "build"', f'verdict = "{verdict}"', 'pass = "full"', 'by = "critic"',
@@ -46,23 +46,23 @@ def verify(folder, head, verdict="publishable", *, findings_=(), name="report.md
     listed = "".join(f'\n\n[[finding]]\nid = "{id_}"\nseverity = "{severity}"\n'
                      f'state = "{state_}"\ntext = "a line is unclear"'
                      for id_, severity, state_ in findings_)
-    path = folder / name
+    path = round_dir / name
     path.write_text(f"# {name}\n\n```toml rounds\n" + "\n".join(keys) + listed
                     + "\n```\n", encoding="utf-8")
-    return verdicts.record(ROUND, path, actor="critic")
+    return verdicts.record(ROUND, path, by="critic")
 
 
 def fix(*commits, key="B1.L1", no_behaviour_change=True):
     return fixes.fix(ROUND, key, list(commits), no_behaviour_change=no_behaviour_change,
-                     actor="planner")
+                     by="planner")
 
 
-def folded(folder):
-    return state.fold(log.read(log.round_log(folder)))
+def folded(round_dir):
+    return state.fold(log.read(log.round_log(round_dir)))
 
 
-def raw(folder) -> bytes:
-    return log.round_log(folder).read_bytes()
+def raw(round_dir) -> bytes:
+    return log.round_log(round_dir).read_bytes()
 
 
 def refusal(*commits, **more) -> str:
@@ -71,9 +71,9 @@ def refusal(*commits, **more) -> str:
     return str(refused.value)
 
 
-def verify_build(folder) -> steps.Step:
+def verify_build(round_dir) -> steps.Step:
     """B1's verify-build step as git reads the build now."""
-    now = folded(folder)
+    now = folded(round_dir)
     seen = checking.seen_of(now, ROUND, settings=own.load())
     return steps.one(now, "verify-build", "B1", name=ROUND, seen=seen)
 
@@ -81,38 +81,38 @@ def verify_build(folder) -> steps.Step:
 # -- the mark -----------------------------------------------------------------------------
 
 def test_a_minor_finding_marked_fixed_is_one_event_naming_the_fix_s_commits(built):
-    folder, _repo, tree = built
-    verify(folder, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
     made = tree.commit("fix.txt", "the fix")
 
     done = fix(made[:8])
 
-    [event] = [one for one in log.read(log.round_log(folder))
+    [event] = [one for one in log.read(log.round_log(round_dir))
                if one["type"] == "finding.marked"]
     assert {key: event[key] for key in ("id", "state", "commits")} == {
         "id": "B1.L1", "state": "fixed", "commits": [made]}
     assert (done.finding.state, done.finding.set_by) == ("fixed", event["n"])
-    [held] = findings.of_stage(folded(folder), "B1")
+    [held] = findings.of_stage(folded(round_dir), "B1")
     assert (held.state, held.severity, held.step) == ("fixed", "minor", "verify-build")
 
 
 @pytest.mark.parametrize("severity", ["blocker", "major"])
 def test_a_blocker_or_a_major_is_not_marked_fixed_without_a_recheck(built, severity):
-    folder, _repo, tree = built
-    verify(folder, tree.rev(), "fold-first", findings_=[("L1", severity, "open")])
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", severity, "open")])
     made = tree.commit("fix.txt", "the fix")
-    before = raw(folder)
+    before = raw(round_dir)
 
     said = refusal(made)
 
     assert f"B1.L1 is a {severity} finding" in said
     assert "re-check the fix's diff" in said
-    assert raw(folder) == before
+    assert raw(round_dir) == before
 
 
 def test_a_mark_without_the_no_behaviour_change_statement_is_refused(built):
-    folder, _repo, tree = built
-    verify(folder, tree.rev(), "fold-first", findings_=[("L1", "note", "open")])
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", "note", "open")])
     made = tree.commit("fix.txt", "the fix")
 
     said = refusal(made, no_behaviour_change=False)
@@ -122,8 +122,8 @@ def test_a_mark_without_the_no_behaviour_change_statement_is_refused(built):
 
 
 def test_a_finding_the_build_does_not_hold_or_a_stage_with_no_build_is_refused(built):
-    folder, _repo, tree = built
-    verify(folder, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
     made = tree.commit("fix.txt", "the fix")
 
     assert "B1's build holds no finding L2" in refusal(made, key="B1.L2")
@@ -131,8 +131,8 @@ def test_a_finding_the_build_does_not_hold_or_a_stage_with_no_build_is_refused(b
 
 
 def test_a_commit_that_is_no_commit_of_the_build_is_refused(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
     base = repo.rev("main")
     repo.switch("elsewhere", new_from="main")
     stray = repo.commit("stray.txt")
@@ -152,8 +152,8 @@ def test_a_key_that_names_no_finding_is_a_bad_argument(built, key):
 
 
 def test_the_command_marks_a_finding_and_says_what_it_needs(built, capsys):
-    folder, _repo, tree = built
-    verify(folder, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
     made = tree.commit("fix.txt", "the fix")
     capsys.readouterr()
 
@@ -170,79 +170,79 @@ def test_the_command_marks_a_finding_and_says_what_it_needs(built, capsys):
 
 
 def test_a_later_report_sets_a_marked_finding_again(built):
-    folder, _repo, tree = built
-    verify(folder, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first", findings_=[("L1", "minor", "open")])
     made = tree.commit("fix.txt", "the fix")
     fix(made)
 
-    verify(folder, made, "fold-first", findings_=[("L1", "minor", "open")],
+    verify(round_dir, made, "fold-first", findings_=[("L1", "minor", "open")],
            name="recheck.md")
 
-    [held] = findings.of_stage(folded(folder), "B1")
+    [held] = findings.of_stage(folded(round_dir), "B1")
     assert held.state == "open"
 
 
 # -- when verification counts at a tip ---------------------------------------------------
 
 def test_verify_build_is_ready_with_work_and_no_report(built):
-    folder, _repo, _tree = built
+    round_dir, _repo, _tree = built
 
-    found = verify_build(folder)
+    found = verify_build(round_dir)
 
     assert found.state == steps.READY
     assert found.owes == ("no report of B1 is recorded",)
 
 
 def test_verify_build_is_done_once_a_publishable_report_read_the_tip(built):
-    folder, _repo, tree = built
-    verify(folder, tree.rev(), "fold-first")
-    assert verify_build(folder).state == steps.READY
+    round_dir, _repo, tree = built
+    verify(round_dir, tree.rev(), "fold-first")
+    assert verify_build(round_dir).state == steps.READY
 
-    verify(folder, tree.rev(), name="recheck.md")
+    verify(round_dir, tree.rev(), name="recheck.md")
 
-    assert verify_build(folder).state == steps.DONE
+    assert verify_build(round_dir).state == steps.DONE
 
 
 def test_a_commit_after_the_verdict_owes_a_recheck_until_a_lead_mark_names_it(built):
-    folder, _repo, tree = built
+    round_dir, _repo, tree = built
     read_at = tree.rev()
-    verify(folder, read_at, "fold-first", findings_=[("L1", "minor", "open")])
-    verify(folder, read_at, findings_=[("L1", "minor", "open")], name="second.md")
-    assert verify_build(folder).state == steps.DONE
+    verify(round_dir, read_at, "fold-first", findings_=[("L1", "minor", "open")])
+    verify(round_dir, read_at, findings_=[("L1", "minor", "open")], name="second.md")
+    assert verify_build(round_dir).state == steps.DONE
     made = tree.commit("fix.txt", "the fix")
 
-    owed = verify_build(folder)
+    owed = verify_build(round_dir)
 
     assert owed.state == steps.READY
     assert f"reading {read_at}..{made}" in owed.owes[0]
 
     fix(made)
 
-    assert verify_build(folder).state == steps.DONE
+    assert verify_build(round_dir).state == steps.DONE
 
 
 def test_a_merge_of_the_target_apart_from_the_build_needs_no_recheck(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit("other.txt")
     tree.merge("main")
 
-    assert verify_build(folder).state == steps.DONE
+    assert verify_build(round_dir).state == steps.DONE
 
 
 def test_a_merge_of_the_target_that_meets_the_build_owes_a_recheck(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit("uv.lock", "a lock")
     tree.merge("main")
 
-    assert verify_build(folder).state == steps.READY
+    assert verify_build(round_dir).state == steps.READY
 
 
 def test_next_says_what_the_verification_reads_and_owes(built):
-    folder, _repo, tree = built
+    round_dir, _repo, tree = built
     read_at = tree.rev()
-    verify(folder, read_at, "fold-first")
+    verify(round_dir, read_at, "fold-first")
     tree.commit("fix.txt", "the fix")
 
     [group] = [one for one in next_step.read(ROUND)["groups"]
@@ -257,9 +257,9 @@ def test_next_says_what_the_verification_reads_and_owes(built):
 
 
 def test_what_finish_waits_for_names_the_verification_owed(built):
-    folder, _repo, tree = built
+    round_dir, _repo, tree = built
 
-    done = verify(folder, tree.rev(), "fold-first")
+    done = verify(round_dir, tree.rev(), "fold-first")
 
     assert any(line.startswith("gate 1, verification: the verification of B1 does not "
                                "count at ")

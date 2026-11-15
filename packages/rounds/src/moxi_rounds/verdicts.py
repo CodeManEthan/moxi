@@ -211,7 +211,7 @@ def _entry(one: states.Pending) -> dict:
     return entry
 
 
-def path(report: Path, folder: Path) -> str:
+def path(report: Path, round_dir: Path) -> str:
     """The report's file as the log names it: from the round's folder when it is in
     it, so the record reads the same wherever the folder is, else the whole path."""
     whole = Path(os.path.abspath(report))
@@ -341,8 +341,8 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
                 # off it, else what it was just before the merge.
                 bases = git.merge_bases(block.head, now.status.target_before)
                 merge_base = bases[0] if len(bases) == 1 else None
-    except RoundsError as error:
-        unmet.append(Unmet(error.reason, error.fix or shown))
+    except RoundsError as exc:
+        unmet.append(Unmet(exc.reason, exc.fix or shown))
     if unmet:
         raise Refused(unmet)
     fields: dict[str, object] = {"kind": block.kind}
@@ -395,7 +395,7 @@ def _decisions_unmet(state: states.State,
         key = f"{stage}.{one.id}"
         held = decisions.find(state, key)
         if held is not None:
-            lighter = decisions.lighter(one.weight, one.forecloses, held)
+            lighter = decisions.lighter(one.weight, forecloses=one.forecloses, than=held)
             if lighter:
                 unmet.append(Unmet(
                     f"the decision {key} is on record as {held.weight}"
@@ -474,7 +474,7 @@ def _of_retro(state: states.State, block: report_block.ReportBlock, *, name: str
     return fields
 
 
-def record(name: str, report: Path | str, *, actor: str, settings=None,
+def record(name: str, report: Path | str, *, by: str, settings=None,
            wait_s: float = write.WAIT_S, at: str | None = None) -> Recorded:
     """Record the verdict of the report file `report` on the round `name`,
     `<project>/<slug>`.
@@ -515,14 +515,14 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
         if block.kind in (report_block.BUILD, report_block.STEP):
             return write.Entry("verdict.recorded", _of_build(
                 state, block, name=name, settings=settings,
-                report=path(report, folder)))
+                report=path(report, round_dir)))
         if block.kind == report_block.MAJORS:
             return write.Entry("verdict.recorded", _of_majors(
-                state, block, name=name, report=path(report, folder)))
+                state, block, name=name, report=path(report, round_dir)))
         if block.kind == report_block.RETRO:
             return write.Entry("verdict.recorded", _of_retro(
                 state, block, name=name, settings=settings,
-                report=path(report, folder)))
+                report=path(report, round_dir)))
         unmet = []
         if not stepping.has_step(state, VERIFIES):
             flow = stepping.current(state).name
@@ -546,7 +546,7 @@ def record(name: str, report: Path | str, *, actor: str, settings=None,
         fields: dict[str, object] = {
             "kind": block.kind, "pass": block.pass_, "verdict": block.verdict,
             "design": block.design, "model": block.model, "by": block.by,
-            "report": path(report, folder), "sha256": block.sha256,
+            "report": path(report, round_dir), "sha256": block.sha256,
             **lists(block)}
         if block.verdict == report_block.PUBLISHABLE:
             applied, left = applies(state, block.design, name=name)

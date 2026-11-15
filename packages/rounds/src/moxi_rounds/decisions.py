@@ -119,7 +119,7 @@ def listed(event: Mapping) -> Iterator[tuple[str, dict]]:
             yield stage, one
 
 
-def lighter(weight: str, forecloses: bool, than: Decision) -> list[str]:
+def lighter(weight: str, *, forecloses: bool, than: Decision) -> list[str]:
     """What of `weight` and `forecloses` is lighter than the decision on record."""
     said = []
     if _ORDER.get(weight, 0) < _ORDER.get(than.weight, 0):
@@ -146,7 +146,7 @@ def of_round(state: states.State) -> tuple[Decision, ...]:
                     stage=stage, id=one["id"], text=str(one.get("text")),
                     origin=event.get("report"), by=event.get("by"), at=event["at"],
                     weight=weight, forecloses=forecloses, raised=event["n"])
-            elif not lighter(weight, forecloses, was):
+            elif not lighter(weight, forecloses=forecloses, than=was):
                 found[key] = replace(was, weight=weight,
                                      forecloses=forecloses or was.forecloses)
     rulings = {ruling.id: ruling for ruling in state.rulings}

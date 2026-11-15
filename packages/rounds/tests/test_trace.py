@@ -686,20 +686,20 @@ def test_what_replaced_an_inherited_ruling_after_the_freezing_holds_the_stage(op
     one = rule(target="proj-a")
     scoped = rule(target="proj-a", text="Rows are sorted by date.",
                   scope="proj-b:src/**")
-    folder = opened(one, scoped)
-    fold(folder, row(one), row(scoped))
-    assert tracing.holding(folded(folder), "B1", register(folder)) == ()
+    round_dir = opened(one, scoped)
+    fold(round_dir, row(one), row(scoped))
+    assert tracing.holding(folded(round_dir), "B1", register(round_dir)) == ()
 
     later = rule(target="proj-a", text="Times are shown in UTC.", supersedes=one)
     narrower = rule(target="proj-a", text="Rows are sorted by name.",
                     scope="proj-b:src/**", supersedes=scoped)
 
     # A standing ruling holds a stage when its scope names no repo or the stage's.
-    assert ids(tracing.holding(folded(folder), "B1", register(folder))) == [later]
-    assert narrower not in ids(tracing.holding(folded(folder), "B2", register(folder)))
+    assert ids(tracing.holding(folded(round_dir), "B1", register(round_dir))) == [later]
+    assert narrower not in ids(tracing.holding(folded(round_dir), "B2", register(round_dir)))
     # Without the project's log, only the round's own rulings are read.
-    assert tracing.holding(folded(folder), "B1") == ()
-    found = steps.one(folded(folder), "commission", "B1", name=ROUND,
-                      register=register(folder))
+    assert tracing.holding(folded(round_dir), "B1") == ()
+    found = steps.one(folded(round_dir), "commission", "B1", name=ROUND,
+                      register=register(round_dir))
     assert [one.reason.split(" until ")[0] for one in found.waits][-1:] == [
         f"{later} holds B1"]

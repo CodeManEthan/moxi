@@ -25,14 +25,14 @@ def a_round(git_repo, tmp_path, capsys):
     assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
     assert cli.main(["projects", "set", "proj-a", "--notes-root",
                      str(tmp_path / "notes")]) == 0
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared", {"id": "B1", "repo": "proj-a", "branch": "work",
-                                        "after": []}, actor="planner")
+                                        "after": []}, by="planner")
     log.append(path, "build.commissioned", {
         "stage": "B1", "repo": "proj-a", "branch": "work", "base": git_repo.rev("main"),
-        "target": "main", "builder": "coder"}, actor="planner")
+        "target": "main", "builder": "coder"}, by="planner")
     capsys.readouterr()
     return path
 
@@ -43,12 +43,12 @@ def folded(path):
 
 def lead_drops(**more):
     return dropping.drop_build(ROUND, "B1", by="lead", record="comms:1234567",
-                               actor="planner", **more)
+                               run_by="planner", **more)
 
 
 def operator_drops():
     return dropping.drop_build(ROUND, "B1", by="operator", record="comms:7654321",
-                               actor="planner")
+                               run_by="planner")
 
 
 def refused_to_the_lead(path) -> str:
@@ -148,18 +148,18 @@ def test_a_dropped_build_ends_and_its_stage_stays_owed(a_round):
     assert "B1 has no open build: its last was dropped" in str(caught.value)
 
 
-def test_a_drop_keeps_folders_outside_rounds_roots_and_names_the_check(a_round, git_repo,
+def test_a_drop_keeps_dirs_outside_rounds_roots_and_names_the_check(a_round, git_repo,
                                                                       tmp_path):
     worktree, scratch = tmp_path / "wt", tmp_path / "scratch"
     worktree.mkdir()
     scratch.mkdir()
     log.append(a_round, "build.dropped", {"stage": "B1", "by": "lead",
                                           "record": "comms:1234567", "tips": []},
-               actor="planner")
+               by="planner")
     log.append(a_round, "build.commissioned", {
         "stage": "B1", "repo": "proj-a", "branch": "work", "base": git_repo.rev("main"),
         "target": "main", "builder": "coder", "worktree": str(worktree),
-        "scratch": str(scratch)}, actor="planner")
+        "scratch": str(scratch)}, by="planner")
 
     dropped = lead_drops()
     assert [(one.place, one.check) for one in dropped.kept] == [(worktree, "A2"),
@@ -176,7 +176,7 @@ def test_a_drop_with_no_build_or_no_pointer_is_refused(a_round, stage, said):
     with pytest.raises(Refused) as caught:
         dropping.drop_build(ROUND, stage, by="lead",
                             record=None if stage == "B1" else "comms:1234567",
-                            actor="planner")
+                            run_by="planner")
     assert said in str(caught.value)
 
 
@@ -185,7 +185,7 @@ def test_a_drop_with_no_build_or_no_pointer_is_refused(a_round, stage, said):
 def test_a_rounds_drop_ends_its_open_builds_with_their_tips(a_round, git_repo):
     git_repo.git("branch", "work", "main")
 
-    dropped = dropping.drop(ROUND, by="lead", record="comms:1234567", actor="planner")
+    dropped = dropping.drop(ROUND, by="lead", record="comms:1234567", run_by="planner")
 
     assert dropped.event["tips"] == [{"stage": "B1", "repo": "proj-a", "branch": "work",
                                       "tip": git_repo.rev("main")}]
@@ -198,11 +198,11 @@ def test_the_leads_round_drop_is_refused_while_a_build_is_not_his(a_round, git_r
     git_repo.switch("main")
 
     with pytest.raises(Refused) as caught:
-        dropping.drop(ROUND, by="lead", record="comms:1234567", actor="planner")
+        dropping.drop(ROUND, by="lead", record="comms:1234567", run_by="planner")
 
     assert "the open build of B1, which reads building" in str(caught.value)
     assert dropping.drop(ROUND, by="operator", record="comms:7654321",
-                         actor="planner").event["by"] == "operator"
+                         run_by="planner").event["by"] == "operator"
 
 
 # -- the command, show and list ------------------------------------------------------------

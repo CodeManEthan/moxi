@@ -13,14 +13,14 @@ from moxi_rounds.gitreads import Git
 class Round:
     """A round's log in the test's tmp, written through the log's own append."""
 
-    def __init__(self, folder):
-        folder.mkdir(parents=True, exist_ok=True)
-        self.path = log.round_log(folder)
+    def __init__(self, round_dir):
+        round_dir.mkdir(parents=True, exist_ok=True)
+        self.path = log.round_log(round_dir)
         self.add("round.opened", description="a placeholder round", flow="full",
                  steps=["design", "build", "finish"])
 
     def add(self, type_: str, **fields) -> dict:
-        return log.append(self.path, type_, fields, actor="planner")
+        return log.append(self.path, type_, fields, by="planner")
 
     def commission(self, stage="B1", *, branch="work", base, target="main") -> None:
         self.add("build.commissioned", stage=stage, repo="proj-a", branch=branch,

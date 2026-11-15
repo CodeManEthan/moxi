@@ -127,7 +127,7 @@ def spoil(rounds, slug="a-round"):
 # -- each call is its command's data -----------------------------------------------------
 
 def test_the_api_has_its_five_calls_and_no_other():
-    assert api.__all__ == ["rounds", "round", "waiting", "questions", "builds"]
+    assert api.__all__ == ["rounds", "round_data", "waiting", "questions", "builds"]
     assert modules.load("rounds", interface=1).api is api
 
 
@@ -174,7 +174,7 @@ def test_the_calls_say_what_step_a_round_is_at(rounds):
         {"step": "commission", "stage": None, "state": "ready"},
         {"step": "commission", "stage": None, "state": "waiting"}]
     assert api.rounds(status="closed")["rounds"][0]["step"] is None
-    at = api.round(A)["step"]
+    at = api.round_data(A)["step"]
     assert (at["step"], at["stage"], at["state"]) == ("commission", "B1", "waiting")
 
 

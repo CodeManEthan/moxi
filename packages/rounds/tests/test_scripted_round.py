@@ -124,14 +124,14 @@ def block(*lines: str) -> str:
     return "```toml rounds\n" + "\n".join(lines) + "\n```\n"
 
 
-def report(folder: Path, name: str, text: str, *lines: str) -> str:
-    path = folder / name
+def report(round_dir: Path, name: str, text: str, *lines: str) -> str:
+    path = round_dir / name
     path.write_text(f"# {name}\n\n{text}\n\n" + block(*lines), encoding="utf-8")
     return str(path)
 
 
-def build_report(folder, name, stage, head, verdict, pass_, *tables) -> str:
-    return report(folder, name, "A check of the build.",
+def build_report(round_dir, name, stage, head, verdict, pass_, *tables) -> str:
+    return report(round_dir, name, "A check of the build.",
                   'kind = "build"', f'verdict = "{verdict}"', f'pass = "{pass_}"',
                   f'by = "{CHECKER}"', 'model = "a-model"', f'stage = "{stage}"',
                   f'head = "{head}"', *tables)
@@ -175,8 +175,8 @@ def test_a_full_round_runs_from_open_to_its_close_on_what_next_names(script):
     # The design, sent back once and re-checked.
     s.read("proj-a/scripted")
     s.names(f"round {FULL}   flow full   step design   by lead, tier second")
-    folder = after("write: design.md in ", s.said)
-    (folder / "design.md").write_text(design(), encoding="utf-8")
+    round_dir = after("write: design.md in ", s.said)
+    (round_dir / "design.md").write_text(design(), encoding="utf-8")
     s.do("moxi rounds fold proj-a/scripted")
 
     s.read("proj-a/scripted")
@@ -190,7 +190,7 @@ def test_a_full_round_runs_from_open_to_its_close_on_what_next_names(script):
     s.read("proj-a/scripted")
     s.names(f"round {FULL}   flow full   step verify-design   by checker, "
             "tier third")
-    (folder / "design.md").write_text(
+    (round_dir / "design.md").write_text(
         design(" The backup goes beside the file it keeps."),
         encoding="utf-8")
     s.do("moxi rounds fold proj-a/scripted")

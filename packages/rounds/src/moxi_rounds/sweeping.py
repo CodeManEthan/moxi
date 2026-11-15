@@ -160,8 +160,8 @@ class Leftover:
     def line(self) -> str:
         """The account's line for it."""
         names = self.candidate.names()
-        folder = "worktree" if self.candidate.kind == removal.WORKTREE else "scratch folder"
-        of = (f"the {folder} of {names['round']} {names['stage']} "
+        place_name = "worktree" if self.candidate.kind == removal.WORKTREE else "scratch folder"
+        of = (f"the {place_name} of {names['round']} {names['stage']} "
               f"({names['repo']} {names['branch']})")
         if self.fate == KEPT and self.kept is not None:
             return f"{self.fate} {self.place}: {of}; {self.kept.line()}"
@@ -264,8 +264,8 @@ def run(*, remove: bool, settings=None) -> Swept:
     held = files.lock(where, timeout_s=0)
     try:
         held.__enter__()
-    except files.LockTimeout as stop:
-        raise Running(stop.holder) from None
+    except files.LockTimeout as exc:
+        raise Running(exc.holder) from None
     try:
         removing = bool(remove and settings["sweep.armed"])
         if removing:
@@ -390,21 +390,21 @@ class _Records:
 def _records(settings) -> _Records:
     homes, unresolved = folders.homes(settings)
     candidates, held, unreadable = [], {}, []
-    for error in unresolved:
-        if isinstance(error, SharedFolder):
-            unreadable.append(error.reason)
+    for exc in unresolved:
+        if isinstance(exc, SharedFolder):
+            unreadable.append(exc.reason)
     for home in homes:
-        for slug in folders.slugs(home.folder):
+        for slug in folders.slugs(home.rounds_dir):
             name = f"{home.project}/{slug}"
             try:
-                events = log.read_round(log.round_log(home.round_folder(slug)))
+                events = log.read_round(log.round_log(home.round_dir(slug)))
             except NoLog:  # removed since the folder was listed
                 continue
-            except Unreadable as error:
-                unreadable.append(error.reason)
+            except Unreadable as exc:
+                unreadable.append(exc.reason)
                 continue
-            except OSError as error:
-                unreadable.append(f"the log of {name} can't be read: {error}")
+            except OSError as exc:
+                unreadable.append(f"the log of {name} can't be read: {exc}")
                 continue
             state = states.fold(events)
             for build in builds.builds(state):
@@ -475,9 +475,9 @@ def _owned_and_clean(candidate: Candidate, settings) -> removal.Proven | removal
     try:
         found = removal.judge(candidate.name, candidate.commissioned, candidate.kind,
                               settings=settings)
-    except RoundsError as error:
+    except RoundsError as exc:
         # What can't be read counts as work.
-        return removal.Kept(candidate.place, "read", error.reason)
+        return removal.Kept(candidate.place, "read", exc.reason)
     if not isinstance(found, removal.Proven):
         return found
     return _kept_by_finish(candidate, found) or found
@@ -494,9 +494,9 @@ def _kept_by_finish(candidate: Candidate, found: removal.Proven) -> removal.Kept
     try:
         tip, head = git.branch(branch), git.branch(target)
         on = tip is not None and head is not None and git.is_ancestor(tip, head)
-    except GitError as error:
+    except GitError as exc:
         return removal.Kept(found.place, "B6", f"git can't read whether {branch} is on "
-                            f"{target}: {error.reason}")
+                            f"{target}: {exc.reason}")
     if on:
         return None
     return removal.Kept(found.place, "B6", f"a finish with no merge kept it, and the tip "
@@ -585,11 +585,11 @@ class _Processes:
     def using(self, at: Iterable[Path]) -> list[str]:
         """Each process with a path at or under one of `at`, as `pid <n> (<name>):
         <path>`."""
-        folders_at = {_folded(str(one)).rstrip(os.sep) for one in at}
+        dirs_at = {_folded(str(one)).rstrip(os.sep) for one in at}
         found = []
         for pid, name, used in self._read():
             for one in used:
-                if any(_under(one, folder) for folder in folders_at):
+                if any(_under(one, at_dir) for at_dir in dirs_at):
                     found.append(f"pid {pid} ({name}): {one}")
                     break
         return found
@@ -604,9 +604,9 @@ def _folded(path: str) -> str:
     return os.path.normcase(path)
 
 
-def _under(path: str, folder: str) -> bool:
+def _under(path: str, parent_dir: str) -> bool:
     path = _folded(path)
-    return path == folder or path.startswith(folder + os.sep)
+    return path == parent_dir or path.startswith(parent_dir + os.sep)
 
 
 def _process_table() -> list[tuple[int, str, tuple[str, ...]]]:
@@ -631,7 +631,7 @@ def _process_table() -> list[tuple[int, str, tuple[str, ...]]]:
         except (psutil.Error, OSError):
             continue
         used: list[str] = []
-        for read in (_cwd, _open_files, _mapped, _words, _environment):
+        for read in (_cwd, _open_files, _mapped, _words, _env_parts):
             try:
                 used += read(process)
             except (psutil.Error, OSError, AttributeError, NotImplementedError,
@@ -658,7 +658,7 @@ def _words(process) -> list[str]:
     return [part for word in process.cmdline() for part in _parts(word)]
 
 
-def _environment(process) -> list[str]:
+def _env_parts(process) -> list[str]:
     return [part for value in process.environ().values() for part in _parts(value)]
 
 
@@ -680,19 +680,19 @@ def _trash(*, removing: bool, began: float) -> tuple[list[TrashEntry], bool]:
     """Each entry of the trash and what became of it: one the sweep's log names as
     renamed with no delete after is deleted by a removing run; anything else is left
     and reported."""
-    folder = removal.trash_dir()
+    trash_dir = removal.trash_dir()
     try:
-        names = sorted(os.listdir(folder))
+        names = sorted(os.listdir(trash_dir))
     except (FileNotFoundError, NotADirectoryError):
         return [], False
-    except OSError as error:
-        return [TrashEntry(folder.name, folder, LEFT, f"it can't be read: {error}")], False
+    except OSError as exc:
+        return [TrashEntry(trash_dir.name, trash_dir, LEFT, f"it can't be read: {exc}")], False
     lines = files.read_records(log_file())
     renamed = {line.get("entry"): line for line in lines if line.get("act") == RENAMED}
     deleted = {line.get("entry") for line in lines if line.get("act") == DELETED}
     found, timed_out = [], False
     for name in names:
-        path = folder / name
+        path = trash_dir / name
         line = renamed.get(name)
         if line is None:
             found.append(TrashEntry(name, path, LEFT, "no line of the sweep's log names "
@@ -702,7 +702,7 @@ def _trash(*, removing: bool, began: float) -> tuple[list[TrashEntry], bool]:
             found.append(TrashEntry(name, path, LEFT, "the sweep deleted it once and this "
                                     "stayed: an entry on another device, or one it could "
                                     "not delete; look at it and delete it by hand"))
-        elif not _real_folder(path):
+        elif not _real_dir(path):
             found.append(TrashEntry(name, path, LEFT, "it is not the folder the sweep "
                                     "moved there"))
         elif not removing:
@@ -723,7 +723,7 @@ def _trash(*, removing: bool, began: float) -> tuple[list[TrashEntry], bool]:
     return found, timed_out
 
 
-def _real_folder(path: Path) -> bool:
+def _real_dir(path: Path) -> bool:
     try:
         found = os.lstat(path)
     except OSError:

@@ -69,19 +69,19 @@ class OpenBuild:
 class OpenBuilds:
     """The open builds, by round and then in the order commissioned: `repo` is the one
     they were kept to, or None. `unreadable` holds a line for each round whose log
-    can't be read, whose builds are not here, and `no_folder` one for each project
+    can't be read, whose builds are not here, and `unplaced` one for each project
     whose rounds folder can't be worked out."""
 
     computed: str
     repo: str | None
     builds: tuple[OpenBuild, ...]
     unreadable: tuple[str, ...] = ()
-    no_folder: tuple[str, ...] = ()
+    unplaced: tuple[str, ...] = ()
 
     def data(self) -> dict:
         return {"computed": self.computed, "repo": self.repo,
                 "builds": [one.data() for one in self.builds],
-                "unreadable": list(self.unreadable), "no_folder": list(self.no_folder)}
+                "unreadable": list(self.unreadable), "no_folder": list(self.unplaced)}
 
 
 def read(repo: str | None = None, *, settings=None, now: str | None = None,
@@ -106,7 +106,7 @@ def read(repo: str | None = None, *, settings=None, now: str | None = None,
     landed: list[builds.Landing] = []
     unreadable: list[str] = []
     for home in homes:
-        for summary in index.rounds(home.project, home.folder):
+        for summary in index.rounds(home.project, home.rounds_dir):
             if summary.unreadable is not None:
                 unreadable.append(summary.unreadable.reason)
                 continue
@@ -127,7 +127,7 @@ def read(repo: str | None = None, *, settings=None, now: str | None = None,
         computed=now, repo=repo,
         builds=tuple(read_now[(summary.name, one.stage)] for summary, one in found),
         unreadable=tuple(unreadable),
-        no_folder=tuple(error.reason for error in unresolved))
+        unplaced=tuple(error.reason for error in unresolved))
 
 
 def _group(members: list[tuple[index.Summary, builds.Build]],
@@ -136,8 +136,8 @@ def _group(members: list[tuple[index.Summary, builds.Build]],
     """The builds `members`, all of one repo and one target, read in that repo."""
     try:
         _key, root = folders.root(members[0][1].repo)
-    except RoundsError as error:
-        return {(summary.name, one.stage): OpenBuild(summary.name, one, problem=error)
+    except RoundsError as exc:
+        return {(summary.name, one.stage): OpenBuild(summary.name, one, problem=exc)
                 for summary, one in members}
     git = Git(root)
     done: dict[tuple[str, str], OpenBuild] = {}
@@ -148,17 +148,17 @@ def _group(members: list[tuple[index.Summary, builds.Build]],
             idle = builds.idle(
                 git, status, now=at,
                 idle_days=own.round_setting(settings, summary.project, "idle_days"))
-        except RoundsError as error:
-            done[name] = OpenBuild(summary.name, one, problem=error)
+        except RoundsError as exc:
+            done[name] = OpenBuild(summary.name, one, problem=exc)
             continue
         done[name] = OpenBuild(summary.name, one, status=status, idle=idle)
     read_ok = {name: found.status for name, found in done.items() if found.problem is None}
     try:
         shared = builds.sharing(git, read_ok)
-    except RoundsError as error:
+    except RoundsError as exc:
         # git failed part-way through a group it had just read: nothing of the
         # group is known to be so now.
-        return {name: OpenBuild(found.round, found.build, problem=error)
+        return {name: OpenBuild(found.round, found.build, problem=exc)
                 for name, found in done.items()}
     return {name: found if found.problem is not None
             else OpenBuild(found.round, found.build, status=found.status,

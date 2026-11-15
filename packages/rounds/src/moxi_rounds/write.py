@@ -204,7 +204,7 @@ def _close(where: Where, round_events: Sequence[dict], *, by: str,
     entry = closing.entry(state.fold(round_events), ratify=str(ratify), at=when)
     if entry is None:
         return None
-    return log.append(where.round_log, entry.type, entry.fields, actor=actor, at=when)
+    return log.append(where.round_log, entry.type, entry.fields, by=by, at=when)
 
 
 #: The callbacks every write calls after its append, in order, each with the `Written`.
@@ -376,7 +376,7 @@ def _append(view: View, entries: list[Entry], result: object, *, by: str,
     after = {ROUND: list(view.events), PROJECT: list(view.project_events)}
     for entry in entries:
         path = where.round_log if entry.log == ROUND else where.project_log
-        written = log.append(path, entry.type, entry.fields, actor=actor,
+        written = log.append(path, entry.type, entry.fields, by=by,
                              at=at if entry.at is None else entry.at)
         appended.append(written)
         after[entry.log].append(written)

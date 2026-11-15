@@ -143,13 +143,13 @@ def project_at(path: str | os.PathLike) -> str | None:
     api = _projects()
     try:
         found = api.for_path(os.fspath(path))
-    except api.ProjectsError as error:
-        raise RoundsError(f"the projects list can't be read: {error}") from None
+    except api.ProjectsError as exc:
+        raise RoundsError(f"the projects list can't be read: {exc}") from None
     return None if found is None else found.key
 
 
-def slugs(folder: Path) -> list[str]:
-    """The slug of each round in the rounds folder `folder`, sorted: every folder there
+def slugs(rounds_dir: Path) -> list[str]:
+    """The slug of each round in the rounds folder `rounds_dir`, sorted: every folder there
     that holds a round's log and whose name is a slug. A rounds folder that does not
     exist holds no round."""
     try:
@@ -239,5 +239,5 @@ def _notes_dir(record) -> Path:
     return Path(found)
 
 
-__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_folder", "root",
+__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "root",
            "slugs", "names"]

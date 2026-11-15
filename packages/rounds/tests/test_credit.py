@@ -24,14 +24,14 @@ def a_round(git_repo, tmp_path, capsys):
     assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
     assert cli.main(["projects", "set", "proj-a", "--notes-root",
                      str(tmp_path / "notes")]) == 0
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared", {"id": "B1", "repo": "proj-a", "branch": "work",
-                                        "after": []}, actor="planner")
+                                        "after": []}, by="planner")
     log.append(path, "build.commissioned", {
         "stage": "B1", "repo": "proj-a", "branch": "work", "base": git_repo.rev("main"),
-        "target": "main", "builder": "coder"}, actor="planner")
+        "target": "main", "builder": "coder"}, by="planner")
     capsys.readouterr()
     return path
 
@@ -52,7 +52,7 @@ def status_now(path, git_repo) -> builds.Status:
 
 
 def credit(**more):
-    return ruling.rule(ROUND, item="credit:B1", record="comms:1234567", actor="planner",
+    return ruling.rule(ROUND, item="credit:B1", record="comms:1234567", by="planner",
                        **more)
 
 
@@ -85,7 +85,7 @@ def test_a_credit_taken_back_leaves_the_build_unclear_again(a_round, git_repo):
     fast_forward(git_repo)
     done = credit()
 
-    ruling.rule(ROUND, item=f"revoke:{done.id}", record="comms:7654321", actor="planner")
+    ruling.rule(ROUND, item=f"revoke:{done.id}", record="comms:7654321", by="planner")
 
     assert status_now(a_round, git_repo).state == builds.UNCLEAR
 
@@ -141,7 +141,7 @@ def test_a_build_in_another_state_is_not_credited(a_round, git_repo, history):
 def test_a_stage_with_no_open_build_is_not_credited(a_round):
     log.append(a_round, "build.dropped", {"stage": "B1", "by": "lead",
                                           "record": "comms:1234567", "tips": []},
-               actor="planner")
+               by="planner")
 
     assert "B1 has no open build to credit" in refused(a_round)
 

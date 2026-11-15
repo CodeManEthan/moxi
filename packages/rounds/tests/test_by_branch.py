@@ -33,13 +33,13 @@ def opened(repo, tmp_path, capsys):
     branch)` of `stages` declared through the log, and return its log."""
 
     def open_on(name=ROUND, stages=(("B1", "work"),)):
-        opening.open_round(name, description="a placeholder round", actor="planner",
+        opening.open_round(name, description="a placeholder round", by="planner",
                            flow="fix")
         path = log.round_log(tmp_path / "notes" / "rounds" / name.split("/")[1])
         for stage_id, branch in stages:
             log.append(path, "stage.declared",
                        {"id": stage_id, "repo": "proj-a", "branch": branch, "after": []},
-                       actor="planner")
+                       by="planner")
         capsys.readouterr()
         return path
 
@@ -47,7 +47,7 @@ def opened(repo, tmp_path, capsys):
 
 
 def commission(name=ROUND, stage="B1"):
-    return commissioning.commission(name, stage, builder="coder", actor="planner")
+    return commissioning.commission(name, stage, builder="coder", by="planner")
 
 
 def refusal(path) -> str:
@@ -88,7 +88,7 @@ def test_next_json_with_no_round_gives_the_same_data_as_naming_it(
     assert by_name == capsys.readouterr().out
 
 
-def test_a_build_is_found_from_a_folder_inside_its_worktree(opened):
+def test_a_build_is_found_from_a_dir_inside_its_worktree(opened):
     opened()
     made = commission()
     inside = made.worktree / "docs" / "deeper"
@@ -151,7 +151,7 @@ def test_a_finished_build_is_not_found(opened, repo):
     path = opened()
     made = commission()
     log.append(path, "finish.done", {"stage": "B1", "tip": repo.rev("work")},
-               actor="coder")
+               by="coder")
 
     assert "no open build has repo proj-a and branch work" in refusal(made.worktree)
 
@@ -163,7 +163,7 @@ def test_two_open_builds_on_one_branch_are_refused_naming_both(opened):
     [event] = [one for one in log.read(first) if one["type"] == "build.commissioned"]
     copied = {key: value for key, value in event.items()
               if key not in ("v", "n", "at", "actor", "type")}
-    log.append(other, "build.commissioned", {**copied, "stage": "B3"}, actor="planner")
+    log.append(other, "build.commissioned", {**copied, "stage": "B3"}, by="planner")
 
     reason = refusal(made.worktree)
 

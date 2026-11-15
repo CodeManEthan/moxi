@@ -840,7 +840,7 @@ def test_a_round_that_is_open_has_no_numbers_file(rounds):
 
 def test_a_dropped_round_s_numbers_are_written_from_its_drop(rounds):
     ask()
-    dropping.drop(A, by="operator", record="comms:30", actor="planner", at=LATER)
+    dropping.drop(A, by="operator", record="comms:30", run_by="planner", at=LATER)
 
     text = retro(rounds).read_text(encoding="utf-8")
 
@@ -862,7 +862,7 @@ def test_a_dropped_round_s_numbers_are_written_from_its_drop(rounds):
 
 def test_the_numbers_file_is_what_the_log_gives_and_the_same_log_gives_the_same_bytes(
         rounds):
-    dropping.drop(A, by="operator", record="comms:30", actor="planner", at=LATER)
+    dropping.drop(A, by="operator", record="comms:30", run_by="planner", at=LATER)
     events = log.read(log.round_log(rounds / "a-round"))
 
     made = rendering.retro("proj-a", "a-round", events)
@@ -873,7 +873,7 @@ def test_the_numbers_file_is_what_the_log_gives_and_the_same_log_gives_the_same_
 
 def test_an_ending_that_holds_no_numbers_writes_no_numbers_file(rounds):
     where = write.Where("proj-a", rounds, "a-round")
-    write.record(where, actor="planner", at=LATER, event=lambda view, result: write.Entry(
+    write.record(where, by="planner", at=LATER, event=lambda view, result: write.Entry(
         "round.dropped", {"by": "operator", "record": "comms:30", "questions": {}}))
 
     assert note(rounds).exists() and not retro(rounds).exists()

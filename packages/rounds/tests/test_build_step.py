@@ -38,17 +38,17 @@ def planned(repo, tmp_path, write_config):
     declares a check. Returns the round's log."""
     command = shlex.join([sys.executable, "-c", "print('the check passed')"])
     write_config(f"[projects.proj-a]\ncheck = {{ command = {json.dumps(command)} }}\n")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
+               by="planner")
     return path
 
 
 def commission():
-    return commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    return commissioning.commission(ROUND, "B1", builder="coder", by="planner")
 
 
 def folded(path: Path) -> states.State:
@@ -93,7 +93,7 @@ def test_the_build_step_moves_from_ready_to_done_as_work_is_committed(planned, r
 
 def test_a_finished_build_s_step_is_done_without_a_read_of_git(planned):
     commission()
-    log.append(planned, "finish.done", {"stage": "B1", "tip": "0" * 40}, actor="coder")
+    log.append(planned, "finish.done", {"stage": "B1", "tip": "0" * 40}, by="coder")
 
     assert build_step(planned, seen=None).state == steps.DONE
 
@@ -142,7 +142,7 @@ def test_next_moves_from_commission_through_build_to_check(planned, repo, capsys
     type(repo)(made.worktree).commit("work.txt", "the work")
     assert at_next() == ("check", "B1", steps.READY)
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     assert at_next()[0] == "verify-build"
 
 

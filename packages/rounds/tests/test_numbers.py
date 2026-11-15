@@ -15,22 +15,22 @@ TIP = "1" * 40
 
 
 @pytest.fixture
-def folder(tmp_path, add_project, write_config, capsys):
+def round_dir(tmp_path, add_project, write_config, capsys):
     """`a-round` of `proj-a`, opened on the `fix` flow."""
     add_project("proj-a", notes_root=tmp_path / "notes")
     write_config("")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     capsys.readouterr()
     return tmp_path / "notes" / "rounds" / "a-round"
 
 
-def append(folder, kind, body, actor="planner"):
-    log.append(log.round_log(folder), kind, body, actor=actor)
+def append(round_dir, kind, body, by="planner"):
+    log.append(log.round_log(round_dir), kind, body, by=by)
 
 
-def counted(folder) -> dict:
-    return numbers.of(state.fold(log.read(log.round_log(folder))))
+def counted(round_dir) -> dict:
+    return numbers.of(state.fold(log.read(log.round_log(round_dir))))
 
 
 def finding(id_, severity, state_="open"):
@@ -46,18 +46,18 @@ def build_report(*, pass_="full", word="fold-first", found=(), flags=()):
 
 
 @pytest.fixture
-def built(folder):
+def built(round_dir):
     """B1 declared and commissioned through the log."""
-    append(folder, "stage.declared",
+    append(round_dir, "stage.declared",
            {"id": "B1", "repo": "proj-a", "branch": "work", "after": []})
-    append(folder, "build.commissioned",
+    append(round_dir, "build.commissioned",
            {"stage": "B1", "repo": "proj-a", "branch": "work", "base": BASE,
             "target": "main", "builder": "coder", "build": "0123456789abcdef"})
-    return folder
+    return round_dir
 
 
-def test_a_round_with_nothing_done_counts_nothing(folder):
-    found = counted(folder)
+def test_a_round_with_nothing_done_counts_nothing(round_dir):
+    found = counted(round_dir)
     assert found["design_passes"] == found["folds"] == found["checks_failed"] == 0
     assert found["findings"] == {"blocker": 0, "major": 0, "minor": 0, "note": 0}
     assert found["decisions"] == {"accept": 0, "reject": 0}
@@ -68,11 +68,11 @@ def test_a_round_with_nothing_done_counts_nothing(folder):
 def test_findings_are_counted_once_each_at_the_severity_the_newest_report_gave(built):
     append(built, "verdict.recorded",
            build_report(found=[finding("L1", "minor"), finding("L2", "major")]),
-           actor="critic")
+           by="critic")
     append(built, "verdict.recorded",
            build_report(pass_="re-check", word="publishable",
                         found=[finding("L1", "major", "fixed"), finding("L2", "major")]),
-           actor="critic")
+           by="critic")
 
     found = counted(built)
 
@@ -83,7 +83,7 @@ def test_findings_are_counted_once_each_at_the_severity_the_newest_report_gave(b
 def test_a_drift_recheck_and_the_flags_of_a_report_are_counted(built):
     append(built, "verdict.recorded",
            build_report(pass_="drift", word="publishable",
-                        flags=["model-below-tier"]), actor="critic")
+                        flags=["model-below-tier"]), by="critic")
     found = counted(built)
     assert found["drift_rechecks"] == 1
     assert found["flags"] == {"extra-full-pass": 0, "model-below-tier": 1}
@@ -93,22 +93,22 @@ def test_a_check_run_that_did_not_exit_0_is_failed_one_at_its_limit_included(bui
     for code in (0, 1, None):
         append(built, "check.ran",
                {"stage": "B1", "step": "check", "commit": TIP, "argv": ["make", "check"],
-                "exit_code": code, "duration_s": 1.0, "output": None}, actor="coder")
+                "exit_code": code, "duration_s": 1.0, "output": None}, by="coder")
     assert counted(built)["checks_failed"] == 2
 
 
-def test_questions_are_counted_by_the_shape_of_the_pointer_they_came_from(folder):
+def test_questions_are_counted_by_the_shape_of_the_pointer_they_came_from(round_dir):
     for id_, origin in (("Q1", "comms:12"), ("Q2", "comms:13"),
                         ("Q3", "https://example.test/a")):
-        append(folder, "question.asked",
+        append(round_dir, "question.asked",
                {"id": id_, "text": "Does it hold?", "from": origin, "blocks": "all",
                 "state": "open", "asked_by": "planner", "asked_at": AT})
-    assert counted(folder)["questions"] == {"comms": 2, "url": 1}
+    assert counted(round_dir)["questions"] == {"comms": 2, "url": 1}
 
 
 def test_skips_corrections_and_the_lead_s_acts_are_counted(built):
-    first = ruling.rule(ROUND, item="skip:verify-build:B1", record=PTR, actor="planner")
-    ruling.rule(ROUND, item=f"revoke:{first.id}", record=PTR, actor="planner")
+    first = ruling.rule(ROUND, item="skip:verify-build:B1", record=PTR, by="planner")
+    ruling.rule(ROUND, item=f"revoke:{first.id}", record=PTR, by="planner")
     append(built, "flow.changed",
            {"was": "fix", "flow": "small", "steps": [], "by": "lead"})
     append(built, "repair", {"what": "base", "stage": "B1", "fields": {}})
@@ -122,24 +122,24 @@ def test_skips_corrections_and_the_lead_s_acts_are_counted(built):
             found["cleared_locks"], found["drops"]) == (1, 1, 1, 1, 1, 1)
 
 
-def test_the_folds_and_the_lead_s_decisions_on_the_design_are_counted(folder):
-    append(folder, "design.frozen", {"version": 1, "digest": "a" * 64})
-    append(folder, "design.frozen",
+def test_the_folds_and_the_lead_s_decisions_on_the_design_are_counted(round_dir):
+    append(round_dir, "design.frozen", {"version": 1, "digest": "a" * 64})
+    append(round_dir, "design.frozen",
            {"version": 2, "digest": "b" * 64, "records_only": True, "record": PTR})
-    append(folder, "thread.decided",
+    append(round_dir, "thread.decided",
            {"thread": "T1", "decision": "lead-decision", "record": PTR})
-    found = counted(folder)
+    found = counted(round_dir)
     assert (found["folds"], found["records_only_folds"], found["lead_decisions"]) == (
         2, 1, 1)
 
 
-def test_a_dropped_round_holds_its_numbers_in_its_drop(folder):
-    append(folder, "design.frozen", {"version": 1, "digest": "a" * 64})
-    before = counted(folder)
+def test_a_dropped_round_holds_its_numbers_in_its_drop(round_dir):
+    append(round_dir, "design.frozen", {"version": 1, "digest": "a" * 64})
+    before = counted(round_dir)
 
-    dropping.drop(ROUND, by="operator", record=PTR, actor="planner")
+    dropping.drop(ROUND, by="operator", record=PTR, run_by="planner")
 
-    event = log.read(log.round_log(folder))[-1]
+    event = log.read(log.round_log(round_dir))[-1]
     assert event["type"] == "round.dropped"
     assert event["numbers"] == {**before, "step_time_s": event["numbers"]["step_time_s"]}
     assert before["folds"] == 1
@@ -176,19 +176,19 @@ def test_a_stretch_that_runs_backwards_or_has_no_time_counts_nothing(built):
     assert found == {"build B1": 20}
 
 
-def test_a_round_that_has_ended_is_at_no_step_after_its_ending(folder):
-    dropping.drop(ROUND, by="operator", record=PTR, actor="planner")
-    events = timed(log.read(log.round_log(folder)), 0, 40)
+def test_a_round_that_has_ended_is_at_no_step_after_its_ending(round_dir):
+    dropping.drop(ROUND, by="operator", record=PTR, run_by="planner")
+    events = timed(log.read(log.round_log(round_dir)), 0, 40)
 
     found = numbers.step_time_s(events, ended_at=log.stamp(1_000_000 + 90))
 
     assert found == {"commission": 40}
 
 
-def test_the_drop_s_numbers_time_its_last_step_to_the_drop_itself(folder):
-    dropping.drop(ROUND, by="operator", record=PTR, actor="planner", at=log.stamp(4e9))
+def test_the_drop_s_numbers_time_its_last_step_to_the_drop_itself(round_dir):
+    dropping.drop(ROUND, by="operator", record=PTR, run_by="planner", at=log.stamp(4e9))
 
-    opened, dropped = log.read(log.round_log(folder))
+    opened, dropped = log.read(log.round_log(round_dir))
 
     spent = dropped["numbers"]["step_time_s"]
     assert dropped["at"] == log.stamp(4e9)

@@ -289,7 +289,7 @@ class Sizing:
     failed: tuple[tuple[Callable, Exception], ...] = ()
 
 
-def size(target: str, stage_id: str, brief: Path | str, *, actor: str, settings=None,
+def size(target: str, stage_id: str, brief: Path | str, *, by: str, settings=None,
          wait_s: float = write.WAIT_S, at: str | None = None) -> Sizing:
     """Size the brief `brief` for the stage `stage_id` of the round `target`.
 
@@ -372,12 +372,12 @@ def size(target: str, stage_id: str, brief: Path | str, *, actor: str, settings=
             return None
         return write.Entry(SIZED, {
             "stage": stage_id, "slice": block.slice, "verify": block.verify,
-            "brief": verdicts.path(block.file, home.folder / slug),
+            "brief": verdicts.path(block.file, home.rounds_dir / slug),
             "sha256": block.sha256, "result": PASSED})
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a sized brief"), names_the_stage,
                    is_a_stage_in_the_plan, declares_the_slice, within_the_limit],
             event=sized, wait_s=wait_s, at=at)

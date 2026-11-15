@@ -626,7 +626,7 @@ def built(rounds, stage, *, finished=True):
     """Record a build of `stage` commissioned, and finished as a later verb will."""
     log.append(log.round_log(rounds / "a-round"), "build.commissioned", {
         "stage": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}",
-        "base": "2" * 40, "target": "main", "builder": "coder"}, actor="planner")
+        "base": "2" * 40, "target": "main", "builder": "coder"}, by="planner")
     if finished:
         finish(rounds, stage)
 
@@ -638,7 +638,7 @@ def decided(rounds, stage, *listed, report="report.md"):
         "kind": "build", "stage": stage, "by": "critic", "report": report,
         "decisions": [{"id": id_, "weight": weight, "forecloses": forecloses,
                        "text": f"as built: {stage}.{id_}"}
-                      for id_, weight, forecloses in listed]}, actor="critic")
+                      for id_, weight, forecloses in listed]}, by="critic")
 
 
 def ratify_setting(write_config, value):
@@ -695,7 +695,7 @@ def dropped(rounds, stage):
     """Record the stage's open build dropped, as a later verb will."""
     log.append(log.round_log(rounds / "a-round"), "build.dropped",
                {"stage": stage, "by": "operator", "record": "comms:40"},
-               actor="planner")
+               by="planner")
 
 
 def test_a_decision_only_a_dropped_build_declared_is_in_no_view(rounds):
@@ -746,7 +746,7 @@ def test_a_majors_report_s_decision_is_the_build_open_when_it_was_recorded(round
         "kind": "majors", "by": "critic", "report": "majors.md", "stages": ["B1"],
         "decisions": [{"id": "M1", "stage": "B1", "weight": "major",
                        "forecloses": False, "text": "as built: B1.M1"}]},
-        actor="critic")
+        by="critic")
     dropped(rounds, "B1")
     built(rounds, "B1")
 
@@ -864,7 +864,7 @@ def test_a_round_that_has_ended_puts_no_decision_to_him(rounds):
     built(rounds, "B1")
     decided(rounds, "B1", ("M1", "major", False))
     log.append(log.round_log(rounds / "a-round"), "round.dropped",
-               {"by": "operator", "record": "comms:13"}, actor="planner")
+               {"by": "operator", "record": "comms:13"}, by="planner")
 
     found = export.questions_of(A, view="ratify")
 

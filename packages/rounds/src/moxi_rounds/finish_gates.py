@@ -95,19 +95,19 @@ def _why(found) -> str:
 
 
 def unmet(state: states.State, stage: str, *, seen, tip: str | None = None,
-          name: str = "ROUND", closed: Callable[[str], bool] | None = None,
+          name: str = "ROUND", on_closed: Callable[[str], bool] | None = None,
           register: states.State | None = None) -> tuple[Gate, ...]:
     """Every gate of `finish` of the stage `stage` that does not hold at `tip`, in
     order. `seen` is what was read of the stage's open build (`steps.Seen`); `tip` is
     the tip the gates are read at, the branch's tip as read when left out, else the
-    build's head. `name`, `closed` and `register` are as `steps.of` takes them.
+    build's head. `name`, `on_closed` and `register` are as `steps.of` takes them.
 
     The stage is one with an open build; `seen` holds no problem."""
     from . import steps
 
     build = builds.current(state, stage)
     at = tip or seen.tip or seen.head
-    every = {"name": name, "closed": closed, "register": register,
+    every = {"name": name, "on_closed": on_closed, "register": register,
              "seen": {stage: seen}}
     found: list[Gate] = []
 
@@ -134,7 +134,7 @@ def unmet(state: states.State, stage: str, *, seen, tip: str | None = None,
             f"{_why(checked)}",
             f"moxi rounds check {name} {stage}; or {_skip(name, checking.CHECK, stage)}")
 
-    for one in steps.held_by(state, stage, name=name, closed=closed):
+    for one in steps.held_by(state, stage, name=name, on_closed=on_closed):
         add(QUESTIONS, one.reason, one.fix)
 
     for step, moved in _drifts(state, stage, seen):

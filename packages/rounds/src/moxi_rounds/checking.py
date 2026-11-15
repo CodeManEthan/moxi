@@ -253,9 +253,9 @@ def seen_of(state: states.State, name: str, *, settings,
             reported = {step: _since_verdict(state, build, now.status, Git(root),
                                              head=head, settings=settings, step=step)
                         for step in report_steps(state)}
-        except RoundsError as error:
+        except RoundsError as exc:
             found[build.stage] = steps.Seen(problem=Unmet(
-                f"{build.stage} can't be read from git: {error.reason}",
+                f"{build.stage} can't be read from git: {exc.reason}",
                 f"moxi rounds show {name}"))
             continue
         argv = None if tip is None else argv_now(settings, name, build, root=root, tip=tip)
@@ -357,7 +357,7 @@ class _Look:
     local_due: bool = False
 
 
-def check(name: str, stage: str, *, actor: str, step: str | None = None,
+def check(name: str, stage: str, *, by: str, step: str | None = None,
           full: bool = False, timeout_s: float | None = None, settings=None,
           wait_s: float = write.WAIT_S, at: str | None = None,
           env=None) -> Ran | CiChecked:
@@ -431,7 +431,7 @@ def check(name: str, stage: str, *, actor: str, step: str | None = None,
         return found.unmet
 
     written = write.record(
-        write.Where(home.project, home.folder, slug), actor=actor,
+        write.Where(home.project, home.rounds_dir, slug), by=by,
         gates=[gate_and_keep],
         act=act, event=event, long_act=True, wait_s=wait_s, at=at, env=env)
     if first[0].ci is not None:
@@ -450,14 +450,14 @@ def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
     output = _output_file(found.scratch)
     started = time.monotonic()
     try:
-        done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.environment(),
+        done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
                         cwd=found.worktree, output=output)
         code: int | None = done.returncode
     except subprocess.TimeoutExpired:
         code = None
-    except OSError as error:
+    except OSError as exc:
         raise RoundsError(f"the command {shlex.join(argv)} could not be started in "
-                          f"{found.worktree}: {error}", fix) from None
+                          f"{found.worktree}: {exc}", fix) from None
     return code, round(time.monotonic() - started, 3), output
 
 
@@ -509,7 +509,7 @@ def _push(found: _Look, *, again: str) -> None:
     remote, branch = found.ci.remote, found.build.branch
     argv = ["git", "push", remote, f"{found.tip}:refs/heads/{branch}"]
     try:
-        done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.environment(),
+        done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.git_env(),
                         cwd=found.worktree)
     except subprocess.TimeoutExpired:
         raise Refused([Unmet(f"{shlex.join(argv)} ran past {PUSH_TIMEOUT_S:g} s, so CI "
@@ -541,8 +541,8 @@ def _by_ci(found: _Look, *, again: str) -> _ByCi:
             return _ByCi(pushed, local)
     try:
         reading = ci.read(found.ci, values=found.values, cwd=found.worktree)
-    except ci.ReadFailed as error:
-        return _ByCi(pushed, local, failed=error)
+    except ci.ReadFailed as exc:
+        return _ByCi(pushed, local, failed=exc)
     return _ByCi(pushed, local, reading=reading)
 
 
@@ -612,9 +612,9 @@ def _moved(before: _Look, *, name: str, stage: str, again: str) -> list[Unmet]:
     anything uncommitted. Empty when neither did."""
     try:
         now = read_tip(before.worktree, before.build.branch)
-    except GitError as error:
+    except GitError as exc:
         return [Unmet(f"the worktree {before.worktree} can't be read after the run, so "
-                      f"nothing is recorded: {error.reason}", again)]
+                      f"nothing is recorded: {exc.reason}", again)]
     unmet = []
     if now.tip != before.tip:
         unmet.append(Unmet(
@@ -699,14 +699,14 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
     found.worktree, found.scratch = worktree, scratch
     try:
         _key, root = folders.root(build.repo)
-    except RoundsError as error:
-        found.unmet.append(Unmet(error.reason, error.fix or "moxi projects list"))
+    except RoundsError as exc:
+        found.unmet.append(Unmet(exc.reason, exc.fix or "moxi projects list"))
         return found
     try:
         found.unmet += _read_git(found, Git(root), worktree, build, name=name, stage=stage,
                                  settings=settings)
-    except GitError as error:
-        found.unmet.append(Unmet(error.reason, error.fix or again))
+    except GitError as exc:
+        found.unmet.append(Unmet(exc.reason, exc.fix or again))
         return found
     if found.tip is not None:
         found.values = values(name, build, root=root, tip=found.tip)

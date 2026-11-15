@@ -171,9 +171,9 @@ def _leftovers() -> Iterator[Row]:
         return
     try:
         swept = sweeping.account(settings=settings)
-    except (RoundsError, OSError) as error:
+    except (RoundsError, OSError) as exc:
         yield Row(MODULE, "leftovers", "warn", "the sweep's dry run could not read what "
-                  f"ended builds left: {getattr(error, 'reason', error)}")
+                  f"ended builds left: {getattr(exc, 'reason', exc)}")
         return
     if swept.clear:
         yield Row(MODULE, "leftovers", "ok",

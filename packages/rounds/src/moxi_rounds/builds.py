@@ -260,7 +260,7 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
     """Every build the round's log records, in the order commissioned."""
     found: list[dict] = []
     open_by_stage: dict[str, dict] = {}
-    credits: list[dict] = []
+    credited: list[dict] = []
     taken_back: set[str] = set()
     for event in round_state.history:
         kind = event["type"]
@@ -269,7 +269,7 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
                 taken_back.add(event["revokes"])
             if (str(event.get("rules") or "").startswith(CREDIT)
                     and is_id(event.get("head")) and isinstance(event.get("build"), int)):
-                credits.append(event)
+                credited.append(event)
         if kind == "round.dropped":
             for one in open_by_stage.values():
                 one["ended"] = DROPPED
@@ -303,7 +303,7 @@ def builds(round_state: states.State) -> tuple[Build, ...]:
             one["ended"] = DROPPED if kind == "build.dropped" else FINISHED
             del open_by_stage[stage]
     by_line = {one["event"]["n"]: one for one in found}
-    for credit in credits:
+    for credit in credited:
         one = by_line.get(credit["build"])
         if one is not None and credit.get("id") not in taken_back and is_id(_base_of(one)):
             one["readings"].append(Reading(credit["type"], credit["n"], credit["head"],

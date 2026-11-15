@@ -11,12 +11,12 @@ from moxi import modules, names
 from moxi_rounds import module
 
 
-def skills_folder():
+def skills_dir():
     return resources.files("moxi_rounds").joinpath(module.SKILLS)
 
 
 def skill_text() -> str:
-    return skills_folder().joinpath("moxi-rounds", "SKILL.md").read_text(encoding="utf-8")
+    return skills_dir().joinpath("moxi-rounds", "SKILL.md").read_text(encoding="utf-8")
 
 
 def front_and_body(text: str) -> tuple[dict[str, str], str]:
@@ -26,14 +26,14 @@ def front_and_body(text: str) -> tuple[dict[str, str], str]:
     return fields, found.group(2)
 
 
-def test_the_announcement_names_the_skills_folder_as_the_core_reads_it():
+def test_the_announcement_names_the_skills_dir_as_the_core_reads_it():
     assert modules.load("rounds").skills == "skills"
 
 
-def test_the_package_ships_one_skill_named_as_its_folder():
-    folders = sorted(entry.name for entry in skills_folder().iterdir()
+def test_the_package_ships_one_skill_named_as_its_dir():
+    dir_names = sorted(entry.name for entry in skills_dir().iterdir()
                      if entry.is_dir() and names.is_skill_dir(entry.name))
-    assert folders == ["moxi-rounds"]
+    assert dir_names == ["moxi-rounds"]
     assert names.is_skill_name("moxi-rounds")
     fields, _ = front_and_body(skill_text())
     assert fields["name"] == "moxi-rounds"

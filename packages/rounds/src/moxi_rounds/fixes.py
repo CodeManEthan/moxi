@@ -53,7 +53,7 @@ class Fixed:
 
 
 def fix(target: str, key: str, commits: Sequence[str], *, no_behaviour_change: bool,
-        actor: str, settings=None, wait_s: float = write.WAIT_S,
+        by: str, settings=None, wait_s: float = write.WAIT_S,
         at: str | None = None) -> Fixed:
     """Mark the finding `key`, `B<n>.L<k>`, of the round `target` fixed by `commits`.
 
@@ -116,7 +116,7 @@ def fix(target: str, key: str, commits: Sequence[str], *, no_behaviour_change: b
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a mark"), held, stated],
             event=marked, wait_s=wait_s, at=at)
     except NoLog:
@@ -154,8 +154,8 @@ def _resolved(name: str, build: builds.Build, named: list[str], *,
                     f"{one} is not a commit of {build.stage}: it is not on "
                     f"{build.branch} above the base the build was cut from",
                     "name the commits of the fix, made on the build's branch"))
-    except RoundsError as error:
-        unmet = [Unmet(error.reason, error.fix or shown)]
+    except RoundsError as exc:
+        unmet = [Unmet(exc.reason, exc.fix or shown)]
         whole = []
     if unmet:
         raise Refused(unmet)

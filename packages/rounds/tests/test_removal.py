@@ -43,13 +43,13 @@ def made(repo, tmp_path, write_config):
     """B1 commissioned on `work` with one commit of work. Returns `(log, worktree repo,
     commission event)`."""
     write_config("")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    done = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    done = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     tree = type(repo)(done.worktree)
     tree.commit("work.txt", "the work")
     return path, tree, commission(path)
@@ -84,7 +84,7 @@ def test_a_worktree_holding_only_disposable_paths_goes_and_its_branch_stays(made
     assert repo.git("branch", "--list", "work").strip().endswith("work")
 
 
-def test_a_scratch_folder_goes_whole_through_the_trash(made):
+def test_a_scratch_dir_goes_whole_through_the_trash(made):
     _path, _tree, event = made
     scratch = Path(event["scratch"])
     (scratch / "check-1.log").write_text("output\n", encoding="utf-8")
@@ -95,19 +95,19 @@ def test_a_scratch_folder_goes_whole_through_the_trash(made):
     assert not (removal.paths.cache_dir() / removal.TRASH_DIR / event["build"]).exists()
 
 
-def test_a_symlinked_root_is_followed_and_its_proven_folder_goes(repo, tmp_path,
+def test_a_symlinked_root_is_followed_and_its_proven_dir_goes(repo, tmp_path,
                                                                  write_config):
     real = tmp_path / "real-worktrees"
     real.mkdir()
     (tmp_path / "linked").symlink_to(real)
     write_config(f"worktree_dir = {json.dumps(str(tmp_path / 'linked'))}\n")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    commissioning.commission(ROUND, "B1", builder="coder", by="planner")
 
     assert remove(commission(path)) == real / "proj-a" / "work"
     assert not (real / "proj-a" / "work").exists()
@@ -122,7 +122,7 @@ def test_a_symlinked_root_is_followed_and_its_proven_folder_goes(repo, tmp_path,
     ({"build": "not-a-build-id"}, "A2"),
     ({"repo": "proj-b"}, "A2"),
 ])
-def test_a_record_that_does_not_name_rounds_own_place_keeps_the_folder(made, change,
+def test_a_record_that_does_not_name_rounds_own_place_keeps_the_dir(made, change,
                                                                         check):
     _path, tree, event = made
     assert kept_by(remove({**event, **change})) == check
@@ -149,7 +149,7 @@ def test_a_link_at_the_place_keeps_what_it_points_at(made, tmp_path):
     assert (elsewhere / places.SCRATCH_MARKER).is_file()
 
 
-def test_a_link_to_a_folder_above_the_place_keeps_it(made, tmp_path):
+def test_a_link_to_a_dir_above_the_place_keeps_it(made, tmp_path):
     _path, _tree, event = made
     scratch = Path(event["scratch"])
     above = scratch.parent
@@ -161,7 +161,7 @@ def test_a_link_to_a_folder_above_the_place_keeps_it(made, tmp_path):
     assert (moved / event["build"]).is_dir()
 
 
-def test_a_folder_with_no_marker_is_unmarked_and_kept(made):
+def test_a_dir_with_no_marker_is_unmarked_and_kept(made):
     _path, _tree, event = made
     scratch = Path(event["scratch"])
     (scratch / places.SCRATCH_MARKER).unlink()
@@ -171,7 +171,7 @@ def test_a_folder_with_no_marker_is_unmarked_and_kept(made):
     assert scratch.is_dir()
 
 
-def test_a_marker_naming_another_build_keeps_the_folder(made):
+def test_a_marker_naming_another_build_keeps_the_dir(made):
     _path, tree, event = made
     git_dir = places.worktree_git_dir(tree.root)
     marker = git_dir / places.WORKTREE_MARKER
@@ -191,7 +191,7 @@ def test_a_worktree_on_another_branch_is_kept(made):
     assert tree.root.is_dir()
 
 
-def test_a_worktree_whose_git_file_names_another_repos_folder_is_kept(made, repo,
+def test_a_worktree_whose_git_file_names_another_repos_dir_is_kept(made, repo,
                                                                       tmp_path):
     _path, tree, event = made
     other = type(repo)(tmp_path / "other")
@@ -323,7 +323,7 @@ def test_the_branch_the_same_act_deletes_holds_no_commit(made, repo):
 
 
 @pytest.mark.parametrize("kind", [removal.WORKTREE, removal.SCRATCH])
-def test_a_mount_inside_keeps_the_folder(made, monkeypatch, kind):
+def test_a_mount_inside_keeps_the_dir(made, monkeypatch, kind):
     _path, tree, event = made
     place = Path(os.path.realpath(event[kind]))
     (place / "node_modules").mkdir()
@@ -353,10 +353,10 @@ def test_a_file_written_between_the_first_read_and_the_removal_keeps_the_worktre
 
 # -- the drops -----------------------------------------------------------------------------
 
-def test_a_build_drop_removes_its_folders_and_keeps_its_branch(made, repo):
+def test_a_build_drop_removes_its_dirs_and_keeps_its_branch(made, repo):
     _path, tree, event = made
     dropped = dropping.drop_build(ROUND, "B1", by="operator", record=POINTER,
-                                  actor="planner")
+                                  run_by="planner")
     assert dropped.removed == (Path(event["worktree"]), Path(event["scratch"]))
     assert dropped.kept == ()
     assert repo.git("branch", "--list", "work").strip().endswith("work")
@@ -364,7 +364,7 @@ def test_a_build_drop_removes_its_folders_and_keeps_its_branch(made, repo):
 
 def test_a_build_drop_writes_its_trash_entry_to_the_sweeps_log_proving_a_and_b(made):
     _path, _tree, event = made
-    dropping.drop_build(ROUND, "B1", by="operator", record=POINTER, actor="planner")
+    dropping.drop_build(ROUND, "B1", by="operator", record=POINTER, run_by="planner")
 
     found = files.read_records(sweeping.log_file())
 
@@ -381,7 +381,7 @@ def test_a_round_drop_keeps_a_worktree_holding_an_ignored_env_and_says_b3(made):
     _path, tree, event = made
     (tree.root / ".env").write_text("TOKEN=only here\n", encoding="utf-8")
 
-    dropped = dropping.drop(ROUND, by="operator", record=POINTER, actor="planner")
+    dropped = dropping.drop(ROUND, by="operator", record=POINTER, run_by="planner")
 
     assert dropped.removed == (Path(event["scratch"]),)
     assert [(one.check, one.work) for one in dropped.kept] == [("B3", (".env",))]

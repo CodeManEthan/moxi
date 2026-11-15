@@ -54,13 +54,13 @@ def declare(write_config, tmp_path):
 def build(repo, tmp_path, capsys):
     """The round, in the `fix` flow, with B1 on the branch `work` commissioned and one
     commit made on it. Returns `(round log, worktree repo, the commission)`."""
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     tree = type(repo)(made.worktree)
     tree.commit("work.txt", "the work")
     capsys.readouterr()
@@ -80,7 +80,7 @@ def test_a_check_runs_in_the_worktree_and_records_the_run(build, declare, repo):
     path, tree, made = build
     script = declare("import os; print(os.getcwd())")
 
-    done = checking.check(ROUND, "B1", actor="coder")
+    done = checking.check(ROUND, "B1", by="coder")
 
     [event] = ran(path)
     assert {key: event[key] for key in ("stage", "step", "commit", "merge_base", "argv",
@@ -100,7 +100,7 @@ def test_the_placeholders_are_filled_for_the_build_and_other_braces_are_kept(
     declare(PASS, "{tip}", "{branch}", "{stage}", "{round}", "{repo}", "{into}", "{root}",
             "{other}", "x{stage}y")
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     assert ran(path)[0]["argv"][2:] == [tree.rev(), "work", "B1", ROUND, "proj-a", "main",
                                         str(repo.root), "{other}", "xB1y"]
@@ -115,7 +115,7 @@ def test_the_run_has_stdin_closed_and_no_git_variable(build, declare, monkeypatc
     """)
     monkeypatch.setenv("GIT_WORK_TREE", "/nowhere")
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     assert Path(ran(path)[0]["output"]).read_text().split("\n")[:2] == ["''", "[]"]
 
@@ -124,8 +124,8 @@ def test_each_run_writes_a_new_output_file(build, declare):
     path, _tree, made = build
     declare(PASS)
 
-    checking.check(ROUND, "B1", actor="coder")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     assert [Path(one["output"]).name for one in ran(path)] == ["check-1.log",
                                                                 "check-2.log"]
@@ -159,7 +159,7 @@ def test_the_check_s_own_time_limit_applies_without_the_flag(build, declare):
     path, _tree, _made = build
     declare("import time; time.sleep(60)", timeout_s=1)
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     assert ran(path)[0]["exit_code"] is None
 
@@ -188,7 +188,7 @@ def test_while_a_check_runs_a_second_verb_on_the_round_completes(build, declare)
                                "comms:1234567"]))
     """)
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     types = [one["type"] for one in log.read(path)]
     assert types[-2:] == ["question.asked", "check.ran"]
@@ -205,7 +205,7 @@ def test_a_run_the_caller_interrupts_records_nothing(build, declare, monkeypatch
 
     monkeypatch.setattr(checking.proc, "run", interrupted)
     with pytest.raises(KeyboardInterrupt):
-        checking.check(ROUND, "B1", actor="coder")
+        checking.check(ROUND, "B1", by="coder")
 
     assert path.read_bytes() == before
 
@@ -222,7 +222,7 @@ def test_a_commit_made_during_the_run_records_nothing(build, declare):
     before = path.read_bytes()
 
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", actor="coder")
+        checking.check(ROUND, "B1", by="coder")
 
     assert "moved" in str(caught.value) and "nothing is recorded" in str(caught.value)
     assert path.read_bytes() == before
@@ -234,7 +234,7 @@ def test_a_file_left_in_the_worktree_by_the_run_records_nothing(build, declare):
     before = path.read_bytes()
 
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", actor="coder")
+        checking.check(ROUND, "B1", by="coder")
 
     assert "changed while the check ran" in str(caught.value)
     assert path.read_bytes() == before
@@ -245,7 +245,7 @@ def test_a_file_left_in_the_worktree_by_the_run_records_nothing(build, declare):
 def refused(path: Path) -> str:
     before = path.read_bytes()
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", actor="coder")
+        checking.check(ROUND, "B1", by="coder")
     assert path.read_bytes() == before
     return str(caught.value)
 
@@ -273,20 +273,20 @@ def test_a_worktree_on_another_branch_is_refused(build, declare):
 
 
 def test_a_build_with_no_work_is_refused(repo, declare, tmp_path):
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     declare(PASS)
 
     assert "B1 has no work to check: it reads empty" in refused(path)
 
 
 def test_a_stage_never_commissioned_is_refused(repo, declare, tmp_path):
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     declare(PASS)
@@ -311,7 +311,7 @@ def folded(path: Path) -> states.State:
 def test_a_pass_counts_at_its_commit_with_the_argv_given_now(build, declare, repo):
     path, tree, _made = build
     declare(PASS, "{tip}")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     tip = tree.rev()
 
     assert checking.passes(folded(path), "B1", "check", tip=tip,
@@ -321,7 +321,7 @@ def test_a_pass_counts_at_its_commit_with_the_argv_given_now(build, declare, rep
 def test_a_pass_at_an_older_commit_does_not_count(build, declare):
     path, tree, _made = build
     declare(PASS)
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     argv = ran(path)[0]["argv"]
     newer = tree.commit("more.txt")
 
@@ -336,7 +336,7 @@ def test_a_pass_of_a_command_the_repo_no_longer_declares_does_not_count(build, d
 
     path, tree, _made = build
     declare(PASS)
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     declare(PASS, "--more")
     build_now = checking.builds.current(folded(path), "B1")
     argv = checking.argv_now(own.load(), ROUND, build_now, root=repo.root, tip=tree.rev())
@@ -349,12 +349,12 @@ def test_a_pass_of_a_command_the_repo_no_longer_declares_does_not_count(build, d
 def test_a_failed_run_and_a_run_of_another_step_do_not_count(build, declare):
     path, tree, _made = build
     declare("raise SystemExit(1)")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     argv = ran(path)[0]["argv"]
     log.append(path, "check.ran", {
         "stage": "B1", "step": "staging", "commit": tree.rev(), "merge_base": None,
         "argv": argv, "exit_code": 0, "duration_s": 0.1, "output": "placeholder.log"},
-        actor="coder")
+        by="coder")
 
     state = folded(path)
     assert "exited 1" in checking.why_not(state, "B1", "check", tip=tree.rev(), argv=argv)
@@ -371,12 +371,12 @@ def step(path: Path, seen=None, **by_stage) -> steps.Step | None:
 
 
 def test_the_check_step_is_not_due_before_the_build_is_commissioned(repo, tmp_path):
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
+               by="planner")
 
     assert step(path).state == steps.NOT_DUE
 
@@ -406,7 +406,7 @@ def test_the_check_step_reads_the_build_as_seen(build, declare):
     assert step(path, seen).state == steps.WAITING
     (made.worktree / "loose.txt").unlink()
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     seen = checking.seen_of(folded(path), ROUND, settings=own.load())
     assert step(path, seen).state == steps.DONE
 
@@ -444,9 +444,9 @@ def test_show_and_the_round_note_give_a_build_s_newest_check_run(build, declare,
 
     _path, tree, _made = build
     declare("raise SystemExit(3)")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     declare(PASS)
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     shown = json.loads(showing.as_json(showing.show(ROUND)))
     [row] = shown["builds"]
@@ -461,7 +461,7 @@ def test_a_skip_of_the_check_lets_the_stage_past_it_whatever_git_reads(build):
     path, _tree, _made = build
     from moxi_rounds import ruling
 
-    ruling.rule(ROUND, item="skip:check:B1", record="comms:1234567", actor="planner")
+    ruling.rule(ROUND, item="skip:check:B1", record="comms:1234567", by="planner")
 
     found = step(path, B1=steps.Seen(state="empty", tip="0" * 40, clean=False,
                                      check=("placeholder",)))
@@ -499,13 +499,13 @@ def stepped(repo, write_config, tmp_path, capsys):
         if check is not None:
             config += f"[projects.proj-a]\ncheck = {{ command = {json.dumps(check)} }}\n"
         write_config(config)
-        opening.open_round(ROUND, description="a placeholder round", actor="planner",
+        opening.open_round(ROUND, description="a placeholder round", by="planner",
                            flow="mine")
         path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
         log.append(path, "stage.declared",
                    {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-                   actor="planner")
-        made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+                   by="planner")
+        made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
         tree = type(repo)(made.worktree)
         tree.commit("work.txt", "the work")
         capsys.readouterr()
@@ -518,7 +518,7 @@ def test_a_command_step_runs_its_argv_in_the_worktree_recorded_under_its_name(st
     path, tree, made, script = stepped("import os; print(os.getcwd())", "{tip}",
                                        "{stage}")
 
-    done = checking.check(ROUND, "B1", actor="coder", step="staging")
+    done = checking.check(ROUND, "B1", by="coder", step="staging")
 
     [event] = ran(path)
     assert (event["step"], event["commit"], event["argv"], event["exit_code"]) == (
@@ -531,7 +531,7 @@ def test_a_command_step_runs_its_argv_in_the_worktree_recorded_under_its_name(st
 def test_a_command_step_runs_in_a_repo_that_declares_no_check(stepped):
     path, _tree, _made, _script = stepped(PASS)
 
-    checking.check(ROUND, "B1", actor="coder", step="staging")
+    checking.check(ROUND, "B1", by="coder", step="staging")
 
     assert [one["step"] for one in ran(path)] == ["staging"]
 
@@ -539,7 +539,7 @@ def test_a_command_step_runs_in_a_repo_that_declares_no_check(stepped):
 def test_a_command_step_s_own_time_limit_applies(stepped):
     path, _tree, _made, _script = stepped("import time; time.sleep(60)", timeout_s=1)
 
-    checking.check(ROUND, "B1", actor="coder", step="staging")
+    checking.check(ROUND, "B1", by="coder", step="staging")
 
     assert ran(path)[0]["exit_code"] is None
 
@@ -580,7 +580,7 @@ def test_a_step_that_is_no_command_step_of_the_flow_is_refused(stepped, name):
     before = path.read_bytes()
 
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", actor="coder", step=name)
+        checking.check(ROUND, "B1", by="coder", step=name)
 
     assert (f"the flow mine of {ROUND} has no step {name} that runs a command (its "
             "command steps: staging)") in str(caught.value)
@@ -599,7 +599,7 @@ def test_the_command_step_is_done_once_a_run_of_it_passed_at_the_tip(stepped):
     path, tree, _made, _script = stepped(PASS)
     assert stepped_step(path).state == steps.READY
 
-    checking.check(ROUND, "B1", actor="coder", step="staging")
+    checking.check(ROUND, "B1", by="coder", step="staging")
     assert stepped_step(path).state == steps.DONE
 
     tree.commit("more.txt")
@@ -620,7 +620,7 @@ def test_the_command_step_waits_for_a_clean_worktree_as_its_run_refuses_one(step
 
     found = stepped_step(path)
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", actor="coder", step="staging")
+        checking.check(ROUND, "B1", by="coder", step="staging")
 
     assert found.state == steps.WAITING
     assert "the worktree of B1 is not clean on its branch here" in [
@@ -634,11 +634,11 @@ def test_the_command_step_waits_for_a_clean_worktree_as_its_run_refuses_one(step
 def test_a_run_of_one_step_is_never_read_for_another(stepped):
     path, _tree, _made, _script = stepped(PASS, check=f"{PY} -c pass")
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     assert (stepped_step(path).state, stepped_step(path, "check").state) == (
         steps.READY, steps.DONE)
 
-    checking.check(ROUND, "B1", actor="coder", step="staging")
+    checking.check(ROUND, "B1", by="coder", step="staging")
     assert stepped_step(path).state == steps.DONE
 
 
@@ -653,12 +653,12 @@ def test_the_command_step_waits_on_git_where_git_was_not_read(stepped):
 def test_the_command_step_is_not_due_before_the_stage_is_commissioned(
         repo, write_config, tmp_path):
     write_config(STEPPED.format(argv=json.dumps([PY, "-c", "pass"]), limit=""))
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="mine")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
+               by="planner")
 
     assert steps.one(folded(path), "staging", "B1").state == steps.NOT_DUE
 
@@ -674,7 +674,7 @@ def test_next_prints_the_command_step_with_the_command_that_runs_it(stepped, cap
                                                                steps.READY)
     assert group["then"] == [f"moxi rounds check {ROUND} B1 --step staging, or moxi "
                              "rounds check --step staging in the build's worktree"]
-    checking.check(ROUND, "B1", actor="coder", step="staging")
+    checking.check(ROUND, "B1", by="coder", step="staging")
     assert next_step.read(ROUND)["groups"][0]["step"] == "security-review"
 
 
@@ -682,7 +682,7 @@ def test_show_and_the_round_note_give_a_command_step_s_newest_run(stepped, tmp_p
     from moxi_rounds import showing
 
     _path, tree, _made, _script = stepped(PASS)
-    checking.check(ROUND, "B1", actor="coder", step="staging")
+    checking.check(ROUND, "B1", by="coder", step="staging")
 
     [row] = json.loads(showing.as_json(showing.show(ROUND)))["builds"]
     assert row["check"] is None

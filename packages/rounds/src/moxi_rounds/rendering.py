@@ -115,7 +115,7 @@ def on_append(written) -> None:
         work.append(put(rounds_dir / where.slug / NOTE_FILE, lambda: note(
             where.project, where.slug, written.round_events, written.project_events)))
         if any(one.get("type") in _ENDINGS for one in written.round_events):
-            work.append(lambda: _put_retro(folder / where.slug, where.project,
+            work.append(lambda: _put_retro(rounds_dir / where.slug, where.project,
                                            where.slug, written.round_events))
     # A round's verb that only read the project's log holds no lock on it, so that
     # log's files are left for whoever writes it. A project with no log has no files.
@@ -439,10 +439,10 @@ def retro(project: str, slug: str, events: Iterable[dict]) -> str | None:
     return "\n".join(lines) + "\n"
 
 
-def _put_retro(folder: Path, project: str, slug: str, events: Iterable[dict]) -> None:
+def _put_retro(round_dir: Path, project: str, slug: str, events: Iterable[dict]) -> None:
     text = retro(project, slug, events)
     if text is not None:
-        files.atomic_write(folder / RETRO_FILE, text, mode=0o644)
+        files.atomic_write(round_dir / RETRO_FILE, text, mode=0o644)
 
 
 # -- a project's two files ---------------------------------------------------------------

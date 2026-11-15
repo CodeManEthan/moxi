@@ -323,7 +323,7 @@ def landings(homes: Iterable[folders.Home], *, repo: str, target: str,
     Writes nothing."""
     found = []
     for home in homes:
-        for summary in rounds(home.project, home.folder, env=env):
+        for summary in rounds(home.project, home.rounds_dir, env=env):
             found += [Landed(summary.name, one) for one in summary.landings
                       if one.repo == repo and one.target == target]
     return found

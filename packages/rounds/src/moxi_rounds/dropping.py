@@ -241,7 +241,7 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
         raise NoRound(name) from None
     event = written.events[-1]
     ended = [one for one in builds.builds(written.view.state) if one.ended is None]
-    cleaned = _remove_folders(written.view.state, name, ended, settings)
+    cleaned = _remove_dirs(written.view.state, name, ended, settings)
     return Dropped(name=name, by=by, record=record,
                    went=tuple(event["questions"].items()), event=event,
                    events=written.events, finished=finished[0],
@@ -249,13 +249,13 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
                    failed=written.failed)
 
 
-def drop_build(name: str, stage_id: str, *, by: str, record: str | None, actor: str,
+def drop_build(name: str, stage_id: str, *, by: str, record: str | None, run_by: str,
                settings=None, wait_s: float = write.WAIT_S,
                at: str | None = None) -> BuildDropped:
     """Drop the open build of the stage `stage_id` of the round `name`.
 
     `by` is `OPERATOR` or `LEAD`; `record` the operator's pointer to where he dropped
-    it, or for the lead's drop a pointer to why; `actor` who runs it. `settings`,
+    it, or for the lead's drop a pointer to why; `run_by` who runs it. `settings`,
     `wait_s` and `at` are as for `drop`.
 
     Raises `BadName` or `BadArgument` for a value that can't be used, `UnknownProject`,
@@ -318,7 +318,7 @@ def drop_build(name: str, stage_id: str, *, by: str, record: str | None, actor: 
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=run_by,
             gates=[ending.takes_new_work(name, "a drop of a build"), has_a_pointer,
                    has_an_open_build, is_the_leads_to_drop],
             event=dropped, wait_s=wait_s, at=at)
@@ -327,12 +327,12 @@ def drop_build(name: str, stage_id: str, *, by: str, record: str | None, actor: 
     build = builds.current(written.view.state, stage_id)
     return BuildDropped(name=name, stage=stage_id, by=by, record=record,
                         event=written.events[0],
-                        **vars(_remove_folders(written.view.state, name, [build],
+                        **vars(_remove_dirs(written.view.state, name, [build],
                                                settings)),
                         failed=written.failed)
 
 
-def _remove_folders(state: states.State, name: str, ended, settings) -> removal.Removed:
+def _remove_dirs(state: states.State, name: str, ended, settings) -> removal.Removed:
     """Remove the folders of the builds `ended`, which the drop just ended, under the
     removal rule. No branch is deleted, so B reads every branch as staying."""
     removed, kept = [], []

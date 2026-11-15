@@ -22,35 +22,35 @@ def built(git_repo, tmp_path, capsys):
     assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
     assert cli.main(["projects", "set", "proj-a", "--notes-root",
                      str(tmp_path / "notes")]) == 0
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
-    folder = tmp_path / "notes" / "rounds" / "a-round"
-    log.append(log.round_log(folder), "stage.declared",
+    round_dir = tmp_path / "notes" / "rounds" / "a-round"
+    log.append(log.round_log(round_dir), "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     tree = type(git_repo)(made.worktree)
     tree.commit("work.txt", "the work")
     tree.commit("README", "a placeholder repo, built on")
     capsys.readouterr()
-    return folder, git_repo, tree
+    return round_dir, git_repo, tree
 
 
-def verify(folder, head, *, name="build-report.md"):
+def verify(round_dir, head, *, name="build-report.md"):
     """Record a publishable report of B1 read at `head`, written as `name`."""
-    path = folder / name
+    path = round_dir / name
     path.write_text(f"# {name}\n\n```toml rounds\n" + "\n".join([
         'kind = "build"', 'verdict = "publishable"', 'pass = "full"', 'by = "critic"',
         'model = "a-model"', 'stage = "B1"', f'head = "{head}"']) + "\n```\n",
         encoding="utf-8")
-    return verdicts.record(ROUND, path, actor="critic")
+    return verdicts.record(ROUND, path, by="critic")
 
 
-def drift_now(folder, repo) -> drift.Drift:
+def drift_now(round_dir, repo) -> drift.Drift:
     """B1's drift at its tip as git reads it now."""
     from moxi_rounds import open_builds
 
-    round_state = state.fold(log.read(log.round_log(folder)))
+    round_state = state.fold(log.read(log.round_log(round_dir)))
     [build] = builds.builds(round_state)
     now = open_builds.of_round(ROUND, ["proj-a"])["B1"]
     read = drift.of_build(round_state, build, now.status, Git(repo.root),
@@ -66,22 +66,22 @@ def _settings():
 
 
 def test_a_target_that_has_not_moved_reads_nothing_more(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert (read.rule, read.owed, read.moved) == (drift.NOT_MOVED, False, 0)
     assert "target has not moved under B1" in showing.as_text(showing.show(ROUND))
 
 
 def test_a_target_that_moved_apart_from_the_build_owes_no_recheck(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit("other.txt")
     repo.commit("more.txt")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert (read.rule, read.owed, read.moved, read.meeting) == (drift.APART, False, 2, ())
     assert "target moved 2 commits under B1; 0 paths meet\n" in showing.as_text(
@@ -89,13 +89,13 @@ def test_a_target_that_moved_apart_from_the_build_owes_no_recheck(built):
 
 
 def test_a_target_that_changed_a_path_of_the_build_owes_a_recheck(built):
-    folder, repo, tree = built
+    round_dir, repo, tree = built
     verdict_base = repo.rev("main")
-    verify(folder, tree.rev())
+    verify(round_dir, tree.rev())
     repo.commit("README", "a placeholder repo, changed on main")
     moved_to = repo.rev("main")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert (read.rule, read.owed, read.meeting) == (drift.OWED, True, ("README",))
     assert read.ranges == {"target": f"{verdict_base}..{moved_to}",
@@ -105,34 +105,34 @@ def test_a_target_that_changed_a_path_of_the_build_owes_a_recheck(built):
 
 
 def test_a_fix_made_after_the_verdict_is_among_the_build_s_paths(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     tree.commit("fix.txt", "a fix after the verdict")
     repo.commit("fix.txt", "the same name changed on main")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert read.owed and read.meeting == ("fix.txt",)
 
 
 def test_a_file_the_target_renamed_meets_the_build_under_its_old_name(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.git("mv", "README", "README.md")
     repo.git("commit", "-q", "-m", "rename the readme")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert read.owed and read.meeting == ("README",)
 
 
 @pytest.mark.parametrize("path", ["uv.lock", "packages/a-package/package-lock.json"])
 def test_a_lockfile_the_target_changed_owes_a_recheck_where_no_path_meets(built, path):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit(path, "a lock")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert (read.owed, read.meeting, read.shared) == (True, (), (path,))
     assert ("target moved 1 commit under B1; 0 paths meet, 1 shared path changed: "
@@ -140,29 +140,29 @@ def test_a_lockfile_the_target_changed_owes_a_recheck_where_no_path_meets(built,
 
 
 def test_a_repo_s_own_shared_paths_add_to_the_lockfiles(built, write_config):
-    folder, repo, tree = built
+    round_dir, repo, tree = built
     write_config("""
         [projects.proj-a]
         shared_paths = ["schema/*.sql"]
     """)
-    verify(folder, tree.rev())
+    verify(round_dir, tree.rev())
     repo.commit("schema/tables.sql", "a table")
     repo.commit("deeper/schema/tables.sql", "not under the glob")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert read.shared == ("schema/tables.sql",)
     assert drift.shared_globs(_settings(), "proj-a")[-1] == "schema/*.sql"
 
 
 def test_the_target_merged_into_the_branch_apart_from_the_build_counts_as_verified(built):
-    folder, repo, tree = built
+    round_dir, repo, tree = built
     read_at = tree.rev()
-    verify(folder, read_at)
+    verify(round_dir, read_at)
     repo.commit("other.txt")
     merge = tree.merge("main")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert (read.rule, read.owed, read.merged_in) == (drift.MERGED_IN, False, True)
     assert set(read.covered) == {merge, repo.rev("main")}
@@ -171,50 +171,50 @@ def test_the_target_merged_into_the_branch_apart_from_the_build_counts_as_verifi
 
 
 def test_a_commit_after_the_verdict_beside_a_merge_of_the_target_owes_a_recheck(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit("other.txt")
     tree.merge("main")
     fix = tree.commit("fix.txt", "a fix after the verdict")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert (read.rule, read.owed, read.covered) == (drift.OWED, True, ())
     assert f"is no merge of the target ({fix[:12]})" in read.why
 
 
 def test_a_merge_of_the_target_that_changes_a_shared_path_owes_a_recheck(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit("uv.lock", "a lock")
     tree.merge("main")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert read.owed and read.merged_in and read.shared == ("uv.lock",)
     assert "the merge changes 1 path of the build or shared (uv.lock)" in read.why
 
 
 def test_the_target_moved_again_after_its_merge_into_the_branch_is_still_read(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit("other.txt")
     tree.merge("main")
     repo.commit("README", "a placeholder repo, changed on main")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert read.owed and read.meeting == ("README",)
 
 
 def test_a_recheck_at_a_tip_that_holds_the_target_reads_as_not_moved(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit("README", "a placeholder repo, changed on main")
     tree.git("merge", "-q", "--no-ff", "--no-edit", "-X", "theirs", "main")
-    verify(folder, tree.rev(), name="recheck.md")
+    verify(round_dir, tree.rev(), name="recheck.md")
 
-    read = drift_now(folder, repo)
+    read = drift_now(round_dir, repo)
 
     assert (read.rule, read.owed) == (drift.NOT_MOVED, False)
 
@@ -252,14 +252,14 @@ def test_a_glob_without_a_slash_matches_a_path_s_last_part(path, glob, shared):
 
 
 def test_show_s_data_and_the_round_note_carry_the_drift(built):
-    folder, repo, tree = built
-    verify(folder, tree.rev())
+    round_dir, repo, tree = built
+    verify(round_dir, tree.rev())
     repo.commit("README", "a placeholder repo, changed on main")
     # Any write to the round writes its note again with what git reads then.
-    verify(folder, tree.rev(), name="second.md")
+    verify(round_dir, tree.rev(), name="second.md")
 
     [row] = showing.data(showing.show(ROUND))["builds"]
-    note = (folder / "round-note.md").read_text(encoding="utf-8")
+    note = (round_dir / "round-note.md").read_text(encoding="utf-8")
 
     assert row["drift"]["owed"] is True
     assert row["drift"]["meeting"] == ["README"]
@@ -267,7 +267,7 @@ def test_show_s_data_and_the_round_note_carry_the_drift(built):
 
 
 def test_a_build_with_no_verdict_shows_no_drift(built):
-    _folder, repo, _tree = built
+    _round_dir, repo, _tree = built
     repo.commit("README", "a placeholder repo, changed on main")
 
     [row] = showing.data(showing.show(ROUND))["builds"]

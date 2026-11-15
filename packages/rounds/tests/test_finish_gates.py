@@ -55,13 +55,13 @@ def opened(repo, configure, tmp_path, capsys):
     commissioned, and one commit of work on it. Returns `(log, worktree repo)`."""
 
     def open_it(flow: str = "fix"):
-        opening.open_round(ROUND, description="a placeholder round", actor="planner",
+        opening.open_round(ROUND, description="a placeholder round", by="planner",
                            flow=flow)
         path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
         log.append(path, "stage.declared",
                    {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-                   actor="planner")
-        made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+                   by="planner")
+        made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
         tree = type(repo)(made.worktree)
         tree.commit("work.txt", "the work")
         capsys.readouterr()
@@ -78,14 +78,14 @@ def verify(path: Path, head: str, *, name: str = "build-report.md",
         'kind = "build"', 'verdict = "publishable"', 'pass = "full"', 'by = "critic"',
         'model = "a-model"', 'stage = "B1"', f'head = "{head}"']) + f"\n{findings}```\n",
         encoding="utf-8")
-    verdicts.record(ROUND, report, actor="critic")
+    verdicts.record(ROUND, report, by="critic")
 
 
 @pytest.fixture
 def ready(opened):
     """The round with B1 checked and verified at its tip: every gate holds."""
     path, tree = opened()
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     verify(path, tree.rev())
     return path, tree
 
@@ -130,7 +130,7 @@ def test_a_build_checked_and_verified_at_its_tip_meets_every_gate(ready):
 
 def _unverified(path, tree, repo, configure):
     tree.commit("more.txt", "a commit after the verdict")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
 
 def _a_finding_open(path, tree, repo, configure):
@@ -233,13 +233,13 @@ def test_a_build_with_no_work_is_refused_in_a_flow_with_no_check_and_no_verifica
         repo, write_config, opened, tmp_path):
     write_config('[flows.bare]\nsteps = [ { step = "build", by = "builder" }, '
                  '{ step = "finish", by = "builder" } ]\n')
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="bare")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    commissioning.commission(ROUND, "B1", builder="coder", by="planner")
 
     assert numbers(gates(path)) == [finish_gates.WORK]
     assert seen_now(path).state == "empty"
@@ -326,7 +326,7 @@ def test_a_user_step_holds_finish_until_done_at_the_tip_and_a_skip_clears_it(
         opened, configure):
     configure(flows=USER_FLOW)
     path, tree = opened("gated")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     verify(path, tree.rev())
 
     found = gates(path)
@@ -334,11 +334,11 @@ def test_a_user_step_holds_finish_until_done_at_the_tip_and_a_skip_clears_it(
     assert found[0].unmet.reason.startswith("the step staging of B1 is not done at ")
     assert found[0].unmet.fix.startswith(f"moxi rounds check {ROUND} B1 --step staging; ")
 
-    checking.check(ROUND, "B1", actor="coder", step="staging")
+    checking.check(ROUND, "B1", by="coder", step="staging")
     assert gates(path) == ()
 
     tree.commit("more.txt", "a commit the run did not see")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     rule("skip:verify-build:B1")
     assert numbers(gates(path)) == [finish_gates.USER_STEPS]
     rule("skip:staging:B1")
@@ -371,7 +371,7 @@ def _green(path: Path, tip: str, base: str) -> None:
         "stage": "B1", "commit": tip, "merge_base": base, "status_argv": ["status"],
         "ids_argv": ["ids"], "workflows": [{"path": FLOW, "id": 11, "reading": ci.GREEN,
                                             "url": "https://example.test/run/1"}],
-        "reading": ci.GREEN}, actor="coder")
+        "reading": ci.GREEN}, by="coder")
 
 
 def test_a_check_met_only_by_ci_needs_the_target_in_the_tip_whatever_check_on_says(
@@ -396,7 +396,7 @@ def test_a_full_check_meets_the_check_gate_with_ci_red(ready, repo, configure):
         "stage": "B1", "commit": tree.rev(), "merge_base": repo.rev("main"),
         "status_argv": ["status"], "ids_argv": ["ids"],
         "workflows": [{"path": FLOW, "id": 11, "reading": ci.RED, "url": None}],
-        "reading": ci.RED}, actor="coder")
+        "reading": ci.RED}, by="coder")
     repo.commit("other.txt", "a change the build does not touch")
 
     assert gates(path) == ()
@@ -408,7 +408,7 @@ def test_a_tip_that_holds_the_moved_target_meets_the_target_gate_again(ready, re
     assert numbers(gates(path)) == [finish_gates.TARGET]
 
     tree.merge("main")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     assert gates(path) == ()
 
@@ -427,12 +427,12 @@ def test_a_build_merged_by_hand_reads_the_target_before_its_merge(ready, repo):
 
 def test_finish_is_not_due_before_commission_and_carries_the_holds_on_its_stage(
         repo, tmp_path):
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
+               by="planner")
     assert main(["ask", ROUND, "Is the page right?", "--from", POINTER, "--blocks", "B1",
                  "--as", "planner"]) == 0
 
@@ -444,7 +444,7 @@ def test_finish_is_not_due_before_commission_and_carries_the_holds_on_its_stage(
 
 def test_a_finished_build_s_finish_is_done_without_a_read_of_git(ready):
     path, tree = ready
-    log.append(path, "finish.done", {"stage": "B1", "tip": tree.rev()}, actor="coder")
+    log.append(path, "finish.done", {"stage": "B1", "tip": tree.rev()}, by="coder")
 
     assert finish_step(path, seen=None).state == steps.DONE
 

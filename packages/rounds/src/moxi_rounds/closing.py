@@ -72,13 +72,13 @@ def _never(_name: str) -> bool:
     return False
 
 
-def _plan_done(state: states.State, closed: Closed, ratify: str, *,
+def _plan_done(state: states.State, on_closed: Closed, ratify: str, *,
                but: tuple[str, ...] = ()) -> Iterator[str]:
     """The plan is done: each step of the flow is done or skipped, each stage of the
     plan is finished, and a round that builds has finished at least one. The steps in
     `but` are not read."""
     # The setting is passed to the steps as their rows read it, under no stage.
-    for step in steps.of(state, closed=closed, but=but,
+    for step in steps.of(state, on_closed=on_closed, but=but,
                          seen={None: steps.Seen(ratify=ratify)}):
         # The questions step waits for exactly the open questions, and the ratify
         # step for exactly what the third part names; each is named one by one there.
@@ -93,7 +93,7 @@ def _plan_done(state: states.State, closed: Closed, ratify: str, *,
         yield "a finished stage: the plan holds none"
 
 
-def _nothing_open(state: states.State, closed: Closed, ratify: str) -> Iterator[str]:
+def _nothing_open(state: states.State, on_closed: Closed, ratify: str) -> Iterator[str]:
     """Nothing is open: no build, no question that holds the close, and no waiting
     item. Which questions hold it is the hold rule's to say; this names each as it
     reads now."""
@@ -150,7 +150,7 @@ def builds(state: states.State) -> bool:
     return flows.has(state.steps, BUILD)
 
 
-def waits(state: states.State, *, closed: Closed | None = None,
+def waits(state: states.State, *, on_closed: Closed | None = None,
           ratify: str | None = None) -> tuple[str, ...]:
     """What the close of the round `state` is of waits for, a line each; empty when
     nothing is, which is when the round closes. It reads the state alone.
@@ -159,7 +159,7 @@ def waits(state: states.State, *, closed: Closed | None = None,
     parked until one is reads in its line; left out, no round reads as closed and
     such a question is named as parked. The lines are as many either way. `ratify`
     is the project's `ratify` setting (`ratify_of`), `majors` when left out."""
-    asked = _never if closed is None else closed
+    asked = _never if on_closed is None else on_closed
     setting = RATIFY_DEFAULT if ratify is None else ratify
     return tuple(line for condition in CONDITIONS
                  for line in condition(state, asked, setting))

@@ -89,7 +89,7 @@ def step_time_s(events: Iterable[dict], *, ended_at: str | None = None) -> dict[
         add(now)
         # Read from the log alone, as the index reads it: a step git would settle
         # waits on that read, so it is still the step the round is at.
-        found = steps.current(folded, closed=_never)
+        found = steps.current(folded, on_closed=_never)
         at_step = None if found is None else _key(found)
         since = now
     if ended_at is not None:

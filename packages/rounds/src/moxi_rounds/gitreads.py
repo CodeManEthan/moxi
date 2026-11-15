@@ -46,7 +46,7 @@ class GitError(RoundsError):
                          "check that the repo is there and git can read it")
 
 
-def environment() -> dict[str, str]:
+def git_env() -> dict[str, str]:
     """The environment git runs in: this process's, less every `GIT_` variable."""
     return {name: value for name, value in os.environ.items()
             if not name.startswith("GIT_")}
@@ -67,12 +67,12 @@ class Git:
              stdin_data: str | None = None) -> tuple[int, str]:
         argv = ["git", "-C", str(self.root), *args]
         try:
-            done = proc.run(argv, timeout_s=GIT_TIMEOUT_S, env=environment(),
+            done = proc.run(argv, timeout_s=GIT_TIMEOUT_S, env=git_env(),
                             stdin_data="" if stdin_data is None else stdin_data)
         except FileNotFoundError:
             raise GitError(argv, "could not run: no git is on PATH") from None
-        except OSError as error:
-            raise GitError(argv, f"could not run: {error}") from None
+        except OSError as exc:
+            raise GitError(argv, f"could not run: {exc}") from None
         except subprocess.TimeoutExpired:
             raise GitError(argv, f"gave no answer in {GIT_TIMEOUT_S:g} seconds") from None
         if done.returncode not in ok:
@@ -213,4 +213,4 @@ class Git:
         return bool(self._lines("rev-list", "--no-merges", "-n", "1", f"{start}..{end}"))
 
 
-__all__ = ["GIT_TIMEOUT_S", "GitError", "Git", "environment", "is_id"]
+__all__ = ["GIT_TIMEOUT_S", "GitError", "Git", "git_env", "is_id"]

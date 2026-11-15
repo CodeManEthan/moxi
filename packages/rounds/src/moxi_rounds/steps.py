@@ -219,7 +219,7 @@ class Asked:
 
     name: str = "ROUND"
     stage: str | None = None
-    closed: Callable[[str], bool] | None = None
+    on_closed: Callable[[str], bool] | None = None
     register: states.State | None = None
     seen: Mapping[str, Seen] | None = None
 
@@ -322,7 +322,7 @@ def _commission(state: states.State, about: Asked) -> Step:
         # A stage that stands for a child round has no build: it is not built here.
         return Step(COMMISSION, NOT_BUILT, stage=about.stage,
                     waits=() if stage is None else held_by(
-                        state, stage.id, name=about.name, closed=about.closed))
+                        state, stage.id, name=about.name, on_closed=about.on_closed))
     if stages.build_of(state, stage.id) is not None:
         return Step(COMMISSION, DONE, stage=stage.id)
     name = about.name
@@ -336,14 +336,14 @@ def _commission(state: states.State, about: Asked) -> Step:
                 "one stage in a repo",
                 f"move the round up to a flow that has a {VERIFIES} step: moxi rounds "
                 f"mark {name} --flow NAME"))
-    if not is_settled(state, DESIGN, closed=about.closed):
+    if not is_settled(state, DESIGN, on_closed=about.on_closed):
         waits.append(Unmet("no version of the design is frozen",
                            f"moxi rounds fold {name}"))
-    if not is_settled(state, VERIFIES, closed=about.closed):
+    if not is_settled(state, VERIFIES, on_closed=about.on_closed):
         word = versions.standing(state).word
         waits.append(Unmet(f"the design is not verified: it stands at {word}",
                            f"moxi rounds next {name}"))
-    waits += held_by(state, stage.id, name=name, closed=about.closed)
+    waits += held_by(state, stage.id, name=name, on_closed=about.on_closed)
     waits += [Unmet(f"{stage.id} waits for {other}, which is not finished",
                     f"moxi rounds next {name}")
               for other in stages.waits_for(state, stage.id)]
@@ -371,9 +371,9 @@ def _declaring(state: states.State, about: Asked) -> Step:
                   "design declares each stage it builds",
                   f"give {versions.DESIGN_FILE} a [[stage]], then {fold}"),))
     waits: list[Unmet] = []
-    if not is_settled(state, DESIGN, closed=about.closed):
+    if not is_settled(state, DESIGN, on_closed=about.on_closed):
         waits.append(Unmet("no version of the design is frozen", fold))
-    waits += held_unbuilt(state, stages.next_id(state), name=name, closed=about.closed)
+    waits += held_unbuilt(state, stages.next_id(state), name=name, on_closed=about.on_closed)
     return Step(COMMISSION, WAITING if waits else READY, waits=tuple(waits))
 
 
@@ -489,10 +489,10 @@ def _finish(state: states.State, about: Asked) -> Step:
     if planned is not None and planned.round is not None:
         # A stage that stands for a child round has no build: it is not built here.
         return Step(FINISH, NOT_BUILT, stage=stage, waits=held_by(
-            state, stage, name=about.name, closed=about.closed))
+            state, stage, name=about.name, on_closed=about.on_closed))
     if built is None:
         return Step(FINISH, NOT_DUE, stage=stage, waits=() if stage is None else held_by(
-            state, stage, name=about.name, closed=about.closed))
+            state, stage, name=about.name, on_closed=about.on_closed))
     if built == stages.FINISHED:
         return Step(FINISH, DONE, stage=stage)
     seen = (about.seen or {}).get(stage)
@@ -502,7 +502,7 @@ def _finish(state: states.State, about: Asked) -> Step:
     if seen.problem is not None:
         return Step(FINISH, WAITING, stage=stage, waits=(seen.problem,))
     found = finish_gates.unmet(state, stage, seen=seen, name=about.name,
-                               closed=about.closed, register=about.register)
+                               on_closed=about.on_closed, register=about.register)
     waits = [one.unmet for one in found]
     build = builds.current(state, stage)
     tip = seen.tip or seen.head
@@ -665,13 +665,13 @@ def held_by(state: states.State, stage: str, *, name: str = "ROUND",
 
 
 def held_unbuilt(state: states.State, stage: str, *, name: str = "ROUND",
-                 closed: Callable[[str], bool] | None = None) -> tuple[Unmet, ...]:
+                 on_closed: Callable[[str], bool] | None = None) -> tuple[Unmet, ...]:
     """What the questions that would hold the stage `stage`, not declared yet, make a
     `commission` that declares it wait for: a question whose `blocks` is every stage
     holds a stage the moment it is declared, so nothing is declared while one is
     open. Each names the operator's ways past it."""
     found = []
-    for one in holds.on_stage(state, stage, closed=closed):
+    for one in holds.on_stage(state, stage, on_closed=on_closed):
         said = ("holds every stage" if one.blocks == questions.ALL
                 else f"names {stage}")
         found.append(Unmet(
@@ -728,7 +728,7 @@ def _has(step: str, stage: str | None, seen: Mapping[str, Seen] | None) -> bool:
     return found.problem is not None or found.check is not None
 
 
-def _each(state: states.State, name: str, closed: Callable[[str], bool] | None,
+def _each(state: states.State, name: str, on_closed: Callable[[str], bool] | None,
           register: states.State | None,
           seen: Mapping[str, Seen] | None, but: Collection[str] = ()) -> Iterator[Step]:
     planned = [stage.id for stage in stages.in_plan(state)]
@@ -738,24 +738,24 @@ def _each(state: states.State, name: str, closed: Callable[[str], bool] | None,
         of_stages = planned if _is_of_a_stage(step) and planned else [None]
         for stage in of_stages:
             if _has(step, stage, seen):
-                yield _read(state, step, entry, Asked(name, stage, closed, register, seen))
+                yield _read(state, step, entry, Asked(name, stage, on_closed, register, seen))
 
 
 def of(state: states.State, *, name: str = "ROUND",
-       closed: Callable[[str], bool] | None = None,
+       on_closed: Callable[[str], bool] | None = None,
        register: states.State | None = None,
        seen: Mapping[str, Seen] | None = None,
        but: Collection[str] = ()) -> tuple[Step, ...]:
     """Every step of the round `state` is of, in order, each with its state. `name`
-    is the round's name, for the commands a wait prints, `closed` answers whether
+    is the round's name, for the commands a wait prints, `on_closed` answers whether
     a round, by name, is closed (`questions.is_closed` when left out), `register`
     is the state of the project's log and `seen` what was read of each open build
     (see `Asked`). The steps named in `but` are left out, and their rows not asked."""
-    return tuple(_each(state, name, closed, register, seen, but))
+    return tuple(_each(state, name, on_closed, register, seen, but))
 
 
 def one(state: states.State, step: str, stage: str | None = None, *,
-        name: str = "ROUND", closed: Callable[[str], bool] | None = None,
+        name: str = "ROUND", on_closed: Callable[[str], bool] | None = None,
         register: states.State | None = None,
         seen: Mapping[str, Seen] | None = None) -> Step | None:
     """The step `step` of the round, for the stage `stage` when it is a step of one
@@ -765,7 +765,7 @@ def one(state: states.State, step: str, stage: str | None = None, *,
         return None
     for found, entry in order(state.steps):
         if found == step:
-            return _read(state, step, entry, Asked(name, stage, closed, register, seen))
+            return _read(state, step, entry, Asked(name, stage, on_closed, register, seen))
     return None
 
 
@@ -778,14 +778,14 @@ def is_settled(state: states.State, step: str, stage: str | None = None, *,
 
 
 def current(state: states.State, *, name: str = "ROUND",
-            closed: Callable[[str], bool] | None = None,
+            on_closed: Callable[[str], bool] | None = None,
             register: states.State | None = None,
             seen: Mapping[str, Seen] | None = None) -> Step | None:
     """The step the round is at: the first, in order, that is neither done nor
     skipped. None when every step is, and for a round that has ended."""
     if state.status != states.OPEN:
         return None
-    return next((step for step in _each(state, name, closed, register, seen)
+    return next((step for step in _each(state, name, on_closed, register, seen)
                  if not step.settled), None)
 
 

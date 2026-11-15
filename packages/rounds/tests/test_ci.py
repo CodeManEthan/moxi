@@ -161,16 +161,16 @@ def repo(git_repo, tmp_path):
 class Stub:
     """The status and ids commands, printing what the test sets."""
 
-    def __init__(self, folder: Path):
-        self.folder = folder
-        folder.mkdir()
-        self.script = folder / "stub.py"
+    def __init__(self, stub_dir: Path):
+        self.stub_dir = stub_dir
+        stub_dir.mkdir()
+        self.script = stub_dir / "stub.py"
         self.script.write_text(STUB, encoding="utf-8")
         self.ids({FLOW: 11})
         self.runs([])
 
     def argv(self, kind: str, *more: str) -> list[str]:
-        return [PY, str(self.script), str(self.folder), kind, *more]
+        return [PY, str(self.script), str(self.stub_dir), kind, *more]
 
     def ids(self, by_path: dict) -> None:
         self._write("ids", [{"id": wid, "path": path} for path, wid in by_path.items()])
@@ -179,11 +179,11 @@ class Stub:
         self._write("status", found)
 
     def _write(self, kind: str, data) -> None:
-        (self.folder / f"{kind}.json").write_text(json.dumps(data), encoding="utf-8")
-        (self.folder / f"{kind}.exit").unlink(missing_ok=True)
+        (self.stub_dir / f"{kind}.json").write_text(json.dumps(data), encoding="utf-8")
+        (self.stub_dir / f"{kind}.exit").unlink(missing_ok=True)
 
     def exits(self, kind: str, code: int) -> None:
-        (self.folder / f"{kind}.exit").write_text(str(code))
+        (self.stub_dir / f"{kind}.exit").write_text(str(code))
 
 
 @pytest.fixture
@@ -215,13 +215,13 @@ def setup(repo, stub, write_config, tmp_path, capsys):
                      f"ci = {{ {table} }}\n")
         if done:
             return done[0]
-        opening.open_round(ROUND, description="a placeholder round", actor="planner",
+        opening.open_round(ROUND, description="a placeholder round", by="planner",
                            flow="fix")
         path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
         log.append(path, "stage.declared",
                    {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-                   actor="planner")
-        made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+                   by="planner")
+        made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
         tree = type(repo)(made.worktree)
         tree.commit("work.txt", "the work")
         capsys.readouterr()
@@ -251,7 +251,7 @@ def test_a_check_by_ci_runs_the_local_part_and_records_the_read(setup, stub, rep
     path, tree, _made = setup()
     green_at(stub, tree.rev())
 
-    done = checking.check(ROUND, "B1", actor="coder")
+    done = checking.check(ROUND, "B1", by="coder")
 
     [local] = events(path, "check.ran")
     [read] = events(path, ci.READ)
@@ -288,7 +288,7 @@ def test_a_failed_local_part_stops_the_check_before_ci_is_read(setup, stub):
     path, tree, _made = setup("raise SystemExit(3)")
     green_at(stub, tree.rev())
 
-    done = checking.check(ROUND, "B1", actor="coder")
+    done = checking.check(ROUND, "B1", by="coder")
 
     assert [one["exit_code"] for one in events(path, "check.ran")] == [3]
     assert events(path, ci.READ) == [] and not done.passed
@@ -308,11 +308,11 @@ def test_a_failed_read_records_nothing_and_names_the_full_check(setup, stub, how
     if how == "exit":
         stub.exits("status", 4)
     elif how == "bad-json":
-        (stub.folder / "ids.json").write_text("not json")
+        (stub.stub_dir / "ids.json").write_text("not json")
     elif how == "missing-field":
         stub.runs([{"headSha": tree.rev()}])
     elif how == "two-ids":
-        (stub.folder / "ids.json").write_text(json.dumps(
+        (stub.stub_dir / "ids.json").write_text(json.dumps(
             [{"id": 1, "path": FLOW}, {"id": 2, "path": FLOW}]))
     if how == "timeout":
         config = paths.LAYOUT.config_file()
@@ -321,7 +321,7 @@ def test_a_failed_read_records_nothing_and_names_the_full_check(setup, stub, how
     before = path.read_bytes()
 
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", actor="coder")
+        checking.check(ROUND, "B1", by="coder")
 
     assert "CI could not be read" in str(caught.value)
     assert f"moxi rounds check {ROUND} B1 --full" in str(caught.value)
@@ -331,10 +331,10 @@ def test_a_failed_read_records_nothing_and_names_the_full_check(setup, stub, how
 def test_full_runs_the_declared_check_and_meets_the_gate_whatever_ci_reads(setup, stub):
     path, tree, _made = setup()
     green_at(stub, tree.rev(), conclusion="failure")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
     assert check_step(path).state == steps.READY
 
-    done = checking.check(ROUND, "B1", actor="coder", full=True)
+    done = checking.check(ROUND, "B1", by="coder", full=True)
 
     assert (done.step, done.passed) == ("check", True)
     assert check_step(path).state == steps.DONE
@@ -344,7 +344,7 @@ def test_with_local_none_a_green_reading_alone_meets_the_gate(setup, stub):
     path, tree, _made = setup(ci.NONE)
     green_at(stub, tree.rev())
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     assert events(path, "check.ran") == []
     assert check_step(path).state == steps.DONE
@@ -357,7 +357,7 @@ def test_red_pending_and_absent_do_not_meet_the_gate(setup, stub, fields):
     path, tree, _made = setup()
     green_at(stub, tree.rev(), **fields)
 
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     found = check_step(path)
     assert found.state == steps.READY
@@ -368,7 +368,7 @@ def test_red_pending_and_absent_do_not_meet_the_gate(setup, stub, fields):
 def test_a_reading_at_an_older_tip_does_not_meet_the_gate(setup, stub):
     path, tree, _made = setup()
     green_at(stub, tree.rev())
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     tree.commit("more.txt")
 
@@ -380,7 +380,7 @@ def test_a_workflow_list_or_a_local_command_changed_since_does_not_meet_the_gate
         setup, stub):
     path, tree, _made = setup()
     green_at(stub, tree.rev())
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     setup(workflows=(FLOW, OTHER))
     assert "the workflows named now are" in check_step(path).owes[1]
@@ -402,7 +402,7 @@ def test_the_check_pushes_to_the_remote_first_and_the_pre_push_hook_runs(
     _path, tree, _made = setup(remote="origin")
     green_at(stub, tree.rev())
 
-    done = checking.check(ROUND, "B1", actor="coder")
+    done = checking.check(ROUND, "B1", by="coder")
 
     assert done.pushed == "origin"
     assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/work") == tree.rev()
@@ -415,7 +415,7 @@ def test_a_refused_push_records_nothing(setup, stub, repo, tmp_path):
     before = path.read_bytes()
 
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", actor="coder")
+        checking.check(ROUND, "B1", by="coder")
 
     assert "was refused, so nothing is recorded" in str(caught.value)
     assert path.read_bytes() == before
@@ -424,16 +424,16 @@ def test_a_refused_push_records_nothing(setup, stub, repo, tmp_path):
 def test_a_repo_with_no_ci_is_checked_by_the_full_check(repo, write_config, tmp_path):
     full = shlex.join([PY, "-c", "print('full ran')"])
     write_config(f"[projects.proj-a]\ncheck = {{ command = {json.dumps(full)} }}\n")
-    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
                        flow="fix")
     path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
     log.append(path, "stage.declared",
                {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
-               actor="planner")
-    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+               by="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
     type(repo)(made.worktree).commit("work.txt")
 
-    done = checking.check(ROUND, "B1", actor="coder")
+    done = checking.check(ROUND, "B1", by="coder")
 
     assert isinstance(done, checking.Ran) and done.step == "check"
     assert events(path, ci.READ) == []
@@ -445,7 +445,7 @@ def test_next_and_show_give_the_newest_reading_and_what_the_gate_owes(setup, stu
                                                                       capsys):
     _path, tree, _made = setup()
     green_at(stub, tree.rev(), conclusion="failure")
-    checking.check(ROUND, "B1", actor="coder")
+    checking.check(ROUND, "B1", by="coder")
 
     assert main(["next", ROUND]) == 0
     printed = capsys.readouterr().out
@@ -466,12 +466,12 @@ def ci_rows() -> list:
 
 
 def gh_on_path(tmp_path, monkeypatch, auth_exit: int) -> None:
-    folder = tmp_path / "bin"
-    folder.mkdir()
-    gh = folder / "gh"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
     gh.write_text(f"#!/bin/sh\nexit {auth_exit}\n")
     gh.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
 
 def default_ci(write_config, local: str = '"none"') -> None:

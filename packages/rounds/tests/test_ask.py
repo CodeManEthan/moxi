@@ -213,17 +213,17 @@ def building(git_repo, tmp_path, capsys):
     assert cli.main(["projects", "set", "proj-b", "--notes-root",
                      str(tmp_path / "notes-b")]) == 0
     opening.open_round("proj-b/a-round", description="a placeholder round",
-                       actor="planner", flow="fix")
+                       by="planner", flow="fix")
     path = log.round_log(tmp_path / "notes-b" / "rounds" / "a-round")
     log.append(path, "stage.declared", {"id": "B1", "repo": "proj-b", "branch": "work"},
-               actor="planner")
+               by="planner")
     git_repo.git("branch", "work")
     log.append(path, "build.commissioned",
                {"stage": "B1", "repo": "proj-b", "branch": "work",
                 "base": git_repo.rev("main"), "target": "main",
                 "worktree": "placeholder-worktree", "scratch": "placeholder-scratch",
                 "builder": "coder", "host": "box-1", "build": "0123456789abcdef"},
-               actor="planner")
+               by="planner")
     capsys.readouterr()
     return path
 
@@ -272,7 +272,7 @@ def test_build_whose_branch_is_gone_is_refused(building, git_repo, capsys):
 
 def test_build_of_a_stage_whose_build_ended_is_refused(building, capsys):
     log.append(building, "build.dropped", {"stage": "B1", "by": "lead",
-                                           "record": "comms:1234567"}, actor="planner")
+                                           "record": "comms:1234567"}, by="planner")
 
     assert main(["ask", "proj-b/a-round", SAID, "--build", "B1"]) == 3
 

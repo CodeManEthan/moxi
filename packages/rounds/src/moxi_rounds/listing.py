@@ -110,7 +110,7 @@ def _step(summary: index.Summary, project: Project,
     def on_closed(name: str) -> bool:
         return questions.is_closed(name, project.settings)
 
-    if kept.get("git") or any(closed(name) for name in kept.get("until", ())):
+    if kept.get("git") or any(on_closed(name) for name in kept.get("until", ())):
         try:
             folded = states.fold(log.read_round(log.round_log(summary.log_dir)))
         except RoundsError:
@@ -119,7 +119,7 @@ def _step(summary: index.Summary, project: Project,
                 if one.round == summary.name}
         seen = checking.seen_of(folded, summary.name, settings=project.settings,
                                 read=read)
-        at = steps.current(folded, name=summary.name, closed=closed, seen=seen)
+        at = steps.current(folded, name=summary.name, on_closed=on_closed, seen=seen)
         kept = {} if at is None else {"step": at.step, "stage": at.stage,
                                       "state": at.state}
     if kept.get("step") is None:
@@ -193,7 +193,7 @@ def rounds(project: str | None = None, *, ended: bool = False, settings=None,
     Raises `Refused` when `project` names a round, and `UnknownProject` or `NoFolder`
     for a project with no rounds folder."""
     now = log.stamp() if now is None else now
-    found, no_folder = _projects(project, settings, now, refresh=refresh)
+    found, unplaced = _projects(project, settings, now, refresh=refresh)
     looked: list[open_builds.OpenBuilds] = []
 
     def opened() -> open_builds.OpenBuilds:
@@ -508,7 +508,7 @@ class Numbers:
     """The numbers of the closed rounds summed: `project` is the one the listing was
     kept to, or None; `rounds` the closed rounds summed, by name; `uncounted` the
     closed rounds whose closing holds no numbers; `unreadable` a line for each log
-    that can't be read, and `no_folder` one for each project whose rounds folder
+    that can't be read, and `unplaced` one for each project whose rounds folder
     can't be worked out, whose rounds are therefore not summed."""
 
     computed: str
@@ -517,13 +517,13 @@ class Numbers:
     numbers: Mapping
     uncounted: tuple[str, ...] = ()
     unreadable: tuple[str, ...] = ()
-    no_folder: tuple[str, ...] = ()
+    unplaced: tuple[str, ...] = ()
 
     def data(self) -> dict:
         return {"computed": self.computed, "project": self.project,
                 "rounds": list(self.rounds), "numbers": dict(self.numbers),
                 "uncounted": list(self.uncounted), "unreadable": list(self.unreadable),
-                "no_folder": list(self.no_folder)}
+                "no_folder": list(self.unplaced)}
 
 
 def numbers(project: str | None = None, *, settings=None, now: str | None = None,
@@ -532,10 +532,10 @@ def numbers(project: str | None = None, *, settings=None, now: str | None = None
     `settings`, `now` and `refresh` are as `rounds` takes them, and so are its
     refusals."""
     now = log.stamp() if now is None else now
-    homes, no_folder, _settings = _homes(project, settings, refresh=refresh)
+    homes, unplaced, _settings = _homes(project, settings, refresh=refresh)
     summed, uncounted, unreadable = [], [], []
     for home in homes:
-        for summary in index.rounds(home.project, home.folder):
+        for summary in index.rounds(home.project, home.rounds_dir):
             if summary.unreadable is not None:
                 unreadable.append(summary.unreadable.reason)
             elif summary.status == states.CLOSED:
@@ -548,7 +548,7 @@ def numbers(project: str | None = None, *, settings=None, now: str | None = None
                    rounds=tuple(name for name, _held in summed),
                    numbers=counted.summed(held for _name, held in summed),
                    uncounted=tuple(uncounted), unreadable=tuple(unreadable),
-                   no_folder=no_folder)
+                   unplaced=unplaced)
 
 
 def numbers_as_text(listing: Numbers) -> str:
@@ -563,7 +563,7 @@ def numbers_as_text(listing: Numbers) -> str:
     if listing.uncounted:
         lines.append("closed with no numbers, not summed: "
                      f"{', '.join(listing.uncounted)}")
-    lines += _trouble(listing.unreadable, listing.no_folder)
+    lines += _trouble(listing.unreadable, listing.unplaced)
     return "\n".join(lines) + "\n"
 
 
@@ -580,8 +580,8 @@ def _projects(project: str | None, settings, now: str, *,
     folder can't be worked out. With `project`, that one alone. The index is brought
     up to every project's logs first, unless `refresh` is false: the reads below
     answer the same from an index that is behind, and write nothing."""
-    homes, no_folder, settings = _homes(project, settings, refresh=refresh)
-    return [_project(home, settings, now) for home in homes], no_folder
+    homes, unplaced, settings = _homes(project, settings, refresh=refresh)
+    return [_project(home, settings, now) for home in homes], unplaced
 
 
 def _homes(project: str | None, settings, *,

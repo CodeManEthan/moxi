@@ -191,7 +191,7 @@ def _verify_build(found: showing.Shown, step: steps.Step) -> dict:
     tier of a re-check once a report of the build is on record."""
     build = builds.current(found.state, step.stage)
     said = {"reads": _named(step),
-            "write": (f"a report in {found.folder} with the block from: moxi rounds "
+            "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.BUILD}"),
             "then": [f"moxi rounds verdict {found.name} <your report>"]}
     if build is None or build.ended is not None:
@@ -216,7 +216,7 @@ def _report(found: showing.Shown, step: steps.Step) -> dict:
     the report's block, with the step's name, and the verdict."""
     build = builds.current(found.state, step.stage)
     said = {"reads": _named(step),
-            "write": (f"a report in {found.folder} with the block from: moxi rounds "
+            "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.STEP}, its step {step.step!r}"),
             "then": [f"moxi rounds verdict {found.name} <your report>"]}
     if build is not None and build.ended is None:
@@ -233,10 +233,10 @@ def _finish(found: showing.Shown, step: steps.Step) -> dict:
 def _retro(found: showing.Shown, step: steps.Step) -> dict:
     """The round's retrospective: the numbers as they stand, which the round's ending
     will hold, the note and the reports, the report's block, and the verdict."""
-    return {"reads": ["the numbers below", str(found.folder / rendering.NOTE_FILE),
-                      f"the reports in {found.folder}", *_named(step)],
+    return {"reads": ["the numbers below", str(found.round_dir / rendering.NOTE_FILE),
+                      f"the reports in {found.round_dir}", *_named(step)],
             "numbers": counted.of(found.state),
-            "write": (f"a report in {found.folder} with the block from: moxi rounds "
+            "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.RETRO}"),
             "then": [f"moxi rounds verdict {found.name} <your report>"]}
 
@@ -285,9 +285,9 @@ def _group(found: showing.Shown, step: steps.Step, models) -> dict:
 
 
 def _groups(found: showing.Shown, models, seen) -> list[dict]:
-    every = steps.of(found.state, name=found.name, closed=found.closed,
+    every = steps.of(found.state, name=found.name, on_closed=found.on_closed,
                      register=found.register, seen=seen)
-    at = steps.current(found.state, name=found.name, closed=found.closed,
+    at = steps.current(found.state, name=found.name, on_closed=found.on_closed,
                        register=found.register, seen=seen)
     if at is None:
         return []
@@ -403,7 +403,7 @@ def read(name: str, *, settings=None) -> dict:
                                                settings=settings)),
             "close": (None if found.state.status != states.OPEN
                       else {"waits": list(closing.waits(
-                          found.state, closed=found.closed,
+                          found.state, on_closed=found.on_closed,
                           ratify=closing.ratify_of(settings, found.name)))}),
             "warnings": _warnings(found)}
 

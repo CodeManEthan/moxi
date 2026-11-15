@@ -50,7 +50,7 @@ _TAKER = textwrap.dedent("""
     from moxi_rounds import finish_lock
     from moxi_rounds.errors import Refused
     try:
-        taken = finish_lock.take(sys.argv[1], sys.argv[2], actor=sys.argv[3],
+        taken = finish_lock.take(sys.argv[1], sys.argv[2], by=sys.argv[3],
                                  name="proj-a/a-round", stage="B1")
     except Refused as error:
         print("refused", error.unmet[0].reason.replace("\\n", " "), flush=True)
@@ -67,8 +67,8 @@ def taker():
     <reason>`."""
     procs = []
 
-    def start(root, ref, actor):
-        proc = subprocess.Popen([sys.executable, "-c", _TAKER, str(root), ref, actor],
+    def start(root, ref, by):
+        proc = subprocess.Popen([sys.executable, "-c", _TAKER, str(root), ref, by],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         procs.append(proc)
         return proc
@@ -126,7 +126,7 @@ def test_a_text_not_in_the_holders_format_names_no_holder(text):
 
 def test_a_take_points_the_ref_at_a_blob_with_the_holders_line_and_release_removes_it(
         git_repo):
-    taken = finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+    taken = finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     assert taken.cleared is None and finish_lock.cleared_entry(taken) is None
     assert points_at(git_repo, REF) == taken.blob
     assert git_repo.git("cat-file", "-t", taken.blob) == "blob"
@@ -141,7 +141,7 @@ def test_a_take_points_the_ref_at_a_blob_with_the_holders_line_and_release_remov
 
 
 def test_a_release_leaves_a_lock_that_is_no_longer_the_takers_own(git_repo):
-    taken = finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+    taken = finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     other = blob_of(git_repo, "someone else\n")
     git_repo.git("update-ref", REF, other)
     assert finish_lock.release(taken) is False
@@ -149,9 +149,9 @@ def test_a_release_leaves_a_lock_that_is_no_longer_the_takers_own(git_repo):
 
 
 def test_a_lock_held_by_a_live_holder_is_refused_naming_it_and_the_command(git_repo):
-    first = finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+    first = finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     with pytest.raises(Refused) as refused:
-        finish_lock.take(git_repo.root, REF, actor="pilot", name="proj-a/b-round",
+        finish_lock.take(git_repo.root, REF, by="pilot", name="proj-a/b-round",
                          stage="B2")
     (unmet,) = refused.value.unmet
     assert first.holder.line in unmet.reason and "Ask the holder" in unmet.reason
@@ -171,9 +171,9 @@ def test_two_finishes_at_once_one_takes_the_lock_and_the_other_names_it(git_repo
 
 
 def test_the_command_a_refusal_prints_clears_that_lock(git_repo):
-    first = finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+    first = finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     with pytest.raises(Refused) as refused:
-        finish_lock.take(git_repo.root, REF, actor="pilot", name=ROUND, stage="B1")
+        finish_lock.take(git_repo.root, REF, by="pilot", name=ROUND, stage="B1")
     argv = refused.value.unmet[0].fix.split()
     subprocess.run(argv, check=True, env=git_repo.env())
     assert points_at(git_repo, REF) is None
@@ -186,7 +186,7 @@ def test_a_dead_holder_on_this_machine_is_cleared_in_one_swap_and_recorded(git_r
     line = dead_line()
     dead = blob_of(git_repo, line)
     git_repo.git("update-ref", REF, dead)
-    taken = finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+    taken = finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     assert taken.cleared == finish_lock.parse(line)
     assert points_at(git_repo, REF) == taken.blob
 
@@ -223,7 +223,7 @@ def test_a_swap_git_refuses_because_another_finish_cleared_first_reads_the_new_h
 
     monkeypatch.setattr(finish_lock, "_dead", first_another_clears)
     with pytest.raises(Refused) as refused:
-        finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+        finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     assert f"pilot pid={other[0].pid} " in refused.value.unmet[0].reason
 
 
@@ -231,7 +231,7 @@ def test_a_holder_of_another_machine_is_not_cleared_even_with_a_dead_pid(git_rep
     held = blob_of(git_repo, dead_line(host="box-1"))
     git_repo.git("update-ref", REF, held)
     with pytest.raises(Refused) as refused:
-        finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+        finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     assert "host=box-1" in refused.value.unmet[0].reason
     assert points_at(git_repo, REF) == held
 
@@ -241,7 +241,7 @@ def test_a_blob_in_no_holders_format_is_not_cleared(git_repo, text):
     held = blob_of(git_repo, text)
     git_repo.git("update-ref", REF, held)
     with pytest.raises(Refused) as refused:
-        finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+        finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     (unmet,) = refused.value.unmet
     assert f"a blob {held} that holds no holder's line" in unmet.reason
     assert unmet.fix.endswith(f"update-ref -d {REF} {held}")
@@ -258,36 +258,36 @@ def test_a_lock_taken_by_hand_at_a_commit_excludes_finish_and_is_not_cleared(
     head = git_repo.rev()
     git_repo.git("update-ref", ref, head)
     with pytest.raises(Refused) as refused:
-        finish_lock.take(git_repo.root, ref, actor="coder", name=ROUND, stage="B1")
+        finish_lock.take(git_repo.root, ref, by="coder", name=ROUND, stage="B1")
     (unmet,) = refused.value.unmet
     assert f"a commit {head}, not a lock a finish takes" in unmet.reason
     assert points_at(git_repo, ref) == head
     git_repo.git("update-ref", "-d", ref, head)
-    taken = finish_lock.take(git_repo.root, ref, actor="coder", name=ROUND, stage="B1")
+    taken = finish_lock.take(git_repo.root, ref, by="coder", name=ROUND, stage="B1")
     assert points_at(git_repo, "refs/locks/merging") == taken.blob
     assert points_at(git_repo, REF) is None
 
 
 def test_locks_of_two_targets_are_apart(git_repo):
-    main = finish_lock.take(git_repo.root, REF, actor="coder", name=ROUND, stage="B1")
+    main = finish_lock.take(git_repo.root, REF, by="coder", name=ROUND, stage="B1")
     other = finish_lock.take(git_repo.root, "refs/rounds/finishing/release%2F1.0",
-                             actor="coder", name=ROUND, stage="B2")
+                             by="coder", name=ROUND, stage="B2")
     assert {points_at(git_repo, REF), points_at(git_repo, other.ref)} == {main.blob,
                                                                           other.blob}
 
 
 def test_a_lock_taken_in_a_worktree_is_the_lock_of_the_repo(git_repo, tmp_path):
     git_repo.git("worktree", "add", "-q", "-b", "side", str(tmp_path / "side"))
-    taken = finish_lock.take(tmp_path / "side", REF, actor="coder", name=ROUND,
+    taken = finish_lock.take(tmp_path / "side", REF, by="coder", name=ROUND,
                              stage="B1")
     assert points_at(git_repo, REF) == taken.blob
     with pytest.raises(Refused):
-        finish_lock.take(git_repo.root, REF, actor="pilot", name=ROUND, stage="B1")
+        finish_lock.take(git_repo.root, REF, by="pilot", name=ROUND, stage="B1")
 
 
 def test_a_ref_name_git_refuses_raises_what_git_said(git_repo):
     with pytest.raises(finish_lock.GitError) as failed:
-        finish_lock.take(git_repo.root, "refs/rounds/finishing/a..b", actor="coder",
+        finish_lock.take(git_repo.root, "refs/rounds/finishing/a..b", by="coder",
                          name=ROUND, stage="B1")
     assert "update-ref" in failed.value.reason
 
