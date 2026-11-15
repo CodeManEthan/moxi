@@ -46,6 +46,13 @@ _RULING_TAG = (
     r"|\[[0-9]+\|[0-9a-f]{6}\]"
 )
 
+#: Every character a ruling tag can start with. Python's engine skips ahead by a pattern's
+#: first characters only when each branch starts with a plain one, and several of these
+#: start with a word boundary, so without the lookahead every branch was tried at every
+#: position of a file. A test holds this set to the pattern's branches.
+_RULING_TAG_START = "[(R\u00a7dbrBMFpowW\u27d0\u2691"
+_RULING_TAG_SCAN = "(?=[" + re.escape(_RULING_TAG_START) + "])(?:" + _RULING_TAG + ")"
+
 #: A quoted passage: straight or curly double quotes around at least one word character.
 _QUOTED = "\"[^\"]*\\w[^\"]*\"|\u201c[^\u201d]*\\w[^\u201d]*\u201d"
 
@@ -59,8 +66,8 @@ _SHAPES: dict[str, tuple[frozenset[str], str, int]] = {
                    r"comms:\s*\d+|\bmsg\s*[#:]?\s*\d+"
                    r"|(?<![0-9A-Za-z])\d{12,}(?![0-9A-Za-z])", re.IGNORECASE),
     # Matched as a pair below: the tag and a quoted passage on one line.
-    "quoted-ruling": (frozenset({MESSAGES}), _RULING_TAG, 0),
-    "ruling-tag": (frozenset({FILES}), _RULING_TAG, 0),
+    "quoted-ruling": (frozenset({MESSAGES}), _RULING_TAG_SCAN, 0),
+    "ruling-tag": (frozenset({FILES}), _RULING_TAG_SCAN, 0),
     "round-pointer": (frozenset({FILES}),
                       r"(?i:\bround [a-z-]+/[a-z0-9-]+)|\bmem [a-z0-9]+-[a-z0-9-]+", 0),
 }

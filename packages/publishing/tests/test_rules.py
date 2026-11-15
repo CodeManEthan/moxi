@@ -51,3 +51,68 @@ def test_every_rule_applies_somewhere():
     assert all(rules.applies(n, rules.FILES) or rules.applies(n, rules.MESSAGES)
                for n in rules.NAMES)
     assert len(rules.NAMES) == 6
+
+
+# -- the ruling tag's start set -------------------------------------------------------------
+
+def _starts(items, ignorecase: bool) -> set[str]:
+    """Every character a match of the parsed pattern `items` can start with; fails on a
+    construct this reader doesn't know, so a new branch can't slip past it."""
+    import re
+    from re import _constants as c
+
+    def cased(ch: str) -> set[str]:
+        if not ignorecase:
+            return {ch}
+        rx = re.compile(re.escape(ch), re.IGNORECASE)
+        return {chr(x) for x in range(0x10000) if rx.fullmatch(chr(x))}
+
+    for op, av in items:
+        if op is c.AT:
+            continue
+        if op is c.LITERAL:
+            return cased(chr(av))
+        if op is c.IN:
+            found = set()
+            for kind, value in av:
+                assert kind in (c.LITERAL, c.RANGE), (kind, value)
+                low, high = (value, value) if kind is c.LITERAL else value
+                for x in range(low, high + 1):
+                    found |= cased(chr(x))
+            return found
+        if op is c.SUBPATTERN:
+            _group, add, remove, inner = av
+            on = (ignorecase or bool(add & c.SRE_FLAG_IGNORECASE)) and not (
+                remove & c.SRE_FLAG_IGNORECASE)
+            return _starts(inner, on)
+        if op is c.BRANCH:
+            return set().union(*(_starts(branch, ignorecase) for branch in av[1]))
+        if op in (c.MAX_REPEAT, c.MIN_REPEAT) and av[0] >= 1:
+            return _starts(av[2], ignorecase)
+        raise AssertionError(f"a branch starts with {op}, which this reader can't follow")
+    raise AssertionError("a branch can match empty")
+
+
+def test_the_ruling_tags_start_set_is_its_branches_first_characters():
+    from re import _parser
+
+    assert _starts(_parser.parse(rules._RULING_TAG), False) == set(rules._RULING_TAG_START)
+
+
+def test_the_lookahead_changes_no_match():
+    import random
+    import re
+
+    plain, scan = re.compile(rules._RULING_TAG), re.compile(rules._RULING_TAG_SCAN)
+    # Joined at run time, so this file spells no tag whole.
+    words = [("RU", "LE "), ("des", "ign v"), ("bui", "ld verif"), ("re-", "check v"),
+             ("B4", " verification"), ("MIN", "OR "), ("Find", "ing 3 ("),
+             ("pro", "be trial "), ("opera", "tor ruling"), ("opera", "tor, 20"),
+             ("Rul", "ed on "), ("wo", "rd: "), ("rul", "ings "), ("20", "26-01")]
+    pieces = (list("[]()|0123456789abcdefRSCFQNBIXrtv \u00a7\u27d0\u2691*-,.:")
+              + [a + b for a, b in words] + ["\u2691*"])
+    rng = random.Random(3)
+    for _ in range(20000):
+        text = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
+        assert ([m.span() for m in plain.finditer(text)]
+                == [m.span() for m in scan.finditer(text)]), text
