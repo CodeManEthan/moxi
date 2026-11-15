@@ -171,6 +171,13 @@ def step_entry(state: states.State, step: str) -> Mapping | None:
     return None
 
 
+def command_steps(state: states.State) -> tuple[str, ...]:
+    """The names of the command steps of the user's own in the round's recorded flow,
+    in the flow's order."""
+    return tuple(str(entry.get("step")) for entry in state.steps
+                 if flows.is_user_step(entry) and entry.get("does") == flows.COMMAND)
+
+
 def report_steps(state: states.State) -> tuple[str, ...]:
     """The names of the report steps of the user's own in the round's recorded flow,
     in the flow's order."""

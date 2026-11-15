@@ -220,6 +220,47 @@ def test_a_commit_after_the_verdict_owes_verification_until_a_mark_names_it(buil
     assert "check B1" not in found
 
 
+STAGING = """
+    [flows.mine]
+    steps = [
+      { step = "build", by = "builder" },
+      { step = "staging", does = "command", before = "finish", by = "builder", argv = ["make", "staging", "{tip}", "{stage}"] },
+      { step = "finish", by = "builder" },
+    ]
+"""
+
+
+def staging_ran(code):
+    return ("check.ran", {"stage": "B1", "step": "staging", "commit": TIP,
+                          "argv": ["make", "staging", TIP, "B1"], "exit_code": code,
+                          "duration_s": 1.0, "output": None})
+
+
+def test_a_command_step_of_the_user_s_own_stops_counting_at_its_run_that_passed(
+        tmp_path, add_project, write_config, capsys):
+    add_project("proj-a", notes_root=tmp_path / "notes")
+    write_config(STAGING)
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
+                       flow="mine")
+    capsys.readouterr()
+    round_dir = tmp_path / "notes" / "rounds" / "a-round"
+    append(round_dir, "stage.declared",
+           {"id": "B1", "repo": "proj-a", "branch": "work", "after": []})
+    append(round_dir, "build.commissioned",
+           {"stage": "B1", "repo": "proj-a", "branch": "work", "base": BASE,
+            "target": "main", "builder": "coder", "build": "0123456789abcdef"})
+    for kind, body in (staging_ran(1), staging_ran(0)):
+        append(round_dir, kind, body, by="coder")
+    events = timed(log.read(log.round_log(round_dir)), 0, 10, 30, 40, 60)
+
+    found = numbers.step_time_s(events, ended_at=log.stamp(1_000_000 + 100))
+
+    # Due from the commission; the failed run leaves it due; the run that passed at the
+    # newest commit the log names settles it, its own argv standing for the filled one.
+    assert found["staging B1"] == 10 + 20
+    assert found["finish B1"] == 70
+
+
 def test_ratify_gets_time_only_where_the_project_asks_for_it(built):
     report = {**build_report(word="publishable"), "decisions": [
         {"id": "M1", "text": "a choice", "weight": "major", "forecloses": False}]}

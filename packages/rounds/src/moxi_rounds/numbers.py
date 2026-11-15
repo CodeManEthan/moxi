@@ -113,7 +113,9 @@ def logged(state: states.State) -> dict[str, steps.Seen]:
     function reads it (`steps.Seen`), for counting time with no read of git. The
     build's tip is the commit the newest record of it names; it has work once a record
     names one; its check is the newest run's command, so the check is done when that
-    run passed at the tip; the commits since a verdict are the ones the log names after
+    run passed at the tip, and a command step of the user's own is done when its newest
+    run passed at the tip, the run's own argv standing for the filled one (`commands`);
+    the commits since a verdict are the ones the log names after
     it, so a lead's mark of them, or a later publishable report, settles the
     verification. The worktree is taken as clean, which only says ready for waiting."""
     found = {}
@@ -126,6 +128,9 @@ def logged(state: states.State) -> dict[str, steps.Seen]:
         found[build.stage] = steps.Seen(
             state=builds.BUILDING if tip else builds.EMPTY, tip=tip, clean=True,
             check=None if run is None else tuple(run.get("argv") or ()), head=tip,
+            commands={step: tuple(ran.get("argv") or ())
+                      for step in checking.command_steps(state)
+                      if (ran := checking.newest(state, build.stage, step)) is not None},
             since=_since(state, build, named, findings.VERIFY_BUILD),
             reported={step: (_since(state, build, named, step), None)
                       for step in checking.report_steps(state)})

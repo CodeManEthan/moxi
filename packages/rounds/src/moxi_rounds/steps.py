@@ -82,9 +82,10 @@ index keeps the step the log alone gives, and marks it so (`at`).
 - a command step of the user's own, of a stage: done once the newest run recorded
   under its name passed at the build's tip with the argv of its entry in the round's
   recorded flow, its placeholders filled for the build there, and once the build is
-  finished. Until then it waits, as `check` does, for the build to have work and for
-  its worktree to be clean. A run of one step is never
-  read for another. It is read from what `Asked.seen` says of the stage's build.
+  finished. Where the caller read no placeholders, as a count from the log alone
+  does, the newest run's own argv stands for the filled one (`Seen.commands`). Until
+  then it waits, as `check` does, for the build to have work and for its worktree to
+  be clean. A run of one step is never read for another. It is read from what `Asked.seen` says of the stage's build.
   (`command_row` gives its row; `row_of` finds it for a step the flow lists.)
 - a report step of the user's own, of a stage: done once its newest report for the
   build is `publishable` and counts at the tip by `verify-build`'s rule, read on this
@@ -127,7 +128,7 @@ that needs the design as it was verified asks `versions.unchanged` beside this.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 from . import (brake, builds, checking, decisions, findings, finish_actions, finish_gates,
@@ -169,8 +170,10 @@ class Seen:
     whether its worktree is on this machine with the build's branch checked out and
     nothing uncommitted; `check`, the argv the repo's check gives now at `head`, None
     when the repo declares no check; `values`, what the placeholders of a command read
-    for the build at `head` (`checking.values`); `ci`, what CI's form of the check
-    gate compares at `head` where the repo declares `ci` (`ci.Now`), else None;
+    for the build at `head` (`checking.values`); `commands`, for each command step of
+    the user's own, the argv that stands for its entry's filled one where `values` was
+    not read, as `numbers.logged` gives the newest run's own; `ci`, what CI's form of
+    the check gate compares at `head` where the repo declares `ci` (`ci.Now`), else None;
     `head`, the tip, or the build's head where its branch is gone; `since`, the commits
     from the head its newest build verdict read to `head`, None with no such verdict or
     when git does not hold that head; `drift`, the build's drift against that verdict
@@ -195,6 +198,7 @@ class Seen:
     clean: bool = False
     check: tuple[str, ...] | None = None
     values: Mapping[str, str] | None = None
+    commands: Mapping[str, tuple[str, ...]] | None = None
     ci: ci_reads.Now | None = None
     head: str | None = None
     since: tuple[str, ...] | None = None
@@ -609,6 +613,18 @@ def report_row(step: str) -> Row:
     return row
 
 
+def _command_argv(step: str, entry: Mapping | None,
+                  seen: Seen) -> Sequence[str] | None:
+    """The argv a run of the command step `step`, whose flow entry is `entry`, must have
+    had to count: the entry's, filled with `seen.values`; where those were not read,
+    the one `seen.commands` holds for the step. None when neither is known."""
+    if entry is None:
+        return None
+    if seen.values is not None:
+        return checking.fill(entry["argv"], seen.values)
+    return (seen.commands or {}).get(step)
+
+
 def command_row(step: str) -> Row:
     """The row of the command step `step` of the user's own."""
 
@@ -625,10 +641,9 @@ def command_row(step: str) -> Row:
                              "tip", about.name)
         if seen.problem is not None:
             return Step(step, WAITING, stage=stage, waits=(seen.problem,))
-        entry = checking.step_entry(state, step)
-        if (entry is not None and seen.head is not None and seen.values is not None
-                and checking.passes(state, stage, step, tip=seen.head,
-                                    argv=checking.fill(entry["argv"], seen.values))):
+        argv = _command_argv(step, checking.step_entry(state, step), seen)
+        if (argv is not None and seen.head is not None
+                and checking.passes(state, stage, step, tip=seen.head, argv=argv)):
             return Step(step, DONE, stage=stage)
         waits = _before_a_run(stage, seen, f"run {step} on")
         return Step(step, WAITING if waits else READY, stage=stage, waits=waits)
