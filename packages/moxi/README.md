@@ -65,6 +65,11 @@ commands:
   removes one. `moxi config <module> path` prints the file's path, `check` exits non-zero
   when the file can't be read or the module refuses it, and `init` writes the file with
   every key commented out at its default. `moxi config moxi` is the core's own.
+  `moxi config <module> show --json` prints every key as JSON, with the page fields its
+  schema gives (how a settings page shows the key: its label, its one line, whether it
+  shows first, its group, unit, words for an enum's values, and whether a change can hurt
+  or is made at the terminal or on another page). `moxi config set --json` and `unset
+  --json` print one object, `{changed, problem, fix, units}`, in place of their lines.
 - `moxi paths <module>` prints where a module keeps its files: its data, state, cache,
   config and runtime directories, its config file and each store it declares.
 - `moxi doctor [<module>...]` checks the modules, their settings, daemons, timers and

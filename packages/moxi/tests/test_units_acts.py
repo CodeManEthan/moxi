@@ -912,7 +912,10 @@ def test_config_show_json_lists_every_key(w, capsys):
                           "plain"]
     assert keys["port"] == {"name": "port", "type": "int", "default": 8470,
                             "doc": "The relay's port.", "values": None, "read": "start",
-                            "env": None, "needs": None, "items": None, "value": 9000,
+                            "env": None, "needs": None, "items": None, "label": None,
+                            "line": None, "common": False, "group": None, "unit": None,
+                            "choices": None, "pick": False, "hurts": None,
+                            "terminal": None, "elsewhere": None, "value": 9000,
                             "source": "file"}
     assert keys["loud"]["value"] is True and keys["loud"]["source"] == "default"
     assert "switch_table" not in keys["plain"] and "entries" not in keys["plain"]
