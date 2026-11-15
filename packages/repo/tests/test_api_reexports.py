@@ -17,7 +17,8 @@ from moxi_repo import api
 NAMES = ("git", "changes", "Change", "literal_pathspec", "Spec", "save_spec", "remove_spec",
          "commit", "commit_saved", "CommitResult", "PrepareContext", "Prepared",
          "HookContext", "Outcome", "PATHSPEC_VARS", "SpecError", "saved_spec",
-         "last_commit_time")
+         "last_commit_time", "commit_rules_problems", "interpreter", "resolve_project",
+         "ProjectUnavailable")
 
 #: The package's own modules that `import moxi_repo.api` loaded before the API handed out
 #: any of these names. It loads no other module outside the standard library.

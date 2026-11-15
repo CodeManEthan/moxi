@@ -1194,13 +1194,18 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     return out
 
 
-#: Each name this module hands out for another module -> the module it comes from. Four
+#: Each name this module hands out for another module -> the module it comes from. Seven
 #: are not package exports: `SpecError`, which `save_spec` raises; `saved_spec`, the spec a
-#: name last saved; `last_commit_time`, when an author last committed; and `PATHSPEC_VARS`,
-#: the environment variables that change how git reads a pathspec.
+#: name last saved; `last_commit_time`, when an author last committed; `PATHSPEC_VARS`,
+#: the environment variables that change how git reads a pathspec; `interpreter`, the
+#: Python the git hook entries run; `resolve_project`, the path a PATH argument names,
+#: which may be a project key; and `ProjectUnavailable`, which it raises with an exit
+#: code in `code`.
 REEXPORTS = {**_PACKAGE_EXPORTS, "SpecError": "moxi_repo.committer",
              "saved_spec": "moxi_repo.committer", "last_commit_time": "moxi_repo.committer",
-             "PATHSPEC_VARS": "moxi_repo.gitrun"}
+             "PATHSPEC_VARS": "moxi_repo.gitrun", "interpreter": "moxi_repo.gitconf",
+             "resolve_project": "moxi_repo.projects",
+             "ProjectUnavailable": "moxi_repo.projects"}
 
 
 def __getattr__(name):

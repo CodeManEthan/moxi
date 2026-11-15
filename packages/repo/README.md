@@ -292,6 +292,12 @@ pattern that won't compile, or that matches the empty string (it would find an e
 on every line and check nothing), is refused by `add` before anything is written, and by
 `moxi config` in the config file.
 
+A check that judges commits after they were made, such as a push guard reading the commits
+it sends, applies the same rules with `moxi_repo.commit_rules_problems(root, text)`: the
+problems the piece would print for message `text`, read with the piece's settings and the
+comment and trailer config of the repo at `root`, and none where the piece is not
+registered or is disabled.
+
 ## The command `moxi repo rules`
 
 `moxi repo rules [PATH]` prints what a committer must know before committing in the repo
@@ -443,6 +449,10 @@ repo keys every repo by its path. With the projects module installed
 
 A projects error leaves the key column empty with one line; a listing never fails because
 of it. Without projects, paths work as before. The git hooks never ask projects anything.
+
+Another module resolves its own PATH arguments the same way with
+`moxi_repo.api.resolve_project(arg)`, which raises `moxi_repo.api.ProjectUnavailable`
+with the exit code in `code`.
 
 ## Doctor checks, upgrades and uninstall
 

@@ -80,17 +80,28 @@ def commit_msg(ctx) -> Outcome:
     return Outcome.ok()
 
 
+#: The git config `git_settings` reads, as a `--get-regexp` pattern.
+_GIT_SETTINGS = r"core\.comment(char|string)|trailer\..*"
+
+
 def git_settings(ctx) -> tuple[str, list[str], str]:
     """What the repo's git config says, in one `git config` call: the comment prefix
     (`core.commentString` or `core.commentChar`, the last one set wins; `#` when neither
     is set or it is `auto`), the trailer keys its `trailer.*` config names (each
     `trailer.<key>.*` and each `trailer.<name>.key` value), and `trailer.separators`."""
-    done = ctx.git("config", "--get-regexp", r"^(core\.comment(char|string)|trailer\..*)$")
-    prefix, configured, separators = "#", [], SEPARATORS
+    done = ctx.git("config", "-z", "--get-regexp", f"^({_GIT_SETTINGS})$", binary=True)
     if done.returncode != 0:
-        return prefix, configured, separators
-    for line in done.stdout.splitlines():
-        name, _, value = line.partition(" ")
+        return _read_settings([])
+    from moxi_repo.run import parse_config
+
+    return _read_settings(parse_config(done.stdout))
+
+
+def _read_settings(pairs) -> tuple[str, list[str], str]:
+    """`git_settings` from `(key, value)` config pairs, keys as git prints them."""
+    prefix, configured, separators = "#", [], SEPARATORS
+    for name, value in pairs:
+        value = value or ""
         if name in ("core.commentchar", "core.commentstring"):
             if value and value != "auto":
                 prefix = value
@@ -102,6 +113,32 @@ def git_settings(ctx) -> tuple[str, list[str], str]:
             if var == "key" and value.strip():
                 configured.append(value.strip().rstrip(separators + " \t"))
     return prefix, configured, separators
+
+
+def commit_rules_problems(root, text: str) -> list[str]:
+    """Every rule of this piece that `text`, a commit message, breaks in the repo at
+    `root`, read with the settings the piece has in that repo's git config and the repo's
+    comment and trailer config; empty when the piece is not registered there, or is
+    disabled. For a check that judges a commit after it was made (a push guard reading the
+    commits it sends) by the rules its commit-msg event applied. One `git config` call."""
+    from moxi_repo.gitrun import git
+    from moxi_repo.run import PIECE_PREFIX, enabled, parse_config, pieces_of, settings_of
+
+    section = re.escape(PIECE_PREFIX + PIECE_ID + ".")
+    done = git(root, "config", "-z", "--get-regexp",
+               f"^({section}.*|{_GIT_SETTINGS})$", binary=True)
+    if done.returncode not in (0, 1):
+        raise OSError(f"git config failed in {root}: {done.stderr.strip()}")
+    pairs = parse_config(done.stdout) if done.returncode == 0 else []
+    piece = pieces_of(pairs).get(PIECE_ID)
+    if piece is None or not enabled(piece):
+        return []
+    settings = settings_of(piece)
+    comment, configured, separators = _read_settings(
+        [(k, v) for k, v in pairs if not k.startswith(PIECE_PREFIX)])
+    return check_message(text, refused=settings.get(REFUSED_TRAILER, ()),
+                         patterns=settings.get(TAG_PATTERN, ()), comment=comment,
+                         root=str(root), configured=configured, separators=separators)
 
 
 def comment_prefix(ctx) -> str:
