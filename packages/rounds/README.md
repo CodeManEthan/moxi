@@ -489,7 +489,8 @@ report of the stage used.
 An as-built choice the operator would notice is a `[[decision]]`, with a `weight`
 (`major` or `minor`) and whether it `forecloses` a capability (then it is major). Each
 is a record of the round, `B1.M1`, with the options `accept` and `reject`; it holds no
-stage. A later report may list it again as heavy or heavier, never lighter. He rules it
+stage. A later report may list it again with the same sentence, as heavy or heavier,
+never lighter; another sentence under its id is refused. He rules it
 with `rule ROUND B1.M1=accept|reject --record PTR`; a rejected one is also a waiting
 item, `B1.M1`, until `mark ROUND B1.M1 --done --record PTR` names the fix. A report of
 `kind = "majors"`, by a checker who built none of the round, declares decisions no

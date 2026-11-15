@@ -124,6 +124,22 @@ def test_verdict_prints_each_decision_with_the_ruling_that_settles_it(built, cap
     assert f"his to rule: moxi rounds rule {ROUND} B1.M1=accept|reject --record PTR" in out
 
 
+def test_a_decision_listed_again_with_another_sentence_is_refused(built):
+    round_dir, tree = built
+    verify(round_dir, tree.rev(), decision(weight="minor"))
+    before = raw(round_dir)
+
+    said = refused(verify, round_dir, tree.rev(),
+                   decision(weight="major", text="a wholly different choice"),
+                   name="second.md")
+
+    assert (f"the decision B1.M1 is on record as '{RETRIED}', from report.md, and the "
+            "report lists M1 as 'a wholly different choice'") in said
+    assert raw(round_dir) == before
+    held = decisions.find(folded(round_dir), "B1.M1")
+    assert (held.text, held.weight) == (RETRIED, "minor")
+
+
 def test_a_later_report_leaves_a_decision_on_record_and_may_only_make_it_heavier(built):
     round_dir, tree = built
     verify(round_dir, tree.rev(), decision(weight="minor"))

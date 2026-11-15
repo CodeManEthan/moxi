@@ -41,11 +41,11 @@ a finding new to the build takes an id no earlier report of the stage used
 (`findings`). Each waiting item the report lists is an open waiting item of the round
 from the moment it is recorded, and takes an id no earlier report of the stage used;
 a later report of the same build may list an item again with the sentence on record,
-and it is the same item (`waits`). Each decision it lists is a record of the round in a question's basic
-form, and stays on it: a decision listed again may be as heavy or heavier, never
-lighter (`decisions`). A
-report whose model the `models` setting places in a weaker tier than the
-`verify-build` step names for its pass is recorded with `model_tiers.BELOW_TIER`.
+and it is the same item (`waits`). Each decision it lists is a record of the round in a
+question's basic form, and stays on it: a decision listed again keeps its sentence and
+may be as heavy or heavier, never lighter (`decisions`). A report whose model the
+`models` setting places in a weaker tier than the `verify-build` step names for its
+pass is recorded with `model_tiers.BELOW_TIER`.
 
 **Against the version it read.** A report names the frozen version its pass read, and
 its verdict is recorded for that version, whether or not a later one was frozen since
@@ -389,12 +389,22 @@ def _decision(one: report_block.Decision) -> dict:
 def _decisions_unmet(state: states.State,
                      declared: list[tuple[str, report_block.Decision]]) -> list[Unmet]:
     """What refuses the decisions a report declares, each with its stage: one on record
-    listed lighter, and a new one under an id an earlier report of its stage used."""
+    listed with another sentence or lighter, and a new one under an id an earlier
+    report of its stage used."""
     unmet = []
     for stage, one in declared:
         key = f"{stage}.{one.id}"
         held = decisions.find(state, key)
-        if held is not None:
+        if held is not None and held.text != one.text:
+            # An id names one decision: the operator rules the sentence on record, so a
+            # new sentence under the same id would be ruled as the old one.
+            unmet.append(Unmet(
+                f"the decision {key} is on record as {held.text!r}, from {held.origin}, "
+                f"and the report lists {one.id} as {one.text!r}: an id names one "
+                "decision, and a new decision takes a new id",
+                f"list {one.id} with the sentence on record, or give the new decision "
+                "an id no report of the stage used"))
+        elif held is not None:
             lighter = decisions.lighter(one.weight, forecloses=one.forecloses, than=held)
             if lighter:
                 unmet.append(Unmet(

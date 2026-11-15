@@ -14,7 +14,8 @@ whether it `forecloses` a capability, and it offers two options, `accept` and
 lists it. A report may list a recorded one again with the same or a heavier `weight`
 and `forecloses`, which then become its own; one that lightens either is refused, so no
 report removes or lowers a decision. A new decision takes an id no earlier report of
-its stage used. The sentence is the one it was declared with.
+its stage used. The sentence is the one it was declared with: a report that lists
+the id with another sentence is refused.
 
 **His ruling.** `rule ROUND B2.M1=accept|reject --record PTR [--text TEXT]` rules one;
 it is one `ruling.recorded` event, of substance, that applies to no stage. A second
