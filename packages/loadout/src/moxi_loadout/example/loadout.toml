@@ -8,7 +8,9 @@
 
 # The global instruction file: off (loadout touches none), managed (your own CLAUDE.md
 # and AGENTS.md stay, and loadout adds its part to each) or if-absent (global.md is
-# placed where a harness has no global file).
+# placed where a harness has no global file). Text for one harness goes in
+# global.claude.md, global.codex.md or global.opencode.md beside global.md: each harness
+# reads global.md and its own part.
 #[global]
 #mode = "off"
 

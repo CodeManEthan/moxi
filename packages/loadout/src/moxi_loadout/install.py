@@ -78,6 +78,8 @@ class Outcome:
     notes: list[str] = field(default_factory=list)
     code: int = 0
     orphans: list[tuple[str, str]] = field(default_factory=list)
+    #: The global file's notes and warns, `(level, line)`, for the doctor's global row.
+    global_lines: list[tuple[str, str]] = field(default_factory=list)
 
     def as_json(self) -> dict:
         counts: dict[str, int] = {}
@@ -119,7 +121,7 @@ def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
         notes.append(differ)
     return Outcome(rows, list(plan.lines) + run.lines,
                    list(dict.fromkeys(plan.notes + run.notes + notes)), code,
-                   orphans(plan, plan.ledger))
+                   orphans(plan, plan.ledger), run.global_lines)
 
 
 def _check_placed(plan: planner.Plan, git: ignores.Git) -> list[str]:
@@ -176,27 +178,47 @@ def global_preview(folder=None, *, resolver=planner.resolve_key,
                    git_seconds: float | None = None) -> dict:
     """What the next install makes of each global file, for `global show`:
     `{"mode": <the manifest's mode>, "files": [...]}`. Each file the managed part edits is
-    `{"file", "changes", "diff"}`, `diff` a unified diff from the file as it is to the file
-    after install (empty when unchanged). Each global file `if-absent` places is
-    `{"file", "changes", "placed": True, "state", "diff"}`, `diff` then the reason its
-    state isn't `ok`. Takes no lock, writes nothing; `git_seconds` as for `status`."""
+    `{"file", "harness", "parts", "changes", "diff"}`, `diff` a unified diff from the file
+    as it is to the file after install (empty when unchanged). Each global file
+    `if-absent` places is `{"file", "harness", "parts", "changes", "placed": True, "state",
+    "diff"}`, `diff` then the reason its state isn't `ok`. `parts` are the absolute paths
+    the harness reads through loadout: the shared file, then its part while in use (none
+    in `off`). Takes no lock, writes nothing; `git_seconds` as for `status`."""
     import difflib
 
+    from moxi_loadout import globalfile
+    from moxi_loadout import harness as hz
+
     plan, run = _plan(folder, resolver, git_seconds)
+    mode, shared = plan.manifest.global_mode, plan.manifest.global_file
+
+    def parts(harness: str) -> list[str]:
+        if mode == "off" or shared is None or harness not in hz.HARNESSES:
+            return []
+        return [str(p) for p in globalfile.reads(shared, harness)]
+
     shown = entries.preview(run)
+    owner = {}
+    for a in run.actions:
+        where = a.where
+        owner[where.file if a.entry else where.get("file")] = (
+            where.harness if a.entry else where.get("harness", ""))
     out = []
     for path, (now, then) in sorted(shown.items()):
         a, b = now.decode("utf-8", "replace"), then.decode("utf-8", "replace")
         diff = "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True),
                                             path, f"{path} after install"))
-        out.append({"file": path, "changes": a != b, "diff": diff})
+        h = owner.get(path, "")
+        out.append({"file": path, "harness": h, "parts": parts(h), "changes": a != b,
+                    "diff": diff})
     for w in plan.wants:
         if w.kind == planner.GLOBAL_KIND:
             state, reason, _ = planner.state_of(w)
             out.append({"file": str(w.item.dest if w.item else w.harness),
+                        "harness": w.harness, "parts": parts(w.harness),
                         "changes": state != "ok", "placed": True, "state": state,
                         "diff": reason})
-    return {"mode": plan.manifest.global_mode, "files": out}
+    return {"mode": mode, "files": out}
 
 
 # -- install --------------------------------------------------------------------------------
@@ -291,9 +313,11 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     _replace_generated_global(claims, machine.backups_keep, say)
     written: list[Row] = []
     notes: list[str] = []
+    said: list[tuple[str, str]] = []
 
     def harness_entries() -> None:
         run = entries.plan(found, machine.source, data, claims=claims)
+        said.extend(run.global_lines)
         # The entries and their records land together: an interrupt waits for the ledger
         # write, so an entry loadout wrote is never left unrecorded (the next run would
         # take it for the user's).
@@ -407,7 +431,7 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
     repo_link.sync(machine.source, machine.reinstall_on_commit, say=say)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
-                   planner.exit_code(codes))
+                   planner.exit_code(codes), global_lines=said)
 
 
 def _cover(in_scope, plain, forced, seeded, placed, data, rows, say) -> set[str]:

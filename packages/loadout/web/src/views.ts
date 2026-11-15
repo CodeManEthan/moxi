@@ -209,7 +209,7 @@ export function replaceAct(row: Row): Act & { sheet: string[] } {
 }
 
 /** The lines the sheet shows before `global remove`: what comes out of each global file. */
-export function globalOffSheet(global: Global | null): string[] {
+export function globalRemoveSheet(global: Global | null): string[] {
   const lines = ["Runs moxi loadout global remove: the global mode becomes off, and loadout "
                  + "takes its own part out of each global file, leaving your text. An edited "
                  + "copy loadout placed moves to Moxi's displaced folder."];
@@ -504,8 +504,8 @@ export function globalView(global: Global): GlobalView {
   const line = !global.chosen
     ? "The manifest chooses no global mode yet, so it reads off and loadout touches no global file."
     : global.mode === "off" ? "Off: loadout touches no global file."
-    : global.mode === "managed" ? "Managed: your text stays, and loadout adds its own part to each global file."
-    : "Only where absent: where a harness has no global file, loadout places global.md there.";
+    : global.mode === "managed" ? "Managed: your text stays, and loadout adds the shared text and the harness's part to each global file."
+    : "Only where absent: where a harness has no global file, loadout places global.md there, or a file of global.md and that harness's part.";
   const modes = (["managed", "if-absent"] as const)
     .filter((mode) => !(global.chosen && global.mode === mode))
     .map((mode) => ({ mode, label: MODE_LABELS[mode],

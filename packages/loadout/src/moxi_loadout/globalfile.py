@@ -69,6 +69,13 @@ def parts(shared: str | os.PathLike) -> dict[str, Path]:
     return {h: p for h in hz.HARNESSES if os.path.lexists(p := part_path(shared, h))}
 
 
+def reads(shared: str | os.PathLike, harness: str) -> list[Path]:
+    """The files `harness` reads through loadout: the shared file, then its part while
+    that is in use."""
+    part = part_path(shared, harness)
+    return [Path(os.path.abspath(shared))] + ([part] if os.path.lexists(part) else [])
+
+
 def read(path: str | os.PathLike) -> str:
     """A part's or the shared file's text. Raises `OSError` or `UnicodeDecodeError`."""
     return Path(path).read_text(encoding="utf-8")
@@ -284,7 +291,7 @@ def _plain_json(text: str) -> str:
     return "".join(out)
 
 
-__all__ = ["MARKER", "GENERATED_MARKER", "END", "part_path", "parts", "read", "assemble",
+__all__ = ["MARKER", "GENERATED_MARKER", "END", "part_path", "parts", "reads", "read", "assemble",
            "named", "block", "generated_path", "generated_bytes", "generated_state",
            "is_generated", "mistyped", "Crossing", "crossed", "OPENCODE_CONFIGS",
            "instructions"]

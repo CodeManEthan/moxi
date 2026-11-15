@@ -134,6 +134,9 @@ class Run:
     docs: dict = field(default_factory=dict)
     refused: dict = field(default_factory=dict)
     shown: dict = field(default_factory=dict)   # file -> (before, after) bytes
+    #: The global file's notes and warns, `(level, line)` with level `note` or `warn`, for
+    #: the doctor's global row; each line is also among `notes` or `lines`.
+    global_lines: list = field(default_factory=list)
 
 
 # -- what the manifest wants ---------------------------------------------------------------
@@ -279,10 +282,14 @@ def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
     every = [h for h in rows if h in hz.HARNESSES]
     if mode != "off" and path is not None:
         for p in globalfile.mistyped(path, rows):
-            run.notes.append(f"{p} is named like a part of the global file but isn't one, "
-                             "so nothing reads it")
-    if mode != "off" and path is not None:
-        run.notes += _instructions_notes(path, records)
+            _say(run, "note", f"{p} is named like a part of the global file but isn't "
+                 "one, so nothing reads it")
+        for line in _instructions_notes(path, records):
+            _say(run, "warn", line)
+        override = hz.codex_home() / "AGENTS.override.md"
+        if "codex" in every and _holds_text(override):
+            _say(run, "warn", f"Codex reads {override} instead of AGENTS.md, so loadout's "
+                 "global text doesn't reach it")
     recorded = {r.get("harness") for r in records if r.get("item") == "global:global"}
     # OpenCode's global entry is its `instructions` path in `opencode.json`, not a line in
     # its `AGENTS.md`, so that file is never edited here.
@@ -294,6 +301,7 @@ def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
         standing[h] = c
         carried.add(("global:global", h))
         if c.verdict == "blocked":
+            run.global_lines.append(("warn", c.line))
             run.rows.append(Row(USER, "global", "global", h, "blocked", c.line,
                                 str(hz.global_file(h)), REFUSED))
         else:
@@ -338,6 +346,19 @@ def _global(manifest, rows, run, carried, records=()) -> list[Entry]:
                              "instructions", ["instructions", os.path.abspath(path)],
                              os.path.abspath(path)))
     return out
+
+
+def _say(run: Run, level: str, line: str) -> None:
+    """One of the global file's notes (`note`) or warns (`warn`)."""
+    run.global_lines.append((level, line))
+    (run.notes if level == "note" else run.lines).append(line)
+
+
+def _holds_text(path: Path) -> bool:
+    try:
+        return bool(path.read_bytes().strip())
+    except OSError:
+        return False
 
 
 def _instructions_notes(path, records) -> list[str]:

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   addChoices, canReplace, cellLine, choiceScope, commandLine, countLine, driftView, exitLine,
-  globalOffSheet, globalView, installAct, installChoices, itemAct, itemsView, jobPathOf, jobView,
+  globalRemoveSheet, globalView, installAct, installChoices, itemAct, itemsView, jobPathOf, jobView,
   jobRefusal, parseKept, readState, replaceAct, replaceValue, saidOf, startedOf, toggleAct,
 } from "../src/views.ts";
 
@@ -196,9 +196,11 @@ test("the global view offers the modes not in force, and off unless chosen off",
 });
 
 test("the global remove sheet says what leaves each file", () => {
-  const lines = globalOffSheet({ problem: null, mode: "managed", chosen: true, files: [
-    { file: "/h/.claude/CLAUDE.md", changes: false, diff: "", placed: false, state: null },
-    { file: "/h/.codex/AGENTS.md", changes: false, diff: "", placed: true, state: "ok" }] });
+  const lines = globalRemoveSheet({ problem: null, mode: "managed", chosen: true, files: [
+    { file: "/h/.claude/CLAUDE.md", harness: "claude", parts: ["/l/global.md"], changes: false,
+      diff: "", placed: false, state: null },
+    { file: "/h/.codex/AGENTS.md", harness: "codex", parts: ["/l/global.md"], changes: false,
+      diff: "", placed: true, state: "ok" }] });
   assert.match(lines[0], /global remove/);
   assert.deepEqual(lines.slice(1), ["/h/.claude/CLAUDE.md: loadout's part comes out.",
                                     "/h/.codex/AGENTS.md: the copy loadout placed is removed."]);

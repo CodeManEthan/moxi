@@ -10,7 +10,9 @@ The core's own rows already show every loadout placement that isn't ok. These ad
   it wrote them (`warn`).
 - generated: generated agent files no agent uses any more (`warn`): an install deletes
   one as it was generated, and leaves one edited by hand for the user to delete.
-- global: the global mode, and its state per harness.
+- global: the global mode, and its state per harness with the files it reads; the
+  global file's notes (a mistyped part) and warns (Codex's `AGENTS.override.md`, harness
+  files that are one file, an OpenCode `instructions` entry naming the global text).
 - hooks: each hook's program resolves (`warn` when one doesn't).
 - projects: a section named by key while projects is absent (`warn`); else the link,
   `off` without projects.
@@ -171,14 +173,28 @@ def _global(found, outcome) -> Row:
     if found.mode is None:
         return Row(MODULE, "global", "ok", "off: the manifest sets no [global] mode",
                    "moxi loadout global mode MODE")
+    from moxi_loadout import globalfile
+    from moxi_loadout import harness as hz
+
     states: dict[str, str] = {}
     for r in outcome.rows:
         if r.kind == "global":
             if r.state != "ok" or r.harness not in states:
                 states[r.harness] = r.state
-    detail = f"mode {mode}" + (": " + ", ".join(f"{h} {s}" for h, s in sorted(
+
+    def reads(h: str) -> str:
+        if mode == "off" or found.global_file is None or h not in hz.HARNESSES:
+            return ""
+        return " (" + ", ".join(p.name for p in globalfile.reads(found.global_file, h)) + ")"
+
+    detail = f"mode {mode}" + (": " + ", ".join(f"{h} {s}{reads(h)}" for h, s in sorted(
         states.items())) if states else "")
-    if any(s not in ("ok", "off") for s in states.values()):
+    said = list(dict.fromkeys(list(outcome.global_lines) + [
+        ("warn", r.reason) for r in outcome.rows
+        if r.kind == "global" and r.state == "blocked" and r.reason]))
+    warns = [line for level, line in said if level == "warn"]
+    detail = "; ".join([detail] + [line for _, line in said])
+    if warns or any(s not in ("ok", "off") for s in states.values()):
         return Row(MODULE, "global", "warn", detail, "moxi loadout global show --diff")
     return Row(MODULE, "global", "ok", detail)
 

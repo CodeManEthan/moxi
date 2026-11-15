@@ -591,7 +591,10 @@ def test_if_absent_to_managed_keeps_an_edited_generated_file_placed(lo):
 # -- moving an existing install ------------------------------------------------------------
 
 def _instructions_notes(out):
-    return [n for n in out.notes if "instructions entry" in n]
+    warns = [line for level, line in out.global_lines if level == "warn"]
+    lines = [n for n in out.lines if "instructions entry" in n]
+    assert lines == [n for n in warns if "instructions entry" in n]
+    return lines
 
 
 def test_an_instructions_entry_naming_the_global_text_is_noted_and_left(lo):
@@ -667,3 +670,75 @@ def test_the_built_claude_and_codex_forms_take_their_parts_in_one_install(lo):
         "Be brief.\n\nCodex only.\n<!-- moxi loadout end -->\n")
     assert cli.main(["global", "remove"]) == 0
     assert claude.read_text() == mine and codex.read_text() == "# Codex mine\n"
+
+
+# -- show, status and the doctor -----------------------------------------------------------
+
+def _doctor_global():
+    from moxi_loadout import doctor
+
+    return next(r for r in doctor.rows() if r.name == "global")
+
+
+def test_show_names_the_files_each_harness_reads(lo, capsys):
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    mode(lo, "managed")
+    assert cli.main(["global", "show", "--json"]) == 0
+    files = {f["harness"]: f for f in json.loads(capsys.readouterr().out)["files"]}
+    assert files["claude"]["parts"] == [str(lo / "global.md"), str(lo / "global.claude.md")]
+    assert files["codex"]["parts"] == [str(lo / "global.md")]
+    assert files["claude"]["file"] == str(harness.global_file("claude"))
+    assert cli.main(["global", "show"]) == 0
+    text = capsys.readouterr().out
+    assert f"claude reads {lo / 'global.md'} and {lo / 'global.claude.md'}\n" in text
+    assert f"codex reads {lo / 'global.md'}, no part\n" in text
+    # If-absent names them too; off names none.
+    mode(lo, "if-absent")
+    placed = {f["harness"]: f for f in install.global_preview()["files"]}
+    assert placed["claude"]["parts"] == [str(lo / "global.md"), str(lo / "global.claude.md")]
+    mode(lo, "off")
+    assert all(f["parts"] == [] for f in install.global_preview()["files"])
+
+
+def test_the_doctor_row_names_each_harness_state_and_parts(lo):
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    (lo / "global.claud.md").write_text("Never read.\n")
+    (lo / "global.old.md").write_text("Kept aside.\n")
+    mode(lo, "managed")
+    assert install.install().code == 0
+    row = _doctor_global()
+    assert row.state == "ok", row.detail
+    assert row.detail.startswith("mode managed: claude ok (global.md, global.claude.md), "
+                                 "codex ok (global.md), opencode ok (global.md)")
+    assert "global.claud.md" in row.detail and "global.old.md" not in row.detail
+
+
+def test_a_codex_override_file_warns_that_the_block_doesnt_reach_codex(lo):
+    mode(lo, "managed")
+    override = harness.codex_home() / "AGENTS.override.md"
+    override.parent.mkdir(parents=True, exist_ok=True)
+    override.write_text("\n")    # only whitespace: Codex reads AGENTS.md
+    assert install.install().code == 0
+    assert _doctor_global().state == "ok"
+    override.write_text("Override.\n")
+    out = install.status()
+    assert out.code == 0 and any("AGENTS.override.md" in line for line in out.lines)
+    row = _doctor_global()
+    assert row.state == "warn" and "AGENTS.override.md" in row.detail
+    assert override.read_text() == "Override.\n"
+    mode(lo, "off")
+    assert install.install().code == 0
+    assert _doctor_global().state == "ok"
+
+
+def test_harness_files_that_are_one_file_warn_in_the_doctor_row(lo):
+    mode(lo, "managed")
+    claude, codex = harness.global_file("claude"), harness.global_file("codex")
+    claude.parent.mkdir(parents=True)
+    claude.write_text("Mine.\n")
+    codex.parent.mkdir(parents=True)
+    os.symlink(claude, codex)
+    install.install()
+    row = _doctor_global()
+    assert row.state == "warn" and "are one file" in row.detail
+    assert str(claude) in row.detail and str(codex) in row.detail

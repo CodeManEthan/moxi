@@ -162,10 +162,10 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
         "/api/status", "/api/list", "/api/global", "/api/projects", "/api/drift", "/api/job"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/remove", "/api/enable", "/api/disable", "/api/global-mode",
-        "/api/install", "/api/replace", "/api/global-off"}
+        "/api/install", "/api/replace", "/api/global-remove"}
     assert {p for p, r in routes.items() if r.get("confirmed")} == {
-        "/api/replace", "/api/global-off"}
-    assert all(routes[p]["status"] == "/api/job" for p in ("/api/replace", "/api/global-off"))
+        "/api/replace", "/api/global-remove"}
+    assert all(routes[p]["status"] == "/api/job" for p in ("/api/replace", "/api/global-remove"))
     assert not any(r["gateway"] or r["stream"] for r in routes.values())
 
 
@@ -195,6 +195,7 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
     assert paths == {
         "/api/status rows[].target", "/api/job outcome.rows[].target",
         "/api/list manifest", "/api/list sections[].root", "/api/global files[].file",
+        "/api/global files[].parts[]",
         "/api/projects projects[].root"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
@@ -498,7 +499,7 @@ def test_a_job_whose_pid_cant_be_recorded_is_still_accepted(lo, spawned, monkeyp
                       "projects": ["alpha"]},
      ["install", "--replace=skill:review@claude", "--replace=/srv/alpha/.claude/skills/x",
       "--project=alpha"]),
-    ("/api/global-off", {}, ["global", "remove"]),
+    ("/api/global-remove", {}, ["global", "remove"]),
 ])
 def test_a_confirmed_act_runs_as_the_job_its_key_names(lo, spawned, path, body, verb):
     status, answer = post(path, body, key=KEY)
@@ -507,14 +508,14 @@ def test_a_confirmed_act_runs_as_the_job_its_key_names(lo, spawned, path, body, 
 
 
 def test_a_confirmed_act_needs_its_key(lo, spawned):
-    status, _ = post("/api/global-off", {})
+    status, _ = post("/api/global-remove", {})
     assert status == 400 and spawned == []
 
 
 def test_a_confirmed_repeat_gets_the_first_answer_and_starts_nothing_more(lo, spawned):
     app = served()
-    first = post("/api/global-off", {}, key=KEY, app=app)
-    assert post("/api/global-off", {}, key=KEY, app=app) == first
+    first = post("/api/global-remove", {}, key=KEY, app=app)
+    assert post("/api/global-remove", {}, key=KEY, app=app) == first
     assert len(spawned) == 1
 
 
@@ -537,11 +538,11 @@ def test_a_repeat_while_the_first_still_runs_is_409(lo, monkeypatch):
 
     async def both():
         app = served()
-        first = asyncio.create_task(_send(app, "POST", "/api/global-off", body={}, key=KEY))
+        first = asyncio.create_task(_send(app, "POST", "/api/global-remove", body={}, key=KEY))
         while not entered.is_set():
             await asyncio.sleep(0.01)
         try:
-            second = await _send(app, "POST", "/api/global-off", body={}, key=KEY)
+            second = await _send(app, "POST", "/api/global-remove", body={}, key=KEY)
         finally:
             release.set()
         return await first, second

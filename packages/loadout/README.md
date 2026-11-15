@@ -34,7 +34,13 @@ and `moxi loadout status` says what has drifted.
 5. The global instruction file, `global.md` in your folder, reaches every session in one
    of three modes: `off` (the default), `managed` (a line or a marked block added to your
    own file, which `moxi loadout global remove` takes out exactly) or `if-absent` (placed
-   only where a harness has none). `global show --diff` previews the next install.
+   only where a harness has none). Text for one harness goes beside it in
+   `global.claude.md`, `global.codex.md` or `global.opencode.md`: each harness reads
+   `global.md` and its own part, never another's. Claude gets an `@` line per file; Codex
+   gets one marked block in its `AGENTS.md`, rewritten by each install; in
+   `if-absent` a harness with a part gets a generated file of both. Use absolute paths for
+   `@` imports in the global text, since a relative one resolves against the file Claude
+   reads. `global show --diff` previews the next install and names each harness's parts.
 6. No placement lands where git would commit it. In a project tree it writes a
    `.gitignore` of its own, which ignores itself, before it places anything there; where
    a `.gitignore` of yours would leave a target committed, the target is not placed and

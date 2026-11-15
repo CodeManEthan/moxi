@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- The global instruction file gains a part per harness. `global.md` is what every agent
+  gets; `global.claude.md`, `global.codex.md` and `global.opencode.md`, beside it, are one
+  harness's own text, found by name with no manifest key. A part is in use while its
+  file exists, even empty. Each harness reads the shared text and its own part, never
+  another harness's.
+- Managed mode: Claude's `CLAUDE.md` gets a second `@` line for its part; the Codex block
+  holds the shared text, a blank line and the part's text, and its marker names both
+  files. A block of an empty shared text loses its blank line, an update made once.
+- If-absent mode: a harness with a part gets a generated file of the shared text and its
+  part, under loadout's state folder, placed where its global file is absent; a harness
+  with no part still gets a link to `global.md`. The generated file's first line names
+  the files and a hash; one edited by hand reads `modified` and keeps its placement until
+  `install --replace global:global@<harness>` backs it up and writes it again.
+- Harness global files that are one real file (one a link to another, or to another
+  harness's part) are left as they are and read `blocked`, so no harness reads another's
+  part; uninstall refuses while one is recorded.
+- `global show` and its `--json` name the files each harness reads (`harness`, `parts`);
+  the page's global view lists them under each file. The doctor's global row names each
+  harness's state and parts, and warns on Codex's `AGENTS.override.md`, harness files
+  that are one file, and an OpenCode `instructions` entry naming the global text. A file named like a mistyped part is noted.
+- The page's confirmed act is `POST /api/global-remove` (was `/api/global-off`), with no
+  old route.
+
 ## 0.1.4 (2026-11-08)
 
 - `moxi loadout global off` is now `moxi loadout global remove`, with no alias.

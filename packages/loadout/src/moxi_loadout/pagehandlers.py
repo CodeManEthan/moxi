@@ -27,7 +27,7 @@ starts an act refuses (422, nothing written):
 - a job that didn't start (its record is removed), or a confirmed act's key that names a
   job of other arguments.
 
-A confirmed act (`/api/replace`, `/api/global-off`) uses its idempotency key as the job's
+A confirmed act (`/api/replace`, `/api/global-remove`) uses its idempotency key as the job's
 id, so a retry after the page server restarted finds the job it started and answers 202
 for it again, without starting a second. It answers `Accepted` or a refusal, never a
 plain answer. Other acts use a fresh id.
@@ -140,7 +140,8 @@ def global_preview(call: Any) -> dict[str, Any]:
         "problem": None,
         "mode": preview["mode"],
         "chosen": chosen,
-        "files": [{"file": os.fspath(f["file"]), "changes": bool(f["changes"]),
+        "files": [{"file": os.fspath(f["file"]), "harness": f["harness"],
+                   "parts": [os.fspath(p) for p in f["parts"]], "changes": bool(f["changes"]),
                    "diff": f["diff"], "placed": bool(f.get("placed", False)),
                    "state": f.get("state")} for f in preview["files"]],
     }
@@ -290,7 +291,7 @@ def disable(call: Any) -> Any:
 
 def global_mode(call: Any) -> Any:
     """`POST /api/global-mode`: `moxi loadout global mode MODE`, as a job. The mode `off`
-    is `/api/global-off`'s, which is confirmed."""
+    is `/api/global-remove`'s, which is confirmed."""
     return _start(["global", "mode", call.body["mode"]])
 
 
@@ -317,11 +318,11 @@ def replace(call: Any) -> Any:
     return _start(["install", *flags, *_sections(call.body)], key=call.key)
 
 
-def global_off(call: Any) -> Any:
-    """`POST /api/global-off`, confirmed: `moxi loadout global remove`, as a job under the
+def global_remove(call: Any) -> Any:
+    """`POST /api/global-remove`, confirmed: `moxi loadout global remove`, as a job under the
     act's key."""
     return _start(["global", "remove"], key=call.key)
 
 
 __all__ = ["status", "listing", "global_preview", "projects", "drift", "job", "add", "remove",
-           "enable", "disable", "global_mode", "install", "replace", "global_off"]
+           "enable", "disable", "global_mode", "install", "replace", "global_remove"]
