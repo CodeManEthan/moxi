@@ -132,9 +132,10 @@ def test_readers_take_the_higher_version(tmp_path):
 
 
 def released(tags=("0.1.7", "0.1.8", "0.1.10"), published=("0.1.7", "0.1.8"),
-             body=None, broken=None):
+             body=None, broken=None, files=None):
     """A fetch answering as GitHub and the index would: the core's release `tags`, the
-    `published` versions, and the catalogue at each tag; `broken` URLs fail to read."""
+    `published` versions, and the catalogue at each tag; `broken` URLs fail to read.
+    `files` gives a version's page another list of files than one unyanked file."""
     asked = []
 
     def fetch(url):
@@ -146,7 +147,8 @@ def released(tags=("0.1.7", "0.1.8", "0.1.10"), published=("0.1.7", "0.1.8"),
                               + [{"ref": "refs/tags/moxi-v0.2.0rc1"}]).encode()
         for version in published:
             if url == catalogue.INDEX_URL.format(version=version):
-                return json.dumps({"urls": [{"filename": "f", "yanked": False}]}).encode()
+                found = (files or {}).get(version, [{"filename": "f", "yanked": False}])
+                return json.dumps({"urls": found}).encode()
         if url.startswith("https://pypi.org/"):
             raise catalogue.NotFound(f"{url} is not published yet (404)")
         if body is not None:
@@ -169,6 +171,16 @@ def test_refresh_keeps_the_catalogue_of_the_highest_released_core(tmp_path):
     assert said.startswith("catalogue version 9 kept in ")
     assert catalogue.cached_path(env).read_text() == text(version=9)
     assert catalogue.load(env).version == 9
+
+
+def test_a_version_whose_files_are_all_yanked_or_none_is_not_released(tmp_path):
+    env = {"MOXI_HOME": str(tmp_path)}
+    yanked = [{"filename": "a", "yanked": True}, {"filename": "b", "yanked": True}]
+    fetch = released(published=("0.1.7", "0.1.8", "0.1.10"),
+                     files={"0.1.10": yanked, "0.1.8": []})
+    kept, _ = catalogue.refresh(env, fetch=fetch)
+    assert fetch.asked[-1] == catalogue.FILE_URL.format(tag="moxi-v0.1.7")
+    assert kept.version == 9
 
 
 def test_refresh_asks_about_three_tags_at_most(tmp_path):
