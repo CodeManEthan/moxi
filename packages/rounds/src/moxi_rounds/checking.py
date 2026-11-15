@@ -66,6 +66,8 @@ RAN = "check.ran"
 PLACEHOLDERS = ("round", "stage", "repo", "root", "branch", "tip", "into")
 #: The states of a build that has work: what a check runs on.
 WITH_WORK = (builds.BUILDING, builds.MERGED)
+#: How long the push before a read of CI may take.
+PUSH_TIMEOUT_S = 300
 #: The name of a run's output file in the build's scratch folder, by its number.
 OUTPUT = "check-{n}.log"
 
@@ -231,8 +233,18 @@ def seen_of(state: states.State, name: str, *, settings,
             state=now.status.state, tip=tip, clean=clean,
             check=None if argv is None and declared(settings, build.repo) is None
             else tuple(argv or ()),
-            values=None if tip is None else values(name, build, root=root, tip=tip))
+            values=None if tip is None else values(name, build, root=root, tip=tip),
+            ci=_ci_now(settings, build, name=name, root=root, tip=tip))
     return found
+
+
+def _ci_now(settings, build: builds.Build, *, name: str, root, tip: str | None):
+    from . import ci
+
+    found = ci.declared(settings, build.repo)
+    if found is None or tip is None:
+        return None
+    return ci.now_of(found, values(name, build, root=root, tip=tip))
 
 
 # -- the run -----------------------------------------------------------------------------
@@ -272,22 +284,30 @@ class _Look:
     merge_base: str | None = None
     argv: list[str] | None = None
     timeout_s: float | None = None
+    values: dict | None = None
+    ci: object = None
+    local_argv: list[str] | None = None
+    local_due: bool = False
 
 
 def check(name: str, stage: str, *, actor: str, step: str | None = None,
-          timeout_s: float | None = None, settings=None, wait_s: float = write.WAIT_S,
-          at: str | None = None, env=None) -> Ran:
+          full: bool = False, timeout_s: float | None = None, settings=None,
+          wait_s: float = write.WAIT_S, at: str | None = None,
+          env=None) -> Ran | CiChecked:
     """Run the repo's check for the build of `stage` in the round `name` at its tip,
     and record the run; with `step`, run that command step of the user's own instead,
-    and record the run under its name. `timeout_s` is the run's time limit in place of
-    the check's or the step's own. `settings` is what `settings.load()` gives, read now
-    when left out.
+    and record the run under its name. In a repo that declares `ci`, with neither
+    `step` nor `full`, check by CI instead (`CiChecked`): push the tip where the
+    setting names a remote, run the local part unless it passed at the tip, and read
+    CI. `timeout_s` is the time limit of the run rounds makes, in place of its own.
+    `settings` is what `settings.load()` gives, read now when left out.
 
-    Raises `BadArgument` for no stage, a time limit that is not above 0, and a `step`
-    whose name no step of the user's own can have; what `folders.home` raises for a
-    round that can't be found; and `Refused` with every condition that does not hold
-    before the run, or with what changed during it, in which case nothing is
-    recorded."""
+    Raises `BadArgument` for no stage, a time limit that is not above 0, `step` with
+    `full`, and a `step` whose name no step of the user's own can have; what
+    `folders.home` raises for a round that can't be found; and `Refused` with every
+    condition that does not hold before the run, with a refused push, with what
+    changed during the run, or with a failed read of CI when nothing ran, in which
+    case nothing is recorded."""
     if not isinstance(stage, str) or not stage.strip():
         raise BadArgument("no stage is named, so no build is known to check",
                           f"moxi rounds check {name} B<n>, or run moxi rounds check in "
@@ -296,6 +316,9 @@ def check(name: str, stage: str, *, actor: str, step: str | None = None,
         raise BadArgument(f"{timeout_s!r} is no time limit",
                           "give --timeout-s a number of seconds above 0")
     _step_name(name, stage, step)
+    if full and step is not None:
+        raise BadArgument("--full runs the repo's check, and --step a step of your own",
+                          "give one of them")
     project, slug = folders.split(name)
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
@@ -307,26 +330,17 @@ def check(name: str, stage: str, *, actor: str, step: str | None = None,
     def look(view) -> _Look:
         if id(view) not in looked:
             looked[id(view)] = _look(view, name=name, stage=stage, step=step,
-                                     settings=settings, again=again, timeout_s=timeout_s)
+                                     settings=settings, again=again, timeout_s=timeout_s,
+                                     by_ci=step is None and not full)
         return looked[id(view)]
 
     def act(view):
         found = look(view)
-        output = _output_file(found.scratch)
-        started = time.monotonic()
-        try:
-            done = proc.run(found.argv, timeout_s=found.timeout_s,
-                            env=gitreads.environment(), cwd=found.worktree, output=output)
-            code: int | None = done.returncode
-        except subprocess.TimeoutExpired:
-            code = None
-        except OSError as error:
-            where = ("the check's command in the settings" if step is None
-                     else f"the argv of the step {step} in the round's flow")
-            raise RoundsError(f"the command {shlex.join(found.argv)} could not be "
-                              f"started in {found.worktree}: {error}",
-                              f"fix {where}, then {again}") from None
-        return code, round(time.monotonic() - started, 3), output
+        if found.ci is not None:
+            return _by_ci(found, again=again)
+        where = ("the check's command in the settings" if step is None
+                 else f"the argv of the step {step} in the round's flow")
+        return _run(found, found.argv, found.timeout_s, f"fix {where}, then {again}")
 
     first: list[_Look] = []
 
@@ -335,6 +349,8 @@ def check(name: str, stage: str, *, actor: str, step: str | None = None,
         moved = _moved(before, name=name, stage=stage, again=again)
         if moved:
             raise Refused(moved)
+        if before.ci is not None:
+            return _ci_entries(before, result, stage=stage, name=name)
         code, duration_s, output = result
         return write.Entry(RAN, {
             "stage": stage, "step": run_as, "commit": before.tip,
@@ -351,11 +367,157 @@ def check(name: str, stage: str, *, actor: str, step: str | None = None,
         write.Where(home.project, home.folder, slug), actor=actor,
         gates=[gate_and_keep],
         act=act, event=event, long_act=True, wait_s=wait_s, at=at, env=env)
+    if first[0].ci is not None:
+        return _ci_checked(first[0], written, name=name, stage=stage)
     one = written.events[-1]
     return Ran(name=name, stage=stage, step=run_as, commit=one["commit"],
                merge_base=one["merge_base"], argv=tuple(one["argv"]),
                exit_code=one["exit_code"], duration_s=one["duration_s"],
                output=Path(one["output"]), event=one, failed=written.failed)
+
+
+def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
+         fix: str) -> tuple[int | None, float, Path]:
+    """Run `argv` in the build's worktree, its output to a new file in the scratch
+    folder: its exit code (None when ended at `timeout_s`), duration and output file."""
+    output = _output_file(found.scratch)
+    started = time.monotonic()
+    try:
+        done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.environment(),
+                        cwd=found.worktree, output=output)
+        code: int | None = done.returncode
+    except subprocess.TimeoutExpired:
+        code = None
+    except OSError as error:
+        raise RoundsError(f"the command {shlex.join(argv)} could not be started in "
+                          f"{found.worktree}: {error}", fix) from None
+    return code, round(time.monotonic() - started, 3), output
+
+
+# -- by CI -------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class _ByCi:
+    """What the act of a check by CI did: the `pushed` remote, the `local` run as
+    `_run` gives it (None when none ran), the `reading`, or the read that `failed`."""
+
+    pushed: str | None
+    local: tuple | None
+    reading: object = None
+    failed: object = None
+
+
+@dataclass(frozen=True)
+class CiChecked:
+    """A check by CI as `check` recorded it: the round's `name`, the `stage`, the
+    `commit` (the tip), the remote it `pushed` to, the `local` run recorded now (None
+    when none ran: `local_passed` then says whether one passed at the tip before, or
+    the repo has none), the `ci.read` event (`reading`, None when the read failed), the
+    `read_failed` line, and the after-append callbacks that `failed`."""
+
+    name: str
+    stage: str
+    commit: str
+    pushed: str | None
+    local: dict | None
+    local_passed: bool
+    reading: dict | None
+    read_failed: str | None
+    failed: tuple = ()
+
+    @property
+    def passed(self) -> bool:
+        """Whether CI reads green at the tip and the local part passed there."""
+        from . import ci
+
+        local_ok = (self.local_passed if self.local is None
+                    else self.local.get("exit_code") == 0)
+        return (local_ok and self.reading is not None
+                and self.reading.get("reading") == ci.GREEN)
+
+
+def _push(found: _Look, *, again: str) -> None:
+    """Push the tip to the remote the setting names, as a plain push. Raises `Refused`
+    with git's message when the push is refused."""
+    remote, branch = found.ci.remote, found.build.branch
+    argv = ["git", "push", remote, f"{found.tip}:refs/heads/{branch}"]
+    try:
+        done = proc.run(argv, timeout_s=PUSH_TIMEOUT_S, env=gitreads.environment(),
+                        cwd=found.worktree)
+    except subprocess.TimeoutExpired:
+        raise Refused([Unmet(f"{shlex.join(argv)} ran past {PUSH_TIMEOUT_S:g} s, so CI "
+                             "was not read and nothing is recorded", again)]) from None
+    if done.returncode == 0:
+        return
+    said = (done.stderr or b"").decode(errors="replace").strip()
+    rebased = "non-fast-forward" in said or "fetch first" in said
+    fix = (f"the branch was rebased: push it yourself with --force-with-lease, then "
+           f"{again}" if rebased else f"fix what git says, then {again}")
+    raise Refused([Unmet(f"{shlex.join(argv)} was refused, so nothing is recorded: "
+                         f"{said or f'exit {done.returncode}'}", fix)])
+
+
+def _by_ci(found: _Look, *, again: str) -> _ByCi:
+    from . import ci
+
+    pushed = None
+    if found.ci.remote:
+        _push(found, again=again)
+        pushed = found.ci.remote
+    local = None
+    if found.local_due:
+        local = _run(found, found.local_argv, found.timeout_s,
+                     f"fix ci.local in the settings, then {again}")
+        if local[0] != 0:
+            # A failed local run stops the check there: CI is not read.
+            return _ByCi(pushed, local)
+    try:
+        reading = ci.read(found.ci, values=found.values, cwd=found.worktree)
+    except ci.ReadFailed as error:
+        return _ByCi(pushed, local, failed=error)
+    return _ByCi(pushed, local, reading=reading)
+
+
+def _read_failed(name: str, stage: str, error) -> Unmet:
+    return Unmet(f"CI could not be read: {shlex.join(error.command)} {error.why}",
+                 "fix the command (install gh, or gh auth login), or run the full "
+                 f"check, which meets the gate without CI: moxi rounds check {name} "
+                 f"{stage} --full")
+
+
+def _ci_entries(before: _Look, result: _ByCi, *, stage: str, name: str) -> list:
+    from . import ci
+
+    entries = []
+    if result.local is not None:
+        code, duration_s, output = result.local
+        entries.append(write.Entry(RAN, {
+            "stage": stage, "step": ci.LOCAL, "commit": before.tip,
+            "merge_base": before.merge_base, "argv": list(before.local_argv),
+            "exit_code": code, "duration_s": duration_s, "output": str(output)}))
+    if result.reading is not None:
+        found = result.reading
+        entries.append(write.Entry(ci.READ, {
+            "stage": stage, "commit": before.tip, "merge_base": before.merge_base,
+            "status_argv": list(found.status_argv), "ids_argv": list(found.ids_argv),
+            "workflows": [dict(one) for one in found.workflows],
+            "reading": found.whole}))
+    if not entries and result.failed is not None:
+        raise Refused([_read_failed(name, stage, result.failed)])
+    return entries
+
+
+def _ci_checked(before: _Look, written, *, name: str, stage: str) -> CiChecked:
+    from . import ci
+
+    local = next((one for one in written.events if one["type"] == RAN), None)
+    reading = next((one for one in written.events if one["type"] == ci.READ), None)
+    result = written.result
+    failed = (None if result.failed is None
+              else _read_failed(name, stage, result.failed).reason)
+    return CiChecked(name=name, stage=stage, commit=before.tip, pushed=result.pushed,
+                     local=local, local_passed=not before.local_due, reading=reading,
+                     read_failed=failed, failed=written.failed)
 
 
 def _step_name(name: str, stage: str, step: str | None) -> None:
@@ -431,7 +593,7 @@ def _command(state: states.State, build: builds.Build, step: str | None, *, name
 
 
 def _look(view, *, name: str, stage: str, step: str | None, settings, again: str,
-          timeout_s: float | None) -> _Look:
+          timeout_s: float | None, by_ci: bool) -> _Look:
     found = _Look(unmet=[])
     state = view.state
     show = f"moxi rounds show {name}"
@@ -479,9 +641,30 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         found.unmet.append(Unmet(error.reason, error.fix or again))
         return found
     if found.tip is not None:
-        found.argv = fill(words, values(name, build, root=root, tip=found.tip))
+        found.values = values(name, build, root=root, tip=found.tip)
+        found.argv = fill(words, found.values)
     found.timeout_s = timeout_s if timeout_s is not None else own_timeout_s
+    if by_ci:
+        _by_ci_look(found, state, settings, timeout_s=timeout_s)
     return found
+
+
+def _by_ci_look(found: _Look, state: states.State, settings, *,
+                timeout_s: float | None) -> None:
+    """Fill in what a check by CI needs, where the build's repo declares `ci`: the
+    setting, the local argv, and whether the local part is to run at the tip."""
+    from . import ci
+
+    declared_ci = ci.declared(settings, found.build.repo)
+    if declared_ci is None:
+        return
+    found.ci = declared_ci
+    found.timeout_s = timeout_s if timeout_s is not None else declared_ci.local_timeout_s
+    if declared_ci.local is None or found.values is None:
+        return
+    found.local_argv = fill(declared_ci.local, found.values)
+    found.local_due = not passes(state, found.build.stage, ci.LOCAL, tip=found.tip,
+                                 argv=found.local_argv)
 
 
 def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, name: str,
@@ -524,4 +707,4 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "fill", "declared",
            "values", "argv_now", "runs", "newest", "why_not", "passes", "step_entry",
            "commission_of",
-           "Tip", "read_tip", "seen_of", "Ran", "check"]
+           "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]

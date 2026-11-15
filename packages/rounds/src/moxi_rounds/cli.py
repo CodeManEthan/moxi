@@ -958,7 +958,10 @@ def _declare_check(verbs) -> None:
             "the target, the argv, its exit code and duration. With --step, run a "
             "command step of the round's flow the same way, recorded under its name. "
             "Its output goes to check-<n>.log in the build's scratch folder. Nothing is "
-            "recorded when the tip or the worktree changed while it ran.")
+            "recorded when the tip or the worktree changed while it ran. In a repo that "
+            "declares ci, it pushes the tip to ci.remote when set, runs the local part "
+            "unless it passed at the tip, and reads CI; --full runs the full check "
+            "instead.")
     parser = verbs.add_parser("check", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", nargs="?",
                         help="the round, <project>/<slug>; left out in a build's "
@@ -966,9 +969,13 @@ def _declare_check(verbs) -> None:
                              "checked out there")
     parser.add_argument("stage", metavar="STAGE", nargs="?",
                         help="the stage whose build is checked, B<n>; given with ROUND")
-    parser.add_argument("--step", metavar="NAME",
-                        help="run the command step NAME of the round's flow, a step of "
-                             "your own, in place of the repo's check")
+    form = parser.add_mutually_exclusive_group()
+    form.add_argument("--step", metavar="NAME",
+                      help="run the command step NAME of the round's flow, a step of "
+                           "your own, in place of the repo's check")
+    form.add_argument("--full", action="store_true",
+                      help="in a repo that declares ci, run the repo's declared check in "
+                           "place of reading CI")
     parser.add_argument("--timeout-s", metavar="N", type=float, dest="timeout_s",
                         help="end the run's whole process tree after N seconds, in place "
                              "of the check's or the step's own timeout_s")
@@ -989,7 +996,9 @@ def _check(args, out) -> int:
                           f"moxi rounds check {name} B<n>, or moxi rounds check in the "
                           "build's worktree")
     ran = checking.check(name, stage, actor=_actor(args), step=args.step,
-                         timeout_s=args.timeout_s)
+                         full=args.full, timeout_s=args.timeout_s)
+    if isinstance(ran, checking.CiChecked):
+        return _ci_checked(ran, args, out)
     code = ran.exit_code
     how = ("passed" if ran.passed else "was ended at its time limit" if code is None
            else f"failed: exit {code}")
@@ -999,6 +1008,49 @@ def _check(args, out) -> int:
     print(f"output: {ran.output}", file=out)
     _warn_of(ran.failed, args.prog, args.verb)
     return codes.OK if ran.passed else codes.ERROR
+
+
+def _ci_checked(ran, args, out) -> int:
+    from . import ci
+
+    print(f"check {ran.name} {ran.stage} at {ran.commit[:12]}, by CI", file=out)
+    if ran.pushed is not None:
+        print(f"pushed: {ran.pushed}", file=out)
+    local = ran.local
+    if local is not None:
+        code = local["exit_code"]
+        how = ("passed" if code == 0 else "was ended at its time limit" if code is None
+               else f"failed: exit {code}")
+        print(f"{ci.LOCAL}: {how}, in {local['duration_s']:g} s; ran: "
+              f"{shlex.join(local['argv'])}; output: {local['output']}", file=out)
+    else:
+        print(f"{ci.LOCAL}: not run; it passed at this tip before, or none is declared",
+              file=out)
+    if ran.read_failed is not None:
+        print(ran.read_failed, file=out)
+        print(f"  fix: moxi rounds check {ran.name} {ran.stage} --full meets the gate "
+              "without CI", file=out)
+    reading = ran.reading
+    if reading is not None:
+        print(f"ci: {reading['reading']}", file=out)
+        for one in reading["workflows"]:
+            url = "" if one["url"] is None else f"   {one['url']}"
+            print(f"  {one['path']}: {one['reading']}{url}", file=out)
+        for line in _ci_way_on(ran.name, ran.stage, reading["reading"]):
+            print(f"  fix: {line}", file=out)
+    _warn_of(ran.failed, args.prog, args.verb)
+    return codes.OK if ran.passed else codes.ERROR
+
+
+def _ci_way_on(name: str, stage: str, whole: str) -> list[str]:
+    from . import ci
+
+    again, full = f"moxi rounds check {name} {stage}", f"moxi rounds check {name} {stage} --full"
+    return {ci.PENDING: [f"once CI ends, {again} reads again; the local part is not run "
+                         "again at this tip"],
+            ci.ABSENT: [f"push the branch or set ci.remote, see that the workflow runs on "
+                        f"a branch push, then {again}"],
+            ci.RED: [f"fix and commit, then {again}", f"or {full}"]}.get(whole, [])
 
 
 # -- drop --------------------------------------------------------------------------------

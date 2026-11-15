@@ -60,6 +60,13 @@ does not yet build.
   worktree changed meanwhile records nothing. A check counts only at the tip it ran at
   and with the command the repo declares now; `show` and the round note give each
   build's newest run.
+- A project may declare `ci`: in its repo `check` pushes the tip to `ci.remote`, runs
+  the local part under `check.local` unless it passed at the tip, and reads CI through
+  two commands printing JSON, by workflow file path, recording `ci.read`. A green
+  reading with the local part passed meets the check step; `check --full` runs the full
+  check, which meets it whatever CI reads. `next` and `show` give each build's newest
+  reading, `next` says what each form still owes, and the doctor's `ci` row says
+  whether CI can be read.
 - `check --step NAME` runs a command step of the user's own from the round's flow the
   way `check` runs the repo's check, and records the run under the step's name. The
   step is done once its newest run passed at the build's tip; `next` prints the command,

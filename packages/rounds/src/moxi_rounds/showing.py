@@ -26,7 +26,8 @@ says so.
 A project is not shown: its rounds are listed.
 
 Its builds are shown each with what its commission recorded, the newest run of its
-repo's check and of each command step of the user's own, and, while it is open, its state as read from git now (`open_builds`):
+repo's check, of each command step of the user's own and of the local part of a check by
+CI, its newest read of CI, and, while it is open, its state as read from git now (`open_builds`):
 whether it is idle, the builds it shares commits with, or what kept it from being read.
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
@@ -45,8 +46,8 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (builds, checking, closing, folders, index, log, open_builds, questions,
-               shown, skips, steps, tracing, versions)
+from . import (builds, checking, ci, closing, folders, index, log, open_builds,
+               questions, shown, skips, steps, tracing, versions)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -357,8 +358,10 @@ def _builds(found: Shown) -> list:
                "head": None, "idle": False, "shares": [], "problem": None,
                "check": _check_run(found.state, one),
                "step_runs": [run for run in (
-                   _check_run(found.state, one, step) for step in _command_steps(found.state))
-                   if run is not None]}
+                   _check_run(found.state, one, step)
+                   for step in [*_command_steps(found.state), ci.LOCAL])
+                   if run is not None],
+               "ci": _ci_read(found.state, one)}
         now = read.get(one.stage) if one.ended is None else None
         if now is not None and now.build.n == one.n:
             data = now.data()
@@ -369,6 +372,28 @@ def _builds(found: Shown) -> list:
                               "fix": "moxi projects list"}
         listed.append(row)
     return listed
+
+
+def _ci_read(state: states.State, build: builds.Build) -> dict | None:
+    """The newest read of CI recorded for `build`, as data: its commit, the whole
+    reading, each workflow with its reading and url, and when it was recorded; None
+    with no read."""
+    found = None
+    for event in state.history:
+        if (event["n"] > build.n and event.get("stage") == build.stage
+                and event["type"] == "build.commissioned"):
+            break
+        if (event["n"] > build.n and event["type"] == ci.READ
+                and event.get("stage") == build.stage):
+            found = event
+    if found is None:
+        return None
+    return {key: found.get(key) for key in ("commit", "reading", "workflows", "at")}
+
+
+def ci_line(read: dict) -> str:
+    """The newest read of CI for a build in words: `ci green at 81c7f5b`."""
+    return f"ci {read['reading']} at {str(read['commit'])[:7]}"
 
 
 def _command_steps(state: states.State) -> list[str]:
@@ -432,6 +457,11 @@ def _build_lines(listed: list) -> list[str]:
         for run in [one.get("check"), *one.get("step_runs", ())]:
             if run is not None:
                 lines.append(f"    {check_line(run)}, output {run['output']}")
+        if one.get("ci") is not None:
+            lines.append(f"    {ci_line(one['ci'])}")
+            lines += [f"      {flow['path']}: {flow['reading']}"
+                      + ("" if flow.get("url") is None else f"   {flow['url']}")
+                      for flow in one["ci"]["workflows"] or ()]
         if one["record"] is not None:
             lines.append(f"    go: {one['record']}")
     return lines
@@ -675,5 +705,5 @@ def as_text(found: Shown) -> str:
     return "\n".join(lines) + "\n"
 
 
-__all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
+__all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
            "ended_line", "skip_line", "stage_line", "build_line", "step_lines", "version_lines", "thread_line", "verdict_lines", "history_of"]

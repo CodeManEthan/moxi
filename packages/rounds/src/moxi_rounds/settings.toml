@@ -86,5 +86,5 @@ read = "use"
 [projects]
 type = "table"
 default = {}
-doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, check, finish, shared_paths, keep_branch, lock_ref and brief."
+doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, check, ci, finish, shared_paths, keep_branch, lock_ref and brief."
 read = "use"

@@ -820,6 +820,7 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "ruling.shown": _ruling_shown,
     "build.commissioned": _kept,
     "check.ran": _kept,
+    "ci.read": _kept,
     "finding.marked": _kept,
     "wait.marked": _kept,
     "brief.sized": _kept,

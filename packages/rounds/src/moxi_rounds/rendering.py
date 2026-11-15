@@ -342,6 +342,8 @@ def _builds(shown_as: dict) -> list[str]:
         said += [showing.check_line(run) for run in [one.get("check"),
                                                      *one.get("step_runs", ())]
                  if run is not None]
+        if one.get("ci") is not None:
+            said.append(showing.ci_line(one["ci"]))
         for line in said:
             lines += _item(line, indent="  ")
     return lines

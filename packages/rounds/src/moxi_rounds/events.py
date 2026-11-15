@@ -135,6 +135,12 @@ TYPES = _types(
     EventType("check.ran",
               ("stage", "step", "commit", "merge_base", "argv", "exit_code", "duration_s",
                "output")),
+    # CI was read for a build: the commit, its merge-base with the target, the two
+    # argvs that ran, each workflow by path with the id it read as, its reading and its
+    # run's url, and the whole reading.
+    EventType("ci.read",
+              ("stage", "commit", "merge_base", "status_argv", "ids_argv", "workflows",
+               "reading")),
     # A finding or a waiting item moved to a new state.
     EventType("finding.marked", ("id", "state", "commits", "record")),
     EventType("wait.marked", ("id", "state", "commits", "record")),

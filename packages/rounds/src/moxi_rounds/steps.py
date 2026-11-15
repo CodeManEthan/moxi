@@ -58,8 +58,10 @@ other, so its row says when the stage reads as skipped.
   `merged`, and done from then on, and once the build is finished. It is read from
   what `Asked.seen` says of the stage's build.
 - `check` of a stage: done once the newest run of the repo's check passed at the
-  build's tip, with the argv the check gives now (`checking.passes`), and once the
-  build is finished. Until then it waits for the build to have work and for its
+  build's tip, with the argv the check gives now (`checking.passes`), or, where the
+  repo declares `ci`, once CI's form of the gate is met there apart from the target
+  (`ci.why_not`), and once the build is finished. Where neither is met in a repo with
+  `ci`, `Step.owes` says what each still owes. Until then it waits for the build to have work and for its
   worktree to be clean. It is read from what `Asked.seen` says of the stage's build;
   where that is not given the step waits on a read of git. A stage whose repo declares
   no check has no `check` step, where `Asked.seen` says so.
@@ -97,6 +99,7 @@ from dataclasses import dataclass
 
 from . import (brake, checking, flows, holds, questions, skips, stages, tracing,
                versions)
+from . import ci as ci_reads
 from . import state as states
 from .errors import Unmet
 
@@ -133,14 +136,17 @@ class Seen:
     whether its worktree is on this machine with the build's branch checked out and
     nothing uncommitted; `check`, the argv the repo's check gives now at the tip, None
     when the repo declares no check; `values`, what the placeholders of a command read
-    for the build at the tip (`checking.values`); `problem`, what kept the build from
-    being read, in which case nothing else is known."""
+    for the build at the tip (`checking.values`); `ci`, what CI's form of the check
+    gate compares at the tip where the repo declares `ci` (`ci.Now`), else None;
+    `problem`, what kept the build from being read, in which case nothing else is
+    known."""
 
     state: str | None = None
     tip: str | None = None
     clean: bool = False
     check: tuple[str, ...] | None = None
     values: Mapping[str, str] | None = None
+    ci: ci_reads.Now | None = None
     problem: Unmet | None = None
 
 
@@ -175,6 +181,8 @@ class Step:
       and what they read; None for a step the flow has without listing it.
     - `unread`: its state is read from git, which the caller did not read, so the
       state given is no answer.
+    - `owes`: for a gate that more than one thing meets, what each still owes, in
+      words: the `check` of a repo that declares `ci`.
     """
 
     step: str
@@ -185,6 +193,7 @@ class Step:
     asked: brake.Asked | None = None
     entry: Mapping | None = None
     unread: bool = False
+    owes: tuple[str, ...] = ()
 
     @property
     def settled(self) -> bool:
@@ -354,6 +363,13 @@ def _check(state: states.State, about: Asked) -> Step:
     if seen.tip is not None and seen.check is not None and checking.passes(
             state, stage, CHECK, tip=seen.tip, argv=seen.check):
         return Step(CHECK, DONE, stage=stage)
+    owes: tuple[str, ...] = ()
+    if seen.ci is not None and seen.tip is not None and seen.check is not None:
+        by_ci = ci_reads.why_not(state, stage, tip=seen.tip, now=seen.ci)
+        if by_ci is None:
+            return Step(CHECK, DONE, stage=stage)
+        full = checking.why_not(state, stage, CHECK, tip=seen.tip, argv=seen.check)
+        owes = (f"by the full check: {full}", f"by CI: {by_ci}")
     waits = []
     if seen.state not in checking.WITH_WORK:
         waits.append(Unmet(f"{stage} has no work to check: it reads {seen.state}",
@@ -362,7 +378,8 @@ def _check(state: states.State, about: Asked) -> Step:
         waits.append(Unmet(f"the worktree of {stage} is not clean on its branch here",
                            "commit or put away what is not committed, in the build's "
                            "worktree on the machine that made it"))
-    return Step(CHECK, WAITING if waits else READY, stage=stage, waits=tuple(waits))
+    return Step(CHECK, WAITING if waits else READY, stage=stage, waits=tuple(waits),
+                owes=owes)
 
 
 def command_row(step: str) -> Row:

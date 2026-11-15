@@ -13,6 +13,11 @@ be, with the right mode and size. These look at what rounds needs and keeps:
 - index: `warn` when the index says something else than the logs do, naming each log
   it differs on. Every read still answers right, from the log itself; `moxi rounds
   list` brings the index up to the logs.
+- ci: for each repo that declares `ci`, `warn` when the first word of its `status` or
+  `ids` command is not on PATH, or, where they are the default `gh` commands, when
+  `gh auth status` does not exit 0 (only its exit code is read), naming `moxi rounds
+  check --full` as the way through; else `ok`. A repo whose `ci.local` is `"none"` is
+  named as meeting the check gate on CI alone.
 
 The doctor only reads. It writes nothing in a rounds folder and nothing in the index:
 an index that is behind is reported, and left for the command that brings it up.
@@ -22,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 from collections.abc import Iterator
@@ -58,6 +64,52 @@ def rows() -> Iterator[Row]:
     yield from _folders(len(homes), unresolved)
     yield from _logs(homes)
     yield _index(homes)
+    yield from _ci()
+
+
+# -- ci ----------------------------------------------------------------------------------
+
+#: How long `gh auth status` gets to answer.
+AUTH_TIMEOUT_S = 10.0
+
+
+def _ci() -> Iterator[Row]:
+    from . import ci
+    from . import settings as own
+
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        # The settings' own row says what is wrong with them.
+        return
+    for repo, table in settings["projects"].items():
+        if not isinstance(table, dict) or "ci" not in table:
+            continue
+        found = ci.declared(settings, repo)
+        name, way = f"ci {repo}", "moxi rounds check ROUND B<n> --full, in place of CI"
+        missing = [argv[0] for argv in (found.status, found.ids)
+                   if shutil.which(argv[0]) is None]
+        if missing:
+            yield Row(MODULE, name, "warn",
+                      f"{', '.join(dict.fromkeys(missing))} is not on PATH, so CI can't be "
+                      "read for a build in it", way)
+            continue
+        if (found.status, found.ids) == (ci.STATUS, ci.IDS) and not _gh_logged_in():
+            yield Row(MODULE, name, "warn",
+                      "gh auth status does not exit 0: gh is not logged in to the repo's "
+                      "host, so CI can't be read", f"gh auth login, or {way}")
+            continue
+        alone = (" It meets the check gate on CI alone: its ci.local is \"none\"."
+                 if found.local is None else "")
+        yield Row(MODULE, name, "ok", f"the commands that read CI are there.{alone}")
+
+
+def _gh_logged_in() -> bool:
+    try:
+        done = proc.run(["gh", "auth", "status"], timeout_s=AUTH_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
 
 
 # -- git -----------------------------------------------------------------------------------

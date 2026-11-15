@@ -88,7 +88,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
-| `moxi rounds check [ROUND B<n>] [--step NAME] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name |
+| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set, runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, rulings not yet shown |
@@ -565,7 +565,28 @@ commission block for a build in it, and `check`, `{ command = "...", timeout_s =
 the command `moxi rounds check` runs at a build's tip. The command is split as a shell
 would split it and run with no shell; its words may hold `{round}`, `{stage}`,
 `{repo}`, `{root}`, `{branch}`, `{tip}` and `{into}`, filled in for the build. With no
-`timeout_s` the run has no time limit. It also takes `defaults.ratify`,
+`timeout_s` the run has no time limit.
+
+A project whose build branches run CI may also declare `ci`, so that a green CI run at
+the tip, with a short local run of what CI can't do, stands in for the full check:
+
+```toml
+[projects.alpha]
+check = { command = "make check", timeout_s = 3600 }
+ci = { workflows = [".github/workflows/ci.yml"], remote = "origin",
+       local = { command = "./scripts/check-local", timeout_s = 900 } }
+```
+
+`workflows` names each workflow by its file's path in the repo. `local` is required:
+the command, or `"none"` written out where CI does all of it. `remote`, when set, is
+where `check` pushes the branch before it reads. CI is read with `status` and `ids`,
+two commands printing JSON, by default `gh run list --commit {tip} --json ...` and `gh
+workflow list --all --json id,path`, each bounded by `status_timeout_s` (60). A
+workflow reads `green`, `pending`, `red` or `absent` at the tip; the check step is
+done once every workflow reads green there, the workflows named are the ones the
+setting names now, and the local run passed at the tip with the command it declares
+now. The full check, run with `check --full`, meets the step whatever CI reads. A
+`ci` in a project with no `check` is refused. It also takes `defaults.ratify`,
 `defaults.check_on`, `defaults.dormant_days`, `defaults.slice_minutes` and
 `defaults.sitting_at`, and in a project's table `finish`, `shared_paths`,
 `keep_branch` and `lock_ref`. They are checked when the file is read, and nothing in

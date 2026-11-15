@@ -18,6 +18,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
   step that is not waiting), and for the
   step that verifies the design the `pass` asked for, `why`, the two frozen `files` a
   re-check compares, and `instead`, what is done in place of a pass.
+- `ci` and `owes`: in the `check` group of a build whose repo declares `ci`, its newest
+  read of CI and what each form of the gate still owes at the tip.
 - `changed`: in the group of a stage with an open build, each ruling recorded since
   the build's block was printed that reaches the stage (`commission_block.changed`),
   so a correction reaches a build already commissioned.
@@ -48,8 +50,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import (brake, builds, checking, closing, commission_block, flows, model_tiers,
-               report_block, showing, stages, steps, tracing, versions)
+from . import (brake, builds, checking, ci, closing, commission_block, flows,
+               model_tiers, report_block, showing, stages, steps, tracing, versions)
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -161,9 +163,18 @@ def _build(found: showing.Shown, step: steps.Step) -> dict:
 
 
 def _check(found: showing.Shown, step: steps.Step) -> dict:
-    return {"reads": _named(step),
+    said = {"reads": _named(step),
             "then": [f"moxi rounds check {found.name} {step.stage}, or moxi rounds check "
                      "in the build's worktree"]}
+    build = builds.current(found.state, step.stage)
+    settings = own.load() if found.settings is None else found.settings
+    if build is None or ci.declared(settings, build.repo) is None:
+        return said
+    newest = ci.newest(found.state, step.stage)
+    said["ci"] = None if newest is None else {
+        key: newest.get(key) for key in ("commit", "reading", "workflows")}
+    said["then"] = [f"{said['then'][0]}: it reads CI, or with --full runs the full check"]
+    return said
 
 
 def _command(found: showing.Shown, step: steps.Step) -> dict:
@@ -200,6 +211,8 @@ def _group(found: showing.Shown, step: steps.Step, models) -> dict:
              "by": OPERATOR if step.step in _HIS else entry.get("by"),
              "tier": entry.get("model"), "model": None, "reads": [], "write": None,
              "then": [], "questions": list(step.questions), "waits": _waits(step)}
+    if step.owes:
+        group["owes"] = list(step.owes)
     lines = LINES.get(step.step)
     if (lines is None and step.entry is not None and flows.is_user_step(step.entry)
             and step.entry.get("does") == flows.COMMAND):
@@ -367,6 +380,14 @@ def _group_lines(said: dict, group: dict) -> list[str]:
         if group["write"] is not None:
             lines.append(f"write: {group['write']}")
         lines += [f"then:  {line}" for line in group["then"]]
+        if "ci" in group:
+            read = group["ci"]
+            lines.append("ci:    no read on record" if read is None
+                         else f"ci:    {showing.ci_line(read)}")
+            for one in (read or {}).get("workflows") or ():
+                url = "" if one.get("url") is None else f"   {one['url']}"
+                lines.append(f"         {one['path']}: {one['reading']}{url}")
+        lines += [f"owes:  {line}" for line in group.get("owes", ())]
     told = _told(group)
     for wait in group["waits"]:
         if wait != told:

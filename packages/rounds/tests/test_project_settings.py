@@ -37,7 +37,7 @@ def test_an_empty_config_gives_a_build_a_local_merge_and_no_check():
     read = settings.load()
     assert {key: settings.build_setting(read, "proj-a", key)
             for key in settings.BUILD_KEYS} == {
-        "into": None, "check": None, "finish": [{"do": "merge", "id": "merge"}],
+        "into": None, "check": None, "ci": None, "finish": [{"do": "merge", "id": "merge"}],
         "check_on": "merged", "shared_paths": [], "keep_branch": False,
         "lock_ref": None, "brief": []}
 
