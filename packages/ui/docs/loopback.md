@@ -115,7 +115,9 @@ PAGE = lb.Page(
   `async def fn(call) -> dict`. A plain `def` runs on a worker thread. `call` carries the
   checked `query` and `body`, the module name, and `busy(name)`, which holds the idle exit
   while work runs. A handler may return `Accepted(status_path)` (202), or raise
-  `Conflict(text)` (409) or `Refused(text)` (422). Anything else it raises is a 500.
+  `Conflict(text)` (409), `Refused(text)` (422) or `BadRequest(key, reason)` (400, for a
+  body its `Field`s can't refuse alone, such as two lists of unequal length; it names the
+  key, never the value). Anything else it raises is a 500.
 - `assets` names one flat directory of static files in the page module's package. That is
   the package whose code builds the `Page`, so a page built by a helper in another package
   names its own with `Page(..., package="moxi_usage")`; without it the base looks in the
