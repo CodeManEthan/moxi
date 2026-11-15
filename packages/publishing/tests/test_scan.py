@@ -120,16 +120,16 @@ def test_not_a_repo_is_a_usage_error(tmp_path, gitenv, capsys):
     assert code == 2 and "no git work tree" in err
 
 
-# -- the commits a push brings: --since -----------------------------------------------------
+# -- the commits a push brings: --from ------------------------------------------------------
 
-def test_since_reads_each_commits_message_and_headers(repo, names, capsys):
+def test_from_reads_each_commits_message_and_headers(repo, names, capsys):
     base = git(repo, "rev-parse", "HEAD").stdout.strip()
     put(repo, "a.md", "clean\n", message=f"Add a\n\nsee {POINTER}\n")
     git(repo, "commit", "-q", "--allow-empty", "-m", "Quiet",
         env={"GIT_AUTHOR_NAME": "bobsecret"})
     code, out, _ = scan(capsys, str(repo))
     assert code == 0
-    code, out, err = scan(capsys, str(repo), "--since", base)
+    code, out, err = scan(capsys, str(repo), "--from", base)
     assert code == 3
     lines = out.splitlines()
     assert any(line.endswith("author header: private-names/private-name") for line in lines)
@@ -137,23 +137,23 @@ def test_since_reads_each_commits_message_and_headers(repo, names, capsys):
     assert "bobsecret" not in out + err
     # The commits the base already holds aren't read again.
     head = git(repo, "rev-parse", "HEAD").stdout.strip()
-    assert scan(capsys, str(repo), "--since", head)[0] == 0
+    assert scan(capsys, str(repo), "--from", head)[0] == 0
 
 
-def test_since_with_ci_leaves_out_private_names(repo, names, capsys):
+def test_from_with_ci_leaves_out_private_names(repo, names, capsys):
     base = git(repo, "rev-parse", "HEAD").stdout.strip()
     git(repo, "commit", "-q", "--allow-empty", "-m", "Quiet",
         env={"GIT_AUTHOR_NAME": "bobsecret"})
-    assert scan(capsys, str(repo), "--since", base, "--ci")[0] == 0
+    assert scan(capsys, str(repo), "--from", base, "--ci")[0] == 0
     git(repo, "commit", "-q", "--allow-empty", "-m", f"key {token(5)}")
-    code, out, _ = scan(capsys, str(repo), "--since", base, "--ci")
+    code, out, _ = scan(capsys, str(repo), "--from", base, "--ci")
     assert code == 3 and "credentials/github-pat" in out
 
 
 def test_a_tag_named_as_rev_has_its_message_and_tagger_read(repo, names, capsys):
     git(repo, "tag", "-a", "-m", f"Release\n\nsee {POINTER}", "docs-1",
         env={"GIT_COMMITTER_EMAIL": "bob@private.example.test"})
-    code, out, _ = scan(capsys, str(repo), "--rev", "docs-1", "--since", "HEAD")
+    code, out, _ = scan(capsys, str(repo), "--rev", "docs-1", "--from", "HEAD")
     assert code == 3
     assert "tag docs-1 tagger header: private-names/" in out
     assert "tag docs-1 message line 3, session-pointer" in out
@@ -167,7 +167,7 @@ def test_text_below_a_scissors_line_is_read(repo, names, capsys):
     base = git(repo, "rev-parse", "HEAD").stdout.strip()
     git(repo, "commit", "-q", "--allow-empty", "-m", "Add", "-m", SCISSORS,
         "-m", f"key {token(5)}")
-    code, out, _ = scan(capsys, str(repo), "--rev", "HEAD", "--since", base, "--ci")
+    code, out, _ = scan(capsys, str(repo), "--rev", "HEAD", "--from", base, "--ci")
     assert code == 3 and "message line 5, credentials/github-pat" in out
     git(repo, "tag", "-a", "--cleanup=verbatim", "-m", f"Docs\n{SCISSORS}\nkey {token(5)}",
         "docs-1", base)

@@ -3,9 +3,9 @@
     moxi publishing enable PATH [--github OWNER/REPO] [--set KEY=VALUE]...
     moxi publishing disable PATH
     moxi publishing list [--json]
-    moxi publishing scan [PATH] [--rev REV] [--since REV] [--ci]
+    moxi publishing scan [PATH] [--rev REV] [--from REV] [--ci]
     moxi publishing bump PACKAGE... [--part patch|minor|major] [--path PATH]
-    moxi publishing tag PACKAGE [--at REV] [--remote NAME] [--path PATH]
+    moxi publishing tag PACKAGE [--rev REV] [--remote NAME] [--path PATH]
     moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]
     moxi publishing ci notes TAG
     moxi publishing ci siblings TAG --artifact DIR [--resolution highest|lowest-direct]
@@ -69,7 +69,7 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("path", metavar="PATH", nargs="?", default=".",
                    help="a path inside the repo, or a project key (default: here)")
     p.add_argument("--rev", default="HEAD", help="the commit or tree (default: HEAD)")
-    p.add_argument("--since", metavar="REV",
+    p.add_argument("--from", dest="from_rev", metavar="REV",
                    help="also read each commit of REV..--rev whole: its message and every "
                         "header (author, committer, a merged signed tag). When --rev names "
                         "an annotated tag, its message and tagger are read either way")
@@ -97,7 +97,7 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                     "is the CHANGELOG section. Pushes nothing. Exits 3 when the gate "
                     "refuses.")
     p.add_argument("package", metavar="PACKAGE")
-    p.add_argument("--at", metavar="REV", help="the commit to tag (default: main's tip)")
+    p.add_argument("--rev", metavar="REV", help="the commit to tag (default: main's tip)")
     p.add_argument("--remote", default="origin", metavar="NAME",
                    help="the remote whose tracking ref holds main (default: origin)")
     p.add_argument("--path", default=".", metavar="PATH",
@@ -177,7 +177,7 @@ def _release(args, prog: str) -> int:
         if args.verb == "bump":
             result = release.bump(args.path, args.packages, part=args.part)
         elif args.verb == "tag":
-            result = release.tag(args.path, args.package, at=args.at, remote=args.remote)
+            result = release.tag(args.path, args.package, rev=args.rev, remote=args.remote)
         elif args.verb == "workflows":
             result = release.workflows_write(args.path)
         elif args.verb == "github":
@@ -211,7 +211,7 @@ def _scan(args, prog: str) -> int:
         refused = content.scan_tree(root, args.rev, ci=args.ci)
         from moxi_publishing import push
 
-        refused += push.judge_history(tags.repo_git(root), args.rev, args.since,
+        refused += push.judge_history(tags.repo_git(root), args.rev, args.from_rev,
                                       sets=content.CI_SETS if args.ci else content.SETS)
     except flag.Failure as exc:
         print(f"{prog}: {exc.text}", file=sys.stderr)

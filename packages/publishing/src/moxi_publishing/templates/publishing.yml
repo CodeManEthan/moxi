@@ -42,8 +42,8 @@ jobs:
         run: |
           rev="$GITHUB_SHA"
           if [ "$GITHUB_REF_TYPE" = tag ]; then rev="$GITHUB_REF"; fi
-          since="$BEFORE"
-          if [ -z "$since" ] || [ -z "${since//0/}" ] || ! git cat-file -e "$since^{commit}" 2>/dev/null; then
-            since="origin/$DEFAULT_BRANCH"
+          base="$BEFORE"
+          if [ -z "$base" ] || [ -z "${base//0/}" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="origin/$DEFAULT_BRANCH"
           fi
-          uv run --locked moxi publishing scan --ci --rev "$rev" --since "$since"
+          uv run --locked moxi publishing scan --ci --rev "$rev" --from "$base"

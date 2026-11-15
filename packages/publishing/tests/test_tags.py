@@ -20,9 +20,9 @@ def where(main_ref="refs/remotes/origin/main", github="operator/proj-a"):
     return tags.Where(main_ref, "main", github)
 
 
-def run_gate(repo, fake, name, *, at="HEAD", annotated=True, **kwargs):
-    """Make tag `name` at `at` and run the gate on it."""
-    git(repo, "tag", *(["-a", "-m", name] if annotated else []), name, at)
+def run_gate(repo, fake, name, *, rev="HEAD", annotated=True, **kwargs):
+    """Make tag `name` at `rev` and run the gate on it."""
+    git(repo, "tag", *(["-a", "-m", name] if annotated else []), name, rev)
     return tags.gate(tags.repo_git(str(repo)), name, where=kwargs.pop("where", where()),
                      tag_object=head(repo, f"refs/tags/{name}"), web=fake_web(fake),
                      **kwargs)
@@ -212,7 +212,7 @@ def test_check_3_refuses_a_branch_commit_a_merge_brought_into_main(released_repo
     git(repo, "push", "-q", "origin", "main")
     fake.green(side)
     fake.green(head(repo))
-    failed(run_gate(repo, fake, "proj-a-v0.1.0", at=side), 3, "first-parent line")
+    failed(run_gate(repo, fake, "proj-a-v0.1.0", rev=side), 3, "first-parent line")
     git(repo, "tag", "-d", "proj-a-v0.1.0")
     assert run_gate(repo, fake, "proj-a-v0.1.0").passed
 

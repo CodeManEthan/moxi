@@ -5756,6 +5756,7 @@ moxi	packages/moxi/src/moxi/units/_schtasks.py	ran = fence.run("tasks", env=env)
 moxi	packages/moxi/src/moxi/units/_schtasks.py	return path.startswith(TASK_DIR.casefold()) or path.startswith(self.folder.casefold())	use	self.folder	self.task_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	return self.folder if tag is None else f"{self.folder}{tag}\\"	use	self.folder	self.task_dir
 moxi	packages/moxi/src/moxi/units/_schtasks.py	self.folder = task_dir	use	self.folder	self.task_dir
+moxi	packages/moxi/src/moxi/units/_schtasks.py	state, detail, more = "active", f"running (pid {pid})", dict(pid=pid, since=since)	keep	since	since
 moxi	packages/moxi/src/moxi/units/_status.py	argv("systemd", "show", "--property=Id", *unit.ids)	keep	show	show
 moxi	packages/moxi/src/moxi/units/_status.py	return _Runs().of(module, f"{module}/{timer}")[-n:]	keep	draft	draft
 moxi	packages/moxi/src/moxi/units/_systemd.py	"""One `show` over every id of `units`, and, when a foreign timer came without the	keep	show	show
@@ -7503,7 +7504,6 @@ publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("
 publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("github", help="the GitHub rulesets and settings of a public repo",	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("list", help="every repo marked public, with its pieces",	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/cli.py	p = verbs.add_parser("workflows", help="the workflow files of a public repo",	keep	help	help
-publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--at", metavar="REV", help="the commit to tag (default: main's tip)")	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--json", action="store_true", help="print JSON")	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--part", choices=("patch", "minor", "major"), default="patch",	keep	default	default
 publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--path", default=".", metavar="PATH",	keep	default	default
@@ -7511,6 +7511,7 @@ publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--remo
 publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--remote", default="origin", metavar="NAME",	keep	default	default
 publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--rev", default="HEAD", help="the commit or tree (default: HEAD)")	keep	default	default
 publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--rev", default="HEAD", help="the commit or tree (default: HEAD)")	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--rev", metavar="REV", help="the commit to tag (default: main's tip)")	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("--set", dest="sets", action="append", default=[], metavar="KEY=VALUE",	keep	default	default
 publishing	packages/publishing/src/moxi_publishing/cli.py	p.add_argument("path", metavar="PATH", nargs="?", default=".",	keep	default	default
 publishing	packages/publishing/src/moxi_publishing/cli.py	result = (github.show if args.step == "show" else github.apply)(args.path)	keep	show	show
@@ -7551,6 +7552,7 @@ publishing	packages/publishing/src/moxi_publishing/push.py	"fail": "closed",	kee
 publishing	packages/publishing/src/moxi_publishing/push.py	_Push.judge_branch	kwonly	creating	creating
 publishing	packages/publishing/src/moxi_publishing/push.py	_Push.judge_branch	kwonly	deleting	deleting
 publishing	packages/publishing/src/moxi_publishing/push.py	_Push.judge_branch	kwonly	here	here
+publishing	packages/publishing/src/moxi_publishing/push.py	judge_history	name	since	from_rev
 publishing	packages/publishing/src/moxi_publishing/push.py	return any(fnmatchcase(ref, pattern) for pattern in patterns)	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/push.py	return sorted(set(tracking) | self.present(tips))	keep	set	set
 publishing	packages/publishing/src/moxi_publishing/push.py	seen = set()	keep	set	set
@@ -7560,6 +7562,7 @@ publishing	packages/publishing/src/moxi_publishing/push.py	shas = [s for s in se
 publishing	packages/publishing/src/moxi_publishing/release.py	cwd=os.path.join(plan.root, plan.member_path), env=env,	keep	env	env
 publishing	packages/publishing/src/moxi_publishing/release.py	f"{req.specifier or 'any'} admits; {got[0]} was installed, raised by "	keep	any	any
 publishing	packages/publishing/src/moxi_publishing/release.py	found = set()	keep	set	set
+publishing	packages/publishing/src/moxi_publishing/release.py	tag	name	at	rev
 publishing	packages/publishing/src/moxi_publishing/release.py	tools, unpinned, named, fence = [], [], set(), None	keep	set	set
 publishing	packages/publishing/src/moxi_publishing/rules.py	#: `round` and a home and slug joined by a slash (any case, the home without digits), or,	keep	round	round
 publishing	packages/publishing/src/moxi_publishing/rules.py	#: either one hyphenated, `round` or `Round` with digits allowed; and a memory key.	keep	round	round
@@ -13702,6 +13705,7 @@ usage	packages/usage/src/moxi_usage/reports.py	read	name	folder	work_dir
 usage	packages/usage/src/moxi_usage/reports.py	removed keeps its key, so a caller that groups by folder asks by `folder`.	use	`folder`	`work_dir`
 usage	packages/usage/src/moxi_usage/reports.py	report	name	folder	work_dir
 usage	packages/usage/src/moxi_usage/reports.py	requests	name	folder	work_dir
+usage	packages/usage/src/moxi_usage/reports.py	result = fn(conn, since=since, until=until, harness=harness, project=project,	keep	since	since
 usage	packages/usage/src/moxi_usage/reports.py	return _report("sessions", query, out, total)	keep	sessions	sessions
 usage	packages/usage/src/moxi_usage/reports.py	row = rows[k] = make(values(found, extra))	keep	start	start
 usage	packages/usage/src/moxi_usage/reports.py	row the `projects` report shows under a `cwd` can be asked for by that `cwd`. `folder` is	use	`folder`	`work_dir`

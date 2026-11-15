@@ -131,6 +131,6 @@ def test_the_release_file_says_which_rerun_is_for_which_failure():
 def test_the_scan_runs_on_every_branch_and_tag_with_the_pushed_commits():
     text = release.template("publishing.yml").decode()
     assert 'branches: ["**"]' in text and 'tags: ["**"]' in text
-    assert 'moxi publishing scan --ci --rev "$rev" --since "$since"' in text
-    assert 'since="origin/$DEFAULT_BRANCH"' in text
+    assert 'moxi publishing scan --ci --rev "$rev" --from "$base"' in text
+    assert 'base="origin/$DEFAULT_BRANCH"' in text
     assert "permissions:\n  contents: read\n" in text

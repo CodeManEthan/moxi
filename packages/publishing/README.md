@@ -148,11 +148,11 @@ can't be written refuses the push.
 
 ## Scanning a whole tree
 
-`moxi publishing scan [PATH] [--rev REV] [--since REV] [--ci]` reads every file of the
+`moxi publishing scan [PATH] [--rev REV] [--from REV] [--ci]` reads every file of the
 tree at `--rev` (default `HEAD`) as git stores it, and every path name, as the content
 piece reads what a commit adds, with the allowlists of that tree. When `--rev` names an
 annotated tag, each tag object of its chain is read too: message (whole) and tagger. With
-`--since`, each commit of `SINCE..REV` is read whole as well: its message and every header
+`--from`, each commit of `FROM..REV` is read whole as well: its message and every header
 (author, committer, a merged signed tag), as the push piece reads them. It prints one line
 per hit and exits 3 when there is one, 1 when the tree can't be read. `--ci` leaves out the
 private names list and the private allowlist, which exist only on your machine, for a scan
@@ -231,7 +231,7 @@ admits the old version but not the new; change that requirement in the same comm
 
 ### Making a release tag
 
-`moxi publishing tag PACKAGE [--at REV] [--remote NAME]` runs the gate at REV (default:
+`moxi publishing tag PACKAGE [--rev REV] [--remote NAME]` runs the gate at REV (default:
 the tip of main as `refs/remotes/origin/<main>` has it, so fetch first) and, when every
 check passes, makes the annotated tag, whose message is the package's CHANGELOG section.
 It pushes nothing: `git push origin <tag>` does, and the push piece runs the gate again.

@@ -18,7 +18,7 @@ The first version.
   tag object new to the remote as a commit would have been judged. A passing push is
   logged.
 - `moxi publishing scan`: a commit's whole tree and its path names, judged the same way;
-  `--ci` without the private names; `--since REV` also reads each commit of the range
+  `--ci` without the private names; `--from REV` also reads each commit of the range
   whole (message and headers), and a tag named by `--rev` has its message and tagger
   read.
 - The six provenance rules, each switched off through `provenance.rules`.

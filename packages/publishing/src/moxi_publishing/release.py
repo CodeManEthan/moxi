@@ -213,9 +213,9 @@ def _read(root: str, rel: str) -> str | None:
 
 # -- tag ------------------------------------------------------------------------------------
 
-def tag(path: str, package: str, *, at: str | None = None, remote: str = REMOTE,
+def tag(path: str, package: str, *, rev: str | None = None, remote: str = REMOTE,
         web=None) -> Result:
-    """`moxi publishing tag PACKAGE [--at REV] [--remote NAME]` in the repo at `path`.
+    """`moxi publishing tag PACKAGE [--rev REV] [--remote NAME]` in the repo at `path`.
     Raises `Failure` for a usage or read problem."""
     from packaging.utils import canonicalize_name
     from packaging.version import InvalidVersion, Version
@@ -226,10 +226,10 @@ def tag(path: str, package: str, *, at: str | None = None, remote: str = REMOTE,
     git = tags.repo_git(root)
     branch = main_branch(root)
     main_ref = f"refs/remotes/{remote}/{branch}"
-    rev = at or main_ref
-    commit = tags.resolve(git, rev)
+    wanted = rev or main_ref
+    commit = tags.resolve(git, wanted)
     if commit is None:
-        raise Failure(f"{rev} names no commit here" + ("" if at else "; fetch first"), 2)
+        raise Failure(f"{wanted} names no commit here" + ("" if rev else "; fetch first"), 2)
     try:
         ws = tags.workspace(git, commit)
     except tags.ReleaseError as exc:

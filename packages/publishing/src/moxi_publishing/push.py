@@ -177,8 +177,8 @@ class _Reader:
         self.reasons += [f"{where} message {line}" for _, line in judged.refusals]
 
 
-def judge_history(git, rev: str, since: str | None, *, sets=None) -> list[str]:
-    """The refusals for what `rev` brings beyond `since`: each commit of `since..rev`, its
+def judge_history(git, rev: str, from_rev: str | None, *, sets=None) -> list[str]:
+    """The refusals for what `rev` brings beyond `from_rev`: each commit of `from_rev..rev`, its
     headers whole and its message, and, when `rev` names an annotated tag, each tag object
     of its chain. `git(*args, stdin_data=)` runs git with bytes on stdout. Raises
     `content.ScanError`."""
@@ -197,9 +197,9 @@ def judge_history(git, rev: str, since: str | None, *, sets=None) -> list[str]:
         seen.add(obj)
         reader.judge_tag(f"tag {rev}", found[1])
         obj = dict(_headers(found[1])[0]).get("object", "").strip()
-    if since is None:
+    if from_rev is None:
         return reader.reasons
-    done = git("rev-list", f"{since}..{rev}", "--")
+    done = git("rev-list", f"{from_rev}..{rev}", "--")
     if done.returncode != 0:
         raise ScanError(f"git rev-list failed: {_first_line(done.stderr)}")
     commits = done.stdout.decode("ascii").split()

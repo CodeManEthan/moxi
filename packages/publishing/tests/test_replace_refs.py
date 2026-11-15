@@ -46,7 +46,7 @@ def test_a_replaced_commit_is_read_as_it_is_at_push_and_in_scan(repo, names, rem
         env={"GIT_AUTHOR_NAME": "bobsecret"})
     clean = twin(repo, "HEAD", "other.md", "x\n")
     git(repo, "replace", "-f", git(repo, "rev-parse", "HEAD").stdout.strip(), clean)
-    code, out = scan(capsys, str(repo), "--since", base)
+    code, out = scan(capsys, str(repo), "--from", base)
     assert code == 3 and "author header: private-names/" in out
 
 
