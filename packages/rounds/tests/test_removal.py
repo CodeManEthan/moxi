@@ -432,3 +432,86 @@ def test_a_project_disposable_list_is_read_for_its_builds(made, write_config):
 @pytest.mark.skipif(sys.platform == "win32", reason="the mount table is read on Linux")
 def test_the_mount_table_reads_escaped_mount_points():
     assert removal._unescape("/srv/a\\040b") == "/srv/a b"
+
+
+# -- another device, and a repo whose git folder is elsewhere ---------------------------------
+
+def _on_another_device(found: os.stat_result) -> os.stat_result:
+    fields = list(found)
+    fields[2] = found.st_dev + 1
+    return os.stat_result(fields)
+
+
+def test_a_folder_below_the_root_on_another_device_keeps_the_dir(made, monkeypatch):
+    _path, tree, event = made
+    place = Path(os.path.realpath(event["worktree"]))
+    real_lstat = os.lstat
+
+    def lstat(path, *args, **kwargs):
+        found = real_lstat(path, *args, **kwargs)
+        return _on_another_device(found) if Path(path) == place else found
+
+    monkeypatch.setattr(removal.os, "lstat", lstat)
+    found = remove(event)
+    monkeypatch.undo()
+
+    assert kept_by(found) == "A3" and "on another device than its root" in found.why
+    assert tree.root.is_dir()
+
+
+@pytest.mark.parametrize("kind", [removal.WORKTREE, removal.SCRATCH])
+def test_an_entry_on_another_device_inside_keeps_the_dir(made, monkeypatch, kind):
+    _path, _tree, event = made
+    place = Path(os.path.realpath(event[kind]))
+    # Ignored and disposable, so only the walk can keep it.
+    (place / "node_modules").mkdir()
+    (place / "node_modules" / "data.bin").write_bytes(b"\0")
+    real_scandir = removal.os.scandir
+
+    class Entry:
+        def __init__(self, real):
+            self._real, self.path, self.name = real, real.path, real.name
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def stat(self, *, follow_symlinks=True):
+            found = self._real.stat(follow_symlinks=follow_symlinks)
+            return _on_another_device(found) if self.name == "node_modules" else found
+
+    class Listing:
+        def __init__(self, path):
+            self._real = real_scandir(path)
+
+        def __enter__(self):
+            return [Entry(one) for one in self._real.__enter__()]
+
+        def __exit__(self, *exc):
+            return self._real.__exit__(*exc)
+
+    monkeypatch.setattr(removal.os, "scandir", Listing)
+    found = remove(event, kind)
+    monkeypatch.undo()
+
+    assert kept_by(found) == "B7" and found.why.endswith("node_modules is on another device")
+    assert (place / "node_modules" / "data.bin").is_file()
+
+
+def test_a_worktree_of_a_repo_whose_git_folder_is_elsewhere_goes(repo, tmp_path,
+                                                                  write_config):
+    repo.git("init", "-q", f"--separate-git-dir={tmp_path / 'git-folder'}")
+    assert (repo.root / ".git").is_file()
+    write_config("")
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
+                       flow="fix")
+    path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
+    log.append(path, "stage.declared",
+               {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+               by="planner")
+    done = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
+    type(repo)(done.worktree).commit("work.txt", "the work")
+
+    assert remove(commission(path)) == Path(done.worktree)
+
+    assert not Path(done.worktree).exists()
+    assert "work" in repo.git("branch", "--list", "work")

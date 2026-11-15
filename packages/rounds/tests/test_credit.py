@@ -157,3 +157,66 @@ def test_show_names_the_credit_and_the_drop_of_an_unclear_fast_forward(a_round, 
     assert showing.drop_lines(row)[1:] == [
         f"the operator credits it: {row['credit']}",
         f"the operator drops it: {row['drop']}"]
+
+
+def _ran(path, commit: str) -> None:
+    log.append(path, "check.ran", {
+        "stage": "B1", "step": "check", "commit": commit, "merge_base": None,
+        "argv": ["true"], "exit_code": 0, "duration_s": 0.1, "output": "check-1.log"},
+        by="coder")
+
+
+def test_a_build_whose_commits_on_record_parted_is_not_credited(a_round, git_repo):
+    git_repo.switch("work", new_from="main")
+    one = git_repo.commit("one.txt")
+    git_repo.switch("other", new_from="main")
+    two = git_repo.commit("two.txt")
+    git_repo.switch("main")
+    _ran(a_round, one)
+    _ran(a_round, two)
+    git_repo.git("branch", "-D", "work")
+    assert status_now(a_round, git_repo).by == builds.PARTED
+
+    assert "only a fast-forward with no reading is credited" in refused(a_round)
+
+
+def test_a_build_whose_head_landed_under_no_one_landing_is_not_credited(a_round,
+                                                                        git_repo):
+    base = git_repo.rev("main")
+    git_repo.switch("work", new_from="main")
+    tip = git_repo.commit("feature.txt")
+    git_repo.switch("main")
+    landing = git_repo.merge("work")
+    # Two landings on record that both hold the head: no one of them is the build's.
+    for at in (base, tip):
+        log.append(a_round, "finish.action", {
+            "stage": "B1", "tip": at, "id": "merge", "kind": "merge", "state": "ok",
+            "landing": landing, "target_before": base}, by="coder")
+    assert status_now(a_round, git_repo).by == builds.NO_LANDING
+
+    assert "only a fast-forward with no reading is credited" in refused(a_round)
+
+
+def test_a_credited_build_meets_the_work_gate_and_finishes_only_once_verified(
+        a_round, git_repo, tmp_path):
+    from moxi_rounds import checking, finish_gates, verdicts
+    from moxi_rounds import settings as own
+
+    tip = fast_forward(git_repo)
+    credit()
+
+    def gates() -> list[int]:
+        found = state.fold(log.read(a_round))
+        seen = checking.seen_of(found, ROUND, settings=own.load())["B1"]
+        return [one.number for one in finish_gates.unmet(found, "B1", seen=seen,
+                                                         name=ROUND)]
+
+    assert finish_gates.VERIFIED in gates() and finish_gates.WORK not in gates()
+    report = tmp_path / "build-report.md"
+    report.write_text("# report\n\n```toml rounds\n" + "\n".join([
+        'kind = "build"', 'verdict = "publishable"', 'pass = "full"', 'by = "critic"',
+        'model = "a-model"', 'stage = "B1"', f'head = "{tip}"']) + "\n```\n",
+        encoding="utf-8")
+    verdicts.record(ROUND, report, by="critic")
+
+    assert finish_gates.VERIFIED not in gates() and finish_gates.WORK not in gates()

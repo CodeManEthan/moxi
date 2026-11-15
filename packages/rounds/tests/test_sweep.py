@@ -438,3 +438,119 @@ def test_a_grace_below_one_hour_is_refused(hours):
 
     with pytest.raises(ConfigError, match="sweep.grace_hours"):
         own.check_text(f"[sweep]\ngrace_hours = {hours}\n")
+
+
+def test_a_trash_entry_the_sweep_deleted_once_is_left_and_named(made, write_config):
+    write_config(ARMED)
+    entry = removal.trash_dir() / "0123456789abcdef"
+    (entry / "inner").mkdir(parents=True)
+    (entry / "inner" / "out.log").write_text("x", encoding="utf-8")
+    for act in ("renamed", "deleted"):
+        files.append_record(sweeping.log_file(), {
+            "at": "2026-01-01T00:00:00Z", "act": act, "place": "/nowhere",
+            "round": ROUND, "stage": "B1", "repo": "proj-a", "branch": "work",
+            "build": "0123456789abcdef", "kind": "scratch", "entry": "0123456789abcdef"})
+
+    swept = sweeping.run(remove=True)
+
+    [found] = swept.trash
+    assert (found.name, found.fate) == ("0123456789abcdef", "left")
+    assert "deleted it once" in found.why
+    assert (entry / "inner" / "out.log").is_file()
+
+
+def test_the_sweep_reads_the_work_again_before_it_removes(ended, write_config,
+                                                           monkeypatch):
+    _path, tree, _event = ended
+    write_config(ARMED)
+    judge = sweeping._judge
+
+    def judge_then_write(candidate, *args, **kwargs):
+        found = judge(candidate, *args, **kwargs)
+        if candidate.kind == removal.WORKTREE:
+            # Written after the first read and before the removal: git's own removal
+            # takes an ignored file, so only the sweep's second read can keep it.
+            (tree.root / ".env").write_text("TOKEN=only here\n", encoding="utf-8")
+        return found
+
+    monkeypatch.setattr(sweeping, "_judge", judge_then_write)
+    swept = sweeping.run(remove=True)
+
+    [kept] = [one for one in swept.leftovers if one.candidate.kind == "worktree"]
+    assert (kept.fate, kept.kept.check, kept.kept.work) == ("kept", "B3", (".env",))
+    assert (tree.root / ".env").read_text(encoding="utf-8") == "TOKEN=only here\n"
+
+
+# -- the removal rule, each half whole --------------------------------------------------------
+
+def _untracked_hidden_by_config(repo, tree, tmp_path):
+    repo.git("config", "status.showUntrackedFiles", "no")
+    (tree.root / "notes.txt").write_text("n", encoding="utf-8")
+    return lambda: (tree.root / "notes.txt").read_text(encoding="utf-8") == "n"
+
+
+def _skip_worktree(repo, tree, tmp_path):
+    tree.commit("tracked.txt", "as committed")
+    tree.git("update-index", "--skip-worktree", "tracked.txt")
+    (tree.root / "tracked.txt").write_text("c", encoding="utf-8")
+    return lambda: (tree.root / "tracked.txt").read_text(encoding="utf-8") == "c"
+
+
+def _ignored(repo, tree, tmp_path):
+    (tree.root / ".env").write_text("e", encoding="utf-8")
+    return lambda: (tree.root / ".env").read_text(encoding="utf-8") == "e"
+
+
+def _commit_no_ref_holds(repo, tree, tmp_path):
+    tree.git("switch", "-q", "--detach")
+    commit = tree.commit("detached.txt", "d")
+    return lambda: (tree.root / "detached.txt").is_file() and bool(
+        repo.git("cat-file", "-t", commit))
+
+
+def _submodule(repo, tree, tmp_path):
+    sub = type(repo)(tmp_path / "sub")
+    sub.root.mkdir()
+    sub.git("init", "-q", "-b", "main")
+    sub.commit("inside.txt", "s")
+    tree.git("-c", "protocol.file.allow=always", "submodule", "add", "-q",
+             str(sub.root), "sub")
+    tree.git("commit", "-q", "-m", "add a submodule")
+    return lambda: (tree.root / "sub" / "inside.txt").read_text(encoding="utf-8") == "s\n"
+
+
+def _locked(repo, tree, tmp_path):
+    repo.git("worktree", "lock", "--reason", "kept by hand", str(tree.root))
+    return lambda: (tree.root / "work.txt").is_file()
+
+
+def _mounted(repo, tree, tmp_path, monkeypatch):
+    (tree.root / "node_modules").mkdir()
+    (tree.root / "node_modules" / "m").write_text("m", encoding="utf-8")
+    monkeypatch.setattr(removal, "_mount_table",
+                        lambda: [os.path.realpath(tree.root / "node_modules"), "/"])
+    return lambda: (tree.root / "node_modules" / "m").read_text(encoding="utf-8") == "m"
+
+
+@pytest.mark.parametrize("plant", [_untracked_hidden_by_config, _skip_worktree, _ignored,
+                                   _commit_no_ref_holds, _submodule, _locked, _mounted])
+def test_no_drop_or_sweep_takes_work_or_a_folder_rounds_did_not_make(
+        made, later, repo, write_config, tmp_path, monkeypatch, plant):
+    from moxi_rounds import dropping
+
+    _path, tree, event = made
+    write_config(ARMED)
+    worktrees = places.worktree_dir(own.load())
+    unmade = [worktrees / "proj-a" / "made-by-hand", tmp_path / "beside"]
+    for one in unmade:
+        one.mkdir(parents=True)
+        (one / "keep.txt").write_text("k", encoding="utf-8")
+    given = {"monkeypatch": monkeypatch} if plant is _mounted else {}
+    still = plant(repo, tree, tmp_path, **given)
+
+    dropping.drop_build(ROUND, "B1", by="operator", record=POINTER, run_by="planner")
+    sweeping.run(remove=True)
+
+    assert still() and tree.root.is_dir()
+    assert all((one / "keep.txt").read_text(encoding="utf-8") == "k" for one in unmade)
+    assert "work" in repo.git("branch", "--list", "work")

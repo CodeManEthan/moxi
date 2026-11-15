@@ -9409,6 +9409,7 @@ rounds	packages/rounds/tests/test_finish_gates.py	assert set(step.gates) == {num
 rounds	packages/rounds/tests/test_finish_gates.py	exclude.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_finish_gates.py	log.append(path, "finish.done", {"stage": "B1", "tip": tree.rev()}, actor="coder")	use	actor=	by=
 rounds	packages/rounds/tests/test_finish_gates.py	opening.open_round(ROUND, description="a placeholder round", actor="planner",	use	actor=	by=
+rounds	packages/rounds/tests/test_finish_gates.py	assert main(["show", ROUND]) == 0	keep	show	show
 rounds	packages/rounds/tests/test_finish_lock.py	(loser,) = [proc for proc in procs if said[proc].startswith("refused")]	keep	refused	refused
 rounds	packages/rounds/tests/test_finish_lock.py	assert said.startswith("refused") and f"coder pid={first.pid} " in said	keep	refused	refused
 rounds	packages/rounds/tests/test_finish_lock.py	assert taken.holder.round == ROUND and taken.holder.stage == "B1"	keep	round	round
