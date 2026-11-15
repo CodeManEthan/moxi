@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  actedOf, actSaid, agentBody, clearLeadBody, editBody, editForm, editing, kindChoices, leadBody,
-  MAY_HAVE_ACTED, removedSaid, removeSheet, removeStatusPath, reread, touched,
-} from "../src/views.ts";
-import { parseOne, parseWritten } from "../src/feed.ts";
+import { kindChoices, removedSaid, removeSheet, removeStatusPath } from "../src/views.ts";
 
 const PROJECT = { key: "alpha", root: "/w/alpha", kind: "project", lead: "lead-a",
                   associated: ["helper"], agents: ["lead-a", "helper"], notes_root: null,
@@ -17,91 +13,10 @@ const KINDS = {
   broken: [],
 };
 
-test("the edit form's kinds keep the project's own kind", () => {
+test("the Edit panel's kinds keep the project's own kind", () => {
   assert.deepEqual(kindChoices(KINDS, "project").map((choice) => choice.value), ["agent", "project", "topic"]);
   assert.deepEqual(kindChoices(KINDS, "shelf-gone").map((choice) => choice.value),
                    ["agent", "project", "topic", "shelf-gone"]);
-});
-
-// -- the edit form --------------------------------------------------------------------------------
-
-test("an edit sends only what changed, as the verb's flags", () => {
-  const form = editForm(PROJECT);
-  assert.deepEqual(form, { root: "/w/alpha", kind: "project", notesRoot: "" });
-  assert.equal(editBody(PROJECT, form, { notes: true }), null);
-  assert.deepEqual(editBody(PROJECT, { ...form, root: "/w/moved" }, { notes: false }), { key: "alpha", root: "/w/moved" });
-  assert.deepEqual(editBody(PROJECT, { ...form, kind: "agent" }, { notes: false }), { key: "alpha", kind: "agent" });
-  // An emptied root is left as it is: a root can't be cleared.
-  assert.equal(editBody(PROJECT, { ...form, root: "" }, { notes: false }), null);
-  // A relative root is sent as typed, so the server refuses it.
-  assert.deepEqual(editBody(PROJECT, { ...form, root: "w/rel" }, { notes: false }), { key: "alpha", root: "w/rel" });
-});
-
-test("an edit is told apart from the project it was opened from, not the one read since", () => {
-  // Opened at /w/ea; a terminal has since moved the root to /w/eb. The user changes only
-  // the kind: the save names the kind alone, so the terminal's root stands.
-  const base = { ...PROJECT, root: "/w/ea" };
-  const form = { ...editForm(base), kind: "agent" };
-  assert.deepEqual(editBody(base, form, { notes: true }), { key: "alpha", kind: "agent" });
-  // The same form told apart from the project as read since would undo the terminal's root.
-  assert.deepEqual(editBody({ ...base, root: "/w/eb" }, form, { notes: true }),
-                   { key: "alpha", root: "/w/ea", kind: "agent" });
-  // The notes root as well: a base with none, a form not typed in, nothing to send.
-  assert.equal(editBody(base, editForm(base), { notes: true }), null);
-});
-
-test("a read again starts an untouched form again and marks a touched one stale", () => {
-  const base = { ...PROJECT, root: "/w/ea" };
-  const moved = { ...base, root: "/w/eb" };
-  const opened = editing(base);
-  assert.deepEqual(opened, { base, form: { root: "/w/ea", kind: "project", notesRoot: "" }, stale: false });
-  assert.equal(touched(opened), false);
-  // Not typed in: it starts again from what was read, and has nothing to save.
-  const again = reread(opened, moved);
-  assert.deepEqual(again, editing(moved));
-  assert.equal(editBody(again.base, again.form, { notes: true }), null);
-  // Typed in: the user's values and the base stay, and the form is stale.
-  const typed = { ...opened, form: { ...opened.form, kind: "agent" } };
-  assert.equal(touched(typed), true);
-  const stale = reread(typed, moved);
-  assert.deepEqual(stale, { ...typed, stale: true });
-  assert.deepEqual(editBody(stale.base, stale.form, { notes: true }), { key: "alpha", kind: "agent" });
-  // Read again with the project as it was: typed in, but not stale.
-  assert.deepEqual(reread(typed, base), typed);
-  assert.equal(reread(stale, base).stale, false);
-  // Typed in to what is now stored (a save whose answer was lost): it starts again.
-  assert.deepEqual(reread(typed, { ...base, kind: "agent" }), editing({ ...base, kind: "agent" }));
-});
-
-test("the notes root is set or cleared only while notes is installed", () => {
-  const withNotes = { ...PROJECT, notes_root: "/n/alpha" };
-  const form = editForm(withNotes);
-  assert.equal(form.notesRoot, "/n/alpha");
-  assert.deepEqual(editBody(withNotes, { ...form, notesRoot: "" }, { notes: true }), { key: "alpha", no_notes_root: true });
-  assert.deepEqual(editBody(withNotes, { ...form, notesRoot: "/n/other" }, { notes: true }),
-                   { key: "alpha", notes_root: "/n/other" });
-  assert.equal(editBody(withNotes, { ...form, notesRoot: "" }, { notes: false }), null);
-  assert.deepEqual(editBody(PROJECT, { ...editForm(PROJECT), notesRoot: "/n/a" }, { notes: true }),
-                   { key: "alpha", notes_root: "/n/a" });
-});
-
-// -- lead and agents ------------------------------------------------------------------------------
-
-test("lead and agents acts send what the verbs take", () => {
-  assert.deepEqual(leadBody("alpha", "  scout "), { key: "alpha", lead: "scout" });
-  assert.deepEqual(clearLeadBody("alpha"), { key: "alpha", no_lead: true });
-  assert.deepEqual(agentBody("alpha", " helper "), { key: "alpha", name: "helper" });
-});
-
-test("an act's answer: done with its notes, refused with its line, or may have acted", () => {
-  const written = { project: PROJECT, notes: ["the root /w/moved doesn't exist yet"] };
-  assert.deepEqual(actSaid(actedOf(200, written, parseWritten), "Saved alpha."),
-                   { tone: "ok", lines: ["Saved alpha.", "the root /w/moved doesn't exist yet"] });
-  assert.deepEqual(actSaid(actedOf(200, { project: PROJECT }, parseOne), "Added helper to alpha."),
-                   { tone: "ok", lines: ["Added helper to alpha."] });
-  assert.deepEqual(actSaid(actedOf(422, { refused: "no such pair; fix: list them" }, parseOne), "x"),
-                   { tone: "error", lines: ["no such pair; fix: list them"] });
-  assert.deepEqual(actSaid(actedOf(504, null, parseOne), "x"), { tone: "warn", lines: [MAY_HAVE_ACTED] });
 });
 
 // -- remove ---------------------------------------------------------------------------------------

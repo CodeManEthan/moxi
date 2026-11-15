@@ -2,7 +2,7 @@
 projects_page_kit.py: one labelled row each (who leads and who also works there, the
 folder and its kind, the notes folder, and the fixture's sections, ranked ones first,
 each with its link), the foot's `Edit` and `Remove`, each with its address, and
-`Change folder` from a folder that doesn't exist through to a saved root.
+`Change folder` from a folder that doesn't exist through the Edit panel to a saved root.
 """
 
 from __future__ import annotations
@@ -146,14 +146,15 @@ def test_an_agent_that_isnt_running_says_so_after_its_name(fixture_shell, fixtur
 def test_the_foots_edit_and_remove_each_have_their_address(small_page):
     item = opened(small_page, "orbit-cli")
     foot = item.locator('[data-part="foot"]')
+    aside = panel_of(small_page).locator('moxi-projects-panel [data-part="panel"]')
     foot.get_by_role("button", name="Edit").click()
     expect_path(small_page, "/m/projects/edit/orbit-cli")
-    expect(item.locator('form[data-part="edit"]')).to_be_visible()
-    focused = panel_of(small_page).evaluate("page => page.shadowRoot.activeElement?.name ?? null")
-    assert focused == "root"
+    expect(aside).to_have_attribute("data-panel", "edit")
+    expect(aside.get_by_label("Folder", exact=True)).to_be_focused()
+    expect(item).to_have_attribute("open", "")
     foot.get_by_role("button", name="Remove").click()
     expect_path(small_page, "/m/projects/remove/orbit-cli")
-    expect(item.locator('form[data-part="edit"]')).to_have_count(0)
+    expect(aside).to_have_count(0)
     expect(item.locator('[data-part="remove"]')).to_be_visible()
     item.locator('[slot="acts-one"]').click()
     expect_path(small_page, "/m/projects/")
@@ -177,11 +178,15 @@ def test_the_change_act_takes_a_missing_root_through_to_a_saved_one(small_shell,
         expect(item.locator('[data-label="Folder"] [data-action="change-folder"]')).to_have_text("Change folder")
         expect(words(item, "Agents")).to_have_text("builder-2 leads")
 
-        # The folder field has the focus; a `~` path is taken as the home.
-        field = item.locator('form[data-part="edit"] input[name="root"]')
+        # The Edit panel's folder field has the focus; a `~` path is taken as the home.
+        aside = panel_of(small_page).locator('moxi-projects-panel [data-part="panel"]')
+        field = aside.get_by_label("Folder", exact=True)
         expect(field).to_be_focused()
+        expect(field).to_have_value("~/code/quill-mobile")
         field.fill("~/code/quill-moved")
-        item.locator('form[data-part="edit"]').get_by_role("button", name="Save").click()
+        aside.get_by_role("button", name="Save").click()
+        expect(aside).to_have_count(0)
+        expect_path(small_page, f"/m/projects/open/{kit.MISSING}")
         expect(root_words).to_have_text("~/code/quill-moved · a code project")
         expect(item.locator('[data-label="Folder"] [data-action="change-folder"]')).to_have_count(0)
         assert item.get_attribute("lead") is None

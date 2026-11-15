@@ -115,12 +115,13 @@ def test_each_address_opens_what_it_names(small_page, route, opened, path):
     # The address says what is open, the stored key's case included.
     expect_path(small_page, path)
     expect(list_part(small_page).locator('[data-line="unknown"]')).to_have_count(0)
-    if route.startswith("edit/"):
-        # Until the Edit panel, the opened project's own folder field takes the focus.
-        focused = panel_of(small_page).evaluate("page => page.shadowRoot.activeElement?.name ?? null")
-        assert focused == "root"
     aside = panel_of(small_page).locator('moxi-projects-panel [data-part="panel"]')
-    if route == "add":
+    if route.startswith("edit/"):
+        # The Edit panel over the project, its folder field focused.
+        expect(aside).to_have_attribute("data-panel", "edit")
+        expect(aside.get_by_label("Folder", exact=True)).to_be_focused()
+        expect(aside.get_by_label("Folder", exact=True)).to_have_value("~/code/quill-mobile")
+    elif route == "add":
         # The Add panel, empty, its folder field focused.
         expect(aside).to_be_visible()
         expect(aside.get_by_label("Folder", exact=True)).to_be_focused()

@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addedSaid, addPanel, addPanelBody, answerNow, createOffered, createWords, filled, FOLDER_WAIT_MS, folderRoute,
-  folderSays, MAY_BE_ADDED, moreLine, named, nameTaken, parseAtPath,
+  addedSaid, addPanel, addPanelBody, agentAdded, alsoHere, answerNow, createOffered, createWords, editPanel,
+  editReread, editTouched, filled, FOLDER_WAIT_MS, folderRoute, folderSays, MAY_BE_ADDED, MAY_BE_SAVED, moreLine,
+  named, NAME_STAYS, nameTaken, parseAtPath, partlySaved, saveSteps, setChanges, takenOff,
 } from "../src/panel-model.ts";
 
 const at = (fields = {}) => ({
@@ -151,4 +152,110 @@ test("what an add came to: added with its notes and warnings, refused with its t
                    { outcome: "refused", lines: ["a project has that root; fix: ..."] });
   assert.deepEqual(addedSaid({ outcome: "unknown", text: "x" }, null), { outcome: "unknown", lines: [MAY_BE_ADDED] });
   assert.equal(MAY_BE_ADDED, "It may have been added.");
+});
+
+// -- Edit ----------------------------------------------------------------------------------------
+
+const HOME = "/home/me";
+const FACTS = { home: HOME, notes: true };
+const crewed = (fields = {}) => ({
+  key: "atlas-api", root: "/home/me/code/atlas-api", kind: "project", lead: "builder-1",
+  associated: ["planner", "reviewer"], agents: ["builder-1", "planner", "reviewer"],
+  notes_root: "/home/me/notes/atlas", created: "2026-01-02T03:04:05Z", ...fields,
+});
+
+test("the Edit panel opens over the project with its folders in ~ form and nothing to save", () => {
+  const form = editPanel(crewed(), HOME);
+  assert.deepEqual(form, { base: crewed(), folder: "~/code/atlas-api", kind: "project", lead: "builder-1",
+                           notesRoot: "~/notes/atlas", off: [], added: [], agent: "", stale: false });
+  assert.deepEqual(alsoHere(form), ["planner", "reviewer"]);
+  assert.deepEqual(saveSteps(form, FACTS), []);
+  assert.equal(editTouched(form, FACTS), false);
+  // No lead and no notes folder: both fields empty, still nothing to save.
+  const bare = editPanel(crewed({ lead: null, notes_root: null }), null);
+  assert.deepEqual([bare.folder, bare.lead, bare.notesRoot], ["/home/me/code/atlas-api", "", ""]);
+  assert.equal(editTouched(bare, FACTS), false);
+  assert.equal(NAME_STAYS, "The name stays as it is: everything filed under this project is filed by its name.");
+});
+
+test("names are taken off and added in the form, and one taken off comes back when added again", () => {
+  let form = takenOff(editPanel(crewed(), HOME), "planner");
+  assert.deepEqual(alsoHere(form), ["reviewer"]);
+  form = agentAdded({ ...form, agent: " scout " });
+  assert.deepEqual([alsoHere(form), form.agent], [["reviewer", "scout"], ""]);
+  // Added twice, or one already there: listed once.
+  assert.deepEqual(alsoHere(agentAdded({ ...form, agent: "scout" })), ["reviewer", "scout"]);
+  assert.deepEqual(alsoHere(agentAdded({ ...form, agent: "reviewer" })), ["reviewer", "scout"]);
+  // One added here and taken off again is simply gone; one taken off and typed again is back.
+  assert.deepEqual(alsoHere(takenOff(form, "scout")), ["reviewer"]);
+  assert.deepEqual(alsoHere(agentAdded({ ...form, agent: "planner" })), ["planner", "reviewer", "scout"]);
+  // Nothing typed adds nothing.
+  assert.deepEqual(alsoHere(agentAdded({ ...form, agent: "  " })), ["reviewer", "scout"]);
+});
+
+test("a save sends the names taken off, then the fields, then the names added", () => {
+  // The lead moves onto an agent who works there: taken off first, so the lead rule holds.
+  let form = { ...takenOff(editPanel(crewed(), HOME), "planner"), lead: "planner", agent: "builder-1" };
+  assert.deepEqual(saveSteps(form, FACTS), [
+    { route: "api/agents-remove", body: { key: "atlas-api", name: "planner" }, parts: ["planner taken off"] },
+    { route: "api/set", body: { key: "atlas-api", lead: "planner" }, parts: ["the lead"] },
+    { route: "api/agents-add", body: { key: "atlas-api", name: "builder-1" }, parts: ["builder-1 added"] },
+  ]);
+  // The fields: each one changed, the paths as typed.
+  form = { ...editPanel(crewed(), HOME), folder: "~/code/atlas-moved", kind: "agent", lead: "",
+           notesRoot: "/srv/notes" };
+  assert.deepEqual(setChanges(form, FACTS), {
+    body: { key: "atlas-api", root: "~/code/atlas-moved", kind: "agent", no_lead: true, notes_root: "/srv/notes" },
+    parts: ["the folder", "the kind", "the lead", "the notes folder"],
+  });
+});
+
+test("only what differs from the project is sent, in either form of a path", () => {
+  const base = editPanel(crewed(), HOME);
+  // The stored path typed in full, or an emptied folder, is no change.
+  assert.equal(setChanges({ ...base, folder: "/home/me/code/atlas-api" }, FACTS), null);
+  assert.equal(setChanges({ ...base, folder: "" }, FACTS), null);
+  assert.equal(setChanges({ ...base, lead: " builder-1 " }, FACTS), null);
+  // An emptied notes folder clears it, but only while notes is installed.
+  assert.deepEqual(setChanges({ ...base, notesRoot: "" }, FACTS),
+                   { body: { key: "atlas-api", no_notes_root: true }, parts: ["the notes folder"] });
+  assert.equal(setChanges({ ...base, notesRoot: "" }, { home: HOME, notes: false }), null);
+  // A notes folder set where there was none.
+  const none = editPanel(crewed({ notes_root: null }), HOME);
+  assert.deepEqual(setChanges({ ...none, notesRoot: "~/n" }, FACTS),
+                   { body: { key: "atlas-api", notes_root: "~/n" }, parts: ["the notes folder"] });
+});
+
+test("a save that stopped sends only the rest next time", () => {
+  const form = { ...takenOff(editPanel(crewed(), HOME), "planner"), lead: "planner" };
+  // The name was taken off; the set was refused. The project as stored now has planner off.
+  const after = { ...form, base: crewed({ associated: ["reviewer"], agents: ["builder-1", "reviewer"] }) };
+  assert.deepEqual(saveSteps(after, FACTS),
+                   [{ route: "api/set", body: { key: "atlas-api", lead: "planner" }, parts: ["the lead"] }]);
+});
+
+test("what a stopped save says: what was saved, then the refusal", () => {
+  assert.equal(partlySaved([], "no such agent; fix: ..."), "no such agent; fix: ...");
+  assert.equal(partlySaved(["the folder", "the lead"], "refused; fix: ..."),
+               "Saved the folder and the lead. Not saved: refused; fix: ...");
+  assert.equal(partlySaved(["planner taken off", "the folder", "the lead"], "x"),
+               "Saved planner taken off, the folder and the lead. Not saved: x");
+  assert.equal(MAY_BE_SAVED, "It may have been saved.");
+});
+
+test("a project read again restarts an untouched form, and marks a touched one stale", () => {
+  const form = editPanel(crewed(), HOME);
+  const moved = crewed({ root: "/home/me/code/atlas-moved" });
+  assert.deepEqual(editReread(form, moved, FACTS), editPanel(moved, HOME));
+  const typed = { ...form, kind: "agent" };
+  const stale = editReread(typed, moved, FACTS);
+  assert.deepEqual(stale, { ...typed, stale: true });
+  // His values stand, told apart from the project he opened: the folder he didn't touch
+  // is not sent back.
+  assert.deepEqual(saveSteps(stale, FACTS),
+                   [{ route: "api/set", body: { key: "atlas-api", kind: "agent" }, parts: ["the kind"] }]);
+  // Read again as it was: not stale.
+  assert.equal(editReread(stale, crewed(), FACTS).stale, false);
+  // Only a name typed, not yet added, counts as touched.
+  assert.equal(editTouched({ ...form, agent: "scout" }, FACTS), true);
 });

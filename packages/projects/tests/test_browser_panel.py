@@ -4,11 +4,15 @@ aside; a folder typed with `~` and in full, what is there said under the field (
 repository, nothing yet with the box that makes it, a project's root, a folder inside
 one), an answer for a value the field no longer holds dropped, the name filled from the
 folder and typed over, `More`'s kind, lead and notes folder, and the add through to the
-stored project.
+stored project. The Edit panel opened by the foot's `Edit`: an agent taken off and the
+lead moved onto it, sent in the order that keeps the lead rule; a save refused part way,
+which says what was saved and sends only the rest next time; and its close back to the
+project open.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 import sys
@@ -59,6 +63,48 @@ def add_panel(page):
 
 def said_under_field(aside):
     return aside.locator('[data-line="folder"]')
+
+
+def posts_to(page, *paths: str) -> list:
+    """The requests the page posts to any of `paths` from now on, in the order sent."""
+    seen: list = []
+    page.on("request", lambda request: seen.append(request)
+            if request.method == "POST" and request.url.rsplit("/m/projects/", 1)[-1] in paths else None)
+    return seen
+
+
+def sent(posts) -> list[tuple[str, dict]]:
+    """Each request's route and body, in the order sent."""
+    return [(request.url.rsplit("/", 1)[1], json.loads(request.post_data)) for request in posts]
+
+
+def agents_of(shell, key: str) -> list[str]:
+    """Who the shell's store says also works on `key`, read without writing."""
+    from moxi_projects import store
+
+    conn = sqlite3.connect(f"file:{store.path(shell.env)}?mode=ro", uri=True)
+    try:
+        found = conn.execute("SELECT agent FROM project_agents WHERE project_key = ? ORDER BY agent",
+                             (key,)).fetchall()
+    finally:
+        conn.close()
+    return [name for (name,) in found]
+
+
+def also_here(aside) -> list[str]:
+    """The names the Edit panel lists under `Also works here`."""
+    return aside.locator("[data-agent]").evaluate_all("rows => rows.map(row => row.dataset.agent)")
+
+
+def edit_panel(page, key: str):
+    """Opens `key`'s project, presses `Edit` in its foot, and gives the panel."""
+    page.goto(f"/m/projects/open/{key}")
+    item = row(page, key)
+    expect(item).to_have_attribute("open", "")
+    item.locator('[data-part="foot"]').get_by_role("button", name="Edit").click()
+    aside = panel_of(page).locator('moxi-projects-panel [data-part="panel"]')
+    expect(aside).to_have_attribute("data-panel", "edit")
+    return aside
 
 
 def saved(shell, key: str) -> dict | None:
@@ -243,3 +289,107 @@ def test_more_holds_the_notes_root_where_notes_is_installed(fixture_shell, fixtu
     finally:
         kit.seed(fixture_shell)
         shutil.rmtree(where, ignore_errors=True)
+
+
+# --- Edit -------------------------------------------------------------------------------------
+
+def test_an_agent_is_taken_off_and_the_lead_moved_onto_it_in_an_order_the_lead_rule_takes(
+        small_shell, small_page):
+    try:
+        small_page.set_viewport_size({"width": 1280, "height": 800})
+        posts = posts_to(small_page, "api/agents-remove", "api/set", "api/agents-add")
+        aside = edit_panel(small_page, "atlas-api")
+        expect_path(small_page, "/m/projects/edit/atlas-api")
+        expect(aside.locator(".ph b")).to_have_text("Edit atlas-api")
+        field = aside.get_by_label("Folder", exact=True)
+        expect(field).to_be_focused()
+        expect(field).to_have_value("~/code/atlas-api")
+        expect(aside.get_by_label("Kind", exact=True)).to_have_value("project")
+        expect(aside.get_by_label("Lead", exact=True)).to_have_value("builder-1")
+        assert also_here(aside) == ["planner", "reviewer"]
+        expect(aside.locator('[data-line="key"]')).to_have_text("atlas-api")
+        expect(aside.locator('[data-line="name"]')).to_have_text(
+            "The name stays as it is: everything filed under this project is filed by its name.")
+        # No notes on the small install, so no notes folder.
+        expect(aside.get_by_label("Notes folder")).to_have_count(0)
+        save = aside.get_by_role("button", name="Save")
+        expect(save).to_be_disabled()
+
+        # planner is taken off and leads; builder-1, the lead until now, works there, typed
+        # and added with Enter, which sends nothing.
+        aside.get_by_role("button", name="Take off planner").click()
+        aside.get_by_label("Lead", exact=True).fill("planner")
+        agent = aside.get_by_label("Add an agent by name")
+        agent.fill("builder-1")
+        agent.press("Enter")
+        expect(agent).to_have_value("")
+        expect(aside.locator('[data-agent="builder-1"]')).to_have_count(1)
+        assert also_here(aside) == ["reviewer", "builder-1"]
+        assert posts == []
+        save.click()
+
+        # A full save closes the panel, the project still open, the focus on its `Edit`.
+        expect(panel_of(small_page).locator("moxi-projects-panel")).to_have_count(0)
+        expect_path(small_page, "/m/projects/open/atlas-api")
+        item = row(small_page, "atlas-api")
+        expect(item.locator('[data-part="foot"]').get_by_role("button", name="Edit")).to_be_focused()
+        expect(item.locator('[data-part="opened"] [data-label="Agents"] .ol')).to_contain_text("planner leads")
+        assert sent(posts) == [
+            ("agents-remove", {"key": "atlas-api", "name": "planner"}),
+            ("set", {"key": "atlas-api", "lead": "planner"}),
+            ("agents-add", {"key": "atlas-api", "name": "builder-1"}),
+        ]
+        assert saved(small_shell, "atlas-api")["lead"] == "planner"
+        assert agents_of(small_shell, "atlas-api") == ["builder-1", "reviewer"]
+    finally:
+        kit.seed(small_shell, notes=False)
+
+
+def test_a_save_refused_part_way_says_what_was_saved_and_sends_the_rest_after(small_shell, small_page):
+    moved = kit.home(small_shell) / "code" / "kestrel-moved"
+    moved.mkdir(parents=True, exist_ok=True)
+    try:
+        aside = edit_panel(small_page, "kestrel-web")
+        aside.get_by_role("button", name="Take off reviewer").click()
+        field = aside.get_by_label("Folder", exact=True)
+        field.fill("code/relative")
+        aside.get_by_role("button", name="Save").click()
+        said = aside.locator('[data-line="said"]')
+        expect(said).to_have_attribute("data-outcome", "refused")
+        expect(said).to_contain_text("Saved reviewer taken off. Not saved: ")
+        expect(said).to_contain_text("fix:")
+        # The panel stays, with what he typed; the name taken off is off for good.
+        expect(field).to_have_value("code/relative")
+        expect(aside.locator("[data-agent]")).to_have_count(0)
+        assert agents_of(small_shell, "kestrel-web") == []
+        assert saved(small_shell, "kestrel-web")["root"] == kit.root(small_shell, kit.SEVEN[2])
+
+        # Only the rest is sent next time.
+        posts = posts_to(small_page, "api/agents-remove", "api/set", "api/agents-add")
+        field.fill("~/code/kestrel-moved")
+        aside.get_by_role("button", name="Save").click()
+        expect(panel_of(small_page).locator("moxi-projects-panel")).to_have_count(0)
+        assert sent(posts) == [("set", {"key": "kestrel-web", "root": "~/code/kestrel-moved"})]
+        assert saved(small_shell, "kestrel-web")["root"] == str(moved)
+    finally:
+        kit.seed(small_shell, notes=False)
+        shutil.rmtree(moved, ignore_errors=True)
+
+
+def test_the_edit_panel_closes_back_to_its_project_open(small_page):
+    aside = edit_panel(small_page, "orbit-cli")
+    aside.get_by_label("Lead", exact=True).fill("someone-else")
+    aside.get_by_role("button", name="Cancel").click()
+    expect_path(small_page, "/m/projects/open/orbit-cli")
+    expect(panel_of(small_page).locator("moxi-projects-panel")).to_have_count(0)
+    item = row(small_page, "orbit-cli")
+    expect(item).to_have_attribute("open", "")
+    edit = item.locator('[data-part="foot"]').get_by_role("button", name="Edit")
+    expect(edit).to_be_focused()
+    # Opened again, it starts from the project: nothing typed before was kept.
+    edit.click()
+    aside = panel_of(small_page).locator('moxi-projects-panel [data-part="panel"]')
+    expect(aside.get_by_label("Lead", exact=True)).to_have_value("planner")
+    small_page.keyboard.press("Escape")
+    expect_path(small_page, "/m/projects/open/orbit-cli")
+    expect(panel_of(small_page).locator("moxi-projects-panel")).to_have_count(0)

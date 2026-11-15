@@ -148,6 +148,11 @@ export class ProjectsPanel extends LitElement {
   }
 
   protected firstUpdated(): void {
+    this.focus();
+  }
+
+  /** The folder field takes the focus. */
+  override focus(): void {
     this.renderRoot.querySelector<HTMLInputElement>('input[name="folder"]')?.focus();
   }
 

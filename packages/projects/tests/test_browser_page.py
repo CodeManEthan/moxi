@@ -5,9 +5,10 @@ Add panel shows the store line above its button and its add refuses with it; a
 contribution that won't load, named under the panel's `Kind`, which an add goes ahead
 without and whose warning the panel shows beside the success; an add with create in a real
 git; an add whose answer is lost, after which the page reads its list again and says it
-may have been added; the edit form, which sends only what the user
-changed when a terminal has changed the project since it was opened; the lead and the
-associated agents; remove through the confirm sheet, where Cancel sends nothing, a refusal
+may have been added; the Edit panel, which changes the folder and the kind, refuses a
+relative folder, and sends only what the user changed when a terminal has changed the
+project since it was opened; the lead and the associated agents set, added, taken off and
+cleared through it; remove through the confirm sheet, where Cancel sends nothing, a refusal
 gives each sentence, a removal takes the row off, and each confirmation sends its own key;
 a remove whose answer is lost, which says projects may have acted; and the 360 px width
 check.
@@ -171,12 +172,20 @@ def open_row(panel, key: str):
     return item
 
 
-def edit_row(panel, key: str):
-    """Opens `key`'s row and presses `Edit` in its foot, and gives the row."""
-    item = open_row(panel, key)
+def edit_panel(panel, key: str):
+    """Opens `key`'s row unless it is open, presses `Edit` in its foot, and gives the Edit
+    panel."""
+    item = row(panel, key)
+    if item.get_attribute("open") is None:
+        open_row(panel, key)
     item.locator('[data-part="foot"] [data-action="edit"]').click()
-    expect(item.locator('form[data-part="edit"]')).to_be_visible()
-    return item
+    aside = panel.locator('moxi-projects-panel [data-part="panel"]')
+    expect(aside).to_have_attribute("data-panel", "edit")
+    return aside
+
+
+def panel_closed(panel) -> None:
+    expect(panel.locator("moxi-projects-panel")).to_have_count(0)
 
 
 def root_row(item):
@@ -377,31 +386,31 @@ def test_a_lost_add_answer_reads_the_list_again_and_says_it_may_have_been_added(
 
 # --- edit ---------------------------------------------------------------------------------------
 
-def test_the_edit_form_changes_the_root_and_kind_and_refuses_a_relative_root(
+def test_the_edit_panel_changes_the_root_and_kind_and_refuses_a_relative_root(
         seeded, ui_shell, ui_page):
     add(ui_shell, "editable")
     panel = open_panel(ui_page)
-    item = edit_row(panel, "editable")
-    edit = item.locator('form[data-part="edit"]')
-    save = edit.get_by_role("button", name="Save")
+    aside = edit_panel(panel, "editable")
+    save = aside.get_by_role("button", name="Save")
     expect(save).to_be_disabled()
     moved = root(ui_shell, "moved-away")
-    edit.get_by_label(re.compile(r"^Root")).fill(moved)
-    edit.get_by_role("combobox", name="Kind").select_option("agent")
+    aside.get_by_label("Folder", exact=True).fill(moved)
+    aside.get_by_label("Kind", exact=True).select_option("agent")
     save.click()
-    said = item.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "ok")
-    expect(said).to_contain_text("Saved editable.")
-    expect(said).to_contain_text("doesn't exist yet")
+    panel_closed(panel)
     # The new folder doesn't exist yet, so the Folder row says so rather than the kind.
+    item = row(panel, "editable")
     expect(root_row(item)).to_contain_text(f"{tilde(ui_shell, moved)} doesn't exist")
     after = shown(ui_shell, "editable")
     assert (after["root"], after["kind"]) == (moved, "agent"), after
 
-    edit.get_by_label(re.compile(r"^Root")).fill("work/relative")
-    save.click()
-    expect(said).to_have_attribute("data-tone", "error")
+    aside = edit_panel(panel, "editable")
+    aside.get_by_label("Folder", exact=True).fill("work/relative")
+    aside.get_by_role("button", name="Save").click()
+    said = aside.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-outcome", "refused")
     expect(said).to_contain_text("fix:")
+    expect(aside.get_by_label("Folder", exact=True)).to_have_value("work/relative")
     assert shown(ui_shell, "editable")["root"] == moved
 
 
@@ -412,44 +421,47 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
     Path(second).mkdir(parents=True)
     panel = open_panel(ui_page)
     sets = posts_to(ui_page, "api/set")
-    item = edit_row(panel, "edited")
-    edit = item.locator('form[data-part="edit"]')
-    save = edit.get_by_role("button", name="Save")
-    root_field = edit.get_by_label(re.compile(r"^Root"))
-    stale = edit.locator('[data-line="stale"]')
-    expect(root_field).to_have_value(first)
+    aside = edit_panel(panel, "edited")
+    item = row(panel, "edited")
+    save = aside.get_by_role("button", name="Save")
+    field = aside.get_by_label("Folder", exact=True)
+    stale = aside.locator('[data-line="stale"]')
+    expect(field).to_have_value(tilde(ui_shell, first))
 
-    # A terminal moves the root while the form is open, and the page reads again on the
-    # changed event. The form wasn't typed in, so it starts again from what is stored, with
+    # A terminal moves the folder while the panel is open, and the page reads again on the
+    # changed event. Nothing was typed, so the panel starts again from what is stored, with
     # nothing to save.
     moxi(ui_shell, "projects", "set", "edited", "--root", second)
     changed(ui_page)
     expect(root_row(item)).to_have_text(f"{tilde(ui_shell, second)} · a code project")
-    expect(root_field).to_have_value(second)
+    expect(field).to_have_value(tilde(ui_shell, second))
     expect(save).to_be_disabled()
     expect(stale).to_have_count(0)
 
-    # Only the kind is changed, so only the kind is sent, and the terminal's root stands.
-    edit.get_by_role("combobox", name="Kind").select_option("agent")
+    # Only the kind is changed, so only the kind is sent, and the terminal's folder stands.
+    aside.get_by_label("Kind", exact=True).select_option("agent")
     save.click()
+    panel_closed(panel)
     expect(root_row(item)).to_have_text(f"{tilde(ui_shell, second)} · an agent's home")
     assert [json.loads(request.post_data) for request in sets] == [
         {"key": "edited", "kind": "agent"}]
     after = shown(ui_shell, "edited")
     assert (after["root"], after["kind"]) == (second, "agent"), after
 
-    # Typed in, the form keeps the user's root when the terminal changes the kind, and
-    # says the project has changed; the save sends the root alone.
+    # Typed in, the panel keeps his folder when the terminal changes the kind, and says
+    # the project has changed; the save sends the folder alone.
     third = root(ui_shell, "edited-typed")
-    root_field.fill(third)
+    aside = edit_panel(panel, "edited")
+    field = aside.get_by_label("Folder", exact=True)
+    field.fill(third)
     moxi(ui_shell, "projects", "set", "edited", "--kind", "project")
     changed(ui_page)
     expect(root_row(item)).to_contain_text("a code project")
-    expect(stale).to_contain_text("This project has changed since you opened the form.")
-    expect(root_field).to_have_value(third)
-    save.click()
+    expect(aside.locator('[data-line="stale"]')).to_have_text("This project has changed since you opened it.")
+    expect(field).to_have_value(third)
+    aside.get_by_role("button", name="Save").click()
+    panel_closed(panel)
     expect(root_row(item)).to_contain_text(tilde(ui_shell, third))
-    expect(stale).to_have_count(0)
     assert json.loads(sets[-1].post_data) == {"key": "edited", "root": third}
     after = shown(ui_shell, "edited")
     assert (after["root"], after["kind"]) == (third, "project"), after
@@ -457,40 +469,41 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
 
 # --- lead and agents ----------------------------------------------------------------------------
 
-def test_the_lead_and_the_agents_are_set_added_removed_and_cleared(seeded, ui_shell, ui_page):
+def test_the_lead_and_the_agents_are_set_added_taken_off_and_cleared(seeded, ui_shell, ui_page):
     add(ui_shell, "crewed")
     panel = open_panel(ui_page)
-    item = edit_row(panel, "crewed")
-    agents = item.locator('[data-part="agents"]')
-    said = item.locator('[data-line="said"]')
-    expect(agents.locator('[data-line="lead"]')).to_have_text("none")
-    expect(agents.locator('[data-line="no-agents"]')).to_be_visible()
+    item = row(panel, "crewed")
+    agents_row = item.locator('[data-part="opened"] [data-label="Agents"] .ol')
+    aside = edit_panel(panel, "crewed")
+    expect(aside.get_by_label("Lead", exact=True)).to_have_value("")
+    expect(aside.locator("[data-agent]")).to_have_count(0)
 
-    agents.get_by_label("Lead agent").fill("captain")
-    agents.get_by_role("button", name="Set lead").click()
-    expect(said).to_contain_text("captain leads crewed now.")
-    expect(agents.locator('[data-line="lead"]')).to_have_text("captain")
-    expect(agents.get_by_label("Lead agent")).to_have_value("")
+    aside.get_by_label("Lead", exact=True).fill("captain")
+    aside.get_by_label("Add an agent by name").fill("deckhand")
+    aside.get_by_role("button", name="Save").click()
+    panel_closed(panel)
+    expect(agents_row).to_contain_text("captain leads")
+    expect(agents_row).to_contain_text("deckhand also works here")
 
-    agents.get_by_label("Agent name").fill("deckhand")
-    agents.get_by_role("button", name="Add agent").click()
-    expect(said).to_contain_text("Added deckhand to crewed.")
-    expect(agents.locator('li[data-agent="deckhand"]')).to_have_count(1)
-
-    # The lead can't also be in the associated set: the verb's refusal, with its fix.
-    agents.get_by_label("Agent name").fill("captain")
-    agents.get_by_role("button", name="Add agent").click()
-    expect(said).to_have_attribute("data-tone", "error")
+    # The lead can't also be one who works there: the verb's refusal, with its fix.
+    aside = edit_panel(panel, "crewed")
+    expect(aside.locator('[data-agent="deckhand"]')).to_have_count(1)
+    agent = aside.get_by_label("Add an agent by name")
+    agent.fill("captain")
+    agent.press("Enter")
+    aside.get_by_role("button", name="Save").click()
+    said = aside.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-outcome", "refused")
     expect(said).to_contain_text("fix:")
+    expect(said).not_to_contain_text("Saved")
     assert shown(ui_shell, "crewed")["associated"] == ["deckhand"]
 
-    agents.get_by_role("button", name="Remove deckhand").click()
-    expect(said).to_contain_text("Took deckhand out of crewed.")
-    expect(agents.locator('li[data-agent="deckhand"]')).to_have_count(0)
-
-    agents.get_by_role("button", name="Clear lead").click()
-    expect(said).to_contain_text("crewed has no lead now.")
-    expect(agents.locator('[data-line="lead"]')).to_have_text("none")
+    aside.get_by_role("button", name="Take off captain").click()
+    aside.get_by_role("button", name="Take off deckhand").click()
+    aside.get_by_label("Lead", exact=True).fill("")
+    aside.get_by_role("button", name="Save").click()
+    panel_closed(panel)
+    expect(agents_row).to_have_text("no lead")
     after = shown(ui_shell, "crewed")
     assert (after["lead"], after["associated"]) == (None, []), after
 
@@ -586,7 +599,10 @@ def test_the_page_fits_a_phone(seeded, ui_shell, ui_page, ui_width_check):
     ui_width_check(ui_page, module="projects")
     panel = ui_page.locator("#moxi-panel > moxi-projects-page")
     expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "up")
-    # A project opened, with its edit form, and then one with a lead and an agent.
+    # A project opened, then one with a lead and an agent, and its Edit panel.
     for key in ("a-project-with-a-rather-long-key-for-a-narrow-screen", "alpha"):
         open_row(panel, key)
         ui_width_check(ui_page)
+    row(panel, "alpha").locator('[data-part="foot"] [data-action="edit"]').click()
+    expect(panel.locator('moxi-projects-panel [data-part="panel"]')).to_be_visible()
+    ui_width_check(ui_page)
