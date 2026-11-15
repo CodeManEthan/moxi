@@ -16,12 +16,12 @@ more, or no `comms.db`), the act refuses with the code `operator-unknown` and po
 nothing. A store that can't be read refuses with `record-unreadable`.
 
 **The answers** carry the verb's outcome and its refusal's code, never its text: the page
-words each from the outcome and the code. A request the verb's own parser refuses (a
-blank `to`) is `refused` with the code `request-shape`; a `message_id` that is not all
-digits is `refused` with `message-id-shape` before anything is read. Any other failure is
-logged once per class with its traceback but not its text, and answers the code
-`page-error`: `failed` for a check, `unknown` for a send or a take-back, since one that
-broke may have acted.
+words each from the outcome and the code. A blank `to` is `refused` with the code
+`request-shape`, and a `message_id` that is not all digits is `refused` with
+`message-id-shape`, each before anything is read. Any exception out of the verb is logged
+once per class with its traceback but not its text, and answers the code `page-error`:
+`failed` for a check, `unknown` for a send or a take-back, since one that broke may have
+acted.
 
 Inside an agent's session the verb refuses the operator's lane, so `check` and `send`
 answer `operator-in-session`, or `operator-and-claim` when this process also carries an
@@ -122,6 +122,8 @@ def _act(call: Any, verb: Callable[..., api.SendResult], broke: str) -> dict[str
     # One check or send as the operator. `broke` is the outcome of a failure past the
     # verb's own answers.
     body = call.body
+    if not body["to"].strip():
+        return refused(REQUEST_SHAPE)
     try:
         user = operator_id()
     except Exception as exc:
@@ -133,8 +135,6 @@ def _act(call: Any, verb: Callable[..., api.SendResult], broke: str) -> dict[str
         result = verb(api.Sender.operator(user), [body["to"]], body["text"],
                       posture=body["posture"], reply_to=body.get("reply_to"),
                       held=body["held"], new_name=True, timeout_s=ACT_TIMEOUT_S)
-    except (ValueError, TypeError):
-        return refused(REQUEST_SHAPE)
     except Exception as exc:
         _log_once(exc, "the page's send box failed")
         return refused(PAGE_ERROR, broke)

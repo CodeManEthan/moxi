@@ -303,8 +303,26 @@ def test_sixteen_thousand_escaped_characters_fit_the_cap(rig):
     assert status == 200 and answer["refusal"] == {"code": "too-long"}
 
 
-def test_a_blank_to_is_refused_as_a_request_the_page_never_sends(rig):
+def test_a_blank_to_is_refused_as_a_request_the_page_never_sends(rig, monkeypatch):
+    monkeypatch.setattr(pageacts, "operator_id", lambda: pytest.fail("read"))
     assert check(to="  ") == pageacts.refused("request-shape")
+    assert send(to="") == pageacts.refused("request-shape")
+
+
+@pytest.mark.parametrize("err", [ValueError, TypeError])
+def test_a_value_or_type_error_after_the_post_may_have_sent(rig, monkeypatch, err):
+    real = api.send
+    posted = []
+
+    def breaks_after_the_post(*a, **kw):
+        posted.append(real(*a, **kw).message_id)
+        raise err("after the post")
+
+    monkeypatch.setattr(api, "send", breaks_after_the_post)
+    monkeypatch.setattr(api, "check", lambda *a, **kw: (_ for _ in ()).throw(err("check")))
+    assert send() == pageacts.refused("page-error", "unknown")
+    assert posted[0] is not None and newest(rig) == str(posted[0])
+    assert check() == pageacts.refused("page-error", "failed")
 
 
 # --- failures and secrets ------------------------------------------------------------------
