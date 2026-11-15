@@ -189,6 +189,11 @@ def resolve(path: str | os.PathLike) -> Repo:
     return repo
 
 
+#: `resolve` under the name `moxi_repo.api` hands it out by, where the API's own verbs
+#: make a bare `resolve` ambiguous.
+resolve_repo = resolve
+
+
 def work_tree(path: str | os.PathLike) -> Path:
     """The top of the work tree `path` is in, a linked one's own top; raises `NotARepo`."""
     return _rev_parse(path).root
@@ -622,7 +627,7 @@ def remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -
 
 
 __all__ = ["Repo", "GitDirOnly", "git_dir_only", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
-           "resolve", "work_tree", "read", "register", "set_enabled", "clear_recorded",
+           "resolve", "resolve_repo", "work_tree", "read", "register", "set_enabled", "clear_recorded",
            "apply_settings", "remove_piece",
            "set_mode", "sync", "remove_all", "pick_mode", "git_version", "parse_version",
            "interpreter", "runner_file", "chain_state", "chain_hooks", "holds_chain_line", "check_shims", "key_of", "worktrees",

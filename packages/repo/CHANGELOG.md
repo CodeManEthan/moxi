@@ -5,8 +5,9 @@
 - `moxi_repo.commit_rules_problems(root, text)`: the commit-rules piece's rules applied
   to a message after the commit was made, with the piece's settings in the repo at
   `root`; empty where the piece is not registered or is disabled.
-- `moxi_repo.api` also hands out `interpreter`, `resolve_project` and
-  `ProjectUnavailable`.
+- `moxi_repo.api` also hands out `interpreter`, `resolve_project`,
+  `ProjectUnavailable`, `resolve_repo` (a repo's paths from a path in any of its work
+  trees), `NotARepo`, `comment_prefix` and `quote_arg`.
 - New command `moxi repo rules [PATH]`: what a committer in a repo must know. It prints
   the trailers the repo refuses and the text its messages may not hold, from the
   commit-rules piece's settings, then the repo's own rule lines, then the commit-proof

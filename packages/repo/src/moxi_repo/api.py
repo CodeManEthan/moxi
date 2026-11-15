@@ -1205,7 +1205,9 @@ REEXPORTS = {**_PACKAGE_EXPORTS, "SpecError": "moxi_repo.committer",
              "saved_spec": "moxi_repo.committer", "last_commit_time": "moxi_repo.committer",
              "PATHSPEC_VARS": "moxi_repo.gitrun", "interpreter": "moxi_repo.gitconf",
              "resolve_project": "moxi_repo.projects",
-             "ProjectUnavailable": "moxi_repo.projects"}
+             "ProjectUnavailable": "moxi_repo.projects", "resolve_repo": "moxi_repo.gitconf",
+             "NotARepo": "moxi_repo.gitconf", "comment_prefix": "moxi_repo.commit_rules",
+             "quote_arg": "moxi_repo.run"}
 
 
 def __getattr__(name):
