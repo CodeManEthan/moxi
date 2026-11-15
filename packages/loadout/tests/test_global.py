@@ -259,6 +259,52 @@ def test_a_harness_file_that_is_another_harness_part_is_blocked(lo):
     assert any("claude's part" in line for line in out.text())
 
 
+def _snap(*paths):
+    return [(p.is_symlink() and os.readlink(p), p.read_bytes()) for p in paths]
+
+
+def _stands_over_installs_remove_and_uninstall(link, to, blocked, named):
+    """`link` made a link to `to` after a clean managed install: over two installs both
+    files stay as they are and `blocked` read blocked (exit 3) with a line naming the
+    files; `global remove` stands the same way, and uninstall refuses with nothing
+    removed."""
+    from moxi import modules
+
+    from moxi_loadout import teardown
+
+    link.unlink()
+    link.symlink_to(to)
+    before = _snap(link, to)
+    for _ in range(2):
+        out = install.install()
+        assert out.code == 3, out.text()
+        assert _rows(out, "blocked") == blocked
+        assert _snap(link, to) == before
+    assert any(str(link) in line and named in line for line in out.text()), out.text()
+    assert cli.main(["global", "remove"]) == 3
+    assert _snap(link, to) == before
+    with pytest.raises(modules.Refused):
+        teardown.teardown(say=lambda line: None)
+    assert _snap(link, to) == before
+
+
+def test_opencodes_file_a_link_to_codexs_stands_through_installs_remove_and_uninstall(lo):
+    (lo / "global.opencode.md").write_text("OpenCode only.\n")
+    mode(lo, "managed")
+    assert install.install().code == 0
+    codex = harness.global_file("codex")
+    _stands_over_installs_remove_and_uninstall(
+        harness.global_file("opencode"), codex, {"codex", "opencode"}, str(codex))
+
+
+def test_codexs_file_a_link_to_claudes_part_stands_through_installs_remove_and_uninstall(lo):
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    mode(lo, "managed")
+    assert install.install().code == 0
+    _stands_over_installs_remove_and_uninstall(
+        harness.global_file("codex"), lo / "global.claude.md", {"codex"}, "claude's part")
+
+
 @pytest.mark.parametrize("to", ["global.md", "global.codex.md"])
 def test_a_link_to_the_shared_file_or_the_own_part_is_left_with_a_line(lo, to):
     (lo / "global.codex.md").write_text("Codex only.\n")
