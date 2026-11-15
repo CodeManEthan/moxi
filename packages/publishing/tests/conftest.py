@@ -180,11 +180,13 @@ class Fake:
 
     def __init__(self):
         self.default_branch = "main"
-        self.runs: dict[str, list[tuple[str, str]]] = {}   # commit: [(job, conclusion)]
+        # commit: [{"event", "branch", "jobs": [(job, conclusion)]}], one dict per run
+        self.runs: dict[str, list[dict]] = {}
         self.index: dict[str, dict[str, list[dict]]] = {}  # dist: {version: [file]}
         self.tags: list[str] = []
         self.broken: set[str] = set()                      # path prefixes answering 500
         self.asked: list[str] = []
+        self.queries: list[str] = []                       # each URL's query string
 
     def publish(self, dist: str, version: str, *, sha256: str = "0" * 64,
                 filename: str | None = None, yanked: bool = False) -> None:
@@ -192,8 +194,17 @@ class Fake:
             {"filename": filename or f"{dist.replace('-', '_')}-{version}.tar.gz",
              "digests": {"sha256": sha256}, "yanked": yanked})
 
-    def green(self, commit: str, job: str = "linux", conclusion: str = "success") -> None:
-        self.runs.setdefault(commit, []).append((job, conclusion))
+    def green(self, commit: str, job: str = "linux", conclusion: str = "success", *,
+              event: str = "push", branch: str | None = None) -> None:
+        """A job of the workflow run at `commit` from `event` on `branch` (default: the
+        default branch), the run made the first time it is named."""
+        branch = branch or self.default_branch
+        runs = self.runs.setdefault(commit, [])
+        run = next((r for r in runs if (r["event"], r["branch"]) == (event, branch)), None)
+        if run is None:
+            run = {"event": event, "branch": branch, "jobs": []}
+            runs.append(run)
+        run["jobs"].append((job, conclusion))
 
     def answer(self, url: str) -> tuple[int, object]:
         from urllib.parse import parse_qs, urlsplit
@@ -201,6 +212,7 @@ class Fake:
         parts = urlsplit(url)
         path, query = parts.path, parse_qs(parts.query)
         self.asked.append(path)
+        self.queries.append(parts.query)
         if any(path.startswith(p) for p in self.broken):
             return 500, None
         bits = path.strip("/").split("/")
@@ -215,13 +227,18 @@ class Fake:
         if not rest:
             return 200, {"default_branch": self.default_branch}
         if rest[:2] == ["actions", "workflows"]:
+            # Every run at the commit, whatever event or branch the query names, so the
+            # gate's own reading of each run is what a test holds.
             sha = query.get("head_sha", [""])[0]
-            runs = [{"id": sha, "head_sha": sha, "event": "push",
-                     "head_branch": self.default_branch}] if sha in self.runs else []
+            runs = [{"id": f"{sha}-{n}", "head_sha": sha, "event": run["event"],
+                     "head_branch": run["branch"]}
+                    for n, run in enumerate(self.runs.get(sha, []))]
             return 200, {"workflow_runs": runs}
         if rest[:2] == ["actions", "runs"]:
-            return 200, {"jobs": [{"name": n, "conclusion": c}
-                                  for n, c in self.runs.get(rest[2], [])]}
+            sha, _, n = rest[2].rpartition("-")
+            runs = self.runs.get(sha, [])
+            jobs = runs[int(n)]["jobs"] if n.isdigit() and int(n) < len(runs) else []
+            return 200, {"jobs": [{"name": name, "conclusion": c} for name, c in jobs]}
         if rest[:3] == ["git", "matching-refs", "tags"]:
             prefix = "/".join(rest[3:])
             return 200, [{"ref": f"refs/tags/{t}"} for t in self.tags if t.startswith(prefix)]

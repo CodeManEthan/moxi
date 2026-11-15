@@ -173,6 +173,17 @@ def test_check_3_wants_main_and_its_check_green(released_repo, fake):
            3, "fetch first")
 
 
+@pytest.mark.parametrize("event, branch", [("pull_request", "main"), ("push", "topic"),
+                                           ("workflow_dispatch", "main")])
+def test_check_3_wants_the_run_from_a_push_to_main(released_repo, fake, event, branch):
+    repo = released_repo
+    fake.runs.clear()
+    fake.green(head(repo), event=event, branch=branch)
+    failed(run_gate(repo, fake, "proj-a-v0.1.0"), 3, "no successful run from a push to main")
+    asked = [q for path, q in zip(fake.asked, fake.queries) if path.endswith("/runs")]
+    assert asked and all("event=push" in q and "branch=main" in q for q in asked)
+
+
 def test_check_3_refuses_a_branch_commit_a_merge_brought_into_main(released_repo, fake):
     repo = released_repo
     git(repo, "switch", "-q", "-c", "topic")
