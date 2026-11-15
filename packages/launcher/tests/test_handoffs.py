@@ -162,6 +162,26 @@ def test_a_file_the_seat_reads_as_its_own_is_not_another_seats(tmp_path):
     assert [key for key, _ in handoffs.others(None, tmp_path, "planner")] == ["lead-2"]
 
 
+def test_a_seat_named_with_a_trailing_count_shares_its_files_with_the_shorter_key(tmp_path):
+    """Seat `lead-2`'s first handoff has the name of seat `lead`'s second: each seat reads
+    it as its own, and `lead` never lists it as another seat's."""
+    files(tmp_path, "2026-10-29-lead-2.md")
+    own = tmp_path / "2026-10-29-lead-2.md"
+    assert handoffs.waiting(None, tmp_path, "lead").path == own
+    assert handoffs.waiting(None, tmp_path, "lead-2").path == own
+    assert handoffs.others(None, tmp_path, "lead") == []
+    assert handoffs.others(None, tmp_path, "lead-2") == []
+    assert [key for key, _ in handoffs.others(None, tmp_path, "planner")] == ["lead-2"]
+    # With the name without the count on the same date, a read without a key gives it to
+    # `lead`, and `lead-2` still reads it as its own.
+    files(tmp_path, "2026-10-29-lead.md")
+    assert [key for key, _ in handoffs.others(None, tmp_path, "planner")] == ["lead"]
+    assert handoffs.waiting(None, tmp_path, "lead").path == own
+    assert handoffs.waiting(None, tmp_path, "lead-2").path == own
+    assert [(key, h.path.name) for key, h in handoffs.others(None, tmp_path, "lead-2")] \
+        == [("lead", "2026-10-29-lead.md")]
+
+
 def test_another_key_picked_up_to_its_newest_is_not_listed(tmp_path):
     conn = store.connect()
     try:

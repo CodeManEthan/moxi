@@ -21,6 +21,12 @@ is taken. Files sort by their date, then that count. Read without a key (`others
 trailing `-<n>` (n of 2 or more) is the count only when the same date holds the name
 without it; otherwise it is part of the key.
 
+The rule is ambiguous for a key that itself ends in `-<n>`: `2026-10-29-lead-2.md` is both
+seat `lead`'s second handoff of that day and seat `lead-2`'s first. A seat reads names
+for its own key (`parse`), so seats `lead` and `lead-2` each take that file as their own
+waiting handoff, and `lead`'s other-seat lines leave it out even on a date with no
+`2026-10-29-lead.md`. Only a read without a key uses the same-date test above.
+
 **Other seats' handoffs.** A seat's start also lists the handoffs other keys have waiting
 in its folder (`others`), newest first, at most `OTHERS_SHOWN` lines, then how many more.
 Listing one picks nothing: it waits for its own seat.
@@ -224,7 +230,10 @@ def file_name(key: str, date: str, count: int = 1) -> str:
 
 
 def parse(path: str | Path, key: str) -> Handoff | None:
-    """The handoff `path` names when its file name is one of `key`'s, else None."""
+    """The handoff `path` names when its file name is one of `key`'s, else None. A
+    trailing `-<n>` is read as `key`'s count whether or not the date holds the name
+    without it, so `<date>-<key>-<n>.md` is `key`'s even when a seat named `<key>-<n>`
+    wrote it (the module's note on the file name)."""
     match = re.fullmatch(_DATE + "-" + re.escape(key) + r"(?:-([2-9]|[1-9]\d+))?\.md",
                          Path(path).name)
     if match is None:
