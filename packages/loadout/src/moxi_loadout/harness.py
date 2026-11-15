@@ -13,11 +13,15 @@ places (`moxi.paths.home`):
   CLI writes them). That Codex reads `hooks.json` and the rules file is taken from its
   binary, not yet confirmed by a run.
 - OpenCode: `$OPENCODE_CONFIG_DIR` when set, else `$XDG_CONFIG_HOME/opencode`, else
-  `~/.config/opencode`, as OpenCode resolves it: `opencode.json` and `AGENTS.md`. The
-  shapes follow OpenCode's published config schema and its docs, not yet confirmed by a
-  run. Its skills and agents folders (the opencode row in the core's harness table) keep
-  the XDG form, `opencode_xdg_home`: nothing yet shows OpenCode reading them from
-  `$OPENCODE_CONFIG_DIR`.
+  `~/.config/opencode`, as OpenCode resolves it: `opencode.json` and `AGENTS.md`. A run of
+  OpenCode 1.19.5 confirmed the `AGENTS.md` facts: it reads the XDG one; with the variable
+  set it reads the one under it instead, and not the XDG one even when the variable's has
+  none; and it doesn't read `~/.claude/CLAUDE.md` while its own `AGENTS.md` exists, even
+  empty (a dangling link counts as absent). The `opencode.json` shapes follow OpenCode's
+  published config schema, not yet confirmed by a run. Its skills and agents folders (the
+  opencode row in the core's harness table) keep the XDG form, `opencode_xdg_home`:
+  OpenCode reads skills and agents from the XDG folder and from `$OPENCODE_CONFIG_DIR`
+  both, so the XDG row reaches it either way.
 
 A `Doc` is one harness file read once. JSON files are read with `json` and written back
 with their key order and the indent of their first indented line (two spaces if none);

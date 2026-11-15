@@ -5,9 +5,10 @@ agents folders; it ships rows for claude and codex only. `SETUP` adds an opencod
 `{name = "opencode", skills = "~/.config/opencode/skills", agents =
 "~/.config/opencode/agents"}` (under `XDG_CONFIG_HOME` when that is set), through
 `moxi.config.add_item`, when the table has no opencode row, and records it in the
-ledger's `entries`. The row keeps this XDG form even with `OPENCODE_CONFIG_DIR` set,
-which moves only OpenCode's `AGENTS.md` and `opencode.json` (`moxi_loadout.harness`);
-a row already recorded stays as it was written either way.
+ledger's `entries`. The row keeps this XDG form even with `OPENCODE_CONFIG_DIR` set: that
+variable moves OpenCode's `AGENTS.md` and `opencode.json` (`moxi_loadout.harness`), and
+OpenCode reads skills and agents from the XDG folder as well as from it, so the XDG row
+reaches OpenCode either way. A row already recorded stays as it was written.
 
     {"item": "harness:opencode", "harness": "opencode", "file": <the core's config file>,
      "kind": "harness-row", "key": ["harnesses", "opencode"], "written": <the row>,

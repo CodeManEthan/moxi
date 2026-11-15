@@ -15,7 +15,9 @@
   after the upgrade takes the old entry out (an emptied `opencode.json` stays as `{}`).
   OpenCode reads Claude's `~/.claude/CLAUDE.md` only while its own `AGENTS.md` is absent,
   so with the block there OpenCode stops reading Claude's text: text for OpenCode goes in
-  `global.md` or `global.opencode.md`.
+  `global.md` or `global.opencode.md`. A run of OpenCode 1.19.5 confirmed where it reads
+  its `AGENTS.md`, so `status`'s note on what no run has confirmed for OpenCode names only
+  the `opencode.json` shapes, and shows only while loadout writes into `opencode.json`.
 - OpenCode's home is resolved as OpenCode does: `OPENCODE_CONFIG_DIR` when set, else
   `XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`, for its `AGENTS.md` and
   `opencode.json`. A page job whose `OPENCODE_CONFIG_DIR` differs from the terminal's is

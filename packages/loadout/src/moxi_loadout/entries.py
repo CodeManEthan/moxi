@@ -37,7 +37,9 @@ every kind's entries planned together, and written once (`moxi_loadout.harness.w
 
 Not yet confirmed by a run: that Codex reads `hooks.json` and `rules/loadout.rules` as
 written here, how Codex asks for a new hook's trust, and OpenCode's `opencode.json` shapes
-(taken from its published schema). `status` notes each (`UNCONFIRMED`).
+(taken from its published schema). `status` notes each (`UNCONFIRMED`) while loadout
+writes into that file. Where OpenCode reads its `AGENTS.md` is confirmed by a run
+(`moxi_loadout.harness`).
 """
 
 from __future__ import annotations
@@ -79,8 +81,7 @@ UNCONFIRMED = {
              "rules/loadout.rules as loadout writes them, and how codex asks you to trust "
              "a new hook",
     "opencode": "not yet confirmed by a run: the opencode.json shapes loadout writes "
-                "(permission, mcp), which follow OpenCode's published schema, and where "
-                "OpenCode reads its AGENTS.md",
+                "(permission, mcp), which follow OpenCode's published schema",
 }
 
 
@@ -187,7 +188,8 @@ def wanted(manifest, folder, rows: dict, run: Run, records=()) -> tuple[list[Ent
     out += _global(manifest, rows, run, carried, records)
     if any(e.harness == "codex" and e.kind in ("hook", "rules") for e in out):
         run.notes.append(UNCONFIRMED["codex"])
-    if any(e.harness == "opencode" for e in out):
+    if any(e.harness == "opencode" and e.file == str(hz.settings_file("opencode"))
+           for e in out):
         run.notes.append(UNCONFIRMED["opencode"])
     return out, carried
 
