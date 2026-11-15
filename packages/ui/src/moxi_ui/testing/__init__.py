@@ -53,7 +53,8 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False)`:
     the contract check on one component (see `moxi_ui.testing.browser.check_component`).
     The shell places it, it renders into an open shadow root, adds no style sheet to the
-    document, takes each of `tokens` as a colour, and requests only under `/m/<module>/`.
+    document, takes each of `tokens` as a colour (waiting up to 5 s for a part drawn from
+    data), and requests only under `/m/<module>/`.
 `ui_width_check`
     `check(page, *, module=None, name="page", attrs=None, route="", width=360)`: the
     document has no horizontal scroll at 360 CSS px, with the module's panel open or its

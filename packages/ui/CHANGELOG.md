@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The contract check (`ui_component_check`) waits up to 5 s for each of `tokens` to
+  reach a colour of the placed component, so a part drawn from data that arrives after
+  the first render (a pushed topic's first value) counts. Before, it probed once two
+  frames after the first render, and a slow push failed the check.
 - The shell reads the modules list once more when its first read at load gets no
   answer. On a phone in Firefox, the gateway's worker being replaced dropped that read,
   and the page said `No module named ui` until the push stream sent the list.
