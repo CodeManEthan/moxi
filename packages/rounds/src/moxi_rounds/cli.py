@@ -1246,6 +1246,9 @@ def _finish(args, out) -> int:
         print(f"{one.id}: {how}{landed}", file=out)
     print(f"finished {done.stage}" if done.event is not None
           else f"{done.stage} was already recorded as finished", file=out)
+    for folder in done.kept:
+        print(f"kept {folder}: this version removes no folder at finish; removing a "
+              "finished build's folders comes with a later version", file=out)
     if not done.released:
         print(f"{args.prog} finish: warning: the finish lock no longer pointed at this "
               "finish's own and was left as it is; moxi doctor rounds names it if it "

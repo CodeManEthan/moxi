@@ -22,6 +22,9 @@ tip as read (its head, once the branch is gone), in this order:
    refuse with what is owed. The build is read at `T` here, not at its branch's tip
    now: `T` is what the merge took, and a commit made on the branch while the actions
    ran is not part of this finish.
+6. Clean up: this version removes nothing. Each of the build's folders still there, its
+   worktree and its scratch folder, is kept and named in `Finished.kept`, for the caller
+   to say so; the removal comes with the rule that says what may go.
 
 The finish lock is released however the verb ends once it was taken: only while it
 still points at this finish's own blob.
@@ -138,7 +141,8 @@ class Action:
 class Finished:
     """What `finish` did: the round, the stage, the tip `T` it finished, each action,
     the dead holder's line when its lock was cleared, the `finish.done` event (None when
-    the log already held one), and the after-append callbacks that failed."""
+    the log already held one), the after-append callbacks that failed, and the build's
+    folders the cleanup kept."""
 
     name: str
     stage: str
@@ -148,6 +152,7 @@ class Finished:
     event: dict | None = None
     released: bool = True
     failed: tuple = field(default=())
+    kept: tuple[Path, ...] = ()
 
 
 def finish(name: str, stage: str, *, actor: str, settings=None,
@@ -263,7 +268,8 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
     return Finished(name=name, stage=stage, tip=tip, actions=tuple(done),
                     cleared=None if taken.cleared is None else taken.cleared.line,
                     event=written.events[-1] if written.events else None,
-                    released=released, failed=written.failed)
+                    released=released, failed=written.failed,
+                    kept=_kept(view.state, build))
 
 
 # -- reading the build -------------------------------------------------------------------
@@ -352,6 +358,17 @@ def _records(state: states.State, build: builds.Build, tip: str) -> dict[str, di
                 and isinstance(event.get("id"), str)):
             newest[event["id"]] = event
     return newest
+
+
+def _kept(state: states.State, build: builds.Build) -> tuple[Path, ...]:
+    """The build's worktree and scratch folder that are still there. Nothing is removed
+    until a removal can tell what may go without losing work, so every one is kept."""
+    commissioned = checking.commission_of(state, build)
+    found = []
+    for key in ("worktree", "scratch"):
+        if commissioned.get(key) and Path(str(commissioned[key])).is_dir():
+            found.append(Path(str(commissioned[key])))
+    return tuple(found)
 
 
 # -- a merge found in git ----------------------------------------------------------------

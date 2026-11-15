@@ -138,7 +138,8 @@ does not yet build.
   merge before it the build's branch at the tip, both by commit id; a `command` action
   runs in the build's worktree with its placeholders filled and its output the
   caller's, `started` recorded before it runs. A command that started and has no
-  result is refused and not run again.
+  result is refused and not run again. A finish removes no folder yet: it names the
+  build's worktree and scratch folder it kept.
 - The finish lock: one finish at a time per repo and target, held as the ref
   `refs/rounds/finishing/<into>` (or the repo's `lock_ref`) pointing at a blob with the
   holder's line. A holder on this machine whose process has ended is cleared in one

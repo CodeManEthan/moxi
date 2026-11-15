@@ -358,6 +358,30 @@ def test_a_gate_the_log_no_longer_meets_after_the_merge_refuses_and_a_rerun_merg
     assert done.event is not None
 
 
+def test_the_cleanup_removes_nothing_and_names_each_folder_it_kept(ready, repo):
+    path, tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+    worktree, scratch = Path(made["worktree"]), Path(made["scratch"])
+
+    done = finishing.finish(ROUND, "B1", actor="coder")
+
+    assert done.event is not None
+    assert done.kept == (worktree, scratch)
+    assert worktree.is_dir() and scratch.is_dir()
+    assert repo.git("branch", "--list", "work").strip().endswith("work")
+
+
+def test_the_command_says_each_folder_the_cleanup_kept(ready, repo, capsys):
+    path, _tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+    assert main(["finish", ROUND, "B1", "--as", "coder"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    kept = [line for line in lines if line.startswith("kept ")]
+    assert [line.split(":")[0] for line in kept] == [f"kept {made['worktree']}",
+                                                     f"kept {made['scratch']}"]
+    assert all("removes no folder" in line for line in kept)
+
+
 # -- the command ---------------------------------------------------------------------------
 
 def test_the_command_finishes_by_name_and_says_what_it_did(ready, repo, capsys):
