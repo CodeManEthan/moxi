@@ -201,9 +201,9 @@ def test_mail_waiting_at_a_reconnect_is_delivered_once_after_the_install(
 def test_interrupt_mail_in_a_reconnect_s_gap_is_steered_once_after_the_install(
         rig, tmp_path, request, hold):
     """A Codex adapter mid turn reconnects. Interrupt mail sent after the bind's answer
-    and before the install is handed on the new connection and queued; the install is
-    held a second past it. The message goes into the running turn by `steer`, once,
-    after the install."""
+    and before the install is handed on the new connection, and the install is held until
+    the adapter has queued it and a second past that. The message goes into the running
+    turn by `steer`, once, after the install."""
     adapter, session = codex_session(rig, tmp_path, request, turn_open=True)
     request.addfinalizer(adapter.stop)
     steered_at: list = []
@@ -215,6 +215,17 @@ def test_interrupt_mail_in_a_reconnect_s_gap_is_steered_once_after_the_install(
         return session_steer(text, ref=ref)
 
     session.steer = steer
+    queued_at: list = []                    # when the adapter queued the interrupt mail
+    on_push = adapter._on_push
+
+    def push(method, params):
+        on_push(method, params)
+        payload = params.get("payload") or {}
+        if (method == "deliver" and MARK in payload.get("text", "")
+                and str(payload.get("message_id")) in adapter.held_ids):
+            queued_at.append(time.monotonic())
+
+    adapter._on_push = push                 # read by every connect after start
 
     def carried() -> list:
         return [handed for handed in session.delivered if MARK in handed.text]
@@ -233,8 +244,12 @@ def test_interrupt_mail_in_a_reconnect_s_gap_is_steered_once_after_the_install(
     assert hold.holding.wait(LIVE_S), "the reconnect reached the bind's answer"
     code, out = rig.send(qualified, MARK, "--interrupt",
                          sender=dict(name="main", scope="proj-a"))
-    hold.go.set()
-    assert code == 0, out
+    try:
+        assert code == 0, out
+        assert wait_until(lambda: queued_at, LIVE_S), "the interrupt mail was queued"
+        assert hold.released_at is None, "it was queued while the install was held"
+    finally:
+        hold.go.set()
 
     assert wait_until(lambda: carried(), LIVE_S), \
         "the interrupt mail sent in the reconnect's gap was delivered"
