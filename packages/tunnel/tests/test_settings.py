@@ -30,4 +30,12 @@ def test_show_json_gives_every_key_a_label(capsys):
     assert keys["cloudflare.metrics_port"]["line"] is None
     for key in keys.values():
         assert key["common"] is False and key["group"] is None and key["hurts"] is None
-        assert key["unit"] is None and key["choices"] is None and key["elsewhere"] is None
+        assert key["unit"] is None and key["choices"] is None
+
+
+def test_show_json_sends_the_cloudflared_switch_to_the_tunnel_verbs(capsys):
+    keys = show_json(capsys)
+    assert [name for name, key in keys.items() if key["elsewhere"]] == ["cloudflare.enabled"]
+    said = keys["cloudflare.enabled"]["elsewhere"]
+    assert "moxi tunnel add TARGET --provider cloudflare" in said
+    assert "moxi tunnel remove" in said
