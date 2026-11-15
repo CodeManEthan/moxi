@@ -22,7 +22,7 @@ def rounds(tmp_path, add_project, capsys):
     add_project("proj-a", notes_root=tmp_path / "notes")
     for slug in ("a-round", "b-round"):
         opening.open_round(f"proj-a/{slug}", description="a placeholder round",
-                           actor="planner", flow="fix")
+                           by="planner", flow="fix")
     capsys.readouterr()
     return tmp_path / "notes" / "rounds"
 
@@ -78,12 +78,12 @@ def declare(rounds, *stages):
     for stage in stages:
         log.append(round_log(rounds), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
 
 
 def test_a_rounds_state_holds_its_rulings(rounds):
     declare(rounds, "B2", "B3")
-    ruling.rule("proj-a/a-round", text=SAID, record="comms:12", actor="planner",
+    ruling.rule("proj-a/a-round", text=SAID, record="comms:12", by="planner",
                 reason="it is not ours to work out", stages="B2,B3", at=AT)
 
     assert state.fold(log.read(round_log(rounds))).rulings == [state.Ruling(
@@ -175,7 +175,7 @@ def test_a_ruling_on_a_project_is_standing_with_no_round(rounds, capsys):
 
 def test_a_projects_state_holds_the_register(rounds):
     ruling.rule("proj-a", text=SAID, record="https://example.com/pages/7",
-                actor="planner", scope="proj-a:packages/ui/**,proj-b", at=AT)
+                by="planner", scope="proj-a:packages/ui/**,proj-b", at=AT)
 
     assert state.fold(log.read(log.project_log(rounds))).rulings == [state.Ruling(
         id="S1", text=SAID, record="https://example.com/pages/7", reason=None,
@@ -184,7 +184,7 @@ def test_a_projects_state_holds_the_register(rounds):
         actor="planner", at=AT)]
 
 
-def test_a_project_with_no_rounds_folder_yet_gets_its_register(
+def test_a_project_with_no_rounds_dir_yet_gets_its_register(
         tmp_path, add_project, capsys):
     add_project("proj-b", notes_root=tmp_path / "other")
     capsys.readouterr()
@@ -226,7 +226,7 @@ def test_ids_count_for_each_round_and_for_the_project_on_their_own(rounds, capsy
 def test_an_id_is_one_past_the_highest_the_log_holds(rounds):
     log.append(round_log(rounds), "ruling.recorded",
                {"id": "C7", "text": "from another machine", "record": "comms:3",
-                "kind": "process", "rules": "skip:retro"}, actor="planner")
+                "kind": "process", "rules": "skip:retro"}, by="planner")
 
     assert run("proj-a/a-round") == 0
 
@@ -278,7 +278,7 @@ def test_a_ruling_with_no_pointer_is_refused_and_the_logs_are_untouched(
     assert "--record PTR" in err
     assert logs(rounds) == before
     with pytest.raises(Refused):
-        ruling.rule(target[0], text=SAID, actor="planner")
+        ruling.rule(target[0], text=SAID, by="planner")
 
 
 def test_rule_takes_no_by_and_one_pointer(rounds, capsys):
@@ -335,13 +335,13 @@ def staged(rounds, capsys):
     for stage in ("B1", "B2", "B3"):
         log.append(round_log(rounds), "stage.declared",
                    {"id": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}"},
-                   actor="planner")
+                   by="planner")
     return rounds
 
 
 def ask(target="proj-a/a-round", blocks=None):
     """Ask a question of `target` and return its id."""
-    return asking.ask(target, ASKED, origin="comms:11", blocks=blocks, actor="scout").id
+    return asking.ask(target, ASKED, origin="comms:11", blocks=blocks, by="scout").id
 
 
 def question(path, question_id="Q1"):
@@ -471,7 +471,7 @@ def test_a_question_parked_until_a_stage_reads_open_once_the_stage_is_finished(s
     assert run("proj-a/a-round", "park:Q1", "--until", "B2", text=None) == 0
     waiting = state.fold(log.read(round_log(staged)))
     log.append(round_log(staged), "finish.done", {"stage": "B2", "tip": "0" * 40},
-               actor="coder")
+               by="coder")
     done = state.fold(log.read(round_log(staged)))
 
     assert questions.current(waiting.questions[0], waiting) == "parked"
@@ -486,7 +486,7 @@ def test_a_question_parked_until_a_round_reads_open_once_that_round_is_closed(st
 
     assert questions.current(found.questions[0], found) == "parked"
     log.append(round_log(staged, "b-round"), "round.closed", {"numbers": {}},
-               actor="planner")
+               by="planner")
     assert questions.current(found.questions[0], found) == "open"
 
 
@@ -645,9 +645,9 @@ def test_a_ruled_question_leaves_the_index_and_a_parked_one_stays(staged):
     ask()
     ask()
     ruling.rule("proj-a/a-round", item="Q1", text=ANSWER, record="comms:12",
-                actor="planner")
+                by="planner")
     ruling.rule("proj-a/a-round", item="park:Q2", until="B2", record="comms:12",
-                actor="planner")
+                by="planner")
 
     [found] = index.read("proj-a", staged, "a-round").of("question")
     assert (found.id, found.body["state"], found.body["until"]) == ("Q2", "parked", "B2")
@@ -685,7 +685,7 @@ def test_a_projects_question_is_parked_until_a_round_and_withdrawn(staged, capsy
     assert [one.kind for one in found.rulings] == ["process", "process"]
     assert questions.current(found.questions[0], found) == "parked"
     log.append(round_log(staged, "b-round"), "round.closed", {"numbers": {}},
-               actor="planner")
+               by="planner")
     assert questions.current(found.questions[0], found) == "open"
 
 
@@ -731,7 +731,7 @@ def test_a_standing_ruling_from_a_round_is_written_under_both_locks(rounds, hold
     held = holder(write.project_lock("proj-a"))
 
     with pytest.raises(Locked) as stopped:
-        ruling.rule("proj-a/a-round", text=SAID, record="comms:12", actor="planner",
+        ruling.rule("proj-a/a-round", text=SAID, record="comms:12", by="planner",
                     standing=True, wait_s=0.2)
 
     assert stopped.value.file == write.project_lock("proj-a")
@@ -746,7 +746,7 @@ def test_a_standing_ruling_from_a_round_waits_for_the_rounds_lock_too(rounds, ho
     held = holder(write.round_lock("proj-a", "a-round"))
 
     with pytest.raises(Locked) as stopped:
-        ruling.rule("proj-a/a-round", text=SAID, record="comms:12", actor="planner",
+        ruling.rule("proj-a/a-round", text=SAID, record="comms:12", by="planner",
                     standing=True, wait_s=0.2)
 
     assert stopped.value.file == write.round_lock("proj-a", "a-round")
@@ -798,7 +798,7 @@ def stopped_after_its_append(monkeypatch, target, **ruled):
     with monkeypatch.context() as patched:
         patched.setattr(write, "ON_APPEND", (stop,))
         with pytest.raises(KeyboardInterrupt):
-            ruling.rule(target, record="comms:12", actor="planner", **ruled)
+            ruling.rule(target, record="comms:12", by="planner", **ruled)
 
 
 @pytest.mark.parametrize("target, item, said, became, by", [
@@ -815,7 +815,7 @@ def test_a_ruling_stopped_after_its_append_is_whole_and_is_refused_when_run_agai
     stopped_after_its_append(monkeypatch, target, item=item, text=said)
 
     with pytest.raises(Refused, match=f"{question_id} is already {became}, by {by}"):
-        ruling.rule(target, item=item, text=said, record="comms:12", actor="planner")
+        ruling.rule(target, item=item, text=said, record="comms:12", by="planner")
     after = log.read(path)
     assert len(after) == events_before + 1
     assert [(event["id"], event["question"]) for event in rulings(path)] == [
@@ -851,7 +851,7 @@ def test_no_ruling_of_a_question_writes_a_second_event(staged):
     for item, said in (("Q1", ANSWER), ("park:Q2", None), ("narrow:Q3=none", None),
                        ("withdraw:Q4", None)):
         ruling.rule("proj-a/a-round", item=item, text=said, record="comms:12",
-                    actor="planner")
+                    by="planner")
 
     added = log.read(round_log(staged))[events_before:]
     assert [event["type"] for event in added] == ["ruling.recorded"] * 4
@@ -867,7 +867,7 @@ OPTIONS = ("a=prose yes, parsed rows no", "b=everything", "c=nothing")
 
 def offer(target="proj-a/a-round", given=OPTIONS):
     """Ask a question of `target` that offers the options `given`."""
-    return asking.ask(target, ASKED, origin="comms:11", actor="scout", options=given).id
+    return asking.ask(target, ASKED, origin="comms:11", by="scout", options=given).id
 
 
 def test_an_answer_names_the_key_he_chose(staged, capsys):

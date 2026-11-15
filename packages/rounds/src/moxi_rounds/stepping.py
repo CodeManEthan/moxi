@@ -155,7 +155,7 @@ def fields(flow: str, view: write.View, settings) -> dict[str, object]:
             "steps": judge(view.state, flow, settings).steps}
 
 
-def step_up(target: str, flow: str, *, actor: str, settings=None,
+def step_up(target: str, flow: str, *, by: str, settings=None,
             wait_s: float = write.WAIT_S, at: str | None = None) -> Stepped:
     """Move the round `target`, `<project>/<slug>`, up to the flow `flow`, and return
     it as moved. This is the lead's move and carries no pointer.
@@ -189,7 +189,7 @@ def step_up(target: str, flow: str, *, actor: str, settings=None,
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             gates=[ending.takes_new_work(name, "a change of flow"),
                    *gates(flow, name=name, settings=settings,
                           again=f"moxi rounds mark {name} --flow NAME"),

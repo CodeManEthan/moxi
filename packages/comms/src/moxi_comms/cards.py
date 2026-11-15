@@ -53,7 +53,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .constants import CARD_MAX_CHARS, CARD_MAX_LINES, CARD_NATIVE_MAX, CARD_READ_LIMIT
+from .constants import (CARD_MAX_CHARS, CARD_MAX_LINES, CARD_NATIVE_MAX, CARD_READ_LIMIT,
+                        GLOBAL_ENV, NAME_ENV, SCOPE_ENV)
 # The indent, the scrub and the closed-envelope rule are SHARED with the delivery
 # adapter's message bodies (`adapters/claude_shim.py`). `envelope` imports nothing from
 # the package, so the card reader's import closure is unchanged in kind by using it.
@@ -96,9 +97,9 @@ def own_scope(env) -> str:
     else `MOXI_COMMS_SCOPE`, else `global`. A process with no scope in its stamp is the global
     identity of its name, as a bind that names no scope is; the working directory's
     project is never a scope. Read only for the caller's own identity."""
-    if env.get("MOXI_COMMS_GLOBAL"):
+    if env.get(GLOBAL_ENV):
         return GLOBAL
-    return env.get("MOXI_COMMS_SCOPE") or GLOBAL
+    return env.get(SCOPE_ENV) or GLOBAL
 
 
 def _candidates(name: str, scope: str | None, env) -> tuple[list[str], str]:
@@ -122,7 +123,7 @@ def _is_name(value: str | None) -> bool:
 
 def _own_identity(env) -> str | None:
     """Who the caller is, read straight off the claim env; None when it has no claim."""
-    name = env.get("MOXI_COMMS_NAME")
+    name = env.get(NAME_ENV)
     if not _is_name(name):
         return None
     return qualify(name, own_scope(env))
@@ -152,17 +153,17 @@ def answer(arg: str, env) -> Answer:
             data, truncated = _read(path)
         except FileNotFoundError:
             continue
-        except NotACard as e:
-            return Answer(UNREADABLE, _unreadable(qualified, str(e)))
-        except OSError as e:
-            return Answer(UNREADABLE, _unreadable(qualified, _oserror(e)))
+        except NotACard as exc:
+            return Answer(UNREADABLE, _unreadable(qualified, str(exc)))
+        except OSError as exc:
+            return Answer(UNREADABLE, _unreadable(qualified, _oserror(exc)))
         try:
-            text = _decode(data, truncated)
+            text = _decode(data, truncated=truncated)
         except UnicodeDecodeError:
             # Never mojibake and never a guess: the same refusal-to-fabricate posture as
             # attribution's `unknown`.
             return Answer(UNREADABLE, _unreadable(qualified, "it is not valid UTF-8"))
-        return Answer(OK, render(qualified, path, text, truncated, note=note))
+        return Answer(OK, render(qualified, path, text, truncated=truncated, note=note))
     return _miss(candidates, env, note=note)
 
 
@@ -218,7 +219,7 @@ def _oserror(e: OSError) -> str:
     return e.strerror or str(e)
 
 
-def _decode(data: bytes, truncated: bool) -> str:
+def _decode(data: bytes, *, truncated: bool) -> str:
     """Strict UTF-8. When the read cap bound, a trailing partial character is dropped
     rather than reported as invalid -- the cut is comms' own, not the holder's defect."""
     return codecs.getincrementaldecoder("utf-8")().decode(data, not truncated)
@@ -252,11 +253,10 @@ def _miss(candidates: list[str], env, *, note: str = "") -> Answer:
 
 # --------------------------------------------------------------------------- rendering
 
-def render(qualified: str, path: Path, text: str, truncated: bool, *,
-           note: str = "") -> str:
+def render(qualified: str, path: Path, text: str, *, truncated: bool, note: str = "") -> str:
     """The closed envelope. Every comms-authored line renders INSIDE it -- an
     unenveloped notice is a line a card body could forge."""
-    shown, over = _budget(text, truncated)
+    shown, over = _budget(text, truncated=truncated)
     out = [_header(qualified, path)]
     claimed = False
     for line in shown:
@@ -277,7 +277,7 @@ def _header(qualified: str, path: Path) -> str:
     return f"[comms card] {qualified} {MARKS}" + (f" · {age}" if age else "")
 
 
-def _budget(text: str, truncated: bool) -> tuple[list[str], str]:
+def _budget(text: str, *, truncated: bool) -> tuple[list[str], str]:
     """The lines to show, and the over-budget notice (empty when the card fits).
 
     What counts as a line is fixed so the holder and the test agree: a single trailing

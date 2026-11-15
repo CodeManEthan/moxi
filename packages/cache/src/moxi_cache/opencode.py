@@ -123,8 +123,8 @@ class _Session:
             raise self.failed
         try:
             self._row = self._open()
-        except Unread as e:
-            self.failed = e
+        except Unread as exc:
+            self.failed = exc
             raise
         return self._row
 
@@ -137,8 +137,8 @@ class _Session:
             self.read = records(Source(HARNESS, str(self.path), self.session_id),
                                 kinds=KINDS)
             return self.read.header.session_row
-        except Unreadable as e:
-            raise _unread(e, self.session_id, self.path) from e
+        except Unreadable as exc:
+            raise _unread(exc, self.session_id, self.path) from exc
 
     def records(self) -> list:
         """Every record the clock reads, in the session's order. Raises Unread."""
@@ -146,10 +146,10 @@ class _Session:
             self.row()
             try:
                 self._records = list(self.read)
-            except Unreadable as e:
+            except Unreadable as exc:
                 # The read is over once it fails: every later ask fails the same way.
-                self.failed = _unread(e, self.session_id, self.path)
-                raise self.failed from e
+                self.failed = _unread(exc, self.session_id, self.path)
+                raise self.failed from exc
         return self._records
 
     def messages(self) -> list:
@@ -214,8 +214,8 @@ def read(session_id, *, cache_source, turned, new_session, agent_model=MISSING,
     """One OpenCode session's clock."""
     try:
         table = _table.load_table()
-    except _table.TableError as e:
-        return unknown(_clock.TABLE_NOT_LOADED, f"{_table.NOT_LOADED} ({e})")
+    except _table.TableError as exc:
+        return unknown(_clock.TABLE_NOT_LOADED, f"{_table.NOT_LOADED} ({exc})")
     if session_id and (not isinstance(session_id, str)
                        or not transcripts.SAFE_ID_RE.match(session_id)):
         return bad_id("session id", session_id)
@@ -224,8 +224,8 @@ def read(session_id, *, cache_source, turned, new_session, agent_model=MISSING,
         return _read(session, session_id, table=table, cache_source=cache_source,
                      turned=turned, new_session=new_session, agent_model=agent_model,
                      now=now)
-    except Unread as e:
-        return unknown(e.code, str(e))
+    except Unread as exc:
+        return unknown(exc.code, str(exc))
     finally:
         session.close()
 
@@ -236,8 +236,8 @@ def _read(session: _Session, session_id, *, table, cache_source, turned, new_ses
     try:
         upcoming = next_pair(session, agent_model)
         unknown_next = None
-    except Unread as e:
-        upcoming, unknown_next = None, e
+    except Unread as exc:
+        upcoming, unknown_next = None, exc
     if upcoming is not None and table.is_free(HARNESS, *upcoming):
         return Clock(NO_CACHE, reason=free_reason(*upcoming),
                      key=f"{HARNESS} {pair_text(*upcoming)} (free)", code=_clock.FREE)

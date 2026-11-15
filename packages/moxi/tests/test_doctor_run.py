@@ -324,9 +324,9 @@ def test_a_daemon_switched_off_is_off_and_still_installed_warns(d):
     row = d.rows("demo")[("demo", "daemon relay")]
     assert (row.state, row.detail, row.fix) == (
         "off", "switched off", "moxi config set demo relay.enabled true")
-    moxi.config.set("demo", "relay.enabled", True, by="test")
+    moxi.config.set_value("demo", "relay.enabled", value=True, by="test")
     d.installed(DAEMONS=switched)
-    moxi.config._change("demo", "relay.enabled", "set", False, by="test")
+    moxi.config._change("demo", "relay.enabled", "set", value=False, by="test")
     row = d.rows("demo")[("demo", "daemon relay")]
     assert row.state == "warn" and row.detail.startswith("switched off, unit still installed")
 
@@ -833,7 +833,7 @@ def test_a_wrap_shows_the_timer_s_state_its_key_and_its_last_run(d):
     files.append_record(d.state_dir() / "runs.jsonl",
                         {"unit": "demo/backup", "at": "2026-10-30T10:00:00Z",
                          "seconds": 3, "result": "ran", "exit": 0})
-    moxi.config.set("demo", "rows.backup", True, by="test")
+    moxi.config.set_value("demo", "rows.backup", value=True, by="test")
     got = d.rows("demo")
     assert got[("demo", "wrap backup.timer switch")].state == "ok"
     assert got[("demo", "wrap backup.timer last run")].detail == (
@@ -906,7 +906,7 @@ def test_store_existence_mode_and_size(d):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
-def test_the_core_s_stores_in_a_module_s_state_directory(d):
+def test_the_core_s_stores_in_a_module_s_state_dir(d):
     d.module(settings=None)
     assert not any(name.startswith("store") for _, name in d.rows("demo"))
     state = d.state_dir()
@@ -943,7 +943,7 @@ def test_cache_s_doctor_runs_through_the_runner_with_no_fail_row():
 
 # -- 6 to 9: home, strays, setup versions, records ---------------------------------------------
 
-def test_a_state_directory_read_in_place_under_a_host_folder_warns(d, monkeypatch):
+def test_a_state_dir_read_in_place_under_a_host_dir_warns(d, monkeypatch):
     d.module(settings=None)
     monkeypatch.setenv("MOXI_DEMO_DEVICE", "oldhost")
     legacy = moxi.paths.Layout("demo").state_root() / "oldhost" / "demo"
@@ -1161,7 +1161,7 @@ def test_a_ledger_that_is_not_json_is_one_fail_row_and_the_rest_run(pl):
 
 
 def test_a_harness_name_with_no_row_and_a_skipped_row_warn_on_moxi(pl, capsys):
-    moxi.config.set("moxi", "skills.harnesses", ["claude", "opencode"], by="test")
+    moxi.config.set_value("moxi", "skills.harnesses", ["claude", "opencode"], by="test")
     moxi.config.add_item("moxi", "harnesses", {"name": "Bad Name", "skills": "/x"},
                          by="test")
     got = pl.rows()
@@ -1253,21 +1253,24 @@ def test_a_check_that_breaks_is_one_fail_row_and_the_rest_still_run(d, monkeypat
 def test_the_idle_rate_takes_the_sample_nearest_an_hour_old():
     now = 1_000_000.0
     stamp = _run._stamp
-    samples = [{"unit": "demo/relay", "at": stamp(now - 300), "cpu_seconds": 9.9},
-               {"unit": "demo/relay", "at": stamp(now - 3000), "cpu_seconds": 4.0},
-               {"unit": "demo/relay", "at": stamp(now - 7200), "cpu_seconds": 1.0},
-               {"unit": "demo/other", "at": stamp(now - 3600), "cpu_seconds": 0.0}]
+    samples = [{"unit": "demo/relay", "at": stamp(now - 300), "cpu_s": 9.9},
+               {"unit": "demo/relay", "at": stamp(now - 3000), "cpu_s": 4.0},
+               {"unit": "demo/relay", "at": stamp(now - 7200), "cpu_s": 1.0},
+               {"unit": "demo/other", "at": stamp(now - 3600), "cpu_s": 0.0}]
     rate, how = _run.idle_rate(samples, "demo/relay", 10.0, now, None)
     assert rate == pytest.approx(6.0 / 3000) and how == "over the last 50 min"
 
 
 def test_the_idle_rate_falls_back_to_uptime_after_a_restart_or_without_samples():
     now = 1_000_000.0
-    old = [{"unit": "demo/relay", "at": _run._stamp(now - 3600), "cpu_seconds": 50.0}]
+    old = [{"unit": "demo/relay", "at": _run._stamp(now - 3600), "cpu_s": 50.0}]
     # The daemon started after the sample: the sample is another run's.
     rate, how = _run.idle_rate(old, "demo/relay", 2.0, now, now - 1000)
     assert rate == pytest.approx(2.0 / 1000) and how.startswith("since it started")
     assert _run.idle_rate([], "demo/relay", 2.0, now, None) == (None, "not measured")
+    legacy = [{"unit": "demo/relay", "at": _run._stamp(now - 3600),
+               "cpu_seconds": 1.0}]
+    assert _run.idle_rate(legacy, "demo/relay", 2.0, now, None) == (None, "not measured")
 
 
 def test_the_cgroup_read(tmp_path, monkeypatch):
@@ -1318,7 +1321,7 @@ def test_costs_rows_against_budgets_and_the_samples_kept(d, monkeypatch):
     assert rss.state == "warn" and "over its budget 1M" in rss.detail
     assert got[("demo", "cost fds")].state == "ok"
     samples = files.read_records(moxi.paths.core().state_dir() / "costs.jsonl")
-    assert [(s["unit"], s["cpu_seconds"]) for s in samples] == [("demo/relay", 18.0)]
+    assert [(s["unit"], s["cpu_s"]) for s in samples] == [("demo/relay", 18.0)]
     # Without --costs nothing is measured or kept.
     assert not any(name.startswith("cost") for _, name in d.rows("demo"))
 

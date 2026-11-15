@@ -204,12 +204,12 @@ def _component(module: str, name: object, decl: object,
     }, None
 
 
-def check_components(module: str, components: object, *, page: bool,
+def check_components(module: str, components: object, *, has_page: bool,
                      assets: Sequence[str] | None
                      ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """Module `module`'s `COMPONENTS` checked: `(placed, refused)`.
 
-    `page` says whether the module declares `PAGE`; `assets` are its page's asset names
+    `has_page` says whether the module declares `PAGE`; `assets` are its page's asset names
     from its export, or None when it has no export. Each placed component carries its
     element name and its script's URL; each refused one, `{"name", "reason"}`. A field
     this shell doesn't know is ignored, since a newer contract 1 may add optional ones.
@@ -227,7 +227,7 @@ def check_components(module: str, components: object, *, page: bool,
     if not isinstance(components, Mapping):
         return placed, refused
     for name, decl in sorted(components.items(), key=lambda item: str(item[0])):
-        if not page:
+        if not has_page:
             item, reason = None, "its module declares no PAGE, which would serve its script"
         else:
             item, reason = _component(module, name, decl, assets)
@@ -280,7 +280,7 @@ def modules_value(listing: Sequence[Mapping[str, Any]], mounts: Mapping[str, Map
         page = bool(item.get("page"))
         export = mounts.get(name)
         assets = list(export.get("assets") or ()) if export is not None else None
-        placed, refused = check_components(name, item.get("components") or {}, page=page,
+        placed, refused = check_components(name, item.get("components") or {}, has_page=page,
                                            assets=assets)
         modules.append({
             "name": name,
@@ -318,8 +318,8 @@ def read_modules(*, cwd: str | os.PathLike, env: Mapping[str, str] | None = None
         done = run(modules_argv(), timeout_s=timeout, cwd=str(cwd), env=env)
     except subprocess.TimeoutExpired:
         return None, f"moxi modules ran past {timeout:g} s"
-    except OSError as err:
-        return None, f"moxi modules could not run: {err}"
+    except OSError as exc:
+        return None, f"moxi modules could not run: {exc}"
     try:
         data = json.loads(done.stdout)
         listed = data["modules"]
@@ -349,9 +349,9 @@ def watched_dirs(env: Mapping[str, str] | None = None) -> list[str]:
 
 def _mtimes(dirs: Iterable[str]) -> tuple[float | None, ...]:
     out = []
-    for directory in dirs:
+    for watched_dir in dirs:
         try:
-            out.append(os.stat(directory).st_mtime)
+            out.append(os.stat(watched_dir).st_mtime)
         except OSError:
             out.append(None)
     return tuple(out)

@@ -43,7 +43,10 @@ _METAVARS = frozenset({"SECONDS", "SECS", "MINUTES", "HOURS", "DAYS", "MS",
 _BAD_VERBS = frozenset({"delete", "rm", "on", "off", "state", "ls"})
 _SWITCH_KEYS = frozenset({"on", "off", "auto", "active", "enable", "disable",
                           "disabled"})
-_MX_CODE = re.compile(r"\bMX[1-4]\b")
+_MARK_CODE = re.compile(r"\b(?:MX[1-4]|N\d{3}|A\d{3}|FBT\d{3})\b")
+_ENV_NAME = re.compile(r"MOXI_[A-Z0-9_]+\Z")
+_OPEN_NAMES = frozenset({"open", "fdopen", "NamedTemporaryFile", "TemporaryFile",
+                         "SpooledTemporaryFile"})
 #: The house unit for each unit word a name, a flag or a metavar may carry.
 _HOUSE = {"seconds": "s", "secs": "s", "sec": "s", "mb": "mib", "millis": "ms", "msecs": "ms",
           "msec": "ms", "milliseconds": "ms", "ms": "ms", "mins": "minutes", "min": "minutes",
@@ -176,6 +179,209 @@ def _python_sources(root: Path):
                 yield path, text, ast.parse(text, filename=path)
             except (OSError, UnicodeDecodeError, SyntaxError):
                 continue
+
+
+def _python_files(root: Path):
+    for path in _files(root):
+        if (path.startswith("packages/") and path.endswith(".py")
+                and not path.startswith(VENDORED)):
+            try:
+                text = (root / path).read_text(encoding="utf-8")
+                yield path, text, ast.parse(text, filename=path)
+            except (OSError, UnicodeDecodeError, SyntaxError):
+                continue
+
+
+def _docstrings(tree: ast.AST) -> set[int]:
+    found = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if (isinstance(body, list) and body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            found.add(id(body[0].value))
+    return found
+
+
+def _assignment(statement: ast.stmt) -> tuple[list[ast.expr], ast.expr | None]:
+    if isinstance(statement, ast.Assign):
+        return statement.targets, statement.value
+    if isinstance(statement, ast.AnnAssign):
+        return [statement.target], statement.value
+    return [], None
+
+
+def _env_owner(variable: str, packages: set[str]) -> str:
+    word = variable.removeprefix("MOXI_").split("_", 1)[0].lower()
+    if word == "test":
+        return "moxi-dev"
+    return word if word in packages and word != "moxi-dev" else "moxi"
+
+
+def _env_constants(root: Path) -> list[Hit]:
+    declarations: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
+    hits = []
+    packages = {path.name for path in (root / "packages").iterdir() if path.is_dir()}
+    for path, _text, tree in _python_sources(root):
+        parts = path.split("/")
+        if len(parts) == 5 and parts[2] == "src" and parts[-1] == "module.py":
+            continue
+        protected: set[int] = set()
+        for statement in tree.body:
+            targets, value = _assignment(statement)
+            names = [target.id for target in targets if isinstance(target, ast.Name)]
+            if value is None or not names:
+                continue
+            if any(name.isupper() for name in names):
+                protected.update(id(node) for node in ast.walk(value))
+            if (isinstance(value, ast.Constant) and isinstance(value.value, str)
+                    and _ENV_NAME.fullmatch(value.value)):
+                protected.add(id(value))
+                for name in names:
+                    declarations[value.value].append((path, statement.lineno, name))
+                    if not name.endswith("_ENV"):
+                        hits.append(Hit(path, statement.lineno, "MX2",
+                                        "environment constant",
+                                        f"{name} holds {value.value} but lacks the house suffix",
+                                        "end the constant with _ENV"))
+        docs = _docstrings(tree)
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and _ENV_NAME.fullmatch(node.value) and id(node) not in protected
+                    and id(node) not in docs):
+                owner = _env_owner(node.value, packages)
+                hits.append(Hit(path, node.lineno, "MX2", "environment literal",
+                                f"{node.value} is written outside a module-level constant",
+                                f"bind it once as an _ENV constant in {owner} and import it"))
+
+    for variable, found in declarations.items():
+        owner = _env_owner(variable, packages)
+        ordered = sorted(found, key=lambda item: (
+            item[0].split("/", 2)[1] != owner, not item[2].endswith("_ENV"), *item))
+        for path, line, name in ordered:
+            package = path.split("/", 2)[1]
+            if package != owner:
+                hits.append(Hit(path, line, "MX2", "environment constant owner",
+                                f"{name} holds {variable} in {package}, not its owner {owner}",
+                                f"define the one _ENV constant in {owner} and import it"))
+        for path, line, name in ordered[1:]:
+            hits.append(Hit(path, line, "MX2", "environment constant duplicate",
+                            f"{name} is another constant for {variable}",
+                            "import the variable's one _ENV constant from its owner"))
+    return hits
+
+
+def _words(name: str) -> set[str]:
+    return {word for word in name.lower().strip("_").split("_") if word}
+
+
+def _ends_with(name: str, word: str) -> bool:
+    return name == word or name.endswith("_" + word)
+
+
+def _connection_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return False
+    return (node.func.attr == "connect"
+            and ast.unparse(node.func.value) in ("sqlite3", "store", "moxi.store"))
+
+
+def _connection_annotation(node: ast.AST | None) -> bool:
+    if node is None:
+        return False
+    rendered = re.sub(r"\s+", "", ast.unparse(node))
+    return rendered in ("sqlite3.Connection", "sqlite3.Connection|None",
+                        "None|sqlite3.Connection")
+
+
+def _one_word_concepts(root: Path) -> list[Hit]:
+    hits = []
+    for path, _text, tree in _python_files(root):
+        for node in ast.walk(tree):
+            bindings: list[tuple[str, str, ast.AST]] = []
+            if isinstance(node, ast.arg):
+                bindings.append(("parameter", node.arg, node))
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                bindings.append(("binding", node.id, node))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bindings.append(("definition", node.name, node))
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+                bindings.append(("attribute", node.attr, node))
+            for kind, name, binding in bindings:
+                words = _words(name)
+                if words & {"environ", "environment"}:
+                    hits.append(Hit(path, binding.lineno, "MX3", "environment mapping",
+                                    f"{kind} {name!r} uses another word for the mapping",
+                                    "use env"))
+                if words & {"folder", "folders", "directory", "directories"}:
+                    hits.append(Hit(path, binding.lineno, "MX3", "directory",
+                                    f"{kind} {name!r} uses folder or directory",
+                                    "name which directory as <what>_dir"))
+                if kind == "parameter" and name == "actor":
+                    hits.append(Hit(path, binding.lineno, "MX3", "actor parameter",
+                                    "parameter 'actor' says who did an act",
+                                    "use by; stored actor fields keep their name"))
+                if (kind == "parameter" and _connection_annotation(
+                        getattr(binding, "annotation", None)) and not _ends_with(name, "conn")):
+                    hits.append(Hit(path, binding.lineno, "MX3", "database connection",
+                                    f"parameter {name!r} is a sqlite3 connection",
+                                    "use conn or <what>_conn"))
+
+            if isinstance(node, ast.ExceptHandler) and node.name and not _ends_with(
+                    node.name, "exc"):
+                hits.append(Hit(path, node.lineno, "MX3", "caught exception",
+                                f"caught exception {node.name!r} lacks the house word",
+                                "use exc, or <what>_exc in a nested handler"))
+
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                args = node.args
+                positional = args.posonlyargs + args.args
+                defaults = [None] * (len(positional) - len(args.defaults)) + list(args.defaults)
+                pairs = list(zip(positional, defaults)) + list(zip(args.kwonlyargs,
+                                                                    args.kw_defaults))
+                for parameter, default in pairs:
+                    if (isinstance(default, ast.Name) and default.id == "print"
+                            and parameter.arg != "say"):
+                        hits.append(Hit(path, parameter.lineno, "MX3", "print callback",
+                                        f"print callback parameter {parameter.arg!r} lacks the house word",
+                                        "use say"))
+
+            if isinstance(node, ast.Call):
+                for keyword in node.keywords:
+                    if (keyword.arg and keyword.arg != "say"
+                            and isinstance(keyword.value, ast.Name)
+                            and keyword.value.id == "print"):
+                        hits.append(Hit(path, keyword.value.lineno, "MX3", "print callback",
+                                        f"print is passed as callback {keyword.arg!r}",
+                                        "name the callback say"))
+
+            if isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    call, target = item.context_expr, item.optional_vars
+                    if isinstance(call, ast.Call) and isinstance(target, ast.Name):
+                        function = call.func
+                        name = (function.attr if isinstance(function, ast.Attribute)
+                                else function.id if isinstance(function, ast.Name) else "")
+                        if name in _OPEN_NAMES and not _ends_with(target.id, "fh"):
+                            hits.append(Hit(path, target.lineno, "MX3", "open file",
+                                            f"open file is bound as {target.id!r}",
+                                            "use fh or <what>_fh"))
+                        if _connection_call(call) and not _ends_with(target.id, "conn"):
+                            hits.append(Hit(path, target.lineno, "MX3", "database connection",
+                                            f"database connection is bound as {target.id!r}",
+                                            "use conn or <what>_conn"))
+
+            target = value = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target, value = node.targets[0], node.value
+            elif isinstance(node, ast.AnnAssign):
+                target, value = node.target, node.value
+            if (isinstance(target, ast.Name) and _connection_call(value)
+                    and not _ends_with(target.id, "conn")):
+                hits.append(Hit(path, target.lineno, "MX3", "database connection",
+                                f"database connection is bound as {target.id!r}",
+                                "use conn or <what>_conn"))
+    return hits
 
 
 def _flags_and_verbs(root: Path) -> list[Hit]:
@@ -423,9 +629,9 @@ def _marks(root: Path) -> list[Hit]:
                 hits.append(Hit(path, number, "marks", "exception mark",
                                 "a bare # noqa gives no rule or reason",
                                 "write # noqa: <code> -- <why>"))
-            elif _MX_CODE.search(tail) and not re.search(r"\s--\s\S", tail):
+            elif _MARK_CODE.search(tail) and not re.search(r"\s--\s\S", tail):
                 hits.append(Hit(path, number, "marks", "exception mark",
-                                "an MX mark has no reason",
+                                "a checked mark has no reason",
                                 "add -- <why> after the code"))
     return hits
 
@@ -459,10 +665,11 @@ def _allowed_marks(root: Path) -> dict[tuple[str, int], set[str]]:
 
 
 def scan(root: Path | str) -> list[Hit]:
-    """Return every unit, verb, switch-key and mark finding in the whole tree."""
+    """Return every mechanical name and exception-mark finding in the whole tree."""
     root = Path(root)
     settings, _leaves = _settings(root)
-    findings = settings + _flags_and_verbs(root) + _parameters(root)
+    findings = (settings + _flags_and_verbs(root) + _parameters(root)
+                + _env_constants(root) + _one_word_concepts(root))
     allowed = _allowed_marks(root)
     findings = [hit for hit in findings if hit.code not in allowed.get((hit.path, hit.line), set())]
     return sorted(findings + _marks(root))

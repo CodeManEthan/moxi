@@ -21,13 +21,13 @@ CLAUDE_ID = "0b6f4a52-6a1d-4d0e-9a51-0c7f6a3d2e11"
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = store.connect(tmp_path / "launcher.db")
-    yield connection
-    connection.close()
+    conn = store.connect(tmp_path / "launcher.db")
+    yield conn
+    conn.close()
 
 
 def claude(conn, request_id="r1", session_id=CLAUDE_ID, **overrides):
-    args = {"request_id": request_id, "actor": "someone", "harness": "claude",
+    args = {"request_id": request_id, "by": "someone", "harness": "claude",
             "target": "slot", "cwd": "/work", "values": {"model": "opus", "effort": "high"},
             "argv": ["claude", "Brief from launcher", "--session-id", session_id],
             "env": {"MOXI_LAUNCHER_REQUEST": request_id}, "posture": "operator",
@@ -37,7 +37,7 @@ def claude(conn, request_id="r1", session_id=CLAUDE_ID, **overrides):
 
 
 def codex(conn, request_id="c1", **overrides):
-    args = {"request_id": request_id, "actor": "someone", "harness": "codex",
+    args = {"request_id": request_id, "by": "someone", "harness": "codex",
             "target": "terminal", "cwd": "/work", "values": {"sandbox": "workspace-write"},
             "argv": ["moxi-turns-codex-host", "--cwd", "/work"],
             "env": {"MOXI_LAUNCHER_REQUEST": request_id}, "posture": "go"}
@@ -90,9 +90,9 @@ def test_opening_again_runs_no_step(tmp_path):
 def test_a_store_from_a_newer_launcher_is_refused(tmp_path):
     db = tmp_path / "launcher.db"
     store.connect(db).close()
-    raw = sqlite3.connect(db)
-    raw.execute("PRAGMA user_version = 3")
-    raw.close()
+    conn = sqlite3.connect(db)
+    conn.execute("PRAGMA user_version = 3")
+    conn.close()
     with pytest.raises(core_store.StoreTooNew) as caught:
         store.connect(db)
     assert caught.value.exit_code == 3
@@ -212,19 +212,19 @@ def test_a_brief_of_exactly_the_cap_is_kept_whole(conn):
 
 def test_a_write_lock_held_past_the_timeout_is_busy(tmp_path):
     db = tmp_path / "launcher.db"
-    holder = store.connect(db)
-    waiter = store.connect(db, timeout=0.05)
+    holder_conn = store.connect(db)
+    waiter_conn = store.connect(db, timeout=0.05)
     try:
-        holder.execute("BEGIN IMMEDIATE")
+        holder_conn.execute("BEGIN IMMEDIATE")
         with pytest.raises(store.Busy) as caught:
-            claude(waiter)
+            claude(waiter_conn)
         assert caught.value.exit_code == 75
-        holder.execute("ROLLBACK")
-        assert count(waiter, "launches") == 0
-        assert not waiter.in_transaction
+        holder_conn.execute("ROLLBACK")
+        assert count(waiter_conn, "launches") == 0
+        assert not waiter_conn.in_transaction
     finally:
-        holder.close()
-        waiter.close()
+        holder_conn.close()
+        waiter_conn.close()
 
 
 # -- forward-only state writes ---------------------------------------------------------
@@ -551,11 +551,11 @@ def test_the_stale_bound_is_the_ready_and_first_waits():
 def placed(conn, request_id, hour, minute=0, **overrides):
     """A launch `operator` made at `hour`:`minute` of one day."""
     at = f"2026-10-30T{hour:02d}:{minute:02d}:00.000000Z"
-    codex(conn, request_id=request_id, at=at, **{"actor": "operator", **overrides})
+    codex(conn, request_id=request_id, at=at, **{"by": "operator", **overrides})
     return at
 
 
-def test_places_are_the_newest_launch_of_each_project_and_folder(conn):
+def test_places_are_the_newest_launch_of_each_project_and_dir(conn):
     placed(conn, "a", 9, cwd="/work/one")
     placed(conn, "b", 10, cwd="/src/proj-a", project_key="proj-a")
     two = placed(conn, "c", 11, cwd="/work/one")
@@ -565,7 +565,7 @@ def test_places_are_the_newest_launch_of_each_project_and_folder(conn):
         store.Place(None, "/work/one", two)]
 
 
-def test_a_project_and_its_folder_launched_without_it_are_two_places(conn):
+def test_a_project_and_its_dir_launched_without_it_are_two_places(conn):
     bare = placed(conn, "a", 9, cwd="/src/proj-a")
     keyed = placed(conn, "b", 10, cwd="/src/proj-a", project_key="proj-a")
     assert store.places(conn, "operator") == [
@@ -578,7 +578,7 @@ def test_places_leave_out_what_the_actor_would_not_launch_again(conn):
     store.set_state(conn, "failed", "failed", reason="exited")
     placed(conn, "relaunch", 11, cwd="/work/relaunch", relaunch_of="kept")
     placed(conn, "resume", 12, cwd="/work/resume", resume_of="kept", session_id="thread-1")
-    placed(conn, "other", 13, cwd="/work/other", actor="alice")
+    placed(conn, "other", 13, cwd="/work/other", by="alice")
     placed(conn, "scratch", 14, cwd="/tmp/scratch-1",
            values={"sandbox": "workspace-write", "scratch": True})
     assert store.places(conn, "operator") == [store.Place(None, "/work/kept", kept)]

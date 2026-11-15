@@ -117,13 +117,13 @@ def unshown(project: str, *, settings=None, now: str | None = None,
     """
     home = folders.home(project, own.load() if settings is None else settings)
     now = log.stamp() if now is None else now
-    register = index.read(home.project, home.folder, env=env)
+    register = index.read(home.project, home.rounds_dir, env=env)
     if register.unreadable is not None:
         raise register.unreadable
     read = max((item.body["through"] for item in register.items
                 if item.kind == index.READ_BACK), default=None)
     rows, unreadable = [], []
-    for summary in (register, *index.rounds(home.project, home.folder, env=env)):
+    for summary in (register, *index.rounds(home.project, home.rounds_dir, env=env)):
         if summary.unreadable is not None:
             unreadable.append(summary.unreadable)
             continue
@@ -147,17 +147,17 @@ def _logs(home: folders.Home):
     `(holder, state)`, the project's own first, and the error of each round's that
     could not."""
     try:
-        project_state = states.fold(log.read(log.project_log(home.folder)))
+        project_state = states.fold(log.read(log.project_log(home.rounds_dir)))
     except NoLog:
         project_state = states.State()
     logs, unreadable = [(home.project, project_state)], []
-    for slug in folders.slugs(home.folder):
+    for slug in folders.slugs(home.rounds_dir):
         try:
-            events = log.read_round(log.round_log(home.round_folder(slug)))
+            events = log.read_round(log.round_log(home.round_dir(slug)))
         except NoLog:
             continue
-        except Unreadable as error:
-            unreadable.append(error)
+        except Unreadable as exc:
+            unreadable.append(exc)
             continue
         logs.append((f"{home.project}/{slug}", states.fold(events)))
     return project_state, logs, tuple(unreadable)
@@ -174,7 +174,7 @@ def ends_a_list(time: str, *, name: str, at: str) -> write.Gate:
     again = f"moxi rounds rule {name} {READBACK}TIME --record PTR"
 
     def gate(view):
-        home = folders.Home(view.where.project, view.where.folder)
+        home = folders.Home(view.where.project, view.where.rounds_dir)
         _state, logs, unreadable = _logs(home)
         # The project's log as read under the lock, not as read again just now.
         logs[0] = (name, view.project_state)
@@ -228,7 +228,7 @@ def parse_ids(text: str) -> tuple[str, ...]:
     return ids
 
 
-def mark(target: str, ids: str | Iterable[str], *, actor: str, record: str | None = None,
+def mark(target: str, ids: str | Iterable[str], *, by: str, record: str | None = None,
          settings=None, wait_s: float = write.WAIT_S, at: str | None = None) -> Marked:
     """Mark rulings as shown to the operator: `ids` of the round `target`,
     `<project>/<slug>`, as `C12,C13`, or of the project `target`'s register, as
@@ -332,7 +332,7 @@ def mark(target: str, ids: str | Iterable[str], *, actor: str, record: str | Non
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=by,
             # No gate asks whether the round has ended: a mark adds no work to it.
             gates=[are_named_by_what_holds_them, are_on_record, are_not_his_own_word,
                    is_a_showing],

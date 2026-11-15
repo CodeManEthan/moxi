@@ -1,6 +1,6 @@
 """Dropping a round: ending it short of its work.
 
-`drop("<project>/<slug>", by=..., record=..., actor=...)` withdraws a round. From then
+`drop("<project>/<slug>", by=..., record=..., run_by=...)` withdraws a round. From then
 on the round is dropped, which is not closed: it stays on record as it was, takes no
 new work, and a correction of one of its rulings is still recorded.
 
@@ -85,7 +85,7 @@ class Left:
     state: str
 
 
-def drop(name: str, *, by: str, record: str | None, actor: str,
+def drop(name: str, *, by: str, record: str | None, run_by: str,
          withdraw_questions: bool = False, settings=None,
          wait_s: float = write.WAIT_S, at: str | None = None) -> Dropped:
     """Drop the round `name`, `<project>/<slug>`, and return it as dropped.
@@ -93,7 +93,7 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
     - `by`: `OPERATOR` or `LEAD`.
     - `record`: the operator's pointer to where he dropped it; for the lead's drop, a
       pointer to why.
-    - `actor`: who runs it, the events' actor.
+    - `run_by`: who runs it, the events' actor.
     - `withdraw_questions`: withdraw the round's open and parked questions, where they
       would go to the project's list. The operator's alone.
     - `settings`: rounds' settings as `settings.load()` gives them, read now when left
@@ -121,7 +121,7 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
     again = (f"moxi rounds drop {name} --by {by} --record PTR"
              f"{' --withdraw-questions' if withdraw_questions else ''}")
 
-    def closed(other):
+    def on_closed(other):
         return questions.is_closed(other, settings)
 
     def has_not_ended(view):
@@ -160,7 +160,7 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
         if not withdraw_questions or ending.how(view.state) is not None:
             return None
         there = [f"{one.question} as {one.became}" for one in
-                 moving.arrivals(view.state, view.project_state, name, closed=closed)
+                 moving.arrivals(view.state, view.project_state, name, on_closed=on_closed)
                  if one.entry is None]
         if not there:
             return None
@@ -177,7 +177,7 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
             went = {question.id: WITHDRAWN for question in view.state.questions
                     if question.state in (questions.OPEN, questions.PARKED)}
         else:
-            found = moving.arrivals(view.state, view.project_state, name, closed=closed)
+            found = moving.arrivals(view.state, view.project_state, name, on_closed=on_closed)
             finished[0] = any(one.entry is None for one in found)
             # The arrivals go first: stopped after any of them, the round is still
             # open, its questions are asked in both logs, and nothing was let go.
@@ -190,7 +190,7 @@ def drop(name: str, *, by: str, record: str | None, actor: str,
 
     try:
         written = write.record(
-            write.Where(home.project, home.folder, slug), actor=actor,
+            write.Where(home.project, home.rounds_dir, slug), by=run_by,
             gates=[has_not_ended, has_a_pointer, is_the_leads_to_drop,
                    withdrawing_is_his, finishes_as_it_began],
             event=dropped, with_project=True, wait_s=wait_s, at=at)
@@ -288,7 +288,7 @@ def left_behind(project_state: states.State, home: folders.Home, *,
     def was_dropped(slug: str) -> bool:
         if slug not in dropped:
             try:
-                found = index.read(home.project, home.folder, slug, env=env)
+                found = index.read(home.project, home.rounds_dir, slug, env=env)
             except NoLog:
                 found = None
             dropped[slug] = found is not None and found.status == states.DROPPED
@@ -306,7 +306,7 @@ def left_behind(project_state: states.State, home: folders.Home, *,
         if project == home.project and was_dropped(slug):
             left.append(Left(question, questions.current(
                 question, project_state,
-                closed=lambda other: questions.is_closed(other, settings))))
+                on_closed=lambda other: questions.is_closed(other, settings))))
     return tuple(left)
 
 

@@ -248,10 +248,10 @@ class Client:
         with self._lock:
             if self._failure is not None:
                 raise _fresh(self._failure)
-            id = next(self._ids)
-            self._calls[id] = call
+            request_id = next(self._ids)
+            self._calls[request_id] = call
         try:
-            if not self._send(_wire.request(id, method, params), deadline):
+            if not self._send(_wire.request(request_id, method, params), deadline):
                 raise Timeout(f"no answer to {method} in {timeout_s} s: its request could "
                               f"not be written in that time")
             left = None if deadline is None else max(deadline - time.monotonic(), 0.0)
@@ -259,7 +259,7 @@ class Client:
                 raise Timeout(f"no answer to {method} in {timeout_s} s")
         finally:
             with self._lock:
-                self._calls.pop(id, None)
+                self._calls.pop(request_id, None)
         if call.error is not None:
             raise call.error
         return call.result

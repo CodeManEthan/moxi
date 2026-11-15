@@ -65,7 +65,7 @@ FOREIGN = ("MOXI_COMMS_",)
 FOREIGN_NAMES = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR")
 
 
-def clean_environ() -> dict:
+def clean_env() -> dict:
     return {k: v for k, v in os.environ.items()
             if not k.startswith(FOREIGN) and k not in FOREIGN_NAMES}
 
@@ -139,7 +139,7 @@ def main() -> int:
     for key in list(os.environ):
         if key.startswith(FOREIGN) or key in FOREIGN_NAMES:
             del os.environ[key]
-    env = {**clean_environ(),
+    env = {**clean_env(),
            "MOXI_COMMS_HOME": str(home), "MOXI_COMMS_DEVICE": "smokebox",
            "MOXI_COMMS_RUNTIME_DIR": str(runtime), "MOXI_COMMS_PROJECT": "smoke",
            "MOXI_COMMS_MOCK_BACKEND": str(store),

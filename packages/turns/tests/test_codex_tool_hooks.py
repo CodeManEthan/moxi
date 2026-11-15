@@ -434,7 +434,7 @@ def test_the_judge_gets_the_call_as_codex_gave_it(monkeypatch, turns_env):
 
 
 @pytest.mark.parametrize("given", [None, "", "moved", "./moved", 7])
-def test_a_missing_or_relative_cwd_falls_back_to_the_launch_directory(
+def test_a_missing_or_relative_cwd_falls_back_to_the_launch_dir(
         monkeypatch, turns_env, given):
     guards = runner(found("t.all", {"codex": ["*"]}, judge="judge_quiet"))
     endpoint, harness, _ = host(turns_env, guards=guards)

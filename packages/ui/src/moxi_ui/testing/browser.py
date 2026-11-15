@@ -283,9 +283,9 @@ def check_component(page: Any, module: str, name: str,
                                  "or its script did not load or define its element")
         try:
             page.wait_for_function(_JS_RENDERED, arg=mark, timeout=RENDER_MS)
-        except Exception as err:  # noqa: BLE001 - Playwright's TimeoutError, named below
+        except Exception as exc:  # noqa: BLE001 - Playwright's TimeoutError, named below
             raise AssertionError(f"{placed['tag']} rendered nothing into an open shadow "
-                                 f"root in {RENDER_MS / 1000:g}s") from err
+                                 f"root in {RENDER_MS / 1000:g}s") from exc
         shape = page.evaluate(_JS_SHAPE, mark)
         if not shape["defined"]:
             raise AssertionError(f"{placed['tag']} is not a defined custom element")

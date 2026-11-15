@@ -149,8 +149,8 @@ def _round(value: float) -> float:
 
 def _row(group: list[list[tuple]]) -> dict[str, Any] | None:
     """One population's parameters, or None when no pair is warm."""
-    S = statistics.median(calls[SETTLE_CALL - 1][1] for calls in group)
-    P = statistics.median(calls[0][2] for calls in group)
+    s = statistics.median(calls[SETTLE_CALL - 1][1] for calls in group)
+    p = statistics.median(calls[0][2] for calls in group)
     growth = []
     for calls in group:
         for a, b in zip(calls, calls[1:]):
@@ -162,7 +162,7 @@ def _row(group: list[list[tuple]]) -> dict[str, Any] | None:
             growth.append(cb - ca)
     if not growth:
         return None
-    row: dict[str, Any] = {"n": len(group), "S": _round(S), "P": _round(P),
+    row: dict[str, Any] = {"n": len(group), "S": _round(s), "P": _round(p),
                            "g": _round(statistics.mean(growth))}
     outputs = [c[5] for calls in group for c in calls if c[5] is not None]
     if outputs:

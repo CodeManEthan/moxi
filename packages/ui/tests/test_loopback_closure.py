@@ -48,7 +48,7 @@ def cwd(tmp_path):
     return path
 
 
-def _environ(site: Path) -> dict[str, str]:
+def _env(site: Path) -> dict[str, str]:
     return {**os.environ, "PYTHONPATH": str(site)}
 
 
@@ -94,9 +94,9 @@ async def _stream_once(info) -> bytes:
 def test_a_page_server_imports_only_the_base_of_ui(fixture_site, cwd, tmp_path):
     log = tmp_path / "server.log"
     argv = [sys.executable, "-X", "importtime", "-P", "-m", "moxi_ui.loopback.serve", MODULE]
-    with open(log, "wb") as err:
-        child = proc.spawn(argv, lifeline="stdin", cwd=cwd, env=_environ(fixture_site),
-                           stdout=subprocess.PIPE, stderr=err)
+    with open(log, "wb") as stderr_fh:
+        child = proc.spawn(argv, lifeline="stdin", cwd=cwd, env=_env(fixture_site),
+                           stdout=subprocess.PIPE, stderr=stderr_fh)
         try:
             ready = child.stdout.readline()
             assert ready.startswith(b"ready "), log.read_text(errors="replace")[-2000:]
@@ -118,7 +118,7 @@ def test_a_page_server_imports_only_the_base_of_ui(fixture_site, cwd, tmp_path):
 
 def test_the_export_command_imports_only_the_base_of_ui(fixture_site, cwd):
     argv = [sys.executable, "-X", "importtime", "-P", "-m", "moxi_ui.loopback.export", MODULE]
-    done = subprocess.run(argv, cwd=cwd, env=_environ(fixture_site), capture_output=True,
+    done = subprocess.run(argv, cwd=cwd, env=_env(fixture_site), capture_output=True,
                           text=True, timeout=60)
     assert done.returncode == 0, done.stderr[-2000:]
     assert json.loads(done.stdout)[MODULE]["ok"] is True, done.stdout

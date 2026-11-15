@@ -1,6 +1,6 @@
 """One config file per module, born declared, read through this module.
 
-A program changes the file through this module (`set`, `unset`, `add_item`,
+A program changes the file through this module (`set_value`, `unset`, `add_item`,
 `remove_item`), which checks each change against the schema before it writes. A person
 may also edit the file by hand; one that no longer reads raises `ConfigError`, naming the
 file, when it is next read.
@@ -77,7 +77,7 @@ turns bad and reporting the error once per change of the file.
 Changing
 --------
 
-`set`, `unset`, `add_item` and `remove_item` change one key of a module's config file
+`set_value`, `unset`, `add_item` and `remove_item` change one key of a module's config file
 (what `moxi config set` and `moxi config unset` run): the key must be declared and live,
 the value is coerced to the key's type, and the file is edited through
 `moxi.files.edit_toml` under its lock, keeping comments and order. Before anything is
@@ -112,7 +112,7 @@ DEFAULT = "default"
 FILE = "file"
 ENV = "env"
 
-#: The history of every change `set`, `unset`, `add_item` and `remove_item` make, in the
+#: The history of every change `set_value`, `unset`, `add_item` and `remove_item` make, in the
 #: core's state directory.
 HISTORY = "settings.jsonl"
 #: How long a change waits for the config file's lock, in seconds.
@@ -406,14 +406,14 @@ def load(module: str, schema: Schema, *, env=None, path=None) -> Settings:
     """
     from pathlib import Path
 
-    environ = os.environ if env is None else env
+    effective_env = os.environ if env is None else env
     if path is None:
         from .paths import _layout
 
-        path = _layout(module).config_file(environ)
+        path = _layout(module).config_file(effective_env)
     else:
         path = Path(path)
-    return _settings(module, schema, path, _parsed(path), environ)
+    return _settings(module, schema, path, _parsed(path), effective_env)
 
 
 class Config:
@@ -504,23 +504,23 @@ def _parsed(path) -> dict | None:
     return result
 
 
-def _settings(module, schema, path, data, environ) -> Settings:
+def _settings(module, schema, path, data, env) -> Settings:
     schema.check_env(module)
     from_file: dict = {}
     if data is not None:
-        _walk_file(data, "", schema, path, from_file, environ)
+        _walk_file(data, "", schema, path, from_file, env)
     values: dict = {}
     sources: dict = {}
     for key in schema.live():
-        raw = environ.get(key.env) if key.env else None
+        raw = env.get(key.env) if key.env else None
         if raw:
-            values[key.name] = _from_env(key, raw, environ)
+            values[key.name] = _from_env(key, raw, env)
             sources[key.name] = ENV
         elif key.name in from_file:
             values[key.name] = _copied(from_file[key.name])
             sources[key.name] = FILE
         else:
-            values[key.name] = _default_value(key, environ)
+            values[key.name] = _default_value(key, env)
             sources[key.name] = DEFAULT
     return Settings(module, path, schema, _MappingProxy(values), _MappingProxy(sources))
 
@@ -534,7 +534,7 @@ def _copied(value):
     return value
 
 
-def _walk_file(table, prefix, schema, path, out, environ) -> None:
+def _walk_file(table, prefix, schema, path, out, env) -> None:
     fix_unknown = "remove it, or check its spelling against the module's schema"
     for name, value in table.items():
         dotted = f"{prefix}{name}"
@@ -542,12 +542,12 @@ def _walk_file(table, prefix, schema, path, out, environ) -> None:
         if key is not None:
             if key.retired is not None:
                 raise ConfigError(path, dotted, "is retired", key.retired)
-            out[dotted] = _check_value(key, value, path, environ)
+            out[dotted] = _check_value(key, value, path, env)
         elif schema.is_group(dotted):
             if not isinstance(value, dict):
                 raise ConfigError(path, dotted, "is a table of settings, not a value",
                                   f"write it as [{dotted}] with its keys under it")
-            _walk_file(value, f"{dotted}.", schema, path, out, environ)
+            _walk_file(value, f"{dotted}.", schema, path, out, env)
         else:
             raise ConfigError(path, dotted, "is not a setting of this module", fix_unknown)
 
@@ -562,7 +562,7 @@ def _item_ok(kind, value) -> bool:
     return isinstance(value, str)
 
 
-def _check_value(key, value, path, environ):
+def _check_value(key, value, path, env):
     """`value` as key `key`'s type, or `ConfigError`."""
     kind = key.type
     ok = True
@@ -586,7 +586,7 @@ def _check_value(key, value, path, environ):
         raise ConfigError(path, key.name, f"is {value!r}, which it cannot be",
                           f"set it to one of {', '.join(map(repr, key.values))}")
     if kind == "path":
-        return _path(key, value, path, environ)
+        return _path(key, value, path, env)
     if key.items is not None and kind in ("list", "table"):
         return _check_items(key, value, path)
     return value
@@ -608,7 +608,7 @@ def _check_items(key, value, path):
     return {k: float(v) for k, v in value.items()} if kind == "float" else value
 
 
-def _path(key, value, source, environ):
+def _path(key, value, source, env):
     from pathlib import Path
 
     from .paths import _expanduser
@@ -617,14 +617,14 @@ def _path(key, value, source, environ):
         return None
     # `check_text` reads no environment of its own, but its `~` is still this process's
     # home, as `load` without an `env` expands it.
-    expanded = Path(_expanduser(value, os.environ if environ is _NO_ENV else environ))
+    expanded = Path(_expanduser(value, os.environ if env is _NO_ENV else env))
     if not expanded.is_absolute():
         raise ConfigError(source, key.name, f"is the relative path {value!r}",
                           "give an absolute path, or one starting with ~")
     return expanded
 
 
-def _from_env(key, raw, environ):
+def _from_env(key, raw, env):
     where = f"environment variable {key.env}"
     kind = key.type
     if kind == "bool":
@@ -640,12 +640,12 @@ def _from_env(key, raw, environ):
         except ValueError:
             raise ConfigError(where, key.name, f"is {raw!r}, not {_a(kind)}",
                               f"set it to {_a(kind)}") from None
-    return _check_value(key, raw, where, environ)
+    return _check_value(key, raw, where, env)
 
 
-def _default_value(key, environ):
+def _default_value(key, env):
     if key.type == "path":
-        return _path(key, key.default, "schema", environ)
+        return _path(key, key.default, "schema", env)
     if key.type in ("list", "table"):
         return _copied(key.default)
     return key.default
@@ -782,7 +782,7 @@ def _key(name, spec, source) -> Key:
 
 # -- changing a module's settings ------------------------------------------------------
 
-def set(module: str, key: str, value, *, by: str) -> list:
+def set_value(module: str, key: str, value, *, by: str) -> list:
     """Set `key` of module `module`'s config file to `value`, coerced to the key's type.
 
     A switch table's entry is set by its name, `<table key>.<entry>`, to a bool. When
@@ -796,7 +796,7 @@ def set(module: str, key: str, value, *, by: str) -> list:
 
 def unset(module: str, key: str, *, by: str) -> list:
     """Remove `key` from module `module`'s config file, so it reads its default (a switch
-    table's entry then reads false). Returns the units applied, as `set` does. A key the
+    table's entry then reads false). Returns the units applied, as `set_value` does. A key the
     file does not hold changes nothing: no file is made or written and no history line is
     added, though the file is still checked as it is (a missing one as the empty text)."""
     _change(module, key, "unset", None, by=by)
@@ -804,7 +804,7 @@ def unset(module: str, key: str, *, by: str) -> list:
 
 
 def apply_units(module: str, key: str, *, say=print) -> list:
-    """After a `set` or `unset` of `key`: when it is the switch of one or more of the
+    """After a `set_value` or `unset` of `key`: when it is the switch of one or more of the
     module's daemons (a `DAEMONS` entry, or one `UNITS_FROM` returns), or the key a socket
     daemon's `start` names (`{"login": key}`), plan and apply those daemons' units and
     nothing else of the module, under the core lock, and return
@@ -967,7 +967,7 @@ def _toml_value(text, path, key, kind):
 
 
 def _coerce(target, entry, name, value, path, text):
-    """Step 3 for `set`: `value` as key `target`'s type (or as a switch entry's bool).
+    """Step 3 for `set_value`: `value` as key `target`'s type (or as a switch entry's bool).
     `text` is True for a value given on the command line."""
     kind = target.type
     if entry is not None:
@@ -1165,7 +1165,7 @@ def _item(value, *, inline=False):
         for v in value:
             array.append(_item(v, inline=True))
         if any(isinstance(v, dict) for v in value):
-            array.multiline(True)
+            array.multiline(multiline=True)
         return array
     if isinstance(value, dict) and inline:
         table = tomlkit.inline_table()
@@ -1237,5 +1237,5 @@ def _check_config(module: str, schema: Schema, check) -> None:
 
 __all__ = ["TYPES", "READS", "FIELDS", "ITEMS", "DEFAULT", "FILE", "ENV", "HISTORY",
            "ConfigError", "SchemaError", "Key", "Schema", "Settings", "is_switch_table",
-           "is_entry_name", "schema_for", "check_text", "load", "Config", "set", "unset",
+           "is_entry_name", "schema_for", "check_text", "load", "Config", "set_value", "unset",
            "add_item", "remove_item", "history"]

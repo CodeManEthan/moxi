@@ -104,9 +104,9 @@ def test_a_shells_env_reaches_its_page_servers(ui_shells, fixture_site):
     assert shell.env["GIT_CONFIG_NOSYSTEM"] == "1"
     assert shell.session().get("/m/fixture/api/summary")[0] == 200
     pid = shell.wait_server("fixture", "running")["pid"]
-    environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
-    assert b"GIT_CONFIG_NOSYSTEM=1" in environ
-    assert f"HOME={shell.home}".encode() in environ
+    proc_env = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+    assert b"GIT_CONFIG_NOSYSTEM=1" in proc_env
+    assert f"HOME={shell.home}".encode() in proc_env
 
 
 def test_a_shell_reads_the_record_under_the_test_kits_anchor(fence, tmp_path, monkeypatch):

@@ -235,7 +235,7 @@ def test_a_live_test_in_another_tier_is_never_put_back_even_with_live_on(
     pytester.makepyfile(test_live=LIVE_AND_TIERED)
     # as if this pytest had started with MOXI_TEST_LIVE=1, which an in-process run
     # reads from the outer one
-    monkeypatch.setitem(testing._SESSION, "live", True)
+    monkeypatch.setitem(testing._SESSION, "live", value=True)
     live = pytester.runpytest("-p", "no:cacheprovider", "-m", "live")
     live.assert_outcomes(passed=2)
     if var == testing.CHANGED_ENV:

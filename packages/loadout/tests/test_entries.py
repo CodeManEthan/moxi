@@ -85,8 +85,8 @@ path.write_text("\n".join(out) + "\n")
 
 
 @pytest.fixture
-def lo(folder, tmp_path, monkeypatch):
-    kit.configure(folder)
+def lo(loadout_dir, tmp_path, monkeypatch):
+    kit.configure(loadout_dir)
     bin_dir = tmp_path / "fake-mcp-bin"
     bin_dir.mkdir()
     for name, body in (("claude", FAKE_CLAUDE), ("codex", FAKE_CODEX)):
@@ -94,11 +94,11 @@ def lo(folder, tmp_path, monkeypatch):
         path.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
         path.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
-    return folder
+    return loadout_dir
 
 
-def write(folder: Path, text: str) -> None:
-    kit.manifest(folder, textwrap.dedent(text))
+def write(loadout_dir: Path, text: str) -> None:
+    kit.manifest(loadout_dir, textwrap.dedent(text))
 
 
 def settings() -> Path:
@@ -356,6 +356,17 @@ def test_status_says_which_harness_facts_no_run_has_confirmed(lo):
     assert len(notes) == 2
     assert any("hooks.json" in n and "rules" in n and "trust" in n for n in notes)
     assert any("opencode.json" in n for n in notes)
+    assert not any("AGENTS.md" in n for n in notes)
+
+
+def test_no_opencode_note_while_loadout_writes_only_its_agents_md(lo):
+    opencode_row()
+    write(lo, '[global]\nmode = "managed"\n')
+    (lo / "global.md").write_text("Be brief.\n")
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert harness.global_file("opencode").exists()
+    assert not [n for n in install.status().notes if "not yet confirmed" in n]
 
 
 def test_another_value_under_the_key_is_blocked_then_taken_over(lo):
@@ -380,7 +391,7 @@ def test_another_value_under_the_key_is_blocked_then_taken_over(lo):
 def test_backups_are_pruned_to_keep(lo):
     from moxi import config
 
-    config.set("loadout", "backups.keep", "2", by="test")
+    config.set_value("loadout", "backups.keep", "2", by="test")
     for n in range(4):
         cmd = f"echo {n}"
         write(lo, f'[user]\nhooks = ["h"]\n[hook.h]\nevent = "Stop"\ncommand = "{cmd}"\n'

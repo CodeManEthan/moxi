@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     import logging
 
 #: Past this size the file named by `MOXI_LOG_FILE` is rolled to `<file>.1`.
+LOG_FILE_ENV = "MOXI_LOG_FILE"
 ROLL_BYTES = 5 * 1024 * 1024
 FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 JOURNAL_FORMAT = "%(levelname)s %(name)s: %(message)s"
@@ -43,7 +44,7 @@ def setup(module: str, level: str | int | None = None) -> logging.Logger:
     logger = logging.getLogger(f"moxi.{module}")
     logger.propagate = False
     if not any(getattr(h, "moxi_setup", False) for h in logger.handlers):
-        logger.addHandler(_handler_class()(os.environ.get("MOXI_LOG_FILE") or None))
+        logger.addHandler(_handler_class()(os.environ.get(LOG_FILE_ENV) or None))
     given = None
     if level is not None and (given := _level(level)) is None:
         raise ValueError(f"{level!r} is not a logging level")
@@ -135,4 +136,4 @@ def _roll(log_file: str) -> None:
         pass  # a log that cannot roll keeps growing; logging never stops the program
 
 
-__all__ = ["setup", "ROLL_BYTES"]
+__all__ = ["LOG_FILE_ENV", "setup", "ROLL_BYTES"]

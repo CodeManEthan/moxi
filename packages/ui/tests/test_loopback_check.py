@@ -206,7 +206,7 @@ def shell(session=cookie_or_token, names=("127.0.0.1", "localhost"), fallback=No
     return browser(shell_table(), session=session, names=names, fallback=fallback)
 
 
-def br(method="GET", path=b"/m/usage/api/summary", extra=(), host=SHELL_HOST, cookie=True):
+def br(method="GET", path=b"/m/usage/api/summary", extra=(), host=SHELL_HOST, *, cookie=True):
     headers = [] if host is None else [(b"host", host)]
     if cookie:
         headers.append((b"cookie", b"s=ok"))

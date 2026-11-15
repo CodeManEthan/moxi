@@ -72,14 +72,14 @@ def fake(module_fake):
     return module_fake
 
 
-@pytest.fixture
-def folder(shell):
+@pytest.fixture(name="work_dir")
+def work_dir_fixture(shell):
     """Home opens on a folder of the test's own, which no launch has run in."""
     return kit.fresh_place(shell)
 
 
 @pytest.fixture
-def context(shell, fake, folder, ui_contexts):
+def context(shell, fake, work_dir, ui_contexts):
     return ui_contexts(shell)
 
 
@@ -157,7 +157,7 @@ def started(fake, count: int) -> dict:
     return fake.starts()[count - 1]
 
 
-def test_a_launch_in_a_project_runs_again_in_the_same_folder_from_one_click(page, fake, shell):
+def test_a_launch_in_a_project_runs_again_in_the_same_dir_from_one_click(page, fake, shell):
     piece = kit.open_home(page)
     pick_project(piece, "proj-a")
     expect(piece.locator("[data-recents]")).to_have_count(0)
@@ -271,11 +271,11 @@ def test_where_the_default_is_the_terminal_a_click_copies_the_recents_command(co
     assert len(fake.starts()) == before
 
 
-def test_a_recent_that_cant_run_again_says_why_and_its_click_does_nothing(page, folder):
+def test_a_recent_that_cant_run_again_says_why_and_its_click_does_nothing(page, work_dir):
     piece = kit.open_home(page)
     launch(page, piece, "say the word gone")
     launch(page, piece, "say the word gone twice")
-    shutil.rmtree(folder)
+    shutil.rmtree(work_dir)
     piece = kit.open_home(page)
     expect(recents(piece)).to_have_count(2)
     shown = point(page, piece, 1)

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- The Claude runner plugin is version 0.2.0, for the leg it speaks now. Claude Code runs
+  a user-scope plugin from a cache kept per version, so `moxi install turns` now updates
+  a plugin installed at another version than the one it ships (`claude plugin update`)
+  instead of skipping it. Before, an earlier install kept running the old runner, which
+  the endpoint refuses, so every session it loaded in ran without turns. `moxi doctor
+  turns` has a new row, `claude installed runner`, that reads the leg of the runner
+  Claude Code runs at user scope and fails when it is not the endpoint's.
+
 ## 0.2.4 (2026-11-08)
 
 - Config keys `start.limit` and `guards.on` are now `start.limit_chars` and
@@ -17,7 +27,8 @@
   `moxi_turns.Session.codex_limits`: `timeout` is now `timeout_s`;
   `moxi_turns.Session.command`: `timeout` is now `timeout_s`;
   `moxi_turns.Session.mcp_reload`: `timeout` is now `timeout_s`;
-  `moxi_turns.wait_ready`: `timeout` is now `timeout_s`.
+  `moxi_turns.wait_ready`: `timeout` is now `timeout_s`; `moxi_turns.Session`: `environ`
+  is now `env`.
 - `start.order`'s default is `["launcher", "comms", "notes"]`, the start-context modules
   in this repository. A config that sets the key keeps its own list.
 - The README is written for a newcomer: what turns is, its three guards and what each

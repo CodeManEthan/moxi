@@ -42,7 +42,7 @@ def wrap(ref: str, *, module: str, key: str, name: str, runner=None) -> Acted:
             problem = unit if isinstance(unit, str) else _conflict(
                 impl, ref, module, key, name, unit.ids[1] if len(unit.ids) == 2 else None)
         if problem is not None:
-            return Acted(module, ref, "wrap", False, (problem,))
+            return Acted(module, ref, "wrap", ok=False, lines=(problem,))
         acted = impl.wrap(ref, module=module, key=key, name=name, fence=fence)
         lines = list(acted.lines)
         if acted.ok:
@@ -60,7 +60,8 @@ def unwrap(ref: str, *, module: str, runner=None) -> Acted:
     with core_lock():
         impl = _implementation()
         if isinstance(impl, str) or impl.supervisor != "systemd":
-            return Acted(module, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
+            return Acted(module, ref, "unwrap", ok=True,
+                         lines=(f"{ref} is not wrapped by {module}",))
         acted = impl.unwrap(ref, module=module, fence=_fence(impl, runner))
         return Acted(module, ref, "unwrap", acted.ok, acted.lines)
 

@@ -81,7 +81,7 @@ def alive(pid) -> bool:
     except ProcessLookupError:
         return False
     try:
-        with open(f"/proc/{pid}/stat") as f:
-            return f.read().split(") ")[1][0] != "Z"
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().split(") ")[1][0] != "Z"
     except OSError:
         return False

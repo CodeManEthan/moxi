@@ -164,12 +164,12 @@ LOCK_RETRY = 0.01
 
 
 @contextlib.contextmanager
-def _locked(directory: Path) -> Iterator[None]:
+def _locked(records_dir: Path) -> Iterator[None]:
     """Hold the records' lock (module doc); without `fcntl` or `msvcrt`, no lock."""
     if fcntl is None and msvcrt is None:
         yield
         return
-    fd = os.open(directory / ".lock", os.O_RDWR | os.O_CREAT, 0o644)
+    fd = os.open(records_dir / ".lock", os.O_RDWR | os.O_CREAT, 0o644)
     try:
         if fcntl is not None:
             fcntl.flock(fd, fcntl.LOCK_EX)
@@ -198,21 +198,21 @@ def _lock_first_byte(fd: int) -> None:
         time.sleep(LOCK_RETRY)
 
 
-def keep(directory: Path, commit: str, runs: Mapping[str, PackageRun]) -> Path:
+def keep(records_dir: Path, commit: str, runs: Mapping[str, PackageRun]) -> Path:
     """Write the commit's record: these packages' runs over any it already holds. An
     `OSError` (a read-only or full disk) reaches the caller, and no part file is left."""
-    path = directory / f"{commit}.json"
-    directory.mkdir(parents=True, exist_ok=True)
-    with _locked(directory):
+    path = records_dir / f"{commit}.json"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    with _locked(records_dir):
         packages = dict(read_record(path) or {})
         packages.update(runs)
         body = {"format": FORMAT, "commit": commit,
                 "packages": {name: {"tiers": run.tiers, "tests": dict(run.tests)}
                              for name, run in sorted(packages.items())}}
-        fd, part = tempfile.mkstemp(dir=directory, prefix=f"{commit}.", suffix=".part")
+        fd, part = tempfile.mkstemp(dir=records_dir, prefix=f"{commit}.", suffix=".part")
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as out:
-                out.write(json.dumps(body, indent=1, sort_keys=True) + "\n")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(body, indent=1, sort_keys=True) + "\n")
             os.replace(part, path)
         except BaseException:
             with contextlib.suppress(OSError):
@@ -230,13 +230,13 @@ def compare(runs: Mapping[str, PackageRun], record: Mapping[str, PackageRun]
     return (sum(runs[name].seconds() - record[name].seconds() for name in same), same)
 
 
-def against_main(root: Path, directory: Path, runs: Mapping[str, PackageRun],
+def against_main(root: Path, records_dir: Path, runs: Mapping[str, PackageRun],
                  base: str = "main") -> Delta | None:
     """The delta against the newest ancestor record on `base` that has a package this run
     can be compared on; None when there is none (or no merge base)."""
-    if not runs or not directory.is_dir():
+    if not runs or not records_dir.is_dir():
         return None
-    kept = {path.stem for path in directory.glob("*.json")}
+    kept = {path.stem for path in records_dir.glob("*.json")}
     if not kept:
         return None
     head = (_git(root, "rev-parse", "HEAD") or "").strip()
@@ -246,7 +246,7 @@ def against_main(root: Path, directory: Path, runs: Mapping[str, PackageRun],
     for sha in (_git(root, "rev-list", fork) or "").split():
         if sha == head or sha not in kept:
             continue
-        record = read_record(directory / f"{sha}.json")
+        record = read_record(records_dir / f"{sha}.json")
         if not record:
             continue
         seconds, same = compare(runs, record)

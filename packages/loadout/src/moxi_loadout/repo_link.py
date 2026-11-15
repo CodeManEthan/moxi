@@ -48,12 +48,12 @@ def api():
     return found.api, None
 
 
-def in_work_tree(folder: str | os.PathLike) -> bool:
-    """Whether `folder` is an existing folder inside a git work tree: it, or a folder
+def in_work_tree(loadout_dir: str | os.PathLike) -> bool:
+    """Whether `loadout_dir` is an existing folder inside a git work tree: it, or a folder
     above it, holds a `.git` (a folder, or the file a linked worktree or a submodule
     has). It runs no git, so it is cheap enough for every install and the doctor; repo
     reads the work tree itself when it registers."""
-    here = os.path.abspath(folder)
+    here = os.path.abspath(loadout_dir)
     if not os.path.isdir(here):
         return False
     while True:
@@ -65,19 +65,18 @@ def in_work_tree(folder: str | os.PathLike) -> bool:
         here = up
 
 
-def registered(link, folder) -> dict[str, dict]:
-    """loadout's pieces registered in the repo holding `folder`, by id, each as repo's
+def registered(link, loadout_dir) -> dict[str, dict]:
+    """loadout's pieces registered in the repo holding `loadout_dir`, by id, each as repo's
     status lists it. Raises the link's `Failure`."""
-    listed = link.status(folder)
+    listed = link.status(loadout_dir)
     found = listed[0]["pieces"] if listed else []
     return {p["id"]: p for p in found if p.get("id") in PIECES}
 
 
-def sync(folder: str | os.PathLike, on: bool, *,
-         say: Callable[[str], object] = print) -> None:
-    """Register the pieces in the work tree holding `folder` while `on`, or remove them
+def sync(loadout_dir: str | os.PathLike, *, enabled: bool, say: Callable[[str], object] = print) -> None:
+    """Register the pieces in the work tree holding `loadout_dir` while `enabled`, or remove them
     while not. See the module's docs."""
-    if not in_work_tree(folder):
+    if not in_work_tree(loadout_dir):
         return
     link, why = api()
     if link is None:
@@ -85,25 +84,25 @@ def sync(folder: str | os.PathLike, on: bool, *,
             say(f"the git hook pieces weren't checked: {why}")
         return
     try:
-        have = registered(link, folder)
-        if on:
+        have = registered(link, loadout_dir)
+        if enabled:
             for pid in PIECES:
                 if pid not in have:
-                    _report(link.add(folder, pid), say)
+                    _report(link.add(loadout_dir, pid), say)
         else:
             for pid in PIECES:
                 if pid in have:
-                    _report(link.remove(folder, pid), say)
+                    _report(link.remove(loadout_dir, pid), say)
     except link.Failure as exc:
-        say(f"the git hook pieces weren't {_verb(on)}: {exc.text}")
+        say(f"the git hook pieces weren't {_verb(enabled=enabled)}: {exc.text}")
         for line in exc.lines:
             say(f"  {line}")
     except (OSError, subprocess.TimeoutExpired) as exc:
-        say(f"the git hook pieces weren't {_verb(on)}: {_git_failed(exc)}")
+        say(f"the git hook pieces weren't {_verb(enabled=enabled)}: {_git_failed(exc)}")
 
 
-def _verb(on: bool) -> str:
-    return "registered" if on else "removed"
+def _verb(*, enabled: bool) -> str:
+    return "registered" if enabled else "removed"
 
 
 def _git_failed(exc: BaseException) -> str:
@@ -125,7 +124,7 @@ def _report(report, say) -> None:
         say(str(problem))
 
 
-def state(folder: str | os.PathLike, on: bool, *, seconds: float | None = None):
+def state(loadout_dir: str | os.PathLike, *, enabled: bool, seconds: float | None = None):
     """The doctor's row for the link: `off` when the folder is in no git work tree, when
     repo is absent (with repo, a commit reinstalls) or when the setting is off; `warn`
     when repo can't be loaded or read, or a piece is unregistered or disabled while the
@@ -134,8 +133,8 @@ def state(folder: str | os.PathLike, on: bool, *, seconds: float | None = None):
     from moxi.doctor import Row
 
     name = "git hook"
-    if not in_work_tree(folder):
-        return Row("loadout", name, "off", f"the loadout folder {folder} is in no git "
+    if not in_work_tree(loadout_dir):
+        return Row("loadout", name, "off", f"the loadout folder {loadout_dir} is in no git "
                    "work tree, so no git hook reinstalls it")
     link, why = api()
     if link is None and why is None:
@@ -144,14 +143,14 @@ def state(folder: str | os.PathLike, on: bool, *, seconds: float | None = None):
                    "moxi install loadout --with repo")
     if link is None:
         return Row("loadout", name, "warn", why, "moxi doctor")
-    if not on:
+    if not enabled:
         return Row("loadout", name, "off", f"{SETTING} is off, so a commit to the loadout "
                    "folder doesn't reinstall it",
                    f"moxi config set loadout {SETTING} true")
     unread = "repo can't read the work tree holding the loadout folder"
     try:
-        have = registered(link, folder) if seconds is None else _within(
-            seconds, registered, link, folder)
+        have = registered(link, loadout_dir) if seconds is None else _within(
+            seconds, registered, link, loadout_dir)
     except link.Failure as exc:
         return Row("loadout", name, "warn", f"{unread}: {exc.text}",
                    "moxi repo git-hooks list")
@@ -166,7 +165,7 @@ def state(folder: str | os.PathLike, on: bool, *, seconds: float | None = None):
                    "doesn't reinstall", "moxi loadout install")
     off = [pid for pid in PIECES if have[pid].get("enabled") is False]
     if off:
-        root = _quoted(folder)
+        root = _quoted(loadout_dir)
         return Row("loadout", name, "warn", f"the git hook piece{'s' * (len(off) != 1)} "
                    f"{', '.join(off)} {'are' if len(off) != 1 else 'is'} disabled in repo",
                    " and ".join(f"moxi repo git-hooks enable {root} {pid}" for pid in off)

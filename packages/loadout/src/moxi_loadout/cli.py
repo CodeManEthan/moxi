@@ -13,8 +13,9 @@ applies the steps in scope (all of them without a flag). `--replace` takes a pat
 `status` prints one line per item that is not `ok`, then notes, then a count. `add` and
 `remove` write a section's list, `enable` and `disable` its `disabled` ids, then each
 installs with that item's steps as the scope. `list` prints every item with its kind,
-scope, harnesses and source. `global show` prints, for each harness, its global file and
-what the next install makes of it (`--diff` as a diff); `global mode MODE` writes the mode
+scope, harnesses and source. `global show` prints, for each harness, the files it reads
+through loadout (the shared file, then its part or "no part"), its global file and what
+the next install makes of it (`--diff` as a diff); `global mode MODE` writes the mode
 (off, managed or if-absent) and installs the global file alone; `global remove` sets `off`
 and takes loadout's part out, leaving the user's own text.
 
@@ -46,8 +47,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    def verb(name: str, help: str) -> argparse.ArgumentParser:
-        p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".")
+    def verb(name: str, help_text: str) -> argparse.ArgumentParser:
+        description = help_text[0].upper() + help_text[1:] + "."
+        p = verbs.add_parser(name, help=help_text, description=description)
         p.add_argument("--json", action="store_true", help="print JSON")
         return p
 
@@ -70,15 +72,15 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="plan and print, change nothing")
     p = verb("status", "say what has drifted")
     scopes(p, many=True)
-    for name, help in (("add", "list an item in a section, then install it"),
+    for name, verb_help in (("add", "list an item in a section, then install it"),
                        ("remove", "take an item out of a section, then install")):
-        p = verb(name, help)
+        p = verb(name, verb_help)
         p.add_argument("kind", metavar="KIND", choices=KINDS)
         p.add_argument("name", metavar="NAME")
         scopes(p, many=False)
-    for name, help in (("enable", "switch an item back on, then install it"),
+    for name, verb_help in (("enable", "switch an item back on, then install it"),
                        ("disable", "switch an item off for a harness, then install")):
-        p = verb(name, help)
+        p = verb(name, verb_help)
         p.add_argument("ident", metavar="ID", help="<kind>:<name>@<harness>, harness * "
                                                     "for every one")
         scopes(p, many=False)
@@ -226,7 +228,7 @@ def _toggle(args, write, done: str) -> int:
         ident = parse_id(args.ident)
     except ValueError as exc:
         raise ManifestError(None, [str(exc)]) from None
-    changed = write(ident, user=args.user, project=args.project)
+    changed = write(ident, user_only=args.user, project=args.project)
     lines = [f"{done} {ident} in {s}" for s in changed] or [f"{ident}: nothing to change"]
     return _write_then_install(args, lines, (ident.kind, ident.name))
 
@@ -277,6 +279,9 @@ def _global_show(args) -> int:
         return codes.OK
     print(f"global mode {preview['mode']}")
     for f in preview["files"]:
+        if f["parts"]:
+            names = " and ".join(f["parts"]) + ("" if len(f["parts"]) > 1 else ", no part")
+            print(f"{f['harness']} reads {names}")
         if f.get("placed"):
             print(f"{f['file']}: {f['state']}" + (f" ({f['diff']})" if f["diff"] else ""))
         elif not f["changes"]:

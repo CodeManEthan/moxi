@@ -44,6 +44,13 @@ from .resolve import Resolution, notes_dir, notes_root_for
 
 #: The folder under a notes directory that holds a project's handoffs.
 HANDOFFS = "handoffs"
+#: The launch override read by notes' CLI and listener.
+NOTES_DIR_ENV = "MOXI_NOTES_DIR"
+
+
+def _env_override() -> str | None:
+    """The launch override in this process's environment, for notes' own CLI."""
+    return os.environ.get(NOTES_DIR_ENV) or None
 
 
 def root():
@@ -57,14 +64,14 @@ def handoffs_dir(path, *, create: bool = False, override=None):
     found = notes_dir(path, override=override).dir
     if found is None:
         return None
-    folder = found / HANDOFFS
+    found_dir = found / HANDOFFS
     if create:
         try:
-            os.makedirs(folder, exist_ok=True)
+            os.makedirs(found_dir, exist_ok=True)
         except FileExistsError:
-            raise Refused(f"{folder} exists and is not a folder",
+            raise Refused(f"{found_dir} exists and is not a folder",
                           "move it aside so notes can make the handoffs folder") from None
-    return folder
+    return found_dir
 
 
 def frontmatter(text: str):
@@ -91,6 +98,6 @@ def validate():
     return walk()
 
 
-__all__ = ["HANDOFFS", "Resolution", "Inbox", "NotesError", "Refused", "BadSlug", "root",
+__all__ = ["HANDOFFS", "NOTES_DIR_ENV", "Resolution", "Inbox", "NotesError", "Refused", "BadSlug", "root",
            "notes_dir", "handoffs_dir", "notes_root_for", "inbox_dir", "make_inbox",
            "inbox_list", "rename_inbox", "frontmatter", "upsert_frontmatter", "validate"]

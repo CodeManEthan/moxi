@@ -5,6 +5,8 @@
 The first version. It keeps the record of a round and takes it through its design; it
 does not yet build.
 
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_rounds.api`: `round` is now `round_data`.
 - `moxi rounds open`, `fold`, `verdict`, `ask`, `rule`, `mark`, `next`, `show`, `list`
   and `drop`.
 - A round's log and a project's log, in the project's rounds folder, with the generated

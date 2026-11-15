@@ -48,7 +48,7 @@ SESSIONS = [
 ]
 
 #: Writes the sessions of the JSON list in argv[1] under the harness roots of the
-#: environment it runs in: three requests each, the newest a minute old.
+#: environment it runs in: three requests each, the newest a minute old and kept on today.
 SEED = """
 import json, sys, time
 from pathlib import Path
@@ -56,7 +56,8 @@ from moxi_sessions import api as sessions
 T = sessions.testing
 now = time.time()
 for spec in json.loads(sys.argv[1]):
-    start = now - spec["days_ago"] * 86400 - 60
+    start = (T.today_at(60, oldest_s=60, now=now) if spec["days_ago"] == 0
+             else now - spec["days_ago"] * 86400 - 60)
     cwd = "/work/" + spec["project"]
     if spec["harness"] == "codex":
         r = T.CodexRollout(Path(sessions.root("codex")), thread_id=spec["session"], cwd=cwd,
@@ -72,7 +73,7 @@ for spec in json.loads(sys.argv[1]):
                            project="-work-" + spec["project"], cwd=cwd, start=start)
     for m in range(3):
         t.user("Fix the failing test.")
-        t.assistant("Done.", usage=T.usage(input=200, output=1000 + m * 500),
+        t.assistant("Done.", usage=T.usage(input_tokens=200, output=1000 + m * 500),
                     request_id=f"req_{spec['session'][-2:]}{m}", model=spec["model"])
     t.write()
 """
@@ -150,6 +151,8 @@ def cost_figures(panel) -> list[str]:
 
 def test_the_filter_line_sits_under_cost_and_opens_on_the_last_30_days_by_cost(page):
     panel = open_page(page)
+    # The part under the filter line is drawn once the chart's or a section's read answers.
+    expect(panel.locator("[data-part=below]")).to_have_count(1)
     order = panel.evaluate("""el => [...el.shadowRoot.children]
         .filter((node) => node.dataset && node.dataset.part).map((node) => node.dataset.part)""")
     assert order[:3] == ["top", "filters", "below"], order
@@ -398,7 +401,7 @@ def test_project_offers_all_alone_when_no_session_has_a_project(page):
     expect(box.get_by_role("menuitemradio")).to_have_text([re.compile(r"^✓\s*all$")])
 
 
-def test_without_projects_the_filter_is_folder_and_filters_by_the_whole_path(small, ui_contexts):
+def test_without_projects_the_filter_is_dir_and_filters_by_the_whole_path(small, ui_contexts):
     page = ui_contexts(small).pages[0]
     panel = open_page(page)
     box = filter_of(panel, "place")

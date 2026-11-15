@@ -174,10 +174,10 @@ def transcript_roots(env: Mapping[str, str] | None = None) -> tuple[tuple[str, s
     from .shape import HARNESSES
     from .source import root
 
-    environ = dict(os.environ if env is None else env)
+    roots_env = dict(os.environ if env is None else env)
     out: list[tuple[str, str]] = list(_configured_roots())
     for harness in HARNESSES:
-        out.append((harness, str(root(harness, environ))))
+        out.append((harness, str(root(harness, roots_env))))
     return tuple(dict.fromkeys(out))
 
 

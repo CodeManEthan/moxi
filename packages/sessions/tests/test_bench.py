@@ -62,7 +62,7 @@ def long_transcript(root: Path, size: int = 35 * MB) -> ClaudeTranscript:
         t.user("Where do things stand? Look at the module and say what is left.")
         t.other("attachment", attachment={"type": "todo", "items": []})
         for n, result in enumerate(RESULT_SIZES):
-            req = t.request(usage_block=usage(input=4, cache_read=90_000 + n,
+            req = t.request(usage_block=usage(input_tokens=4, cache_read=90_000 + n,
                                               cache_write=1_500, output=300))
             req.thinking("Which file holds it? " * 20)
             call = req.tool_use("Read", {"file_path": f"/work/project/src/m{n}.py"})
@@ -105,8 +105,8 @@ def test_records_since_with_nothing_new_is_under_1_ms(big):
 
 def bare_pass(path: Path) -> None:
     """The yardstick: a forward pass that decodes only the lines holding `"usage"`."""
-    with open(path, "rb") as handle:
-        for line in handle:
+    with open(path, "rb") as fh:
+        for line in fh:
             if b'"usage"' in line:
                 json.loads(line)
 
@@ -139,7 +139,7 @@ def opencode_db(tmp_path_factory) -> Path:
             a.reasoning("Which file holds it? " * 10)
             a.tool("read", {"filePath": "/work/project/src/m.py"},
                    output=CODE * 30)
-            a.step(input=900, output=120, text="It reads every file it is given. " * 10)
+            a.step(input_tokens=900, output=120, text="It reads every file it is given. " * 10)
             a.complete()
     return db.write()
 

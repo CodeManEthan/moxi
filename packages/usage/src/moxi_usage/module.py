@@ -1,6 +1,6 @@
 """The announcement of Moxi's usage module, which moxi.modules reads."""
 
-#: Interface 2 is interface 1 plus `report`'s `folder` filter, the `projects` report by
+#: Interface 2 is interface 1 plus `report`'s `work_dir` filter, the `projects` report by
 #: folder, `saving` on a `terms` total and `opened` on a limits row. A caller that needs
 #: any of those asks for 2; one written against 1 still loads.
 INTERFACES = frozenset({1, 2})

@@ -247,8 +247,8 @@ def _from_app_server(binary: str, deadline: float) -> CodexLimits:
             raise TimeoutError("the time ran out")
         return remaining
 
-    folder = Path(tempfile.mkdtemp(prefix="moxi-turns-limits-"))
-    server = AppServer(folder / "app.sock", binary=binary)
+    server_dir = Path(tempfile.mkdtemp(prefix="moxi-turns-limits-"))
+    server = AppServer(server_dir / "app.sock", binary=binary)
     ws = None
     try:
         server.start()
@@ -266,7 +266,7 @@ def _from_app_server(binary: str, deadline: float) -> CodexLimits:
         if ws is not None:
             ws.close()
         server.stop()
-        shutil.rmtree(folder, ignore_errors=True)
+        shutil.rmtree(server_dir, ignore_errors=True)
 
 
 __all__ = ["AppServer", "AppServerBusy", "BINARY", "CodexLimits", "LIMITS_READ",

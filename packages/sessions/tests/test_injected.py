@@ -359,7 +359,7 @@ def test_the_model_s_opencode_messages_and_thoughts_are_not_injected(db):
     a.step_start()
     a.reasoning("which suite?")
     a.text("all green")
-    a.step_finish(input=5, output=6)
+    a.step_finish(input_tokens=5, output=6)
     user, answer, thought = messages(opencode_records(db, s.id))
     assert user.injected is UNKNOWN
     assert answer.role == "assistant" and answer.injected is False

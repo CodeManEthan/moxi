@@ -33,7 +33,7 @@ from moxi.paths import Layout, python
 from .. import cli, config
 from . import endpoint
 
-__all__ = ["HOLD_WAIT", "cmd_devices", "cmd_log", "cmd_off", "cmd_on",
+__all__ = ["HOLD_WAIT", "cmd_devices", "cmd_log", "cmd_disable", "cmd_enable",
            "cmd_pair", "cmd_revoke", "dispatch"]
 
 MODULE = "ui"
@@ -80,8 +80,8 @@ def _layout() -> Layout:
 # --- reading ------------------------------------------------------------------------------
 
 
-def _check_runtime(environ: Mapping[str, str] | None) -> None:
-    moved = endpoint.runtime_problem(environ)
+def _check_runtime(env: Mapping[str, str] | None) -> None:
+    moved = endpoint.runtime_problem(env)
     if moved:
         raise Refused(moved)
 
@@ -111,15 +111,15 @@ def _address() -> Any:
 
 
 def cmd_pair(args: argparse.Namespace, say: Callable[[str], Any], *,
-             environ: Mapping[str, str] | None = None) -> int:
+             env: Mapping[str, str] | None = None) -> int:
     from .pairing import NoAddress, mint
 
-    _check_runtime(environ)
+    _check_runtime(env)
     address = _address()
     try:
-        url = mint(_layout().runtime_dir(environ, create=True), address)
-    except NoAddress as err:
-        raise Refused(str(err)) from None
+        url = mint(_layout().runtime_dir(env, create=True), address)
+    except NoAddress as exc:
+        raise Refused(str(exc)) from None
     say("Open this on the phone within 2 minutes, or scan the desktop's QR code:")
     say(url)
     return 0
@@ -181,8 +181,8 @@ def cmd_log(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
 # --- on, off --------------------------------------------------------------------------------
 
 
-def _set_switch(on: bool) -> None:
-    words = ("set", "--", MODULE, "gateway.enabled", "true") if on \
+def _set_switch(*, enabled: bool) -> None:
+    words = ("set", "--", MODULE, "gateway.enabled", "true") if enabled \
         else ("unset", "--", MODULE, "gateway.enabled")
     if _run(_moxi("config", *words)) != 0:
         raise Refused(f"`moxi config {' '.join(w for w in words if w != '--')}` failed")
@@ -196,8 +196,8 @@ def _start_shell(say: Callable[[str], Any]) -> None:
         return
     try:
         acted = cli._units_start()
-    except Exception as err:  # noqa: BLE001 - said, and the wait below decides
-        say(f"the shell's unit did not start: {err}")
+    except Exception as exc:  # noqa: BLE001 - said, and the wait below decides
+        say(f"the shell's unit did not start: {exc}")
     else:
         for line in (line for a in acted for line in a.lines):
             say(line)
@@ -221,23 +221,23 @@ def _doctor_text() -> str:
     return row.detail + (f"; {row.fix}" if row.fix else "")
 
 
-def cmd_on(args: argparse.Namespace, say: Callable[[str], Any], *,
-           environ: Mapping[str, str] | None = None) -> int:
+def cmd_enable(args: argparse.Namespace, say: Callable[[str], Any], *,
+           env: Mapping[str, str] | None = None) -> int:
     from .listener import extra_installed
 
-    _check_runtime(environ)
+    _check_runtime(env)
     if not extra_installed():
         raise Refused("the gateway extra isn't installed; run `moxi install ui --with gateway`")
     address = _address()
     kind = endpoint.resolve_kind(endpoint.system())
     if kind == "unix":
         try:
-            endpoint.check_socket_path(endpoint.socket_path(_layout(), environ))
-        except endpoint.PathRefused as err:
-            raise Refused(str(err)) from None
-    _set_switch(True)
+            endpoint.check_socket_path(endpoint.socket_path(_layout(), env))
+        except endpoint.PathRefused as exc:
+            raise Refused(str(exc)) from None
+    _set_switch(enabled=True)
     _start_shell(say)
-    if kind == "tcp" and _wait_hold(_layout().runtime_dir(environ)) is None:
+    if kind == "tcp" and _wait_hold(_layout().runtime_dir(env)) is None:
         raise Refused(f"the shell didn't take the gateway's port within {HOLD_WAIT:g} s: "
                       f"{_doctor_text()}")
     if address is None:
@@ -247,11 +247,11 @@ def cmd_on(args: argparse.Namespace, say: Callable[[str], Any], *,
     return 0
 
 
-def cmd_off(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
+def cmd_disable(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
     from .address import REFUSED
     from .listener import read_tunnel
 
-    _set_switch(False)
+    _set_switch(enabled=False)
     say("the gateway is off; every phone session ends within 2 s")
     read = read_tunnel()
     address = read.address
@@ -279,7 +279,7 @@ def cmd_off(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
 
 
 HANDLERS = {"pair": cmd_pair, "devices": cmd_devices, "revoke": cmd_revoke, "log": cmd_log,
-            "enable": cmd_on, "disable": cmd_off}
+            "enable": cmd_enable, "disable": cmd_disable}
 
 
 def dispatch(args: argparse.Namespace, say: Callable[[str], Any]) -> int:

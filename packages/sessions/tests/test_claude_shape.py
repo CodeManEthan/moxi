@@ -36,7 +36,7 @@ def transcript(projects) -> ClaudeTranscript:
 
 def test_a_request_maps_its_token_classes(transcript):
     transcript.user("go")
-    transcript.assistant("ok", usage=usage(input=3, cache_read=900, cache_write=200,
+    transcript.assistant("ok", usage=usage(input_tokens=3, cache_read=900, cache_write=200,
                                            cache_write_1h=150, output=40, thinking=25,
                                            service_tier="priority", speed="fast"))
     (request,) = requests(read(transcript.write()))
@@ -186,7 +186,7 @@ def test_turn_id_is_the_prompt_the_line_is_in(transcript):
 
 def test_a_progress_line_s_nested_usage_is_not_read(transcript):
     transcript.other("progress", data={"message": {"type": "assistant", "message": {
-        "model": "m", "usage": usage(input=999)}}})
+        "model": "m", "usage": usage(input_tokens=999)}}})
     records = read(transcript.write())
     assert requests(records) == []
     assert isinstance(records[0], Other) and records[0].recognised is True

@@ -4,9 +4,11 @@ The record holds every variable of the core set that is set in the recording run
 environment, with its exact value, and nothing else. An empty value is kept as empty; a
 name absent from the record was unset. Values compare as strings.
 
-The core set is every name read by the resolvers a page's check may use: `Layout`'s
-methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.harness_dirs` and
-`paths.which`. `in_set(name)` matches it by name, so recording needs no module discovery:
+The core set is every name read by the resolvers a page's check may use: the core's own,
+`Layout`'s methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.harness_dirs`
+and `paths.which`, and each harness's own home variable, which a module's page may resolve
+though no core resolver reads it (`OPENCODE_CONFIG_DIR`). `in_set(name)` matches it by
+name, so recording needs no module discovery:
 
 - `MOXI_HOME`, `MOXI_DEVICE`, and `MOXI_<P>_<S>` for any prefix `<P>` and `<S>` one of
   `paths.LOCATORS` or `DEVICE`, but not `MOXI_ANCHOR_HOME`, which places the record
@@ -14,7 +16,7 @@ methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.harness_dirs` a
 - `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`,
   `XDG_RUNTIME_DIR`, `HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`,
   `WIN_PD_OVERRIDE_APPDATA` and `WIN_PD_OVERRIDE_LOCAL_APPDATA`;
-- `CLAUDE_CONFIG_DIR` and `CODEX_HOME`;
+- `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `OPENCODE_CONFIG_DIR`;
 - `PATH` and `PATHEXT`.
 
 What the core reads for other purposes (the stray check's `UV_TOOL_DIR` and `APPDATA`)
@@ -58,7 +60,7 @@ FIXED = frozenset({
     "XDG_RUNTIME_DIR",
     "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
     "WIN_PD_OVERRIDE_APPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA",
-    "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+    "CLAUDE_CONFIG_DIR", "CODEX_HOME", "OPENCODE_CONFIG_DIR",
     "PATH", "PATHEXT",
 })
 
@@ -193,9 +195,9 @@ def read(path: str | os.PathLike | None = None, *,
             break
         except (FileNotFoundError, NotADirectoryError):
             return NoRecord(path)
-        except OSError as error:
+        except OSError as exc:
             if time.monotonic() >= deadline:
-                return Unreadable(path, error)
+                return Unreadable(path, exc)
             time.sleep(files.POLL)
     return parse(path, data)
 
@@ -436,8 +438,8 @@ def step(env: Mapping[str, str] | None = None, *, stdin=None, view=None,
     no_place = None
     try:
         path = paths.terminal_record(source)
-    except paths.NoAnchor as error:
-        no_place = error
+    except paths.NoAnchor as exc:
+        no_place = exc
     else:
         # One read, no retry, no parse: the file is this run's record byte for byte, or the
         # run applies the rule. A file that can't be read now is replaced if it holds.
@@ -459,8 +461,8 @@ def step(env: Mapping[str, str] | None = None, *, stdin=None, view=None,
         return Outcome(NO_PLACE, None, error=no_place)
     try:
         files.atomic_write(path, text(held, version()), mode=0o600)
-    except OSError as error:
-        return Outcome(FAILED, path, error=error)
+    except OSError as exc:
+        return Outcome(FAILED, path, error=exc)
     return Outcome(WRITTEN, path)
 
 
@@ -476,9 +478,9 @@ def row(outcome: Outcome) -> str | None:
     if outcome.kind == NO_PLACE:
         return f"Moxi can't find where it keeps the record: {error.cause}; {error.step}"
     if outcome.kind == FAILED:
-        folder = outcome.path.parent
+        record_dir = outcome.path.parent
         return (f"the record at {outcome.path} can't be written ({_reason(error)}); "
-                f"make {folder} writable by you")
+                f"make {record_dir} writable by you")
     return None
 
 

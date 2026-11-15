@@ -94,7 +94,10 @@ def test_interface_2_holds_its_names():
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
         "session_of", "caller_identity", "roster_rows", "RosterRow", "CODEX_RESUME",
-        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT"}
+        "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
+        "COMMAND_ENV", "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV",
+        "OPERATOR_ENV", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
+        "SHELL_REACH_ENV", "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
@@ -219,10 +222,10 @@ def test_a_bad_argument_raises_as_the_parser_would():
 
 def test_the_sender_forms_name_the_process_the_verb_would_see(tmp_path):
     base = {"HOME": "/h", "MOXI_COMMS_CLAIM_SOCKET": "/old"}
-    assert api.Sender.session().environ(base) == base
-    assert api.Sender.socket(tmp_path / "s.sock").environ(base)[
+    assert api.Sender.session().sender_env(base) == base
+    assert api.Sender.socket(tmp_path / "s.sock").sender_env(base)[
         "MOXI_COMMS_CLAIM_SOCKET"] == str(tmp_path / "s.sock")
-    op = api.Sender.operator("900001").environ(base)
+    op = api.Sender.operator("900001").sender_env(base)
     assert op["MOXI_COMMS_OPERATOR"] == "900001" and "MOXI_COMMS_CLAIM_SOCKET" not in op
 
     class Server:
@@ -257,11 +260,11 @@ def test_the_deadline_reaches_the_daemon_call_and_the_records_busy_timeout(env):
 # --------------------------------------------------------------------------- the rig
 
 def _sender(rig, name, scope=None):
-    environ = {"MOXI_COMMS_PROJECT": "proj-a", "MOXI_COMMS_NAME": name}
+    env = {"MOXI_COMMS_PROJECT": "proj-a", "MOXI_COMMS_NAME": name}
     if scope:
-        environ["MOXI_COMMS_SCOPE"] = scope
+        env["MOXI_COMMS_SCOPE"] = scope
     from conftest import _stamp_of
-    return _stamp_of(environ)
+    return _stamp_of(env)
 
 
 def _ids_out(lines):

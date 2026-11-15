@@ -61,9 +61,9 @@ class Result:
         return self.code == 0
 
 
-def client_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+def client_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
     """This process's environment without `TMUX` and `TMUX_PANE`."""
-    source = os.environ if environ is None else environ
+    source = os.environ if env is None else env
     return {k: v for k, v in source.items() if k not in DROPPED}
 
 
@@ -155,13 +155,13 @@ def judge(text: str) -> Version:
     text = text.strip()
     found = _VERSION.search(text)
     if not found:
-        return Version(text or "no output", False)
+        return Version(text or "no output", ok=False)
     word = found.group(1)
     if word == "master" or word.startswith("next-"):
-        return Version(text, True)
+        return Version(text, ok=True)
     number = _NUMBER.match(word)
     if not number:
-        return Version(text, False)
+        return Version(text, ok=False)
     return Version(text, (int(number.group(1)), int(number.group(2))) >= FLOOR)
 
 
@@ -171,12 +171,12 @@ def version(path: str, *, timeout: float = TIMEOUT) -> Version:
     try:
         done = _run([path, "-V"], timeout, client_env())
     except subprocess.TimeoutExpired:
-        return Version(f"{path} -V gave no answer within {timeout:g} s", False)
+        return Version(f"{path} -V gave no answer within {timeout:g} s", ok=False)
     except OSError as exc:
-        return Version(f"{path} could not be run: {exc}", False)
+        return Version(f"{path} could not be run: {exc}", ok=False)
     if done.returncode != 0:
         return Version(f"{path} -V exited {done.returncode}: "
-                       f"{_text(done.stderr).strip() or 'no message'}", False)
+                       f"{_text(done.stderr).strip() or 'no message'}", ok=False)
     return judge(_text(done.stdout))
 
 

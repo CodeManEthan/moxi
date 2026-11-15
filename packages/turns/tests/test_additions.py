@@ -94,14 +94,14 @@ def test_claude_gets_both_plugin_dirs_and_the_endpoint_and_writes_nothing(group,
 
 
 def test_claude_launches_from_a_read_only_install(group, claude_root):
-    folders = [claude_root, claude_root / "moxi-turns", claude_root / "moxi-turns-gate"]
-    for folder in folders:
-        folder.chmod(0o555)
+    plugin_dirs = [claude_root, claude_root / "moxi-turns", claude_root / "moxi-turns-gate"]
+    for plugin_dir in plugin_dirs:
+        plugin_dir.chmod(0o555)
     try:
         got = adds("claude")
     finally:
-        for folder in folders:
-            folder.chmod(0o755)
+        for plugin_dir in plugin_dirs:
+            plugin_dir.chmod(0o755)
     assert "MOXI_TURNS_ENDPOINT" in got.env
     assert not (claude_root / "moxi-turns" / "endpoint.json").exists()
 

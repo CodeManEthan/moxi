@@ -32,18 +32,18 @@ class Line:
     command is run in the session's folder."""
 
     words: tuple[str, ...]
-    in_folder: bool
+    in_work_dir: bool
 
 
 #: The resume command of each harness that has one.
 LINES: dict[str, Line] = {
-    CLAUDE: Line(("claude", "--resume"), True),
-    CODEX: Line(("codex", "resume"), False),
-    OPENCODE: Line(("opencode", "--session"), True),
+    CLAUDE: Line(("claude", "--resume"), in_work_dir=True),
+    CODEX: Line(("codex", "resume"), in_work_dir=False),
+    OPENCODE: Line(("opencode", "--session"), in_work_dir=True),
 }
 
 
-def resume(harness: str, session: Any, folder: str | None = None) -> dict[str, Any] | None:
+def resume(harness: str, session: Any, work_dir: str | None = None) -> dict[str, Any] | None:
     """`{"command", "folder"}` for picking `session` up again in `harness`. None for a
     harness with no line in the table, for a session with no id, and for a harness whose
     command must be run in the session's folder when `folder` is not known.
@@ -55,10 +55,10 @@ def resume(harness: str, session: Any, folder: str | None = None) -> dict[str, A
     line = LINES.get(harness)
     if line is None or not isinstance(session, str) or not session:
         return None
-    if line.in_folder and not folder:
+    if line.in_work_dir and not work_dir:
         return None
     return {"command": " ".join((*line.words, shlex.quote(session))),
-            "folder": folder if line.in_folder else None}
+            "folder": work_dir if line.in_work_dir else None}
 
 
 __all__ = ["Line", "LINES", "resume"]

@@ -30,14 +30,14 @@ def rounds(tmp_path, add_project, capsys):
     """The rounds folder of the project `proj-a`, with the round `a-round` opened in
     it, with the stages B1 and B2."""
     add_project("proj-a", notes_root=tmp_path / "notes")
-    folder = tmp_path / "notes" / "rounds"
-    opening.open_round(A, description="a placeholder round", actor="planner",
+    rounds_dir = tmp_path / "notes" / "rounds"
+    opening.open_round(A, description="a placeholder round", by="planner",
                        flow="fix", at=OPENED_AT)
     for stage in ("B1", "B2"):
-        append(folder, "stage.declared", {"id": stage, "repo": "proj-a",
+        append(rounds_dir, "stage.declared", {"id": stage, "repo": "proj-a",
                                           "branch": f"branch-{stage.lower()}"})
     capsys.readouterr()
-    return folder
+    return rounds_dir
 
 
 def round_log(rounds, slug="a-round"):
@@ -50,7 +50,7 @@ def project_log(rounds):
 
 def append(rounds, kind, fields, slug="a-round"):
     """Append an event of a later kind of record, as the verb that records it will."""
-    return log.append(round_log(rounds, slug), kind, fields, actor="coder")
+    return log.append(round_log(rounds, slug), kind, fields, by="coder")
 
 
 def logs(rounds):
@@ -62,18 +62,18 @@ def logs(rounds):
 def ask(text=SAID, target=A, blocks=None, **more):
     """Ask a question of `target`, by `scout` at `ASKED_AT`, and return its id."""
     more.setdefault("origin", None if "record" in more else "comms:11")
-    return asking.ask(target, text, blocks=blocks, actor="scout", at=ASKED_AT,
+    return asking.ask(target, text, blocks=blocks, by="scout", at=ASKED_AT,
                       **more).id
 
 
 def rule(target=A, **more):
     more.setdefault("record", "comms:12")
-    return ruling.rule(target, actor="planner", **more)
+    return ruling.rule(target, by="planner", **more)
 
 
 def drop(name=A, by="operator", record="comms:30", **more):
     more.setdefault("at", DROPPED_AT)
-    return dropping.drop(name, by=by, record=record, actor="planner", **more)
+    return dropping.drop(name, by=by, record=record, run_by="planner", **more)
 
 
 def held(path):
@@ -222,7 +222,7 @@ def test_the_operator_may_have_the_questions_withdrawn(rounds, capsys):
 
 def test_the_lead_drops_a_round_that_holds_nothing_of_the_operators(rounds, capsys):
     ask()
-    marking.widen(A, "Q1", "all", actor="planner")
+    marking.widen(A, "Q1", "all", by="planner")
 
     assert main(["drop", A, "--by", "lead", "--record", "comms:31"]) == 0
 
@@ -257,7 +257,7 @@ def his_own_question(rounds):
 
 def a_list_he_gave(rounds):
     ask(target="proj-a")
-    moving.adopt(A, "P1", blocks="B1", record="comms:15", actor="planner")
+    moving.adopt(A, "P1", blocks="B1", record="comms:15", by="planner")
     return ["Q1, adopted with the list he gave (S1 of the project's register)"]
 
 
@@ -310,7 +310,7 @@ def test_the_lead_is_refused_a_round_that_holds_an_act_of_the_operators(
 
 
 def test_the_lead_is_refused_a_round_opened_on_the_operators_go(rounds, capsys):
-    opening.open_round(B, description="a placeholder round", actor="planner",
+    opening.open_round(B, description="a placeholder round", by="planner",
                        flow="fix", record="comms:5")
     before = logs(rounds)
 
@@ -352,7 +352,7 @@ def a_decision_on_a_build_that_reached_nothing(rounds):
 
 def a_project_question_adopted_with_no_list(rounds):
     ask(target="proj-a")
-    moving.adopt(A, "P1", actor="planner")
+    moving.adopt(A, "P1", by="planner")
 
 
 @pytest.mark.parametrize("holds_none_of_his", [
@@ -702,9 +702,9 @@ def test_the_next_opening_prints_the_questions_a_dropped_round_left(rounds, caps
 def test_an_opening_prints_only_what_a_dropped_round_left_and_is_still_asked(
         rounds, capsys):
     ask(SAID)                                  # moved out of a round that stays open
-    moving.move("proj-a", f"{A}:Q1", record="comms:20", actor="planner")
+    moving.move("proj-a", f"{A}:Q1", record="comms:20", by="planner")
     ask(OTHER, target="proj-a")                # asked on the list
-    opening.open_round(B, description="a placeholder round", actor="planner",
+    opening.open_round(B, description="a placeholder round", by="planner",
                        flow="fix")
     ask(THIRD, target=B)
     ask("Is a ruled question printed?", target=B)
@@ -712,14 +712,14 @@ def test_an_opening_prints_only_what_a_dropped_round_left_and_is_still_asked(
     rule("proj-a", item="P4", text="It is not.")
 
     opened = opening.open_round("proj-a/c-round", description="a placeholder round",
-                                actor="planner", flow="fix")
+                                by="planner", flow="fix")
 
     assert [(one.question.id, one.question.text, one.state) for one in opened.left] == [
         ("P3", THIRD, "open")]
 
-    moving.adopt("proj-a/c-round", "P3", actor="planner")
+    moving.adopt("proj-a/c-round", "P3", by="planner")
     later = opening.open_round("proj-a/d-round", description="a placeholder round",
-                               actor="planner", flow="fix")
+                               by="planner", flow="fix")
     assert later.left == ()
 
 
@@ -735,20 +735,20 @@ def test_an_opening_with_nothing_left_by_a_dropped_round_prints_no_more(rounds, 
 def test_a_question_of_a_dropped_round_is_adopted_holding_up_every_stage(rounds):
     ask(blocks="B1")
     drop()
-    opening.open_round(B, description="a placeholder round", actor="planner",
+    opening.open_round(B, description="a placeholder round", by="planner",
                        flow="fix")
     append(rounds, "stage.declared", {"id": "B1", "repo": "proj-a", "branch": "again"},
            slug="b-round")
     before = logs(rounds)
 
     with pytest.raises(Refused) as refused:
-        moving.adopt(B, "P1", blocks="B1", actor="planner")
+        moving.adopt(B, "P1", blocks="B1", by="planner")
 
     assert f"P1 came from {A}:Q1, so it arrives holding up every stage" in str(
         refused.value)
     assert logs(rounds) == before
 
-    adopted = moving.adopt(B, "P1", actor="planner")
+    adopted = moving.adopt(B, "P1", by="planner")
     assert (adopted.id, adopted.question.blocks, adopted.question.by,
             adopted.question.at) == ("Q1", "all", "scout", ASKED_AT)
 
@@ -756,12 +756,12 @@ def test_a_question_of_a_dropped_round_is_adopted_holding_up_every_stage(rounds)
 def test_a_question_of_a_dropped_round_takes_a_list_with_the_operators_pointer(rounds):
     ask(blocks="B1")
     drop()
-    opening.open_round(B, description="a placeholder round", actor="planner",
+    opening.open_round(B, description="a placeholder round", by="planner",
                        flow="fix")
     append(rounds, "stage.declared", {"id": "B1", "repo": "proj-a", "branch": "again"},
            slug="b-round")
 
-    adopted = moving.adopt(B, "P1", blocks="B1", record="comms:33", actor="planner")
+    adopted = moving.adopt(B, "P1", blocks="B1", record="comms:33", by="planner")
 
     assert adopted.question.blocks == ("B1",) and adopted.ruling == "S1"
 

@@ -12,9 +12,16 @@ places (`moxi.paths.home`):
   loadout owns), `AGENTS.md`, and `config.toml` (its MCP servers, read only: the `codex`
   CLI writes them). That Codex reads `hooks.json` and the rules file is taken from its
   binary, not yet confirmed by a run.
-- OpenCode: `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`: `opencode.json` and
-  `AGENTS.md`. The shapes follow OpenCode's published config schema, not yet confirmed
-  by a run.
+- OpenCode: `$OPENCODE_CONFIG_DIR` when set, else `$XDG_CONFIG_HOME/opencode`, else
+  `~/.config/opencode`, as OpenCode resolves it: `opencode.json` and `AGENTS.md`. A run of
+  OpenCode 1.19.5 confirmed the `AGENTS.md` facts: it reads the XDG one; with the variable
+  set it reads the one under it instead, and not the XDG one even when the variable's has
+  none; and it doesn't read `~/.claude/CLAUDE.md` while its own `AGENTS.md` exists, even
+  empty (a dangling link counts as absent). The `opencode.json` shapes follow OpenCode's
+  published config schema, not yet confirmed by a run. Its skills and agents folders (the
+  opencode row in the core's harness table) keep the XDG form, `opencode_xdg_home`:
+  OpenCode reads skills and agents from the XDG folder and from `$OPENCODE_CONFIG_DIR`
+  both, so the XDG row reaches it either way.
 
 A `Doc` is one harness file read once. JSON files are read with `json` and written back
 with their key order and the indent of their first indented line (two spaces if none);
@@ -43,22 +50,30 @@ GLOBAL_NAMES = {"claude": "CLAUDE.md", "codex": "AGENTS.md", "opencode": "AGENTS
 
 
 def claude_home(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("CLAUDE_CONFIG_DIR")
+    given = _env(env).get("CLAUDE_CONFIG_DIR")
     return Path(given) if given else _home(env) / ".claude"
 
 
 def claude_json(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("CLAUDE_CONFIG_DIR")
+    given = _env(env).get("CLAUDE_CONFIG_DIR")
     return Path(given) / ".claude.json" if given else _home(env) / ".claude.json"
 
 
 def codex_home(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("CODEX_HOME")
+    given = _env(env).get("CODEX_HOME")
     return Path(given) if given else _home(env) / ".codex"
 
 
 def opencode_home(env: Mapping[str, str] | None = None) -> Path:
-    given = _environ(env).get("XDG_CONFIG_HOME")
+    """Where OpenCode reads its `AGENTS.md` and `opencode.json`."""
+    given = _env(env).get("OPENCODE_CONFIG_DIR")
+    return Path(given) if given else opencode_xdg_home(env)
+
+
+def opencode_xdg_home(env: Mapping[str, str] | None = None) -> Path:
+    """OpenCode's folder under the XDG config home, which its skills and agents folders
+    stay under whatever `OPENCODE_CONFIG_DIR` says."""
+    given = _env(env).get("XDG_CONFIG_HOME")
     return (Path(given) if given else _home(env) / ".config") / "opencode"
 
 
@@ -74,7 +89,7 @@ def settings_file(harness: str) -> Path | None:
             "opencode": opencode_home() / "opencode.json"}.get(harness)
 
 
-def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
+def _env(env: Mapping[str, str] | None) -> Mapping[str, str]:
     return os.environ if env is None else env
 
 
@@ -191,11 +206,11 @@ def backup(path: Path, harness: str, data: bytes, keep: int) -> Path:
 
     from moxi_loadout import stores
 
-    folder = private_dir(stores.backups_dir() / harness)
+    backup_dir = private_dir(stores.backups_dir() / harness)
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + f"{time.time_ns() % 10**9:09d}"
-    out = folder / f"{stamp}-{path.name}"
+    out = backup_dir / f"{stamp}-{path.name}"
     atomic_write(out, data, mode=0o600)
-    mine = sorted(p for p in folder.iterdir() if p.name.endswith("-" + path.name))
+    mine = sorted(p for p in backup_dir.iterdir() if p.name.endswith("-" + path.name))
     for old in mine[:-keep] if keep > 0 else []:
         try:
             old.unlink()
@@ -205,5 +220,5 @@ def backup(path: Path, harness: str, data: bytes, keep: int) -> Path:
 
 
 __all__ = ["HARNESSES", "GLOBAL_NAMES", "claude_home", "claude_json", "codex_home",
-           "opencode_home", "home", "settings_file", "global_file", "rules_file", "Refused",
+           "opencode_home", "opencode_xdg_home", "home", "settings_file", "global_file", "rules_file", "Refused",
            "Doc", "write", "backup"]

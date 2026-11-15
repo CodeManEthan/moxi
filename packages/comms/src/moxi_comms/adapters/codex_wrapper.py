@@ -192,10 +192,10 @@ def row_flags(agent: codex_roster.CodexAgent) -> list[str]:
     return flags
 
 
-def comms_flags(options: dict, added_root=None, *, network: bool = True) -> list[str]:
+def comms_flags(options: dict, added_root=None, *, allow_network: bool = True) -> list[str]:
     """What comms adds to a launch whose host flags give `options` (the thread
     parameters `turns.codex.launch_args` reads from them). See the module's docstring.
-    `network` is the network access a sandbox gets when the flags name none: off for a
+    `allow_network` is the network access a sandbox gets when the flags name none: off for a
     launch that carries comms' tools, on for one that doesn't."""
     flags: list[str] = []
     sandbox = options.get("sandbox")
@@ -206,7 +206,7 @@ def comms_flags(options: dict, added_root=None, *, network: bool = True) -> list
         settings = (options.get("config") or {}).get("sandbox_workspace_write")
         settings = settings if isinstance(settings, dict) else {}
         if "network_access" not in settings:
-            flags += option(["sandbox_workspace_write", "network_access"], bool(network))
+            flags += option(["sandbox_workspace_write", "network_access"], bool(allow_network))
         roots = settings.get("writable_roots")
         roots = [str(r) for r in roots] if isinstance(roots, list) else []
         if added_root is not None:
@@ -241,8 +241,8 @@ def launch_args(argv) -> dict:
 
     try:
         return moxi_turns.codex.launch_args(argv)
-    except ValueError as e:
-        raise Refused(f"the host refuses this launch's settings: {e}") from None
+    except ValueError as exc:
+        raise Refused(f"the host refuses this launch's settings: {exc}") from None
 
 
 # --------------------------------------------------------------------------- the launch
@@ -368,8 +368,8 @@ def _named_agent(args, cwd: str) -> codex_roster.CodexAgent:
     try:
         load()                  # a bad config file fails here, before Codex starts
         directors = directors_mod.declare(args.director)
-    except (ConfigError, directors_mod.BadDirector) as e:
-        raise Refused(str(e)) from None
+    except (ConfigError, directors_mod.BadDirector) as exc:
+        raise Refused(str(exc)) from None
     scope = args.scope or GLOBAL
     qualified = qualify(args.name, scope)
     return codex_roster.CodexAgent(
@@ -403,8 +403,8 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
         try:
             roster = codex_roster.load(path=args.config)
             agent = roster.require(args.identity)
-        except ConfigError as e:
-            raise Refused(str(e)) from None
+        except ConfigError as exc:
+            raise Refused(str(exc)) from None
         source, window, settings = roster.source, bool(args.window), row_flags(agent)
         cwd = str(agent.cwd)
     else:
@@ -423,7 +423,7 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
     tools_url, tools_why = endpoint() if endpoint is not None else (None, "")
     # One fact, the stamped pair, decides the default: a launch that carries comms' tools
     # starts with the network off.
-    flags = settings + comms_flags(asked, write_root, network=tools_url is None)
+    flags = settings + comms_flags(asked, write_root, allow_network=tools_url is None)
     if not window:
         flags.append("--no-window")
     read = launch_args(["--cwd", cwd, *flags])
@@ -527,9 +527,9 @@ def main(argv=None, prog: str = PROG) -> int:
     args = build_parser(prog).parse_args(argv)
     try:
         launch = plan(args, endpoint=tools_endpoint)
-    except Refused as e:
-        print(f"{prog}: {e}", file=sys.stderr)
-        return e.code
+    except Refused as exc:
+        print(f"{prog}: {exc}", file=sys.stderr)
+        return exc.code
     from moxi import paths as moxi_paths
 
     try:
@@ -686,7 +686,7 @@ def serve(adapter, handle: int, *, say=None) -> int:
 
     if adapter.tool_token is None:
         adapter.layer_form = layer_one_form(os.environ)
-        adapter.tool_token = ToolToken.from_environ()
+        adapter.tool_token = ToolToken.from_env()
     stopping = threading.Event()
     adapter.exit_hook = stopping.set
     adapter._on_bound = bound
@@ -694,16 +694,16 @@ def serve(adapter, handle: int, *, say=None) -> int:
     try:
         try:
             adapter.start()
-        except HostGone as e:
-            log.info("%s", e)
+        except HostGone as exc:
+            log.info("%s", exc)
             return 0
-        except NobodyWaits as e:
-            log.warning("%s", e)
+        except NobodyWaits as exc:
+            log.warning("%s", exc)
             return moxi_exit.TEMPFAIL
-        except Exception as e:                              # noqa: BLE001
-            log.warning("the launch of %s failed: %s", adapter.agent.qualified, e)
-            word = word_for(e)
-            say(word, str(e))
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("the launch of %s failed: %s", adapter.agent.qualified, exc)
+            word = word_for(exc)
+            say(word, str(exc))
             return exit_of(word)
         log.info("adapter for codex host pid %s is up (pid %d)", adapter.harness_pid,
                  os.getpid())

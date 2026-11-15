@@ -146,12 +146,12 @@ class Rollout:
 
     def write(self, root: Path, *, suffix="", name_tid=None, day="2026/10/05",
               zst=False) -> Path:
-        directory = root / day
-        directory.mkdir(parents=True, exist_ok=True)
+        day_dir = root / day
+        day_dir.mkdir(parents=True, exist_ok=True)
         name = f"rollout-2026-10-05T15-55-21-{name_tid or self.tid}{suffix}.jsonl"
         if zst:
             name += ".zst"
-        path = directory / name
+        path = day_dir / name
         path.write_text(self.text())
         return path
 
@@ -211,9 +211,9 @@ class OcDb:
             c.executescript(schema)
 
     def conn(self):
-        c = sqlite3.connect(self.path)
-        c.isolation_level = None
-        return c
+        conn = sqlite3.connect(self.path)
+        conn.isolation_level = None
+        return conn
 
     def mint(self, prefix):
         self.n += 1
@@ -259,11 +259,11 @@ class OcDb:
         return mid
 
     def request(self, sid, t, provider, model, *, steps=((0.0, 3.0),), agent="build",
-                summary=None, created=None, user=True):
+                summary=None, created=None, include_user=True):
         """A user message and its assistant reply whose first step starts at `t`, each
         step `(start offset, end offset)` from `t`. The message is created at
         `created` (default `t`)."""
-        if user:
+        if include_user:
             self.user(sid, (created or t) - 0.5, model=(provider, model))
         data = {"role": "assistant", "agent": agent, "mode": agent, "providerID": provider,
                 "modelID": model, "time": {"created": int((created or t) * 1000)},
@@ -548,10 +548,10 @@ def test_a_cold_read_with_no_lifetime_prints_no_duration_and_describe_agrees():
     assert Daemon._describe(zst) == f"cold ({COMPRESSED})"
     timed = cache.Clock("cold", age_s=42 * 60, ttl_s=1800)
     assert Daemon._describe(timed) == "cold for 12m (last request 42m ago)"
-    state = CacheState(target="x", kind="cold", age_seconds=42 * 60, ttl_seconds=1800,
+    state = CacheState(target="x", kind="cold", age_s=42 * 60, ttl_s=1800,
                        key="codex openai/gpt-5.6-terra", adapter="codex")
     assert "went cold 12m ago" in cache.hold_line(state)
-    for clock_state_ in (CacheState(target="x", kind="cold", age_seconds=180,
+    for clock_state_ in (CacheState(target="x", kind="cold", age_s=180,
                                     reason="no row", adapter="opencode"),
                          CacheState(target="x", kind="cold", reason=COMPRESSED,
                                     adapter="codex")):
@@ -768,7 +768,7 @@ def binding(rig):
     return wait_until(lambda: rig.daemon.bindings.get(CODER_Q))
 
 
-def test_cache_source_is_the_sessions_directory_under_codex_home(
+def test_cache_source_is_the_sessions_dir_under_codex_home(
         rig, codex_wrapper, tmp_path, monkeypatch):
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))

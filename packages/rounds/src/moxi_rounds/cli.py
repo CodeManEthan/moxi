@@ -209,11 +209,11 @@ def _open(args, out) -> int:
     from . import opening
 
     opened = opening.open_round(args.round, description=args.description,
-                                actor=_actor(args), flow=args.flow, record=args.record,
+                                by=_actor(args), flow=args.flow, record=args.record,
                                 inherits=_listed(args.inherits))
     steps = ", ".join(step["step"] for step in opened.steps) or "no steps"
     print(f"opened {opened.name}   flow {opened.flow} ({steps})", file=out)
-    print(f"folder: {opened.folder}", file=out)
+    print(f"folder: {opened.round_dir}", file=out)
     if opened.inherits:
         print(f"inherits: {', '.join(opened.inherits)}", file=out)
     for line in _left(opened):
@@ -326,7 +326,7 @@ def _declare_rule(verbs) -> None:
 def _rule(args, out) -> int:
     from . import ruling
 
-    ruled = ruling.rule(args.target, actor=_actor(args), record=args.record,
+    ruled = ruling.rule(args.target, by=_actor(args), record=args.record,
                         text=args.text, reason=args.reason, standing=args.standing,
                         scope=args.scope, stages=args.stages, item=args.item,
                         until=args.until, chose=args.chose,
@@ -460,7 +460,7 @@ def _ask(args, out) -> int:
         raise BadArgument("--retire takes an option out of a question on record",
                           "name the question by its id in place of a sentence: "
                           f"{args.prog} ask {args.target} ID --retire K")
-    asked = asking.ask(args.target, args.text, actor=_actor(args), origin=args.origin,
+    asked = asking.ask(args.target, args.text, by=_actor(args), origin=args.origin,
                        record=args.record, blocks=args.blocks, options=args.options)
     print(f"{asked.id}: {asked.text}", file=out)
     print(f"blocks: {questions.said(asked.blocks)}   from: {asked.origin}", file=out)
@@ -480,7 +480,7 @@ def _fill(args, out) -> int:
             raise BadArgument(f"{flag} is given when a question is asked, and "
                               f"{args.text} is a question on record",
                               f"leave {flag} out to change its options")
-    filled = choices.fill(args.target, args.text, actor=_actor(args),
+    filled = choices.fill(args.target, args.text, by=_actor(args),
                           options=args.options, retire=args.retire)
     found = filled.question
     print(f"{found.id}: {found.text}", file=out)
@@ -509,10 +509,10 @@ def _carry(args, out) -> int:
             raise BadArgument(f"{flag} carries a question as it is on record, and "
                               f"{other} is not for it", f"leave {other} out")
     if args.adopt is not None:
-        moved = moving.adopt(args.target, args.adopt, actor=_actor(args),
+        moved = moving.adopt(args.target, args.adopt, by=_actor(args),
                              blocks=args.blocks, record=args.record)
     else:
-        moved = moving.move(args.target, args.move, actor=_actor(args),
+        moved = moving.move(args.target, args.move, by=_actor(args),
                             record=args.record)
     found = moved.question
     print(f"{found.id}: {found.text}", file=out)
@@ -619,9 +619,9 @@ def _mark(args, out) -> int:
                           "a change to a question that anyone may make carries none",
                           "leave --record out")
     if args.reopen:
-        marked = marking.reopen(args.target, args.id, actor=_actor(args))
+        marked = marking.reopen(args.target, args.id, by=_actor(args))
     else:
-        marked = marking.widen(args.target, args.id, args.blocks, actor=_actor(args))
+        marked = marking.widen(args.target, args.id, args.blocks, by=_actor(args))
     found = marked.question
     print(f"{found.id}: {found.state}   blocks: {questions.said(found.blocks)}",
           file=out)
@@ -640,7 +640,7 @@ def _mark_thread(args, out) -> int:
                           "letters, digits and . _ -")
     done = brake.decide(args.target, args.id[len(brake.PREFIX):],
                         brake.CLOSE if args.close else brake.ACCEPT_RISK,
-                        record=args.record, actor=_actor(args))
+                        record=args.record, by=_actor(args))
     one = done.decision
     already = (f"   (recorded already, {one.at} by {one.actor}: nothing was written)"
                if done.found else "")
@@ -659,7 +659,7 @@ def _mark_after(args, out) -> int:
         raise BadArgument("--record is a pointer to the operator's word, and a wait "
                           "added to a stage is anyone's and carries none",
                           "leave --record out")
-    marked = stages.wait(args.target, args.id, args.after, actor=_actor(args))
+    marked = stages.wait(args.target, args.id, args.after, by=_actor(args))
     print(f"{marked.stage.id}   after: {', '.join(marked.stage.after)}   added: "
           f"{', '.join(marked.added)}", file=out)
     _warn_of(marked.failed, args.prog, args.verb)
@@ -676,7 +676,7 @@ def _mark_flow(args, out) -> int:
     if args.record is not None:
         raise BadArgument("--record is a pointer to the operator's word, and a step "
                           "up is the lead's and carries none", "leave --record out")
-    stepped = stepping.step_up(args.target, args.flow, actor=_actor(args))
+    stepped = stepping.step_up(args.target, args.flow, by=_actor(args))
     steps = ", ".join(str(step.get("step")) for step in stepped.steps) or "no steps"
     print(f"{stepped.name}   flow {stepped.flow} ({steps})   was: {stepped.was}",
           file=out)
@@ -688,7 +688,7 @@ def _mark_shown(args, out) -> int:
     """`mark --shown`: say that rulings were shown to the operator, and where."""
     from . import shown
 
-    marked = shown.mark(args.target, args.id, actor=_actor(args), record=args.record)
+    marked = shown.mark(args.target, args.id, by=_actor(args), record=args.record)
     if marked.marked:
         print(f"{marked.name} {', '.join(marked.marked)}: shown   record: "
               f"{marked.record}", file=out)
@@ -729,7 +729,7 @@ def _declare_fold(verbs) -> None:
 def _fold(args, out) -> int:
     from . import freezing, tracing
 
-    frozen = freezing.freeze(args.round, actor=_actor(args),
+    frozen = freezing.freeze(args.round, by=_actor(args),
                              records_only=args.records_only, record=args.record)
     print(f"froze the design of {frozen.name} as v{frozen.version}", file=out)
     print(f"file: {frozen.file}", file=out)
@@ -805,7 +805,7 @@ def _declare_verdict(verbs) -> None:
 def _verdict(args, out) -> int:
     from . import verdicts, versions
 
-    done = verdicts.record(args.round, args.report, actor=_actor(args))
+    done = verdicts.record(args.round, args.report, by=_actor(args))
     one = done.verdict
     print(f"recorded for {done.name}: {one.verdict} for v{one.design} of its design, "
           f"{one.pass_} pass by {one.by}, model {one.model}", file=out)
@@ -858,7 +858,7 @@ def _drop(args, out) -> int:
     from . import dropping
 
     dropped = dropping.drop(args.round, by=args.by, record=args.record,
-                            actor=_actor(args),
+                            run_by=_actor(args),
                             withdraw_questions=args.withdraw_questions)
     project = dropped.name.partition("/")[0]
     print(f"dropped {dropped.name}   by: {dropped.by}   record: {dropped.record}",

@@ -70,7 +70,7 @@ def check(settings):
                 "matched ignoring case, so the two tables are one project's",
                 f"keep the project's settings in one table, [projects.{first}]")
         _check_project(settings.file, name, table)
-    _check_folders_apart(settings)
+    _check_rounds_dirs_apart(settings)
     return settings
 
 
@@ -199,7 +199,7 @@ def _check_dir(file, where, project, value) -> None:
                           "give the rounds folder as a string")
     if os.path.isabs(os.path.expanduser(value)):
         return
-    if has_notes_folder(project) is False:
+    if has_notes_dir(project) is False:
         raise ConfigError(
             file, where,
             f"is the relative path {value!r}, and the project {project!r} has no notes "
@@ -208,7 +208,7 @@ def _check_dir(file, where, project, value) -> None:
             f"projects set {project} --notes-root DIR`")
 
 
-def _check_folders_apart(settings) -> None:
+def _check_rounds_dirs_apart(settings) -> None:
     """Refuse two project tables whose `dir` settings reach one folder, once every
     link on the way is followed: a rounds folder belongs to one project. A relative
     `dir` is judged where the project's notes folder is known, and left alone where it
@@ -222,13 +222,13 @@ def _check_folders_apart(settings) -> None:
     for name, table in settings["projects"].items():
         if "dir" not in table:
             continue
-        folder = os.path.expanduser(table["dir"])
-        if not os.path.isabs(folder):
+        rounds_dir = os.path.expanduser(table["dir"])
+        if not os.path.isabs(rounds_dir):
             try:
-                folder = os.path.join(folders.notes_folder(name), folder)
+                rounds_dir = os.path.join(folders.notes_dir(name), rounds_dir)
             except RoundsError:
                 continue
-        real = os.path.realpath(folder)
+        real = os.path.realpath(rounds_dir)
         first = reached.setdefault(real, name)
         if first != name:
             raise ConfigError(
@@ -239,7 +239,7 @@ def _check_folders_apart(settings) -> None:
                 f"give {name} or {first} a rounds folder of its own")
 
 
-def has_notes_folder(project: str) -> bool | None:
+def has_notes_dir(project: str) -> bool | None:
     """Whether the project `project` has a notes folder: the one its projects record
     names, else the one the notes module gives it by default. None when that can't be
     told: projects has no such project, or projects or an installed notes can't be
@@ -248,9 +248,9 @@ def has_notes_folder(project: str) -> bool | None:
     from .errors import NoFolder, RoundsError
 
     try:
-        folders.notes_folder(project)
-    except NoFolder as none:
-        return False if none.known else None
+        folders.notes_dir(project)
+    except NoFolder as exc:
+        return False if exc.known else None
     except RoundsError:
         return None
     return True
@@ -361,4 +361,4 @@ _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
            "ROUND_KEYS", "BUILD_KEYS", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
            "round_setting", "build_setting", "project_table", "finish_actions",
-           "has_notes_folder"]
+           "has_notes_dir"]

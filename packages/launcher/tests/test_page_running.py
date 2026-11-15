@@ -33,9 +33,9 @@ def fresh_handlers(monkeypatch):
 
 @pytest.fixture
 def conn():
-    connection = store.connect()
-    yield connection
-    connection.close()
+    conn = store.connect()
+    yield conn
+    conn.close()
 
 
 def launched(conn, request_id: str, *, live: bool = True, target: str = "slot",
@@ -43,7 +43,7 @@ def launched(conn, request_id: str, *, live: bool = True, target: str = "slot",
     """A Claude launch's row with a session id of its own, its process this test's own
     when `live`."""
     me = proc.identity(os.getpid())
-    store.insert(conn, request_id=request_id, actor="alice", harness="claude", target=target,
+    store.insert(conn, request_id=request_id, by="alice", harness="claude", target=target,
                  cwd=cwd, values={"model": "opus"}, argv=["claude"], env={},
                  posture="operator",
                  session_id=more.pop("session_id", f"session-{request_id}"),
@@ -59,7 +59,7 @@ def test_with_no_launch_log_nothing_runs():
                                              "sessions": []}
 
 
-def test_a_live_launch_is_sent_with_its_folder_and_nothing_joined(conn):
+def test_a_live_launch_is_sent_with_its_dir_and_nothing_joined(conn):
     launched(conn, "r1", identity="planner", project_key="proj-a", session_id=SID,
              at="2026-03-01T10:00:00.000000Z")
     value = pagehandlers.gather_running()
@@ -76,7 +76,7 @@ def test_a_live_launch_is_sent_with_its_folder_and_nothing_joined(conn):
         None, None, False, None)
 
 
-def test_the_folder_is_the_directorys_last_segment_and_no_path_is_sent(conn):
+def test_the_dir_is_the_dirs_last_segment_and_no_path_is_sent(conn):
     launched(conn, "r1", target="headless", cwd="/srv/work/proj-b/sub/")
     [entry] = pagehandlers.gather_running()["sessions"]
     assert entry["where"] == {"target": "headless", "slot": None, "project_key": None,

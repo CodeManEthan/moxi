@@ -68,7 +68,7 @@ def rows() -> Iterator[Row]:
     found = _contributions.load()
     yield _roots(data)
     yield _spelling(data, where, state.version)
-    yield _same_directory(data)
+    yield _same_dir(data)
     yield _kinds(data, found)
     yield _agents(data)
     yield from _contribution_rows(found)
@@ -193,7 +193,7 @@ def _spelling(data: list[tuple], where: str, version: int) -> Row:
                f"now ({_keys(keys)})")
 
 
-def _same_directory(data: list[tuple]) -> Row:
+def _same_dir(data: list[tuple]) -> Row:
     seen: dict[tuple[int, int], list[str]] = {}
     for row in data:
         try:

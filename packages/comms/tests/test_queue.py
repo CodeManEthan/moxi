@@ -119,7 +119,7 @@ class Peer:
                            {"identity": self.q, **fields})
         self.sync()
 
-    def turn(self, handled=(), unhandled=(), answered=False) -> dict:
+    def turn(self, handled=(), unhandled=(), *, answered=False) -> dict:
         """A turn end, as an adapter sends it: one digest opened for the `handled`
         message ids and one for the `unhandled` ones, then `turn_ended` naming them,
         marked `answered` when the turn ended with the model's answer. Returns the

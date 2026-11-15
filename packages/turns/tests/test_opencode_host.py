@@ -106,7 +106,7 @@ def host(turns_env, tmp_path):
     made = []
     world = World(tmp_path)
 
-    def make(auto=True, **kw):
+    def make(*, auto=True, **kw):
         world.auto = auto
         h = opencode.OpenCodeHarness(tmp_path, binary="/x/opencode",
                                      server_factory=world.factory,
@@ -423,7 +423,7 @@ def test_compact_meets_a_busy_status_at_the_post_and_refuses(host):
     from moxi_turns.harness import Live
 
     s, h, world = _compacting(host, options={"model": "prov/m"})
-    h.live = lambda: Live(0, False)      # so the one status answer meets the re-check
+    h.live = lambda: Live(0, draft=False)      # so the one status answer meets the re-check
     world.fake.status_answers.append((200, json.dumps({h.session_id: {"type": "busy"}})))
     assert s.command("compact", timeout_s=10) == Refused("busy-turn")
     assert summaries(world) == []
@@ -614,7 +614,7 @@ def test_a_session_gone_from_the_server_ends_the_endpoint(host):
     assert until(lambda: h.endpoint.is_gone)
 
 
-def test_a_dead_hosts_directory_is_swept_with_its_instructions(turns_env):
+def test_a_dead_hosts_dir_is_swept_with_its_instructions(turns_env):
     import moxi_turns
     from moxi_turns import client, protocol
     root = protocol.v2_root(client.runtime_dir())

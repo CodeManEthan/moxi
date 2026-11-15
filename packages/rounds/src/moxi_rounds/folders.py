@@ -38,14 +38,14 @@ SLUG = re.compile(r"[a-z0-9-]+")
 @dataclass(frozen=True)
 class Home:
     """A project as rounds' home for rounds: `project` is its key as the projects list
-    stores it, and `folder` its rounds folder, which need not exist yet."""
+    stores it, and `rounds_dir` its rounds folder, which need not exist yet."""
 
     project: str
-    folder: Path
+    rounds_dir: Path
 
-    def round_folder(self, slug: str) -> Path:
+    def round_dir(self, slug: str) -> Path:
         """The folder of the round `<project>/<slug>`."""
-        return self.folder / slug
+        return self.rounds_dir / slug
 
 
 def is_slug(text: object) -> bool:
@@ -70,13 +70,13 @@ def home(project: str, settings=None) -> Home:
     api = _projects()
     record = _record(api.get, project)
     settings = _settings(settings)
-    found = Home(record.key, _folder(record, settings))
-    mine = os.path.realpath(found.folder)
+    found = Home(record.key, _rounds_dir(record, settings))
+    mine = os.path.realpath(found.rounds_dir)
     for other in _records(api):
         if other.key == record.key:
             continue
         try:
-            theirs = _folder(other, settings)
+            theirs = _rounds_dir(other, settings)
         except NoFolder:
             continue
         if os.path.realpath(theirs) == mine:
@@ -95,18 +95,18 @@ def homes(settings=None) -> tuple[list[Home], list[RoundsError]]:
     reach: dict[str, list[str]] = {}
     for record in records:
         try:
-            one = Home(record.key, _folder(record, settings))
-        except NoFolder as error:
-            placed.append(error)
+            one = Home(record.key, _rounds_dir(record, settings))
+        except NoFolder as exc:
+            placed.append(exc)
             continue
         placed.append(one)
-        reach.setdefault(os.path.realpath(one.folder), []).append(record.key)
+        reach.setdefault(os.path.realpath(one.rounds_dir), []).append(record.key)
     found, failed = [], []
     for one in placed:
         if isinstance(one, NoFolder):
             failed.append(one)
             continue
-        real = os.path.realpath(one.folder)
+        real = os.path.realpath(one.rounds_dir)
         others = [key for key in reach[real] if key != one.project]
         if others:
             failed.append(SharedFolder(one.project, others[0], Path(real)))
@@ -115,28 +115,28 @@ def homes(settings=None) -> tuple[list[Home], list[RoundsError]]:
     return found, failed
 
 
-def notes_folder(project: str) -> Path:
+def notes_dir(project: str) -> Path:
     """The notes folder of the project `project` (its key, in any case): the one its
     projects record names, else the one the notes module gives it. Raises
     `UnknownProject`, or `NoFolder` when it has none or none can be found out."""
-    return _notes_folder(_record(_projects().get, project))
+    return _notes_dir(_record(_projects().get, project))
 
 
-def slugs(folder: Path) -> list[str]:
-    """The slug of each round in the rounds folder `folder`, sorted: every folder there
+def slugs(rounds_dir: Path) -> list[str]:
+    """The slug of each round in the rounds folder `rounds_dir`, sorted: every folder there
     that holds a round's log and whose name is a slug. A rounds folder that does not
     exist holds no round."""
     try:
-        entries = sorted(os.listdir(folder))
+        entries = sorted(os.listdir(rounds_dir))
     except (FileNotFoundError, NotADirectoryError):
         return []
     return [name for name in entries
-            if is_slug(name) and log.exists(log.round_log(Path(folder) / name))]
+            if is_slug(name) and log.exists(log.round_log(Path(rounds_dir) / name))]
 
 
 def names(found: Iterable[Home]) -> list[str]:
     """The name of every round of the projects `found`, in their order."""
-    return [f"{one.project}/{slug}" for one in found for slug in slugs(one.folder)]
+    return [f"{one.project}/{slug}" for one in found for slug in slugs(one.rounds_dir)]
 
 
 # -- the lookups -------------------------------------------------------------------------
@@ -164,17 +164,17 @@ def _records(api) -> list:
     """Every record of the projects list."""
     try:
         return api.list_projects()
-    except api.ProjectsError as error:
-        raise RoundsError(f"the projects list can't be read: {error}") from None
+    except api.ProjectsError as exc:
+        raise RoundsError(f"the projects list can't be read: {exc}") from None
 
 
-def _folder(record, settings) -> Path:
+def _rounds_dir(record, settings) -> Path:
     """The rounds folder the `dir` setting gives the project `record`. Raises
     `NoFolder`."""
     from . import settings as own
 
-    folder = Path(os.path.expanduser(own.round_setting(settings, record.key, "dir")))
-    return folder if folder.is_absolute() else _notes_folder(record) / folder
+    rounds_dir = Path(os.path.expanduser(own.round_setting(settings, record.key, "dir")))
+    return rounds_dir if rounds_dir.is_absolute() else _notes_dir(record) / rounds_dir
 
 
 def _record(get, project: str):
@@ -184,11 +184,11 @@ def _record(get, project: str):
         return get(project)
     except api.NotFound:
         raise UnknownProject(project) from None
-    except api.ProjectsError as error:
-        raise RoundsError(f"the projects list can't be read: {error}") from None
+    except api.ProjectsError as exc:
+        raise RoundsError(f"the projects list can't be read: {exc}") from None
 
 
-def _notes_folder(record) -> Path:
+def _notes_dir(record) -> Path:
     """The notes folder of the project `record`: the one its record names, else the one
     notes gives it. Raises `NoFolder`."""
     if record.notes_root:
@@ -205,13 +205,13 @@ def _notes_folder(record) -> Path:
                                    f"({notes.reason})", known=False)
     try:
         found = notes.api.notes_root_for(record.root, record.kind, record.key)
-    except Exception as error:  # noqa: BLE001 - whatever notes raises, the answer is none
+    except Exception as exc:  # noqa: BLE001 - whatever notes raises, the answer is none
         raise NoFolder(record.key, f"{relative} and notes could not give it one "
-                                   f"({error})", known=False) from None
+                                   f"({exc})", known=False) from None
     if found is None:
         raise NoFolder(record.key, f"{relative} and notes gives it none")
     return Path(found)
 
 
-__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_folder", "slugs",
+__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "slugs",
            "names"]

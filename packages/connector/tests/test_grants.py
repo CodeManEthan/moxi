@@ -263,8 +263,9 @@ def test_the_doctor_reads_the_grants_with_the_origin_it_reads(config_file, monke
 
 
 def _snap(view):
-    return doctor.Snapshot(True, 8452, "", None, ORIGIN, {"providers": [], "tools": []},
-                           None, None, None, view)
+    return doctor.Snapshot(switch=True, port=8452, public_url="", address=None,
+                           origin=ORIGIN, answer={"providers": [], "tools": []},
+                           error=None, last_check=None, last_call=None, grants=view)
 
 
 # -- the switch-off rule ------------------------------------------------------------------
@@ -290,9 +291,9 @@ def test_a_stop_with_the_switch_off_revokes_and_a_restart_with_it_on_keeps(confi
     store = grants.Store()
     gid = made(store)
     oauth = OAuth(grants.Store(), _log(), redirect_uris=CALLBACKS)
-    run(oauth.stopping(True))
+    run(oauth.stopping(switch_on=True))
     assert not grants.Store().grant(gid)["revoked"]
-    run(oauth.stopping(False))
+    run(oauth.stopping(switch_on=False))
     assert grants.Store().grant(gid)["revoked_by"] == "stop"
 
 

@@ -32,6 +32,7 @@ from pathlib import Path
 from moxi import ipc
 
 from . import claimfile, wire
+from .constants import CLAIM_SOCKET_ENV, GLOBAL_ENV, NAME_ENV, SCOPE_ENV
 from .claimfile import BOUND, HOLDS, OFFLINE, STANDBY, WAITING
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
 from .membership import DEFAULT_PROC, SELF, TREE, ProcView, Root, root_of, sessions_of
@@ -53,9 +54,6 @@ class AdapterMismatch(Exception):
 #: speaks comms 0.2's claim socket.
 OLD_ADAPTER = ("this session's comms adapter is from comms 0.2 and speaks the old wire; "
                "relaunch the session. Nothing was sent.")
-
-#: The one variable every adapter stamps into what it spawns.
-CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
 
 #: The claim socket's methods, beside the hello: `claim` answers only inside the session,
 #: `state` any local caller.
@@ -344,9 +342,9 @@ class ClaimHolder:
             if self.key not in self.caller_sessions(pid):
                 return {"ok": False, "error": NOT_INSIDE, "not_inside": True}
             return self.claim_answer()
-        except Exception as e:                                   # noqa: BLE001
+        except Exception as exc:                                   # noqa: BLE001
             log.exception("claim method %s failed", method)
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def ipc_lock_path(address: str) -> str:
@@ -364,20 +362,20 @@ def call(path, method: str, timeout: float = 15.0) -> dict:
     version)."""
     try:
         client = ipc.connect(str(path), timeout_s=timeout)
-    except (ipc.IpcError, OSError) as e:
-        raise ClaimUnreachable(f"no claim socket answers at {path}: {e}") from None
+    except (ipc.IpcError, OSError) as exc:
+        raise ClaimUnreachable(f"no claim socket answers at {path}: {exc}") from None
     try:
         client.hello(wire.VERSIONS)
         answer = client.call(method, {}, timeout_s=timeout)
     except ipc.NotRpc:
         raise AdapterMismatch(OLD_ADAPTER) from None
-    except ipc.RpcError as e:
-        if e.code == wire.VERSION_REFUSED:
-            raise AdapterMismatch(_version_text(e.data)) from None
+    except ipc.RpcError as exc:
+        if exc.code == wire.VERSION_REFUSED:
+            raise AdapterMismatch(_version_text(exc.data)) from None
         raise ClaimUnreachable(f"the claim socket at {path} refused {method}: "
-                               f"{e.message}") from None
-    except (ipc.IpcError, OSError) as e:
-        raise ClaimUnreachable(f"the claim socket at {path} did not answer: {e}") from None
+                               f"{exc.message}") from None
+    except (ipc.IpcError, OSError) as exc:
+        raise ClaimUnreachable(f"the claim socket at {path} did not answer: {exc}") from None
     finally:
         client.close()
     return answer if isinstance(answer, dict) else {}
@@ -470,8 +468,8 @@ def whoami(env=None, say=print, proc=None) -> int:
     env = env if env is not None else os.environ
     try:
         path = socket_from_env(env)
-    except OutsideRuntime as e:
-        say(f"{e} Nothing was asked.")
+    except OutsideRuntime as exc:
+        say(f"{exc} Nothing was asked.")
         return moxi_exit.REFUSED
     if not path:
         say("this process has no claim socket: it is inside no comms session and holds "
@@ -479,8 +477,8 @@ def whoami(env=None, say=print, proc=None) -> int:
         return moxi_exit.REFUSED
     try:
         answer = call(path, "claim")
-    except AdapterMismatch as e:
-        say(str(e).replace(" Nothing was sent.", ""))
+    except AdapterMismatch as exc:
+        say(str(exc).replace(" Nothing was sent.", ""))
         return moxi_exit.ERROR
     except ClaimUnreachable:
         answer = dead_adapter_answer(path, proc=proc)
@@ -694,12 +692,12 @@ class ClaimServer:
             client.close()
             self.set_offline()
             return False
-        except DaemonError as e:
+        except DaemonError as exc:
             client.close()
-            if self.refusal != str(e):
-                log.warning("the daemon refused %s: %s", c["qualified"], e)
-            self.refusal = str(e)
-            held = (e.data.get("holder") or {}).get("qualified") == c["qualified"]
+            if self.refusal != str(exc):
+                log.warning("the daemon refused %s: %s", c["qualified"], exc)
+            self.refusal = str(exc)
+            held = (exc.data.get("holder") or {}).get("qualified") == c["qualified"]
             self.set_waiting(None if held else self.refusal)
             return False
         # The arm reads `bound` only while the connection its register was answered on
@@ -756,7 +754,7 @@ __all__ = ["AdapterMismatch", "CLAIM_OPS", "CLAIM_SOCKET_ENV", "ClaimUnreachable
            "socket_from_env", "whoami"]
 
 
-STAMP_VARS = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL")
+STAMP_VARS = (NAME_ENV, SCOPE_ENV, GLOBAL_ENV)
 
 
 def claim_overlay(env) -> dict:
@@ -773,8 +771,8 @@ def claim_overlay(env) -> dict:
     out = {k: v for k, v in env.items() if k not in STAMP_VARS}
     try:
         path = socket_from_env(env)
-    except OutsideRuntime as e:
-        log.warning("%s", e)
+    except OutsideRuntime as exc:
+        log.warning("%s", exc)
         return out
     try:
         answer = call(path, "claim", timeout=5.0)
@@ -787,8 +785,8 @@ def claim_overlay(env) -> dict:
     claim = answer.get("claim") or {}
     if not claim.get("name"):
         return out
-    out["MOXI_COMMS_NAME"] = claim["name"]
+    out[NAME_ENV] = claim["name"]
     if claim.get("global"):
-        out["MOXI_COMMS_GLOBAL"] = "1"
-    out["MOXI_COMMS_SCOPE"] = claim.get("scope") or ""
+        out[GLOBAL_ENV] = "1"
+    out[SCOPE_ENV] = claim.get("scope") or ""
     return out

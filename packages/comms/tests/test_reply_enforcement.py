@@ -166,12 +166,12 @@ def test_bodies_keeps_its_bare_namespace_form():
     these bytes."""
     from types import SimpleNamespace
 
-    class Ctx:
-        class record:
-            max_content_length = 2000
+    class Record:
+        max_content_length = 2000
 
     args = SimpleNamespace(text="hi")
-    assert cli._bodies(args, Ctx(), ["lead"], None) == ["::to lead\nhi"]
+    ctx = SimpleNamespace(record=Record())
+    assert cli._bodies(args, ctx, ["lead"], None) == ["::to lead\nhi"]
 
 
 # ------------------------------------------------ the sent index and `owed`

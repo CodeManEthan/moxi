@@ -124,7 +124,7 @@ def test_an_unreadable_announcement_of_a_dependency_stops_the_plan(repo):
         plan(repo.root, repo.root.parent / "w")
 
 
-def test_a_workspace_member_s_announcement_is_read_from_its_directory(repo, tmp_path):
+def test_a_workspace_member_s_announcement_is_read_from_its_dir(repo, tmp_path):
     """A sibling named in `members` is read where it is, not beside the package."""
     elsewhere = tmp_path / "elsewhere" / "beta"
     elsewhere.parent.mkdir()

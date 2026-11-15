@@ -2,8 +2,8 @@
 which handoffs are still waiting for their seat.
 
 A handoff is a short file a session writes for the next session of its seat. The launcher
-points a seat to its waiting handoff at the seat's next start (`listen_handoff`) and gives
-a handoff to a launch as its first turn.
+points a seat to its waiting handoff at the seat's next start or resume (`listen_handoff`),
+and gives a handoff to a launch as its first turn.
 
 **The key.** For a launch, from its row: the comms identity without its `@scope`; else the
 seat's name; else the project key. For a session the launcher did not start: the comms name
@@ -17,11 +17,23 @@ folder in its data directory. A key named from outside its sessions (`handoffs -
 read in the folder of its newest launch, else in the caller's directory's folder.
 
 **The file name.** `<YYYY-MM-DD>-<key>.md`, then `-2`, `-3` before `.md` when the day's name
-is taken. Files sort by their date, then that count.
+is taken. Files sort by their date, then that count. Read without a key (`others`), a name's
+trailing `-<n>` (n of 2 or more) is the count only when the same date holds the name
+without it; otherwise it is part of the key.
+
+The rule is ambiguous for a key that itself ends in `-<n>`: `2026-10-29-lead-2.md` is both
+seat `lead`'s second handoff of that day and seat `lead-2`'s first. A seat reads names
+for its own key (`parse`), so seats `lead` and `lead-2` each take that file as their own
+waiting handoff, and `lead`'s other-seat lines leave it out even on a date with no
+`2026-10-29-lead.md`. Only a read without a key uses the same-date test above.
+
+**Other seats' handoffs.** A seat's start also lists the handoffs other keys have waiting
+in its folder (`others`), newest first, at most `OTHERS_SHOWN` lines, then how many more.
+Listing one picks nothing: it waits for its own seat.
 
 **A handoff is used up only by the seat it was written for.** It counts as picked when the
-launcher gave it to a launch, or showed it at startup to a session that claimed a launch of
-the same key. A handoff waits while it is newer than the newest handoff of its key a pick
+launcher gave it to a launch, or showed it at startup or resume to a session that claimed a
+launch of the same key. A handoff waits while it is newer than the newest handoff of its key a pick
 names.
 """
 
@@ -46,12 +58,18 @@ log = logging.getLogger("moxi.launcher.handoffs")
 
 MODULE = "launcher"
 #: The launcher's own handoff folder, under its data directory (the `handoffs` store).
-FOLDER = "handoffs"
-#: comms' identity stamp in a session's environment.
-COMMS_NAME = "MOXI_COMMS_NAME"
+HANDOFFS_DIR = "handoffs"
+def comms_name_env() -> str | None:
+    """Comms' identity stamp, when the optional comms module is available."""
+    if not modules.available("comms"):
+        return None
+    found = modules.load("comms", interface=2)
+    return found.api.NAME_ENV if found.ok and found.api is not None else None
 #: What a key may be: it is part of a file name.
 _KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _DATE = r"(\d{4}-\d{2}-\d{2})"
+#: How many other seats' handoffs a start lists before it counts the rest.
+OTHERS_SHOWN = 5
 
 
 class NoKey(Exception):
@@ -100,22 +118,22 @@ def key_of_row(row) -> str | None:
 def key_of_env(env: Mapping[str, str]) -> str | None:
     """The key of a session the launcher did not start: its comms name without any
     `@scope`."""
-    name = env.get(COMMS_NAME)
+    name = env.get(comms_name_env() or "")
     return check_key(name.split("@", 1)[0]) if name else None
 
 
 # -- the folder --------------------------------------------------------------------------
 
 
-def own_folder(env: Mapping[str, str] | None = None, *, create: bool = True) -> Path:
+def own_handoffs_dir(env: Mapping[str, str] | None = None, *, create: bool = True) -> Path:
     """The launcher's own handoff folder, used when notes is absent."""
-    folder = Layout(MODULE).data_dir(env) / FOLDER
+    handoffs_dir = Layout(MODULE).data_dir(env) / HANDOFFS_DIR
     if create:
-        files.private_dir(folder)
-    return folder
+        files.private_dir(handoffs_dir)
+    return handoffs_dir
 
 
-def folder(cwd: str | Path, *, notes_dir: str | None = None,
+def handoff_dir(cwd: str | Path, *, notes_dir: str | None = None,
            env: Mapping[str, str] | None = None, create: bool = True,
            create_own: bool | None = None) -> Path:
     """The handoff folder for a session working in `cwd`.
@@ -125,38 +143,38 @@ def folder(cwd: str | Path, *, notes_dir: str | None = None,
     the launcher's own. `create` is passed to notes, and makes the launcher's own folder
     unless `create_own` says otherwise.
     """
-    notes_folder = _notes_folder(cwd, notes_dir, create)
-    if notes_folder is not None:
-        return Path(notes_folder)
-    return own_folder(env, create=create if create_own is None else create_own)
+    notes_handoff_dir = _notes_handoff_dir(cwd, notes_dir, create)
+    if notes_handoff_dir is not None:
+        return Path(notes_handoff_dir)
+    return own_handoffs_dir(env, create=create if create_own is None else create_own)
 
 
-def folder_of_row(row, *, env: Mapping[str, str] | None = None,
+def handoff_dir_of_row(row, *, env: Mapping[str, str] | None = None,
                   create: bool = True) -> Path:
     """A launch's handoff folder, for its cwd and its `notes_dir` value."""
     notes_dir = row.values.get("notes_dir")
-    return folder(row.cwd, notes_dir=notes_dir or None, env=env, create=create)
+    return handoff_dir(row.cwd, notes_dir=notes_dir or None, env=env, create=create)
 
 
 @dataclass(frozen=True)
 class KeyFolder:
-    """The handoff folder `folder_of_key` read for a key, and the launch it came from:
+    """The handoff folder `handoff_dir_of_key` read for a key, and the launch it came from:
     None when the key has no launch and the folder is the caller's directory's."""
 
-    folder: Path
+    handoff_dir: Path
     launch: LaunchRow | None
 
 
-def folder_of_key(key: str, *, cwd: str | Path | None = None,
+def handoff_dir_of_key(key: str, *, cwd: str | Path | None = None,
                   env: Mapping[str, str] | None = None, create: bool = False) -> KeyFolder:
-    """`key`'s own handoff folder: the one of its newest launch (`folder_of_row`), so a
+    """`key`'s own handoff folder: the one of its newest launch (`handoff_dir_of_row`), so a
     seat that works in another project is read where it files. A key with no launch, or
     no launch log at all, gets the folder of `cwd` (this directory by default)."""
     launch = newest_launch(key, env=env)
     if launch is not None:
-        return KeyFolder(folder_of_row(launch, env=env, create=create), launch)
+        return KeyFolder(handoff_dir_of_row(launch, env=env, create=create), launch)
     where = cwd if cwd is not None else Path.cwd()
-    return KeyFolder(folder(where, env=env, create=create), None)
+    return KeyFolder(handoff_dir(where, env=env, create=create), None)
 
 
 def newest_launch(key: str, *, env: Mapping[str, str] | None = None) -> LaunchRow | None:
@@ -190,7 +208,7 @@ def newest_launch(key: str, *, env: Mapping[str, str] | None = None) -> LaunchRo
         conn.close()
 
 
-def _notes_folder(cwd, notes_dir, create):
+def _notes_handoff_dir(cwd, notes_dir, create):
     if not modules.available("notes"):
         return None
     found = modules.load("notes", interface=1)
@@ -216,7 +234,10 @@ def file_name(key: str, date: str, count: int = 1) -> str:
 
 
 def parse(path: str | Path, key: str) -> Handoff | None:
-    """The handoff `path` names when its file name is one of `key`'s, else None."""
+    """The handoff `path` names when its file name is one of `key`'s, else None. A
+    trailing `-<n>` is read as `key`'s count whether or not the date holds the name
+    without it, so `<date>-<key>-<n>.md` is `key`'s even when a seat named `<key>-<n>`
+    wrote it (the module's note on the file name)."""
     match = re.fullmatch(_DATE + "-" + re.escape(key) + r"(?:-([2-9]|[1-9]\d+))?\.md",
                          Path(path).name)
     if match is None:
@@ -256,6 +277,72 @@ def pointer(handoff: Handoff) -> str:
     return f"Handoff waiting: {handoff.path} ({handoff.date}). Read it before other work."
 
 
+def keyed(where: str | Path) -> list[tuple[str, Handoff]]:
+    """Every handoff file in folder `where` with the key its name gives: the date, then
+    the key, then an optional `-<n>` count that is a count only when the same date also
+    holds the name without it. Names that give no usable key are left out."""
+    try:
+        paths = [p for p in Path(where).iterdir() if p.is_file()]
+    except OSError:
+        return []
+    names = {p.name for p in paths}
+    out: list[tuple[str, Handoff]] = []
+    for path in paths:
+        match = re.fullmatch(_DATE + r"-(.+)\.md", path.name)
+        if match is None:
+            continue
+        date, rest = match.group(1), match.group(2)
+        key, count = rest, 1
+        counted = re.fullmatch(r"(.+)-([2-9]|[1-9]\d+)", rest)
+        if counted is not None and f"{date}-{counted.group(1)}.md" in names:
+            key, count = counted.group(1), int(counted.group(2))
+        if _KEY.fullmatch(key):
+            out.append((key, Handoff(path, date, count)))
+    return out
+
+
+def others(conn, where: str | Path, key: str | None) -> list[tuple[str, Handoff]]:
+    """Each other key's newest handoff still waiting in folder `where`, as `(key,
+    handoff)`, newest first (by date, then when the file was last written). `key` is the
+    asking seat's, left out with every file its own names read as; None leaves out
+    nothing. `conn` is the launch log, or None when it was never made."""
+    from . import store
+
+    grouped: dict[str, list[Handoff]] = {}
+    for other, found in keyed(where):
+        if other == key or (key is not None and parse(found.path, key) is not None):
+            continue
+        grouped.setdefault(other, []).append(found)
+    out: list[tuple[str, Handoff]] = []
+    for other, found in grouped.items():
+        picked = store.picked(conn, other) if conn is not None else []
+        named = [h.order for p in picked if (h := parse(p, other)) is not None]
+        newest = max(named) if named else None
+        left = [h for h in found if newest is None or h.order > newest]
+        if left:
+            out.append((other, max(left, key=lambda h: h.order)))
+    return sorted(out, key=lambda item: (item[1].date, _mtime(item[1].path), item[0]),
+                  reverse=True)
+
+
+def other_lines(found: list[tuple[str, Handoff]], shown: int | None = None) -> list[str]:
+    """The lines a seat's start shows for other keys' waiting handoffs: at most `shown`
+    (`OTHERS_SHOWN`), then one line counting the rest."""
+    shown = OTHERS_SHOWN if shown is None else shown
+    lines = [f"Another seat's handoff: {h.path} ({other}, {h.date})"
+             for other, h in found[:shown]]
+    if len(found) > shown:
+        lines.append(f"\u2026 and {len(found) - shown} more")
+    return lines
+
+
+def _mtime(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 # -- the current session -----------------------------------------------------------------
 
 
@@ -264,7 +351,7 @@ class Current:
     """The current session's key and handoff folder."""
 
     key: str
-    folder: Path
+    handoff_dir: Path
     request_id: str | None
 
 
@@ -280,7 +367,7 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
     from . import listeners, store
 
     env = os.environ if env is None else env
-    request_id = env.get(listeners.REQUEST)
+    request_id = env.get(listeners.REQUEST_ENV)
     if request_id:
         conn = listeners.open_store()
         row = None
@@ -294,15 +381,15 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
             if key is None:
                 raise NoKey(f"launch {request_id} has no identity, seat or project key, "
                             "so it has no handoff folder")
-            return Current(key, folder_of_row(row, create=create), request_id)
+            return Current(key, handoff_dir_of_row(row, create=create), request_id)
     key = key_of_env(env)
     if key is None:
         raise NoKey("this session has no comms name and no launch of the launcher's, so "
                     "it has no handoff folder")
-    return Current(key, folder(cwd if cwd is not None else Path.cwd(), create=create), None)
+    return Current(key, handoff_dir(cwd if cwd is not None else Path.cwd(), create=create), None)
 
 
-__all__ = ["COMMS_NAME", "FOLDER", "Current", "Handoff", "KeyFolder", "NoKey", "check_key",
-           "current", "file_name", "folder", "folder_of_key", "folder_of_row", "handoffs",
-           "key_of_env", "key_of_row", "newest_launch", "own_folder", "parse", "pointer",
-           "unpicked", "waiting"]
+__all__ = ["comms_name_env", "HANDOFFS_DIR", "OTHERS_SHOWN", "Current", "Handoff", "KeyFolder",
+           "NoKey", "check_key", "current", "file_name", "handoff_dir", "handoff_dir_of_key",
+           "handoff_dir_of_row", "handoffs", "key_of_env", "key_of_row", "keyed", "newest_launch",
+           "other_lines", "others", "own_handoffs_dir", "parse", "pointer", "unpicked", "waiting"]

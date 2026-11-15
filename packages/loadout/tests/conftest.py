@@ -8,6 +8,7 @@ write outside it. Here, for every test:
   (`GIT_CONFIG_NOSYSTEM=1`);
 - fake `claude` and `codex` programs come first on `PATH`; each appends its arguments to
   `calls.log` beside it and exits 0, so no test runs a real harness CLI;
+- `OPENCODE_CONFIG_DIR` is unset, so OpenCode's home follows the kit's `XDG_CONFIG_HOME`;
 - every harness home is asserted to be under the test's tmp before the test runs.
 
 `site` is a fresh site of fake distributions on `sys.path` (a fake projects or repo, say).
@@ -26,7 +27,8 @@ import pytest
 import moxi.modules
 
 #: The variables that place a harness's home.
-HARNESS_HOMES = ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME")
+HARNESS_HOMES = ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME",
+                 "OPENCODE_CONFIG_DIR")
 FAKE_CLIS = ("claude", "codex")
 
 
@@ -43,6 +45,7 @@ def _loadout_fence(tmp_path, monkeypatch, fence):
     for name in FAKE_CLIS:
         fake_cli(bin_dir, name)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
     for key in HARNESS_HOMES:
         value = os.environ.get(key)
         if value:
@@ -68,7 +71,7 @@ def fake_cli(bin_dir: Path, name: str) -> Path:
 
 
 @pytest.fixture
-def folder(tmp_path) -> Path:
+def loadout_dir(tmp_path) -> Path:
     """A loadout folder of the test's own, not yet made."""
     return tmp_path / "loadout-folder"
 

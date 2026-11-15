@@ -62,8 +62,8 @@ def _bind():
 
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    P = ctypes.c_void_p
-    PP = ctypes.POINTER(ctypes.c_void_p)
+    void_pointer = ctypes.c_void_p
+    void_pointer_pointer = ctypes.POINTER(ctypes.c_void_p)
 
     def bind(dll, name, restype, *argtypes):
         fn = getattr(dll, name)
@@ -71,23 +71,24 @@ def _bind():
         fn.argtypes = list(argtypes)
         return fn
 
-    class SECURITY_ATTRIBUTES(ctypes.Structure):
-        _fields_ = [("nLength", w.DWORD), ("lpSecurityDescriptor", P),
+    class SECURITY_ATTRIBUTES(ctypes.Structure):  # noqa: N801 -- Win32 structure name
+        _fields_ = [("nLength", w.DWORD), ("lpSecurityDescriptor", void_pointer),
                     ("bInheritHandle", w.BOOL)]
 
     class ACL(ctypes.Structure):
         _fields_ = [("AclRevision", w.BYTE), ("Sbz1", w.BYTE), ("AclSize", w.WORD),
                     ("AceCount", w.WORD), ("Sbz2", w.WORD)]
 
-    class ACE_HEADER(ctypes.Structure):
+    class ACE_HEADER(ctypes.Structure):  # noqa: N801 -- Win32 structure name
         _fields_ = [("AceType", w.BYTE), ("AceFlags", w.BYTE), ("AceSize", w.WORD)]
 
-    class IO_COUNTERS(ctypes.Structure):
+    class IO_COUNTERS(ctypes.Structure):  # noqa: N801 -- Win32 structure name
         _fields_ = [(name, ctypes.c_ulonglong) for name in (
             "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
             "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
 
-    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+    class JOBOBJECT_BASIC_LIMIT_INFORMATION(  # noqa: N801 -- Win32 structure name
+            ctypes.Structure):
         _fields_ = [("PerProcessUserTimeLimit", w.LARGE_INTEGER),
                     ("PerJobUserTimeLimit", w.LARGE_INTEGER),
                     ("LimitFlags", w.DWORD),
@@ -98,7 +99,8 @@ def _bind():
                     ("PriorityClass", w.DWORD),
                     ("SchedulingClass", w.DWORD)]
 
-    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(  # noqa: N801 -- Win32 structure name
+            ctypes.Structure):
         _fields_ = [("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
                     ("IoInfo", IO_COUNTERS),
                     ("ProcessMemoryLimit", ctypes.c_size_t),
@@ -118,15 +120,15 @@ def _bind():
     api.JOBOBJECT_EXTENDED_LIMIT_INFORMATION = JOBOBJECT_EXTENDED_LIMIT_INFORMATION
     api.GetCurrentProcess = bind(kernel32, "GetCurrentProcess", w.HANDLE)
     api.CloseHandle = bind(kernel32, "CloseHandle", w.BOOL, w.HANDLE)
-    api.LocalFree = bind(kernel32, "LocalFree", P, P)
+    api.LocalFree = bind(kernel32, "LocalFree", void_pointer, void_pointer)
     api.CreateDirectoryW = bind(kernel32, "CreateDirectoryW", w.BOOL, w.LPCWSTR,
                                 ctypes.POINTER(SECURITY_ATTRIBUTES))
     api.CreateFileW = bind(kernel32, "CreateFileW", w.HANDLE, w.LPCWSTR, w.DWORD, w.DWORD,
                            ctypes.POINTER(SECURITY_ATTRIBUTES), w.DWORD, w.DWORD, w.HANDLE)
     api.OpenProcess = bind(kernel32, "OpenProcess", w.HANDLE, w.DWORD, w.BOOL, w.DWORD)
-    api.CreateJobObjectW = bind(kernel32, "CreateJobObjectW", w.HANDLE, P, w.LPCWSTR)
+    api.CreateJobObjectW = bind(kernel32, "CreateJobObjectW", w.HANDLE, void_pointer, w.LPCWSTR)
     api.SetInformationJobObject = bind(kernel32, "SetInformationJobObject", w.BOOL,
-                                       w.HANDLE, ctypes.c_int, P, w.DWORD)
+                                       w.HANDLE, ctypes.c_int, void_pointer, w.DWORD)
     api.AssignProcessToJobObject = bind(kernel32, "AssignProcessToJobObject", w.BOOL,
                                         w.HANDLE, w.HANDLE)
     api.TerminateJobObject = bind(kernel32, "TerminateJobObject", w.BOOL, w.HANDLE,
@@ -134,24 +136,24 @@ def _bind():
     api.OpenProcessToken = bind(advapi32, "OpenProcessToken", w.BOOL, w.HANDLE, w.DWORD,
                                 ctypes.POINTER(w.HANDLE))
     api.GetTokenInformation = bind(advapi32, "GetTokenInformation", w.BOOL, w.HANDLE,
-                                   ctypes.c_int, P, w.DWORD, ctypes.POINTER(w.DWORD))
-    api.ConvertSidToStringSidW = bind(advapi32, "ConvertSidToStringSidW", w.BOOL, P,
+                                   ctypes.c_int, void_pointer, w.DWORD, ctypes.POINTER(w.DWORD))
+    api.ConvertSidToStringSidW = bind(advapi32, "ConvertSidToStringSidW", w.BOOL, void_pointer,
                                       ctypes.POINTER(w.LPWSTR))
     api.ConvertStringSecurityDescriptorToSecurityDescriptorW = bind(
         advapi32, "ConvertStringSecurityDescriptorToSecurityDescriptorW", w.BOOL,
-        w.LPCWSTR, w.DWORD, PP, ctypes.POINTER(w.ULONG))
-    api.GetSecurityDescriptorDacl = bind(advapi32, "GetSecurityDescriptorDacl", w.BOOL, P,
-                                         ctypes.POINTER(w.BOOL), PP,
+        w.LPCWSTR, w.DWORD, void_pointer_pointer, ctypes.POINTER(w.ULONG))
+    api.GetSecurityDescriptorDacl = bind(advapi32, "GetSecurityDescriptorDacl", w.BOOL, void_pointer,
+                                         ctypes.POINTER(w.BOOL), void_pointer_pointer,
                                          ctypes.POINTER(w.BOOL))
     api.GetSecurityDescriptorControl = bind(advapi32, "GetSecurityDescriptorControl",
-                                            w.BOOL, P, ctypes.POINTER(w.WORD),
+                                            w.BOOL, void_pointer, ctypes.POINTER(w.WORD),
                                             ctypes.POINTER(w.DWORD))
     api.GetNamedSecurityInfoW = bind(advapi32, "GetNamedSecurityInfoW", w.DWORD,
-                                     w.LPCWSTR, ctypes.c_int, w.DWORD, PP, PP, PP, PP, PP)
+                                     w.LPCWSTR, ctypes.c_int, w.DWORD, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer, void_pointer_pointer)
     api.SetNamedSecurityInfoW = bind(advapi32, "SetNamedSecurityInfoW", w.DWORD,
-                                     w.LPWSTR, ctypes.c_int, w.DWORD, P, P, P, P)
-    api.GetAce = bind(advapi32, "GetAce", w.BOOL, P, w.DWORD, PP)
-    api.EqualSid = bind(advapi32, "EqualSid", w.BOOL, P, P)
+                                     w.LPWSTR, ctypes.c_int, w.DWORD, void_pointer, void_pointer, void_pointer, void_pointer)
+    api.GetAce = bind(advapi32, "GetAce", w.BOOL, void_pointer, w.DWORD, void_pointer_pointer)
+    api.EqualSid = bind(advapi32, "EqualSid", w.BOOL, void_pointer, void_pointer)
     api.GetNamedPipeClientProcessId = bind(kernel32, "GetNamedPipeClientProcessId", w.BOOL,
                                            w.HANDLE, ctypes.POINTER(w.ULONG))
     api.GetNamedPipeServerProcessId = bind(kernel32, "GetNamedPipeServerProcessId", w.BOOL,
@@ -160,7 +162,7 @@ def _bind():
     api.GetConsoleMode = bind(kernel32, "GetConsoleMode", w.BOOL, w.HANDLE,
                               ctypes.POINTER(w.DWORD))
     api.GetFileInformationByHandleEx = bind(kernel32, "GetFileInformationByHandleEx",
-                                            w.BOOL, w.HANDLE, ctypes.c_int, P, w.DWORD)
+                                            w.BOOL, w.HANDLE, ctypes.c_int, void_pointer, w.DWORD)
     _api = api
     return api
 
@@ -224,7 +226,7 @@ def _sid_text(pointer: int) -> str:
 # -- the user's known folders -------------------------------------------------------------
 
 #: The known folders `known_folder` asks for, by the names the core uses for them.
-KNOWN_FOLDERS = {
+KNOWN_FOLDERS = {  # noqa: MX3 -- Windows names these Known Folders
     "roaming": "{3EB685DB-65F9-4CF6-A03A-E3EF65729F3D}",  # FOLDERID_RoamingAppData
     "local": "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}",    # FOLDERID_LocalAppData
     "profile": "{5E6C858F-0E22-4760-9AFE-EA3317B67173}",  # FOLDERID_Profile
@@ -232,7 +234,7 @@ KNOWN_FOLDERS = {
 _KF_FLAG_DONT_VERIFY = 0x00004000
 
 
-def known_folder(name: str) -> str:
+def known_folder(name: str) -> str:  # noqa: MX3 -- Windows names these Known Folders
     """The current user's known folder `name` (`roaming`, `local` or `profile`), asked of
     the shell (`SHGetKnownFolderPath`), never read from an environment variable.
 
@@ -398,7 +400,7 @@ def private_file(path: str | os.PathLike) -> None:
     descriptor = _descriptor(f"O:{sid}D:P(A;;FA;;;{sid})")
     try:
         attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
-                                             descriptor, False)
+                                             descriptor, False)  # noqa: FBT003 -- Win32 fields are positional
         handle = api.CreateFileW(str(path), _GENERIC_WRITE, 0, ctypes.byref(attributes),
                                  _CREATE_NEW, _FILE_ATTRIBUTE_NORMAL, None)
         if handle is None or handle == ctypes.c_void_p(-1).value:
@@ -427,7 +429,7 @@ def _create_dir(path: Path, descriptor) -> bool:
     api = _bind()
     ctypes = api.ctypes
     attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
-                                         descriptor, False)
+                                         descriptor, False)  # noqa: FBT003 -- Win32 fields are positional
     if api.CreateDirectoryW(str(path), ctypes.byref(attributes)):
         return True
     code = ctypes.get_last_error()
@@ -557,7 +559,8 @@ class Job:
 
     def assign(self, pid: int) -> None:
         api = _bind()
-        process = api.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, pid)
+        process = api.OpenProcess(
+            _PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, pid)  # noqa: FBT003 -- Win32 API arguments are positional
         if not process:
             raise _error(f"opening process {pid}")
         try:

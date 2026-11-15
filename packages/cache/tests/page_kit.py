@@ -29,9 +29,9 @@ def record_dir(shell: Any) -> Path:
 def put(shell: Any, record: dict, text: str | None = None) -> None:
     """Write `record` (or `text` in its place) as its session's record, as the watcher
     does: whole, by a rename."""
-    directory = record_dir(shell)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{record['session']}.json"
+    records_dir = record_dir(shell)
+    records_dir.mkdir(parents=True, exist_ok=True)
+    path = records_dir / f"{record['session']}.json"
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(record) if text is None else text)
     os.replace(tmp, path)
@@ -39,9 +39,9 @@ def put(shell: Any, record: dict, text: str | None = None) -> None:
 
 def clear(shell: Any) -> None:
     """Remove every record, so a test starts from none."""
-    directory = record_dir(shell)
-    if directory.is_dir():
-        for path in directory.iterdir():
+    records_dir = record_dir(shell)
+    if records_dir.is_dir():
+        for path in records_dir.iterdir():
             path.unlink()
 
 

@@ -135,9 +135,9 @@ def find(file: Path | str, what: str) -> Found:
     file = Path(file)
     try:
         raw = file.read_bytes()
-    except OSError as error:
+    except OSError as exc:
         raise BadBlock(file, what, [Problem(
-            None, f"it can't be read: {error.strerror or error}",
+            None, f"it can't be read: {exc.strerror or exc}",
             "name a file that is there and that you may read")]) from None
     try:
         # A byte-order mark that opens the file is no part of its first line.
@@ -169,10 +169,10 @@ def find(file: Path | str, what: str) -> Found:
     top = first.start + 2
     try:
         data = tomllib.loads(source)
-    except tomllib.TOMLDecodeError as error:
-        at, said = _decode_error(error, len(body))
+    except tomllib.TOMLDecodeError as exc:
+        position, said = _decode_error(exc, len(body))
         raise BadBlock(file, what, [Problem(
-            top + at - 1, f"the block is not TOML: {said}",
+            top + position - 1, f"the block is not TOML: {said}",
             "correct the TOML on that line; a string is in quotes, a table is "
             "[[name]], and a key is written once")]) from None
     return Found(file=file, line=first.start + 1, data=data,
@@ -242,15 +242,15 @@ def _decode_error(error: tomllib.TOMLDecodeError, count: int) -> tuple[int, str]
     """The line of the block a TOML error is on, counted from 1, and what it says.
     An error at the end of the block is on its last line."""
     said = str(error)
-    at = getattr(error, "lineno", None)
+    position = getattr(error, "lineno", None)
     match = _AT.search(said)
     if match:
-        at = at or int(match[1])
+        position = position or int(match[1])
         said = said[:match.start()]
     said = _AT_END.sub("", said)
-    if not isinstance(at, int) or not 1 <= at <= count:
-        at = max(count, 1)
-    return at, said.rstrip(". ")
+    if not isinstance(position, int) or not 1 <= position <= count:
+        position = max(count, 1)
+    return position, said.rstrip(". ")
 
 
 # Where each table and key starts.
@@ -310,47 +310,47 @@ def _starts(source: str) -> list[int]:
     something on it that is not inside a string or a list that an earlier line
     opened."""
     starts: list[int] = []
-    line = depth = at = 0
+    line = depth = position = 0
     fresh = True
     size = len(source)
-    while at < size:
-        char = source[at]
+    while position < size:
+        char = source[position]
         if char == "\n":
-            line, fresh, at = line + 1, True, at + 1
+            line, fresh, position = line + 1, True, position + 1
         elif char in " \t":
-            at += 1
+            position += 1
         elif char == "#":
-            at = _until(source, at, "\n")
+            position = _until(source, position, "\n")
         else:
             if fresh and depth == 0:
                 starts.append(line)
             fresh = False
             if char in "\"'":
-                end = _string_end(source, at)
-                line += source.count("\n", at, end)
-                at = end
+                end = _string_end(source, position)
+                line += source.count("\n", position, end)
+                position = end
             else:
                 if char in "[{":
                     depth += 1
                 elif char in "]}":
                     depth = max(depth - 1, 0)
-                at += 1
+                position += 1
     return starts
 
 
-def _until(source: str, at: int, mark: str) -> int:
-    """The index of the next `mark` from `at`, or the text's end."""
-    found = source.find(mark, at)
+def _until(source: str, position: int, mark: str) -> int:
+    """The index of the next `mark` from `position`, or the text's end."""
+    found = source.find(mark, position)
     return len(source) if found < 0 else found
 
 
-def _string_end(source: str, at: int) -> int:
-    """The index after the string that opens at `at`. A one-line string that is never
+def _string_end(source: str, position: int) -> int:
+    """The index after the string that opens at `position`. A one-line string that is never
     closed ends with its line."""
-    quote = source[at]
+    quote = source[position]
     escapes = quote == '"'
-    if source.startswith(quote * 3, at):
-        scan = at + 3
+    if source.startswith(quote * 3, position):
+        scan = position + 3
         while scan < len(source):
             if escapes and source[scan] == "\\":
                 scan += 2
@@ -363,7 +363,7 @@ def _string_end(source: str, at: int) -> int:
             else:
                 scan += 1
         return len(source)
-    scan = at + 1
+    scan = position + 1
     while scan < len(source) and source[scan] != "\n":
         if escapes and source[scan] == "\\":
             scan += 2
@@ -412,17 +412,17 @@ def _check(found: Found, table: Table, entry: Mapping, path: tuple,
         if under.name not in entry:
             continue
         value = entry[under.name]
-        at = path + (under.name,)
+        position = path + (under.name,)
         if not under.many:
             if isinstance(value, dict):
-                _check(found, under, value, at, problems)
+                _check(found, under, value, position, problems)
                 continue
         elif isinstance(value, list) and all(isinstance(one, dict) for one in value):
             for number, one in enumerate(value):
-                _check(found, under, one, at + (number,), problems)
+                _check(found, under, one, position + (number,), problems)
             continue
-        header = _where(at, many=under.many)
-        problems.append(Problem(found.line_of(*at),
+        header = _where(position, many=under.many)
+        problems.append(Problem(found.line_of(*position),
                                 f"`{under.name}` is {shown(value)}, not a table",
                                 f"write it as {header.removeprefix('this ')}"))
 

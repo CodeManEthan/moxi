@@ -76,8 +76,8 @@ def race(fn, n: int, timeout: float = 30.0) -> dict:
         t0 = time.monotonic()
         try:
             value, error = fn(i), None
-        except Exception as e:                       # the refusals are the point
-            value, error = None, e
+        except Exception as exc:                       # the refusals are the point
+            value, error = None, exc
         out[i] = (value, error, time.monotonic() - t0)
 
     threads = [threading.Thread(target=run, args=(i,)) for i in range(n)]
@@ -257,8 +257,8 @@ def test_a_message_that_lands_during_the_round_trip_is_delivered_not_stranded(ri
         try:
             outcome["ok"] = client.bind(name="planner", scope="proj-a",
                                             session_id=warm)      # a working agent
-        except Exception as e:
-            outcome["error"] = e
+        except Exception as exc:
+            outcome["error"] = exc
 
     thread = threading.Thread(target=register)
     thread.start()

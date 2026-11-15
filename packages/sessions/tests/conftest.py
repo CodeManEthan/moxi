@@ -25,9 +25,9 @@ def own_config(tmp_path, monkeypatch) -> Path:
 
 
 def write_config(own_config: Path, text: str) -> Path:
-    directory = own_config / "sessions"
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / "config.toml"
+    config_dir = own_config / "sessions"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / "config.toml"
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -73,9 +73,9 @@ def user_line(*, uuid: str = "u1", ts: str = "2026-08-12T11:00:00.000Z",
 
 def write_transcript(projects_root: Path, project: str, session_id: str,
                      lines: list[str], *, newline_at_end: bool = True) -> Path:
-    directory = projects_root / project
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{session_id}.jsonl"
+    project_dir = projects_root / project
+    project_dir.mkdir(parents=True, exist_ok=True)
+    path = project_dir / f"{session_id}.jsonl"
     path.write_text("\n".join(lines) + ("\n" if newline_at_end else ""), encoding="utf-8")
     return path
 
@@ -115,10 +115,10 @@ def rollout_lines(thread: str = THREAD) -> list[str]:
 def write_rollout(sessions_root: Path, thread: str = THREAD, *, day: str = "2026/10/06",
                   stamp: str = "2026-10-06T10-00-00", suffix: str = "",
                   zst: bool = False, lines: list[str] | None = None) -> Path:
-    directory = sessions_root / day
-    directory.mkdir(parents=True, exist_ok=True)
+    day_dir = sessions_root / day
+    day_dir.mkdir(parents=True, exist_ok=True)
     name = f"rollout-{stamp}-{thread}{suffix}.jsonl" + (".zst" if zst else "")
-    path = directory / name
+    path = day_dir / name
     body = "\n".join(lines if lines is not None else rollout_lines(thread)) + "\n"
     path.write_bytes(body.encode("utf-8"))
     return path

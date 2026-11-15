@@ -121,18 +121,18 @@ class HooksUntrusted(RuntimeError):
     """The app-server did not report every launch hook as trusted."""
 
 
-def hooks_socket(directory) -> Path:
+def hooks_socket(endpoint_dir) -> Path:
     """The hooks' socket of the endpoint in `directory`: in it, or on the short path
     when that is too long for a socket address."""
-    return Path(protocol.endpoint_socket(directory, protocol.CODEX_HOOKS_SOCK))
+    return Path(protocol.endpoint_socket(endpoint_dir, protocol.CODEX_HOOKS_SOCK))
 
 
 def command(ping: list[str], socket_path, event: HookEvent,
-            wait_seconds: float = PING_TIMEOUT, refuse: str | None = None) -> str:
+            wait_s: float = PING_TIMEOUT, refuse: str | None = None) -> str:
     argv = [*ping, "--socket", str(socket_path)]
     if refuse is not None:
         argv += ["--refuse-unanswered", refuse]
-    argv += ["--wait-s", f"{wait_seconds:g}", event.event]
+    argv += ["--wait-s", f"{wait_s:g}", event.event]
     if event.source:
         argv += ["--source", event.source]
     return shlex.join(argv)
@@ -251,12 +251,12 @@ def session_flags(ping: list[str], socket_path, *, hold_wait_s: float = PING_TIM
     keys: dict[str, str] = {}
     for event in EVENTS:
         if event.event == "Stop":
-            wait_seconds = hold_wait_s + 1
+            event_wait_s = hold_wait_s + 1
         elif event.event == "Interrupt":
-            wait_seconds = PING_TIMEOUT
+            event_wait_s = PING_TIMEOUT
         else:
-            wait_seconds = listen_wait_s + 1
-        one = handler(command(ping, socket_path, event, wait_seconds), event.timeout)
+            event_wait_s = listen_wait_s + 1
+        one = handler(command(ping, socket_path, event, event_wait_s), event.timeout)
         argv += ["-c", f"hooks.{event.event}={_toml([{'hooks': [one]}])}"]
         keys[hook_key(event.label)] = trusted_hash(event.label, one)
     tools = []
@@ -409,7 +409,7 @@ class HookServer:
                     reply = self._dispatch(frame, conn)
             if reply is not None:
                 conn.send(reply)
-                self._timed(frame)
+                self._on_timed(frame)
         except (OSError, TimeoutError, protocol.ProtocolError):
             pass
         finally:
@@ -450,7 +450,7 @@ class HookServer:
                 context = JOIN.join([*([context] if context else []), "\n".join(notes)])
             if source == "compact":
                 # A compaction the host sent took effect: its shell stop may begin.
-                compacted = getattr(self.harness, "compacted", None)
+                compacted = getattr(self.harness, "on_compacted", None)
                 if compacted is not None:
                     compacted()
             reply = {"ok": True, "context": context}
@@ -459,7 +459,7 @@ class HookServer:
                 # The mark clears only once the answer is out: a send that fails leaves
                 # it, as if this start had not been answered.
                 conn.send(reply)
-                self._timed(frame)
+                self._on_timed(frame)
                 start_answered()
                 return None
             return reply
@@ -482,7 +482,7 @@ class HookServer:
         reason = endpoint.on_stop(facts)
         if reason:
             conn.send({"ok": True, "block": reason})
-            self._timed(frame)
+            self._on_timed(frame)
             # The ping still says when it has printed the block. Whether it did or not,
             # the turn's end is Codex's to report.
             try:
@@ -516,7 +516,7 @@ class HookServer:
             log.exception("the Codex %s hook failed", frame.get("event"))
             return {"ok": False, "error": f"the host's {name} failed: {type(exc).__name__}"}
 
-    def _timed(self, frame: dict) -> None:
+    def _on_timed(self, frame: dict) -> None:
         """Record the hook's wait: from the ping's stamp to this answer. A frame with no
         stamp (an older ping) and one from another session record nothing. A tool hook's
         wait is recorded as `guard` or `after-tool`."""
@@ -531,7 +531,7 @@ class HookServer:
 
 class _Ping:
     def __init__(self, path: Path, event: str, source: str | None,
-                 wait_seconds: float, stamp: float | None = None,
+                 wait_s: float, stamp: float | None = None,
                  refuse: str | None = None):
         self.path = path
         #: The deny guards' cover rule (`refuse_table`), on a `PreToolUse` ping only.
@@ -543,7 +543,7 @@ class _Ping:
         self.stamp = stamp
         self.event = event
         self.source = source
-        self.wait_seconds = wait_seconds
+        self.wait_s = wait_s
         self.conn: protocol.LineConn | None = None
         self.block = False
         self.deny = False
@@ -556,7 +556,7 @@ class _Ping:
         if self.stamp is not None:
             ask["stamp"] = self.stamp
         self.conn.send(ask)
-        reply = self.conn.recv(self.wait_seconds)
+        reply = self.conn.recv(self.wait_s)
         if not isinstance(reply, dict) or not reply.get("ok"):
             raise RuntimeError((reply or {}).get("error", "the hook host did not answer"))
         reason = reply.get("block")
@@ -578,7 +578,7 @@ class _Ping:
 
         return envelope(event, text)
 
-    def emitted(self, text) -> None:
+    def on_emitted(self, text) -> None:
         self.answered = True
         try:
             if self.block and self.conn is not None:
@@ -638,7 +638,7 @@ def main(argv=None) -> int:
         ping.render if args.event == "PreToolUse" else None
     kwargs = {"render": render} if render is not None else {}
     run(args.event, ping.body, seconds=args.wait_s, on_error=ping.error,
-        on_emitted=ping.emitted, **kwargs)
+        on_emitted=ping.on_emitted, **kwargs)
     # The wall is down and nothing was printed: a covered call is refused here.
     refusal = ping.unanswered()
     if refusal is not None:

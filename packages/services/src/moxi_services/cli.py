@@ -72,12 +72,12 @@ def worst(codes_: Sequence[int]) -> int:
 
 # --- splitting a command line -----------------------------------------------------------
 
-def split_command(text: str, *, windows: bool | None = None) -> list[str]:
+def split_command(text: str, *, is_windows: bool | None = None) -> list[str]:
     """Split `text` into an argument list as this system's command lines are split:
     `shlex.split` on POSIX, the rules of Windows' `CommandLineToArgvW` there. Raises
     `Usage` (exit 2) on an empty command or unbalanced quotes."""
-    windows = sys.platform == "win32" if windows is None else windows
-    if windows:
+    is_windows = sys.platform == "win32" if is_windows is None else is_windows
+    if is_windows:
         argv = _split_windows(text)
     else:
         try:
@@ -169,8 +169,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    def verb(name: str, help: str, *, reads: bool = False) -> argparse.ArgumentParser:
-        p = verbs.add_parser(name, help=help, description=help[0].upper() + help[1:] + ".",
+    def verb(name: str, help_text: str, *, reads: bool = False) -> argparse.ArgumentParser:
+        p = verbs.add_parser(name, help=help_text, description=help_text[0].upper() + help_text[1:] + ".",
                              allow_abbrev=False)
         if reads:
             p.add_argument("--json", action="store_true", help="print JSON")
@@ -211,14 +211,14 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p = verb("remove", "remove a row you added or adopted")
     p.add_argument("id", metavar="ID")
 
-    for name, help in (("start", "start a daemon, or run a timer now"),
+    for name, verb_help in (("start", "start a daemon, or run a timer now"),
                        ("stop", "stop a daemon until the next login or start, or end a "
                                 "timer's run"),
                        ("restart", "stop, then start"),
                        ("enable", "turn rows on: a daemon running and starting at login, "
                                   "a timer's schedule armed"),
                        ("disable", "turn rows off")):
-        p = verb(name, help)
+        p = verb(name, verb_help)
         p.add_argument("ids", nargs="+", metavar="ID")
 
     p = verb("watch", "print a line whenever a row's verdict changes, until interrupted",
@@ -295,7 +295,7 @@ def _add(args, out) -> int:
                         "command services writes, not an adopted unit, which keeps its own",
                         None)
         enable = True if args.enable else False if args.disable else None
-        outcome = acts.add_adopted(args.name, args.unit, enable=enable, timer=args.timer,
+        outcome = acts.add_adopted(args.name, args.unit, enable=enable, is_timer=args.timer,
                                    health=health, project=args.project,
                                    launches_session=args.launches_session, doc=args.doc)
     else:
@@ -309,7 +309,7 @@ def _add(args, out) -> int:
             if not args.cwd:
                 raise Usage("--cwd is empty; name a directory", None)
             cwd = os.path.abspath(os.path.expanduser(args.cwd))
-        outcome = acts.add_written(args.name, args.command, timer=args.timer,
+        outcome = acts.add_written(args.name, args.command, is_timer=args.timer,
                                    every=args.every, at=_commas(args.at),
                                    days=_commas(args.days), cwd=cwd, health=health,
                                    project=args.project,
@@ -410,7 +410,7 @@ def _view_json(view: View) -> dict:
 
 def _list(args, out) -> int:
     found = _all_rows(args.project, args.kind)
-    seen = views(found, health=args.health)
+    seen = views(found, check_health=args.health)
     if args.json:
         print(json.dumps([_view_json(v) for v in seen], indent=2), file=out)
         return codes.OK
@@ -491,7 +491,7 @@ def _duration(seconds: float) -> str:
 
 def _show(args, out) -> int:
     row = acts.resolve(args.id)
-    view = views([row], health=True)[0]
+    view = views([row], check_health=True)[0]
     st = view.st
     process = _process(st.pid) if (row.kind == "daemon" and st is not None
                                    and st.state == "active") else None
@@ -609,7 +609,7 @@ def _watch(args, out) -> int:
                 found, gone = _watch_rows(args.ids, noted)
                 now = _clock()
                 fresh = last_health is None or now - last_health >= WATCH_HEALTH
-                current = views(found, health=fresh, known_health=None if fresh
+                current = views(found, check_health=fresh, known_health=None if fresh
                                 else checked)
                 if fresh:
                     checked = {v.row.id: v.health for v in current if v.health is not None}
@@ -618,12 +618,12 @@ def _watch(args, out) -> int:
                     key = (view.verdict.state, view.verdict.reason)
                     if seen.get(view.row.id) != key:
                         seen[view.row.id] = key
-                        _watch_line(out, args.json, view.row.id, view)
+                        _watch_line(out, as_json=args.json, ident=view.row.id, view=view)
                 here = {v.row.id for v in current}
                 for ident in [i for i in seen if i not in here] + gone:
                     if ident in seen:
                         del seen[ident]
-                        _watch_line(out, args.json, ident, None)
+                        _watch_line(out, as_json=args.json, ident=ident, view=None)
             except ServicesError as exc:
                 print(f"{time.strftime('%H:%M:%S')} {exc.reason}", file=sys.stderr)
             out.flush()
@@ -632,7 +632,7 @@ def _watch(args, out) -> int:
         return codes.OK
 
 
-def _watch_line(out, as_json: bool, ident: str, view: View | None) -> None:
+def _watch_line(out, *, as_json: bool, ident: str, view: View | None) -> None:
     if as_json:
         found = {"at": _iso(time.time()), "id": ident}
         if view is None:

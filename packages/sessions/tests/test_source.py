@@ -23,8 +23,8 @@ from moxi_sessions.testing.codex import write_imports
 
 def header_of(source: Source) -> Header:
     path = Path(source.path)
-    with path.open("rb") as handle:
-        return file_header(source, handle, path.stat().st_size)
+    with path.open("rb") as fh:
+        return file_header(source, fh, path.stat().st_size)
 
 
 # --- Source and unpack -----------------------------------------------------------------
@@ -114,8 +114,8 @@ def test_a_claude_header_starts_at_the_first_line_that_has_a_time(tmp_path):
 
 
 def head_name(t: ClaudeTranscript) -> str | None:
-    with t.path.open("rb") as handle:
-        return claude_head_name(handle, t.path.stat().st_size)
+    with t.path.open("rb") as fh:
+        return claude_head_name(fh, t.path.stat().st_size)
 
 
 def test_a_claude_head_name_is_the_newest_typed_title_among_the_first_lines(tmp_path):
@@ -146,14 +146,14 @@ def test_a_head_is_complete_once_the_file_has_outgrown_it(tmp_path):
         t.other("attachment")
     t.title("named in the head")
     t.write()
-    with t.path.open("rb") as handle:
-        assert claude_named_head(handle, t.path.stat().st_size) == (
+    with t.path.open("rb") as fh:
+        assert claude_named_head(fh, t.path.stat().st_size) == (
             "named in the head", False)
     t.other("attachment")
     t.title("named past the head")
     t.flush()
-    with t.path.open("rb") as handle:
-        assert claude_named_head(handle, t.path.stat().st_size) == (
+    with t.path.open("rb") as fh:
+        assert claude_named_head(fh, t.path.stat().st_size) == (
             "named in the head", True)
 
 
@@ -180,8 +180,8 @@ def test_an_imported_codex_thread_shows_its_marks_and_a_missing_file_is_unknown(
     r = CodexRollout(root, imported=True)
     r.turn()
     r.write()
-    with r.path.open("rb") as handle:
-        head = codex_head(handle, r.path.stat().st_size)
+    with r.path.open("rb") as fh:
+        head = codex_head(fh, r.path.stat().st_size)
     assert head.first_turn_id.startswith("external-import-turn-")
     marks = codex_header(Source("codex", str(r.path), None), head).import_marks
     assert marks.originator is True and marks.turn_id is True
@@ -219,7 +219,7 @@ def test_an_opencode_header_is_its_session_row(tmp_path):
 
 # --- roots -------------------------------------------------------------------------------
 
-def test_the_codex_and_opencode_roots_follow_the_environment_handed_in():
+def test_the_codex_and_opencode_roots_follow_the_env_handed_in():
     assert codex_root({"HOME": "/h"}) == Path("/h/.codex/sessions")
     assert codex_root({"HOME": "/h", "CODEX_HOME": "~/cx"}) == Path("/h/cx/sessions")
     assert opencode_root({"HOME": "/h"}) == Path("/h/.local/share/opencode/opencode.db")

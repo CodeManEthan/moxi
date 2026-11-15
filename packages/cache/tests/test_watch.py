@@ -68,7 +68,7 @@ def sessions() -> Path:
 
 def make(fake, sessions, **kw) -> watch.Watcher:
     return watch.Watcher(agents=fake.agents, read=fake.read, now=fake.now,
-                         sessions=sessions, **kw)
+                         session_files_dir=sessions, **kw)
 
 
 def poke(sessions: Path) -> None:
@@ -166,9 +166,9 @@ UNSAFE = ["../escape", "a/b", "..", "sub/../../up", "/abs"]
 
 def test_a_session_id_the_reader_refuses_is_skipped_with_one_log_line(tmp_path, sessions,
                                                                       caplog):
-    directory = tmp_path / "rt" / "cache" / "clock"
+    records_dir = tmp_path / "rt" / "cache" / "clock"
     fake = Fake([entry(11, A)] + [entry(20 + i, s) for i, s in enumerate(UNSAFE)])
-    w = make(fake, sessions, directory=directory)
+    w = make(fake, sessions, records_dir=records_dir)
     before = {p for p in tmp_path.rglob("*")}
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
         live = w.tick()
@@ -176,10 +176,10 @@ def test_a_session_id_the_reader_refuses_is_skipped_with_one_log_line(tmp_path, 
         w.tick()
     assert live == [watch.Live(11, A)]
     assert set(fake.reads) == {A}              # an unsafe id is never read either
-    assert sorted(p.name for p in directory.iterdir()) == [f"{A}.json"]
+    assert sorted(p.name for p in records_dir.iterdir()) == [f"{A}.json"]
     made = {p for p in tmp_path.rglob("*")} - before
-    assert made <= {directory, directory.parent, directory.parent.parent,
-                    directory / f"{A}.json", directory.parent / records.READING_NAME}
+    assert made <= {records_dir, records_dir.parent, records_dir.parent.parent,
+                    records_dir / f"{A}.json", records_dir.parent / records.READING_NAME}
     lines = [r.getMessage() for r in caplog.records]
     assert len(lines) == 1
     assert all(repr(s) in lines[0] for s in UNSAFE)
@@ -188,12 +188,12 @@ def test_a_session_id_the_reader_refuses_is_skipped_with_one_log_line(tmp_path, 
 
 @pytest.mark.parametrize("session", UNSAFE)
 def test_write_record_refuses_an_id_that_cannot_name_a_file(tmp_path, session):
-    directory = tmp_path / "clock"
-    directory.mkdir()
+    records_dir = tmp_path / "clock"
+    records_dir.mkdir()
     record = {"v": records.VERSION, "session": session}
     before = set(tmp_path.rglob("*"))
     with pytest.raises(ValueError):
-        watch.write_record(directory, record)
+        watch.write_record(records_dir, record)
     assert set(tmp_path.rglob("*")) == before
 
 
@@ -235,7 +235,7 @@ def test_a_fresh_session_with_no_transcript_is_read_once_a_transcript_appears(ro
     def read(harness, session, *, now):
         fake_read.append(session)
         return Clock("fresh")
-    w = watch.Watcher(agents=fake.agents, read=read, now=fake.now, sessions=sessions)
+    w = watch.Watcher(agents=fake.agents, read=read, now=fake.now, session_files_dir=sessions)
     w.tick()
     w.tick()
     assert fake_read == [A]
@@ -271,7 +271,7 @@ def test_a_clear_moves_the_record_to_the_new_id(root, sessions):
     assert rec(A) is None and rec(C)["pid"] == 11
 
 
-def test_the_list_is_asked_every_third_tick_or_when_the_sessions_folder_changes(sessions):
+def test_the_list_is_asked_every_third_tick_or_when_the_sessions_dir_changes(sessions):
     fake = Fake([entry(11, A)])
     w = make(fake, sessions)
     for _ in range(4):
@@ -286,13 +286,13 @@ def test_the_list_is_asked_every_third_tick_or_when_the_sessions_folder_changes(
 
 
 def test_a_restart_removes_records_of_sessions_no_longer_live(sessions):
-    directory = records.record_dir()
-    directory.mkdir(parents=True)
-    (directory / f"{B}.json").write_text("{}")
-    (directory / f".{A}.123.tmp").write_text("partial")
-    (directory / "notes.txt").write_text("left alone")
+    records_dir = records.record_dir()
+    records_dir.mkdir(parents=True)
+    (records_dir / f"{B}.json").write_text("{}")
+    (records_dir / f".{A}.123.tmp").write_text("partial")
+    (records_dir / "notes.txt").write_text("left alone")
     make(Fake([entry(11, A)]), sessions).tick()
-    assert sorted(p.name for p in directory.iterdir()) == [f"{A}.json", "notes.txt"]
+    assert sorted(p.name for p in records_dir.iterdir()) == [f"{A}.json", "notes.txt"]
 
 
 def test_one_record_per_session_when_two_pids_list_it(sessions):
@@ -426,7 +426,7 @@ def test_a_tick_that_raises_still_writes_its_reading(sessions):
         raise RuntimeError("the clock broke")
 
     fake = Fake([entry(11, A)])
-    w = watch.Watcher(agents=fake.agents, read=broken, now=fake.now, sessions=sessions)
+    w = watch.Watcher(agents=fake.agents, read=broken, now=fake.now, session_files_dir=sessions)
     with pytest.raises(RuntimeError):
         w.tick()
     assert (reading_file()["tick_at"], reading_file()["listed_at"]) == (fake.t, None)
@@ -482,9 +482,9 @@ def test_the_reading_is_no_file_under_clock(root, sessions):
         records.DIR_NAME, records.READING_NAME]
 
 
-def test_a_stand_in_directory_puts_the_reading_beside_it(tmp_path, sessions):
-    directory = tmp_path / "rt" / "cache" / "clock"
-    make(Fake([entry(11, A)]), sessions, directory=directory).tick()
+def test_a_stand_in_dir_puts_the_reading_beside_it(tmp_path, sessions):
+    records_dir = tmp_path / "rt" / "cache" / "clock"
+    make(Fake([entry(11, A)]), sessions, records_dir=records_dir).tick()
     assert records.reading(tmp_path / "rt" / "cache" / "watch.json")["listed_at"] is not None
     assert not records.reading_path().exists()
 
@@ -497,7 +497,7 @@ def test_the_reading_stays_when_the_watcher_stops(own_roots, sessions):
             stop.set()
             return super()._tick()
     write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
-    w = Once(agents=lambda: [], sessions=sessions)
+    w = Once(agents=lambda: [], session_files_dir=sessions)
     assert watch.run(watcher=w, stop=stop) == 0
     assert records.reading() == {"v": 1, "pid": os.getpid(), "tick_at": w.tick_at,
                                  "listed_at": w.tick_at, "stale_after": 3}
@@ -670,7 +670,7 @@ def first_tick_records(own_roots, sessions, t) -> dict:
             seen.update({s: rec(s) for s in (A, B)})
             return live
     write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
-    w = Once(agents=lambda: [entry(11, A), entry(12, B)], sessions=sessions)
+    w = Once(agents=lambda: [entry(11, A), entry(12, B)], session_files_dir=sessions)
     assert watch.run(watcher=w, stop=stop, timer=t) == 0
     return seen
 
@@ -685,7 +685,7 @@ def test_the_first_tick_after_run_starts_carries_asks(own_roots, sessions, tmp_p
     subs = [timer.check({"name": name, "at": -900, "run": [str(exe)], **extra},
                         source=timer.CONFIG, resolve=timer.resolve_config_argv0)
             for name, extra in (("plain", {}), ("needs-v", {"requires_env": {"V": "*"}}))]
-    t = timer.Timer(modules=subs, environ={11: {"V": "x"}, 12: {}}.get,
+    t = timer.Timer(modules=subs, process_env={11: {"V": "x"}, 12: {}}.get,
                     spawn=lambda argv: None, log_file=tmp_path / "timer.jsonl")
     seen = first_tick_records(own_roots, sessions, t)
     assert seen[A]["asks"] == ["needs-v", "plain"]
@@ -708,13 +708,13 @@ def test_a_timer_whose_first_load_raises_gives_asks_null(own_roots, sessions, tm
 
 
 def test_write_record_replaces_whole(tmp_path):
-    directory = tmp_path / "records"
-    directory.mkdir()
+    records_dir = tmp_path / "records"
+    records_dir.mkdir()
     r = {"session": A, "v": 1}
-    watch.write_record(directory, {"session": A, "v": 0})
-    path = watch.write_record(directory, r)
+    watch.write_record(records_dir, {"session": A, "v": 0})
+    path = watch.write_record(records_dir, r)
     assert json.loads(path.read_text()) == r
-    assert [p.name for p in directory.iterdir()] == [f"{A}.json"]
+    assert [p.name for p in records_dir.iterdir()] == [f"{A}.json"]
 
 
 # --- running ---------------------------------------------------------------------------------
@@ -728,7 +728,7 @@ def test_run_ticks_until_stopped(sessions):
             ticks.append(1)
             stop.set()
             return []
-    assert watch.run(watcher=Once(agents=lambda: [], sessions=sessions), stop=stop) == 0
+    assert watch.run(watcher=Once(agents=lambda: [], session_files_dir=sessions), stop=stop) == 0
     assert ticks == [1]
 
 
@@ -745,7 +745,7 @@ def test_run_keeps_going_after_a_failed_tick(own_roots, sessions, caplog):
             return []
     write_cache_config(own_roots, "[watch]\ntick_s = 1\n")
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
-        assert watch.run(watcher=Flaky(agents=lambda: [], sessions=sessions), stop=stop) == 0
+        assert watch.run(watcher=Flaky(agents=lambda: [], session_files_dir=sessions), stop=stop) == 0
     assert len(count) == 2 and "boom" in caplog.text
 
 
@@ -763,7 +763,7 @@ def test_a_tick_below_one_second_ticks_every_second(own_roots, sessions, caplog)
     write_cache_config(own_roots, "[watch]\ntick_s = 0\n")
     config = Config(MODULE, schema())
     config.start()
-    w = watch.Watcher(agents=lambda: [], sessions=sessions)
+    w = watch.Watcher(agents=lambda: [], session_files_dir=sessions)
     with caplog.at_level(logging.WARNING, logger="moxi.cache"):
         assert watch._interval(config, w) == 1.0
     assert "watch.tick_s is 0" in caplog.text

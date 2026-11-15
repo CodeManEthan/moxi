@@ -40,7 +40,7 @@ def _servers_row(page, module="fixture"):
     return page.locator(f"#moxi-panel moxi-ui-servers li[data-module={module}]")
 
 
-def _hide(page, hidden=True):
+def _hide(page, *, hidden=True):
     """Make the tab report itself hidden (or shown again), as switching tabs would."""
     page.evaluate("""(hidden) => {
       Object.defineProperty(document, "visibilityState", {configurable: true,
@@ -56,8 +56,8 @@ def _in_thread(fn):
     def run():
         try:
             out["value"] = fn()
-        except BaseException as err:  # handed back to the test
-            out["error"] = err
+        except BaseException as exc:  # handed back to the test
+            out["error"] = exc
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
@@ -172,7 +172,7 @@ def test_the_stream_closes_after_10_s_with_no_visible_tab_and_reopens_when_one_i
     wait_for(closed, 5, interval=0.1, what="the stream to close with no tab shown")
     # Acts while no stream is open; showing a tab reopens it with the current value.
     ui_shell.session().post("/m/fixture/api/add", {"by": 5})
-    _hide(second, False)
+    _hide(second, hidden=False)
     wait_for(lambda: _streams(ui_shell) == 1, 5, what="the stream to reopen")
     for page in (first, second):
         expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n + 5}")
@@ -226,7 +226,7 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
     expect(row).to_contain_text("The next request after 10 s tries again.")
     expect(row).to_contain_text("last exited with code 3")
     expect(row).to_contain_text("log: ")
-    fixture_kit.fail_start(shell, False)
+    fixture_kit.fail_start(shell, enabled=False)
 
 
 def test_the_servers_block_says_when_no_page_server_has_run(ui_shells, fixture_site, ui_contexts):
@@ -315,7 +315,7 @@ def test_a_version_change_drains_the_server_and_the_next_request_starts_the_new_
     assert shell.server("fixture")["state"] == "draining"
     # A new request waits for the drain; the open one finishes on the old server.
     waiting = _in_thread(lambda: shell.session(timeout=30).get("/m/fixture/api/summary"))
-    fixture_kit.hold(shell, False)
+    fixture_kit.hold(shell, enabled=False)
     status, data = held()
     assert status == 200 and data["pid"] == old["pid"]
     status, data = waiting()

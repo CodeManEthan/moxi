@@ -169,7 +169,7 @@ run = ["{tmp_path / 'missing'}"]
     return exe
 
 
-def test_asking_names_what_the_environment_meets(subscribed):
+def test_asking_names_what_the_env_meets(subscribed):
     assert api.asking({"MOXI_LAUNCHER_REQUEST": "doctor"}) == ("plain", "stamped")
     assert api.asking({"MOXI_LAUNCHER_REQUEST": "doctor", "V": "on"}) == (
         "plain", "stamped", "valued")
@@ -183,7 +183,7 @@ def test_asking_reads_the_config_as_it_is_now(subscribed, own_roots):
     assert api.asking({"MOXI_LAUNCHER_REQUEST": "x"}) == ()
 
 
-def test_asking_is_none_where_an_environment_cannot_be_read(subscribed, monkeypatch):
+def test_asking_is_none_where_an_env_cannot_be_read(subscribed, monkeypatch):
     monkeypatch.setattr(timer, "env_checkable", lambda: False)
     assert api.asking({"MOXI_LAUNCHER_REQUEST": "doctor"}) is None
 

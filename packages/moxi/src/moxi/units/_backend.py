@@ -291,7 +291,7 @@ class Spec:
     environment and its `args`, or a run-time entry's `argv`. A timer's backend wraps it in
     the gate, `moxi run [--if <module>.<switch>] --record <module>/<name> -- <command>`,
     with no `--if` when `switch` is None. `doc` is the entry's one line (the unit's name when
-    it has none). `entry` is the declaration as read. `environment` is the variables the
+    it has none). `entry` is the declaration as read. `env` is the variables the
     unit runs with (`moxi.units.unit_env`), as `(name, value)` pairs: `MOXI_HOME` for a
     tagged home, none for the default home.
     """
@@ -311,7 +311,7 @@ class Spec:
     memory_swap_max: str | None = None
     schedule: Schedule | None = None
     socket: Socket | None = None
-    environment: tuple[tuple[str, str], ...] = ()
+    env: tuple[tuple[str, str], ...] = ()
 
     @property
     def unit(self) -> str:
@@ -386,11 +386,11 @@ class ApplyIO:
     """
 
     def __init__(self, fence: Fence, *, say: Callable[[str], object] = print,
-                 replace: bool = False, displaced: Callable[[Path], Path] | None = None):
+                 replace: bool = False, on_displaced: Callable[[Path], Path] | None = None):
         self.fence = fence
         self._say = say
         self.replace = replace
-        self._displaced = displaced
+        self._on_displaced = on_displaced
         self.lines: dict[int, list[str]] = {}
         self.failed: set[int] = set()
         self.written: list[Path] = []
@@ -399,9 +399,9 @@ class ApplyIO:
     def write(self, change: UnitChange) -> None:
         from .. import files
 
-        if change.foreign is not None and self.replace and self._displaced is not None:
+        if change.foreign is not None and self.replace and self._on_displaced is not None:
             if change.foreign.exists():
-                aside = self._displaced(change.foreign)
+                aside = self._on_displaced(change.foreign)
                 aside.parent.mkdir(parents=True, exist_ok=True)
                 # `shutil.move`, not a rename: the displaced folder may be on another
                 # file system than the unit directory.

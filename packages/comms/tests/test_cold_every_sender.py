@@ -1185,7 +1185,7 @@ def test_a_never_prompted_shim_is_delivered_and_again_after_a_restart(rig, reboo
 
 # ===================================================== (j) the shim's evidence
 
-def test_projects_root_comes_from_the_shims_own_environment(monkeypatch, tmp_path):
+def test_projects_root_comes_from_the_shims_own_env(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     s = ClaudeShim(name="x", scope="y", session_id=SESS_A)
     assert s.projects_root == str(tmp_path / "cfg" / "projects")

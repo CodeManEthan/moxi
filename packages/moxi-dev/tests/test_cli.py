@@ -35,7 +35,7 @@ def test_no_verb_is_a_usage_error(capsys):
     assert stop.value.code == 2
 
 
-def test_contract_checks_a_module_directory_from_the_shell(tmp_path):
+def test_contract_checks_a_module_dir_from_the_shell(tmp_path):
     exe = shutil.which("moxi-dev")
     assert exe, "moxi-dev is not installed in this environment"
     proc = subprocess.run([exe, "contract", "--staged", str(tmp_path)], capture_output=True,

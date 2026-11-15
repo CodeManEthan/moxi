@@ -62,8 +62,8 @@ def from_b64url(text: object) -> bytes:
         raise ValueError("not base64url text")
     try:
         return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
-    except (binascii.Error, ValueError) as err:
-        raise ValueError("not base64url text") from err
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("not base64url text") from exc
 
 
 # --- the signed challenge -------------------------------------------------------------
@@ -177,8 +177,8 @@ def verify_creation(credential: Mapping[str, Any], *, challenge: bytes, origin: 
         verified = verify_registration_response(
             credential=dict(credential), expected_challenge=challenge, expected_rp_id=rp_id,
             expected_origin=origin, require_user_verification=True)
-    except Exception as err:  # noqa: BLE001 - any failure, malformed input included, refuses
-        raise Refused("credential", f"the new passkey doesn't verify: {err}") from None
+    except Exception as exc:  # noqa: BLE001 - any failure, malformed input included, refuses
+        raise Refused("credential", f"the new passkey doesn't verify: {exc}") from None
     return Registered(b64url(verified.credential_id), b64url(verified.credential_public_key),
                       verified.sign_count)
 
@@ -193,8 +193,8 @@ def assertion_parts(credential: object) -> tuple[str, bytes]:
         response = credential["response"]
         client = json.loads(from_b64url(response["clientDataJSON"]))
         challenge = from_b64url(client["challenge"])
-    except (KeyError, TypeError, ValueError) as err:
-        raise Refused("credential", f"the assertion can't be read: {err}") from None
+    except (KeyError, TypeError, ValueError) as exc:
+        raise Refused("credential", f"the assertion can't be read: {exc}") from None
     return raw_id, challenge
 
 
@@ -210,6 +210,6 @@ def verify_assertion(credential: Mapping[str, Any], *, challenge: bytes, origin:
             credential=dict(credential), expected_challenge=challenge, expected_rp_id=rp_id,
             expected_origin=origin, credential_public_key=from_b64url(public_key),
             credential_current_sign_count=sign_count, require_user_verification=True)
-    except Exception as err:  # noqa: BLE001 - any failure, malformed input included, refuses
-        raise Refused("credential", f"the assertion doesn't verify: {err}") from None
+    except Exception as exc:  # noqa: BLE001 - any failure, malformed input included, refuses
+        raise Refused("credential", f"the assertion doesn't verify: {exc}") from None
     return Asserted(verified.new_sign_count)

@@ -64,7 +64,7 @@ def fake(module_fake):
 
 
 @pytest.fixture(autouse=True)
-def own_folder(ui_shell):
+def own_dir(ui_shell):
     """Home opens on a folder of the test's own, so it fills nothing from another test's launch."""
     return kit.fresh_place(ui_shell)
 
@@ -208,10 +208,10 @@ def test_a_row_found_and_changed_is_in_the_launch_and_on_its_groups_line(fake, u
     name.blur()
     find.fill("extra folders")
     expect(panel.locator("[data-row]")).to_have_count(1)
-    folder = str(ui_shell.env["HOME"])
-    row(panel, "add_dir").fill(folder)
+    home_dir = str(ui_shell.env["HOME"])
+    row(panel, "add_dir").fill(home_dir)
     panel.locator('[data-row="add_dir"]').get_by_role("button", name="Add").click()
-    expect(panel.locator('[data-row="add_dir"] li')).to_have_text([f"{folder}Remove"])
+    expect(panel.locator('[data-row="add_dir"] li')).to_have_text([f"{home_dir}Remove"])
     # With the field emptied the groups are back, and say what was changed.
     find.fill("")
     expect(group(panel, "seat").locator(".sum")).to_have_text("Native name helper-1")
@@ -228,7 +228,7 @@ def test_a_row_found_and_changed_is_in_the_launch_and_on_its_groups_line(fake, u
     with ui_page.expect_request(lambda request: request.url.endswith(PREVIEW)) as sent:
         piece.locator(".go").click()
     body = json.loads(sent.value.post_data)
-    assert body["values"]["native_name"] == "helper-1" and body["values"]["add_dir"] == [folder], body
+    assert body["values"]["native_name"] == "helper-1" and body["values"]["add_dir"] == [home_dir], body
     assert body["values"]["brief"] == BRIEF and body["values"]["target"] == "headless", body
     assert "off_posture" not in body and "handoff" not in body["values"], body
     expect(piece.locator('.said [data-line="started"]')).to_be_visible()
@@ -236,7 +236,7 @@ def test_a_row_found_and_changed_is_in_the_launch_and_on_its_groups_line(fake, u
                      10, what="the fake harness's run with the brief")
     argv = run["argv"]
     assert argv[argv.index("-n") + 1] == "helper-1", argv
-    assert argv[argv.index("--add-dir") + 1] == folder, argv
+    assert argv[argv.index("--add-dir") + 1] == home_dir, argv
     # The panel stays open through the launch, with its values.
     expect(row(panel, "native_name")).to_have_value("helper-1")
 
@@ -361,8 +361,8 @@ def test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag
     # A second row, changed after it, is named after it; a row holding no such value is plain.
     panel.locator('button[data-sub="access/Reach"]').click()
     kit.assert_colour(panel.locator('[data-row="add_dir"] .label'), "text")
-    folder = "/srv/proj-a"
-    row(panel, "add_dir").fill(folder)
+    project_dir = "/srv/proj-a"
+    row(panel, "add_dir").fill(project_dir)
     panel.locator('[data-row="add_dir"]').get_by_role("button", name="Add").click()
     marks = changed_line(piece).locator("b")
     expect(marks).to_have_text(["Permission mode", "Extra folders"])

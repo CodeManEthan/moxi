@@ -42,7 +42,7 @@ def test_the_options_slots_relies_on_are_off(server):
     assert out == "off"
 
 
-def test_the_server_starts_with_a_clean_environment(server):
+def test_the_server_starts_with_a_clean_env(server):
     out = tmux.call("show-environment", "-g").out.splitlines()
     names = {line.split("=", 1)[0].lstrip("-") for line in out}
     assert "MOXI_HOME" not in names and "TMPDIR" not in names
@@ -69,13 +69,13 @@ def test_a_second_wrapper_leaves_the_running_server_alone(server):
 
 
 def test_the_wrapper_removes_launch_files_left_from_before(tmux_path):
-    directory = places.launch_dir()
-    directory.mkdir(parents=True, mode=0o700)
-    (directory / "left").write_text("SECRET=1")
+    launch_dir = places.launch_dir()
+    launch_dir.mkdir(parents=True, mode=0o700)
+    (launch_dir / "left").write_text("SECRET=1")
     proc = start_server()
     try:
         wait_answer()
-        assert list(directory.iterdir()) == []
+        assert list(launch_dir.iterdir()) == []
     finally:
         kill(tmux_path, places.socket(), proc)
 

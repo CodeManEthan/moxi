@@ -39,9 +39,6 @@ from moxi.config import ConfigError
 from . import api
 from .errors import NotesError
 
-#: The variable the launcher sets for one launch; read here, never by notes' API.
-OVERRIDE = "MOXI_NOTES_DIR"
-
 _PARSERS: dict[str, argparse.ArgumentParser] = {}
 
 
@@ -154,7 +151,7 @@ def _path(text: str | None) -> str:
 
 
 def _override() -> str | None:
-    return os.environ.get(OVERRIDE) or None
+    return api._env_override()
 
 
 #: Why a folder has no notes directory, by the resolver rule that said so.
@@ -183,11 +180,11 @@ def _dir(args, out) -> int:
 
 
 def _handoffs(args, out) -> int:
-    folder = api.handoffs_dir(_path(args.path), override=_override())
-    if folder is None:
+    handoffs_dir = api.handoffs_dir(_path(args.path), override=_override())
+    if handoffs_dir is None:
         print("no notes directory for this folder, so no handoffs folder", file=sys.stderr)
         return codes.ERROR
-    print(folder, file=out)
+    print(handoffs_dir, file=out)
     return codes.OK
 
 

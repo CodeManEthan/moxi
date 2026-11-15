@@ -124,7 +124,7 @@ class Uninstaller:
     def _run(self, module: str) -> int:
         from . import install
 
-        env = install.environment()
+        env = install.install_env()
         self.env = env
 
         # step 1 ------------------------------------------------------------------

@@ -253,7 +253,7 @@ def test_resolve_answers_ever_bound_none_when_the_binding_history_is_closed(rig)
 
 # --------------------------------------------------------------------------- retired
 
-def test_directory_retired_and_standing_row_ignores_a_retired_row(rig):
+def test_dir_retired_and_standing_row_ignores_a_retired_row(rig):
     retire("captain", "proj-old")
     conn = directory.connect(comms_db(), read_only=True)
     try:

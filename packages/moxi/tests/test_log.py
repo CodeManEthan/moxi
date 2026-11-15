@@ -103,9 +103,9 @@ def run_roller(tmp_path, lines: int, *, named: str | None = None):
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("MOXI_") and k != "JOURNAL_STREAM" or k == "MOXI_ANCHOR_HOME"}
     env["MOXI_LOG_FILE"] = str(named or log_file)
-    with open(log_file, "ab") as out:
-        subprocess.run([sys.executable, "-c", ROLLER, str(lines)], stdout=out,
-                       stderr=out, env=env, check=True, timeout=60)
+    with open(log_file, "ab") as fh:
+        subprocess.run([sys.executable, "-c", ROLLER, str(lines)], stdout=fh,
+                       stderr=fh, env=env, check=True, timeout=60)
     return log_file
 
 

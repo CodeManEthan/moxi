@@ -495,7 +495,7 @@ def test_a_press_without_a_request_id_is_refused_by_the_route(waiting):
 def ended(conn, sid, outcome, word):
     """A keep-warm run ended `outcome`, `word` now, after the session's last request."""
     run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                           session_id=sid, actor="launcher", state="acting",
+                           session_id=sid, by="launcher", state="acting",
                            job=f"proc:{me()}", turn_number=4)
     store.end_run(conn, run.run_id, outcome, word=word)
     return run
@@ -504,7 +504,7 @@ def ended(conn, sid, outcome, word):
 def open_run(conn, sid):
     """A run open on the launch, its job this test's own process."""
     return store.insert_run(conn, kind="relaunch", mode="verb", request_id="r1",
-                            session_id=sid, actor="launcher", state="armed",
+                            session_id=sid, by="launcher", state="armed",
                             job=f"proc:{me()}")
 
 
@@ -512,6 +512,6 @@ def nudges(conn, sid, count):
     """`count` nudged keep-warm runs in a row, the newest opening turn 4."""
     for number in range(4 - count, 4):
         run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
-                               session_id=sid, actor="launcher", state="acting",
+                               session_id=sid, by="launcher", state="acting",
                                job=f"proc:{me()}", turn_number=number)
         store.end_run(conn, run.run_id, "nudged", word="nudged", turn_number=number + 1)

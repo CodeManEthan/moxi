@@ -53,11 +53,12 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .constants import TOKEN_STORE_ENV
+
 log = logging.getLogger("comms.tokens")
 
 #: The variable that overrides config.toml's `[credentials] store` for one process
 #: (settings.toml declares it; moxi.config reads it).
-STORE_ENV_VAR = "MOXI_COMMS_TOKEN_STORE"
 DIR_MODE = 0o700
 FILE_MODE = 0o600
 LOOSE_MASK = 0o077                      # any group/other bit at all is too wide
@@ -298,7 +299,7 @@ class TokenStore:
     def root(self) -> Path:
         if self._root is not None:
             return self._root
-        override = self.env.get(STORE_ENV_VAR)
+        override = self.env.get(TOKEN_STORE_ENV)
         if override:
             return Path(override)
         from . import config
@@ -351,8 +352,8 @@ class TokenStore:
             st = path.stat()
         except (FileNotFoundError, NotADirectoryError):
             return None
-        except OSError as e:
-            raise TokenStoreError(f"the token store is unreadable ({e.strerror}). "
+        except OSError as exc:
+            raise TokenStoreError(f"the token store is unreadable ({exc.strerror}). "
                                   "Nothing was attempted.") from None
         self._check_mode(path, st.st_mode, "file")
         self._check_mode(self.root, self.root.stat().st_mode, "directory")
@@ -434,13 +435,13 @@ class TokenStore:
         log.info("token store: removed [%s] from %s", key, path)
         return True
 
-    def _mkdirs(self, directory: Path) -> None:
+    def _mkdirs(self, holder_dir: Path) -> None:
         root = self.root
         root.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
         os.chmod(root, DIR_MODE)
-        if directory != root:
-            directory.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
-            os.chmod(directory, DIR_MODE)
+        if holder_dir != root:
+            holder_dir.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
+            os.chmod(holder_dir, DIR_MODE)
 
     def owners_present(self) -> list[str]:
         """Holder keys with a file, for the provision verb's summary. Never values."""
@@ -450,7 +451,7 @@ class TokenStore:
         return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
 
 
-__all__ = ["TokenOwner", "TokenStore", "TokenStoreError", "private_file", "OUTSIDE_PROFILE", "STORE_ENV_VAR", "DIR_MODE",
+__all__ = ["TokenOwner", "TokenStore", "TokenStoreError", "private_file", "OUTSIDE_PROFILE", "TOKEN_STORE_ENV", "DIR_MODE",
            "FILE_MODE", "PROVISIONER_FENCE", "LOOSE_PERMISSIONS", "NOT_A_MAP",
            "ROLE_READER", "ROLE_DAEMON", "ROLE_PROVISIONER", "ROLE_OPERATOR",
            "OPERATOR_SECRET_ID", "COMPONENT_RE", "box_roles", "owner_for_role", "holder_of_key",

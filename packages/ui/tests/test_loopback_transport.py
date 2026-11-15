@@ -104,9 +104,9 @@ def test_bind_unix_replaces_a_stale_socket(closing):
 
 @posix
 def test_bind_unix_refuses_a_path_that_is_not_a_socket():
-    directory = Layout("demo").runtime_dir(create=True)
+    runtime_dir = Layout("demo").runtime_dir(create=True)
     path = socket_path("demo", "page")
-    (directory / "page.sock").write_text("not a socket")
+    (runtime_dir / "page.sock").write_text("not a socket")
     with pytest.raises(FileExistsError):
         bind_unix(path)
 
@@ -114,8 +114,8 @@ def test_bind_unix_refuses_a_path_that_is_not_a_socket():
 @posix
 @pytest.mark.parametrize("mode", [0o750, 0o705, 0o770])
 def test_bind_unix_refuses_a_dir_open_to_others(mode):
-    directory = Layout("demo").runtime_dir(create=True)
-    os.chmod(directory, mode)
+    runtime_dir = Layout("demo").runtime_dir(create=True)
+    os.chmod(runtime_dir, mode)
     with pytest.raises(NotPrivate):
         bind_unix(socket_path("demo", "page"))
     assert not os.path.exists(socket_path("demo", "page"))
@@ -306,14 +306,14 @@ def test_windows_restart_on_the_same_fixed_port_is_recorded(monkeypatch, closing
     _serve_once_and_stop(first)
     try:
         keep(closing, bind_browser(first.port))
-    except OSError as err:
-        pytest.xfail(f"Windows refused the restart bind: {err}")
+    except OSError as exc:
+        pytest.xfail(f"Windows refused the restart bind: {exc}")
 
 
 # --- browser_names ------------------------------------------------------------------
 
 
-def listener(closing, family=socket.AF_INET, host="127.0.0.1", port=0, listen=True,
+def listener(closing, family=socket.AF_INET, host="127.0.0.1", port=0, *, listen=True,
              kind=socket.SOCK_STREAM):
     sock = keep(closing, socket.socket(family, kind))
     if family == socket.AF_INET6:

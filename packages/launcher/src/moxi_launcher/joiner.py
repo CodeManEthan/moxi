@@ -419,8 +419,8 @@ def work(each: Pass, launch: Launch) -> dict[str, Any]:
             facts.update(read(each, launch))
         except Late:
             raise
-        except Exception as err:
-            _log_once(err, f"reading a running launch's {read.__name__} failed")
+        except Exception as exc:
+            _log_once(exc, f"reading a running launch's {read.__name__} failed")
     return facts
 
 

@@ -54,8 +54,8 @@ def lay_tokens(source: Path, dest: Path) -> None:
     os.chmod(dest, tokens.DIR_MODE)
     for f in source.iterdir():
         fd = os.open(dest / f.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, tokens.FILE_MODE)
-        with os.fdopen(fd, "wb") as out:
-            out.write(f.read_bytes())
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(f.read_bytes())
         os.chmod(dest / f.name, tokens.FILE_MODE)
 
 
@@ -128,7 +128,7 @@ def test_the_move_carries_every_row_and_makes_rows_for_row_less_mail(soon):
                               "7 message(s), 5 queue row(s) (3 made")
     assert upgrade_0_2.FENCED_LINE.format(name="planner") in said
     for p in upgrade_0_2_paths().values():
-        assert not p.exists() and upgrade_0_2.moved_name(p).exists()
+        assert not p.exists() and upgrade_0_2.moved_path(p).exists()
     assert not Path(f"{store.path()}.new").exists()
 
 
@@ -230,10 +230,10 @@ def test_a_move_stopped_after_its_commit_finishes_its_renames(soon, monkeypatch)
     said = []
     store.open_write(report=said.extend).close()
     assert said[0].startswith("finished the move")
-    assert all(upgrade_0_2.moved_name(p).exists() for p in found.values())
+    assert all(upgrade_0_2.moved_path(p).exists() for p in found.values())
 
 
-def test_a_stopped_move_whose_cursor_folder_alone_is_left_finishes_it(soon, monkeypatch):
+def test_a_stopped_move_whose_cursor_dir_alone_is_left_finishes_it(soon, monkeypatch):
     """The cursor folder counts as comms 0.2's when the move fingerprinted it: left
     under its 0.2 name alone, it still makes the next open finish the move."""
     found = zero_two_home()
@@ -246,12 +246,12 @@ def test_a_stopped_move_whose_cursor_folder_alone_is_left_finishes_it(soon, monk
     monkeypatch.setattr(upgrade_0_2, "_rename", real)
     for role, p in found.items():
         if role != "cursors":
-            os.replace(p, upgrade_0_2.moved_name(p))
+            os.replace(p, upgrade_0_2.moved_path(p))
     assert store.zero_two_files() == [found["cursors"]]
     said = []
     store.open_write(report=said.extend).close()
     assert said[0].startswith("finished the move")
-    assert upgrade_0_2.moved_name(found["cursors"]).is_dir()
+    assert upgrade_0_2.moved_path(found["cursors"]).is_dir()
     assert not found["cursors"].exists()
 
 
@@ -362,7 +362,7 @@ def test_another_backends_cursor_files_are_named_and_skipped(soon):
     assert rows("SELECT name FROM cursors") == [("reviewer@proj-a",)]
 
 
-def test_older_directory_shapes_are_carried_as_0_2_read_them(soon):
+def test_older_dir_shapes_are_carried_as_0_2_read_them(soon):
     """Rooms from before one room carry with no kind; an agents table with no kind
     column reads as `agent`; a webhooks table isn't read."""
     found = zero_two_home()
@@ -400,8 +400,8 @@ def run_setup():
     name, _, attr = module.SETUP.partition(":")
     try:
         result = getattr(importlib.import_module(name), attr)()
-    except SystemExit as e:
-        result = e.code
+    except SystemExit as exc:
+        result = exc.code
     if isinstance(result, int) and not isinstance(result, bool):
         return result, None
     return (1, result) if isinstance(result, str) else (0, None)
@@ -439,7 +439,7 @@ def test_setup_leaves_the_move_to_the_daemon_while_0_2s_daemon_answers(capsys):
 def test_setup_moves_0_2s_files_and_provisions(soon, capsys):
     found = zero_two_home()
     assert run_setup() == (0, None)
-    assert all(upgrade_0_2.moved_name(p).exists() for p in found.values())
+    assert all(upgrade_0_2.moved_path(p).exists() for p in found.values())
     assert rows("SELECT value FROM meta WHERE key = 'migrated_from'") == [("0.2",)]
 
 

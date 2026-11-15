@@ -61,8 +61,8 @@ def wheel_from_pypi(name: str, version: str) -> bytes:
     raise SystemExit(f"PyPI has no {wanted}")
 
 
-def wheel_from_dir(directory: Path, name: str, version: str) -> bytes:
-    path = directory / f"{name}-{version}-py3-none-any.whl"
+def wheel_from_dir(wheel_dir: Path, name: str, version: str) -> bytes:
+    path = wheel_dir / f"{name}-{version}-py3-none-any.whl"
     if not path.is_file():
         raise SystemExit(f"{path} does not exist")
     return path.read_bytes()

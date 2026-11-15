@@ -53,6 +53,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from ..paths import HOME_ENV
+
 from ._backend import (
     ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, enabled_by_socket,
     listen_address, socket_name, socket_place, socket_state)
@@ -94,9 +96,9 @@ _PLAIN = re.compile(r"[A-Za-z0-9_@%$+=:,./-]+")
 def unit_dir(env: Mapping[str, str] | None = None) -> Path:
     """The user unit directory: `$XDG_CONFIG_HOME/systemd/user`, else
     `~/.config/systemd/user`."""
-    environ = os.environ if env is None else env
-    base = environ.get("XDG_CONFIG_HOME") or os.path.join(
-        environ.get("HOME") or os.path.expanduser("~"), ".config")
+    effective_env = os.environ if env is None else env
+    base = effective_env.get("XDG_CONFIG_HOME") or os.path.join(
+        effective_env.get("HOME") or os.path.expanduser("~"), ".config")
     return Path(base) / "systemd" / "user"
 
 
@@ -122,7 +124,7 @@ def quote(arg: str) -> str:
     return '"' + "".join(out) + '"'
 
 
-def environment_line(name: str, value: str) -> str:
+def environment_line(name: str, value: str) -> str:  # noqa: MX3 -- systemd names this an Environment= line
     """One `Environment=` line setting `name` to `value`, by that setting's rules: the
     assignment in double quotes, `\\` and `"` escaped, a control character written as a
     C escape, `%` doubled (a specifier), and `$` left alone, since systemd expands no
@@ -297,7 +299,7 @@ class SystemdBackend:
                                "WantedBy=sockets.target"]
                     sockets.append((root / unit, _text(socket)))
             service = head + ["[Unit]", f"Description={_value(doc)}", "", "[Service]",
-                              "Type=simple", *_environment(spec),
+                              "Type=simple", *_env(spec),
                               f"ExecStart={command_line(spec.command)}"]
             if sockets:
                 # By default a service is handed only the socket unit of its own name.
@@ -320,7 +322,7 @@ class SystemdBackend:
                 out.append(Rendered("socket", tuple(sockets)))
             return tuple(out)
         service = head + ["[Unit]", f"Description={_value(doc)}", "", "[Service]",
-                          "Type=oneshot", *_environment(spec),
+                          "Type=oneshot", *_env(spec),
                           f"ExecStart={command_line(_gate_argv(spec))}"]
         if spec.cwd:
             service.append(f"WorkingDirectory={_path_value(spec.cwd, 'cwd')}")
@@ -846,7 +848,7 @@ class SystemdBackend:
         from .. import files, paths
 
         def no(line: str) -> Acted:
-            return Acted(None, ref, "wrap", False, (line,))
+            return Acted(None, ref, "wrap", ok=False, lines=(line,))
 
         if self.own(ref):
             return no(f"{ref} is in moxi's own unit names; only a foreign timer is wrapped")
@@ -917,7 +919,7 @@ class SystemdBackend:
         record = f"{module}/{name}"
         # The gate is told the home rather than the service given `MOXI_HOME`, which
         # would reach the foreign unit's own command too.
-        home = unit_env(module).get("MOXI_HOME")
+        home = unit_env(module).get(HOME_ENV)
         run = [gate, "run"] + (["--home", home] if home else [])
         text = _text([
             f"{WRAP_MARK}{record}",
@@ -933,7 +935,7 @@ class SystemdBackend:
         if not ran.ok:
             return no(ran.failure() + f"; {path} is written, and applies at the next "
                                       "daemon-reload")
-        return Acted(None, ref, "wrap", True, (
+        return Acted(None, ref, "wrap", ok=True, lines=(
             f"{ref}: its runs are behind {switch} and recorded as {record}",
             f"turn them on with: moxi config set {module} {key} true"))
 
@@ -955,7 +957,8 @@ class SystemdBackend:
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
         found = [path for path, mark in self._drop_ins(module) if mark[1] == ref]
         if not found:
-            return Acted(None, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
+            return Acted(None, ref, "unwrap", ok=True,
+                         lines=(f"{ref} is not wrapped by {module}",))
         for path in found:
             _delete(path)
         ran = fence.run("daemon-reload")
@@ -979,17 +982,17 @@ def dropin_name(module: str) -> str:
     return f"50-moxi-{module}.conf" if tag is None else f"50-moxi-{tag}-{module}.conf"
 
 
-def _environment(spec: Spec) -> list[str]:
+def _env(spec: Spec) -> list[str]:
     """A service's `Environment=` lines: one per variable the unit runs with."""
-    return [environment_line(name, value) for name, value in spec.environment]
+    return [environment_line(name, value) for name, value in spec.env]
 
 
 def _read_wrap(path: Path) -> tuple[str, str, str, str] | None:
     """A drop-in's two mark lines as `(module, timer, key, name)`, or None for a file
     without them."""
     try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            first, second = handle.readline().rstrip("\n"), handle.readline().rstrip("\n")
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            first, second = fh.readline().rstrip("\n"), fh.readline().rstrip("\n")
     except OSError:
         return None
     if not first.startswith(WRAP_MARK):
@@ -1194,7 +1197,7 @@ class SocketStarts:
                 # Its login link is made or kept even though nothing starts it now.
                 if login and not self._run(io, daemon, "enable", service):
                     return
-                io.say(daemon, _login_line(service, login) if login_only else
+                io.say(daemon, _login_line(service, login=login) if login_only else
                        f"{service} rewritten; the new code runs from its next start")
             return
         found = "down" if self._new(key) else (
@@ -1316,7 +1319,7 @@ def _outside_install(text: str) -> list[str]:
     return out
 
 
-def _login_line(unit: str, login: bool) -> str:
+def _login_line(unit: str, *, login: bool) -> str:
     """The line for a login-only change, which runs no stop or restart."""
     now = "starts it from now on" if login else "no longer starts it"
     return f"{unit} rewritten: a login {now}; a running daemon is left as it is"

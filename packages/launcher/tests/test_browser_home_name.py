@@ -80,14 +80,14 @@ def fake(module_fake):
     return module_fake
 
 
-@pytest.fixture
-def folder(shell):
+@pytest.fixture(name="work_dir")
+def work_dir_fixture(shell):
     """Home opens on a folder of the test's own, which no launch has run in."""
     return kit.fresh_place(shell)
 
 
 @pytest.fixture
-def page(shell, fake, folder, ui_contexts):
+def page(shell, fake, work_dir, ui_contexts):
     return ui_contexts(shell).pages[0]
 
 
@@ -158,21 +158,21 @@ def saved(page, found) -> dict:
 
 
 def test_the_name_follows_the_model_and_a_typed_name_is_a_change_until_the_template_is_taken(
-        page, shell, folder):
+        page, shell, work_dir):
     piece = kit.open_home(page)
     panel = name_row(piece)
     name = field(panel)
     expect(name).to_have_value("")
-    expect(name).to_have_attribute("placeholder", re.compile(rf"^{folder.name}-{DATE}$"))
+    expect(name).to_have_attribute("placeholder", re.compile(rf"^{work_dir.name}-{DATE}$"))
     expect(note(panel)).to_have_text(
         f"From the template for every launch. It follows the project, the model and the clock; {TYPE_OVER}")
     kit.assert_colour(note(panel), "text-dim")
     pick_model(page, piece, "opus")
-    expect(name).to_have_attribute("placeholder", re.compile(rf"^{folder.name}-opus-{DATE}$"))
+    expect(name).to_have_attribute("placeholder", re.compile(rf"^{work_dir.name}-opus-{DATE}$"))
     # A launch with no name typed leaves it out, and takes the template's.
     body = launch(page, piece, "name this launch from its template")
     assert "name" in body["leave_out"] and "name" not in body["values"], body
-    assert re.fullmatch(rf"{folder.name}-opus-{DATE}", kit.newest_launch(shell).values["name"])
+    assert re.fullmatch(rf"{work_dir.name}-opus-{DATE}", kit.newest_launch(shell).values["name"])
     # Typed over, it is a change like any row, and the launch takes it.
     name.fill("orders-skeleton")
     expect(note(panel)).to_have_text("Typed for this launch. Use the template")
@@ -184,13 +184,13 @@ def test_the_name_follows_the_model_and_a_typed_name_is_a_change_until_the_templ
     # `Use the template` lets go of it.
     note(panel).get_by_role("button", name="Use the template").click()
     expect(name).to_have_value("")
-    expect(name).to_have_attribute("placeholder", re.compile(rf"^{folder.name}-opus-{DATE}$"))
+    expect(name).to_have_attribute("placeholder", re.compile(rf"^{work_dir.name}-opus-{DATE}$"))
     expect(piece.locator('[data-line="changed"]')).to_have_count(0)
     expect(note(panel)).to_contain_text("From the template for every launch.")
 
 
 def test_an_edited_template_renders_unsaved_is_refused_then_saved_and_the_next_read_names_it(
-        page, folder, unsaved):
+        page, work_dir, unsaved):
     piece = kit.open_home(page)
     panel = name_row(piece)
     found = editor(panel)
@@ -207,23 +207,23 @@ def test_an_edited_template_renders_unsaved_is_refused_then_saved_and_the_next_r
     # Each edit is rendered unsaved.
     found.get_by_role("button", name="Take out date").click()
     expect(written(found)).to_have_value("<project>-<model>-<agent>")
-    expect(field(panel)).to_have_attribute("placeholder", folder.name)
+    expect(field(panel)).to_have_attribute("placeholder", work_dir.name)
     # A template the page server would refuse says why, and can't be saved.
     written(found).fill("<project>-<n>")
     expect(found.locator("[data-refused]")).to_have_text(re.compile(
         r"^the name template holds <n>, which is not a piece a name is made of\. use <project>, "))
     expect(found.get_by_role("button", name="Save template")).to_be_disabled()
     written(found).fill("<project>-kept")
-    expect(field(panel)).to_have_attribute("placeholder", f"{folder.name}-kept")
+    expect(field(panel)).to_have_attribute("placeholder", f"{work_dir.name}-kept")
     expect(found.locator("[data-refused]")).to_have_count(0)
     assert saved(page, found) == {"module": "launcher", "key": "name.template", "value": "<project>-kept"}
     expect(panel.locator("[data-editor]")).to_have_count(0)
     expect(note(panel)).to_have_text(f"From the template for every launch. It follows the project; {TYPE_OVER}")
-    expect(field(panel)).to_have_attribute("placeholder", f"{folder.name}-kept")
+    expect(field(panel)).to_have_attribute("placeholder", f"{work_dir.name}-kept")
     # A fresh Home reads the saved template.
     piece = kit.open_home(page)
     panel = name_row(piece)
-    expect(field(panel)).to_have_attribute("placeholder", f"{folder.name}-kept")
+    expect(field(panel)).to_have_attribute("placeholder", f"{work_dir.name}-kept")
     expect(written(editor(panel))).to_have_value("<project>-kept")
 
 
@@ -246,7 +246,7 @@ def test_a_template_kept_for_the_project_names_its_launches_and_says_whose_it_is
     expect(field(panel)).to_have_attribute("placeholder", "proj-a-own")
 
 
-def test_a_folder_inside_a_project_says_the_projects_template_and_keeps_an_edit_for_it(
+def test_a_dir_inside_a_project_says_the_projects_template_and_keeps_an_edit_for_it(
         page, shell, unsaved):
     (Path(shell.env["HOME"]) / "work" / "proj-a" / "sub").mkdir(exist_ok=True)
     status, answer = kit.session(shell).post(SAVE, {"module": "launcher", "key": "name.templates",
@@ -275,13 +275,13 @@ def test_a_folder_inside_a_project_says_the_projects_template_and_keeps_an_edit_
 
 def test_on_a_shell_started_with_the_template_locked_the_save_is_refused_in_the_shells_words(
         locked_shell, fake, ui_contexts):
-    folder = kit.fresh_place(locked_shell)
+    place_dir = kit.fresh_place(locked_shell)
     page = ui_contexts(locked_shell).pages[0]
     piece = kit.open_home(page)
     panel = name_row(piece)
     found = editor(panel)
     written(found).fill("<project>-locked")
-    expect(field(panel)).to_have_attribute("placeholder", f"{folder.name}-locked")
+    expect(field(panel)).to_have_attribute("placeholder", f"{place_dir.name}-locked")
     with page.expect_response(lambda answer: answer.url.endswith(SAVE)) as answered:
         found.get_by_role("button", name="Save template").click()
     assert answered.value.status == 422
@@ -290,6 +290,6 @@ def test_on_a_shell_started_with_the_template_locked_the_save_is_refused_in_the_
     # Nothing was written: the name is still the shipped template's.
     found.get_by_role("button", name="Cancel").click()
     expect(panel.locator("[data-editor]")).to_have_count(0)
-    expect(field(panel)).to_have_attribute("placeholder", re.compile(rf"^{folder.name}-{DATE}$"))
+    expect(field(panel)).to_have_attribute("placeholder", re.compile(rf"^{place_dir.name}-{DATE}$"))
     written_file = locked_shell.config_file("launcher")
     assert not written_file.exists() or "<project>-locked" not in written_file.read_text()

@@ -71,7 +71,7 @@ def test_one_run_goes_at_a_time_and_each_start_and_end_is_told(tmp_path):
 
     async def scene():
         doctor = _Doctor()
-        checks = Checks(tmp_path / CHECKS_FILE, run=doctor, changed=told.append)
+        checks = Checks(tmp_path / CHECKS_FILE, run=doctor, on_changed=told.append)
         assert checks.ask()["running"] and checks.ask()["running"]
         assert checks.run_now()["running"]
         await asyncio.sleep(0.05)
@@ -172,7 +172,7 @@ def test_with_the_runs_off_nothing_is_started(tmp_path):
 
     async def scene():
         doctor = _Doctor()
-        checks = Checks(tmp_path / CHECKS_FILE, run=doctor, changed=told.append,
+        checks = Checks(tmp_path / CHECKS_FILE, run=doctor, on_changed=told.append,
                         enabled=False)
         nothing = {"at": None, "running": False, "rows": [], "error": None}
         assert checks.ask() == nothing and checks.run_now() == nothing

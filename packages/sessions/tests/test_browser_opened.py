@@ -92,7 +92,7 @@ def seed(env: dict[str, str]) -> None:
     changed_at(rollout.write(), noon(4).timestamp())
 
     db = OpenCodeDb(Path(env["XDG_DATA_HOME"]) / "opencode")
-    db.session(title="a title the harness made", directory="/work/proj-c", at=noon(5).timestamp())
+    db.session(title="a title the harness made", work_dir="/work/proj-c", at=noon(5).timestamp())
     db.write()
 
 
@@ -135,14 +135,14 @@ def test_an_opened_row_shows_every_piece_and_is_read_only_once_opened(seeded, ui
     one = row(view, "claude", sid(1))
     one.get_by_role("button", name="Open").click()
     det = opened(one)
-    expect(det.locator('[data-line="you"]')).to_have_text(re.compile(r"^You\s*\d.*" + re.escape(PROMPT) + "$"))
-    expect(det.locator('[data-line="reply"]')).to_have_text(re.compile(r"^Reply\s*\d.*" + re.escape(REPLY) + "$"))
+    expect(det.locator('[data-line="you"]')).to_have_text(re.compile(r"^You\s*(?:yesterday )?\d.*" + re.escape(PROMPT) + "$"))
+    expect(det.locator('[data-line="reply"]')).to_have_text(re.compile(r"^Reply\s*(?:yesterday )?\d.*" + re.escape(REPLY) + "$"))
     subs = det.locator('[data-line="subagent"]')
     expect(subs).to_have_count(2)
     expect(subs.filter(has_text="List the callers")).to_contain_text("Found three callers.")
     expect(subs.filter(has_text="Read the deploy logs")).to_have_text(
         re.compile(r"^Read the deploy logs\s*· Explore · .+ to .+The check ran too early\.$", re.S))
-    expect(det.locator('[data-line="session"]')).to_have_text(re.compile(r"^Session\s*claude · \S+\s*· today .+ to .+$"))
+    expect(det.locator('[data-line="session"]')).to_have_text(re.compile(r"^Session\s*claude · \S+\s*· (?:today|yesterday) .+ to .+$"))
     resume = det.locator('[data-line="resume"]')
     expect(resume.locator("code")).to_have_text(f"claude --resume {sid(1)}")
     expect(resume.locator('[data-line="where"]')).to_have_text("run it in /work/proj-a")
@@ -166,7 +166,7 @@ def test_a_piece_whose_fact_was_not_read_is_not_drawn(seeded, ui_page):
     view = open_list(ui_page)
     # No folder, no typed message, no reply, no subagents, no model: the session line and the foot.
     _, det = open_row(view, "claude", sid(3))
-    expect(det.locator('[data-line="session"]')).to_have_text(re.compile(r"^Session\s*claude\s*· today .+ to .+$"))
+    expect(det.locator('[data-line="session"]')).to_have_text(re.compile(r"^Session\s*claude\s*· (?:today|yesterday) .+ to .+$"))
     for absent in ("you", "reply", "subagents", "resume"):
         expect(det.locator(f'[data-line="{absent}"]')).to_have_count(0)
     expect(det.locator(".r")).to_have_count(1)
@@ -317,7 +317,7 @@ def test_an_opened_row_fits_a_phone(seeded, ui_page, ui_width_check):
 def test_a_row_is_opened_read_and_left_for_its_transcript_by_keyboard(seeded, ui_page):
     view = open_list(ui_page)
     one = row(view, "claude", sid(1))
-    line = one.get_by_role("button", name=re.compile(r"^proj-a · started today "))
+    line = one.get_by_role("button", name=re.compile(r"^proj-a · started (?:today|yesterday) "))
     line.focus()
     ui_page.keyboard.press("Enter")
     det = opened(one)

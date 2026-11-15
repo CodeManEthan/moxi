@@ -107,8 +107,8 @@ def check_private_dir(path: str | os.PathLike) -> None:
     """
     try:
         st = os.lstat(path)
-    except OSError as err:
-        raise NotPrivate(f"{path} cannot be checked: {err.strerror}") from None
+    except OSError as exc:
+        raise NotPrivate(f"{path} cannot be checked: {exc.strerror}") from None
     if stat.S_ISLNK(st.st_mode):
         raise NotPrivate(f"{path} is a symbolic link")
     if not stat.S_ISDIR(st.st_mode):
@@ -174,8 +174,8 @@ def bind_browser(port: int = 0) -> BrowserSockets:
         except BaseException:
             v6.close()
             raise
-    except OSError as err:
-        names = BASE_NAMES if err.errno in _NO_IPV6 else _V4_ONLY
+    except OSError as exc:
+        names = BASE_NAMES if exc.errno in _NO_IPV6 else _V4_ONLY
         return BrowserSockets((v4,), bound, names)
     except BaseException:
         v4.close()
@@ -201,8 +201,8 @@ def browser_names(sockets: Iterable[socket.socket]) -> frozenset[str]:
         try:
             listening = sock.getsockopt(socket.SOL_SOCKET, _SO_ACCEPTCONN)
             address = sock.getsockname()
-        except OSError as err:
-            raise NotLoopback(f"an inherited socket cannot be read: {err}") from None
+        except OSError as exc:
+            raise NotLoopback(f"an inherited socket cannot be read: {exc}") from None
         if not listening:
             raise NotLoopback("an inherited socket is not listening")
         if sock.family == socket.AF_INET and address[0] == _V4:
@@ -254,8 +254,8 @@ def _bind_v6(port: int) -> socket.socket:
 def _no_ipv6_loopback() -> bool:
     try:
         _bind_v6(0).close()
-    except OSError as err:
-        return err.errno in _NO_IPV6
+    except OSError as exc:
+        return exc.errno in _NO_IPV6
     return False
 
 
@@ -341,8 +341,8 @@ async def open_connection(info: RuntimeInfo, *, timeout: float = 5.0) -> tuple[A
             if time.monotonic() >= deadline:
                 raise
             raise NotOurServer(f"no answer to {PROVE_PATH} within {PROVE_LIMIT} s") from None
-        except (OSError, asyncio.IncompleteReadError, asyncio.LimitOverrunError) as err:
-            raise NotOurServer(f"{PROVE_PATH} failed: {err!r}") from None
+        except (OSError, asyncio.IncompleteReadError, asyncio.LimitOverrunError) as exc:
+            raise NotOurServer(f"{PROVE_PATH} failed: {exc!r}") from None
         try:
             conn.receive_data(head)
             event = conn.next_event()
@@ -350,8 +350,8 @@ async def open_connection(info: RuntimeInfo, *, timeout: float = 5.0) -> tuple[A
                 raise NotOurServer(f"{PROVE_PATH} gave no answer")
             _check_proof(info, nonce, event.status_code, event.headers)
             end = conn.next_event()
-        except h11.ProtocolError as err:
-            raise NotOurServer(f"{PROVE_PATH} answered badly: {err}") from None
+        except h11.ProtocolError as exc:
+            raise NotOurServer(f"{PROVE_PATH} answered badly: {exc}") from None
         if not isinstance(end, h11.EndOfMessage) or conn.their_state is not h11.DONE:
             raise NotOurServer(f"the server closes the connection after {PROVE_PATH}")
         return reader, writer
@@ -391,8 +391,8 @@ def call(info: RuntimeInfo, method: str, path: str, body: Any = None, *,
             if time.monotonic() >= deadline:
                 raise
             raise NotOurServer(f"no answer to {PROVE_PATH} within {PROVE_LIMIT} s") from None
-        except (OSError, h11.ProtocolError) as err:
-            raise NotOurServer(f"{PROVE_PATH} failed: {err!r}") from None
+        except (OSError, h11.ProtocolError) as exc:
+            raise NotOurServer(f"{PROVE_PATH} failed: {exc!r}") from None
         _check_proof(info, nonce, status, headers)
         if conn.our_state is not h11.DONE or conn.their_state is not h11.DONE:
             raise NotOurServer(f"the server closes the connection after {PROVE_PATH}")
@@ -409,8 +409,8 @@ def call(info: RuntimeInfo, method: str, path: str, body: Any = None, *,
         _send(sock, message, deadline)
         try:
             status, _, data = _receive(sock, conn, deadline)
-        except h11.ProtocolError as err:
-            raise ConnectionError(f"the server answered badly: {err}") from None
+        except h11.ProtocolError as exc:
+            raise ConnectionError(f"the server answered badly: {exc}") from None
     finally:
         sock.close()
     if not data:

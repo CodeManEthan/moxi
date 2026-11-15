@@ -814,16 +814,16 @@ def test_edit_toml_holds_the_files_lock(tmp_path, holder):
 
 
 def test_edit_toml_takes_the_lock_it_is_given_and_none_beside_the_file(tmp_path, holder):
-    folder = tmp_path / "loadout"
-    folder.mkdir()
-    target = folder / "loadout.toml"
+    loadout_dir = tmp_path / "loadout"
+    loadout_dir.mkdir()
+    target = loadout_dir / "loadout.toml"
     target.write_text("a = 1\n")
     given = tmp_path / "state" / "loadout" / "manifest.lock"
     with files.edit_toml(target, lock=given) as doc:
         doc["a"] = 2
     assert target.read_text() == "a = 2\n" and given.exists()
-    assert [p.name for p in folder.iterdir()] == ["loadout.toml"]
-    holder(folder / "loadout.toml.lock")          # the default lock is not waited on
+    assert [p.name for p in loadout_dir.iterdir()] == ["loadout.toml"]
+    holder(loadout_dir / "loadout.toml.lock")          # the default lock is not waited on
     with files.edit_toml(target, timeout_s=0.1, lock=given) as doc:
         doc["a"] = 3
     assert target.read_text() == "a = 3\n"
@@ -835,11 +835,11 @@ def test_edit_toml_takes_the_lock_it_is_given_and_none_beside_the_file(tmp_path,
 
 
 def test_edit_toml_without_a_lock_leaves_its_lock_beside_the_file(tmp_path):
-    folder = tmp_path / "loadout"
-    target = folder / "loadout.toml"
+    loadout_dir = tmp_path / "loadout"
+    target = loadout_dir / "loadout.toml"
     with files.edit_toml(target) as doc:
         doc["a"] = 1
-    assert sorted(p.name for p in folder.iterdir()) == ["loadout.toml", "loadout.toml.lock"]
+    assert sorted(p.name for p in loadout_dir.iterdir()) == ["loadout.toml", "loadout.toml.lock"]
 
 
 def test_importing_moxi_files_loads_no_tomlkit():
@@ -928,7 +928,7 @@ def test_append_record_with_no_cap_never_rolls_and_takes_any_line(tmp_path):
     assert files.read_records(log) == [big, big, {"i": 2}]
 
 
-def test_a_durable_append_flushes_the_file_and_the_directory_it_made_the_file_in(
+def test_a_durable_append_flushes_the_file_and_the_dir_it_made_the_file_in(
         tmp_path, monkeypatch):
     """`durable=True` flushes the file after each write, and its directory only when that
     write created the file (POSIX); the default flushes nothing."""
@@ -956,7 +956,7 @@ def test_a_durable_append_flushes_the_file_and_the_directory_it_made_the_file_in
     assert files.read_records(log) == [{"i": 1}, {"i": 2}]
 
 
-def test_a_durable_append_that_rolls_flushes_the_new_files_directory(tmp_path, monkeypatch):
+def test_a_durable_append_that_rolls_flushes_the_new_files_dir(tmp_path, monkeypatch):
     dirs: list[Path] = []
     monkeypatch.setattr(files, "_fsync_dir", dirs.append)
     log = tmp_path / "logs" / "r.jsonl"
@@ -1060,7 +1060,7 @@ def test_read_records_tail_reads_only_the_end(tmp_path, monkeypatch):
 # -- private_dir -------------------------------------------------------------------------
 
 @POSIX
-def test_private_dir_makes_a_0700_directory(tmp_path):
+def test_private_dir_makes_a_0700_dir(tmp_path):
     made = files.private_dir(tmp_path / "a" / "b")
     assert made == tmp_path / "a" / "b"
     assert made.is_dir() and mode_of(made) == 0o700
@@ -1076,7 +1076,7 @@ def test_private_dir_clears_group_and_other_bits(tmp_path):
 
 
 @POSIX
-def test_private_dir_refuses_another_users_directory(tmp_path, monkeypatch):
+def test_private_dir_refuses_another_users_dir(tmp_path, monkeypatch):
     existing = tmp_path / "d"
     existing.mkdir()
     monkeypatch.setattr(os, "getuid", lambda: os.stat(existing).st_uid + 1)
@@ -1138,7 +1138,7 @@ MAKERS = {
 
 @POSIX
 @pytest.mark.parametrize("maker", MAKERS)
-def test_each_missing_directory_on_the_way_is_made_0700(tmp_path, open_umask, maker):
+def test_each_missing_dir_on_the_way_is_made_0700(tmp_path, open_umask, maker):
     shared = tmp_path / "shared"
     shared.mkdir()
     os.chmod(shared, 0o775)
@@ -1150,7 +1150,7 @@ def test_each_missing_directory_on_the_way_is_made_0700(tmp_path, open_umask, ma
 
 
 @POSIX
-def test_making_directories_leaves_an_existing_one_as_it_is(tmp_path, open_umask):
+def test_making_dirs_leaves_an_existing_one_as_it_is(tmp_path, open_umask):
     middle = tmp_path / "a" / "b"
     middle.mkdir(parents=True)
     os.chmod(tmp_path / "a", 0o751)
@@ -1162,13 +1162,13 @@ def test_making_directories_leaves_an_existing_one_as_it_is(tmp_path, open_umask
 
 
 @POSIX
-def test_a_directory_made_without_privacy_gets_the_default_mode(tmp_path, open_umask):
+def test_a_dir_made_without_privacy_gets_the_default_mode(tmp_path, open_umask):
     files._make_dirs(tmp_path / "a" / "b", private=False)
     assert mode_of(tmp_path / "a") == 0o777
     assert mode_of(tmp_path / "a" / "b") == 0o777
 
 
-def test_making_directories_refuses_a_file_in_the_way(tmp_path):
+def test_making_dirs_refuses_a_file_in_the_way(tmp_path):
     (tmp_path / "a").write_text("")
     with pytest.raises(FileExistsError):
         files._make_dirs(tmp_path / "a")
@@ -1385,7 +1385,7 @@ def test_a_summary_is_as_durable_as_its_classes_rows(tmp_path, monkeypatch):
     synced: list[int] = []
     real = os.fsync
     monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real(fd)))
-    monkeypatch.setattr(files, "_fsync_dir", lambda directory: None)
+    monkeypatch.setattr(files, "_fsync_dir", lambda target_dir: None)
     log = tmp_path / "day.jsonl"
     window = files.Collapse(after=0, clock=Clock(T0))
     files.append_record(log, {"i": 0}, durable=True, collapse=(window, "open"))

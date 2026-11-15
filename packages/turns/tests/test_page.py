@@ -314,8 +314,8 @@ def test_each_session_carries_the_declared_fields_and_cwd_is_a_path():
 
 def test_the_first_read_lists_the_session_with_its_facts_and_agents(make_endpoint):
     fake = FakeHarness()
-    fake.entries = [Agent("a1", "subagent", "running", False, "look around", None),
-                    Agent("a2", "subagent", "done", True, None, "a1")]
+    fake.entries = [Agent("a1", "subagent", "running", final=False, description="look around", parent_id=None),
+                    Agent("a2", "subagent", "done", final=True, description=None, parent_id="a1")]
     ep, _ = make_endpoint(fake, session_id="s-1")
     ep.ready("startup", "s-1")
 

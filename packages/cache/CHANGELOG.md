@@ -2,6 +2,8 @@
 
 ## 0.1.6 (unreleased)
 
+- Public names renamed for the naming rules (callers passing the old keyword or reading
+  the old name must change): `moxi_cache.api.asking`: `environ` is now `env`.
 - Each clock record carries `asks`: the names of the timer's subscriptions the watcher
   that wrote it will ask about the session when their window comes, by the environment
   the session's process started with. It is null while the watcher's timer has loaded

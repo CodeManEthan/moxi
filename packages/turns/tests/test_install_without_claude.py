@@ -50,9 +50,9 @@ def _normal(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _project(directory: Path) -> dict:
-    with (directory / "pyproject.toml").open("rb") as f:
-        return tomllib.load(f)["project"]
+def _project(package_dir: Path) -> dict:
+    with (package_dir / "pyproject.toml").open("rb") as fh:
+        return tomllib.load(fh)["project"]
 
 
 def _members() -> dict[str, Path]:
@@ -111,10 +111,10 @@ SKIPPED = ("turns: Claude Code not found; skipped its plugin. Run moxi install t
 def wheels(tmp_path, uv_env) -> dict[str, Path]:
     """Each built package's wheel, by normalized name."""
     out = {}
-    for name, directory in BUILT.items():
+    for name, package_dir in BUILT.items():
         dist = tmp_path / "dist" / name
         done = subprocess.run([UV, "build", "--wheel", "--out-dir", str(dist),
-                               str(directory)], capture_output=True, text=True,
+                               str(package_dir)], capture_output=True, text=True,
                               timeout=300, env=uv_env, check=False)
         assert done.returncode == 0, done.stderr
         [out[name]] = dist.glob("*.whl")

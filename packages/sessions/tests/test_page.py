@@ -133,7 +133,7 @@ def claude_turns(root: Path, turns: int = 3) -> ClaudeTranscript:
     t = ClaudeTranscript(root)
     for n in range(turns):
         t.user(f"turn {n}")
-        req = t.request(usage_block=usage(input=3, cache_read=900, output=40))
+        req = t.request(usage_block=usage(input_tokens=3, cache_read=900, output=40))
         req.thinking("which file?")
         call = req.tool_use("Read", {"file_path": "/work/project/notes.md"})
         t.tool_result(call, "the notes, which the page never sends")
@@ -164,7 +164,7 @@ def opencode_turns(root: Path, turns: int = 3) -> tuple[OpenCodeDb, object]:
         a.step_start()
         a.tool("bash", {"command": "pytest -q"}, output="the output, never sent")
         a.text(f"done {n}")
-        a.step_finish(input=900, output=40, cache_read=1200)
+        a.step_finish(input_tokens=900, output=40, cache_read=1200)
         a.complete()
     return db, s
 
@@ -525,18 +525,18 @@ def test_a_session_with_no_subagents_lists_none(roots):
 
 
 @posix_only
-def test_a_subagent_directory_that_cannot_be_listed_is_unreadable_with_why(roots):
+def test_a_subagent_dir_that_cannot_be_listed_is_unreadable_with_why(roots):
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         pytest.skip("root reads a directory whatever its mode")
     t = claude_turns(roots["claude"], 1)
     t.subagent().assistant("x")
     t.write()
-    directory = t.path.with_suffix("") / "subagents"
-    directory.chmod(0)
+    subagents_dir = t.path.with_suffix("") / "subagents"
+    subagents_dir.chmod(0)
     try:
         body = listing("claude", SESSION)
     finally:
-        directory.chmod(0o755)
+        subagents_dir.chmod(0o755)
     assert body["state"] == "unreadable" and "cannot be listed" in body["reason"]
 
 
@@ -545,7 +545,7 @@ def test_an_opencode_child_opens_as_a_session_of_its_own(roots):
     child = s.child(title="look into it")
     child.user("look")
     a = child.assistant()
-    a.step(text="looked", input=5, output=3)
+    a.step(text="looked", input_tokens=5, output=3)
     a.complete()
     db.write()
     [entry] = listing("opencode", s.id)["entries"]

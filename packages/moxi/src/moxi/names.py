@@ -43,7 +43,7 @@ VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", 
 
 #: Why the core keeps each name of `RESERVED`, one reason per name, as `reserved_why`
 #: gives it. `test` is kept because `MOXI_TEST_` is the prefix of the variables
-#: moxi-dev's test tiers read (moxi-dev's `contract.DEV_ENV_PREFIX`): a module named
+#: moxi-dev's test tiers read (moxi-dev's `contract.TEST_PREFIX_ENV`): a module named
 #: `test` would have that prefix for its own variables, and the two would collide.
 #: `anchor` is kept because a module of that name would have the home variable
 #: `MOXI_ANCHOR_HOME`, which is the test kits' own stand-in for the account's folder

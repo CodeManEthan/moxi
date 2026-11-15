@@ -39,9 +39,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .attribution import TIER_OPERATOR, VERIFIED
+from .constants import DIRECTORS_ENV
 from .scoping import NAME_RE, identity_of, split_tag
 
-ENV_VAR = "MOXI_COMMS_DIRECTORS"
 SEPARATOR = ","
 
 DIRECTIVE, INFORMATION = "directive", "information"
@@ -93,7 +93,7 @@ def declare(tags) -> list[str]:
 def stamp(directors) -> dict:
     """The env stamp, beside the identity stamp. Empty declaration stamps nothing."""
     directors = list(directors or ())
-    return {ENV_VAR: SEPARATOR.join(directors)} if directors else {}
+    return {DIRECTORS_ENV: SEPARATOR.join(directors)} if directors else {}
 
 
 def from_env(env=None) -> tuple:
@@ -101,7 +101,7 @@ def from_env(env=None) -> tuple:
     import os
 
     env = os.environ if env is None else env
-    raw = env.get(ENV_VAR) or ""
+    raw = env.get(DIRECTORS_ENV) or ""
     return tuple(part.strip() for part in raw.split(SEPARATOR) if part.strip())
 
 
@@ -152,5 +152,5 @@ def standing_of(author: dict, directors=()) -> Standing:
     return Standing(INFORMATION, "from", None)
 
 
-__all__ = ["ENV_VAR", "SEPARATOR", "DIRECTIVE", "INFORMATION", "BadDirector", "Standing",
+__all__ = ["DIRECTORS_ENV", "SEPARATOR", "DIRECTIVE", "INFORMATION", "BadDirector", "Standing",
            "declare", "from_env", "qualify_director", "stamp", "standing_of", "validated"]

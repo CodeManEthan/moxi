@@ -97,7 +97,7 @@ def test_scan_skips_the_core_s_vendored_copies(repo):
     assert scan(repo) == [Hit("packages/moxi/src/moxi/_vendor.py", 1, "D07")]
 
 
-def test_scan_reads_a_module_s_own_vendor_directory(repo):
+def test_scan_reads_a_module_s_own_vendor_dir(repo):
     own = repo / "packages" / "cache" / "src" / "moxi_cache" / "_vendor"
     own.mkdir(parents=True)
     (own / "a.py").write_text("# per D07\n")

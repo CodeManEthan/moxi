@@ -147,10 +147,10 @@ def take(*, ask: Callable[..., object] | None = None,
             answer = got if isinstance(got, dict) else None
             if answer is None:
                 error = "the control socket answered something other than a status"
-        except ipc.IpcError as e:
-            error = str(e) or type(e).__name__
-        except OSError as e:
-            error = str(e)
+        except ipc.IpcError as exc:
+            error = str(exc) or type(exc).__name__
+        except OSError as exc:
+            error = str(exc)
     rows = [r for r in _safe_rows(days=2)]
     last_check = next((r for r in reversed(rows) if r.get("kind") == "check"), None)
     last_call = next((r for r in reversed(rows) if r.get("kind") == "request"), None)

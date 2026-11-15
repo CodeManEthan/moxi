@@ -38,7 +38,7 @@ def _set_user_version(path, version: int) -> None:
 
 # --- where it lives, and the first write -------------------------------------------------
 
-def test_the_store_is_in_the_modules_data_directory(fence, store_path):
+def test_the_store_is_in_the_modules_data_dir(fence, store_path):
     import moxi.paths
 
     assert store_path == moxi.paths.Layout("projects").data_dir() / "projects.db"
@@ -221,16 +221,16 @@ def test_the_migration_runs_outside_the_writes_transaction(store_path, monkeypat
 def test_a_write_locked_out_past_the_wait_is_busy_with_exit_75(golden_copy, store_path,
                                                                 monkeypatch):
     monkeypatch.setattr(store, "TIMEOUT", 0.05)
-    holder = sqlite3.connect(store_path, isolation_level=None)
+    holder_conn = sqlite3.connect(store_path, isolation_level=None)
     try:
-        holder.execute("BEGIN IMMEDIATE")
+        holder_conn.execute("BEGIN IMMEDIATE")
         with pytest.raises(api.Busy) as caught:
             store.write(lambda conn: store.add_agent(conn, "gamma", "x"))
         assert caught.value.exit_code == 75
         assert isinstance(caught.value, api.Unreadable)
     finally:
-        holder.execute("ROLLBACK")
-        holder.close()
+        holder_conn.execute("ROLLBACK")
+        holder_conn.close()
 
 
 def test_a_corrupt_store_is_unreadable_with_exit_1(store_path):

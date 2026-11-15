@@ -90,13 +90,13 @@ _UNLISTED = ((QUESTIONS, _AFTER, VERIFIES), ("commission", _BEFORE, "build"),
 @dataclass(frozen=True)
 class Asked:
     """What a row is asked about: `name`, the round's name, for the commands it
-    prints; `stage`, for a step of one stage; `closed`, which answers whether a round,
+    prints; `stage`, for a step of one stage; `on_closed`, which answers whether a round,
     by name, is closed, for a question parked until one is (`questions.is_closed` when
     None)."""
 
     name: str = "ROUND"
     stage: str | None = None
-    closed: Callable[[str], bool] | None = None
+    on_closed: Callable[[str], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +166,7 @@ def _verify_design(state: states.State, about: Asked) -> Step:
 
 def _docket(state: states.State, about: Asked) -> Step:
     if about.stage is not None:
-        holding = holds.on_stage(state, about.stage, closed=about.closed)
+        holding = holds.on_stage(state, about.stage, on_closed=about.on_closed)
         if holding:
             return Step(QUESTIONS, READY, stage=about.stage,
                         questions=tuple(one.id for one in holding))
@@ -174,7 +174,7 @@ def _docket(state: states.State, about: Asked) -> Step:
         return Step(QUESTIONS, SKIPPED if skipped else DONE, stage=about.stage)
     asked = tuple(
         one.id for one in state.questions
-        if questions.current(one, state, closed=about.closed) == questions.OPEN)
+        if questions.current(one, state, on_closed=about.on_closed) == questions.OPEN)
     return Step(QUESTIONS, READY if asked else DONE, questions=asked)
 
 
@@ -195,13 +195,13 @@ def answer(name: str, question: states.Question) -> str:
 
 
 def held_by(state: states.State, stage: str, *, name: str = "ROUND",
-            closed: Callable[[str], bool] | None = None) -> tuple[Unmet, ...]:
+            on_closed: Callable[[str], bool] | None = None) -> tuple[Unmet, ...]:
     """What the questions that hold the stage `stage` make it wait for, in the order
     they were asked: each names the question and the command that records the
     operator's answer. Empty when nothing holds the stage."""
     return tuple(
         Unmet(f"{one.id} holds {stage}: {one.text}", answer(name, one))
-        for one in holds.on_stage(state, stage, closed=closed))
+        for one in holds.on_stage(state, stage, on_closed=on_closed))
 
 
 # -- the steps of a round ----------------------------------------------------------------
@@ -235,54 +235,54 @@ def _read(state: states.State, step: str, entry: Mapping | None, about: Asked) -
         return dataclasses.replace(row(state, about), entry=entry)
     waits = ()
     if step in HELD and about.stage is not None:
-        waits = held_by(state, about.stage, name=about.name, closed=about.closed)
+        waits = held_by(state, about.stage, name=about.name, on_closed=about.on_closed)
     return Step(step, NOT_BUILT, stage=about.stage, waits=waits, entry=entry)
 
 
 def _each(state: states.State, name: str,
-          closed: Callable[[str], bool] | None) -> Iterator[Step]:
+          on_closed: Callable[[str], bool] | None) -> Iterator[Step]:
     planned = [stage.id for stage in stages.in_plan(state)]
     for step, entry in order(state.steps):
         of_stages = planned if _is_of_a_stage(step) and planned else [None]
         for stage in of_stages:
-            yield _read(state, step, entry, Asked(name, stage, closed))
+            yield _read(state, step, entry, Asked(name, stage, on_closed))
 
 
 def of(state: states.State, *, name: str = "ROUND",
-       closed: Callable[[str], bool] | None = None) -> tuple[Step, ...]:
+       on_closed: Callable[[str], bool] | None = None) -> tuple[Step, ...]:
     """Every step of the round `state` is of, in order, each with its state. `name`
-    is the round's name, for the commands a wait prints, and `closed` answers whether
+    is the round's name, for the commands a wait prints, and `on_closed` answers whether
     a round, by name, is closed (`questions.is_closed` when left out)."""
-    return tuple(_each(state, name, closed))
+    return tuple(_each(state, name, on_closed))
 
 
 def one(state: states.State, step: str, stage: str | None = None, *,
         name: str = "ROUND",
-        closed: Callable[[str], bool] | None = None) -> Step | None:
+        on_closed: Callable[[str], bool] | None = None) -> Step | None:
     """The step `step` of the round, for the stage `stage` when it is a step of one
     stage; None when the round's flow has no such step. The questions step asked of
     a stage reads the questions that hold that stage."""
     for found, entry in order(state.steps):
         if found == step:
-            return _read(state, step, entry, Asked(name, stage, closed))
+            return _read(state, step, entry, Asked(name, stage, on_closed))
     return None
 
 
 def is_settled(state: states.State, step: str, stage: str | None = None, *,
-               closed: Callable[[str], bool] | None = None) -> bool:
+               on_closed: Callable[[str], bool] | None = None) -> bool:
     """Whether nothing waits on the step any longer: it is done or skipped, or the
     round's flow has no such step."""
-    found = one(state, step, stage, closed=closed)
+    found = one(state, step, stage, on_closed=on_closed)
     return found is None or found.settled
 
 
 def current(state: states.State, *, name: str = "ROUND",
-            closed: Callable[[str], bool] | None = None) -> Step | None:
+            on_closed: Callable[[str], bool] | None = None) -> Step | None:
     """The step the round is at: the first, in order, that is neither done nor
     skipped. None when every step is, and for a round that has ended."""
     if state.status != states.OPEN:
         return None
-    return next((step for step in _each(state, name, closed) if not step.settled), None)
+    return next((step for step in _each(state, name, on_closed) if not step.settled), None)
 
 
 # -- what the index keeps ----------------------------------------------------------------
@@ -298,7 +298,7 @@ def at(state: states.State):
     Only the round's own log is read, so a question parked until another round
     closes is read as parked. The body then names those rounds in `until`: once one
     of them is closed, whoever lists the row reads the step from the log again."""
-    found = current(state, closed=_never)
+    found = current(state, on_closed=_never)
     until = sorted({one.until[len(questions.UNTIL_ROUND):] for one in state.questions
                     if one.state == questions.PARKED
                     and (one.until or "").startswith(questions.UNTIL_ROUND)})

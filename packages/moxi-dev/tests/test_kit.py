@@ -124,8 +124,8 @@ def test_fsync_is_a_no_op_in_a_plain_test(tmp_path):
     fd = os.open(tmp_path / "f", os.O_WRONLY | os.O_CREAT, 0o600)
     os.write(fd, b"x")
     assert os.fsync(fd) is None
-    with open(tmp_path / "f", "rb+") as f:
-        os.fsync(f)                               # a file object, as os.fsync takes
+    with open(tmp_path / "f", "rb+") as fh:
+        os.fsync(fh)                               # a file object, as os.fsync takes
     os.close(fd)
     with pytest.raises(OSError):
         os.fsync(fd)                              # still refuses a closed descriptor

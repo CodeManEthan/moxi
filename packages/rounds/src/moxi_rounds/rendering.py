@@ -96,7 +96,7 @@ def on_append(written) -> None:
     Each file is tried whatever became of the one before it; the first failure is
     raised once all were tried."""
     where = written.where
-    folder = Path(where.folder)
+    rounds_dir = Path(where.rounds_dir)
     wrote_project = len(written.project_events) > len(written.view.project_events)
     work: list[Callable[[], None]] = []
 
@@ -106,27 +106,27 @@ def on_append(written) -> None:
 
     # A note is written only beside its log: a folder with none is not a round of
     # ours, and a note there may be another tool's.
-    if where.slug is not None and log.exists(log.round_log(folder / where.slug)):
-        work.append(put(folder / where.slug / NOTE_FILE, lambda: note(
+    if where.slug is not None and log.exists(log.round_log(rounds_dir / where.slug)):
+        work.append(put(rounds_dir / where.slug / NOTE_FILE, lambda: note(
             where.project, where.slug, written.round_events, written.project_events)))
     # A round's verb that only read the project's log holds no lock on it, so that
     # log's files are left for whoever writes it. A project with no log has no files.
     if (where.slug is None or wrote_project) and written.project_events:
-        work.append(put(folder / RULINGS_FILE, lambda: rulings(
+        work.append(put(rounds_dir / RULINGS_FILE, lambda: rulings(
             where.project, written.project_events)))
-        work.append(put(folder / QUESTIONS_FILE, lambda: questions(
+        work.append(put(rounds_dir / QUESTIONS_FILE, lambda: questions(
             where.project, written.project_events)))
     if _read_back(written.project_events[len(written.view.project_events):]):
         # What each round's note says is shown has changed, in every round there is.
-        work += [lambda slug=slug: _note_again(where.project, folder, slug,
+        work += [lambda slug=slug: _note_again(where.project, rounds_dir, slug,
                                                written.project_events)
-                 for slug in folders.slugs(folder) if slug != where.slug]
+                 for slug in folders.slugs(rounds_dir) if slug != where.slug]
     failed = []
     for step in work:
         try:
             step()
-        except Exception as error:
-            failed.append(error)
+        except Exception as exc:
+            failed.append(exc)
     if failed:
         raise failed[0]
 
@@ -137,7 +137,7 @@ def _read_back(appended: Iterable[dict]) -> bool:
                for one in states.fold(appended).rulings)
 
 
-def _note_again(project: str, folder: Path, slug: str,
+def _note_again(project: str, rounds_dir: Path, slug: str,
                 project_events: Iterable[dict]) -> None:
     """Write the note of a round this write did not touch, from its log as it stands,
     under the round's lock so that no verb on the round writes it meanwhile. A round
@@ -147,24 +147,24 @@ def _note_again(project: str, folder: Path, slug: str,
     try:
         with files.lock(path, timeout_s=NOTE_WAIT_S):
             try:
-                events = log.read_round(log.round_log(folder / slug))
+                events = log.read_round(log.round_log(rounds_dir / slug))
             except (NoLog, Unreadable):
                 return
-            files.atomic_write(folder / slug / NOTE_FILE,
+            files.atomic_write(rounds_dir / slug / NOTE_FILE,
                                note(project, slug, events, project_events), mode=0o644)
-    except files.LockTimeout as stop:
-        raise Locked(path, stop.holder, NOTE_WAIT_S) from None
+    except files.LockTimeout as exc:
+        raise Locked(path, exc.holder, NOTE_WAIT_S) from None
 
 
 # -- a round's note ----------------------------------------------------------------------
 
 def note(project: str, slug: str, events: Iterable[dict],
-         project_events: Iterable[dict] = (), *, closed: Closed | None = None) -> str:
+         project_events: Iterable[dict] = (), *, on_closed: Closed | None = None) -> str:
     """The note of the round `<project>/<slug>`, as text: `events` is its whole log and
     `project_events` its project's, which says what the operator has read back.
-    `closed` answers whether a round, by name, is closed, for a parked question that
+    `on_closed` answers whether a round, by name, is closed, for a parked question that
     waits for one; the logs answer when it is left out."""
-    found = _read(project, events, project_events, closed, slug=slug)
+    found = _read(project, events, project_events, on_closed, slug=slug)
     shown_as = showing.data(found)
     lines = [*_header("round-note", project, shown_as["description"],
                       ["round", slug], shown_as["history"],
@@ -375,10 +375,10 @@ def rulings(project: str, project_events: Iterable[dict]) -> str:
 
 
 def questions(project: str, project_events: Iterable[dict], *,
-              closed: Closed | None = None) -> str:
+              on_closed: Closed | None = None) -> str:
     """The questions on the list of `project`, as text, by state, each with who asked
-    it and when. `closed` is as `note` takes it."""
-    found = _read(project, project_events, project_events, closed)
+    it and when. `on_closed` is as `note` takes it."""
+    found = _read(project, project_events, project_events, on_closed)
     shown_as = showing.data(found)
     lines = [*_header("questions", project,
                       f"The questions on the list of {project}, by state",
@@ -394,15 +394,15 @@ def questions(project: str, project_events: Iterable[dict], *,
 # -- shared ------------------------------------------------------------------------------
 
 def _read(project: str, events: Iterable[dict], project_events: Iterable[dict],
-          closed: Closed | None, *, slug: str | None = None) -> showing.Shown:
+          on_closed: Closed | None, *, slug: str | None = None) -> showing.Shown:
     """The logs as `showing` reads a round, so a file lists what `show` shows. A
     project's own log is read as a round with no slug. No folder is named: a file
     says nothing of the machine it was written on."""
     return showing.Shown(
         name=project if slug is None else f"{project}/{slug}", project=project,
-        slug=slug or "", folder=Path(),
+        slug=slug or "", round_dir=Path(),
         state=states.fold(events), register=states.fold(project_events),
-        closed=asked.is_closed if closed is None else closed)
+        on_closed=asked.is_closed if on_closed is None else on_closed)
 
 
 def _header(kind: str, project: str, description: str | None, tags: list[str],

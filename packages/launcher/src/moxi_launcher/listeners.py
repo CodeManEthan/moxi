@@ -40,9 +40,9 @@ LISTENERS = (
 )
 
 #: The launch's stamp: the request id of the launch that started the session.
-REQUEST = "MOXI_LAUNCHER_REQUEST"
+REQUEST_ENV = "MOXI_LAUNCHER_REQUEST"
 #: Set on a relaunch, whose handoff comes in its first turn.
-RELAUNCH = "MOXI_LAUNCHER_RELAUNCH"
+RELAUNCH_ENV = "MOXI_LAUNCHER_RELAUNCH"
 #: How long a listener waits for the launch log's write lock, in seconds. turns bounds
 #: every listener of an event together (two seconds by default), and a listener holds the
 #: lock for one short write.
@@ -97,7 +97,7 @@ def claim(event, conn):
     """
     from . import store
 
-    request_id = event_env(event).get(REQUEST)
+    request_id = event_env(event).get(REQUEST_ENV)
     if not request_id or conn is None:
         return None
     return store.claim(conn, request_id, harness=event.harness,
@@ -105,5 +105,5 @@ def claim(event, conn):
                        endpoint=endpoint_id())
 
 
-__all__ = ["LISTENERS", "REQUEST", "RELAUNCH", "STORE_TIMEOUT", "claim", "endpoint_id",
+__all__ = ["LISTENERS", "REQUEST_ENV", "RELAUNCH_ENV", "STORE_TIMEOUT", "claim", "endpoint_id",
            "event_env", "open_store"]

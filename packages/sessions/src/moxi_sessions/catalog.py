@@ -247,7 +247,7 @@ class Head:
     * `settled`: no later read of the same file can say more.
     """
 
-    folder: str | None = None
+    work_dir: str | None = None
     started: float | None = None
     by_program: bool | None = None
     name: str | None = None
@@ -297,7 +297,7 @@ class Details:
       reads; and for a session a program started.
     """
 
-    folder: str | None = None
+    work_dir: str | None = None
     started: float | None = None
     by_program: bool | None = None
     name: str | None = None
@@ -339,7 +339,7 @@ def row_head(listed: Listed) -> Head:
     header = listed.header
     if header is None:
         return Head()
-    return Head(folder=_str(header.cwd), started=_time(header.started))
+    return Head(work_dir=_str(header.cwd), started=_time(header.started))
 
 
 @dataclass(frozen=True)
@@ -352,7 +352,7 @@ class Facts:
     """
 
     name: str | None = None
-    folder: str | None = None
+    work_dir: str | None = None
     started: float | None = None
 
 
@@ -372,22 +372,22 @@ def read_head(listed: Listed, imports: Any = None) -> Head | None:
     listing read it; without it a rollout's read looks for the file itself."""
     source = listed.source
     try:
-        with open(source.path, "rb") as handle:
-            st = os.fstat(handle.fileno())
+        with open(source.path, "rb") as fh:
+            st = os.fstat(fh.fileno())
             end = st.st_size
             if source.harness == CLAUDE:
-                header = claude_header(source, handle, end)
-                name, settled = claude_named_head(handle, end)
+                header = claude_header(source, fh, end)
+                name, settled = claude_named_head(fh, end)
                 spawn = None
             else:
-                head = codex_head(handle, end)
+                head = codex_head(fh, end)
                 header = codex_header(source, head, imports)
                 name = None
                 spawn = header.spawn
                 settled = head.meta is not None
     except OSError:
         return None
-    return Head(folder=_str(header.cwd), started=_time(header.started),
+    return Head(work_dir=_str(header.cwd), started=_time(header.started),
                 by_program=by_program(header.entrypoint), name=name, spawn=spawn,
                 dev=st.st_dev, ino=st.st_ino, size=end, settled=settled)
 
@@ -435,7 +435,7 @@ def _model(records: Sequence[Any]) -> str | None:
     return None
 
 
-def _activity(records: Sequence[Any], program: bool | None) -> Said | None:
+def _activity(records: Sequence[Any], *, program: bool | None) -> Said | None:
     for record in reversed(records):
         if not _spoken(record):
             continue
@@ -452,7 +452,7 @@ def _activity(records: Sequence[Any], program: bool | None) -> Said | None:
     return None
 
 
-def read_tail(listed: Listed, program: bool | None = None) -> Tail | None:
+def read_tail(listed: Listed, *, program: bool | None = None) -> Tail | None:
     """The last-turn facts of a session whose `by_program` is `program`; None when the
     read failed."""
     try:
@@ -461,7 +461,7 @@ def read_tail(listed: Listed, program: bool | None = None) -> Tail | None:
         return None
     return Tail(program=program,
                 name=_name(records) if listed.source.harness == CLAUDE else None,
-                model=_model(records), activity=_activity(records, program))
+                model=_model(records), activity=_activity(records, program=program))
 
 
 # --- the prompt ------------------------------------------------------------------------------
@@ -505,7 +505,7 @@ class PromptRead:
     taken: int
 
 
-def reads_prompt(harness: str, program: bool | None) -> bool:
+def reads_prompt(harness: str, *, program: bool | None) -> bool:
     """Whether a session of `harness` whose `by_program` is `program` is read for a
     prompt: its record carries a typed mark, and no program started it."""
     return harness in TYPED and program is not True
@@ -517,7 +517,7 @@ def _typed(raw: bytes, listed: Listed) -> Said | None:
         return None
     source = listed.source
     _request, records, _turn = claude.line_records(
-        raw, at={"line": None, "offset": None}, session_id=source.session_id,
+        raw, position={"line": None, "offset": None}, session_id=source.session_id,
         agent_id=source.agent_id)
     said = None
     for record in records:
@@ -545,24 +545,24 @@ def read_prompt(listed: Listed, kept: Kept | None = None) -> PromptRead:
     length; nothing is returned of a read that failed part-way."""
     source = listed.source
     try:
-        with open(source.path, "rb") as handle:
-            st = os.fstat(handle.fileno())
+        with open(source.path, "rb") as fh:
+            st = os.fstat(fh.fileno())
             end = st.st_size
             if kept is not None and kept.stamp == (st.st_dev, st.st_ino, end,
                                                    st.st_mtime_ns):
-                return PromptRead(kept, False, 0)
+                return PromptRead(kept, whole=False, taken=0)
             offset, prompt, before = 0, None, b""
             if (kept is not None and kept.offset >= WINDOW and kept.offset <= end
                     and (kept.dev, kept.ino) == (st.st_dev, st.st_ino)):
-                handle.seek(kept.offset - WINDOW)
-                held = handle.read(WINDOW)
+                fh.seek(kept.offset - WINDOW)
+                held = fh.read(WINDOW)
                 if (len(held) == WINDOW
                         and hashlib.sha256(held).digest() == kept.digest):
                     offset, prompt, before = kept.offset, kept.prompt, held
             start = offset
-            handle.seek(start)
+            fh.seek(start)
             while offset < end:
-                line = handle.readline(end - offset)
+                line = fh.readline(end - offset)
                 if not line.endswith(b"\n"):
                     if len(line) < end - offset:
                         raise Unreadable(f"{source.path} ended before its size")
@@ -915,11 +915,11 @@ class Catalog:
         name = None
         if entry.harness == CLAUDE:
             name = self._name(entry) or head.name
-        return Facts(name=name, folder=head.folder, started=head.started)
+        return Facts(name=name, work_dir=head.work_dir, started=head.started)
 
     # -- the details ------------------------------------------------------------------------
 
-    def _tail(self, entry: Entry, program: bool | None) -> Tail | None:
+    def _tail(self, entry: Entry, *, program: bool | None) -> Tail | None:
         listed = entry.listed
         if entry.harness == OPENCODE:
             key, stamp = (entry.path, entry.session), (entry.changed_ns,)
@@ -930,7 +930,7 @@ class Catalog:
             if kept is not None and kept[0] == stamp and kept[1].program == program:
                 self._tails.move_to_end(key)
                 return kept[1]
-        tail = read_tail(listed, program)
+        tail = read_tail(listed, program=program)
         with self._lock:
             self.tail_reads += 1
             if tail is not None:
@@ -940,11 +940,11 @@ class Catalog:
                     self._tails.popitem(last=False)
         return tail
 
-    def _prompt(self, entry: Entry, program: bool | None) -> Said | None:
+    def _prompt(self, entry: Entry, *, program: bool | None) -> Said | None:
         """The entry's prompt: the kept one where the file is as it was kept, else what
         a read now gives, which is then kept. None when the session is not read for one
         or the read failed; a failed read leaves what was kept as it was."""
-        if not reads_prompt(entry.harness, program):
+        if not reads_prompt(entry.harness, program=program):
             return None
         listed, path = entry.listed, entry.path
         with self._lock:
@@ -983,12 +983,12 @@ class Catalog:
         each read now unless a kept read stands. Never raises for a session that cannot
         be read: a fact that was not read is None."""
         head = self.head(entry) or Head()
-        tail = self._tail(entry, head.by_program) or Tail()
-        return Details(folder=head.folder, started=head.started,
+        tail = self._tail(entry, program=head.by_program) or Tail()
+        return Details(work_dir=head.work_dir, started=head.started,
                        by_program=head.by_program,
                        name=(tail.name or head.name) if entry.harness == CLAUDE else None,
                        model=tail.model, activity=tail.activity,
-                       prompt=self._prompt(entry, head.by_program))
+                       prompt=self._prompt(entry, program=head.by_program))
 
 
 # --- the process's catalog ------------------------------------------------------------------

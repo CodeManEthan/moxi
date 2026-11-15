@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 
 import pytest
 
@@ -11,6 +13,7 @@ from moxi import units
 from moxi.units import _backend, _fence
 from moxi.units._backend import Backend, UnitRef
 from moxi.units._fence import Fence, FenceError, argv
+from moxi_dev import testing
 
 from fake_backend import FakeBackend, FakeSupervisor
 
@@ -73,7 +76,7 @@ def test_the_fence_refuses_anything_else(backend, verb, args):
         argv(backend, verb, *args)
 
 
-def test_the_task_read_carries_refs_only_in_its_environment():
+def test_the_task_read_carries_refs_only_in_its_env():
     cmd = argv("schtasks", "tasks")
     assert cmd[:4] == ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
     assert "$env:MOXI_TASK_REFS" in cmd[4]
@@ -123,9 +126,22 @@ def test_a_call_keeps_stderr_as_it_is_and_names_a_failed_start():
 
 
 def test_the_real_runner_is_refused_under_pytest(monkeypatch):
-    monkeypatch.delenv(_fence.REAL_SUPERVISOR, raising=False)
+    monkeypatch.delenv(testing.REAL_SUPERVISOR_ENV, raising=False)
     with pytest.raises(_fence.SupervisorRefused):
         Fence("systemd").run("daemon-reload")
+
+
+def test_the_real_runner_is_built_on_an_install_without_moxi_dev():
+    # A user install has no moxi-dev: the fence and its real runner must not need it.
+    code = ("import sys; sys.modules['moxi_dev'] = None; "
+            "from moxi.units import _fence; "
+            "print(callable(_fence.default_runner()), 'moxi_dev.testing' in sys.modules)")
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("PYTEST_CURRENT_TEST", testing.REAL_SUPERVISOR_ENV)}
+    done = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
+                          text=True, timeout=60, check=False)
+    assert (done.returncode, done.stdout, done.stderr) == (0, "True False\n", "")
+    assert _fence.REAL_SUPERVISOR_ENV == testing.REAL_SUPERVISOR_ENV
 
 
 # -- backend() -----------------------------------------------------------------------------

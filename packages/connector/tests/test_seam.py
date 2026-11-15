@@ -295,8 +295,8 @@ def test_ctx_log_with_a_refused_field_raises_and_writes_nothing(front, fake):
                        {"ok": 1, "authorization": "Bearer x"}):
             try:
                 ctx.log(**fields)
-            except ValueError as e:
-                caught.append(str(e))
+            except ValueError as exc:
+                caught.append(str(exc))
         return Result("fine")
 
     async def main():
@@ -317,8 +317,8 @@ def test_ctx_log_with_a_field_the_connector_writes_raises_and_keeps_its_own(fron
                        {"dropped": False}):
             try:
                 ctx.log(**fields)
-            except ValueError as e:
-                caught.append(str(e))
+            except ValueError as exc:
+                caught.append(str(exc))
         return Result("fine")
 
     async def main():
@@ -454,9 +454,9 @@ def test_setting_the_switch_applies_the_units_through_the_core(monkeypatch, conf
     monkeypatch.setattr(moxi.config, "apply_units",
                         lambda module, key, **kw: applied.append((module, key)) or [])
     config_file("")
-    moxi.config.set("connector", "enabled", True, by="test")
+    moxi.config.set_value("connector", "enabled", value=True, by="test")
     assert settings.enabled() is True
-    moxi.config.set("connector", "port", 8453, by="test")
+    moxi.config.set_value("connector", "port", 8453, by="test")
     moxi.config.unset("connector", "enabled", by="test")
     assert settings.enabled() is False
     # The port is the socket unit's setting, so the core writes the units after it too.
@@ -515,7 +515,7 @@ def test_a_port_another_listener_holds_is_port_taken():
     held = listen.bind(0)
     try:
         port = held.getsockname()[1]
-        taken = listen.take(port, environ={}, unit_state=lambda: "missing", retry_for=0.2)
+        taken = listen.take(port, env={}, unit_state=lambda: "missing", retry_for=0.2)
         assert taken.sock is None and taken.why == "port-taken"
     finally:
         held.close()

@@ -18,12 +18,12 @@ def skill_md(name: str) -> str:
 
 
 @pytest.fixture
-def demo(site, folder):
+def demo(site, loadout_dir):
     """A module `demo` shipping skills moxi-demo and moxi-other, and the loadout folder."""
     package = site.module("demo", SKILLS="'skills'", files={
         "skills/moxi-demo/SKILL.md": skill_md("moxi-demo"),
         "skills/moxi-other/SKILL.md": skill_md("moxi-other")})
-    kit.configure(folder)
+    kit.configure(loadout_dir)
     return site.root / package / "skills"
 
 
@@ -47,7 +47,7 @@ def module_step(skills, name="moxi-demo"):
     return place.plan("demo", [item(skills, name)])[0]
 
 
-def test_a_modules_own_placement_is_taken_over_unseeded(demo, folder):
+def test_a_modules_own_placement_is_taken_over_unseeded(demo, loadout_dir):
     place_as_module(demo)
     out = install.install()
     assert out.code == 0, out.text()
@@ -55,7 +55,7 @@ def test_a_modules_own_placement_is_taken_over_unseeded(demo, folder):
     assert kit.owner_of(target) == "loadout"
     entry = next(iter(kit.handed("demo").values()))
     assert entry["to"] == "loadout" and not entry.get("seeded")
-    found = load(folder)
+    found = load(loadout_dir)
     assert found.user.names("skill") == ("demo/moxi-demo",)
     assert found.harnesses("skill", "demo/moxi-demo") == ("claude",)
     record = next(iter(ledger.read()["placed"].values()))
@@ -64,10 +64,10 @@ def test_a_modules_own_placement_is_taken_over_unseeded(demo, folder):
     assert install.status().code == 0
 
 
-def test_a_skill_the_manifest_lists_is_placed_as_the_module_and_seeded(demo, folder):
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+def test_a_skill_the_manifest_lists_is_placed_as_the_module_and_seeded(demo, loadout_dir):
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
-    before = (folder / "loadout.toml").read_text()
+    before = (loadout_dir / "loadout.toml").read_text()
     out = install.install()
     assert out.code == 0, out.text()
     target = kit.claude() / "moxi-demo"
@@ -79,14 +79,14 @@ def test_a_skill_the_manifest_lists_is_placed_as_the_module_and_seeded(demo, fol
     # The module's next install skips it, and would ask about the rest.
     assert module_step(demo).action == "skip"
     assert module_step(demo, "moxi-other").action == "add"
-    assert (folder / "loadout.toml").read_text() == before
+    assert (loadout_dir / "loadout.toml").read_text() == before
     # A second run changes nothing.
     assert install.install().code == 0
     assert install.status().code == 0
 
 
-def test_the_modules_add_refused_adopts_nothing(demo, folder):
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+def test_the_modules_add_refused_adopts_nothing(demo, loadout_dir):
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
     kit.claude().mkdir(parents=True)
     (kit.claude() / "moxi-demo").mkdir()
@@ -98,10 +98,10 @@ def test_the_modules_add_refused_adopts_nothing(demo, folder):
 
 
 @pytest.mark.parametrize("form", ["id", "path"])
-def test_replace_on_a_module_skill_places_it_as_the_module_seeded(demo, folder, form):
+def test_replace_on_a_module_skill_places_it_as_the_module_seeded(demo, loadout_dir, form):
     from moxi_loadout import teardown
 
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
     target = kit.claude() / "moxi-demo"
     kit.claude().mkdir(parents=True)
@@ -125,10 +125,10 @@ def test_replace_on_a_module_skill_places_it_as_the_module_seeded(demo, folder, 
     assert kit.owner_of(target) is None
 
 
-def test_a_failed_hand_over_undoes_the_placement(demo, folder, monkeypatch):
+def test_a_failed_hand_over_undoes_the_placement(demo, loadout_dir, monkeypatch):
     from moxi import place
 
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
 
     def broken(*args, **kwargs):
@@ -142,10 +142,10 @@ def test_a_failed_hand_over_undoes_the_placement(demo, folder, monkeypatch):
     assert place.status("demo") == []
 
 
-def test_a_failed_undo_names_the_target(demo, folder, monkeypatch):
+def test_a_failed_undo_names_the_target(demo, loadout_dir, monkeypatch):
     from moxi import place
 
-    kit.manifest(folder, '[user]\nskills = ["demo/moxi-demo"]\n'
+    kit.manifest(loadout_dir, '[user]\nskills = ["demo/moxi-demo"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
     real_apply = place.apply
 
@@ -165,20 +165,20 @@ def test_a_failed_undo_names_the_target(demo, folder, monkeypatch):
     assert any(target in r.reason and "still placed" in r.reason for r in out.rows)
 
 
-def test_a_module_skill_whose_module_is_absent_reads_off(site, folder):
-    kit.configure(folder)
-    kit.manifest(folder, '[user]\nskills = ["gone/moxi-gone"]\n')
+def test_a_module_skill_whose_module_is_absent_reads_off(site, loadout_dir):
+    kit.configure(loadout_dir)
+    kit.manifest(loadout_dir, '[user]\nskills = ["gone/moxi-gone"]\n')
     out = install.install()
     assert out.code == 0
     assert {r.state for r in out.rows} == {"off"}
     assert "gone is not installed" in out.rows[0].reason
 
 
-def test_a_module_skill_whose_module_is_broken_reads_broken(site, folder, monkeypatch):
+def test_a_module_skill_whose_module_is_broken_reads_broken(site, loadout_dir, monkeypatch):
     from moxi import modules
 
-    kit.configure(folder)
-    kit.manifest(folder, '[user]\nskills = ["bent/moxi-bent"]\n')
+    kit.configure(loadout_dir)
+    kit.manifest(loadout_dir, '[user]\nskills = ["bent/moxi-bent"]\n')
     found = modules.Found(name="bent", state=modules.BROKEN, reason="its announcement fails")
     monkeypatch.setattr(modules, "load", lambda name: found)
     out = install.install()
@@ -187,7 +187,7 @@ def test_a_module_skill_whose_module_is_broken_reads_broken(site, folder, monkey
     assert out.rows[0].reason == "bent is broken"
 
 
-def test_disable_then_enable_an_adopted_skill(demo, folder):
+def test_disable_then_enable_an_adopted_skill(demo, loadout_dir):
     from moxi_loadout import writes
 
     place_as_module(demo)
@@ -204,26 +204,26 @@ def test_disable_then_enable_an_adopted_skill(demo, folder):
     assert next(iter(kit.handed("demo").values()))["seeded"] is True
 
 
-def test_the_users_own_skill_wins_its_name_over_a_module_skill(demo, folder):
-    kit.skill(folder / "skills", "moxi-demo")
-    kit.manifest(folder, '[user]\nskills = ["moxi-demo", "demo/moxi-demo"]\n'
+def test_the_users_own_skill_wins_its_name_over_a_module_skill(demo, loadout_dir):
+    kit.skill(loadout_dir / "skills", "moxi-demo")
+    kit.manifest(loadout_dir, '[user]\nskills = ["moxi-demo", "demo/moxi-demo"]\n'
                          '[skill."demo/moxi-demo"]\nharnesses = ["claude"]\n')
     out = install.install()
     assert out.code == 3
     rows = {(r.name, r.harness): r for r in out.rows}
     assert rows["demo/moxi-demo", "claude"].state == "blocked"
-    assert os.readlink(kit.claude() / "moxi-demo") == str(folder / "skills" / "moxi-demo")
+    assert os.readlink(kit.claude() / "moxi-demo") == str(loadout_dir / "skills" / "moxi-demo")
 
 
-def test_take_lists_every_module_placement_in_one_write(demo, folder):
+def test_take_lists_every_module_placement_in_one_write(demo, loadout_dir):
     place_as_module(demo, "moxi-demo", "moxi-other")
-    taken = adoption.take(folder=folder, say=lambda line: None)
+    taken = adoption.take(loadout_dir=loadout_dir, say=lambda line: None)
     assert sorted(t.placed.name for t in taken) == ["moxi-demo", "moxi-other"]
-    assert load(folder).user.names("skill") == ("demo/moxi-demo", "demo/moxi-other")
-    assert not os.path.lexists(folder / "loadout.toml.lock")
+    assert load(loadout_dir).user.names("skill") == ("demo/moxi-demo", "demo/moxi-other")
+    assert not os.path.lexists(loadout_dir / "loadout.toml.lock")
 
 
-def test_take_leaves_a_placement_the_module_made_with_dest(demo, folder, tmp_path):
+def test_take_leaves_a_placement_the_module_made_with_dest(demo, loadout_dir, tmp_path):
     from moxi import place
 
     dest = tmp_path / "demo-data" / "moxi-demo"
@@ -231,23 +231,23 @@ def test_take_leaves_a_placement_the_module_made_with_dest(demo, folder, tmp_pat
     there = place.Item(mine.source, "claude", "moxi-demo", dest=dest)
     place.apply(place.plan("demo", [mine, there], form="copy"), say=lambda line: None)
     by_path = {str(p.path): p for p in place.status("demo")}
-    at_folder = by_path[place.target_key(kit.claude() / "moxi-demo")]
+    at_harness_dir = by_path[place.target_key(kit.claude() / "moxi-demo")]
     at_dest = by_path[place.target_key(dest)]
-    assert adoption.at_its_folder(at_folder) and not adoption.at_its_folder(at_dest)
-    taken = adoption.take(["demo"], folder=folder, say=lambda line: None)
-    assert [str(t.placed.path) for t in taken] == [str(at_folder.path)]
+    assert adoption.at_harness_dir(at_harness_dir) and not adoption.at_harness_dir(at_dest)
+    taken = adoption.take(["demo"], loadout_dir=loadout_dir, say=lambda line: None)
+    assert [str(t.placed.path) for t in taken] == [str(at_harness_dir.path)]
     assert kit.owner_of(dest) == "demo"
-    assert load(folder).harnesses("skill", "demo/moxi-demo") == ("claude",)
+    assert load(loadout_dir).harnesses("skill", "demo/moxi-demo") == ("claude",)
 
 
-def test_a_placement_whose_harness_row_is_gone_is_not_at_its_folder():
+def test_a_placement_whose_harness_row_is_gone_is_not_at_its_harness_dir():
     from pathlib import Path
 
     from moxi.place import Placed
 
     placed = Placed("demo", "skill", "nowhere", "moxi-demo", Path("/x/moxi-demo"), "link",
                     "ok")
-    assert not adoption.at_its_folder(placed, {})
+    assert not adoption.at_harness_dir(placed, {})
 
 
 def test_signals_wait_for_the_span_to_end():
