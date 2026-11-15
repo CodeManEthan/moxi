@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from moxi.config import DEFAULT, FILE
+import json
+
+from moxi import cli
+from moxi.config import COMMON_MAX, DEFAULT, FILE, Schema
 from moxi.paths import Layout
 
 from moxi_launcher import settings
@@ -66,3 +69,82 @@ def test_a_key_set_in_the_file_wins():
     assert current.source("ready.wait_s") == FILE
     assert current["startup.trust_dialog"] is True
     assert current["first.wait_s"] == 120
+
+
+# -- page fields: how the settings page shows each key --------------------------------------
+
+#: The keys the settings page shows before More, in schema order.
+COMMON = ["startup.trust_dialog", "startup.dev_channels_dialog", "runs.keep_days",
+          "relaunch.fallback", "relaunch.pass_env", "records.keep_days"]
+#: The sub-heads behind More, in the order they first appear, and the keys under each.
+GROUPS = {
+    "Waits": ["ready.wait_s", "first.wait_s", "startup.wait_s", "recycle.limit_wait_s",
+              "page.launch_wait_s"],
+    "Relaunch": ["relaunch.wait_s", "relaunch.person_s", "relaunch.dialog_s",
+                 "relaunch.name_wait_s", "relaunch.follow_s", "relaunch.director_pass_env",
+                 "relaunch.notice_retry_s"],
+    "Keep warm": ["keep_warm.subagent_cap", "keep_warm.director_cap",
+                  "keep_warm.subagent_texts", "keep_warm.director_texts",
+                  "keep_warm.directing_texts"],
+}
+#: The keys edited on another page, which carry no label here.
+TEMPLATES = {"name.template", "name.templates"}
+
+
+def show_json(capsys) -> dict:
+    capsys.readouterr()
+    assert cli.main(["config", "launcher", "show", "--json"]) == 0
+    return {key["name"]: key for key in json.loads(capsys.readouterr().out)}
+
+
+def test_the_schema_passes_the_cores_check_with_its_page_fields():
+    parsed = Schema.from_resource("moxi_launcher", "settings.toml")
+    assert sum(1 for key in parsed.live() if key.common) <= COMMON_MAX
+
+
+def test_show_json_gives_every_key_but_the_templates_a_label(capsys):
+    keys = show_json(capsys)
+    assert {name for name, key in keys.items() if not key["label"]} == TEMPLATES
+    assert keys["runs.keep_days"]["label"] == "Keep run files for"
+    assert keys["runs.keep_days"]["line"] == "A launch's prompt file and headless log."
+    assert keys["ready.wait_s"]["label"] == "For a started session to be ready"
+    assert keys["keep_warm.subagent_cap"]["label"] == "Nudges in a row, waiting on subagents"
+    for key in keys.values():
+        assert key["choices"] is None and key["pick"] is False and key["terminal"] is None
+
+
+def test_show_json_marks_six_keys_common_and_groups_the_rest(capsys):
+    keys = show_json(capsys)
+    assert [name for name, key in keys.items() if key["common"]] == COMMON
+    assert all(keys[name]["group"] is None for name in COMMON)
+    first_seen = list(dict.fromkeys(key["group"] for key in keys.values() if key["group"]))
+    assert first_seen == list(GROUPS)
+    for group, names in GROUPS.items():
+        assert [name for name, key in keys.items() if key["group"] == group] == names
+
+
+def test_show_json_gives_each_wait_and_count_its_unit(capsys):
+    keys = show_json(capsys)
+    for name, key in keys.items():
+        if name.endswith("_s"):
+            assert key["unit"] == "seconds", name
+        elif name.endswith("_days"):
+            assert key["unit"] == "days", name
+        elif name.endswith("_cap"):
+            assert key["unit"] == "nudges", name
+        else:
+            assert key["unit"] is None, name
+
+
+def test_show_json_marks_the_three_changes_that_can_hurt(capsys):
+    keys = show_json(capsys)
+    hurts = {name: key["hurts"] for name, key in keys.items() if key["hurts"]}
+    assert set(hurts) == {"startup.trust_dialog", "startup.dev_channels_dialog",
+                          "relaunch.pass_env"}
+    trust = hurts["startup.trust_dialog"]
+    assert (trust["when"], trust["stays"]) == ("on", True)
+    assert trust["says"] == "answers the trust question for every slot launch"
+    assert (hurts["startup.dev_channels_dialog"]["when"],
+            hurts["startup.dev_channels_dialog"]["stays"]) == ("on", False)
+    assert hurts["relaunch.pass_env"]["when"] == "add"
+    assert all(hurt["confirm"] for hurt in hurts.values())
