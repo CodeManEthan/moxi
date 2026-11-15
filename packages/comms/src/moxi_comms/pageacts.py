@@ -17,8 +17,9 @@ nothing. A store that can't be read refuses with `record-unreadable`.
 
 **The answers** carry the verb's outcome and its refusal's code, never its text: the page
 words each from the outcome and the code. A blank `to` is `refused` with the code
-`request-shape`, and a `message_id` that is not all digits is `refused` with
-`message-id-shape`, each before anything is read. Any exception out of the verb is logged
+`request-shape`, and a `message_id` or `reply_to` that is not a message id (all digits,
+within SQLite's integer) is `refused` with `message-id-shape`, each before anything is
+read. Any exception out of the verb is logged
 once per class with its traceback but not its text, and answers the code `page-error`:
 `failed` for a check, `unknown` for a send or a take-back, since one that broke may have
 acted.
@@ -34,7 +35,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import sqlite3
 import threading
 import traceback
@@ -43,6 +43,7 @@ from typing import Any
 
 from . import api
 from .constants import OPERATOR_ENV
+from .pagereads import is_message_id
 from .paths import comms_db
 from .sending import OUTCOME_FAILED, OUTCOME_REFUSED, OUTCOME_UNKNOWN
 from .store import open_read
@@ -56,8 +57,6 @@ RECORD_UNREADABLE = "record-unreadable"
 REQUEST_SHAPE = "request-shape"
 MESSAGE_ID_SHAPE = "message-id-shape"
 PAGE_ERROR = "page-error"
-
-_ID = re.compile(r"\A[0-9]{1,20}\Z")
 
 log = logging.getLogger("moxi.comms.page")
 
@@ -124,6 +123,8 @@ def _act(call: Any, verb: Callable[..., api.SendResult], broke: str) -> dict[str
     body = call.body
     if not body["to"].strip():
         return refused(REQUEST_SHAPE)
+    if body.get("reply_to") is not None and not is_message_id(body["reply_to"]):
+        return refused(MESSAGE_ID_SHAPE)
     try:
         user = operator_id()
     except Exception as exc:
@@ -165,7 +166,7 @@ def take_back(call: Any) -> dict[str, Any]:
     was withdrawn from, who had it already and whose copy had expired, or why nothing
     was withdrawn."""
     mid = call.body["message_id"]
-    if not _ID.match(mid):
+    if not is_message_id(mid):
         return taken(MESSAGE_ID_SHAPE)
     try:
         user = operator_id()

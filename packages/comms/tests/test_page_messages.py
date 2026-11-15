@@ -283,6 +283,7 @@ def test_a_day_before_today_needs_a_message_id(rig, today):
 
 @pytest.mark.parametrize("query", [
     {"before": "12a"}, {"before": "-5"}, {"before": ""}, {"before": "1e9"},
+    {"before": "9223372036854775808"},
     {"day": "yesterday"}, {"day": "2026-13-01"}, {"day": "2026-1-1"}, {"limit": "0"},
     {"limit": "-3"},
 ])

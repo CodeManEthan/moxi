@@ -256,7 +256,7 @@ SEND_BODY = {
     "text": lb.Field("string", max=MAX_CONTENT_LENGTH),
     "posture": lb.Field("enum", values=POSTURES),
     "held": lb.Field("bool"),
-    "reply_to": lb.Field("string", required=False, max=20),
+    "reply_to": lb.Field("string", required=False, max=19),
 }
 #: The acts' body cap in bytes: 16,000 characters can be 64,000 bytes of UTF-8, and
 #: 96,000 once JSON escapes them.
@@ -301,7 +301,7 @@ PAGE = lb.Page(
                  topics={"roster": lb.Out("table", items=ROSTER)}),
         lb.Route("/api/messages", "read", "moxi_comms.pagereads:messages",
                  query={"day": lb.Field("string", required=False, max=10),
-                        "before": lb.Field("string", required=False, max=20),
+                        "before": lb.Field("string", required=False, max=19),
                         "limit": lb.Field("int", required=False, max=500)},
                  returns=MESSAGES),
         lb.Route("/api/mail-state", "read", "moxi_comms.pagereads:mail_state",
@@ -312,9 +312,9 @@ PAGE = lb.Page(
         lb.Route("/api/thread", "read", "moxi_comms.pagereads:thread",
                  query={"a": lb.Field("string", max=200),
                         "b": lb.Field("string", required=False, max=200),
-                        "before": lb.Field("string", required=False, max=20),
-                        "after": lb.Field("string", required=False, max=20),
-                        "oldest": lb.Field("string", required=False, max=20),
+                        "before": lb.Field("string", required=False, max=19),
+                        "after": lb.Field("string", required=False, max=19),
+                        "oldest": lb.Field("string", required=False, max=19),
                         "limit": lb.Field("int", required=False, max=100)},
                  returns=THREAD),
         lb.Route("/api/check", "act", "moxi_comms.pageacts:check", body=SEND_BODY,
@@ -322,7 +322,7 @@ PAGE = lb.Page(
         lb.Route("/api/send", "act", "moxi_comms.pageacts:send", body=SEND_BODY,
                  body_cap=SEND_BODY_CAP_BYTES, returns=SENT),
         lb.Route("/api/take-back", "act", "moxi_comms.pageacts:take_back",
-                 body={"message_id": lb.Field("string", max=20)}, returns=TAKEN),
+                 body={"message_id": lb.Field("string", max=19)}, returns=TAKEN),
     ),
     assets="web",
 )

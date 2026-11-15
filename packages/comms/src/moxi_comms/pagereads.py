@@ -19,9 +19,10 @@ Which store answers what:
   class is logged once with its text and traceback; no exception's text reaches the
   browser.
 
-A query value the page never sends (an id that is not all digits, a day that is not a
+A query value the page never sends (an id that is not a message id, a day that is not a
 date, a limit under one, an empty address) answers `error` with a fixed sentence, and
-opens nothing.
+opens nothing. A message id is all digits, at most `MESSAGE_ID_MAX`, SQLite's largest
+integer.
 
 A message is listed only when its line zero is a machine line: a prose message, which
 no list shows, is left out and not counted. Its rows come from one query of the books'
@@ -84,7 +85,10 @@ BAD_QUERY = "the read's query holds a value this page never sends"
 #: What the page shows for an earlier day asked for with no message id to read back from.
 NO_CURSOR = "a day before today is read back from a message id, and none was given"
 
-_ID = re.compile(r"\A[0-9]{1,20}\Z")
+#: The largest message id: SQLite's largest integer.
+MESSAGE_ID_MAX = 2**63 - 1
+
+_ID = re.compile(r"\A[0-9]{1,19}\Z")
 _DAY = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
 log = logging.getLogger("moxi.comms.page")
@@ -168,11 +172,16 @@ def answer(empty: dict[str, Any], read) -> dict[str, Any]:
 # --- query values ------------------------------------------------------------------------
 
 
+def is_message_id(raw: str) -> bool:
+    """`raw` is a message id: all digits, at most `MESSAGE_ID_MAX`."""
+    return bool(_ID.match(raw)) and int(raw) <= MESSAGE_ID_MAX
+
+
 def query_id(raw: str | None) -> str | None:
     """A query's message id: a string of digits, or None when it is absent."""
     if raw is None:
         return None
-    if not _ID.match(raw):
+    if not is_message_id(raw):
         raise _Refused(BAD_QUERY)
     return raw
 
@@ -726,8 +735,8 @@ def _changed(store: Store, pair: _Pair, oldest: str | None,
     return [{"message_id": mid, "rows": rows[mid]} for mid in sorted(rows, key=int)]
 
 
-__all__ = ["BAD_QUERY", "DAY_PAGE", "LIMIT", "NO_CURSOR", "QUEUE_CAP", "READ_ERROR",
+__all__ = ["BAD_QUERY", "DAY_PAGE", "LIMIT", "MESSAGE_ID_MAX", "NO_CURSOR", "QUEUE_CAP", "READ_ERROR",
            "THREAD_LIMIT", "THREAD_PAGE", "Authored", "Read", "Store", "answer", "authored",
-           "book_rows", "day_bounds", "earlier", "local_day", "mail_state", "messages",
+           "book_rows", "day_bounds", "earlier", "is_message_id", "local_day", "mail_state", "messages",
            "opened", "query_id", "queue", "readable", "sent_entry", "shaped", "stamp",
            "thread"]

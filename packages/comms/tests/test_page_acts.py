@@ -23,7 +23,7 @@ import pytest
 from claim_kit import World
 from conftest import wait_until
 from moxi.store import transaction
-from moxi_comms import api, machine_line, page, pageacts, store
+from moxi_comms import api, machine_line, page, pageacts, pagereads, store
 from moxi_comms.paths import comms_db
 
 from test_page import PORT, TOKEN, run, served
@@ -387,7 +387,7 @@ def books_row(mid, name=MAIN):
 def test_take_back_declares_its_body_and_answer():
     route = {r.path: r for r in page.PAGE.routes}["/api/take-back"]
     assert (route.kind, route.gateway, route.confirmed) == ("act", False, False)
-    assert list(route.body) == ["message_id"] and route.body["message_id"].max == 20
+    assert list(route.body) == ["message_id"] and route.body["message_id"].max == 19
     assert dict(route.returns) == page.TAKEN and list(route.returns) == TAKEN_KEYS
 
 
@@ -415,16 +415,29 @@ def test_take_back_of_anothers_message_or_none_is_refused_with_its_code(rig):
     assert take_back("4611686018427399999")["refusal"] == {"code": "unknown-message"}
 
 
-@pytest.mark.parametrize("mid", ["12a", "", " 5", "-1"])
+@pytest.mark.parametrize("mid", ["12a", "", " 5", "-1", "9223372036854775808"])
 def test_a_message_id_that_is_not_digits_is_refused_before_anything_is_read(
         rig, monkeypatch, mid):
     monkeypatch.setattr(pageacts, "operator_id", lambda: pytest.fail("read"))
     assert take_back(mid) == pageacts.taken("message-id-shape")
 
 
-def test_a_message_id_over_twenty_characters_is_refused_by_the_route(rig):
-    status, _ = run(post_raw("/api/take-back", json.dumps({"message_id": "1" * 21}).encode()))
+def test_a_message_id_over_nineteen_characters_is_refused_by_the_route(rig):
+    status, _ = run(post_raw("/api/take-back", json.dumps({"message_id": "1" * 20}).encode()))
     assert status == 400
+    status, _ = run(post_raw("/api/send", json.dumps(body(reply_to="1" * 20)).encode()))
+    assert status == 400
+
+
+def test_the_largest_message_id_is_one_and_one_past_it_is_not():
+    assert pagereads.is_message_id(str(pagereads.MESSAGE_ID_MAX))
+    assert not pagereads.is_message_id(str(pagereads.MESSAGE_ID_MAX + 1))
+
+
+def test_a_reply_to_past_sqlites_integer_is_refused_before_anything_is_read(rig, monkeypatch):
+    monkeypatch.setattr(pageacts, "operator_id", lambda: pytest.fail("read"))
+    for act_ in (check, send):
+        assert act_(reply_to="9223372036854775808") == pageacts.refused("message-id-shape")
 
 
 def test_take_back_with_no_operator_is_operator_unknown(rig):
