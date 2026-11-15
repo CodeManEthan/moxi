@@ -28,8 +28,16 @@
 //   the window's right edge, and the column moves aside where the window has the room.
 //   An opened project's `Edit`, its `Change folder` and the `edit/<key>` address open the
 //   Edit panel over it, its folder field focused; closing it leaves the project open.
-// - Until the remove step is drawn, an opened project's `Remove` takes the remove through
-//   the shell's confirm sheet.
+// - The remove step: an opened project's `Remove`, and the `remove/<key>` address, read
+//   `/api/remove-check` and draw under the foot either what goes and what stays, with
+//   `Remove from Moxi`, or each thing that refuses it now, with the button off. The step
+//   is the confirmation: the press sends `/api/remove` with a `job` minted for it, and is
+//   answered at once. A removed project's row becomes one line with `Add it back`, which
+//   adds it again as the page held it. Refused since the check, the step is drawn again
+//   from a fresh check; refused before the remove was tried, its text shows under the
+//   button. With no answer, the outcome kept under the `job` is read once, else the page
+//   says it may have been removed. While `/api/where` says a change would be refused, its
+//   note shows dim above the button.
 //
 // Every act sends what the same `moxi projects` verb takes, and every control that acts is
 // off while one is on its way. After an act that was done or may have been, the page
@@ -43,24 +51,28 @@ import type { ElementPart, PartInfo } from "lit/directive.js";
 import { live } from "lit/directives/live.js";
 import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, components, confirm, navigate, place, subscribe } from "/m/ui/client.js";
+import { api, components, installed, navigate, place, subscribe } from "/m/ui/client.js";
 
 import { keyIn, listState, noSuchProject, NOTHING_OPEN, parseRoute, pathToWrite, READING_AFTER_MS } from "./address.ts";
 import type { Address, ListState } from "./address.ts";
 import { FACTS_COMPONENT, FACTS_EVENT } from "./facts.ts";
 import type { Given } from "./facts.ts";
-import { CHANGED, Feed, parseKinds, parseListing, parseRemoveStatus } from "./feed.ts";
-import type { Kinds, Listed, Listing, Project, RemoveStatus } from "./feed.ts";
+import { CHANGED, Feed, parseAdded, parseKinds, parseListing, parseRemoveCheck, parseRemoveStatus, parseWhere } from "./feed.ts";
+import type { Kinds, Listed, Listing, Refusal } from "./feed.ts";
 import { factsModules, FirstOrder, givenOf, HeldReports, presentModules } from "./frame.ts";
 import { HOLD_MS, JOIN, listView, rowAttributes } from "./list-model.ts";
 import type { ListView, ProjectRow } from "./list-model.ts";
-import { emptySentence, NO_PROJECTS, openedRows } from "./opened-model.ts";
+import {
+  addBackBody, emptySentence, GOES, MAY_BE_REMOVED, mintJob, NO_PROJECTS, NOTHING_CHANGED, openedRows, pressedOf,
+  refusedRows, refusedTitle, removedAt, removedLine, removeStep,
+} from "./opened-model.ts";
+import type { Pressed } from "./opened-model.ts";
 import type { OpenedRow } from "./opened-model.ts";
 import { PANEL_WIDTH_PX } from "./panel.ts";
 import type { PanelAsk } from "./panel.ts";
 import { BASE } from "./styles.ts";
-import { MAY_HAVE_ACTED, removedSaid, removeSheet, removeStatusPath } from "./views.ts";
-import type { Said } from "./views.ts";
+import { MAY_BE_ADDED } from "./panel-model.ts";
+import { actedOf } from "./views.ts";
 
 const TAG = "moxi-projects-page";
 
@@ -76,6 +88,12 @@ const ALL = "all";
 const CLEAR = "Clear";
 const SHOW = "Show";
 const HIDE = "Hide";
+const GOES_LABEL = "Goes";
+const STAYS_LABEL = "Stays";
+const REMOVE_FROM_MOXI = "Remove from Moxi";
+const CANCEL = "Cancel";
+const CLOSE = "Close";
+const ADD_IT_BACK = "Add it back";
 
 /** Sets each attribute of a map on the element it is bound to, and removes each one whose
  * value is null. */
@@ -153,10 +171,11 @@ const STYLES = [BASE, css`
   .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; padding-top: 24px; }
   .first p { max-width: 520px; margin: 0 auto; }
   .first .x { margin-top: 12px; padding: 0; border: 0; background: none; color: var(--moxi-text); }
-  .said { display: grid; gap: 2px; padding-left: 8px; border-left: 3px solid var(--moxi-border-strong); }
-  .said.ok { border-left-color: var(--moxi-ok); }
-  .said.error { border-left-color: var(--moxi-error); color: var(--moxi-error); }
-  .said.warn { border-left-color: var(--moxi-warn); }
+  p.said { margin: 16px 0 0; padding: 0 2px; overflow-wrap: anywhere; }
+  /* A removed project's one line, in its place: dim, with its act in the text colour. */
+  .gone { padding: 9px 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .gone button { margin-left: 14px; color: var(--moxi-text); }
+  .gone p { margin: 2px 0 0; }
 
   .detail { display: grid; gap: var(--moxi-gap); min-width: 0; margin: 9px 0 3px; padding-top: 8px;
             border-top: 1px solid var(--moxi-border); cursor: auto; }
@@ -176,9 +195,26 @@ const STYLES = [BASE, css`
   .foot button { padding: 0; margin: 0; border: 0; background: none; font: inherit; cursor: pointer;
                  color: var(--moxi-text-dim); }
   .foot button[aria-pressed="true"] { color: var(--moxi-text); }
+  /* The remove step, under the foot and in line with the rows' words: its question
+     heavier, its rows labelled as the opened project's are, then its buttons. */
+  .step { display: grid; gap: 6px; margin: 4px 0 2px 110px; padding-top: 10px; border-top: 1px solid var(--moxi-border);
+          min-width: 0; }
+  .step .orow { grid-template-columns: 76px minmax(0, 1fr) auto; }
+  .step .q { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .step p.dim { margin: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+  .step .then { padding-left: 90px; }
+  .step .btns { display: flex; align-items: center; gap: 18px; padding: 4px 0 2px; }
+  .step button.btn { padding: 5px 13px; border: 1px solid var(--moxi-border-strong); border-radius: 7px; background: none;
+                     color: var(--moxi-text); font: inherit; cursor: pointer; }
+  .step button.btn:hover:not(:disabled) { background: var(--moxi-bg-hover); }
+  .step button.btn:disabled { color: var(--moxi-text-dim); border-color: var(--moxi-border); cursor: default; }
+  .step button.lnk { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); font: inherit; cursor: pointer; }
   @media (max-width: 720px) {
     .orow { grid-template-columns: minmax(0, 1fr) auto; }
     .orow .ok { grid-column: 1 / -1; font-size: 13px; }
+    .step { margin-left: 0; }
+    .step .orow { grid-template-columns: minmax(0, 1fr) auto; }
+    .step .then { padding-left: 0; }
   }
   .part { display: grid; gap: 6px; min-width: 0; padding-top: var(--moxi-gap); border-top: 1px solid var(--moxi-border); }
 
@@ -190,10 +226,27 @@ const STYLES = [BASE, css`
   }
 `];
 
-/** What the page last said, and the project it is about (null for the page itself). */
-interface Told {
-  key: string | null;
-  said: Said;
+/** The open project's remove step. */
+interface Step {
+  key: string;
+  /** `/api/remove-check`'s refusals; null until it is read. */
+  refusals: Refusal[] | null;
+  /** The check couldn't be read: what its answer said. */
+  failed: string | null;
+  /** `/api/where`'s note: what a change would be refused with now. */
+  note: string | null;
+  sending: boolean;
+  /** Under the button: a refusal's text, or that it may have been removed. */
+  said: string | null;
+}
+
+/** A project removed from the page, drawn as one line in its place until it is back. */
+interface Removed {
+  project: Listed;
+  /** The key drawn before it when it went. */
+  after: string | null;
+  sending: boolean;
+  said: string | null;
 }
 
 export class ProjectsPage extends LitElement {
@@ -223,9 +276,12 @@ export class ProjectsPage extends LitElement {
   /** When the page was connected, for the first read's `Reading…`. */
   #since = Date.now();
   #readingTimer: ReturnType<typeof setTimeout> | null = null;
-  /** An act is being sent, or the confirm sheet is open. */
-  #sending = false;
-  #told: Told | null = null;
+  #step: Step | null = null;
+  /** Counts the steps opened, so an answer for one left behind is dropped. */
+  #steps = 0;
+  #removed: Removed | null = null;
+  /** A line at the list's top: what a step said of a project no longer listed. */
+  #told: string | null = null;
 
   // The list's choices: the find field, the kind filter, the `Earlier` fold shown, and the
   // keys in the order last drawn, so the open row keeps its place.
@@ -341,10 +397,14 @@ export class ProjectsPage extends LitElement {
     if (this.#open !== null && this.#list?.failure === null) {
       const open = projects.find((p) => p.key === this.#open) ?? null;
       if (open === null) {
+        // What its step said is said at the list's top.
+        if (this.#step?.said != null) this.#told = this.#step.said;
         this.#close();
         this.#write();
       }
     }
+    const removed = this.#removed;
+    if (removed !== null && keyIn(projects, removed.project.key) !== null) this.#removed = null;
     this.#openPending();
     this.#seat();
     this.requestUpdate();
@@ -396,11 +456,14 @@ export class ProjectsPage extends LitElement {
     this.#setOpen(null);
     this.#openFor = "open";
     this.#adding = null;
+    this.#step = null;
   }
 
-  /** `project` is open, for `piece`. */
+  /** `project` is open, for `piece`; for its remove, the step is read anew. */
   #openProject(project: Listed, piece: "open" | "edit" | "remove"): void {
     this.#setOpen(project.key);
+    if (piece !== "remove") this.#step = null;
+    else if (this.#openFor !== "remove" || this.#step?.key !== project.key) this.#openStep(project.key);
     this.#openFor = piece;
     this.#adding = null;
   }
@@ -479,46 +542,129 @@ export class ProjectsPage extends LitElement {
     document.dispatchEvent(new Event(CHANGED));
   }
 
-  async #remove(project: Project): Promise<void> {
-    if (this.#sending) return;
-    this.#sending = true;
-    this.#told = null;
-    this.requestUpdate();
+  // -- the remove step ----------------------------------------------------------------------
+
+  /** Opens the step for `key`: what a remove would meet now, and where a change would be
+   * refused, are read. */
+  #openStep(key: string): void {
+    this.#steps += 1;
+    this.#step = { key, refusals: null, failed: null, note: null, sending: false, said: null };
+    void this.#readCheck(this.#steps);
+    void this.#readWhere(this.#steps);
+  }
+
+  /** The step `mine`, while it is still the one open. */
+  #stepOf(mine: number): Step | null {
+    return mine === this.#steps ? this.#step : null;
+  }
+
+  async #readCheck(mine: number): Promise<void> {
+    const key = this.#stepOf(mine)?.key;
+    if (key === undefined) return;
+    let answer;
     try {
-      const outcome = await confirm("projects", "api/remove", { key: project.key }, removeSheet(project));
-      if (outcome.outcome === "cancelled") return;
-      if (outcome.outcome === "refused") {
-        this.#told = { key: project.key, said: { tone: "error", lines: [outcome.text] } };
-        return;
-      }
-      // Nothing was sent, and confirm() has already shown where to take the act.
-      if (outcome.outcome === "desk") return;
-      if (outcome.outcome === "unknown") {
-        this.#told = { key: project.key, said: { tone: "warn", lines: [MAY_HAVE_ACTED] } };
-        this.#changed();
-        return;
-      }
-      const path = removeStatusPath(outcome.status);
-      if (path === null) {
-        this.#told = { key: project.key, said: { tone: "warn", lines: [
-          "projects' page server took the remove but gave no status link to read; the list has been read again."] } };
-        this.#changed();
-        return;
-      }
-      const status = new Feed<RemoveStatus>(() => api("projects", path), parseRemoveStatus, () => {});
-      await status.refresh();
-      if (status.value !== null) {
-        const removed = status.value.state === "removed";
-        this.#told = { key: removed ? null : project.key, said: removedSaid(status.value) };
-      } else {
-        this.#told = { key: project.key, said: { tone: "warn", lines: [
-          `The remove was taken, but what it came to can't be read: ${status.failure?.said ?? status.failure?.why ?? "no answer"}.`] } };
+      answer = await api("projects", `api/remove-check?key=${encodeURIComponent(key)}`);
+    } catch {
+      answer = { status: 0, data: null };
+    }
+    const step = this.#stepOf(mine);
+    if (step === null) return;
+    const check = actedOf(answer.status, answer.data, parseRemoveCheck);
+    this.#step = check.outcome === "done" ? { ...step, refusals: check.value.refusals, failed: null }
+      : { ...step, failed: check.text };
+    this.requestUpdate();
+  }
+
+  async #readWhere(mine: number): Promise<void> {
+    let answer;
+    try {
+      answer = await api("projects", "api/where");
+    } catch {
+      return;
+    }
+    const step = this.#stepOf(mine);
+    if (step === null) return;
+    this.#step = { ...step, note: answer.status === 200 ? parseWhere(answer.data)?.note ?? null : null };
+    this.requestUpdate();
+  }
+
+  /** `Remove from Moxi`: the remove is sent under a `job` of its own, and its answer drawn. */
+  async #press(project: Listed): Promise<void> {
+    const mine = this.#steps;
+    const step = this.#stepOf(mine);
+    if (step === null || step.sending || step.refusals === null || step.refusals.length > 0) return;
+    this.#step = { ...step, sending: true, said: null };
+    this.requestUpdate();
+    const job = mintJob();
+    const pressed = await this.#sendRemove(project.key, job);
+    if (pressed.outcome === "removed") {
+      const at = this.#order.indexOf(project.key);
+      this.#removed = { project, after: at > 0 ? this.#order[at - 1] : null, sending: false, said: null };
+      if (this.#open === project.key) {
+        this.#close();
+        this.#write();
       }
       this.#changed();
-    } finally {
-      this.#sending = false;
-      this.requestUpdate();
+    } else if (pressed.outcome === "held") {
+      // Something changed since the check: the step is drawn from a fresh one.
+      await this.#readCheck(mine);
+      const now = this.#stepOf(mine);
+      if (now !== null) {
+        const held = now.refusals !== null && now.refusals.length > 0;
+        this.#step = { ...now, sending: false, said: held ? null : pressed.reason };
+      }
+    } else {
+      const now = this.#stepOf(mine);
+      if (now !== null) {
+        this.#step = { ...now, sending: false, said: pressed.outcome === "refused" ? pressed.text : MAY_BE_REMOVED };
+      }
+      if (pressed.outcome === "unknown") this.#changed();
     }
+    this.requestUpdate();
+  }
+
+  /** Sends the remove of `key` under `job`; with no answer, reads the outcome kept under
+   * `job` once. */
+  async #sendRemove(key: string, job: string): Promise<Pressed> {
+    let answer;
+    try {
+      answer = await api("projects", "api/remove", { key, job });
+    } catch {
+      answer = { status: 0, data: null };
+    }
+    const acted = actedOf(answer.status, answer.data, parseRemoveStatus);
+    if (acted.outcome === "done") return pressedOf(acted.value);
+    if (acted.outcome === "refused") return { outcome: "refused", text: acted.text };
+    try {
+      const kept = await api("projects", `api/remove-status?job=${job}`);
+      const status = kept.status === 200 ? parseRemoveStatus(kept.data) : null;
+      if (status !== null) return pressedOf(status);
+    } catch {
+      // Nothing more can be read: it may have been removed.
+    }
+    return { outcome: "unknown" };
+  }
+
+  /** `Add it back`: the removed project is added again as the page held it. */
+  async #addBack(): Promise<void> {
+    const removed = this.#removed;
+    if (removed === null || removed.sending) return;
+    this.#removed = { ...removed, sending: true, said: null };
+    this.requestUpdate();
+    let answer;
+    try {
+      answer = await api("projects", "api/add",
+                         addBackBody(removed.project, { notesInstalled: this.#list?.value?.notes_installed ?? false }));
+    } catch {
+      answer = { status: 0, data: null };
+    }
+    const acted = actedOf(answer.status, answer.data, parseAdded);
+    if (this.#removed?.project.key === removed.project.key) {
+      this.#removed = acted.outcome === "done" ? null
+        : { ...this.#removed, sending: false, said: acted.outcome === "refused" ? acted.text : MAY_BE_ADDED };
+    }
+    if (acted.outcome !== "refused") this.#changed();
+    this.requestUpdate();
   }
 
   // -- rendering ---------------------------------------------------------------------------
@@ -546,7 +692,6 @@ export class ProjectsPage extends LitElement {
 
   #listPart(list: Feed<Listing>, state: ListState) {
     const told = this.#told;
-    const loose = told !== null && (told.key === null || this.#find(told.key) === null) ? told.said : null;
     const listing = state.rows ? list.value : null;
     const reports = this.#reports.reports();
     const placed = this.#modules === undefined ? null : this.#facts.size + this.#placing.size;
@@ -555,8 +700,9 @@ export class ProjectsPage extends LitElement {
     return html`<section data-part="list" data-state=${state.state}>
       ${state.line !== null ? html`<p class="state ${state.state === "loading" ? "dim" : ""}"
         data-line=${state.state === "loading" ? "reading" : "failed"} role="status">${state.line}</p>` : nothing}
-      ${loose !== null ? this.#saidPart(loose) : nothing}
-      ${listing === null ? nothing : listing.projects.length === 0 ? state.acts ? html`<div class="first" data-part="empty">
+      ${told !== null && state.acts ? html`<p class="said" data-line="said" role="status">${told}</p>` : nothing}
+      ${listing === null ? nothing : listing.projects.length === 0 ? state.acts ? html`${
+          this.#removed !== null ? this.#removedPart(this.#removed) : nothing}<div class="first" data-part="empty">
           <p data-line="empty">${NO_PROJECTS}</p><p data-line="sentence">${emptySentence(reports)}</p>
           <button type="button" class="x" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button></div>` : nothing
         : this.#rows(listing, listView(listing.projects, { home: listing.home, reports, open, now: Date.now() / 1000 },
@@ -571,12 +717,17 @@ export class ProjectsPage extends LitElement {
     this.#order = view.order;
     const byKey = new Map(listing.projects.map((project) => [project.key, project]));
     const row = (item: ProjectRow) => this.#row(byKey.get(item.key) as Listed, item, acts);
+    // A project removed here keeps a line where its row was.
+    const removed = acts ? this.#removed : null;
+    const shown: (ProjectRow | Removed)[] = [...view.rows];
+    if (removed !== null) shown.splice(removedAt(view.rows.map((item) => item.key), removed.after), 0, removed);
+    const drawn = (item: ProjectRow | Removed) => ("project" in item ? this.#removedPart(item) : row(item));
     return html`${view.long ? this.#findPart(view) : nothing}
       <div class=${acts ? "grps" : "grps kept"}>
         <section class="grp" data-part="projects"><div class="gk"><span data-line="count">${view.count}</span>${acts
           ? html`<small><button type="button" data-action="add" @click=${() => this.#add()}>${ADD_A_PROJECT}</button></small>`
           : nothing}</div>
-          <div class="gl">${repeat(view.rows, (item) => item.key, row)}</div></section>
+          <div class="gl">${repeat(shown, (item) => ("project" in item ? `\n${item.project.key}` : item.key), drawn)}</div></section>
         ${view.earlierLine !== null ? html`<section class="grp" data-part="earlier"><div class="gk">${EARLIER}</div>
           <div class="gl"><div class="one"><span data-line="earlier">${view.earlierLine}</span><button type="button"
             data-action="earlier" aria-expanded=${this.#earlierShown ? "true" : "false"}
@@ -623,9 +774,13 @@ export class ProjectsPage extends LitElement {
     </moxi-ui-row>`;
   }
 
-  #saidPart(said: Said) {
-    return html`<div class="said ${said.tone}" data-line="said" data-tone=${said.tone} role="status">
-      ${said.lines.map((line) => html`<p>${line}</p>`)}</div>`;
+  /** A removed project's one line, with `Add it back`, and what that came to. */
+  #removedPart(removed: Removed) {
+    return html`<div class="gone" data-part="removed" data-key=${removed.project.key}>
+      <span data-line="removed">${removedLine(removed.project.key)}</span><button type="button" data-action="add-back"
+        ?disabled=${removed.sending} @click=${() => void this.#addBack()}>${ADD_IT_BACK}</button>
+      ${removed.said !== null ? html`<p data-line="said" role="status">${removed.said}</p>` : nothing}
+    </div>`;
   }
 
   /** `Open` or `Close`, or the row's own line: the row opens, or closes, and the address
@@ -634,7 +789,7 @@ export class ProjectsPage extends LitElement {
     if (this.#open === project.key) this.#close();
     else this.#openProject(project, "open");
     this.#unknown = null;
-    if (this.#told?.key !== null && this.#told?.key !== this.#open) this.#told = null;
+    this.#told = null;
     this.#write();
     this.requestUpdate();
   }
@@ -653,6 +808,8 @@ export class ProjectsPage extends LitElement {
   /** `Remove` in the opened project's foot: it is open for its remove. */
   #removeOpen(project: Listed): void {
     this.#openProject(project, "remove");
+    this.#unknown = null;
+    this.#told = null;
     this.#write();
     this.requestUpdate();
   }
@@ -661,6 +818,7 @@ export class ProjectsPage extends LitElement {
   #add(): void {
     this.#close();
     this.#unknown = null;
+    this.#told = null;
     this.#adding = { mode: "add" };
     this.#write();
     this.requestUpdate();
@@ -682,10 +840,9 @@ export class ProjectsPage extends LitElement {
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(focus)?.focus());
   }
 
-  /** The opened project: its labelled rows, then the foot, `Edit` and `Remove`. Until the
-   * remove step is drawn, `Remove` takes the remove through the shell's confirm sheet. */
+  /** The opened project: its labelled rows, then the foot, `Edit` and `Remove`, and under
+   * it the remove step while it is open for its remove. */
   #detail(project: Listed) {
-    const told = this.#told?.key === project.key ? this.#told.said : null;
     const listing = this.#list?.value;
     const rows = openedRows(project, { home: listing?.home ?? null, notesInstalled: listing?.notes_installed ?? false,
                                        reports: this.#reports.reports(), installed: presentModules(this.#modules) });
@@ -697,13 +854,78 @@ export class ProjectsPage extends LitElement {
         <button type="button" data-action="remove" aria-pressed=${this.#openFor === "remove" ? "true" : "false"}
           @click=${() => this.#removeOpen(project)}>${REMOVE}</button>
       </div>
-      ${told !== null ? this.#saidPart(told) : nothing}
-      ${this.#openFor === "remove" ? html`<div class="part" data-part="remove"><div class="bar">
-        <button type="button" data-action="remove-sheet" ?disabled=${this.#sending}
-          @click=${() => void this.#remove(project)}>Remove…</button>
-        <span class="dim">Takes it off the list; its files stay.</span>
-      </div></div>` : nothing}
+      ${this.#openFor === "remove" && this.#step?.key === project.key ? this.#stepPart(project, this.#step) : nothing}
     </div>`;
+  }
+
+  /** The remove step: nothing until the check is read; then what goes and what stays,
+   * with `Remove from Moxi` and `Cancel`, or what refuses it now, with the button off and
+   * `Close`. */
+  #stepPart(project: Listed, step: Step) {
+    if (step.refusals === null) {
+      return step.failed === null ? nothing : html`<div class="step" data-part="remove" data-state="failed">
+        <p class="dim" data-line="said" role="status">${step.failed}</p>
+        <div class="btns"><button type="button" class="lnk" data-action="cancel"
+          @click=${() => this.#leaveStep(project)}>${CLOSE}</button></div></div>`;
+    }
+    const listing = this.#list?.value;
+    const facts = { home: listing?.home ?? null, notesInstalled: listing?.notes_installed ?? false,
+                    reports: this.#reports.reports(), installed: presentModules(this.#modules) };
+    const refused = step.refusals.length > 0;
+    const busy = step.sending;
+    const tail = html`
+      ${step.note !== null ? html`<p class="dim then" data-line="note">${step.note}</p>` : nothing}
+      <div class="btns then">
+        <button type="button" class="btn" data-action="remove-press" ?disabled=${refused || busy}
+          @click=${() => void this.#press(project)}>${REMOVE_FROM_MOXI}</button>
+        <button type="button" class="lnk" data-action="cancel" @click=${() => this.#leaveStep(project)}>${
+          refused ? CLOSE : CANCEL}</button>
+      </div>
+      ${step.said !== null ? html`<p class="dim then" data-line="said" role="status">${step.said}</p>` : nothing}`;
+    if (refused) {
+      const rows = refusedRows(project, step.refusals, (module) => this.#pageTitle(module));
+      return html`<div class="step" data-part="remove" data-state="refused">
+        <p class="q" data-line="title">${refusedTitle(project.key)}</p>
+        ${rows.map((item) => html`<div class="orow" data-label=${item.label}><span class="ok">${item.label}</span>
+          <div class="ol">${item.lines.map((line) => html`<p>${line}</p>`)}</div>
+          ${item.page !== null ? this.#pageLink(item.page, item.label)
+            : item.edit ? html`<button type="button" class="oa" data-action="edit"
+              @click=${() => this.#editOpen(project)}>${EDIT}</button>` : nothing}</div>`)}
+        <p class="dim then" data-line="unchanged">${NOTHING_CHANGED}</p>
+        ${tail}</div>`;
+    }
+    const words = removeStep(project, facts);
+    return html`<div class="step" data-part="remove" data-state="ask">
+      <p class="q" data-line="title">${words.title}</p>
+      <div class="orow" data-label=${GOES_LABEL}><span class="ok">${GOES_LABEL}</span><div class="ol"><p>${GOES}</p></div></div>
+      ${words.stays.length > 0 ? html`<div class="orow" data-label=${STAYS_LABEL}><span class="ok">${STAYS_LABEL}</span>
+        <div class="ol">${words.stays.map((line) => html`<p>${line}</p>`)}</div></div>` : nothing}
+      <p class="dim then" data-line="foot">${words.foot}</p>
+      ${tail}</div>`;
+  }
+
+  /** A module's page title, or null when it has no page. */
+  #pageTitle(module: string): string | null {
+    if (!installed(module)) return null;
+    return components(module).find((item) => item.name === "page")?.title ?? null;
+  }
+
+  /** A link to `module`'s page, at a row's right. */
+  #pageLink(module: string, text: string, route = "") {
+    return html`<a class="oa" href=${`/m/${module}/${route}`} data-action="link" @click=${(event: MouseEvent) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigate(module, route);
+      }}>${text}</a>`;
+  }
+
+  /** The step's `Cancel` or `Close`: the project stays open, its step gone. */
+  #leaveStep(project: Listed): void {
+    this.#openProject(project, "open");
+    this.#write();
+    this.requestUpdate();
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(
+      `moxi-ui-row[data-key="${CSS.escape(project.key)}"] [data-part="foot"] [data-action="remove"]`)?.focus());
   }
 
   /** One labelled row: the label dim at the left, its lines, and at the right its link or
@@ -713,12 +935,7 @@ export class ProjectsPage extends LitElement {
     return html`<div class="orow" data-label=${item.label}><span class="ok">${item.label}</span>
       <div class="ol">${item.lines.map((one) => html`<p>${one.parts.map((part, n) => html`${n > 0 ? JOIN : ""}${
         part.heavy ? html`<strong>${part.text}</strong>` : part.text}`)}</p>`)}</div>
-      ${link !== null ? html`<a class="oa" href=${`/m/${link.module}/${link.route}`} data-action="link"
-          @click=${(event: MouseEvent) => {
-            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            event.preventDefault();
-            navigate(link.module, link.route);
-          }}>${link.text}</a>`
+      ${link !== null ? this.#pageLink(link.module, link.text, link.route)
         : item.changeFolder ? html`<button type="button" class="oa fix" data-action="change-folder"
           @click=${() => this.#editOpen(project)}>${CHANGE_FOLDER}</button>` : nothing}
     </div>`;

@@ -4,7 +4,7 @@
 
 import { claimedBelow, inOrder, partText } from "./claims.ts";
 import type { Link, Report, Say } from "./facts.ts";
-import type { Listed } from "./feed.ts";
+import type { Listed, Refusal, RemoveStatus } from "./feed.ts";
 import { JOIN } from "./list-model.ts";
 import { homeForm, kindPhrase, lastActive, LOCAL } from "./words.ts";
 import type { Clock } from "./words.ts";
@@ -198,12 +198,6 @@ export function removeStep(project: Listed, facts: OpenedFacts): RemoveStep {
   };
 }
 
-/** One row of `/api/remove-check`'s `refusals`. */
-export interface Refusal {
-  module: string;
-  sentence: string;
-  fix: string | null;
-}
 
 /** One row of the refused step: its label, its words, and at the right that module's page or `Edit`. */
 export interface RefusedRow {
@@ -247,6 +241,50 @@ export function refusedRows(project: Listed, refusals: readonly Refusal[],
 
 /** The row a removed project becomes, with `Add it back`. */
 export const removedLine = (key: string): string => `${key} was removed from Moxi. Nothing on disk was deleted.`;
+
+/** What a remove whose answer was lost, and whose kept outcome can't be read, says. */
+export const MAY_BE_REMOVED = "It may have been removed.";
+
+/** A remove's `job`: 32 hexadecimal characters, minted for each press of `Remove from Moxi`. */
+export function mintJob(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** What a press of `Remove from Moxi` came to, from the remove's own answer or, when it
+ * was lost, the outcome kept under its `job`. */
+export type Pressed =
+  /** The project is gone from Moxi. */
+  | { outcome: "removed" }
+  /** Refused for something that changed since the check: the check is read again, and
+   * `reason` shows under the button when it then finds nothing to refuse. */
+  | { outcome: "held"; reason: string }
+  /** Refused before the remove was tried (the comparison, the store): its text. */
+  | { outcome: "refused"; text: string }
+  /** No outcome can be read: it may have been removed. */
+  | { outcome: "unknown" };
+
+/** A kept remove outcome as a press's. */
+export function pressedOf(status: RemoveStatus): Pressed {
+  return status.state === "removed" ? { outcome: "removed" } : { outcome: "held", reason: status.reason ?? "" };
+}
+
+/** `/api/add`'s body that puts a removed project back as the page held it: its key,
+ * folder, kind and lead, and its notes folder while notes is installed. */
+export function addBackBody(project: Listed, { notesInstalled }: { notesInstalled: boolean }):
+    Record<string, string> {
+  const body: Record<string, string> = { key: project.key, root: project.root, kind: project.kind };
+  if (project.lead !== null) body.lead = project.lead;
+  if (notesInstalled && project.notes_root !== null) body.notes_root = project.notes_root;
+  return body;
+}
+
+/** Where a removed project's line goes among the rows drawn now: after the row of
+ * `after`, the key drawn before it, or first when that row isn't drawn. */
+export function removedAt(keys: readonly string[], after: string | null): number {
+  return after === null ? 0 : keys.indexOf(after) + 1;
+}
 
 // -- the empty list ---------------------------------------------------------------------------
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHANGED, Feed, parseAdded, parseKinds, parseListing, parseOne, parseProjects, parseRemoveStatus, parseWhere,
+  CHANGED, Feed, parseAdded, parseKinds, parseListing, parseOne, parseProjects, parseRemoveCheck, parseRemoveStatus, parseWhere,
   parseWritten,
   PICKED, RETRIES, saidOf,
 } from "../src/feed.ts";
@@ -89,6 +89,18 @@ test("a remove's status: removed, or refused with its sentences", () => {
   assert.deepEqual(parseRemoveStatus(refused), refused);
   assert.equal(parseRemoveStatus({ ...removed, state: "gone" }), null);
   assert.equal(parseRemoveStatus({ ...removed, exit_code: "1" }), null);
+});
+
+test("what a remove would meet: each refusal, or none", () => {
+  const check = { key: "atlas-api", refusals: [
+    { module: "projects", sentence: "it has agents", fix: null },
+    { module: "notes", sentence: "its import failed", fix: "repair it" }] };
+  assert.deepEqual(parseRemoveCheck(check), check);
+  assert.deepEqual(parseRemoveCheck({ key: "a", refusals: [] }), { key: "a", refusals: [] });
+  for (const bad of [null, { key: "a" }, { key: 1, refusals: [] }, { key: "a", refusals: [{ module: "x", sentence: "s" }] },
+                     { key: "a", refusals: [{ module: "x", sentence: 2, fix: null }] }]) {
+    assert.equal(parseRemoveCheck(bad), null, JSON.stringify(bad));
+  }
 });
 
 test("an answer's own line", () => {

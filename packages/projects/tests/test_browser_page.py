@@ -8,18 +8,14 @@ git; an add whose answer is lost, after which the page reads its list again and 
 may have been added; the Edit panel, which changes the folder and the kind, refuses a
 relative folder, and sends only what the user changed when a terminal has changed the
 project since it was opened; the lead and the associated agents set, added, taken off and
-cleared through it; remove through the confirm sheet, where Cancel sends nothing, a refusal
-gives each sentence, a removal takes the row off, and each confirmation sends its own key;
-a remove whose answer is lost, which says projects may have acted; and the 360 px width
-check.
+cleared through it; and the 360 px width check.
 
 Rows are seeded with `moxi projects add` run with the shell's own environment, so the
 store is the one the page server reads, under the shell's home, and every check reads it
 back the same way. Those runs have no keyboard, so they record nothing; each shell is
 given the core's record of a terminal with its own environment before the page writes,
-as a person's own terminal run would leave it. A fake module on the shell's site refuses to remove a project while a
-file named `HOLD` is in its root. git runs with a global config of the test's own and no
-system config.
+as a person's own terminal run would leave it. git runs with a global config of the
+test's own and no system config.
 """
 
 from __future__ import annotations
@@ -30,7 +26,6 @@ import re
 import shutil
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -43,27 +38,12 @@ pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
 
 #: The event projects' page and components read their routes again on.
 CHANGED = "moxi-projects-changed"
-#: An `Idempotency-Key` as the shell's confirm sheet mints one.
-KEY = re.compile(r"^[A-Za-z0-9_-]{43}$")
 #: The paths a create from the page goes through, for a real-git row put back by a change.
 MINT_GLOBS = ("packages/projects/src/moxi_projects/acts.py",
               "packages/projects/src/moxi_projects/pagehandlers.py",
               "packages/projects/web/src/panel.ts",
               "packages/projects/web/src/page.ts",
               "packages/projects/tests/test_browser_page.py")
-
-HOLDS = textwrap.dedent('''\
-    import os
-
-    INTERFACE = 1
-
-
-    def refuse_remove(project):
-        hold = os.path.join(project.root, "HOLD")
-        if os.path.exists(hold):
-            return f"{hold} holds it; delete that file to free it"
-        return None
-''')
 
 BROKEN = "INTERFACE = 1\nimport fake_module_that_is_not_there\n"
 
@@ -87,14 +67,11 @@ def fake_site(base: Path, package: str, entry: str, source: str) -> Path:
 
 @pytest.fixture(scope="module")
 def ui_shell_options(tmp_path_factory) -> dict:
-    """A site holding the fake module `holds`, and git with the test's own global config and
-    no system config."""
-    site = fake_site(tmp_path_factory.mktemp("holds"), "fake_holds", "holds", HOLDS)
+    """git with the test's own global config and no system config."""
     gitconfig = tmp_path_factory.mktemp("git") / "gitconfig"
     gitconfig.write_text("[user]\n\tname = sample-bot\n\temail = bot@example.invalid\n"
                          "[init]\n\tdefaultBranch = main\n", encoding="utf-8")
-    return {"site": [str(site)],
-            "env": {"GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1"}}
+    return {"env": {"GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1"}}
 
 
 def moxi(shell, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -506,89 +483,6 @@ def test_the_lead_and_the_agents_are_set_added_taken_off_and_cleared(seeded, ui_
     expect(agents_row).to_have_text("no lead")
     after = shown(ui_shell, "crewed")
     assert (after["lead"], after["associated"]) == (None, []), after
-
-
-# --- remove -------------------------------------------------------------------------------------
-
-def test_remove_goes_through_the_sheet_refuses_with_its_sentences_then_removes(
-        seeded, ui_shell, ui_page):
-    where = add(ui_shell, "held")
-    moxi(ui_shell, "projects", "agents", "add", "held", "keeper")
-    hold = Path(where) / "HOLD"
-    hold.write_text("kept\n", encoding="utf-8")
-    panel = open_panel(ui_page)
-    posts = posts_to(ui_page, "api/remove")
-    statuses = reads_of(ui_page, "api/remove-status")
-    item = open_row(panel, "held")
-    sheet = ui_page.locator("moxi-ui-confirm").get_by_role("dialog")
-
-    # Cancel sends nothing.
-    item.get_by_role("button", name="Remove…").click()
-    expect(sheet).to_contain_text("moxi projects remove held")
-    expect(sheet).to_contain_text(where)
-    sheet.get_by_role("button", name="Cancel").click()
-    expect(ui_page.locator("moxi-ui-confirm")).to_have_count(0)
-    assert posts == []
-    expect(row(panel, "held")).to_have_count(1)
-
-    # Its associated agent holds it.
-    item.get_by_role("button", name="Remove…").click()
-    sheet.get_by_role("button", name="Confirm").click()
-    said = item.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "error")
-    expect(said).to_contain_text("keeper")
-    expect(said).to_contain_text("fix:")
-    assert shown(ui_shell, "held") is not None
-
-    # Then the fake module's sentence, named by its module.
-    item.get_by_role("button", name="Remove keeper").click()
-    expect(item.locator('li[data-agent="keeper"]')).to_have_count(0)
-    item.get_by_role("button", name="Remove…").click()
-    sheet.get_by_role("button", name="Confirm").click()
-    expect(said).to_have_attribute("data-tone", "error")
-    expect(said).to_contain_text(f"holds: {hold} holds it; delete that file to free it")
-    expect(said).to_contain_text("moxi projects remove held")
-    assert shown(ui_shell, "held") is not None
-
-    # Freed, it is removed; its root and files stay.
-    hold.unlink()
-    item.get_by_role("button", name="Remove…").click()
-    sheet.get_by_role("button", name="Confirm").click()
-    expect(row(panel, "held")).to_have_count(0)
-    told = panel.locator('section[data-part="list"] > [data-line="said"]')
-    expect(told).to_have_attribute("data-tone", "ok")
-    expect(told).to_contain_text("Removed held.")
-    assert shown(ui_shell, "held") is None
-    assert Path(where).is_dir()
-
-    # Each confirmation sent once, with a key of its own, and its status link was read.
-    keys = [request.headers["idempotency-key"] for request in posts]
-    assert len(keys) == 3 and len(set(keys)) == 3 and all(KEY.match(k) for k in keys), keys
-    for key in keys:
-        assert any(url.endswith(f"/m/projects/api/remove-status?job={key}") for url in statuses), statuses
-
-
-def test_a_lost_remove_answer_says_projects_may_have_acted(seeded, ui_shell, ui_page):
-    add(ui_shell, "lost-remove")
-    panel = open_panel(ui_page)
-
-    def lost(route) -> None:
-        route.fetch()               # the remove is made, and its answer never arrives
-        route.fulfill(status=504, json={"error": "timeout"})
-
-    ui_page.route("**/m/projects/api/remove", lost)
-    item = open_row(panel, "lost-remove")
-    item.get_by_role("button", name="Remove…").click()
-    ui_page.locator("moxi-ui-confirm").get_by_role("dialog").get_by_role(
-        "button", name="Confirm").click()
-    # The page read its list again, which no longer holds it, and says so in its own words.
-    expect(row(panel, "lost-remove")).to_have_count(0)
-    told = panel.locator('section[data-part="list"] > [data-line="said"]')
-    expect(told).to_have_attribute("data-tone", "warn")
-    expect(told).to_have_text(
-        "No answer came back, so projects may have acted; the list has been read again.")
-    ui_page.unroute("**/m/projects/api/remove")
-    assert shown(ui_shell, "lost-remove") is None
 
 
 # --- width --------------------------------------------------------------------------------------

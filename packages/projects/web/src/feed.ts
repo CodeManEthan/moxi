@@ -104,6 +104,22 @@ export interface RemoveStatus {
   exit_code: number | null;
 }
 
+/** One thing a remove would be refused with now: projects' own (the associated agents) or a
+ * contribution's sentence, which carries its own fix; `fix` is set only for a
+ * contribution that won't load, whose `sentence` is the reason. */
+export interface Refusal {
+  module: string;
+  sentence: string;
+  fix: string | null;
+}
+
+/** `/api/remove-check`: the project's key as stored, and what a remove would be refused
+ * with now, empty when nothing would. */
+export interface RemoveCheck {
+  key: string;
+  refusals: Refusal[];
+}
+
 /**
  * The event every projects component listens for on the document, and reads its route
  * again: one of projects' acts has ended, so the list may have changed. The add form and
@@ -233,6 +249,17 @@ export function parseRemoveStatus(data: unknown): RemoveStatus | null {
   return { job: data.job, project: data.project, created: data.created, state: data.state,
            key: data.key, reason: data.reason, fix: data.fix, sentences: [...data.sentences],
            exit_code: data.exit_code };
+}
+
+/** `/api/remove-check`'s value, or null when it isn't one. */
+export function parseRemoveCheck(data: unknown): RemoveCheck | null {
+  if (!isObj(data) || !isStr(data.key) || !Array.isArray(data.refusals)) return null;
+  const refusals: Refusal[] = [];
+  for (const one of data.refusals) {
+    if (!isObj(one) || !isStr(one.module) || !isStr(one.sentence) || !isStrOrNull(one.fix)) return null;
+    refusals.push({ module: one.module, sentence: one.sentence, fix: one.fix });
+  }
+  return { key: data.key, refusals };
 }
 
 /** The text an answer gives: its `refused`, `conflict` or `error`. */

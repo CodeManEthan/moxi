@@ -3,8 +3,9 @@ import test from "node:test";
 
 import { readReport } from "../src/facts.ts";
 import {
-  agentPhrase, agentsLine, emptySentence, folderGroup, GOES, joinNames, MISSING_SAYS, moreFolders, NO_PROJECTS,
-  NOTHING_CHANGED, openedRows, refusedRows, refusedTitle, removedLine, removeStep,
+  addBackBody, agentPhrase, agentsLine, emptySentence, folderGroup, GOES, joinNames, MAY_BE_REMOVED, mintJob,
+  MISSING_SAYS, moreFolders, NO_PROJECTS, NOTHING_CHANGED, openedRows, pressedOf, refusedRows, refusedTitle,
+  removedAt, removedLine, removeStep,
 } from "../src/opened-model.ts";
 
 const UTC = {
@@ -249,6 +250,41 @@ test("the refused step: projects' agents row, a module's sentence, a broken one'
   assert.equal(refusedTitle("atlas-api"), "atlas-api can't be removed yet");
   assert.equal(NOTHING_CHANGED, "Nothing was changed.");
   assert.equal(removedLine("reviewer-home"), "reviewer-home was removed from Moxi. Nothing on disk was deleted.");
+});
+
+test("each press mints a job of its own, 32 hexadecimal characters", () => {
+  const jobs = new Set(Array.from({ length: 50 }, () => mintJob()));
+  assert.equal(jobs.size, 50);
+  for (const job of jobs) assert.match(job, /^[0-9a-f]{32}$/);
+});
+
+test("a press comes to removed, or held for a reason the check is read again for", () => {
+  const kept = { job: "j", project: "atlas-api", created: "2026-01-02T03:04:05Z", key: "atlas-api", reason: null,
+                 fix: null, sentences: [], exit_code: null };
+  assert.deepEqual(pressedOf({ ...kept, state: "removed" }), { outcome: "removed" });
+  assert.deepEqual(pressedOf({ ...kept, state: "refused", reason: "project 'atlas-api' is still held", fix: "free it",
+                               sentences: ["fixture: held"], exit_code: 3 }),
+                   { outcome: "held", reason: "project 'atlas-api' is still held" });
+  assert.equal(MAY_BE_REMOVED, "It may have been removed.");
+});
+
+test("Add it back sends the key, folder, kind and lead, and the notes folder while notes is installed", () => {
+  assert.deepEqual(addBackBody(ATLAS, { notesInstalled: true }), {
+    key: "atlas-api", root: "/home/me/code/atlas-api", kind: "project", lead: "builder-1",
+    notes_root: "/home/me/notes/code/atlas-api" });
+  assert.deepEqual(addBackBody(ATLAS, { notesInstalled: false }),
+                   { key: "atlas-api", root: "/home/me/code/atlas-api", kind: "project", lead: "builder-1" });
+  assert.deepEqual(addBackBody(listed("solo", { kind: "agent" }), { notesInstalled: true }),
+                   { key: "solo", root: "/home/me/code/solo", kind: "agent" });
+});
+
+test("a removed project's line takes its row's place", () => {
+  const keys = ["atlas-api", "kestrel-web", "orbit-cli"];
+  assert.equal(removedAt(keys, null), 0);
+  assert.equal(removedAt(keys, "atlas-api"), 1);
+  assert.equal(removedAt(keys, "orbit-cli"), 3);
+  // The row before it isn't drawn now (filtered, folded): first.
+  assert.equal(removedAt(keys, "lumen-docs"), 0);
 });
 
 // -- the empty list ---------------------------------------------------------------------------

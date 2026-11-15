@@ -2,7 +2,7 @@
 // no DOM so the Node tests can read it. Every string here goes into the page as text.
 
 import { saidOf } from "./feed.ts";
-import type { Added, Failure, Kind, Kinds, One, Project, Projects, RemoveStatus } from "./feed.ts";
+import type { Added, Failure, Kind, Kinds, One, Project, Projects } from "./feed.ts";
 
 /** A component's data as its `Feed` holds it. */
 export interface FeedState<V> {
@@ -263,9 +263,6 @@ export function emptyForm(kind: string): AddForm {
 
 // -- the page -------------------------------------------------------------------------------
 
-/** What the page or a form says after an act: a tone and its lines. */
-export type Said = AddSaid;
-
 /** One choice of a kind menu: the value sent, and the label shown. */
 export interface KindChoice {
   value: string;
@@ -283,32 +280,4 @@ export function kindChoices(kinds: Kinds | null, current: string): KindChoice[] 
   const choices = (kinds?.found ?? []).map((kind) => ({ value: kind.name, label: kindLabel(kind) }));
   if (!choices.some((choice) => choice.value === current)) choices.push(undeclared(current));
   return choices;
-}
-
-/** The confirm sheet's lines for removing `project`: the command, and what stays. */
-export function removeSheet(project: Project): string[] {
-  return [
-    `moxi projects remove ${project.key}`,
-    `Takes the project ${project.key} off the list. Its root, ${project.root}, and every file in it stay as they are.`,
-  ];
-}
-
-/** The status path a remove's 202 gave, relative to projects' page, or null when it is
- * not the remove status route. */
-export function removeStatusPath(status: unknown): string | null {
-  if (typeof status !== "string") return null;
-  const path = status.replace(/^\/+/, "");
-  return /^api\/remove-status\?job=[A-Za-z0-9_-]+$/.test(path) ? path : null;
-}
-
-/** What a remove came to, as its status link gives it: removed, or refused with each
- * sentence and the fix. */
-export function removedSaid(status: RemoveStatus): Said {
-  if (status.state === "removed") {
-    return { tone: "ok", lines: [`Removed ${status.key}. Its root and its files are left as they were.`] };
-  }
-  const lines = [...status.sentences];
-  if (lines.length === 0 && status.reason !== null) lines.push(status.reason);
-  if (status.fix !== null) lines.push(`fix: ${status.fix}`);
-  return { tone: "error", lines };
 }
