@@ -68,7 +68,7 @@ import { HOLD_MS, JOIN, listView, rowAttributes } from "./list-model.ts";
 import type { ListView, ProjectRow } from "./list-model.ts";
 import {
   addBackBody, emptySentence, folderAsk, folderGroup, GOES, MAY_BE_REMOVED, mintJob, NO_PROJECTS, NOTHING_CHANGED,
-  openedRows, pressedOf, refusedRows, refusedTitle, removedAt, removedLine, removeStep,
+  openedRows, pressedOf, refusedRows, refusedTitle, removedIndex, removedLine, removeStep,
 } from "./opened-model.ts";
 import type { FolderGroup, FolderRow, Pressed } from "./opened-model.ts";
 import type { OpenedRow } from "./opened-model.ts";
@@ -607,8 +607,8 @@ export class ProjectsPage extends LitElement {
     const job = mintJob();
     const pressed = await this.#sendRemove(project.key, job);
     if (pressed.outcome === "removed") {
-      const at = this.#order.indexOf(project.key);
-      this.#removed = { project, after: at > 0 ? this.#order[at - 1] : null, sending: false, said: null };
+      const index = this.#order.indexOf(project.key);
+      this.#removed = { project, after: index > 0 ? this.#order[index - 1] : null, sending: false, said: null };
       if (this.#open === project.key) {
         this.#close();
         this.#write();
@@ -736,7 +736,7 @@ export class ProjectsPage extends LitElement {
     // A project removed here keeps a line where its row was.
     const removed = acts ? this.#removed : null;
     const shown: (ProjectRow | Removed)[] = [...view.rows];
-    if (removed !== null) shown.splice(removedAt(view.rows.map((item) => item.key), removed.after), 0, removed);
+    if (removed !== null) shown.splice(removedIndex(view.rows.map((item) => item.key), removed.after), 0, removed);
     const drawn = (item: ProjectRow | Removed) => ("project" in item ? this.#removedPart(item) : row(item));
     return html`${view.long ? this.#findPart(view) : nothing}
       <div class=${acts ? "grps" : "grps kept"}>

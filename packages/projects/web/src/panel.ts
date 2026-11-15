@@ -177,8 +177,8 @@ export class ProjectsPanel extends LitElement {
     return this.listing?.home ?? null;
   }
 
-  #facts(): { home: string | null; notes: boolean } {
-    return { home: this.#home(), notes: this.listing?.notes_installed ?? false };
+  #facts(): { home: string | null; notesInstalled: boolean } {
+    return { home: this.#home(), notesInstalled: this.listing?.notes_installed ?? false };
   }
 
   async #readWhere(): Promise<void> {
@@ -263,8 +263,8 @@ export class ProjectsPanel extends LitElement {
     event.preventDefault();
     if (this.#sending || !this.#ready()) return;
     const form = this.#form;
-    const offered = createOffered(answerNow(this.#asked, form.folder), this.kinds, form.kind) !== null;
-    const body = addPanelBody(form, { notes: this.listing?.notes_installed ?? false, offered });
+    const canCreate = createOffered(answerNow(this.#asked, form.folder), this.kinds, form.kind) !== null;
+    const body = addPanelBody(form, { notesInstalled: this.listing?.notes_installed ?? false, canCreate });
     this.#sending = true;
     this.#said = null;
     this.requestUpdate();
@@ -300,7 +300,7 @@ export class ProjectsPanel extends LitElement {
     const form = this.#form;
     const busy = this.#sending;
     const kinds = this.kinds;
-    const notes = this.listing?.notes_installed ?? false;
+    const notesInstalled = this.listing?.notes_installed ?? false;
     const answer = answerNow(this.#asked, form.folder);
     const says = answer === null ? "" : folderSays(answer);
     const create = createOffered(answer, kinds, form.kind);
@@ -321,8 +321,8 @@ export class ProjectsPanel extends LitElement {
         ${nameLine !== "" ? html`<p class="hint" data-line="name">${nameLine}</p>` : nothing}
         <button type="button" class="fold" data-action="more" aria-expanded=${this.#more ? "true" : "false"}
           @click=${() => { this.#more = !this.#more; this.requestUpdate(); }}><span><span class="ar">${
-          this.#more ? "▾" : "▸"}</span>More</span><span class="d" data-line="more">${moreLine(form, { notes })}</span></button>
-        ${this.#more ? this.#moreFields(form, kinds, notes, busy) : nothing}
+          this.#more ? "▾" : "▸"}</span>More</span><span class="d" data-line="more">${moreLine(form, { notesInstalled })}</span></button>
+        ${this.#more ? this.#moreFields(form, kinds, notesInstalled, busy) : nothing}
         ${this.#note !== null ? html`<p class="hint note" data-line="note">${this.#note}</p>` : nothing}
         <div class="pbtns">
           <button type="button" class="lnk" data-action="cancel" @click=${() => this.#close()}>Cancel</button>
@@ -334,14 +334,14 @@ export class ProjectsPanel extends LitElement {
     </aside>`;
   }
 
-  #moreFields(form: AddPanel, kinds: Kinds | null, notes: boolean, busy: boolean) {
+  #moreFields(form: AddPanel, kinds: Kinds | null, notesInstalled: boolean, busy: boolean) {
     return html`<label class="f" for="p-kind">Kind</label><select id="p-kind" name="kind"
         ?disabled=${busy || kinds === null} .value=${live(form.kind)} @change=${this.#field("kind")}>${(kinds?.found ?? []).map((kind) => html`<option
           value=${kind.name} title=${kind.doc} ?selected=${kind.name === form.kind}>${kindLabel(kind)}</option>`)}</select>
       ${brokenLines(kinds).map((line) => html`<p class="hint" data-line="broken">${line}</p>`)}
       <label class="f" for="p-lead">Lead</label><input id="p-lead" type="text" name="lead" autocomplete="off"
         spellcheck="false" ?disabled=${busy} .value=${live(form.lead)} @input=${this.#field("lead")}>
-      ${notes ? html`<label class="f" for="p-notes">Notes folder</label><input id="p-notes" type="text" name="notes_root"
+      ${notesInstalled ? html`<label class="f" for="p-notes">Notes folder</label><input id="p-notes" type="text" name="notes_root"
         autocomplete="off" spellcheck="false" ?disabled=${busy} .value=${live(form.notesRoot)} @input=${this.#field("notesRoot")}>`
         : nothing}`;
   }
@@ -439,7 +439,7 @@ export class ProjectsPanel extends LitElement {
         <input type="text" name="agent" aria-label="Add an agent by name" placeholder="Add an agent by name"
           autocomplete="off" spellcheck="false" ?disabled=${busy} .value=${live(form.agent)}
           @input=${this.#editTyped("agent")} @keydown=${this.#agentKeys}>
-        ${facts.notes ? html`<label class="f" for="p-notes">Notes folder</label><input id="p-notes" type="text"
+        ${facts.notesInstalled ? html`<label class="f" for="p-notes">Notes folder</label><input id="p-notes" type="text"
           name="notes_root" autocomplete="off" spellcheck="false" ?disabled=${busy} .value=${live(form.notesRoot)}
           @input=${this.#editTyped("notesRoot")}>` : nothing}
         <p class="f">Name</p><p class="ro" data-line="key">${key}</p>

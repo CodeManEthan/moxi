@@ -62,7 +62,7 @@ def fixture_page(fixture_shell, ui_contexts):
 @pytest.fixture
 def small_page(small_shell, ui_contexts):
     yield ui_contexts(small_shell).pages[0]
-    kit.seed(small_shell, notes=False)
+    kit.seed(small_shell, with_notes=False)
 
 
 # --- forty projects ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ def test_forty_projects_have_the_find_field_the_kind_filter_and_the_earlier_fold
 # --- the empty list ---------------------------------------------------------------------------
 
 def test_the_small_install_with_no_project_says_what_a_project_is_and_no_more(small_shell, small_page):
-    kit.seed(small_shell, (), notes=False)
+    kit.seed(small_shell, (), with_notes=False)
     panel = open_list(small_page, "empty")
     empty = panel.locator('[data-part="empty"]')
     expect(empty.locator('[data-line="empty"]')).to_have_text("No projects yet.")

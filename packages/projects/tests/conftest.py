@@ -176,7 +176,7 @@ def site(tmp_path, monkeypatch):
 def fixture_shell(ui_shells, tmp_path_factory):
     """A test shell of the fixture install, with the seven projects and their notes roots,
     the fixture saying nothing."""
-    shell = ui_shells(**kit.options(tmp_path_factory.mktemp("fixture-install"), fixture=True))
+    shell = ui_shells(**kit.options(tmp_path_factory.mktemp("fixture-install"), with_fixture=True))
     kit.record_terminal(shell)
     kit.seed(shell)
     kit.reset(shell)
@@ -186,7 +186,7 @@ def fixture_shell(ui_shells, tmp_path_factory):
 @pytest.fixture(scope="module")
 def small_shell(ui_shells, tmp_path_factory):
     """A test shell of the small install, with the seven projects and no notes roots."""
-    shell = ui_shells(**kit.options(tmp_path_factory.mktemp("small-install"), fixture=False))
+    shell = ui_shells(**kit.options(tmp_path_factory.mktemp("small-install"), with_fixture=False))
     kit.record_terminal(shell)
-    kit.seed(shell, notes=False)
+    kit.seed(shell, with_notes=False)
     return shell

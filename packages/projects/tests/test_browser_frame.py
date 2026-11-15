@@ -271,7 +271,7 @@ def test_a_store_that_refuses_shows_its_reason_and_fix_and_no_rows(small_shell, 
     finally:
         for path in where.parent.glob(f"{where.name}*"):
             path.unlink()
-        kit.seed(small_shell, notes=False)
+        kit.seed(small_shell, with_notes=False)
 
 
 # --- the facts components on another page -----------------------------------------------------

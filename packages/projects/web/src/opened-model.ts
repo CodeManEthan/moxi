@@ -282,7 +282,7 @@ export function addBackBody(project: Listed, { notesInstalled }: { notesInstalle
 
 /** Where a removed project's line goes among the rows drawn now: after the row of
  * `after`, the key drawn before it, or first when that row isn't drawn. */
-export function removedAt(keys: readonly string[], after: string | null): number {
+export function removedIndex(keys: readonly string[], after: string | null): number {
   return after === null ? 0 : keys.indexOf(after) + 1;
 }
 

@@ -193,4 +193,4 @@ def test_the_change_act_takes_a_missing_root_through_to_a_saved_one(small_shell,
         expect(item.locator('[slot="acts"]')).to_have_count(0)
         assert saved_root(small_shell, kit.MISSING) == str(moved)
     finally:
-        kit.seed(small_shell, notes=False)
+        kit.seed(small_shell, with_notes=False)

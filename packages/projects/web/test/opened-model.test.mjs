@@ -5,7 +5,7 @@ import { readReport } from "../src/facts.ts";
 import {
   addBackBody, agentPhrase, agentsLine, emptySentence, folderAsk, folderGroup, GOES, joinNames, MAY_BE_REMOVED, mintJob,
   MISSING_SAYS, moreFolders, NO_PROJECTS, NOTHING_CHANGED, openedRows, pressedOf, refusedRows, refusedTitle,
-  removedAt, removedLine, removeStep,
+  removedIndex, removedLine, removeStep,
 } from "../src/opened-model.ts";
 
 const UTC = {
@@ -280,11 +280,11 @@ test("Add it back sends the key, folder, kind and lead, and the notes folder whi
 
 test("a removed project's line takes its row's place", () => {
   const keys = ["atlas-api", "kestrel-web", "orbit-cli"];
-  assert.equal(removedAt(keys, null), 0);
-  assert.equal(removedAt(keys, "atlas-api"), 1);
-  assert.equal(removedAt(keys, "orbit-cli"), 3);
+  assert.equal(removedIndex(keys, null), 0);
+  assert.equal(removedIndex(keys, "atlas-api"), 1);
+  assert.equal(removedIndex(keys, "orbit-cli"), 3);
   // The row before it isn't drawn now (filtered, folded): first.
-  assert.equal(removedAt(keys, "lumen-docs"), 0);
+  assert.equal(removedIndex(keys, "lumen-docs"), 0);
 });
 
 // -- the empty list ---------------------------------------------------------------------------

@@ -175,7 +175,7 @@ def test_a_path_typed_with_a_tilde_is_added_under_its_own_name(small_shell, smal
         expect(panel_of(small_page).locator("moxi-projects-panel")).to_have_count(0)
         assert panel_of(small_page).get_attribute("data-side") is None
     finally:
-        kit.seed(small_shell, notes=False)
+        kit.seed(small_shell, with_notes=False)
         shutil.rmtree(where, ignore_errors=True)
 
 
@@ -209,7 +209,7 @@ def test_a_full_path_with_nothing_there_is_made_with_more_set_and_its_name_typed
                                                    "lead": "builder-3", "notes_root": None}
         expect(row(small_page, "wren-home")).to_have_attribute("where", "~/agents/wren · agent's home")
     finally:
-        kit.seed(small_shell, notes=False)
+        kit.seed(small_shell, with_notes=False)
         shutil.rmtree(where, ignore_errors=True)
 
 
@@ -342,7 +342,7 @@ def test_an_agent_is_taken_off_and_the_lead_moved_onto_it_in_an_order_the_lead_r
         assert saved(small_shell, "atlas-api")["lead"] == "planner"
         assert agents_of(small_shell, "atlas-api") == ["builder-1", "reviewer"]
     finally:
-        kit.seed(small_shell, notes=False)
+        kit.seed(small_shell, with_notes=False)
 
 
 def test_a_save_refused_part_way_says_what_was_saved_and_sends_the_rest_after(small_shell, small_page):
@@ -372,7 +372,7 @@ def test_a_save_refused_part_way_says_what_was_saved_and_sends_the_rest_after(sm
         assert sent(posts) == [("set", {"key": "kestrel-web", "root": "~/code/kestrel-moved"})]
         assert saved(small_shell, "kestrel-web")["root"] == str(moved)
     finally:
-        kit.seed(small_shell, notes=False)
+        kit.seed(small_shell, with_notes=False)
         shutil.rmtree(moved, ignore_errors=True)
 
 

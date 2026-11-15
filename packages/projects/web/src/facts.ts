@@ -137,231 +137,231 @@ export function isAbsolutePath(path: string): boolean {
 class Refusals {
   lines: string[] = [];
 
-  add(at: string, why: string): void {
-    this.lines.push(`${at}: ${why}`);
+  add(place: string, why: string): void {
+    this.lines.push(`${place}: ${why}`);
   }
 }
 
 /** A text field: a string of 1 to 200 characters, else null and refused. */
-function readText(value: unknown, at: string, refused: Refusals): string | null {
+function readText(value: unknown, place: string, refused: Refusals): string | null {
   if (typeof value !== "string") {
-    refused.add(at, "not a string");
+    refused.add(place, "not a string");
     return null;
   }
   if (value === "") {
-    refused.add(at, "empty");
+    refused.add(place, "empty");
     return null;
   }
   if (charsOf(value) > TEXT_MAX_CHARS) {
-    refused.add(at, `over ${TEXT_MAX_CHARS} characters`);
+    refused.add(place, `over ${TEXT_MAX_CHARS} characters`);
     return null;
   }
   return value;
 }
 
 /** An optional text field: null when absent, and when refused. */
-function readOptionalText(value: unknown, at: string, refused: Refusals): string | null {
-  return value === undefined ? null : readText(value, at, refused);
+function readOptionalText(value: unknown, place: string, refused: Refusals): string | null {
+  return value === undefined ? null : readText(value, place, refused);
 }
 
-function readFlag(value: unknown, at: string, refused: Refusals): boolean {
+function readFlag(value: unknown, place: string, refused: Refusals): boolean {
   if (value === undefined) return false;
   if (typeof value !== "boolean") {
-    refused.add(at, "not true or false");
+    refused.add(place, "not true or false");
     return false;
   }
   return value;
 }
 
-function readRank(value: unknown, at: string, refused: Refusals): number | null {
+function readRank(value: unknown, place: string, refused: Refusals): number | null {
   if (value === undefined) return null;
   if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > ORDER_MAX) {
-    refused.add(at, `not a whole number from 1 to ${ORDER_MAX}`);
+    refused.add(place, `not a whole number from 1 to ${ORDER_MAX}`);
     return null;
   }
   return value as number;
 }
 
-function readAt(value: unknown, at: string, refused: Refusals): number | null {
+function readAt(value: unknown, place: string, refused: Refusals): number | null {
   if (value === undefined) return null;
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    refused.add(at, "not epoch seconds");
+    refused.add(place, "not epoch seconds");
     return null;
   }
   return value;
 }
 
 /** A list of texts: each one refused alone; a value that is no list refuses them all. */
-function readTexts(value: unknown, at: string, refused: Refusals): string[] {
+function readTexts(value: unknown, place: string, refused: Refusals): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) {
-    refused.add(at, "not a list");
+    refused.add(place, "not a list");
     return [];
   }
   const texts: string[] = [];
   value.forEach((item, index) => {
-    const text = readText(item, `${at}[${index}]`, refused);
+    const text = readText(item, `${place}[${index}]`, refused);
     if (text !== null) texts.push(text);
   });
   return texts;
 }
 
-function readCount(value: unknown, at: string, refused: Refusals): Count | null {
+function readCount(value: unknown, place: string, refused: Refusals): Count | null {
   if (value === undefined) return null;
   if (!isObj(value)) {
-    refused.add(at, "not an object");
+    refused.add(place, "not an object");
     return null;
   }
-  const one = readText(value.one, `${at}.one`, refused);
-  const many = readText(value.many, `${at}.many`, refused);
+  const one = readText(value.one, `${place}.one`, refused);
+  const many = readText(value.many, `${place}.many`, refused);
   if (one === null || many === null) return null;
   return {
     one, many,
-    after_one: readOptionalText(value.after_one, `${at}.after_one`, refused),
-    after_many: readOptionalText(value.after_many, `${at}.after_many`, refused),
+    after_one: readOptionalText(value.after_one, `${place}.after_one`, refused),
+    after_many: readOptionalText(value.after_many, `${place}.after_many`, refused),
   };
 }
 
-function readPart(value: unknown, at: string, refused: Refusals): Part | null {
+function readPart(value: unknown, place: string, refused: Refusals): Part | null {
   if (!isObj(value)) {
-    refused.add(at, "not a part");
+    refused.add(place, "not a part");
     return null;
   }
-  const count = readCount(value.count, `${at}.count`, refused);
+  const count = readCount(value.count, `${place}.count`, refused);
   let text: string | null;
   if (count !== null && value.text === "") {
     text = "";
   } else {
-    text = readText(value.text, `${at}.text`, refused);
+    text = readText(value.text, `${place}.text`, refused);
   }
   if (text === null) return null;
   return {
     text,
-    heavy: readFlag(value.heavy, `${at}.heavy`, refused),
-    warn: readFlag(value.warn, `${at}.warn`, refused),
-    rank: readRank(value.rank, `${at}.rank`, refused),
-    claims: readTexts(value.claims, `${at}.claims`, refused),
+    heavy: readFlag(value.heavy, `${place}.heavy`, refused),
+    warn: readFlag(value.warn, `${place}.warn`, refused),
+    rank: readRank(value.rank, `${place}.rank`, refused),
+    claims: readTexts(value.claims, `${place}.claims`, refused),
     count,
   };
 }
 
 /** A list of parts. Over `PARTS_MAX` refuses the list; a part that won't read is left out. */
-function readParts(value: unknown, at: string, refused: Refusals): Part[] {
+function readParts(value: unknown, place: string, refused: Refusals): Part[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) {
-    refused.add(at, "not a list");
+    refused.add(place, "not a list");
     return [];
   }
   if (value.length > PARTS_MAX) {
-    refused.add(at, `more than ${PARTS_MAX} parts`);
+    refused.add(place, `more than ${PARTS_MAX} parts`);
     return [];
   }
   const parts: Part[] = [];
   value.forEach((item, index) => {
-    const part = readPart(item, `${at}[${index}]`, refused);
+    const part = readPart(item, `${place}[${index}]`, refused);
     if (part !== null) parts.push(part);
   });
   return parts;
 }
 
 /** A line, or null when it has no part left to draw. */
-function readLine(value: unknown, at: string, refused: Refusals): Line | null {
+function readLine(value: unknown, place: string, refused: Refusals): Line | null {
   if (!isObj(value)) {
-    refused.add(at, "not a line");
+    refused.add(place, "not a line");
     return null;
   }
-  const parts = readParts(value.parts, `${at}.parts`, refused);
+  const parts = readParts(value.parts, `${place}.parts`, refused);
   if (parts.length === 0) return null;
-  return { parts, claims: readTexts(value.claims, `${at}.claims`, refused) };
+  return { parts, claims: readTexts(value.claims, `${place}.claims`, refused) };
 }
 
-function readLink(value: unknown, at: string, refused: Refusals): Link | null {
+function readLink(value: unknown, place: string, refused: Refusals): Link | null {
   if (value === undefined) return null;
   if (!isObj(value)) {
-    refused.add(at, "not a link");
+    refused.add(place, "not a link");
     return null;
   }
-  const text = readText(value.text, `${at}.text`, refused);
-  const module = readText(value.module, `${at}.module`, refused);
+  const text = readText(value.text, `${place}.text`, refused);
+  const module = readText(value.module, `${place}.module`, refused);
   let route: string | null = "";
-  if (value.route !== "") route = readText(value.route, `${at}.route`, refused);
+  if (value.route !== "") route = readText(value.route, `${place}.route`, refused);
   if (text === null || module === null || route === null) return null;
   return { text, module, route };
 }
 
 /** A section, or null when it has no line left to draw. */
-function readSection(value: unknown, at: string, refused: Refusals): Section | null {
+function readSection(value: unknown, place: string, refused: Refusals): Section | null {
   if (!isObj(value)) {
-    refused.add(at, "not a section");
+    refused.add(place, "not a section");
     return null;
   }
-  const label = readText(value.label, `${at}.label`, refused);
+  const label = readText(value.label, `${place}.label`, refused);
   if (label === null) return null;
   if (!Array.isArray(value.lines)) {
-    refused.add(`${at}.lines`, "not a list");
+    refused.add(`${place}.lines`, "not a list");
     return null;
   }
   if (value.lines.length > LINES_MAX) {
-    refused.add(`${at}.lines`, `more than ${LINES_MAX} lines`);
+    refused.add(`${place}.lines`, `more than ${LINES_MAX} lines`);
     return null;
   }
   const lines: Line[] = [];
   value.lines.forEach((item, index) => {
-    const line = readLine(item, `${at}.lines[${index}]`, refused);
+    const line = readLine(item, `${place}.lines[${index}]`, refused);
     if (line !== null) lines.push(line);
   });
   if (lines.length === 0) return null;
   return {
     label, lines,
-    rank: readRank(value.rank, `${at}.rank`, refused),
-    link: readLink(value.link, `${at}.link`, refused),
+    rank: readRank(value.rank, `${place}.rank`, refused),
+    link: readLink(value.link, `${place}.link`, refused),
   };
 }
 
 /** A `Say`. A `where` beside `runs` false contradicts it, so the whole `Say` is refused. */
-function readSay(value: unknown, at: string, refused: Refusals): Say | null {
+function readSay(value: unknown, place: string, refused: Refusals): Say | null {
   if (!isObj(value)) {
-    refused.add(at, "not a say");
+    refused.add(place, "not a say");
     return null;
   }
   if (typeof value.runs !== "boolean") {
-    refused.add(`${at}.runs`, "not true or false");
+    refused.add(`${place}.runs`, "not true or false");
     return null;
   }
   if (!value.runs && value.where !== undefined) {
-    refused.add(`${at}.where`, "given with runs false");
+    refused.add(`${place}.where`, "given with runs false");
     return null;
   }
-  const state = readText(value.state, `${at}.state`, refused);
+  const state = readText(value.state, `${place}.state`, refused);
   if (state === null) return null;
-  const where = value.runs ? readOptionalText(value.where, `${at}.where`, refused) : null;
+  const where = value.runs ? readOptionalText(value.where, `${place}.where`, refused) : null;
   return { runs: value.runs, state, where };
 }
 
-function readSections(value: unknown, at: string, refused: Refusals): Section[] {
+function readSections(value: unknown, place: string, refused: Refusals): Section[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) {
-    refused.add(at, "not a list");
+    refused.add(place, "not a list");
     return [];
   }
   const sections: Section[] = [];
   value.forEach((item, index) => {
-    const section = readSection(item, `${at}[${index}]`, refused);
+    const section = readSection(item, `${place}[${index}]`, refused);
     if (section !== null) sections.push(section);
   });
   return sections;
 }
 
-function readAgents(value: unknown, names: ReadonlySet<string>, at: string,
+function readAgents(value: unknown, names: ReadonlySet<string>, place: string,
                     refused: Refusals): Map<string, Say> {
   const agents = new Map<string, Say>();
   if (value === undefined) return agents;
   if (!isObj(value)) {
-    refused.add(at, "not an object");
+    refused.add(place, "not an object");
     return agents;
   }
   for (const [name, item] of Object.entries(value)) {
-    const where = `${at}[${JSON.stringify(name)}]`;
+    const where = `${place}[${JSON.stringify(name)}]`;
     if (!names.has(name)) {
       refused.add(where, "no such agent was given for the open project");
       continue;
@@ -375,26 +375,26 @@ function readAgents(value: unknown, names: ReadonlySet<string>, at: string,
 /** The fields only the open project may carry. */
 const OPEN_ONLY = ["sections", "agents", "stays"] as const;
 
-function readFacts(value: unknown, isOpen: boolean, names: ReadonlySet<string>, at: string,
+function readFacts(value: unknown, isOpen: boolean, names: ReadonlySet<string>, place: string,
                    refused: Refusals): Facts | null {
   if (!isObj(value)) {
-    refused.add(at, "not an object");
+    refused.add(place, "not an object");
     return null;
   }
   const facts: Facts = {
-    at: readAt(value.at, `${at}.at`, refused),
-    parts: readParts(value.parts, `${at}.parts`, refused),
+    at: readAt(value.at, `${place}.at`, refused),
+    parts: readParts(value.parts, `${place}.parts`, refused),
     sections: [], agents: new Map(), stays: [],
   };
   if (!isOpen) {
     for (const name of OPEN_ONLY) {
-      if (value[name] !== undefined) refused.add(`${at}.${name}`, "given for a project that is not open");
+      if (value[name] !== undefined) refused.add(`${place}.${name}`, "given for a project that is not open");
     }
     return facts;
   }
-  facts.sections = readSections(value.sections, `${at}.sections`, refused);
-  facts.agents = readAgents(value.agents, names, `${at}.agents`, refused);
-  facts.stays = readTexts(value.stays, `${at}.stays`, refused);
+  facts.sections = readSections(value.sections, `${place}.sections`, refused);
+  facts.agents = readAgents(value.agents, names, `${place}.agents`, refused);
+  facts.stays = readTexts(value.stays, `${place}.stays`, refused);
   return facts;
 }
 
@@ -408,41 +408,41 @@ function readProjects(value: unknown, given: readonly Given[], open: string | nu
   }
   const byKey = new Map(given.map((project) => [project.key, project]));
   for (const [key, item] of Object.entries(value)) {
-    const at = `projects[${JSON.stringify(key)}]`;
+    const place = `projects[${JSON.stringify(key)}]`;
     const project = byKey.get(key);
     if (project === undefined) {
-      refused.add(at, "no such project was given");
+      refused.add(place, "no such project was given");
       continue;
     }
     const names = new Set(project.lead === null ? project.associated : [project.lead, ...project.associated]);
-    const facts = readFacts(item, key === open, names, at, refused);
+    const facts = readFacts(item, key === open, names, place, refused);
     if (facts !== null) projects.set(key, facts);
   }
   return projects;
 }
 
-function readFolder(value: unknown, activity: Activity | null, at: string,
+function readFolder(value: unknown, activity: Activity | null, place: string,
                     refused: Refusals): FolderFacts | null {
   if (!isObj(value)) {
-    refused.add(at, "not an object");
+    refused.add(place, "not an object");
     return null;
   }
   const folder = value.folder;
   if (typeof folder !== "string" || !isAbsolutePath(folder)) {
-    refused.add(`${at}.folder`, "not an absolute path");
+    refused.add(`${place}.folder`, "not an absolute path");
     return null;
   }
   if (charsOf(folder) > PATH_MAX_CHARS) {
-    refused.add(`${at}.folder`, `over ${PATH_MAX_CHARS} characters`);
+    refused.add(`${place}.folder`, `over ${PATH_MAX_CHARS} characters`);
     return null;
   }
   let when: number | null = null;
   if (activity === null) {
-    if (value.at !== undefined) refused.add(`${at}.at`, "given by a report with no activity");
+    if (value.at !== undefined) refused.add(`${place}.at`, "given by a report with no activity");
   } else {
-    when = readAt(value.at, `${at}.at`, refused);
+    when = readAt(value.at, `${place}.at`, refused);
   }
-  return { folder, at: when, parts: readParts(value.parts, `${at}.parts`, refused) };
+  return { folder, at: when, parts: readParts(value.parts, `${place}.parts`, refused) };
 }
 
 function readFolders(value: unknown, activity: Activity | null, refused: Refusals): FolderFacts[] {
@@ -454,11 +454,11 @@ function readFolders(value: unknown, activity: Activity | null, refused: Refusal
   const folders: FolderFacts[] = [];
   const seen = new Set<string>();
   value.forEach((item, index) => {
-    const at = `folders[${index}]`;
-    const row = readFolder(item, activity, at, refused);
+    const place = `folders[${index}]`;
+    const row = readFolder(item, activity, place, refused);
     if (row === null) return;
     if (seen.has(row.folder)) {
-      refused.add(`${at}.folder`, "listed twice");
+      refused.add(`${place}.folder`, "listed twice");
       return;
     }
     seen.add(row.folder);

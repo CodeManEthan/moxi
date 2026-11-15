@@ -23,7 +23,7 @@ export interface AtPath {
    * field. */
   path: string | null;
   exists: boolean | null;
-  git: boolean | null;
+  has_git: boolean | null;
   project: string | null;
   how: How | null;
   key: string | null;
@@ -38,10 +38,10 @@ const HOWS: ReadonlySet<unknown> = new Set(["root", "inside", "worktree", null])
 
 /** `/api/folder`'s value, or null when it isn't one. */
 export function parseAtPath(data: unknown): AtPath | null {
-  if (!isObj(data) || !isStrOrNull(data.path) || !isBoolOrNull(data.exists) || !isBoolOrNull(data.git)
+  if (!isObj(data) || !isStrOrNull(data.path) || !isBoolOrNull(data.exists) || !isBoolOrNull(data.has_git)
       || !isStrOrNull(data.project) || !HOWS.has(data.how) || !isStrOrNull(data.key)
       || !isBoolOrNull(data.taken)) return null;
-  return { path: data.path, exists: data.exists, git: data.git, project: data.project, how: data.how as How | null,
+  return { path: data.path, exists: data.exists, has_git: data.has_git, project: data.project, how: data.how as How | null,
            key: data.key, taken: data.taken };
 }
 
@@ -72,7 +72,7 @@ export function folderSays(answer: AtPath): string {
   const said: string[] = [];
   if (answer.exists === true) {
     said.push("The folder exists.");
-    if (answer.git === true) said.push("It is a git repository.");
+    if (answer.has_git === true) said.push("It is a git repository.");
   } else if (answer.exists === false) {
     said.push("No folder there yet.");
   }
@@ -140,10 +140,10 @@ export function named(form: AddPanel, name: string): AddPanel {
 }
 
 /** The `More` fold's line: the kind, who leads, and the notes folder when one is set. */
-export function moreLine(form: AddPanel, { notes }: { notes: boolean }): string {
+export function moreLine(form: AddPanel, { notesInstalled }: { notesInstalled: boolean }): string {
   const lead = form.lead.trim();
   const said = [kindPhrase(form.kind), lead === "" ? "no lead" : `${lead} leads`];
-  if (notes && form.notesRoot.trim() !== "") said.push(`notes in ${form.notesRoot.trim()}`);
+  if (notesInstalled && form.notesRoot.trim() !== "") said.push(`notes in ${form.notesRoot.trim()}`);
   return said.join(" · ");
 }
 
@@ -151,16 +151,16 @@ export function moreLine(form: AddPanel, { notes }: { notes: boolean }): string 
  * `/api/add`'s body for `form`. The folder and the notes folder are sent as typed, `~`
  * included, which the server takes as its home; an empty one is left out, so the kind's
  * module may give it. The notes folder goes only while notes is installed, and create
- * only while the box is offered (`offered`) and ticked.
+ * only while the box is offered (`canCreate`) and ticked.
  */
-export function addPanelBody(form: AddPanel, { notes, offered }: { notes: boolean; offered: boolean }):
+export function addPanelBody(form: AddPanel, { notesInstalled, canCreate }: { notesInstalled: boolean; canCreate: boolean }):
     Record<string, string | boolean> {
   const body: Record<string, string | boolean> = { key: form.name.trim() };
   if (form.folder !== "") body.root = form.folder;
   if (form.kind !== "") body.kind = form.kind;
   if (form.lead.trim() !== "") body.lead = form.lead.trim();
-  if (notes && form.notesRoot !== "") body.notes_root = form.notesRoot;
-  if (offered && form.create) body.create = true;
+  if (notesInstalled && form.notesRoot !== "") body.notes_root = form.notesRoot;
+  if (canCreate && form.create) body.create = true;
   return body;
 }
 
@@ -250,7 +250,7 @@ function pathChanged(typed: string, stored: string, home: string | null): boolea
 /** `/api/set`'s body for what changed in the form's fields, with the words for each field
  * saved; null when none did. A path is sent as typed; an emptied lead clears it, as an
  * emptied notes folder does while notes is installed. */
-export function setChanges(form: EditPanel, { home, notes }: { home: string | null; notes: boolean }):
+export function setChanges(form: EditPanel, { home, notesInstalled }: { home: string | null; notesInstalled: boolean }):
     { body: Record<string, string | boolean>; parts: string[] } | null {
   const base = form.base;
   const body: Record<string, string | boolean> = { key: base.key };
@@ -269,7 +269,7 @@ export function setChanges(form: EditPanel, { home, notes }: { home: string | nu
     else body.lead = lead;
     parts.push("the lead");
   }
-  if (notes) {
+  if (notesInstalled) {
     if (form.notesRoot === "" && base.notes_root !== null) {
       body.no_notes_root = true;
       parts.push("the notes folder");
@@ -294,12 +294,12 @@ export interface SaveStep {
  * added (what is typed in `Add an agent by name` among them). Only what differs from the
  * project as stored is sent, so a save after a partial one sends the rest.
  */
-export function saveSteps(form: EditPanel, { home, notes }: { home: string | null; notes: boolean }): SaveStep[] {
+export function saveSteps(form: EditPanel, { home, notesInstalled }: { home: string | null; notesInstalled: boolean }): SaveStep[] {
   const now = agentAdded(form);
   const key = form.base.key;
   const steps: SaveStep[] = now.off.filter((name) => form.base.associated.includes(name)).map((name) => ({
     route: "api/agents-remove", body: { key, name }, parts: [`${name} taken off`] }));
-  const set = setChanges(form, { home, notes });
+  const set = setChanges(form, { home, notesInstalled });
   if (set !== null) steps.push({ route: "api/set", ...set });
   for (const name of now.added.filter((one) => !form.base.associated.includes(one))) {
     steps.push({ route: "api/agents-add", body: { key, name }, parts: [`${name} added`] });
@@ -308,8 +308,8 @@ export function saveSteps(form: EditPanel, { home, notes }: { home: string | nul
 }
 
 /** Whether he has changed anything in the form from the project it stands over. */
-export function editTouched(form: EditPanel, { home, notes }: { home: string | null; notes: boolean }): boolean {
-  return saveSteps(form, { home, notes }).length > 0;
+export function editTouched(form: EditPanel, { home, notesInstalled }: { home: string | null; notesInstalled: boolean }): boolean {
+  return saveSteps(form, { home, notesInstalled }).length > 0;
 }
 
 function sameProject(a: Project, b: Project): boolean {
@@ -320,9 +320,9 @@ function sameProject(a: Project, b: Project): boolean {
 /** The form once its project has been read again as `project`: one he hasn't changed starts
  * again from it; any other keeps his values over the project it stood over, and is stale
  * while `project` differs from that one. */
-export function editReread(form: EditPanel, project: Project, { home, notes }: { home: string | null; notes: boolean }):
+export function editReread(form: EditPanel, project: Project, { home, notesInstalled }: { home: string | null; notesInstalled: boolean }):
     EditPanel {
-  if (!editTouched(form, { home, notes })) return editPanel(project, home);
+  if (!editTouched(form, { home, notesInstalled })) return editPanel(project, home);
   return { ...form, stale: !sameProject(project, form.base) };
 }
 

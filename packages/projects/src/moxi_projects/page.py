@@ -113,7 +113,7 @@ KINDS = {"found": lb.Out("list", items=KIND), "broken": lb.Out("list", items=BRO
 #: What the Add panel says under its folder field, for the `path` typed. `path` is that
 #: path with a leading `~` taken as this server's home, made normal; null, with every
 #: other field, for a relative path, `~user`, or a `~` path while nothing places the
-#: home. `exists`: whether it is a directory now; `git`: whether `<path>/.git` exists,
+#: home. `exists`: whether it is a directory now; `has_git`: whether `<path>/.git` exists,
 #: null when `exists` is false; each null when its `stat` did not answer within the
 #: bound. `project`: the key of the project the path is in, or null; `how` the path
 #: stands to it: `root` (its root), `inside` (under its root) or `worktree` (matched
@@ -121,7 +121,7 @@ KINDS = {"found": lb.Out("list", items=KIND), "broken": lb.Out("list", items=BRO
 #: valid key, else null; `taken`: whether a project already has that key, ignoring case.
 #: `project`, `how` and `taken` are null when the store can't be read; `project` and
 #: `how` are null too when the path's own `stat` did not answer.
-AT_PATH = {"path": _MAYBE_PATH, "exists": _MAYBE_BOOL, "git": _MAYBE_BOOL,
+AT_PATH = {"path": _MAYBE_PATH, "exists": _MAYBE_BOOL, "has_git": _MAYBE_BOOL,
           "project": _MAYBE, "how": _MAYBE, "key": _MAYBE, "taken": _MAYBE_BOOL}
 #: What a remove of `key` would meet now, without removing: `key` as stored, and one row
 #: per refusal. `module` is `projects` for the associated agents (its `sentence` names

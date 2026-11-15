@@ -85,7 +85,7 @@ def stored(shell, key: str) -> dict | None:
 @pytest.fixture
 def small_page(small_shell, ui_contexts):
     yield ui_contexts(small_shell).pages[0]
-    kit.seed(small_shell, notes=False)
+    kit.seed(small_shell, with_notes=False)
 
 
 @pytest.fixture

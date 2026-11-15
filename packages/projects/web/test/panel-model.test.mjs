@@ -8,7 +8,7 @@ import {
 } from "../src/panel-model.ts";
 
 const at = (fields = {}) => ({
-  path: "/home/me/code/finch-scripts", exists: true, git: false, project: null, how: null, key: "finch-scripts",
+  path: "/home/me/code/finch-scripts", exists: true, has_git: false, project: null, how: null, key: "finch-scripts",
   taken: false, ...fields,
 });
 
@@ -35,7 +35,7 @@ test("the folder is read a quarter second after the last key, its path sent enco
 
 test("an answer of the route's shape is read, and any other is not", () => {
   assert.deepEqual(parseAtPath(at()), at());
-  const none = { path: null, exists: null, git: null, project: null, how: null, key: null, taken: null };
+  const none = { path: null, exists: null, has_git: null, project: null, how: null, key: null, taken: null };
   assert.deepEqual(parseAtPath(none), none);
   for (const bad of [null, [], {}, at({ how: "beside" }), at({ exists: "yes" }), at({ key: 3 }),
                      { ...at(), taken: undefined }]) {
@@ -45,20 +45,20 @@ test("an answer of the route's shape is read, and any other is not", () => {
 
 test("the words under the field say what is there and how it stands to a project", () => {
   assert.equal(folderSays(at()), "The folder exists.");
-  assert.equal(folderSays(at({ git: true })), "The folder exists. It is a git repository.");
-  assert.equal(folderSays(at({ exists: false, git: null })), "No folder there yet.");
-  assert.equal(folderSays(at({ git: true, project: "atlas-api", how: "root" })),
+  assert.equal(folderSays(at({ has_git: true })), "The folder exists. It is a git repository.");
+  assert.equal(folderSays(at({ exists: false, has_git: null })), "No folder there yet.");
+  assert.equal(folderSays(at({ has_git: true, project: "atlas-api", how: "root" })),
                "The folder exists. It is a git repository. That folder is atlas-api's already.");
   assert.equal(folderSays(at({ project: "atlas-api", how: "inside" })),
                "The folder exists. Inside atlas-api, a project already.");
-  assert.equal(folderSays(at({ git: true, project: "atlas-api", how: "worktree" })),
+  assert.equal(folderSays(at({ has_git: true, project: "atlas-api", how: "worktree" })),
                "The folder exists. It is a git repository. A worktree of atlas-api, a project already.");
   // A stat that didn't answer in time says nothing of its part.
-  assert.equal(folderSays(at({ exists: null, git: null })), "");
-  assert.equal(folderSays(at({ exists: null, git: null, project: "atlas-api", how: "inside" })),
+  assert.equal(folderSays(at({ exists: null, has_git: null })), "");
+  assert.equal(folderSays(at({ exists: null, has_git: null, project: "atlas-api", how: "inside" })),
                "Inside atlas-api, a project already.");
   // A path the server can't take (relative, `~user`) says nothing.
-  assert.equal(folderSays(at({ path: null, exists: null, git: null, key: null, taken: null })), "");
+  assert.equal(folderSays(at({ path: null, exists: null, has_git: null, key: null, taken: null })), "");
 });
 
 test("an answer asked for a value the field no longer holds is dropped", () => {
@@ -75,11 +75,11 @@ test("the box that makes the folder is offered only while nothing is there, in t
   assert.equal(createWords(KINDS, "shelf"), null);
   assert.equal(createWords(KINDS, "unknown"), null);
   assert.equal(createWords(null, "project"), null);
-  const missing = at({ exists: false, git: null });
+  const missing = at({ exists: false, has_git: null });
   assert.equal(createOffered(missing, KINDS, "project"), "Create the folder and run git init");
   assert.equal(createOffered(missing, KINDS, "shelf"), null);
   assert.equal(createOffered(at(), KINDS, "project"), null);
-  assert.equal(createOffered(at({ exists: null, git: null }), KINDS, "project"), null);
+  assert.equal(createOffered(at({ exists: null, has_git: null }), KINDS, "project"), null);
   assert.equal(createOffered(null, KINDS, "project"), null);
   assert.equal(createOffered(at({ path: null, exists: false }), KINDS, "project"), null);
 });
@@ -115,11 +115,11 @@ test("a name a project already has is taken, ignoring case and spaces around it"
 // -- More ----------------------------------------------------------------------------------------
 
 test("More's line names the kind, who leads and the notes folder when one is set", () => {
-  assert.equal(moreLine(addPanel(), { notes: true }), "a code project · no lead");
+  assert.equal(moreLine(addPanel(), { notesInstalled: true }), "a code project · no lead");
   const form = { ...addPanel(), kind: "agent", lead: " builder-2 ", notesRoot: "~/notes/x" };
-  assert.equal(moreLine(form, { notes: true }), "an agent's home · builder-2 leads · notes in ~/notes/x");
-  assert.equal(moreLine(form, { notes: false }), "an agent's home · builder-2 leads");
-  assert.equal(moreLine({ ...addPanel(), kind: "topic" }, { notes: false }), "topic · no lead");
+  assert.equal(moreLine(form, { notesInstalled: true }), "an agent's home · builder-2 leads · notes in ~/notes/x");
+  assert.equal(moreLine(form, { notesInstalled: false }), "an agent's home · builder-2 leads");
+  assert.equal(moreLine({ ...addPanel(), kind: "topic" }, { notesInstalled: false }), "topic · no lead");
 });
 
 // -- the add -------------------------------------------------------------------------------------
@@ -127,15 +127,15 @@ test("More's line names the kind, who leads and the notes folder when one is set
 test("the add sends the paths as typed, and create only while it is offered and ticked", () => {
   const form = { ...addPanel({ folder: "~/code/finch-scripts" }), name: " finch-scripts ", lead: " builder-2 ",
                  notesRoot: "~/notes/finch", create: true };
-  assert.deepEqual(addPanelBody(form, { notes: true, offered: true }), {
+  assert.deepEqual(addPanelBody(form, { notesInstalled: true, canCreate: true }), {
     key: "finch-scripts", root: "~/code/finch-scripts", kind: "project", lead: "builder-2",
     notes_root: "~/notes/finch", create: true,
   });
-  assert.deepEqual(addPanelBody(form, { notes: false, offered: false }), {
+  assert.deepEqual(addPanelBody(form, { notesInstalled: false, canCreate: false }), {
     key: "finch-scripts", root: "~/code/finch-scripts", kind: "project", lead: "builder-2",
   });
   // An empty folder is left out, so the kind's module may give it.
-  assert.deepEqual(addPanelBody({ ...addPanel(), name: "t", kind: "topic" }, { notes: true, offered: false }),
+  assert.deepEqual(addPanelBody({ ...addPanel(), name: "t", kind: "topic" }, { notesInstalled: true, canCreate: false }),
                    { key: "t", kind: "topic" });
 });
 
@@ -157,7 +157,7 @@ test("what an add came to: added with its notes and warnings, refused with its t
 // -- Edit ----------------------------------------------------------------------------------------
 
 const HOME = "/home/me";
-const FACTS = { home: HOME, notes: true };
+const FACTS = { home: HOME, notesInstalled: true };
 const crewed = (fields = {}) => ({
   key: "atlas-api", root: "/home/me/code/atlas-api", kind: "project", lead: "builder-1",
   associated: ["planner", "reviewer"], agents: ["builder-1", "planner", "reviewer"],
@@ -219,7 +219,7 @@ test("only what differs from the project is sent, in either form of a path", () 
   // An emptied notes folder clears it, but only while notes is installed.
   assert.deepEqual(setChanges({ ...base, notesRoot: "" }, FACTS),
                    { body: { key: "atlas-api", no_notes_root: true }, parts: ["the notes folder"] });
-  assert.equal(setChanges({ ...base, notesRoot: "" }, { home: HOME, notes: false }), null);
+  assert.equal(setChanges({ ...base, notesRoot: "" }, { home: HOME, notesInstalled: false }), null);
   // A notes folder set where there was none.
   const none = editPanel(crewed({ notes_root: null }), HOME);
   assert.deepEqual(setChanges({ ...none, notesRoot: "~/n" }, FACTS),

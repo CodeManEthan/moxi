@@ -182,7 +182,7 @@ def _how(path: str, root: str) -> str:
     return "worktree"
 
 
-_AT_PATH_NONE = dict.fromkeys(("path", "exists", "git", "project", "how", "key",
+_AT_PATH_NONE = dict.fromkeys(("path", "exists", "has_git", "project", "how", "key",
                                "taken"))
 #: `<path>/.git` exists, as a directory or a worktree's file.
 _GIT = {pagestat.DIR: True, pagestat.OTHER: True, pagestat.MISSING: False, None: None}
@@ -213,7 +213,7 @@ def at_path(call: Any) -> dict[str, Any]:
     except ProjectsError:
         found = taken = None
     return {"path": path, "exists": exists,
-            "git": None if exists is False else _GIT[seen[git_path]],
+            "has_git": None if exists is False else _GIT[seen[git_path]],
             "project": found.key if found else None,
             "how": _how(path, found.root) if found else None,
             "key": key, "taken": taken}

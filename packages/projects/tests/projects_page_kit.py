@@ -111,15 +111,15 @@ def install_fixture(site: Path) -> Path:
     return site
 
 
-def options(site: Path, *, fixture: bool) -> dict[str, Any]:
-    """The `ui_shells` options of the fixture install (`fixture`) or the small one, over
+def options(site: Path, *, with_fixture: bool) -> dict[str, Any]:
+    """The `ui_shells` options of the fixture install (`with_fixture`) or the small one, over
     `site`, a new directory."""
-    holds = FIXTURE_INSTALL if fixture else SMALL_INSTALL
+    holds = FIXTURE_INSTALL if with_fixture else SMALL_INSTALL
     gone = left_out(holds)
     site.mkdir(parents=True, exist_ok=True)
     hidden = sorted(f"moxi-{name}" for name in gone)
     (site / "sitecustomize.py").write_text(_HIDE.format(names=set(hidden)), encoding="utf-8")
-    if fixture:
+    if with_fixture:
         install_fixture(site)
     return {"site": [str(site)], "leave_out": gone}
 
@@ -141,10 +141,10 @@ def root(shell: Any, row: Row) -> str:
     return str(home(shell) / row.root)
 
 
-def seed(shell: Any, rows: tuple[Row, ...] = SEVEN, *, notes: bool = True,
+def seed(shell: Any, rows: tuple[Row, ...] = SEVEN, *, with_notes: bool = True,
          missing: tuple[str, ...] = (MISSING,)) -> None:
     """Make the shell's store hold `rows` and nothing else, each folder made but those of
-    `missing`, which are taken away, and the loose folder made. With `notes` each row keeps
+    `missing`, which are taken away, and the loose folder made. With `with_notes` each row keeps
     its notes root (an install with notes)."""
     from moxi_projects import store
 
@@ -161,7 +161,7 @@ def seed(shell: Any, rows: tuple[Row, ...] = SEVEN, *, notes: bool = True,
         conn.execute("DELETE FROM projects")
         for row in rows:
             store.insert(conn, key=row.key, root=root(shell, row), kind=row.kind, lead=row.lead,
-                         notes_root=str(home(shell) / row.notes_root) if notes else None)
+                         notes_root=str(home(shell) / row.notes_root) if with_notes else None)
             for name in row.associated:
                 store.add_agent(conn, row.key, name)
 

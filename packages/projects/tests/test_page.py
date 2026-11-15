@@ -398,7 +398,7 @@ def at_path(path) -> dict:
     return read("/api/folder", f"path={quote(str(path), safe='')}")
 
 
-NOTHING = dict.fromkeys(("path", "exists", "git", "project", "how", "key", "taken"))
+NOTHING = dict.fromkeys(("path", "exists", "has_git", "project", "how", "key", "taken"))
 
 
 def test_a_git_dir_a_plain_one_and_a_missing_one(tmp_path, own_pool, store_path):
@@ -406,12 +406,12 @@ def test_a_git_dir_a_plain_one_and_a_missing_one(tmp_path, own_pool, store_path)
     (repo / ".git").mkdir(parents=True)
     plain = tmp_path / "plain"
     plain.mkdir()
-    assert at_path(repo) == {"path": str(repo), "exists": True, "git": True,
+    assert at_path(repo) == {"path": str(repo), "exists": True, "has_git": True,
                                "project": None, "how": None, "key": "finch-scripts",
                                "taken": False}
-    assert at_path(plain)["exists"] is True and at_path(plain)["git"] is False
+    assert at_path(plain)["exists"] is True and at_path(plain)["has_git"] is False
     gone = at_path(tmp_path / "not-yet")
-    assert gone["exists"] is False and gone["git"] is None and gone["key"] == "not-yet"
+    assert gone["exists"] is False and gone["has_git"] is None and gone["key"] == "not-yet"
     assert not store_path.exists()
 
 
@@ -419,13 +419,13 @@ def test_a_worktrees_git_file_counts_as_git(tmp_path, own_pool):
     tree = tmp_path / "wt"
     tree.mkdir()
     (tree / ".git").write_text("gitdir: /somewhere\n")
-    assert at_path(tree)["git"] is True
+    assert at_path(tree)["has_git"] is True
 
 
 def test_a_file_is_not_a_dir(tmp_path, own_pool):
     a_file = tmp_path / "a-file"
     a_file.write_text("")
-    assert at_path(a_file)["exists"] is False and at_path(a_file)["git"] is None
+    assert at_path(a_file)["exists"] is False and at_path(a_file)["has_git"] is None
 
 
 def test_how_the_path_stands_to_the_project_it_is_in(tmp_path, own_pool):
@@ -463,7 +463,7 @@ def test_a_linked_worktree_outside_any_root_is_a_worktree(tmp_path, own_pool):
     (tree / ".git").write_text(f"gitdir: {gitdir}\n")
     _register(("main", main))
     body = at_path(tree)
-    assert (body["project"], body["how"], body["git"]) == ("main", "worktree", True)
+    assert (body["project"], body["how"], body["has_git"]) == ("main", "worktree", True)
 
 
 def test_a_tilde_path_is_taken_as_the_home(tmp_path, own_pool, monkeypatch):
@@ -506,7 +506,7 @@ def test_a_store_that_cant_be_read_answers_the_rest(tmp_path, own_pool, store_pa
     store_path.write_bytes(b"not a database at all" * 100)
     (tmp_path / "x").mkdir()
     body = at_path(tmp_path / "x")
-    assert body == {"path": str(tmp_path / "x"), "exists": True, "git": False,
+    assert body == {"path": str(tmp_path / "x"), "exists": True, "has_git": False,
                     "project": None, "how": None, "key": "x", "taken": None}
 
 
@@ -528,7 +528,7 @@ def test_a_path_stat_that_hangs_reads_null_inside_the_bound_and_is_not_asked_aga
         start = time.monotonic()
         body = at_path(slow)
         assert time.monotonic() - start < 2
-        assert body["exists"] is None and body["git"] is False and body["key"] == "slow"
+        assert body["exists"] is None and body["has_git"] is False and body["key"] == "slow"
         assert at_path(slow)["exists"] is None
         assert asked.count(str(slow)) == 1
     finally:
