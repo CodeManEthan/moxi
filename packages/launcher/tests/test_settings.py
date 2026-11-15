@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 
 from moxi import cli
@@ -148,3 +149,13 @@ def test_show_json_marks_the_three_changes_that_can_hurt(capsys):
             hurts["startup.dev_channels_dialog"]["stays"]) == ("on", False)
     assert hurts["relaunch.pass_env"]["when"] == "add"
     assert all(hurt["confirm"] for hurt in hurts.values())
+
+
+def test_show_json_keeps_each_groups_keys_together_behind_more(capsys):
+    # The page starts a sub-head wherever the group changes in schema order, so a group
+    # whose keys were split would be drawn twice.
+    keys = show_json(capsys)
+    more = [key["group"] for key in keys.values()
+            if not key["common"] and not key["elsewhere"]]
+    runs = [group for group, _ in itertools.groupby(more) if group]
+    assert len(runs) == len(set(runs)), runs

@@ -50,6 +50,42 @@ common = true
 group = "Guards"
 hurts = { when = "remove", says = "stops this guard", confirm = "From the next tool call, this guard no longer runs in any session, unless its own switch is on." }
 
+[guards.max_wait_ms]
+type = "int"
+default = 3000
+doc = "The most any guard's judge may take on one tool call, in milliseconds; a guard's own deadline is clamped to it."
+read = "use"
+label = "The most a guard may take"
+group = "Waits"
+unit = "ms"
+
+[stop_handler.wait_ms]
+type = "int"
+default = 2000
+doc = "How long a Stop waits for the session's stop handler to answer before the turn ends, in milliseconds."
+read = "start"
+label = "For a session's stop handler"
+group = "Waits"
+unit = "ms"
+
+[listen.wait_ms]
+type = "int"
+default = 2000
+doc = "How long an event waits for the registered listeners to answer, in milliseconds."
+read = "start"
+label = "For listeners on an event"
+group = "Waits"
+unit = "ms"
+
+[after_tool.wait_ms]
+type = "int"
+default = 300
+doc = "How long the after-tool listeners may take on one tool call, together, in milliseconds."
+read = "use"
+label = "The most after-tool listeners may take"
+group = "Waits"
+unit = "ms"
+
 # The start list: what adds context when a session starts, resumes, is cleared or is
 # compacted, in this order. An entry is a module name or a file path (one holding a `/`
 # or starting with `~`). A module not installed is skipped; a module not on the list adds
@@ -92,42 +128,6 @@ doc = "The endpoint command the Claude plugin spawns; empty means this environme
 read = "use"
 label = "The endpoint"
 line = "The command the Claude plugin spawns. Empty, it is this environment's moxi-turns-endpoint."
-
-[stop_handler.wait_ms]
-type = "int"
-default = 2000
-doc = "How long a Stop waits for the session's stop handler to answer before the turn ends, in milliseconds."
-read = "start"
-label = "For a session's stop handler"
-group = "Waits"
-unit = "ms"
-
-[listen.wait_ms]
-type = "int"
-default = 2000
-doc = "How long an event waits for the registered listeners to answer, in milliseconds."
-read = "start"
-label = "For listeners on an event"
-group = "Waits"
-unit = "ms"
-
-[guards.max_wait_ms]
-type = "int"
-default = 3000
-doc = "The most any guard's judge may take on one tool call, in milliseconds; a guard's own deadline is clamped to it."
-read = "use"
-label = "The most a guard may take"
-group = "Waits"
-unit = "ms"
-
-[after_tool.wait_ms]
-type = "int"
-default = 300
-doc = "How long the after-tool listeners may take on one tool call, together, in milliseconds."
-read = "use"
-label = "The most after-tool listeners may take"
-group = "Waits"
-unit = "ms"
 
 [question_mode.origins]
 type = "list"

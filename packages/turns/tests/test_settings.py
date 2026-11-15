@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 
 from moxi import cli
@@ -74,3 +75,13 @@ def test_show_json_marks_turning_a_guard_off_and_removing_one_as_able_to_hurt(ca
     assert hurts["guards.no_nested_agents"]["confirm"] == (
         "From its next tool call, a subagent in any session can start subagents of its own.")
     assert not any(hurt["stays"] for hurt in hurts.values())
+
+
+def test_show_json_keeps_each_groups_keys_together_behind_more(capsys):
+    # The page starts a sub-head wherever the group changes in schema order, so a group
+    # whose keys were split would be drawn twice.
+    keys = show_json(capsys)
+    more = [key["group"] for key in keys.values()
+            if not key["common"] and not key["elsewhere"]]
+    runs = [group for group, _ in itertools.groupby(more) if group]
+    assert len(runs) == len(set(runs)), runs

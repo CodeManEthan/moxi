@@ -52,6 +52,24 @@ line = "In a slot launch, when it shows."
 common = true
 hurts = { when = "on", says = "answers the development-channels screen for every slot launch", confirm = "Every slot launch accepts Claude Code's development-channels screen for you." }
 
+[recycle.limit_wait_s]
+type = "int"
+default = 1800
+doc = "How long a compact at the context limit waits for the session to be idle, in seconds."
+read = "use"
+label = "For idle, to compact at the limit"
+group = "Waits"
+unit = "seconds"
+
+[page.launch_wait_s]
+type = "int"
+default = 600
+doc = "How long a launch made from the page may take, and how long a preview stays good for launching, in seconds."
+read = "use"
+label = "A launch from the page may take"
+group = "Waits"
+unit = "seconds"
+
 [runs.keep_days]
 type = "int"
 default = 30
@@ -150,15 +168,6 @@ label = "Retry a refused notice for"
 group = "Relaunch"
 unit = "seconds"
 
-[recycle.limit_wait_s]
-type = "int"
-default = 1800
-doc = "How long a compact at the context limit waits for the session to be idle, in seconds."
-read = "use"
-label = "For idle, to compact at the limit"
-group = "Waits"
-unit = "seconds"
-
 [keep_warm.subagent_cap]
 type = "int"
 default = 3
@@ -218,15 +227,6 @@ default = {}
 items = "str"
 doc = "A name template of its own for a project, by project key; a project with none takes name.template."
 read = "use"
-
-[page.launch_wait_s]
-type = "int"
-default = 600
-doc = "How long a launch made from the page may take, and how long a preview stays good for launching, in seconds."
-read = "use"
-label = "A launch from the page may take"
-group = "Waits"
-unit = "seconds"
 
 [records.keep_days]
 type = "int"
