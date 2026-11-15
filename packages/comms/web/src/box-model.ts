@@ -89,16 +89,16 @@ interface Answered<A> {
 const heldCold = (answer: SendAnswer | null): boolean =>
   answer !== null && answer.outcome === "would-send" && answer.recipients.some((one) => one.delivery === "held-cold");
 
-/** The words of a line the box shows, by the act that gave it. */
-export function checkLine(answered: Answered<SendAnswer>, when: (at: number) => string): Said {
-  return answered.status === 200 && answered.answer !== null ? checkWords(answered.answer, when)
+/** The words of a line the box shows, by the act that gave it; `to` is the box's address. */
+export function checkLine(answered: Answered<SendAnswer>, when: (at: number) => string, to: string | null = null): Said {
+  return answered.status === 200 && answered.answer !== null ? checkWords(answered.answer, when, to)
     : transportWords("check", answered.status);
 }
 
 export function sendLine(answered: Answered<SendAnswer> & { at: number }, when: (at: number) => string,
-                         waiting: number | null): Said {
-  return answered.status === 200 && answered.answer !== null ? sendWords(answered.answer, answered.at, when, waiting)
-    : transportWords("send", answered.status);
+                         waiting: number | null, to: string | null = null): Said {
+  return answered.status === 200 && answered.answer !== null
+    ? sendWords(answered.answer, answered.at, when, waiting, to) : transportWords("send", answered.status);
 }
 
 export function takeLine(answered: Answered<TakeAnswer>): Said {
@@ -302,10 +302,10 @@ export class SendBox {
             menu: DELIVERIES.map((one) => ({ value: one.held, label: one.word, says: null, current: one.held === this.held })) };
     }
     let line: Said | null = null;
-    if (this.lineFrom === "check" && this.checked !== null) line = checkLine(this.checked, when);
+    if (this.lineFrom === "check" && this.checked !== null) line = checkLine(this.checked, when, this.to);
     else if (this.lineFrom === "send" && this.sent !== null) {
       const read = queue !== null && queue !== this.queueAtSend ? waitingIn(queue, this.to) : null;
-      line = sendLine(this.sent, when, read);
+      line = sendLine(this.sent, when, read, this.to);
     }
     const word = POSTURES.find((one) => one.posture === this.posture)?.word ?? this.posture;
     return {

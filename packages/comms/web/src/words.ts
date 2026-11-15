@@ -240,13 +240,15 @@ const HELD = new Set(["held-cold", "held-flag", "waiting", "unbound"]);
 const said = (heavy: string | null, text: string, flags: Partial<Omit<Said, "heavy" | "text">> = {}): Said =>
   ({ key: null, heavy, text, dim: null, again: false, reread: false, keep: false, ...flags });
 
-/** The words for an answer of `check` or `send` that is not `would-send` or `sent`. */
-function notSentWords(act: "check" | "send", answer: SendAnswer): Said {
+/** The words for an answer of `check` or `send` that is not `would-send` or `sent`. A
+ * refusal carries no recipient, so the name is the address the box writes to, `to`. */
+function notSentWords(act: "check" | "send", answer: SendAnswer, to: string | null): Said {
   const check = act === "check";
   const lead = check ? "Refused: nothing would be sent." : "Not sent.";
   const flags = { key: check ? IF_SENT : null, again: check, keep: true };
   const code = answer.refusal?.code ?? null;
-  const name = nameOf(answer.recipients[0]?.qualified ?? "it");
+  const qualified = answer.recipients[0]?.qualified ?? to;
+  const name = qualified !== null ? nameOf(qualified) : "the recipient";
   switch (answer.outcome) {
     case "cache-unread":
       return said(lead, `Comms can't read ${name}'s cache right now, so it can't tell whether this would wake it cold. `
@@ -282,9 +284,9 @@ function notSentWords(act: "check" | "send", answer: SendAnswer): Said {
   }
 }
 
-/** The dry-run line after `If sent now`, for an answer of `check`. */
-export function checkWords(answer: SendAnswer, when: (at: number) => string): Said {
-  if (answer.outcome !== "would-send") return notSentWords("check", answer);
+/** The dry-run line after `If sent now`, for an answer of `check` to the address `to`. */
+export function checkWords(answer: SendAnswer, when: (at: number) => string, to: string | null = null): Said {
+  if (answer.outcome !== "would-send") return notSentWords("check", answer, to);
   const phrases = answer.recipients.map((recipient) => deliveryWords(recipient, when));
   return said(null, phrases.filter((phrase): phrase is string => phrase !== null).join(" "), { key: IF_SENT });
 }
@@ -296,8 +298,8 @@ export function checkWords(answer: SendAnswer, when: (at: number) => string): Sa
  * taken back until the recipient has read it. The box empties. Anything else keeps the text.
  */
 export function sendWords(answer: SendAnswer, sentAt: number, when: (at: number) => string,
-                          waiting: number | null = null): Said {
-  if (answer.outcome !== "sent") return notSentWords("send", answer);
+                          waiting: number | null = null, to: string | null = null): Said {
+  if (answer.outcome !== "sent") return notSentWords("send", answer, to);
   const text = answer.recipients.map((recipient) => deliveryWords(recipient, when))
     .filter((phrase): phrase is string => phrase !== null).join(" ");
   const dim: string[] = [];

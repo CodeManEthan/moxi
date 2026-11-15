@@ -141,6 +141,14 @@ test("check: every other outcome leads with the refusal and offers Check again",
   }
 });
 
+test("a refusal names the box's address, since it carries no recipient", () => {
+  const unread = { outcome: "cache-unread", message_id: null, recipients: [], refusal: { code: "cold-not-held" } };
+  assert.match(checkWords(unread, when, "reviewer@kestrel-web").text, /^Comms can't read reviewer's cache right now/);
+  assert.equal(sendWords({ ...unread, outcome: "refused", refusal: { code: "send-only" } }, 0, when, null, "console").text,
+               "console takes no mail.");
+  assert.match(checkWords(unread, when).text, /^Comms can't read the recipient's cache right now/);
+});
+
 test("send: refusals lead with Not sent and keep the text; unknown may have been sent", () => {
   assert.deepEqual(sendWords(answer("refused", "live", "too-long"), 0, when),
                    { key: null, heavy: "Not sent.", text: "With its address line it is over the 16,000-character cap on one message.",
