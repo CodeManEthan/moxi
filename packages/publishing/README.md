@@ -94,6 +94,45 @@ read from the index, so an allowance counts only once it is staged:
 A malformed allowlist, a secrets set that can't run or a failed git read refuses the
 commit, naming why.
 
+## The push piece
+
+Nothing leaves a public repo unless every ref the push moves follows these rules:
+
+| what is pushed | allowed when |
+|---|---|
+| a branch created or moved | the remote's tip is an ancestor of the new one: a public branch is never rewritten |
+| a branch deleted | it is not `main` or on `protected`, and the remote's tip, as this repo has it, is in the tracking ref of `main`; otherwise "fetch first" |
+| a tag shaped like a release tag (`<package>-v<version>`) | never moved or deleted; this version creates none, since it runs no release gate |
+| any other tag or ref | a `free-ref` pattern names it; then it is created, moved or deleted freely |
+
+Every ref pushed points at a commit or a tag of one, a push creates at most three tags
+(GitHub starts nothing for a push that creates more), and each ref name goes through
+secrets' sets. A `free-ref` pattern never applies to a branch or a release tag, even one
+written into git config by hand. GitHub's rulesets still hold on the server.
+
+Everything the push makes public for the first time is judged as a commit would have
+been. Already public means reachable from the remote's tracking refs or a ref's remote
+tip; a remote with no tracking refs here is asked for its refs, and only an empty one is
+scanned whole. For each commit sent:
+
+- its added lines and new path names, as the content piece reads them (a merge by its own
+  lines), with the allowlists that commit holds;
+- its message, through the message piece's sets and rules, and the repo's
+  `repo/commit-rules` rules;
+- its headers whole (author, committer, a merged signed tag) through secrets' sets;
+- a trailer whose key is on `drop-trailer` or `pass-trailer` means a commit-msg hook
+  didn't run, and refuses the push when the committer is your identity (secrets'
+  `author.name` and `author.email`). A contributor's commit keeps its trailers, and is
+  still scanned like any other.
+
+Each tag pushed has every tag object of its chain read the same way: tagger and message.
+
+With `word-required` set to `true`, a push needs `MOXI_PUBLISHING_PUSH_WORD`, matching
+`push.word_pattern` in full: where the push was approved. It is a record, not a proof; any
+process can set it. A push that passes is logged first, one JSON line in the module's
+state directory, `pushes.jsonl` (time, repo, remote, URL, word, refs, commits); a log that
+can't be written refuses the push.
+
 ## Scanning a whole tree
 
 `moxi publishing scan [PATH] [--rev REV] [--ci]` reads every file of the tree at `REV`

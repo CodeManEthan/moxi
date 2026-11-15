@@ -125,3 +125,13 @@ def public_repo(repo: Path, *pieces: str, sets: tuple[str, ...] = ()) -> Path:
     git(repo, "config", "moxi-publishing.public", "true")
     api.add(repo, *pieces, sets=list(sets))
     return repo
+
+
+@pytest.fixture
+def remote(repo, tmp_path) -> Path:
+    """A bare remote, `origin` of `repo`, holding its `main` (pushed before any piece)."""
+    bare = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", str(bare))
+    git(repo, "remote", "add", "origin", str(bare))
+    git(repo, "push", "-q", "origin", "main")
+    return bare

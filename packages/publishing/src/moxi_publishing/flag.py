@@ -117,6 +117,13 @@ def registered(root: str) -> dict[str, dict]:
 
 # -- free-ref patterns -------------------------------------------------------------------
 
+def looks_like_release_tag(name: str) -> bool:
+    """Whether tag `name` (without `refs/tags/`) has the shape of a release tag,
+    `<package>-v<version>`: read loosely, so it says yes to more names than the scheme
+    makes, never fewer."""
+    return "/" not in name and _RELEASE_SHAPE.match(name) is not None
+
+
 def free_ref_problem(pattern: str) -> str | None:
     """Why `pattern` can't be a `free-ref` value, or None. A pattern is a full ref name in
     which `*`, `?` and `[...]` are wildcards; one that could match a branch or a release
@@ -302,5 +309,5 @@ def listing() -> list[dict]:
 
 
 __all__ = ["FLAG", "GITHUB", "INTERPRETER", "PIECES", "Failure", "config_get", "disable",
-           "enable", "free_ref_problem", "is_public", "listing", "registered", "resolve",
-           "work_tree"]
+           "enable", "free_ref_problem", "is_public", "listing", "looks_like_release_tag",
+           "registered", "resolve", "work_tree"]

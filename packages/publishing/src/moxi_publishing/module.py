@@ -12,8 +12,12 @@ CLI = "moxi_publishing.cli:main"
 SUMMARY = "Keep private text out of a public git repo, and release its packages."
 OPTIONAL = {}
 GATED = {}
-#: The push word is the user's, set per push; nothing here stamps it on a session.
-INTERNAL_ENV = {}
+INTERNAL_ENV = {
+    "MOXI_PUBLISHING_PUSH_WORD": "set by whoever pushes, per push: where the push was "
+                                 "approved, which the push piece checks against "
+                                 "push.word_pattern and logs, in a repo whose "
+                                 "word-required setting is true",
+}
 SETTINGS = "settings.toml"
 # The schema can't tell a rule name from a typo, nor a pattern that won't compile.
 CONFIG_CHECK = "moxi_publishing.settings:check_text"

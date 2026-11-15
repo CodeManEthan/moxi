@@ -193,28 +193,40 @@ def residue_allowed(text: str | bytes | None, where: str = RESIDUE_ALLOW
     return frozenset(pairs)
 
 
-def read_blobs(git, specs) -> dict[str, bytes | None]:
-    """Each object `spec` (`:path` for the index, `<tree>:path`) read with one
-    `cat-file --batch`, as git stores it; None for one that doesn't exist. `git(*args,
-    stdin_data=)` runs git and returns its finished process with bytes on stdout."""
+def read_objects(git, specs) -> dict[str, tuple[str, bytes] | None]:
+    """Each object `spec` (an object id, `:path` for the index, `<tree>:path`) read with
+    one `cat-file --batch`, as git stores it: (its type, its bytes), or None for one that
+    doesn't exist. `git(*args, stdin_data=)` runs git and returns its finished process
+    with bytes on stdout."""
     specs = list(specs)
+    if not specs:
+        return {}
     done = git("cat-file", "--batch", stdin_data="".join(f"{s}\n" for s in specs))
     if done.returncode != 0:
         raise ScanError(f"git cat-file failed: {_first_line(done.stderr)}")
-    out: dict[str, bytes | None] = {}
+    out: dict[str, tuple[str, bytes] | None] = {}
     data, at = done.stdout, 0
     for spec in specs:
         end = data.index(b"\n", at)
         header = data[at:end].split(b" ")
         at = end + 1
-        if header[-1] == b"missing":
+        if header[-1] == b"missing" or len(header) != 3:
             out[spec] = None
             continue
-        if len(header) != 3 or header[1] != b"blob":
-            raise ScanError(f"{spec} is not a file")
         size = int(header[2])
-        out[spec] = data[at:at + size]
+        out[spec] = (header[1].decode("ascii"), data[at:at + size])
         at += size + 1
+    return out
+
+
+def read_blobs(git, specs) -> dict[str, bytes | None]:
+    """`read_objects` for files: each spec's bytes, None for one that doesn't exist.
+    Raises `ScanError` for an object that is not a file."""
+    out: dict[str, bytes | None] = {}
+    for spec, found in read_objects(git, specs).items():
+        if found is not None and found[0] != "blob":
+            raise ScanError(f"{spec} is not a file")
+        out[spec] = None if found is None else found[1]
     return out
 
 
@@ -422,5 +434,5 @@ def scan_tree(root: str, rev: str = "HEAD", *, ci: bool = False) -> list[str]:
 
 
 __all__ = ["CONTENT", "PIECE_ID", "SETS", "CI_SETS", "NAME_PATH", "DIFF_FLAGS",
-           "FileChange", "ScanError", "parse_patch", "residue_allowed", "read_blobs",
-           "allowlists", "judge", "staged", "pre_commit", "scan_tree"]
+           "FileChange", "ScanError", "parse_patch", "residue_allowed", "read_objects",
+           "read_blobs", "allowlists", "judge", "staged", "pre_commit", "scan_tree"]
