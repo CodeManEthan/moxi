@@ -1042,8 +1042,9 @@ def _schema_of(module: str) -> tuple:
                        "module", 3)
     try:
         schema = schema_for(found)
-    except ConfigError as exc:
-        raise _refused(exc.file, exc.problem, exc.fix, 3) from None
+    except SchemaError as exc:
+        exc.exit_code = 3
+        raise
     if schema is None:
         raise _refused(module, "declares no settings", "nothing to set", 3)
     return schema, found.config_check
@@ -1353,7 +1354,8 @@ def _check_file(module, schema, check, text, path, key) -> None:
     try:
         _read_text(module, schema, text, path)
     except SchemaError as exc:
-        raise _refused(exc.file, exc.problem, exc.fix, 3, exc.key) from None
+        exc.exit_code = 3
+        raise
     if check is None:
         return
     import importlib

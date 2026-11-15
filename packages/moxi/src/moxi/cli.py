@@ -1031,7 +1031,8 @@ def _config_change(op: str, argv: list[str]) -> int:
         changed = config._change(args.module, args.key, op, value, by=args.by, text=True)
     except config.ConfigError as exc:
         if args.json:
-            _change_json(changed=False, problem=exc.problem, fix=exc.fix, units=[])
+            _change_json(changed=False, problem=_json_problem(exc, args.module, args.key),
+                         fix=exc.fix, units=[])
         else:
             _error(str(exc))
         return exc.exit_code
@@ -1055,6 +1056,21 @@ def _config_change(op: str, argv: list[str]) -> int:
         if any(not a.ok for a in applied):
             return 1
     return 0
+
+
+def _json_problem(exc, module: str, key: str) -> str:
+    """`set --json`'s and `unset --json`'s `problem` for the refusal `exc` of a change of
+    `module`'s `key`: its bare predicate when it is about that key's value; else the whole
+    sentence, naming what it is about (the config file, another key in it, the module, or
+    the module's settings schema)."""
+    from . import config
+
+    if not isinstance(exc, config.SchemaError) and exc.exit_code == 2 and exc.key == key:
+        return exc.problem
+    whole = str(exc).removesuffix(f"; fix: {exc.fix}")
+    if isinstance(exc, config.SchemaError):
+        return f"{module}'s settings schema cannot be read: {whole}"
+    return whole
 
 
 def _change_json(*, changed: bool, problem, fix, units: list[str]) -> None:
