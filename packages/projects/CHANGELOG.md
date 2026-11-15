@@ -30,6 +30,13 @@
 - The README's "Facts on the Projects page" states the contract through which another
   module adds its facts to the Projects page: a `project-facts` component that reports in
   a `moxi-project-facts` event, version 1.
+- The page lists each project as a row: its name, its folder in `~` form and its kind,
+  at the right when it was last active and `Open`, and a second line only when there is
+  something to say, such as a folder that doesn't exist, with `Change folder`. It places
+  each installed module's `project-facts` and draws what they report, at most once a
+  frame; with a source of activity, projects with bad news come first and the rest by
+  latest activity, else by name. Past twelve projects it gains a find field, a kind
+  filter (which replaces the old one) and an `Earlier` fold.
 
 ## 0.1.4 (2026-11-08)
 

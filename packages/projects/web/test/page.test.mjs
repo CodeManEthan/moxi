@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  actedOf, actSaid, agentBody, clearLeadBody, editBody, editForm, editing, filterChoices, kindChoices, leadBody,
-  listView, MAY_HAVE_ACTED, NO_GIT, projectFields, removedSaid, removeSheet, removeStatusPath, reread, touched,
+  actedOf, actSaid, agentBody, clearLeadBody, editBody, editForm, editing, kindChoices, leadBody,
+  MAY_HAVE_ACTED, NO_GIT, projectFields, removedSaid, removeSheet, removeStatusPath, reread, touched,
   WHERE_LINE, whereView,
 } from "../src/views.ts";
 import { parseOne, parseWritten } from "../src/feed.ts";
@@ -12,40 +12,12 @@ const state = (over) => ({ loading: false, gone: false, failure: null, value: nu
 const PROJECT = { key: "alpha", root: "/w/alpha", kind: "project", lead: "lead-a",
                   associated: ["helper"], agents: ["lead-a", "helper"], notes_root: null,
                   created: "2026-01-02T03:04:05Z" };
-const OLD = { ...PROJECT, key: "old", kind: "shelf-gone", lead: null, associated: [], agents: [] };
 const KINDS = {
   found: [{ name: "agent", doc: "an agent's home", module: "projects", mint: "git" },
           { name: "project", doc: "code", module: "projects", mint: "git" },
           { name: "topic", doc: "a subject", module: "notes", mint: "dir" }],
   broken: [],
 };
-
-// -- the list -----------------------------------------------------------------------------------
-
-test("the list: loading, up, empty for the kind, failed keeping the last list, gone", () => {
-  assert.equal(listView(state({ loading: true }), null).state, "loading");
-  const up = listView(state({ value: { projects: [PROJECT] } }), null);
-  assert.deepEqual(up, { state: "up", projects: [PROJECT], line: null });
-  assert.deepEqual(listView(state({ value: { projects: [] } }), "agent"),
-                   { state: "empty", projects: [], line: "No project has the kind agent." });
-  const failure = { status: 422, why: "x", said: "the store is newer than this code; fix: upgrade" };
-  assert.deepEqual(listView(state({ value: { projects: [PROJECT] }, failure }), null),
-                   { state: "failed", projects: [PROJECT], line: "the store is newer than this code; fix: upgrade" });
-  assert.equal(listView(state({ gone: true, value: { projects: [PROJECT] } }), null).state, "gone");
-});
-
-test("the kind filter offers every kind, each listed kind, and a kind no module declares", () => {
-  const choices = filterChoices(KINDS, [PROJECT, OLD], "");
-  assert.deepEqual(choices.map((choice) => choice.value), ["", "agent", "project", "topic", "shelf-gone"]);
-  assert.equal(choices[0].label, "Every kind");
-  assert.equal(choices[3].label, "topic (notes)");
-  assert.equal(choices[4].label, "shelf-gone (no installed module declares it)");
-  // A filter that names a kind no longer listed stays offered, so the menu shows it.
-  assert.deepEqual(filterChoices(null, [], "gone").map((choice) => choice.value), ["", "gone"]);
-  // While the kinds are unknown, a listed kind is offered by name, not called undeclared.
-  assert.deepEqual(filterChoices(null, [PROJECT], ""), [{ value: "", label: "Every kind" },
-                                                       { value: "project", label: "project" }]);
-});
 
 test("the edit form's kinds keep the project's own kind", () => {
   assert.deepEqual(kindChoices(KINDS, "project").map((choice) => choice.value), ["agent", "project", "topic"]);

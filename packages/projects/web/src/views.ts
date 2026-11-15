@@ -266,25 +266,6 @@ export function emptyForm(kind: string): AddForm {
 /** What the page or a form says after an act: a tone and its lines. */
 export type Said = AddSaid;
 
-/** The page's list as it is drawn. */
-export interface ListView {
-  /** `loading`, `up` (projects listed), `empty` (none, or none of the kind), `failed` (the
-   * read failed; the last list read is kept), or `gone` (projects went away). */
-  state: "loading" | "up" | "empty" | "failed" | "gone";
-  projects: Project[];
-  line: string | null;
-}
-
-/** The page's list, read with the kind filter `kind` (null for every kind). */
-export function listView(data: FeedState<Projects>, kind: string | null): ListView {
-  const projects = data.value?.projects ?? [];
-  if (data.gone) return { state: "gone", projects: [], line: null };
-  if (data.failure !== null) return { state: "failed", projects, line: failureLine(data.failure) };
-  if (data.loading || data.value === null) return { state: "loading", projects: [], line: null };
-  if (projects.length === 0) return { state: "empty", projects, line: emptyLine(kind) };
-  return { state: "up", projects, line: null };
-}
-
 /** One choice of a kind menu: the value sent, and the label shown. */
 export interface KindChoice {
   value: string;
@@ -294,24 +275,6 @@ export interface KindChoice {
 /** A kind a project has that no installed module declares: kept as a label. */
 function undeclared(name: string): KindChoice {
   return { value: name, label: `${name} (no installed module declares it)` };
-}
-
-/** The kind filter's choices: every kind, then each kind listed, then any kind a listed
- * project has that no module declares, then the filter itself if it is none of those.
- * While the kinds are unknown, a project's kind is offered by its name alone. */
-export function filterChoices(kinds: Kinds | null, projects: readonly Project[], current: string): KindChoice[] {
-  const choices: KindChoice[] = [{ value: "", label: "Every kind" }];
-  const seen = new Set<string>([""]);
-  for (const kind of kinds?.found ?? []) {
-    choices.push({ value: kind.name, label: kindLabel(kind) });
-    seen.add(kind.name);
-  }
-  for (const name of [...projects.map((project) => project.kind), current]) {
-    if (seen.has(name)) continue;
-    choices.push(kinds === null ? { value: name, label: name } : undeclared(name));
-    seen.add(name);
-  }
-  return choices;
 }
 
 /** The edit form's kind menu for a project of kind `current`: each kind listed, and the

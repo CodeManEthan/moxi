@@ -1,17 +1,16 @@
-"""projects' page in a browser, through a real shell that starts projects' real page
-server: the contract check; the store file and the git the page acts with, and a shell
-whose PATH has no git; a terminal whose last run placed the store elsewhere than the
-shell does, after which the page's add refuses with the store line and the where block
-shows it as a note; the list and its kind filter; a contribution that won't load,
-named beside the filter and in the add form, which an add goes ahead without and whose
-warning the form shows beside the success; an add with create in a
-real git; a topic added with no root, whose answer is lost, after which the page reads its
-list again and says the directory may exist; the edit form, which sends only what the
-user changed when a terminal has changed the project since it was opened; the lead and
-the associated agents; remove through the confirm sheet, where Cancel sends nothing, a
-refusal gives each sentence, a removal takes the row off, and each confirmation sends its
-own key; a remove whose answer is lost, which says projects may have acted; and the 360
-px width check.
+"""projects' page in a browser, through a real shell that starts projects' real page server:
+the contract check; the store file and the git the page acts with, and a shell whose PATH
+has no git; a terminal whose last run placed the store elsewhere than the shell does,
+after which the page's add refuses with the store line and the where block shows it as a
+note; a contribution that won't load, named in the add form, which an add goes ahead
+without and whose warning the form shows beside the success; an add with create in a real
+git; a topic added with no root, whose answer is lost, after which the page reads its list
+again and says the directory may exist; the edit form, which sends only what the user
+changed when a terminal has changed the project since it was opened; the lead and the
+associated agents; remove through the confirm sheet, where Cancel sends nothing, a refusal
+gives each sentence, a removal takes the row off, and each confirmation sends its own key;
+a remove whose answer is lost, which says projects may have acted; and the 360 px width
+check.
 
 Rows are seeded with `moxi projects add` run with the shell's own environment, so the
 store is the one the page server reads, under the shell's home, and every check reads it
@@ -161,13 +160,14 @@ def open_panel(page):
 
 
 def row(panel, key: str):
-    return panel.locator(f'li.project[data-key="{key}"]')
+    return panel.locator(f'moxi-ui-row[data-key="{key}"]')
 
 
 def open_row(panel, key: str):
+    """Opens `key`'s row with its `Open`, and gives the row."""
     item = row(panel, key)
     item.locator('[data-action="open"]').click()
-    expect(item).to_have_attribute("data-open", "true")
+    expect(item).to_have_attribute("open", "")
     return item
 
 
@@ -193,7 +193,7 @@ def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
     for route in ("projects", "kinds", "where"):
         assert any(url.endswith(f"/m/projects/api/{route}") for url in check.requests), check.requests
     for key in seeded:
-        expect(check.locator.locator(f'li.project[data-key="{key}"]')).to_have_count(1)
+        expect(check.locator.locator(f'moxi-ui-row[data-key="{key}"]')).to_have_count(1)
     expect(check.locator.locator("moxi-projects-add form")).to_have_attribute("data-state", "up")
 
 
@@ -277,24 +277,6 @@ def test_a_shell_with_no_git_says_so_and_a_create_names_the_lasting_fix(
 
 # --- the list ---------------------------------------------------------------------------------
 
-def test_the_kind_filter_lists_only_that_kind(seeded, ui_page):
-    panel = open_panel(ui_page)
-    reads = reads_of(ui_page, "api/projects")
-    expect(row(panel, "alpha")).to_have_count(1)
-    expect(row(panel, "scout-home")).to_have_count(1)
-    expect(panel.locator('[data-part="broken"]')).to_have_count(0)
-    choose = panel.get_by_role("combobox", name="Show the kind")
-    choose.select_option("agent")
-    expect(row(panel, "alpha")).to_have_count(0)
-    expect(row(panel, "scout-home")).to_have_count(1)
-    assert any(url.endswith("/m/projects/api/projects?kind=agent") for url in reads), reads
-    choose.select_option("topic")
-    expect(panel.locator('[data-line="empty"]')).to_have_text("No project has the kind topic.")
-    choose.select_option("")
-    expect(row(panel, "alpha")).to_have_count(1)
-    expect(row(panel, "scout-home")).to_have_count(1)
-
-
 def test_a_contribution_that_wont_load_is_named_and_an_add_goes_ahead_with_its_warning(
         ui_shells, ui_contexts, tmp_path_factory):
     site = fake_site(tmp_path_factory.mktemp("broken"), "fake_broken", "broken", BROKEN)
@@ -303,11 +285,6 @@ def test_a_contribution_that_wont_load_is_named_and_an_add_goes_ahead_with_its_w
     page = ui_contexts(shell).pages[0]
     page.goto("/m/projects/")
     panel = page.locator("#moxi-panel > moxi-projects-page")
-    broken = panel.locator('section[data-part="list"] [data-part="broken"]')
-    expect(broken.locator('[data-line="broken"]')).to_contain_text("broken:")
-    expect(broken).to_contain_text("a remove is refused, as is an add or set of a kind no "
-                                   "loaded module declares")
-    expect(broken).to_contain_text("any other add goes ahead without it, with a warning")
     form = panel.locator("moxi-projects-add")
     expect(form.locator('[data-line="broken"]')).to_contain_text("broken:")
     where = root(shell, "skipping")
