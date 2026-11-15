@@ -5,15 +5,18 @@ agents to read beside the logs.
                                            skips that stand, its design's newest
                                            version and standing, the lead's
                                            decisions on threads, its stages, its
+                                           builds with their state, its
                                            questions by state, its rulings, the
                                            verdicts of its design and its history
+    <rounds folder>/<slug>/retro.md        one round that has ended: its numbers, as
+                                           the event that ended it holds them
     <rounds folder>/rulings.md             the project's register: its standing rulings
     <rounds folder>/questions.md           the questions on the project's own list
 
 Each file is written whole, in one step, after every write to the log it is made from
-(`on_append`, one of the write path's after-append callbacks): the note after a write to
-its round, the two project files after a write to the project's log. Nothing reads one
-back.
+(`on_append`, one of the write path's after-append callbacks): the note, and once the
+round has ended its numbers, after a write to its round, the two project files after a
+write to the project's log. Nothing reads one back.
 
 A note also says which of its round's rulings the operator has read back, and that is
 in the project's log. So a read-back, when it is recorded, writes again the note of
@@ -53,11 +56,13 @@ from moxi import files
 
 from . import questions as asked
 from . import closing, folders, log, readback, ruling, showing, write
+from . import numbers as counted
 from . import state as states
 from .errors import Locked, NoLog, Unreadable
 
-#: The names of the three files.
+#: The names of the four files.
 NOTE_FILE = "round-note.md"
+RETRO_FILE = "retro.md"
 RULINGS_FILE = "rulings.md"
 QUESTIONS_FILE = "questions.md"
 
@@ -109,6 +114,9 @@ def on_append(written) -> None:
     if where.slug is not None and log.exists(log.round_log(rounds_dir / where.slug)):
         work.append(put(rounds_dir / where.slug / NOTE_FILE, lambda: note(
             where.project, where.slug, written.round_events, written.project_events)))
+        if any(one.get("type") in _ENDINGS for one in written.round_events):
+            work.append(lambda: _put_retro(rounds_dir / where.slug, where.project,
+                                           where.slug, written.round_events))
     # A round's verb that only read the project's log holds no lock on it, so that
     # log's files are left for whoever writes it. A project with no log has no files.
     if (where.slug is None or wrote_project) and written.project_events:
@@ -231,7 +239,8 @@ def _questions_by_state(listed: list, heading: str) -> list[str]:
         for one in group:
             lines += _item(f"{one['id']}: {one['text']}")
             said = [f"from: {one['from']}", f"blocks: {_listed(one['blocks'])}",
-                    f"by: {one['by']}", f"at: {one['at']}"]
+                    f"by: {asked.asker(one['by'], one.get('builder'))}",
+                    f"at: {one['at']}"]
             if "left_as" in one:
                 said.append(f"reads as {one['left_as']}, and the round has ended")
             if "recorded" in one:
@@ -326,13 +335,115 @@ def _history(shown_as: dict) -> list[str]:
     return lines
 
 
+def _repairs(shown_as: dict) -> list[str]:
+    listed = shown_as["repairs"]
+    if not listed:
+        return ["No repair."]
+    lines = []
+    for one in listed:
+        lines += _item(f"{showing.repair_line(one)}, {one['at']} by {one['actor']}")
+    return lines
+
+
+def _builds(shown_as: dict) -> list[str]:
+    # A build's folders and host are this machine's, and a file names no machine.
+    listed = shown_as["builds"]
+    if not listed:
+        return ["No build."]
+    lines = []
+    for one in listed:
+        lines += _item(showing.build_line(one))
+        said = [f"commissioned: {one['at']}"]
+        if one["record"] is not None:
+            said.append(f"go: {one['record']}")
+        said += [showing.check_line(run) for run in [one.get("check"),
+                                                     *one.get("step_runs", ())]
+                 if run is not None]
+        if one.get("ci") is not None:
+            said.append(showing.ci_line(one["ci"]))
+        if one.get("verdict") is not None:
+            said.append(showing.build_verdict_line(one["verdict"]))
+        if one.get("drift") is not None:
+            said.append(showing.drift_line(one["stage"], one["drift"]))
+        said += [showing.finish_action_line(action) for action in one.get("finish", ())]
+        said += [showing.finding_line(finding) for finding in one.get("findings", ())]
+        if one["ended"] is None:
+            said += showing.briefs_lines(one)
+        for line in said:
+            lines += _item(line, indent="  ")
+    return lines
+
+
+def _waits(shown_as: dict) -> list[str]:
+    listed = shown_as["waits"]
+    if not listed:
+        return ["No waiting item."]
+    lines = []
+    for one in listed:
+        lines += _item(showing.wait_line(one))
+        for line in showing.wait_facts(one):
+            lines += _item(line, indent="  ")
+    return lines
+
+
+def _decisions(shown_as: dict) -> list[str]:
+    listed = shown_as["decisions"]
+    if not listed:
+        return ["No decision."]
+    lines = []
+    for one in listed:
+        lines += _item(showing.decision_line(one))
+        for line in showing.decision_facts(one):
+            lines += _item(line, indent="  ")
+    return lines
+
+
 #: The parts of a round's note, in the order they are written.
 PARTS: tuple[Part, ...] = (
     Part("Flow", _flow),
+    Part("Builds", _builds),
+    Part("Waiting items", _waits),
+    Part("Decisions", _decisions),
     Part("Questions", _questions),
     Part("Rulings", _rulings),
     Part("Verdicts", _verdicts),
+    Part("Repairs", _repairs),
     Part("History", _history))
+
+
+# -- a round's numbers -------------------------------------------------------------------
+
+#: The events that can end a round, so hold its numbers.
+_ENDINGS = ("round.closed", "round.dropped")
+
+
+def retro(project: str, slug: str, events: Iterable[dict]) -> str | None:
+    """The numbers of the round `<project>/<slug>` as text, as the event that ended it
+    holds them; `events` is its whole log. None while the round is open, and for an
+    ending event that holds no numbers."""
+    folded = states.fold(events)
+    end = folded.ended
+    if end is None or end.numbers is None:
+        return None
+    name = f"{project}/{slug}"
+    ended = {"how": end.how, "by": end.by, "record": end.record, "at": end.at,
+             "questions": dict(end.questions)}
+    lines = [*_header("retro", project, folded.description, ["retro", slug],
+                      folded.history, round=slug, status=folded.status),
+             f"Generated by moxi rounds from the event that ended the round {name}, "
+             "and written again whole after every write to the round. Edits to this "
+             "file are lost: write the retrospective in a report of its own.",
+             "", f"# Numbers of {name}", "", *_lines(folded.description), "",
+             *_item(f"ended: {showing.ended_line(ended)}"), "", "## Numbers", ""]
+    for line in counted.lines(end.numbers):
+        lines += _item(line)
+    return "\n".join(lines) + "\n"
+
+
+def _put_retro(round_dir: Path, project: str, slug: str, events: Iterable[dict]) -> None:
+    text = retro(project, slug, events)
+    if text is not None:
+        files.atomic_write(round_dir / RETRO_FILE, text, mode=0o644)
 
 
 # -- a project's two files ---------------------------------------------------------------
@@ -445,5 +556,5 @@ def _scope(scope: Iterable[dict]) -> list[str] | None:
             else str(one.get("repo")) for one in scope] or None
 
 
-__all__ = ["NOTE_FILE", "RULINGS_FILE", "QUESTIONS_FILE", "NOTE_WAIT_S", "Part", "PARTS",
-           "on_append", "note", "rulings", "questions"]
+__all__ = ["NOTE_FILE", "RETRO_FILE", "RULINGS_FILE", "QUESTIONS_FILE", "NOTE_WAIT_S",
+           "Part", "PARTS", "on_append", "note", "retro", "rulings", "questions"]

@@ -101,7 +101,7 @@ the `moxi` command and lists the other modules.
 The loadout folder is the `source` setting (`moxi config set loadout source DIR`); empty,
 it is a folder in loadout's data directory (`moxi paths loadout`). Setup writes an example
 manifest into an empty folder, every item commented out; the same file is
-[`example/loadout.toml`](https://github.com/CodeManEthan/moxi/blob/main/packages/loadout/src/moxi_loadout/example/loadout.toml)
+[`example/loadout.toml`](https://github.com/CodeManEthan/moxi/blob/moxi-loadout-v0.1.4/packages/loadout/src/moxi_loadout/example/loadout.toml)
 in the package. Take the `#` off an item, put the item's files in the folder
 (`skills/<name>/SKILL.md`, `agents/<name>.md`, `global.md`), then run
 `moxi loadout install`.
@@ -165,4 +165,4 @@ rest is written.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/loadout/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-loadout-v0.1.4/packages/loadout/LICENSE).

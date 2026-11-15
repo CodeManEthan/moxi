@@ -194,6 +194,48 @@ def test_a_stage_declared_as_it_was_commissioned_keeps_its_place_across_a_step_u
         "B1", "repo-b1", "branch-b1", None)
 
 
+def test_a_step_up_while_a_build_is_open_keeps_the_build_and_applies_the_new_flow(
+        git_repo, tmp_path, capsys):
+    from moxi import cli
+    from moxi_rounds import builds, checking, commissioning, next_step
+    from moxi_rounds import settings as own
+    from moxi_rounds import steps
+
+    assert cli.main(["projects", "add", "proj-a", "--root", str(git_repo.root)]) == 0
+    assert cli.main(["projects", "set", "proj-a", "--notes-root",
+                     str(tmp_path / "notes")]) == 0
+    opening.open_round(ROUND, description="a placeholder round", by="planner",
+                       flow="fix")
+    round_dir = tmp_path / "notes" / "rounds" / "a-round"
+    log.append(log.round_log(round_dir), "stage.declared",
+               {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+               by="planner")
+    made = commissioning.commission(ROUND, "B1", builder="coder", by="planner")
+    type(git_repo)(made.worktree).commit("work.txt", "the work")
+
+    assert main(["mark", ROUND, "--flow", "small", "--as", "planner"]) == 0
+    capsys.readouterr()
+
+    state_ = folded(round_dir)
+    seen = checking.seen_of(state_, ROUND, settings=own.load())
+    by_step = {(one.step, one.stage): one
+               for one in steps.of(state_, name=ROUND, seen=seen)}
+    assert state_.flow == "small"
+    # The build stays the one commissioned: its commission is not asked for again.
+    [build] = builds.builds(state_)
+    assert (build.stage, build.branch, build.ended) == ("B1", "work", None)
+    assert by_step[("commission", "B1")].state == steps.DONE
+    assert by_step[("build", "B1")].state == steps.DONE
+    assert by_step[("verify-build", "B1")].state == steps.READY
+    assert not by_step[("finish", "B1")].settled
+    assert ("check", "B1") not in by_step
+    # The new flow's rows apply: its design step and its checker's tier.
+    assert by_step[("design", None)].state == steps.READY
+    groups = next_step.read(ROUND)["groups"]
+    assert [(one["step"], one["stage"], one["tier"]) for one in groups] == [
+        ("design", None, "second"), ("verify-build", "B1", "second")]
+
+
 @pytest.mark.parametrize("flow", FLOWS)
 def test_a_change_of_flow_keeps_every_stage_and_what_it_waits_for(opened, flow):
     round_dir = opened(flow)

@@ -14,7 +14,7 @@ def test_the_types_are_the_ones_a_log_holds():
     assert sorted(events.TYPES) == sorted([
         "round.opened", "flow.changed", "design.frozen", "verdict.recorded",
         "question.asked", "question.changed", "stage.declared", "stage.changed",
-        "ruling.recorded", "ruling.shown", "build.commissioned", "check.ran",
+        "ruling.recorded", "ruling.shown", "build.commissioned", "check.ran", "ci.read",
         "finding.marked", "wait.marked", "brief.sized", "finish.action", "finish.done",
         "lock.cleared", "build.dropped", "round.dropped", "thread.decided", "repair",
         "round.closed"])

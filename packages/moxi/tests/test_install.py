@@ -689,6 +689,21 @@ def test_a_from_for_another_distribution_does_not_pass_the_gate(fake, capsys):
     assert code == 3 and "not a first-party Moxi module" in err
 
 
+def test_an_unreleased_entry_is_refused_unless_from_gives_its_source(fake, capsys,
+                                                                    monkeypatch):
+    import moxi.catalogue as catalogue
+
+    marked = catalogue.Catalogue(1, (catalogue.Entry("turns", "moxi-turns", "Turns.",
+                                                     unreleased=True),), "shipped")
+    monkeypatch.setattr(catalogue, "load", lambda env=None: marked)
+    code, _, err = moxi_install(capsys, "turns", "--none")
+    assert code == 3 and fake.runs == []
+    assert "turns is not on PyPI yet; install it from a checkout with --from" in err
+    code, _, err = moxi_install(capsys, "turns", "--none", "--from",
+                                "moxi-turns @ git+https://h/turns")
+    assert code == 0, err
+
+
 def test_an_unlisted_module_already_installed_runs_its_setup_again(fake, capsys):
     fake.site.module("extra")
     code, out, err = moxi_install(capsys, "extra")

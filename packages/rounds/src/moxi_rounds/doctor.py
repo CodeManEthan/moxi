@@ -13,6 +13,21 @@ be, with the right mode and size. These look at what rounds needs and keeps:
 - index: `warn` when the index says something else than the logs do, naming each log
   it differs on. Every read still answers right, from the log itself; `moxi rounds
   list` brings the index up to the logs.
+- ci: for each repo that declares `ci`, `warn` when the first word of its `status` or
+  `ids` command is not on PATH, or, where they are the default `gh` commands, when
+  `gh auth status` does not exit 0 (only its exit code is read), naming `moxi rounds
+  check --full` as the way through; else `ok`. A repo whose `ci.local` is `"none"` is
+  named as meeting the check gate on CI alone.
+- finish locks: `warn` for each finish lock older than an hour, in the repo of any
+  project, with its holder's line and the one git command that clears it, for the lead
+  to run after asking the holder; else one `ok` row. Only a lock in the format `finish`
+  writes has a holder and a time to read; whatever else a repo's `lock_ref` points at
+  is another tool's, and not judged here. A project whose root git can't read has no
+  locks to look at.
+- leftovers: the sweep's dry run (`sweeping.account`). `ok` when no folder of an ended
+  build and no trash entry is left on this machine; else `warn` with each folder,
+  whether it would go or the check that keeps it, and the command that removes what
+  would go. Like every row it only reads: it takes no lock and removes nothing.
 
 The doctor only reads. It writes nothing in a rounds folder and nothing in the index:
 an index that is behind is reported, and left for the command that brings it up.
@@ -22,6 +37,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 from collections.abc import Iterator
@@ -58,6 +74,128 @@ def rows() -> Iterator[Row]:
     yield from _round_dirs(len(homes), unresolved)
     yield from _logs(homes)
     yield _index(homes)
+    yield from _ci()
+    yield from _locks()
+    yield from _leftovers()
+
+
+# -- ci ----------------------------------------------------------------------------------
+
+#: How long `gh auth status` gets to answer.
+AUTH_TIMEOUT_S = 10.0
+
+
+def _ci() -> Iterator[Row]:
+    from . import ci
+    from . import settings as own
+
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        # The settings' own row says what is wrong with them.
+        return
+    for repo, table in settings["projects"].items():
+        if not isinstance(table, dict) or "ci" not in table:
+            continue
+        found = ci.declared(settings, repo)
+        name, way = f"ci {repo}", "moxi rounds check ROUND B<n> --full, in place of CI"
+        # Each such repo is named at any level of its row: its check rests on CI.
+        alone = (" It meets the check gate on CI alone: its ci.local is \"none\"."
+                 if found.local is None else "")
+        missing = [argv[0] for argv in (found.status, found.ids)
+                   if shutil.which(argv[0]) is None]
+        if missing:
+            yield Row(MODULE, name, "warn",
+                      f"{', '.join(dict.fromkeys(missing))} is not on PATH, so CI can't be "
+                      f"read for a build in it.{alone}", way)
+            continue
+        if (found.status, found.ids) == (ci.STATUS, ci.IDS) and not _gh_logged_in():
+            yield Row(MODULE, name, "warn",
+                      "gh auth status does not exit 0: gh is not logged in to the repo's "
+                      f"host, so CI can't be read.{alone}", f"gh auth login, or {way}")
+            continue
+        yield Row(MODULE, name, "ok", f"the commands that read CI are there.{alone}")
+
+
+def _gh_logged_in() -> bool:
+    from .gitreads import git_env
+
+    # gh gets the caller's environment less every GIT_ variable, as every process
+    # rounds starts does.
+    try:
+        done = proc.run(["gh", "auth", "status"], timeout_s=AUTH_TIMEOUT_S, stdin_data="",
+                        env=git_env())
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
+
+
+# -- finish locks --------------------------------------------------------------------------
+
+def _locks() -> Iterator[Row]:
+    from . import finish_lock
+    from . import settings as own
+    from .gitreads import GitError
+
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        settings = None
+    old, read = [], 0
+    for key, root in folders.roots():
+        if not root.is_dir():
+            continue
+        named = [] if settings is None else [own.build_setting(settings, key, "lock_ref")]
+        try:
+            found = finish_lock.stale(root, [one for one in named if one])
+        except GitError:
+            continue
+        read += 1
+        old += [(key, one) for one in found]
+    for key, one in old:
+        hours = one.holder.age_s() / 3600
+        yield Row(MODULE, f"finish lock {key} {one.ref}", "warn",
+                  f"held for {hours:.1f} hours, longer than finish takes, by "
+                  f"{one.holder.line}",
+                  f"ask the holder; once no finish of theirs runs: {one.clear}")
+    if not old:
+        yield Row(MODULE, "finish locks", "ok",
+                  f"no finish lock older than an hour in the {read} "
+                  f"repo{'' if read == 1 else 's'} read")
+
+
+# -- leftovers -------------------------------------------------------------------------------
+
+def _leftovers() -> Iterator[Row]:
+    from . import settings as own
+    from . import sweeping
+
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        # The settings' own row says what is wrong with them.
+        return
+    try:
+        swept = sweeping.account(settings=settings)
+    except (RoundsError, OSError) as exc:
+        yield Row(MODULE, "leftovers", "warn", "the sweep's dry run could not read what "
+                  f"ended builds left: {getattr(exc, 'reason', exc)}")
+        return
+    if swept.clear:
+        yield Row(MODULE, "leftovers", "ok",
+                  "no folder of an ended build is left on this machine")
+        return
+    lines = swept.lines()
+    more = len(lines) - _NAMED
+    detail = "; ".join(lines[:_NAMED]) + (f"; and {more} more" if more > 0 else "")
+    goes = swept.would_go or any(one.fate == sweeping.WOULD_DELETE
+                                 for one in swept.trash)
+    fix = None
+    if goes:
+        fix = (sweeping.REMOVE if swept.armed else "read the dry run with "
+               f"{sweeping.DRY_RUN}, set armed = true under [sweep] in rounds' config, "
+               f"then: {sweeping.REMOVE}")
+    yield Row(MODULE, "leftovers", "warn", detail, fix)
 
 
 # -- git -----------------------------------------------------------------------------------
@@ -69,13 +207,11 @@ def _floor() -> str:
 def git_version() -> tuple[tuple[int, ...] | None, str]:
     """The version of the git on PATH as numbers, and in words what it said: the
     numbers are None when there is no git, or it gave no version."""
-    # git gets the caller's environment less every GIT_ variable, as every git rounds
-    # starts does.
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith("GIT_")}
+    from .gitreads import git_env
+
     try:
         done = proc.run(["git", "version"], timeout_s=GIT_TIMEOUT_S, stdin_data="",
-                        env=env)
+                        env=git_env())
     except FileNotFoundError:
         return None, "no git is on PATH"
     except OSError as exc:

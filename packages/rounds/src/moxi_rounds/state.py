@@ -4,7 +4,8 @@
 none of them, and gives equal states for equal logs. Each event type has one handler in
 `_HANDLERS`, called with the state so far and the event; a type whose handler is `_kept`
 changes nothing and is still in the history. A type this code does not know is kept the
-same way, so a log with a later version's events still folds.
+same way, so a log with a later version's events still folds. `folding(events)` is the
+same fold, giving the state after each event in turn.
 
 The state holds what the round's first event set (its description, its flow's name and
 the steps recorded for it, its parent, and its status), the rulings recorded in the log,
@@ -44,6 +45,12 @@ block took away, and the fold takes it out from that event: a question is withdr
 question holds up fewer stages, a stage waits for fewer. A stage it takes out of the
 plan keeps its record, as one the operator rules out does.
 
+A reread of a recorded report is one event too, and it only adds: the findings,
+waiting items and decisions it found in the report's block and the verdict's record
+lacked join that verdict's lists, at the verdict's place in the log. `with_rereads`
+gives the history with each verdict's event as its rereads left it, for every reader
+of a verdict's lists.
+
 A round that was dropped is `DROPPED` from that event on, and the event is the whole of
 the drop in the round's log: it says who dropped the round, and where each question
 that was open or parked went, which the fold applies to the question as a change. A
@@ -54,7 +61,7 @@ are its register, and its questions the project's list.
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 
 #: The status of a round that was opened and has not ended.
@@ -87,6 +94,12 @@ class Ended:
     #: Where each question that was open or parked went, in the order asked: its id
     #: on the project's list, or `withdrawn`.
     questions: tuple[tuple[str, str], ...] = ()
+    #: The round's numbers, as the event holds them; None for one that holds none.
+    numbers: dict | None = None
+
+
+def _numbers(event: dict) -> dict | None:
+    return event["numbers"] if isinstance(event.get("numbers"), dict) else None
 
 
 @dataclass(frozen=True)
@@ -208,6 +221,8 @@ class Question:
     held: str | tuple[str, ...] | None = None
     #: The record it became in the log it was moved to, or None while it is here.
     moved_to: str | None = None
+    #: The builder of the build it came up in, whom `by` asked it for, or None.
+    builder: str | None = None
 
 
 @dataclass(frozen=True)
@@ -314,8 +329,16 @@ class Verdict:
     kind: str | None
     pass_: str | None
     verdict: str | None
+    #: The step of the user's own it is for, for a step report.
+    step: str | None
     #: The version of the design it read, for a design report.
     design: int | None
+    #: For a report of a build: the stage, the head the pass read, and the merge-base
+    #: of that head and the target before the build reached it, None when git gave
+    #: none or several.
+    stage: str | None
+    head: str | None
+    merge_base: str | None
     #: The model the report says wrote it, and who it says wrote it.
     model: str | None
     by: str | None
@@ -368,6 +391,9 @@ class State:
     verdicts: list[Verdict] = field(default_factory=list)
     #: The lead's decisions on threads of the design's verification, oldest first.
     threads: list[Decided] = field(default_factory=list)
+    #: What rereads added to the lists of a verdict, by the line of its event: each
+    #: list's name, and the entries added to it, oldest first.
+    reread: dict[int, dict[str, list[dict]]] = field(default_factory=dict)
     #: Every event, oldest first.
     history: list[dict] = field(default_factory=list)
 
@@ -375,10 +401,21 @@ class State:
 def fold(events: Iterable[dict]) -> State:
     """The state the events of one log give, read oldest first."""
     state = State()
+    for state in folding(events):
+        pass
+    return state
+
+
+def folding(events: Iterable[dict]) -> Iterator[State]:
+    """The state the events of one log give after each of them, oldest first. This is
+    the fold itself, so what a round was at any event is read by the same code as what
+    it is now. One `State` is changed in place and given after each event: read it
+    before asking for the next."""
+    state = State()
     for event in events:
         _HANDLERS.get(event["type"], _kept)(state, event)
         state.history.append(event)
-    return state
+        yield state
 
 
 def _kept(state: State, event: dict) -> None:
@@ -413,7 +450,8 @@ def _round_dropped(state: State, event: dict) -> None:
                  if isinstance(where, str)) if isinstance(went, dict) else ()
     state.status = DROPPED
     state.ended = Ended(how=DROPPED, by=event.get("by"), record=event.get("record"),
-                        actor=event["actor"], at=event["at"], questions=went)
+                        actor=event["actor"], at=event["at"], questions=went,
+                        numbers=_numbers(event))
     for question_id, where in went:
         change = ({"state": _WITHDRAWN} if where == _WITHDRAWN else
                   {"state": _MOVED, "moved_to": where})
@@ -429,7 +467,7 @@ def _round_closed(state: State, event: dict) -> None:
         return
     state.status = CLOSED
     state.ended = Ended(how=CLOSED, by=None, record=None, actor=event["actor"],
-                        at=event["at"])
+                        at=event["at"], numbers=_numbers(event))
 
 
 def _ruling_recorded(state: State, event: dict) -> None:
@@ -624,7 +662,8 @@ def _question_asked(state: State, event: dict) -> None:
         until=event.get("until"), options=_offered(event.get("options")),
         # A key retired where the question was before stays retired here.
         retired=tuple(event.get("retired") or ()),
-        moved_from=event.get("moved_from"), held=_blocks(event.get("held"))))
+        moved_from=event.get("moved_from"), held=_blocks(event.get("held")),
+        builder=event.get("builder")))
 
 
 def _question_changed(state: State, event: dict) -> None:
@@ -770,7 +809,10 @@ def _verdict_recorded(state: State, event: dict) -> None:
             if isinstance(one, dict)]
     state.verdicts.append(Verdict(
         n=event.get("n"), kind=event.get("kind"), pass_=event.get("pass"),
-        verdict=event.get("verdict"), design=event.get("design"),
+        verdict=event.get("verdict"), step=event.get("step"),
+        design=event.get("design"),
+        stage=event.get("stage"), head=event.get("head"),
+        merge_base=event.get("merge_base"),
         model=event.get("model"), by=event.get("by"), report=event.get("report"),
         sha256=event.get("sha256"),
         findings=tuple(copy.deepcopy(one) for one in event.get("findings") or ()
@@ -803,6 +845,60 @@ def _thread_decided(state: State, event: dict) -> None:
         actor=event["actor"], at=event["at"]))
 
 
+#: What a repair re-derives: the base of an open build, or the record of a verdict.
+BASE = "base"
+REPORT = "report"
+#: The lists of a verdict's event a reread may add to.
+REREAD_LISTS = ("findings", "waits", "decisions")
+
+
+def _repair(state: State, event: dict) -> None:
+    """A reread adds to the lists of the verdict it names the entries the record
+    lacked, an id the list holds already being kept as it is. A repair of a base is
+    read where builds are (`builds.builds`)."""
+    if event.get("what") != REPORT:
+        return
+    n = event.get("verdict")
+    at = next((i for i, one in enumerate(state.verdicts) if one.n == n), None)
+    recorded = next((one for one in state.history
+                     if one.get("type") == "verdict.recorded" and one.get("n") == n), None)
+    fields = event.get("fields")
+    if at is None or recorded is None or not isinstance(fields, dict):
+        return
+    added = state.reread.setdefault(n, {})
+    for name in REREAD_LISTS:
+        change = fields.get(name)
+        now = change.get("now") if isinstance(change, dict) else None
+        have = {one.get("id") for one in
+                [*(recorded.get(name) or ()), *added.get(name, ())]
+                if isinstance(one, dict)}
+        for one in now if isinstance(now, list) else ():
+            if isinstance(one, dict) and isinstance(one.get("id"), str) \
+                    and one["id"] not in have:
+                added.setdefault(name, []).append(copy.deepcopy(one))
+                have.add(one["id"])
+    findings = added.get("findings", [])
+    if findings:
+        verdict = state.verdicts[at]
+        known = {one.get("id") for one in verdict.findings}
+        state.verdicts[at] = replace(verdict, findings=verdict.findings + tuple(
+            copy.deepcopy(one) for one in findings if one.get("id") not in known))
+
+
+def with_rereads(state: State) -> Iterable[dict]:
+    """Every event of the history, oldest first, each verdict's event with what
+    rereads added to its lists: what every reader of a verdict's findings, waiting
+    items and decisions reads."""
+    for event in state.history:
+        added = (state.reread.get(event.get("n"))
+                 if event.get("type") == "verdict.recorded" else None)
+        if not added:
+            yield event
+            continue
+        yield {**event, **{name: [*(event.get(name) or ()), *entries]
+                           for name, entries in added.items()}}
+
+
 #: The handler of each event type. Every type in `events.TYPES` has a row.
 _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.opened": _round_opened,
@@ -817,6 +913,7 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "ruling.shown": _ruling_shown,
     "build.commissioned": _kept,
     "check.ran": _kept,
+    "ci.read": _kept,
     "finding.marked": _kept,
     "wait.marked": _kept,
     "brief.sized": _kept,
@@ -826,10 +923,11 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "build.dropped": _kept,
     "round.dropped": _round_dropped,
     "thread.decided": _thread_decided,
-    "repair": _kept,
+    "repair": _repair,
     "round.closed": _round_closed,
 }
 
 __all__ = ["OPEN", "DROPPED", "CLOSED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
            "Ended", "Ruling", "Change", "Question", "Stage", "Pending", "Version",
-           "Decided", "Verdict", "State", "fold", "without"]
+           "Decided", "Verdict", "State", "fold", "folding", "without", "BASE", "REPORT",
+           "REREAD_LISTS", "with_rereads"]

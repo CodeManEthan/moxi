@@ -518,4 +518,4 @@ that calls them loads sessions with `interface=4`. Interface 5 is interface 4 pl
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/sessions/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-sessions-v0.2.9/packages/sessions/LICENSE).

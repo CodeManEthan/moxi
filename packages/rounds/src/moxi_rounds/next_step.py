@@ -1,29 +1,50 @@
 """What is done next in a round: the step it is at, who does it, at which tier, what
 they read, the command that completes it and what it waits for.
 
-`read(name)` reads the round's log and its project's and writes nothing, the index
-included. Nothing here decides a step's state or which pass is asked for: the state is
-what `steps` gives, and the pass what `brake` gives. This module only says them.
+`read(name)` reads the round's log and its project's, and git for each open build (its
+state, its tip and its worktree, for the steps a build's state decides), and writes
+nothing, the index included. Nothing here decides a step's state or which pass is
+asked for: the state is what `steps` gives, and the pass what `brake` gives. This
+module only says them.
 
 What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 (`as_json`); the lines are made from the dict and hold nothing it lacks.
 
 - `groups`: one for the step the round is at, then one for each stage of the plan
-  whose own first step that is not done is another step. A group holds the step, its
+  whose own first step that is not done is another step, then one for each other
+  step of the round's own (under no stage) that is ready. A group holds the step, its
   stage and state, `by`, `tier` and `model`, `reads`, `write`, `then` (each a command
   that completes the step), `waits` (each with the command that meets it; the lines
   leave out the one `instead` already says, and say `waits: nothing` only for a built
   step that is not waiting), and for the
   step that verifies the design the `pass` asked for, `why`, the two frozen `files` a
   re-check compares, and `instead`, what is done in place of a pass.
+- `ci` and `owes`: in the `check` group of a build whose repo declares `ci`, its newest
+  read of CI and what each form of the gate still owes at the tip. In the
+  `verify-build` group, `owes` says why the build's verification does not count at its
+  tip, with the range a re-check reads, and once a report of the build is on record
+  the group's tier is the one a re-check is held to. While the target's move owes the
+  build a re-check, the group of the step whose report owes it, the build's
+  verification or a report step of the user's own, names the re-check's `pass` and
+  `why`, and its `ranges`, the target's change and the build's diff, which it reads.
+- `changed`: in the group of a stage with an open build, each ruling recorded since
+  the build's block was printed that reaches the stage (`commission_block.changed`),
+  so a correction reaches a build already commissioned.
+- `numbers`: in the `retro` group, the round's numbers as they stand now, counted from
+  its log as its ending will count them, for the retrospective to read.
 - `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
   is printed for a round at no step, where nothing else says why it is still open.
-- `warnings`: what the lead should know and no step waits for.
+- `warnings`: what the lead should know beside the steps: a ruling that holds a stage
+  until the design has a row for it is said here as well as in that stage's wait, and
+  a plan of `MANY_BUILDS` or more stages that are builds is pointed at child rounds,
+  which refuses nothing, and an open build's slices that have no sized brief are named
+  with the mark that sizes one, to run before the brief is handed out.
 
 A step with no row in `steps.ROWS` is printed as not built in this version, with the
 holds on its stage. **A later step's lines** are a row of `LINES`: the step's name ->
 a function `(found, step) -> dict` that gives the group's `reads`, `write` and `then`,
-and any key of its own; the head of the group and its waits are filled in for it.
+and any key of its own; the head of the group and its waits are filled in for it. A
+command step of the user's own has its lines from `_command`.
 
 A tier's model is what the `models` setting names for the tier, as `model_of` gives
 it from `model_tiers.models_of`, the same reader that places a report's model in a
@@ -39,8 +60,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import (brake, closing, model_tiers, report_block, showing, stages, steps,
+from . import (brake, builds, checking, ci, closing, commission_block, drift, flows,
+               model_tiers, rendering, report_block, showing, sizing, stages, steps,
                tracing, versions)
+from . import numbers as counted
 from . import settings as own
 from . import shown as showings
 from . import state as states
@@ -61,6 +84,11 @@ NOT_SHOWN = "not-shown"
 STALE_ROW = "stale-row"
 HOLDS_STAGE = "holds-stage"
 READ_BACK_UNKNOWN = "read-back-unknown"
+MANY_STAGES = "many-stages"
+UNSIZED = "unsized-slice"
+
+#: How many stages that are builds a round plans before `next` points at child rounds.
+MANY_BUILDS = 5
 
 
 # -- the schema --------------------------------------------------------------------------
@@ -122,15 +150,109 @@ def _verify_design(found: showing.Shown, step: steps.Step) -> dict:
 
 def _docket(found: showing.Shown, step: steps.Step) -> dict:
     asked = {one.id: one for one in found.state.questions}
-    return {"export": f"moxi rounds list {found.name} --questions",
+    return {"export": f"moxi rounds list {found.name} --questions --view docket",
             "then": [steps.answer(found.name, asked[question_id])
                      for question_id in step.questions]}
+
+
+def _commission(found: showing.Shown, step: steps.Step) -> dict:
+    if step.stage is not None:
+        return {"then": [f"moxi rounds commission {found.name} {step.stage} "
+                         "--builder NAME"]}
+    if flows.has(found.state.steps, steps.VERIFIES):
+        # The design declares the stage; nothing is commissioned until it does.
+        return {}
+    return {"then": [f"moxi rounds commission {found.name} --repo KEY --branch NAME "
+                     "--builder NAME [--slice ID=TEXT --minutes N]..."]}
+
+
+def _build(found: showing.Shown, step: steps.Step) -> dict:
+    build = builds.current(found.state, step.stage)
+    if build is None or build.ended is not None:
+        return {"reads": _named(step)}
+    worktree = checking.commission_of(found.state, build).get("worktree")
+    return {"reads": _named(step),
+            "write": f"the work, committed on {build.branch} in {worktree}"}
+
+
+def _check(found: showing.Shown, step: steps.Step) -> dict:
+    said = {"reads": _named(step),
+            "then": [f"moxi rounds check {found.name} {step.stage}, or moxi rounds check "
+                     "in the build's worktree"]}
+    build = builds.current(found.state, step.stage)
+    settings = own.load() if found.settings is None else found.settings
+    if build is None or ci.declared(settings, build.repo) is None:
+        return said
+    newest = ci.newest(found.state, step.stage)
+    said["ci"] = None if newest is None else {
+        key: newest.get(key) for key in ("commit", "reading", "workflows")}
+    said["then"] = [f"{said['then'][0]}: it reads CI, or with --full runs the full check"]
+    return said
+
+
+def _verify_build(found: showing.Shown, step: steps.Step) -> dict:
+    """A build's verification: the diff of its branch, the report's block, and the
+    tier of a re-check once a report of the build is on record."""
+    build = builds.current(found.state, step.stage)
+    said = {"reads": _named(step),
+            "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
+                      f"next --schema {report_block.BUILD}"),
+            "then": [f"moxi rounds verdict {found.name} <your report>"]}
+    if build is None or build.ended is not None:
+        return said
+    said["reads"] = [f"the diff {build.base[:7]}..{build.branch}", *said["reads"]]
+    if drift.newest_verdict(found.state, build) is not None:
+        said["tier"] = model_tiers.held_to(found.state.steps, steps.VERIFY_BUILD,
+                                           report_block.RECHECK)
+    return said
+
+
+def _command(found: showing.Shown, step: steps.Step) -> dict:
+    """The lines of a command step of the user's own."""
+    name = step.step
+    return {"reads": _named(step),
+            "then": [f"moxi rounds check {found.name} {step.stage} --step {name}, or "
+                     f"moxi rounds check --step {name} in the build's worktree"]}
+
+
+def _report(found: showing.Shown, step: steps.Step) -> dict:
+    """The lines of a report step of the user's own: the diff of the build's branch,
+    the report's block, with the step's name, and the verdict."""
+    build = builds.current(found.state, step.stage)
+    said = {"reads": _named(step),
+            "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
+                      f"next --schema {report_block.STEP}, its step {step.step!r}"),
+            "then": [f"moxi rounds verdict {found.name} <your report>"]}
+    if build is not None and build.ended is None:
+        said["reads"] = [f"the diff {build.base[:7]}..{build.branch}", *said["reads"]]
+    return said
+
+
+def _finish(found: showing.Shown, step: steps.Step) -> dict:
+    """A build's finish: the command that runs it, by name or in the build's worktree."""
+    return {"then": [f"moxi rounds finish {found.name} {step.stage}, or moxi rounds "
+                     "finish in the build's worktree"]}
+
+
+def _retro(found: showing.Shown, step: steps.Step) -> dict:
+    """The round's retrospective: the numbers as they stand, which the round's ending
+    will hold, the note and the reports, the report's block, and the verdict."""
+    settings = own.load() if found.settings is None else found.settings
+    return {"reads": ["the numbers below", str(found.round_dir / rendering.NOTE_FILE),
+                      f"the reports in {found.round_dir}", *_named(step)],
+            "numbers": counted.of(found.state,
+                                  ratify=closing.ratify_of(settings, found.name)),
+            "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
+                      f"next --schema {report_block.RETRO}"),
+            "then": [f"moxi rounds verdict {found.name} <your report>"]}
 
 
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
 #: and `then`, and any key of its own.
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
-    steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket}
+    steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket,
+    steps.COMMISSION: _commission, steps.BUILD: _build, steps.CHECK: _check,
+    steps.VERIFY_BUILD: _verify_build, steps.FINISH: _finish, steps.RETRO: _retro}
 
 
 def _waits(step: steps.Step) -> list[dict]:
@@ -145,31 +267,75 @@ def _told(group: dict) -> dict | None:
     return {"reason": group["why"], "fix": "; ".join(group["instead"])}
 
 
-def _group(found: showing.Shown, step: steps.Step, models) -> dict:
+def _drift_pass(group: dict, step: steps.Step, seen) -> None:
+    """Make the re-check of a step whose newest report owes one for drift the drift
+    form: its pass, why, and both ranges it reads, the target's change and the build's
+    diff, whichever step's row asks for the re-check."""
+    if step.settled or step.stage is None:
+        return
+    now = (seen or {}).get(step.stage)
+    if now is None:
+        return
+    if step.step == steps.VERIFY_BUILD:
+        moved, pass_ = now.drift, report_block.DRIFT
+    else:
+        moved = ((now.reported or {}).get(step.step) or (None, None))[1]
+        pass_ = report_block.RECHECK
+    if moved is None or not getattr(moved, "owed", False):
+        return
+    ranges = moved.ranges
+    group.update({"pass": pass_, "why": moved.why or "the target moved under the build",
+                  "version": None, "instead": [], "ranges": ranges})
+    group["reads"] = [*(f"{side} {span}" for side, span in
+                        (("the target's change", ranges["target"]),
+                         ("the build's diff", ranges["build"])) if span),
+                      *group["reads"]]
+
+
+def _group(found: showing.Shown, step: steps.Step, models, seen=None) -> dict:
     entry = step.entry or {}
     group = {"step": step.step, "stage": step.stage, "state": step.state,
              "built": step.state != steps.NOT_BUILT,
              "by": OPERATOR if step.step in _HIS else entry.get("by"),
              "tier": entry.get("model"), "model": None, "reads": [], "write": None,
              "then": [], "questions": list(step.questions), "waits": _waits(step)}
+    if step.owes:
+        group["owes"] = list(step.owes)
     lines = LINES.get(step.step)
+    if lines is None and step.entry is not None and flows.is_user_step(step.entry):
+        lines = {flows.COMMAND: _command, flows.REPORT: _report}.get(
+            step.entry.get("does"))
     if group["built"] and lines is not None:
         group.update(lines(found, step))
+        if step.step == steps.VERIFY_BUILD or lines is _report:
+            _drift_pass(group, step, seen)
     group["model"] = model_of(models, group["tier"])
+    if (step.stage is not None
+            and stages.build_of(found.state, step.stage) == stages.BUILDING):
+        group["changed"] = [one.data() for one in commission_block.changed(
+            found.state, found.register, step.stage)]
     return group
 
 
-def _groups(found: showing.Shown, models) -> list[dict]:
-    every = steps.of(found.state, name=found.name, on_closed=found.on_closed)
-    at = steps.current(found.state, name=found.name, on_closed=found.on_closed)
+def _groups(found: showing.Shown, models, seen) -> list[dict]:
+    every = steps.of(found.state, name=found.name, on_closed=found.on_closed,
+                     register=found.register, seen=seen)
+    at = steps.current(found.state, name=found.name, on_closed=found.on_closed,
+                       register=found.register, seen=seen)
     if at is None:
         return []
-    groups = [_group(found, at, models)]
+    groups = [_group(found, at, models, seen)]
     for stage in stages.in_plan(found.state):
         first = next((step for step in every
                       if step.stage == stage.id and not step.settled), None)
         if first is not None and (first.step, first.stage) != (at.step, at.stage):
-            groups.append(_group(found, first, models))
+            groups.append(_group(found, first, models, seen))
+    # A step of the round's own that is ready gets its group too, though a stage's
+    # step comes before it in the flow: ratifying can go on while a stage builds.
+    for step in every:
+        if (step.stage is None and step.state == steps.READY
+                and (step.step, step.stage) != (at.step, at.stage)):
+            groups.append(_group(found, step, models, seen))
     return groups
 
 
@@ -214,14 +380,35 @@ def _warnings(found: showing.Shown) -> list[dict]:
                        f"{tracing.stale_line(tracing.stale_data(one))}",
             f"give {versions.DESIGN_FILE} the row of the ruling that stands, then "
             f"{fold}"))
+    planned = [stage.id for stage in stages.in_plan(state) if stage.round is None]
+    if len(planned) >= MANY_BUILDS:
+        warnings.append(_warning(
+            MANY_STAGES, f"{name} plans {len(planned)} stages that are builds "
+                         f"({', '.join(planned)}); a part of the work that stands on "
+                         "its own can be a child round, run as a round of its own",
+            f"plan it in {versions.DESIGN_FILE} as a [[stage]] with round = "
+            "\"<project>/<slug>\", then " + fold))
     for stage in stages.in_plan(state):
         if stages.build_of(state, stage.id) is not None:
             continue
-        for one in tracing.holding(state, stage.id):
+        for one in tracing.holding(state, stage.id, found.register):
             warnings.append(_warning(
                 HOLDS_STAGE, f"{one.id} holds {stage.id} until a version of the "
                              f"design has a row for it: {one.text}",
                 f"give {versions.DESIGN_FILE} a row for {one.id}, then {fold}"))
+    for build in builds.builds(state):
+        left = [] if build.ended is not None else sizing.unsized(state, build)
+        if left == [sizing.ONE_SLICE]:
+            warnings.append(_warning(
+                UNSIZED, f"{build.stage} declares no slices, and its one slice has no "
+                         "sized brief: size the brief before a worker gets it",
+                sizing.mark_line(name, build.stage)))
+        elif left:
+            warnings.append(_warning(
+                UNSIZED, f"{build.stage}'s slice{'' if len(left) == 1 else 's'} "
+                         f"{', '.join(left)} {'has' if len(left) == 1 else 'have'} no "
+                         "sized brief: size each brief before a worker gets it",
+                sizing.mark_line(name, build.stage)))
     return warnings
 
 
@@ -249,10 +436,13 @@ def read(name: str, *, settings=None) -> dict:
         return {**said, "unreadable": {"file": str(error.file), "line": error.line,
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
+    seen = checking.seen_of(found.state, found.name, settings=settings)
     return {**said, "status": found.state.status, "flow": found.state.flow,
-            "groups": _groups(found, settings["models"]),
+            "groups": _groups(found, settings["models"], seen),
             "close": (None if found.state.status != states.OPEN
-                      else {"waits": list(closing.waits(found.state, on_closed=found.on_closed))}),
+                      else {"waits": list(closing.waits(
+                          found.state, on_closed=found.on_closed,
+                          ratify=closing.ratify_of(settings, found.name), seen=seen))}),
             "warnings": _warnings(found)}
 
 
@@ -286,6 +476,7 @@ def _pass_line(group: dict) -> str:
 
 def _group_lines(said: dict, group: dict) -> list[str]:
     lines = [_head(said, group)]
+    lines += [commission_block.line(one) for one in group.get("changed", ())]
     if group["built"]:
         if "pass" in group:
             lines.append(_pass_line(group))
@@ -299,6 +490,17 @@ def _group_lines(said: dict, group: dict) -> list[str]:
         if group["write"] is not None:
             lines.append(f"write: {group['write']}")
         lines += [f"then:  {line}" for line in group["then"]]
+        if "ci" in group:
+            read = group["ci"]
+            lines.append("ci:    no read on record" if read is None
+                         else f"ci:    {showing.ci_line(read)}")
+            for one in (read or {}).get("workflows") or ():
+                url = "" if one.get("url") is None else f"   {one['url']}"
+                lines.append(f"         {one['path']}: {one['reading']}{url}")
+        lines += [f"owes:  {line}" for line in group.get("owes", ())]
+        if "numbers" in group:
+            lines += ["numbers:", *(f"  {line}" for line in
+                                    counted.lines(group["numbers"]))]
     told = _told(group)
     for wait in group["waits"]:
         if wait != told:
