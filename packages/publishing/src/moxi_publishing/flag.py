@@ -48,15 +48,22 @@ class Failure(Exception):
 
 # -- the repo ----------------------------------------------------------------------------
 
+def _project_path(path: str | os.PathLike) -> str:
+    """`path`, or the root of the project it names where repo resolves keys."""
+    from moxi_repo.api import ProjectUnavailable, resolve_project
+
+    try:
+        return resolve_project(os.fspath(path))
+    except ProjectUnavailable as exc:
+        raise Failure(exc.text, exc.code) from None
+
+
 def resolve(path: str | os.PathLike) -> str:
     """The main work tree of the repo at `path`, which may be a project key where repo
     resolves one. Raises `Failure`."""
-    from moxi_repo import gitconf, projects
+    from moxi_repo import gitconf
 
-    try:
-        where = projects.resolve(os.fspath(path))
-    except projects.Unavailable as exc:
-        raise Failure(exc.text, exc.code) from None
+    where = _project_path(path)
     try:
         return str(gitconf.resolve(where).root)
     except gitconf.NotARepo as exc:
@@ -66,12 +73,7 @@ def resolve(path: str | os.PathLike) -> str:
 def work_tree(path: str | os.PathLike) -> str:
     """The top of the work tree `path` is in (a linked worktree's own), where `path` may
     be a project key where repo resolves one. Raises `Failure`."""
-    from moxi_repo import projects
-
-    try:
-        where = projects.resolve(os.fspath(path))
-    except projects.Unavailable as exc:
-        raise Failure(exc.text, exc.code) from None
+    where = _project_path(path)
     done = _git(where, "rev-parse", "--show-toplevel")
     if done.returncode != 0 or not done.stdout.strip():
         raise Failure(f"no git work tree at {where}", 2)
@@ -213,7 +215,7 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
            sets: list[str] | tuple = ()) -> list[str]:
     """Mark the repo at `path` public and register the three pieces. Returns the lines to
     print. Raises `Failure`; a refused `--set` writes nothing."""
-    from moxi_repo import api, gitconf
+    from moxi_repo import api
 
     root = resolve(path)
     planned = _planned(sets)
@@ -231,7 +233,7 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
                 given += [f"{key}={value}" for value in values]
     github = github or _github_from_origin(root)
     lines = []
-    for key, value in ((FLAG, "true"), (INTERPRETER, gitconf.interpreter()),
+    for key, value in ((FLAG, "true"), (INTERPRETER, api.interpreter()),
                        *(((GITHUB, github),) if github else ())):
         done = _git(root, "config", key, value)
         if done.returncode != 0:
