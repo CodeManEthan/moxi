@@ -390,7 +390,7 @@ def test_a_claude_limit_that_fills_before_it_resets_leads_the_page_and_its_row_s
         groups = panel.locator("[data-group=limits]")
         expect(groups).to_have_count(2)
         expect(groups.nth(0)).to_have_attribute("data-harness", "claude")
-        expect(group(panel, "claude").locator(".gk")).to_have_text(re.compile(rf"^Claude\s*read {TIME}$"))
+        expect(group(panel, "claude").locator(".gk")).to_have_text(re.compile(rf"^Claude\s*read {WHEN}$"))
         five = limit(panel, FIVE)
         expect(five.locator("span").first).to_have_text("5-hour")
         expect(five.locator(".u")).to_have_text("52% used")
@@ -428,7 +428,7 @@ def test_codex_limits_say_their_use_and_an_opened_row_says_why_it_has_no_fill_ti
     def walk(page, shell) -> list:
         panel = open_page(page)
         codex = group(panel, "codex")
-        expect(codex.locator(".gk")).to_have_text(re.compile(rf"^Codex\s*read {TIME}$"))
+        expect(codex.locator(".gk")).to_have_text(re.compile(rf"^Codex\s*read {WHEN}$"))
         assert codex.locator("[data-limit]").evaluate_all("all => all.map((one) => one.dataset.limit)") == [
             CODEX_FIVE, CODEX_WEEKLY]
         five = limit(panel, CODEX_FIVE)
@@ -483,7 +483,7 @@ def test_cost_says_today_and_the_last_seven_days_with_the_period_before_and_toda
             re.compile(rf"^most to {TYPED} {MONEY}, proj-b · started {NAMED} {MONEY}$"))
         caption = cost.locator("[data-part=caption]")
         expect(caption).to_contain_text("Estimated from a local price table. Not billing data.")
-        expect(caption.locator("[data-part=read]")).to_have_text(re.compile(rf"^sessions read {TIME}$"))
+        expect(caption.locator("[data-part=read]")).to_have_text(re.compile(rf"^sessions read {WHEN}$"))
         # The figures are the page's first screen: the filters move none of them.
         before = shown(cost)
         pick(panel, "range", "Today")
@@ -725,14 +725,14 @@ def test_each_part_says_when_it_was_read_and_read_new_sessions_brings_a_new_one_
         panel = open_page(page)
         # The limits say when each harness was last read; Cost and the foot when the
         # sessions were.
-        expect(group(panel, "claude").locator(".gk small")).to_have_text(re.compile(rf"^read {TIME}$"))
-        expect(group(panel, "codex").locator(".gk small")).to_have_text(re.compile(rf"^read {TIME}$"))
+        expect(group(panel, "claude").locator(".gk small")).to_have_text(re.compile(rf"^read {WHEN}$"))
+        expect(group(panel, "codex").locator(".gk small")).to_have_text(re.compile(rf"^read {WHEN}$"))
         expect(panel.locator("[data-group=cost] [data-part=read]")).to_have_text(
-            re.compile(rf"^sessions read {TIME}$"))
+            re.compile(rf"^sessions read {WHEN}$"))
         foot = panel.locator("[data-part=foot]")
         expect(foot).to_have_attribute("data-state", "up")
         last = foot.locator(".last")
-        expect(last).to_have_text(re.compile(rf"^Sessions read {TIME} · {files}$"))
+        expect(last).to_have_text(re.compile(rf"^Sessions read {WHEN} · {files}$"))
         before = re.search(files, last.inner_text())
         expect(panel.locator("[data-part=lines] p")).to_have_count(0)
         steps = [shown(panel.locator("[data-group=limits] .gk, [data-part=caption], [data-part=foot]"))]
@@ -743,7 +743,7 @@ def test_each_part_says_when_it_was_read_and_read_new_sessions_brings_a_new_one_
         was = today.inner_text()
         foot.get_by_role("button", name="Read new sessions").click()
         expect(last).to_have_text(re.compile(
-            rf"^Sessions read {TIME} · {int(before[1]) + 1} files: Claude {int(before[2]) + 1}, Codex 1$"),
+            rf"^Sessions read {WHEN} · {int(before[1]) + 1} files: Claude {int(before[2]) + 1}, Codex 1$"),
             timeout=30_000)
         expect(foot).to_have_attribute("data-state", "up")
         expect(today).not_to_have_text(was)

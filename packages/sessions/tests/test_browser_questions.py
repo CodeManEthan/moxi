@@ -324,7 +324,7 @@ def test_the_last_hours_work_is_under_active_recently_with_no_running_group_or_l
         expect(named.locator(".name")).to_have_text("fix-tooltips")
         expect(named.locator(".where")).to_have_text("proj-a")
         expect(named.locator(".l2")).to_have_text(
-            re.compile(r"^\s*2 subagents\s*·\s*\d.*You:\s*" + re.escape(TOOLTIPS_PROMPT) + r"\s*$"))
+            re.compile(r"^\s*2 subagents\s*·\s*(?:yesterday )?\d.*You:\s*" + re.escape(TOOLTIPS_PROMPT) + r"\s*$"))
         # An unnamed one is told by its folder and when it started.
         unnamed = row(view, "claude", sid(PARSER))
         expect(unnamed.locator(".name")).to_have_text(
@@ -360,9 +360,9 @@ def test_an_opened_row_says_which_session_it_was_and_where_it_stopped_without_th
         _, first = open_row(view, "claude", sid(TOOLTIPS))
         assert lines(first) == ["you", "reply", "subagents", "session", "resume"]
         expect(first.locator('[data-line="you"]')).to_have_text(
-            re.compile(r"^\s*You\s*\d.*" + re.escape(TOOLTIPS_PROMPT) + r"\s*$"))
+            re.compile(r"^\s*You\s*(?:yesterday )?\d.*" + re.escape(TOOLTIPS_PROMPT) + r"\s*$"))
         expect(first.locator('[data-line="reply"]')).to_have_text(
-            re.compile(r"^\s*Reply\s*\d.*" + re.escape(TOOLTIPS_REPLY) + r"\s*$"))
+            re.compile(r"^\s*Reply\s*(?:yesterday )?\d.*" + re.escape(TOOLTIPS_REPLY) + r"\s*$"))
         subs = first.locator('[data-line="subagent"]')
         expect(subs).to_have_text([re.compile(r"List the callers.*general-purpose.*Found three callers\."),
                                    re.compile(r"Read the tooltip code.*Explore.*The hide timer is never cleared\.")])

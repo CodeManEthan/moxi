@@ -161,7 +161,7 @@ def test_a_limit_filling_before_its_reset_leads_the_row_and_needs_the_user(filli
     expect(line.locator(".fact")).to_have_text(
         re.compile(rf"^Claude 5-hour limit fills {WHEN}, resets {WHEN} · {COST}$"))
     expect(line.locator(".fact .heavy")).to_have_text(re.compile(rf"^Claude 5-hour limit fills {WHEN}$"))
-    expect(line.locator(".time")).to_have_text(re.compile(rf"^read {TIME}$"))
+    expect(line.locator(".time")).to_have_text(re.compile(rf"^read {WHEN}$"))
     # It needs the user: the sentence goes, and the row sits above Health, which does not.
     # The comms daemon is not running, so comms reports no row.
     expect(_home(page).get_by_text(SENTENCE)).to_have_count(0)
@@ -174,7 +174,7 @@ def test_a_limit_that_is_not_filling_says_its_percents_and_needs_nothing(steady,
     line = _line(page, USAGE)
     expect(line.locator(".fact")).to_have_text(re.compile(rf"^Claude 5-hour 30%, resets {WHEN} · weekly 60%$"))
     expect(line.locator(".fact .heavy")).to_have_count(0)
-    expect(line.locator(".time")).to_have_text(re.compile(rf"^read {TIME}$"))
+    expect(line.locator(".time")).to_have_text(re.compile(rf"^read {WHEN}$"))
     expect(_home(page).get_by_text(SENTENCE)).to_be_visible()
     _expect_shown(page, [USAGE, HEALTH])
     assert page.evaluate("window.homeNeeds")["moxi-usage-row"] == 0
@@ -268,7 +268,7 @@ def test_the_phone_shows_the_usage_row(gw, ui_browser):
         expect(line.locator(".label")).to_have_text("Usage")
         expect(line.locator(".fact .heavy")).to_have_text(re.compile(rf"^Claude 5-hour limit fills {WHEN}$"))
         expect(line.locator(".fact")).to_have_text(re.compile(rf"^Claude 5-hour limit fills {WHEN}, resets {WHEN}$"))
-        expect(line.locator(".time")).to_have_text(re.compile(rf"^read {TIME}$"))
+        expect(line.locator(".time")).to_have_text(re.compile(rf"^read {WHEN}$"))
         # Home draws it as the desk does, a link to usage's page.
         expect(line).to_have_attribute("href", "/m/usage/")
         _expect_shown(page, [USAGE, HEALTH])
