@@ -1,7 +1,9 @@
 """comms' page in a browser, through a test shell whose comms page server reads the rig's
 record and asks the rig's daemon: who can be messaged and in which session, when a
-message to each would be read, and which names need launching, on the full install and
-on the small one.
+message to each would be read, which names need launching, who owes a reply, the thread
+between two agents and whether comms is working, on the full install and on the small
+one; and the acts: a send end to end with `Take back`, `Reply` with the ask quoted, and a
+refused check with `Check again`.
 
 Each test starts its own shell after its rig, with the rig's roots in the shell's
 environment (`rig_env`), so the shell's comms page server opens the rig's `comms.db`, its
@@ -22,6 +24,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 import uuid
 from typing import Any
 
@@ -29,11 +32,13 @@ import pytest
 from playwright.sync_api import expect
 
 import roster_kit
+import shim_drive
 from conftest import cache_absent, write_transcript
 from moxi import paths as moxi_paths
+from moxi_comms import machine_line
 from moxi_comms.paths import daemon_socket
 from roster_kit import holding, wait_for
-from test_reply_enforcement import PLANNER, REVIEWER, P, R, send
+from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, last, reply, send
 
 pytestmark = [pytest.mark.browser,
               pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -48,6 +53,10 @@ SMALL = ["launcher", "cache", "sessions", "usage", "turns", "projects"]
 RIG_ENV = ("MOXI_COMMS_HOME", "MOXI_COMMS_DEVICE", "MOXI_COMMS_RUNTIME_DIR",
            "MOXI_COMMS_DELIVERY_EXPIRY", "MOXI_TURNS_RUNTIME_DIR", "MOXI_TURNS_CONFIG_HOME",
            "CLAUDE_CONFIG_DIR", "PYTHON_KEYRING_BACKEND")
+BUILDER = dict(name="builder-1")
+B = "builder-1"
+#: A time as the page words one today: ui's hour and minute in the browser's locale.
+T = r"\d{1,2}:\d\d(?: [AP]M)?"
 #: A cold Claude session: its last request two hours ago, past the hour's lifetime.
 COLD_AGE_S = 2 * 3600
 PAGE = "/m/comms/"
@@ -132,17 +141,62 @@ class LauncherStub:
         route.fulfill(status=200, content_type="application/json", body=json.dumps(self.answer))
 
 
+#: Keeps in `window.pushed` the name of each event the shell's push stream brings.
+_PUSHED = """(() => {
+  const pushed = window.pushed = [];
+  const fetched = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const answer = await fetched(input, init);
+    const url = typeof input === "string" ? input : input.url;
+    if (!url.includes("/m/ui/api/push") || answer.body === null) return answer;
+    const [kept, read] = answer.body.tee();
+    (async () => {
+      const reader = read.pipeThrough(new TextDecoderStream()).getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        for (const found of value.matchAll(/^event: ?(.+)$/gm)) pushed.push(found[1].trim());
+      }
+    })().catch(() => {});
+    return new Response(kept, { status: answer.status, statusText: answer.statusText,
+                                headers: answer.headers });
+  };
+})()"""
+
+
 def open_page(shell, ui_contexts, launcher: list[dict] | None = None) -> tuple[Any, Any, Any]:
-    """A signed-in page on the shell; with `launcher`, the stub serves those launches. The
-    page, its root and the stub."""
+    """A signed-in page on the shell, once the shell's push stream has brought the modules;
+    with `launcher`, the stub serves those launches. The page, its root and the stub.
+
+    The shell places the page again on a modules event when the address differs from the
+    one it placed, and the page writes its address as things open; the stream's first
+    value of the modules would place a page a test had already acted on anew."""
     page = ui_contexts(shell).pages[0]
+    page.add_init_script(_PUSHED)
     stub = LauncherStub(page, launcher) if launcher is not None else None
     page.goto(PAGE)
+    page.wait_for_function("() => window.pushed.includes('ui.modules')")
     return page, page.locator("#moxi-panel > moxi-comms-page"), stub
 
 
 def agent(root, name: str) -> Any:
     return root.locator(f'moxi-ui-row[data-name="{name}"]')
+
+
+def awaits(data: dict, qualified: str) -> list[str]:
+    """The names a roster value says `qualified` waits on."""
+    return next(row["awaiting"] for row in data["rows"] if row["qualified"] == qualified)
+
+
+def ask_him(rig, by: str, text: str) -> Any:
+    """`by`'s ask to the operator, one reply wanted, posted under its verified identity."""
+    return rig.record.post_as_identity(by, rig.names_channel,
+                                       machine_line.compose(["operator"], text, posture="once"))
+
+
+def address(page) -> str:
+    """The page's address after `/m/comms/`."""
+    return urllib.parse.unquote(page.evaluate("() => location.pathname").removeprefix(PAGE))
 
 
 # --- M1: who can I message, and in which session ------------------------------------------------
@@ -278,3 +332,203 @@ def test_keep_warm_presses_launcher_and_a_refusal_leads_line_three(page_shell, r
     expect(row).to_have_attribute("fact", "kept warm while 2 agents work")
     expect(row.locator('[data-action="keep-warm"]')).to_have_count(0)
     assert stub.presses == [{"request_id": "r-planner"}] * 2
+
+
+# --- M4: who owes a reply, to him and between agents -----------------------------------------
+
+def test_who_owes_a_reply_to_him_and_between_agents(page_shell, rig, ui_contexts):
+    rig.shim(**PLANNER)
+    rig.shim(**REVIEWER)
+    bound(rig, P, R)
+    # critic asked him and its session ended; planner asked reviewer.
+    ask_him(rig, "critic", "Which branch takes the fix?")
+    indexed(rig, send(rig, R, "Is the cursor fix safe to ship?", "--posture", "once", who=PLANNER).id)
+    shell = page_shell()
+    roster_kit.current(shell, lambda data: holding([P, R])(data) and awaits(data, P) == [R])
+    page, root, _ = open_page(shell, ui_contexts, [])
+    rows = root.locator('[data-group="agents"] moxi-ui-row')
+    # A message waiting for his reply comes first, on a row of its own though no session holds it.
+    expect(rows).to_have_count(3)
+    expect(rows.first).to_have_attribute("data-name", "critic")
+    critic = agent(root, "critic")
+    expect(critic).to_have_attribute("fact", "waiting for your reply")
+    expect(critic).to_have_attribute("lead", re.compile(rf"^wrote to you {T}, wants one reply$"))
+    expect(critic.locator("button.do")).to_have_text(["Reply", "Message"])
+    # Between agents: the asker's row says whom it waits on, and its opened row the thread.
+    planner = agent(root, P)
+    expect(planner).to_have_attribute("lead", re.compile(rf"^waiting on reviewer's reply since {T}$"))
+    planner.locator('[data-action="message"]').click()
+    waits = root.locator('[data-part="opened"][data-to="planner"] [data-line="waits:reviewer"]')
+    expect(waits).to_contain_text(re.compile(rf"Waits onreviewer · for one reply to its {T} message"))
+    waits.locator('[data-action="thread"]').click()
+    header = root.locator('[data-part="thread"] [data-line="thread-header"]')
+    expect(header).to_have_text("planner and reviewer · 1 message today · reviewer owes one reply")
+    assert address(page) == "thread/planner/reviewer"
+
+
+# --- M5: the thread between planner and builder-1 ----------------------------------------------
+
+def test_the_thread_between_planner_and_builder_1_opens_in_place(page_shell, rig, ui_contexts):
+    rig.shim(**PLANNER)
+    rig.shim(**BUILDER)
+    bound(rig, P, B)
+    first = send(rig, B, "Take the parser change.", "--posture", "once", who=PLANNER)
+    indexed(rig, first.id)
+    indexed(rig, reply(rig, first.id, "On it; the cursor tests first.", who=BUILDER).id)
+    indexed(rig, send(rig, B, "And the web build after?", "--posture", "once", who=PLANNER).id)
+    shell = page_shell()
+    roster_kit.current(shell, lambda data: holding([P, B])(data) and awaits(data, P) == [B])
+    page, root, _ = open_page(shell, ui_contexts, [])
+    today = root.locator('[data-group="today"] moxi-ui-row')
+    expect(today).to_have_count(3)
+    expect(today.first).to_have_attribute("lead", "And the web build after?")
+    today.first.locator('[data-action="open-thread"]').click()
+    # It opens under the newest message between the two, the pair in name order.
+    thread = today.first.locator('[data-part="thread"]')
+    expect(thread.locator('[data-line="thread-header"]')).to_have_text(
+        "builder-1 and planner · 3 messages today · builder-1 owes one reply")
+    assert address(page) == "thread/builder-1/planner"
+    expect(thread.locator(".tm .h")).to_have_text([
+        re.compile(rf"^planner · {T} · wants one reply"),
+        re.compile(rf"^builder-1 · {T} · replies · wants no reply"),
+        re.compile(rf"^planner · {T} · wants one reply"),
+    ])
+    expect(thread.locator(".tm p.msg")).to_have_text([
+        "Take the parser change.", "On it; the cursor tests first.", "And the web build after?"])
+    expect(thread.locator('[data-action="show-earlier"]')).to_have_count(0)
+    expect(thread.locator(".foot button")).to_have_text(
+        ["Message builder-1", "Message planner", "Copy the last message's id"])
+    thread.locator('[data-action="message-side"][data-address="builder-1"]').click()
+    expect(root.locator('[data-part="box"][data-to="builder-1"] textarea')).to_be_focused()
+    assert address(page) == "agent/builder-1"
+
+
+# --- M6: is comms working, with the daemon stopped mid-page ----------------------------------
+
+def test_with_the_daemon_stopped_the_page_says_so_and_the_messages_still_read(
+        page_shell, rig, ui_contexts):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    send(rig, "builder-2", "Pick up the parser.", "--posture", "none", who=PLANNER)
+    shell = page_shell()
+    roster_kit.current(shell, holding([P]))
+    page, root, _ = open_page(shell, ui_contexts, [])
+    expect(root.locator('[data-line="answering"]')).to_have_text(
+        re.compile(rf"^Comms is answering · read {T}"))
+    expect(agent(root, P).locator('[data-action="message"]')).to_have_count(1)
+    rig.daemon.stop()
+    down = root.locator('[data-part="down"]')
+    expect(down.locator('[data-line="down"]')).to_have_text("The comms daemon isn't answering",
+                                                            timeout=15_000)
+    expect(down).to_contain_text("moxi doctor comms")
+    expect(down.locator('[data-action="copy-doctor"]')).to_have_count(1)
+    expect(root.locator('[data-line="last-read"]')).to_have_text(
+        re.compile(rf"^Last read {T}\. It may have changed since\.$"))
+    # The last rows stay, dim, with no acts and no box; the messages stay with no Open.
+    expect(root.locator('[data-part="agents"]')).to_have_class(re.compile(r"\bstale\b"))
+    expect(agent(root, P)).to_have_count(1)
+    expect(root.locator('[data-part="agents"] button.do')).to_have_count(0)
+    expect(root.locator('[data-part="box"]')).to_have_count(0)
+    expect(root.locator('[data-part="messages"] [data-action="open-thread"]')).to_have_count(0)
+    # The message reads need no daemon: a message the record gains shows on the next read.
+    rig.post_as("reviewer", ["planner"], "Read while the daemon is down.")
+    roster_kit.show_tab(page)
+    expect(root.locator('[data-group="today"] moxi-ui-row').first).to_have_attribute(
+        "lead", "Read while the daemon is down.")
+
+
+# --- Send, Take back, Reply and Check again -------------------------------------------------
+
+def test_a_send_end_to_end_then_take_back(page_shell, rig, ui_contexts):
+    cold_shim(rig, PLANNER)
+    bound(rig, P)
+    shell = page_shell()
+    roster_kit.current(shell, holding([P]))
+    page, root, _ = open_page(shell, ui_contexts, [])
+    agent(root, P).locator('[data-action="message"]').click()
+    box = root.locator('[data-part="box"][data-to="planner"]')
+    send_button = box.locator('[data-action="send"]')
+    expect(root.locator('[data-line="dry"]')).to_contain_text("Held until planner's next turn.")
+    # An outline until the box has text and the check answered that it would send.
+    expect(send_button).to_be_disabled()
+    box.locator("textarea").fill("The parser change is yours.")
+    expect(send_button).to_be_enabled()
+    expect(send_button).to_have_class("go")
+    send_button.click()
+    dry = root.locator('[data-line="dry"]')
+    expect(dry.locator(".k")).to_have_text(re.compile(rf"^Sent {T}$"))
+    expect(dry).to_contain_text("Held until planner's next turn. Its cache went cold at")
+    expect(dry.locator(".d")).to_have_text(
+        "1 message now waits for it. You can take a message back until planner has read it.")
+    expect(box.locator("textarea")).to_have_value("")
+    # Posted as him, to planner.
+    posted = last(rig)
+    assert machine_line.parse(posted.content).text == "The parser change is yours."
+    assert machine_line.parse(posted.content).recipients == ("planner",)
+    held = root.locator('[data-line="held"]')
+    expect(held).to_contain_text(re.compile(rf"{T} from you · The parser change is yours\."))
+    today = root.locator('[data-group="today"] moxi-ui-row').first
+    expect(today).to_have_attribute("name", "you")
+    expect(today).to_have_attribute("where", "to planner · not read yet, held until its next turn")
+    held.locator('[data-action="take-back"]').click()
+    expect(root.locator('[data-line="taken"]')).to_contain_text("Taken back.")
+    expect(held).to_have_count(0)
+    expect(today).to_have_attribute("where", "to planner · taken back")
+
+
+def test_reply_answers_the_address_that_asked_with_the_ask_quoted(page_shell, rig, ui_contexts):
+    rig.shim(**PLANNER)
+    bound(rig, P)
+    # The asker is planner@proj-b, not the row's lead, the bound planner.
+    asked = ask_him(rig, "planner@proj-b", "Ship the cursor fix tonight?")
+    shell = page_shell()
+    roster_kit.current(shell, holding([P]))
+    page, root, _ = open_page(shell, ui_contexts, [])
+    row = agent(root, P)
+    expect(row).to_have_attribute("fact", "waiting for your reply")
+    row.locator('[data-action="reply"]').click()
+    assert address(page) == f"reply/{asked.id}"
+    box = root.locator('[data-part="box"][data-to="planner@proj-b"]')
+    expect(box.locator('[data-line="quote"] .ql')).to_have_text(
+        re.compile(rf"^Answering planner's {T} message:$"))
+    expect(box.locator('[data-line="quote"] .msg')).to_have_text("Ship the cursor fix tonight?")
+    expect(box.locator('[data-action="posture"]')).to_have_text(re.compile(r"^no reply"))
+    expect(box.locator("textarea")).to_be_focused()
+    box.locator("textarea").fill("Yes, tonight.")
+    box.locator('[data-action="send"]').click()
+    expect(root.locator('[data-line="dry"] .k')).to_have_text(re.compile(r"^Sent "))
+    posted = machine_line.parse(last(rig).content)
+    assert (posted.recipients, posted.reply_to, posted.posture) == (
+        ("planner@proj-b",), str(asked.id), "none")
+    # Answered: the row's case goes, and the address says the row alone.
+    expect(row).not_to_have_attribute("fact", "waiting for your reply")
+    expect(box.locator('[data-line="quote"]')).to_have_count(0)
+    assert address(page) == "agent/planner@proj-b"
+
+
+def test_a_cache_comms_cannot_read_refuses_the_check_until_check_again(
+        page_shell, rig, ui_contexts):
+    # A session that has had a turn but has no transcript: comms can't tell whether a
+    # message would wake it cold.
+    session_id = str(uuid.uuid4())
+    reviewer = rig.shim(**REVIEWER, session_id=session_id)
+    bound(rig, R)
+    shim_drive.turn_started(reviewer)
+    shim_drive.turn_ended(reviewer)
+    wait_for(lambda: rig.daemon.bindings[R].turned, 5, what="reviewer's turn to reach the daemon")
+    shell = page_shell()
+    roster_kit.current(shell, holding([R]))
+    _, root, _ = open_page(shell, ui_contexts, [])
+    agent(root, R).locator('[data-action="message"]').click()
+    dry = root.locator('[data-line="dry"]')
+    expect(dry.locator("b")).to_have_text("Refused: nothing would be sent.")
+    expect(dry).to_contain_text("Comms can't read reviewer's cache right now, so it can't tell "
+                                "whether this would wake it cold. Check again in a moment.")
+    box = root.locator('[data-part="box"][data-to="reviewer"]')
+    box.locator("textarea").fill("Is the cursor fix safe?")
+    expect(box.locator('[data-action="send"]')).to_be_disabled()
+    write_transcript(session_id, 0)
+    dry.locator('[data-action="check-again"]').click()
+    expect(dry).to_contain_text("Delivered. reviewer reads it at its next turn boundary.")
+    expect(dry.locator('[data-action="check-again"]')).to_have_count(0)
+    expect(box.locator('[data-action="send"]')).to_be_enabled()
