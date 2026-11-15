@@ -37,6 +37,14 @@
   frame; with a source of activity, projects with bad news come first and the rest by
   latest activity, else by name. Past twelve projects it gains a find field, a kind
   filter (which replaces the old one) and an `Earlier` fold.
+- The page has addresses: `/m/projects/open/<key>` opens a project, `edit/<key>` opens
+  it for its edit, `remove/<key>` for its remove, and `add` the add; a key is matched
+  ignoring case. Opening and closing rewrite the address without a new history entry, so
+  Back leaves the page. It reads its list on opening, when its tab is shown again and
+  after each change; a read still out after 400 ms shows `Reading…`. While the page server
+  isn't answering the last list stays, dim and with no acts; a store that refuses shows
+  its reason and fix. The heading, the lede, "Where this page acts" and `Read again` are
+  gone: the shell's top line names the page.
 
 ## 0.1.4 (2026-11-08)
 

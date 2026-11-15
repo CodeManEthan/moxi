@@ -2,7 +2,7 @@
 // no DOM so the Node tests can read it. Every string here goes into the page as text.
 
 import { saidOf } from "./feed.ts";
-import type { Added, Failure, Kind, Kinds, One, Project, Projects, RemoveStatus, Where } from "./feed.ts";
+import type { Added, Failure, Kind, Kinds, One, Project, Projects, RemoveStatus } from "./feed.ts";
 
 /** A component's data as its `Feed` holds it. */
 export interface FeedState<V> {
@@ -290,38 +290,6 @@ export function projectFields(project: Project): Field[] {
   const fields = cardFields(project);
   if (project.notes_root !== null) fields.push({ name: "notes_root", label: "Notes root", value: project.notes_root });
   return fields;
-}
-
-/** The line under the store and the git: why they are shown. */
-export const WHERE_LINE = "These are the browser shell's, which can differ from your terminal's. "
-  + "Before each change the page compares the folders it would read and write with the last "
-  + "run in a terminal, and refuses while they differ.";
-/** The git line when the page server finds none. */
-export const NO_GIT = "none on this server's PATH, so create is refused for a kind made with git";
-
-/** The store and git line as it is drawn. */
-export interface WhereView {
-  /** `loading`, `up`, `failed` (the read failed, the last value kept) or `gone`. */
-  state: "loading" | "up" | "failed" | "gone";
-  store: string | null;
-  /** The git a create would run, or null for none (with `up`) or not known. */
-  git: string | null;
-  /** The line a change would be refused with now, as the server last said it, or null. */
-  note: string | null;
-  line: string | null;
-}
-
-/** The store file and the git the page server acts with, as `/api/where` gives them. */
-export function whereView(data: FeedState<Where>): WhereView {
-  const store = data.value?.store ?? null;
-  const git = data.value?.git ?? null;
-  const note = data.value?.note ?? null;
-  if (data.gone) return { state: "gone", store: null, git: null, note: null, line: null };
-  if (data.failure !== null) return { state: "failed", store, git, note, line: failureLine(data.failure) };
-  if (data.loading || data.value === null) {
-    return { state: "loading", store: null, git: null, note: null, line: null };
-  }
-  return { state: "up", store, git, note, line: null };
 }
 
 /** The edit form, as typed. */

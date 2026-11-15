@@ -1,8 +1,7 @@
 """projects' page in a browser, through a real shell that starts projects' real page server:
-the contract check; the store file and the git the page acts with, and a shell whose PATH
-has no git; a terminal whose last run placed the store elsewhere than the shell does,
-after which the page's add refuses with the store line and the where block shows it as a
-note; a contribution that won't load, named in the add form, which an add goes ahead
+the contract check; a shell whose PATH has no git, where a create names the lasting fix;
+a terminal whose last run placed the store elsewhere than the shell does, after which the
+page's add refuses with the store line; a contribution that won't load, named in the add form, which an add goes ahead
 without and whose warning the form shows beside the success; an add with create in a real
 git; a topic added with no root, whose answer is lost, after which the page reads its list
 again and says the directory may exist; the edit form, which sends only what the user
@@ -171,6 +170,11 @@ def open_row(panel, key: str):
     return item
 
 
+def changed(page) -> None:
+    """Sends the event after which every projects component reads again."""
+    page.evaluate("name => document.dispatchEvent(new Event(name))", CHANGED)
+
+
 def posts_to(page, path: str) -> list:
     seen: list = []
     page.on("request", lambda request: seen.append(request)
@@ -190,28 +194,14 @@ def reads_of(page, path: str) -> list[str]:
 def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
     check = ui_component_check(ui_page, "projects", "page", keep=True)
     assert check.element == "moxi-projects-page"
-    for route in ("projects", "kinds", "where"):
+    for route in ("projects", "kinds"):
         assert any(url.endswith(f"/m/projects/api/{route}") for url in check.requests), check.requests
     for key in seeded:
         expect(check.locator.locator(f'moxi-ui-row[data-key="{key}"]')).to_have_count(1)
     expect(check.locator.locator("moxi-projects-add form")).to_have_attribute("data-state", "up")
 
 
-def test_the_page_shows_the_store_and_the_git_it_acts_with(seeded, ui_shell, ui_page):
-    store = store_of(ui_shell.env)
-    git = shutil.which("git", path=ui_shell.env["PATH"])
-    assert git is not None
-    panel = open_panel(ui_page)
-    where = panel.locator('section[data-part="where"]')
-    expect(where).to_have_attribute("data-state", "up")
-    expect(where.locator('[data-line="store"]')).to_have_text(store)
-    expect(where.locator('[data-line="git"]')).to_have_text(git)
-    assert Path(store).is_relative_to(Path(ui_shell.env["MOXI_HOME"]))
-    # The terminal's last run placed this same store, so there is no note.
-    expect(where.locator('[data-line="note"]')).to_have_count(0)
-
-
-def test_a_terminal_whose_store_is_elsewhere_refuses_the_add_and_shows_the_note(
+def test_a_terminal_whose_store_is_elsewhere_refuses_the_add_with_the_store_line(
         ui_shells, ui_shell_options, ui_contexts, tmp_path_factory):
     shell = ui_shells(**ui_shell_options)
     moved = str(tmp_path_factory.mktemp("terminal-data"))
@@ -223,10 +213,6 @@ def test_a_terminal_whose_store_is_elsewhere_refuses_the_add_and_shows_the_note(
     page.goto("/m/projects/")
     panel = page.locator("#moxi-panel > moxi-projects-page")
     line = f"the projects store here is {here}, but the last run in a terminal used {there}"
-    note = panel.locator('section[data-part="where"] [data-line="note"]')
-    expect(note).to_be_visible()
-    expect(note).to_contain_text(line)
-    expect(note).to_contain_text(f"Set MOXI_PROJECTS_DATA_HOME to {moved}")
     # The list still reads: the shell's store, which has no rows.
     expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "empty")
 
@@ -238,12 +224,13 @@ def test_a_terminal_whose_store_is_elsewhere_refuses_the_add_and_shows_the_note(
     said = form.locator('[data-line="said"]')
     expect(said).to_have_attribute("data-tone", "error")
     expect(said).to_contain_text(line)
+    expect(said).to_contain_text(f"Set MOXI_PROJECTS_DATA_HOME to {moved}")
     expect(said).to_contain_text("moxi ui stop")
     # Neither store was made.
     assert not os.path.exists(here) and not os.path.exists(there)
 
 
-def test_a_shell_with_no_git_says_so_and_a_create_names_the_lasting_fix(
+def test_a_shell_with_no_git_refuses_a_create_with_the_lasting_fix(
         ui_shells, ui_shell_options, ui_contexts, tmp_path_factory):
     tools = tmp_path_factory.mktemp("no-git-bin")
     for name in ("sh", "env", "uname", "cat"):
@@ -258,8 +245,6 @@ def test_a_shell_with_no_git_says_so_and_a_create_names_the_lasting_fix(
     page.goto("/m/projects/")
     panel = page.locator("#moxi-panel > moxi-projects-page")
     expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "empty")
-    where = panel.locator('section[data-part="where"]')
-    expect(where.locator('[data-line="git"]')).to_contain_text("none on this server's PATH")
 
     form = panel.locator("moxi-projects-add")
     where_to = str(Path(shell.env["HOME"]) / "work" / "nogit")
@@ -399,10 +384,11 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
     stale = edit.locator('[data-line="stale"]')
     expect(root_field).to_have_value(first)
 
-    # A terminal moves the root while the form is open, and the page reads again. The form
-    # wasn't typed in, so it starts again from what is stored, with nothing to save.
+    # A terminal moves the root while the form is open, and the page reads again on the
+    # changed event. The form wasn't typed in, so it starts again from what is stored, with
+    # nothing to save.
     moxi(ui_shell, "projects", "set", "edited", "--root", second)
-    panel.get_by_role("button", name="Read again").click()
+    changed(ui_page)
     expect(item.locator('[data-field="root"]')).to_have_text(second)
     expect(root_field).to_have_value(second)
     expect(save).to_be_disabled()
@@ -422,7 +408,7 @@ def test_an_edit_after_a_terminal_change_sends_only_what_the_user_changed(
     third = root(ui_shell, "edited-typed")
     root_field.fill(third)
     moxi(ui_shell, "projects", "set", "edited", "--kind", "project")
-    panel.get_by_role("button", name="Read again").click()
+    changed(ui_page)
     expect(item.locator('[data-field="kind"]')).to_have_text("project")
     expect(stale).to_contain_text("This project has changed since you opened the form.")
     expect(root_field).to_have_value(third)

@@ -137,7 +137,9 @@ def test_the_page_keeps_the_contract_and_holds_the_add_form(seeded, ui_page,
                                                             ui_component_check):
     check = ui_component_check(ui_page, "projects", "page", keep=True)
     assert check.element == "moxi-projects-page"
-    expect(check.locator.locator("h1")).to_have_text("Projects")
+    # The shell's top line names the page; the page draws no heading of its own.
+    expect(check.locator.locator("h1")).to_have_count(0)
+    expect(check.locator.locator('moxi-ui-row[data-key="alpha"]')).to_have_count(1)
     expect(check.locator.locator("moxi-projects-add form")).to_have_attribute("data-state", "up")
 
 
