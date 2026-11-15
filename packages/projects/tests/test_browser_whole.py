@@ -164,6 +164,17 @@ def test_the_busy_list_an_opened_project_and_its_remove_fit_the_width(
         act = item.locator('[slot="acts-one"]').bounding_box()
         name = item.locator(".l1").bounding_box()
         assert act["y"] < name["y"] + name["height"], (item.get_attribute("data-key"), act, name)
+    # `Add a project` is drawn at every width, under the count or beside it, and opens
+    # the panel.
+    count = panel.locator('section[data-part="projects"] [data-line="count"]')
+    add = panel.locator('section[data-part="projects"] .gk [data-action="add"]')
+    expect(add).to_be_visible()
+    box = add.bounding_box()
+    assert box["width"] > 0 and box["x"] + box["width"] <= width, box
+    assert box["y"] < count.bounding_box()["y"] + 40, (box, count.bounding_box())
+    add.click()
+    expect(panel.locator('moxi-projects-panel [data-part="panel"]')).to_be_visible()
+    expect(fixture_page).to_have_url(re.compile(r"/m/projects/add$"))
 
     fixture_page.goto("/m/projects/open/atlas-api")
     expect(panel.locator('moxi-ui-row[data-key="atlas-api"] [data-part="opened"]')).to_be_visible()

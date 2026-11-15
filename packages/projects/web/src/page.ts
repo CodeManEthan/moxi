@@ -226,8 +226,10 @@ const STYLES = [BASE, css`
   @media (max-width: 720px) {
     :host { padding-top: 10px; }
     .grp { display: block; padding: 4px 0 6px; }
-    .grp .gk { padding-top: 9px; font-size: 13px; }
-    .grp .gk small { display: none; }
+    /* The count above the rows, with Add a project beside it at the right. */
+    .grp .gk { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding-top: 9px;
+               font-size: 13px; }
+    .grp .gk small { margin-top: 0; }
   }
 `];
 

@@ -220,8 +220,10 @@ var ft=globalThis,mt=ft.ShadowRoot&&(ft.ShadyCSS===void 0||ft.ShadyCSS.nativeSha
   @media (max-width: 720px) {
     :host { padding-top: 10px; }
     .grp { display: block; padding: 4px 0 6px; }
-    .grp .gk { padding-top: 9px; font-size: 13px; }
-    .grp .gk small { display: none; }
+    /* The count above the rows, with Add a project beside it at the right. */
+    .grp .gk { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding-top: 9px;
+               font-size: 13px; }
+    .grp .gk small { margin-top: 0; }
   }
 `],Ce=class extends E{constructor(){super();this.route="";this.#t=null;this.#e=null;this.#n=null;this.#i="open";this.#o=null;this.#r=null;this.#s=null;this.#l=null;this.#d=Date.now();this.#h=null;this.#a=null;this.#g=0;this.#u=null;this.#x=null;this.#v="";this.#p=null;this.#y=!1;this.#S=!1;this.#E=[];this.#b=void 0;this.#c=new Map;this.#A=new Set;this.#R=[];this.#j=new Map;this.#w=[];this.#_="[]";this.#C=new pt(Date.now());this.#L=null;this.#M=null;this.#F=()=>{this.#N()};this.#U=()=>{document.visibilityState==="visible"&&this.#N()};this.#$=document.createElement("div"),this.#$.hidden=!0,this.#$.dataset.part="facts",this.#$.addEventListener(cn,e=>{e.stopPropagation();let s=this.#j.get(e.target.localName);s!==void 0&&this.#R.includes(s)&&this.#f.heard(s,e.detail,this.#w,this.#n)}),this.#f=new Mt(e=>{requestAnimationFrame(()=>e())},()=>this.requestUpdate(),(e,s)=>console.warn(`moxi: ${e}'s project facts refused in part:
 ${s.join(`
