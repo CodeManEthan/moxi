@@ -9,6 +9,8 @@
     moxi publishing ci gate TAG [--github OWNER/REPO] [--artifact DIR]
     moxi publishing ci notes TAG
     moxi publishing ci siblings TAG --artifact DIR [--resolution highest|lowest-direct]
+    moxi publishing github show [PATH]
+    moxi publishing github apply [PATH]
     moxi publishing workflows write [PATH]
 
 PATH is a path inside the repo; with the projects module installed it may also be a
@@ -133,6 +135,26 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                    help="the directory of the build's files")
     s.add_argument("--resolution", choices=("highest", "lowest-direct"),
                    help="run once, at this resolution only (default: both)")
+    p = verbs.add_parser("github", help="the GitHub rulesets and settings of a public repo",
+                         description="The rulesets and settings a public repo expects of "
+                                     "GitHub, read or written with gh.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    for step, short, text in (
+            ("show", "print how GitHub differs from what a public repo expects",
+             "Read the rulesets, secret scanning, the pypi environment and the "
+                     "default branch of the repo's GitHub repo (moxi-publishing.github) "
+                     "with gh, and print each field unlike what a public repo expects. "
+                     "The index's trusted publishers can't be read from GitHub; it says "
+                     "what each needs."),
+            ("apply", "write the rulesets and settings that differ",
+             "Write with gh each ruleset and setting that show finds different. "
+                      "It deletes no ruleset and changes no branch: it prints those for "
+                      "you to do. The pypi environment's reviewer is the account gh is "
+                      "signed in as.")):
+        s = steps.add_parser(step, help=short, description=text)
+        s.add_argument("path", metavar="PATH", nargs="?", default=".",
+                       help="a path inside the repo, or a project key (default: here)")
     p = verbs.add_parser("workflows", help="the workflow files of a public repo",
                          description="The release and public scan workflow files.")
     steps = p.add_subparsers(dest="step", metavar="STEP")
@@ -156,6 +178,10 @@ def _release(args, prog: str) -> int:
             result = release.tag(args.path, args.package, at=args.at, remote=args.remote)
         elif args.verb == "workflows":
             result = release.workflows_write(args.path)
+        elif args.verb == "github":
+            from moxi_publishing import github
+
+            result = (github.show if args.step == "show" else github.apply)(args.path)
         elif args.step == "gate":
             result = release.ci_gate(".", args.tag, github=args.github,
                                      artifact=args.artifact)
@@ -220,7 +246,7 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
     args = _parser(prog).parse_args(argv)
     if args.verb == "scan":
         return _scan(args, prog)
-    if args.verb in ("bump", "tag", "ci", "workflows"):
+    if args.verb in ("bump", "tag", "ci", "workflows", "github"):
         return _release(args, prog)
     try:
         if args.verb == "enable":

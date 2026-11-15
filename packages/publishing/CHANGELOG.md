@@ -31,7 +31,12 @@ The first version.
   one of it and `not-ready`, and the gate counts one on neither or both as not ready.
 - `moxi publishing ci siblings`: the release test from a fresh venv, at the newest and
   the lowest published siblings, with the site-packages check.
-- `moxi publishing workflows write`: the public scan and release workflow files.
+- `moxi publishing workflows write`: the public scan and release workflow files. The
+  release workflow's upload job runs only pinned actions, never the repo's code; a
+  verify job before it runs the gate with the build's files.
+- `moxi publishing github show` and `github apply`: the rulesets, secret scanning and
+  `pypi` environment a public repo expects of GitHub, read with `gh` and printed field
+  by field, or written.
 - `moxi doctor publishing`: fails a hook command running another interpreter than the
   recorded one, and a later commit-msg hook while `drop-trailer` names `Commit-Check`;
   warns on an unset GitHub repo, a workflow file unlike its template, an empty private

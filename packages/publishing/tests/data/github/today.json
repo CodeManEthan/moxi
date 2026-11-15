@@ -1,0 +1,267 @@
+{
+  "GET repos/alice/proj-a": {
+    "id": 4242,
+    "name": "proj-a",
+    "full_name": "alice/proj-a",
+    "private": false,
+    "default_branch": "main",
+    "security_and_analysis": {
+      "secret_scanning": {
+        "status": "disabled"
+      },
+      "secret_scanning_push_protection": {
+        "status": "disabled"
+      }
+    }
+  },
+  "GET repos/alice/proj-a/rulesets?includes_parents=false&per_page=100": [
+    {
+      "id": 101,
+      "name": "moxi-main",
+      "target": "branch",
+      "source_type": "Repository",
+      "source": "alice/proj-a",
+      "enforcement": "active",
+      "created_at": "2026-01-02T10:00:00.000Z",
+      "updated_at": "2026-01-02T10:00:00.000Z",
+      "_links": {
+        "self": {
+          "href": "https://api.github.com/repos/alice/proj-a/rulesets/101"
+        }
+      }
+    },
+    {
+      "id": 102,
+      "name": "moxi-only-main",
+      "target": "branch",
+      "source_type": "Repository",
+      "source": "alice/proj-a",
+      "enforcement": "active",
+      "created_at": "2026-01-02T10:00:00.000Z",
+      "updated_at": "2026-01-02T10:00:00.000Z",
+      "_links": {
+        "self": {
+          "href": "https://api.github.com/repos/alice/proj-a/rulesets/102"
+        }
+      }
+    },
+    {
+      "id": 103,
+      "name": "moxi-tags",
+      "target": "tag",
+      "source_type": "Repository",
+      "source": "alice/proj-a",
+      "enforcement": "active",
+      "created_at": "2026-01-02T10:00:00.000Z",
+      "updated_at": "2026-01-02T10:00:00.000Z",
+      "_links": {
+        "self": {
+          "href": "https://api.github.com/repos/alice/proj-a/rulesets/103"
+        }
+      }
+    },
+    {
+      "id": 104,
+      "name": "tags-create",
+      "target": "tag",
+      "source_type": "Repository",
+      "source": "alice/proj-a",
+      "enforcement": "active",
+      "created_at": "2026-01-02T10:00:00.000Z",
+      "updated_at": "2026-01-02T10:00:00.000Z",
+      "_links": {
+        "self": {
+          "href": "https://api.github.com/repos/alice/proj-a/rulesets/104"
+        }
+      }
+    }
+  ],
+  "GET repos/alice/proj-a/rulesets/101": {
+    "id": 101,
+    "name": "moxi-main",
+    "target": "branch",
+    "source_type": "Repository",
+    "source": "alice/proj-a",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/heads/main"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      }
+    ],
+    "bypass_actors": [],
+    "current_user_can_bypass": "never",
+    "created_at": "2026-01-02T10:00:00.000Z",
+    "updated_at": "2026-01-02T10:00:00.000Z",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/alice/proj-a/rulesets/101"
+      }
+    }
+  },
+  "GET repos/alice/proj-a/rulesets/102": {
+    "id": 102,
+    "name": "moxi-only-main",
+    "target": "branch",
+    "source_type": "Repository",
+    "source": "alice/proj-a",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [
+          "refs/heads/main"
+        ],
+        "include": [
+          "~ALL"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "creation"
+      }
+    ],
+    "bypass_actors": [],
+    "current_user_can_bypass": "never",
+    "created_at": "2026-01-02T10:00:00.000Z",
+    "updated_at": "2026-01-02T10:00:00.000Z",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/alice/proj-a/rulesets/102"
+      }
+    }
+  },
+  "GET repos/alice/proj-a/rulesets/103": {
+    "id": 103,
+    "name": "moxi-tags",
+    "target": "tag",
+    "source_type": "Repository",
+    "source": "alice/proj-a",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/tags/**/*"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "update"
+      },
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      }
+    ],
+    "bypass_actors": [],
+    "current_user_can_bypass": "never",
+    "created_at": "2026-01-02T10:00:00.000Z",
+    "updated_at": "2026-01-02T10:00:00.000Z",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/alice/proj-a/rulesets/103"
+      }
+    }
+  },
+  "GET repos/alice/proj-a/rulesets/104": {
+    "id": 104,
+    "name": "tags-create",
+    "target": "tag",
+    "source_type": "Repository",
+    "source": "alice/proj-a",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [
+          "refs/tags/v*"
+        ],
+        "include": [
+          "refs/tags/**/*"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "creation"
+      }
+    ],
+    "bypass_actors": [
+      {
+        "actor_id": 5,
+        "actor_type": "RepositoryRole",
+        "bypass_mode": "always"
+      }
+    ],
+    "current_user_can_bypass": "never",
+    "created_at": "2026-01-02T10:00:00.000Z",
+    "updated_at": "2026-01-02T10:00:00.000Z",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/alice/proj-a/rulesets/104"
+      }
+    }
+  },
+  "GET repos/alice/proj-a/environments/pypi": {
+    "id": 77,
+    "name": "pypi",
+    "url": "https://api.github.com/repos/alice/proj-a/environments/pypi",
+    "created_at": "2026-01-02T10:00:00Z",
+    "updated_at": "2026-01-02T10:00:00Z",
+    "can_admins_bypass": true,
+    "protection_rules": [
+      {
+        "id": 501,
+        "type": "required_reviewers",
+        "prevent_self_review": true,
+        "reviewers": [
+          {
+            "type": "User",
+            "reviewer": {
+              "login": "bob",
+              "id": 1002,
+              "type": "User"
+            }
+          }
+        ]
+      },
+      {
+        "id": 502,
+        "type": "branch_policy"
+      }
+    ],
+    "deployment_branch_policy": {
+      "protected_branches": false,
+      "custom_branch_policies": true
+    }
+  },
+  "GET repos/alice/proj-a/environments/pypi/deployment-branch-policies?per_page=100": {
+    "total_count": 1,
+    "branch_policies": [
+      {
+        "id": 31,
+        "name": "main",
+        "type": "branch"
+      }
+    ]
+  },
+  "GET user": {
+    "login": "alice",
+    "id": 1001,
+    "type": "User",
+    "site_admin": false
+  }
+}

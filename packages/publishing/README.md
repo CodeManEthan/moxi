@@ -272,6 +272,31 @@ The steps the workflow runs:
   published version it admits refuses, naming it. Before any test runs, the run fails if
   the package imports from anywhere but the venv's site-packages.
 
+## GitHub's side
+
+The local guards can be skipped (`--no-verify`, a tool that runs no hooks), so GitHub
+checks too. `moxi publishing github show [PATH]` reads, with [gh](https://cli.github.com),
+the GitHub repo `moxi-publishing.github` names and prints each field unlike what a
+public repo expects; `moxi publishing github apply [PATH]` writes those that differ.
+
+- Ruleset `moxi-main` on the push piece's `main` branch: no deletion and no force push.
+- No other branch ruleset: other branches are created, updated and deleted freely; the
+  push piece keeps a branch from being deleted before it is merged.
+- Ruleset `moxi-tags` on every tag: no update, deletion or force push.
+- Ruleset `tags-create` on every tag but release tags (`*-v*`): no creation.
+- Each ruleset active, with no bypass actors.
+- Secret scanning with push protection, which needs admin access to read.
+- Environment `pypi`, deployable from release tags only, whose required reviewer is the
+  account `gh` is signed in as, allowed to approve its own runs since that account
+  pushes the tags.
+
+`show` also names a push piece `main` setting unlike the repository's default branch.
+The trusted publisher each package needs on the package index can't be read from
+GitHub; `show` says what each needs (this repository, `release.yml`, environment
+`pypi`), to set on pypi.org. `apply` deletes no ruleset and changes no branch: an
+unexpected branch or tag ruleset and a `main` unlike the default branch are printed
+for you, with the command that would remove the ruleset.
+
 ## Doctor
 
 `moxi doctor publishing` reads each repo repo has indexed, and uses no network. It fails
@@ -303,6 +328,7 @@ that run.
 ## Install
 
 Linux, Python 3.12 or later, git 2.39 or later, and [uv](https://docs.astral.sh/uv/).
+`github show` and `github apply` need [gh](https://cli.github.com), signed in.
 
 ```sh
 uv tool install moxi
