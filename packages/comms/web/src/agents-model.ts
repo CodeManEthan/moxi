@@ -72,11 +72,11 @@ export function parsePageRoster(data: unknown, parse: (data: unknown) => Roster 
   };
 }
 
-/** An author of waiting mail; `operator` is the server's mark for the operator, whatever
- * name the directory gives him. */
+/** An author of waiting mail; `isOperator` is the server's mark for the operator
+ * (`is_operator`), whatever name the directory gives him. */
 export interface Author {
   qualified: string;
-  operator: boolean;
+  isOperator: boolean;
 }
 
 /** An address with a row in the books: how many rows wait, how many are in its session,
@@ -132,8 +132,8 @@ function keep<T>(data: unknown, parse: (item: Record<string, unknown>) => T | nu
   return data.map((item) => (isTable(item) ? parse(item) : null)).filter((item): item is T => item !== null);
 }
 
-function parseAuthor({ qualified, operator }: Record<string, unknown>): Author | null {
-  return isString(qualified) && typeof operator === "boolean" ? { qualified, operator } : null;
+function parseAuthor({ qualified, is_operator: isOperator }: Record<string, unknown>): Author | null {
+  return isString(qualified) && typeof isOperator === "boolean" ? { qualified, isOperator } : null;
 }
 
 /** The answer of `/api/mail-state`, or null when it isn't one. An entry that is not one is
@@ -165,7 +165,7 @@ export function parseMailState(data: unknown): MailState | null {
  * of waiting mail it marks. Empty before the mail state is read. */
 export function operatorAddresses(mail: MailState | null): Set<string> {
   if (mail === null || mail.state !== "up") return new Set();
-  const marked = mail.queued.flatMap((entry) => entry.from.filter((author) => author.operator))
+  const marked = mail.queued.flatMap((entry) => entry.from.filter((author) => author.isOperator))
     .map((author) => author.qualified);
   return new Set([...mail.operator_names, ...marked]);
 }
@@ -269,7 +269,7 @@ export interface Options {
   /** A time as the page words it. */
   when?: (at: number) => string;
   /** The cache module is installed: without it, held mail reads `not read yet`. */
-  cache: boolean;
+  hasCache: boolean;
   /** Each address's running launch, with launcher installed; null without it. */
   launched?: ReadonlyMap<string, Launched> | null;
 }
@@ -286,9 +286,9 @@ export function messages(n: number): string {
 /** Authors as a line names them: the one the server marks the operator as `you`, each
  * other by the part before `@` unless two share it, then in full. */
 export function authorsWords(authors: readonly Author[]): string {
-  const shorts = authors.filter((author) => !author.operator).map((author) => nameOf(author.qualified));
+  const shorts = authors.filter((author) => !author.isOperator).map((author) => nameOf(author.qualified));
   const named = authors.map((author) => {
-    if (author.operator) return "you";
+    if (author.isOperator) return "you";
     const short = nameOf(author.qualified);
     return shorts.filter((other) => other === short).length === 1 ? short : author.qualified;
   });
@@ -416,7 +416,7 @@ function fromOf(addresses: readonly Address[]): Author[] {
 interface Words {
   now: number;
   when: (at: number) => string;
-  cache: boolean;
+  hasCache: boolean;
 }
 
 /** A case's fact and line two, for a name whose addresses are `addresses`, whose lead is
@@ -457,7 +457,7 @@ function wordsOf(kind: Case, addresses: readonly Address[], lead: Address, lined
       let more: string | null = null;
       if (from.length > 0) more = `from ${authorsWords(from)}${since !== null ? ` ${when(since)}` : ""}`;
       else if (since !== null) more = `since ${when(since)}`;
-      const held = words.cache ? "held until its next turn" : "not read yet";
+      const held = words.hasCache ? "held until its next turn" : "not read yet";
       return { fact: cacheFact(), line: { lead: `${messages(n)} ${held}`, heavy: false, more } };
     }
     case "awaiting": {
@@ -505,7 +505,7 @@ function linesOf(addresses: readonly Address[], lead: Address, full: ReadonlySet
     const fact = factOf(address, words.now, when);
     if (fact !== null) parts.push(fact.text);
     const n = heldCount(address);
-    if (n > 0) parts.push(`${messages(n)} ${words.cache ? "held" : "not read yet"}`);
+    if (n > 0) parts.push(`${messages(n)} ${words.hasCache ? "held" : "not read yet"}`);
     out.push({ qualified: address.qualified, text: parts.join(" · ") });
   }
   return out;
@@ -595,7 +595,7 @@ export function order(rows: readonly AgentRow[]): AgentRow[] {
  * session whose name has a row. A send-only name is always in `Other names`.
  */
 export function agentsOf(roster: PageRoster, mail: MailState | null, options: Options): Agents {
-  const words: Words = { now: options.now, when: options.when ?? LOCAL.time, cache: options.cache };
+  const words: Words = { now: options.now, when: options.when ?? LOCAL.time, hasCache: options.hasCache };
   const kept = mail !== null && mail.state === "up" ? mail : null;
   const names = gather(roster, kept, options.launched ?? null);
   const full = namedInFull(roster);

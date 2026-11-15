@@ -36,7 +36,7 @@ function frame(fields = {}) {
   const value = fields.rosterValue ?? CAST;
   return frameModel({
     roster: read(value), kept: value.state === "up" ? { value, at: at("19:10") } : null, mail: mail(), now: NOW,
-    today: TODAY, cache: true, launcher: false, waitedMs: 0, at: { piece: "none" }, ...fields,
+    today: TODAY, hasCache: true, hasLauncher: false, waitedMs: 0, at: { piece: "none" }, ...fields,
   }, CLOCK);
 }
 
@@ -112,11 +112,11 @@ test("error: its sentence in the first row's place, or the server's when it give
 
 test("empty: the sentence, with launcher a way to Home, without it the command", () => {
   const none = roster([]);
-  const withLauncher = frame({ rosterValue: none, launcher: true }).empty;
+  const withLauncher = frame({ rosterValue: none, hasLauncher: true }).empty;
   assert.equal(withLauncher.line, NO_AGENTS);
   assert.match(withLauncher.sentence, /^An agent is a name that one session holds at a time/);
-  assert.deepEqual([withLauncher.launch, withLauncher.command], [true, null]);
-  assert.deepEqual([frame({ rosterValue: none }).empty.launch, frame({ rosterValue: none }).empty.command], [false, NAME_COMMAND]);
+  assert.deepEqual([withLauncher.offersLaunch, withLauncher.command], [true, null]);
+  assert.deepEqual([frame({ rosterValue: none }).empty.offersLaunch, frame({ rosterValue: none }).empty.command], [false, NAME_COMMAND]);
   assert.equal(frame({ rosterValue: roster([row("ops-watch")]) }).empty, null);
   // An agent that asked him and whose session ended is a row, so the page isn't empty.
   const asked = frame({ rosterValue: none, mail: mail({ owed: [owed("planner", "19:02", "7")] }) });
@@ -227,7 +227,7 @@ test("with launcher: a coverable loud row draws Keep warm; a press disables it a
     covered: false, coverable: { cap: 3 }, activity: null,
   }];
   const launched = joinRunning({ state: "up", detail: null, sessions }, value.rows, CLOCK.time);
-  const base = { rosterValue: value, roster: read(value), kept: { value, at: NOW }, launcher: true, launched };
+  const base = { rosterValue: value, roster: read(value), kept: { value, at: NOW }, hasLauncher: true, launched };
   const idle = frame({ ...base, presses: NO_PRESSES }).rows[0];
   assert.deepEqual([idle.row.case, idle.row.where, idle.row.fact.text, idle.row.line.lead, idle.pressing],
                    ["uncovered", "slot 4 · atlas-api", "goes cold at 19:22", "waiting on 2 agents", false]);
@@ -241,6 +241,6 @@ test("with launcher: a coverable loud row draws Keep warm; a press disables it a
 });
 
 test("with launcher: its read that failed is a foot line", () => {
-  const got = frame({ launcher: true, runningLine: "The running sessions can't be read: no answer from the shell." });
+  const got = frame({ hasLauncher: true, runningLine: "The running sessions can't be read: no answer from the shell." });
   assert.deepEqual(got.lines, [{ key: "running", text: "The running sessions can't be read: no answer from the shell." }]);
 });

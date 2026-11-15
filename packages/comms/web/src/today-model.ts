@@ -116,7 +116,7 @@ export interface MessagesView {
 /** What the page knows of an address when it words a recipient's row. */
 export interface Readers {
   bound: (qualified: string) => boolean;
-  cache: boolean;
+  hasCache: boolean;
   /** The operator's names: a tag naming one of them reads `you`. */
   him: (tag: string) => boolean;
 }
@@ -133,7 +133,7 @@ export function messageRow(message: Message, readers: Readers, when: (at: number
   else {
     // His own copy has no read state on his page: he is reading it.
     said = [...new Set(message.rows.filter((row) => !readers.him(row.qualified))
-      .map((row) => readWords(row, { bound: readers.bound(row.qualified), cache: readers.cache }))
+      .map((row) => readWords(row, { bound: readers.bound(row.qualified), hasCache: readers.hasCache }))
       .filter((words): words is string => words !== null))];
   }
   const to = names.length > 0 ? `to ${namesWords(names)}` : "";

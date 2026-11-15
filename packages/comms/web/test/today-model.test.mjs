@@ -17,7 +17,7 @@ const message = (id, fields = {}) => ({
   reply_to: null, text: "Is the pagination branch ready?", withdrawn: false, rows: [], ...fields,
 });
 const waiting = (qualified) => ({ qualified, state: "waiting", held: false, takeable: false });
-const readers = (fields = {}) => ({ bound: (q) => q === "builder-1" || q === "reviewer", cache: true,
+const readers = (fields = {}) => ({ bound: (q) => q === "builder-1" || q === "reviewer", hasCache: true,
                                     him: (tag) => tag === "operator", ...fields });
 const day = (messages, more = 0, earlier = null, d = TODAY) => ({ day: d, messages, more, earlier });
 
@@ -55,7 +55,7 @@ test("a message row: names, each recipient's read state, the time, the text on o
                           time: "18:28", text: "Is the pagination branch ready?", thread: { a: "planner", b: "builder-1" } });
   const unbound = messageRow(message("2", { to: ["docs-writer"], rows: [waiting("docs-writer")] }), readers(), when);
   assert.equal(unbound.where, "to docs-writer · not read yet, docs-writer isn't running");
-  const noCache = messageRow(message("3", { rows: [waiting("builder-1")] }), readers({ cache: false }), when);
+  const noCache = messageRow(message("3", { rows: [waiting("builder-1")] }), readers({ hasCache: false }), when);
   assert.equal(noCache.where, "to builder-1 · not read yet");
   const handed = messageRow(message("4", { rows: [{ ...waiting("builder-1"), state: "handed" }] }), readers(), when);
   assert.equal(handed.where, "to builder-1 · not read yet");

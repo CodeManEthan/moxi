@@ -20,7 +20,7 @@ const row = (qualified, fields = {}) => ({
 const answer = (fields = {}) => ({ state: "up", detail: null, today: "2026-11-12", messages: [], count_today: 0,
                                    earlier: null, changed: null, ...fields });
 const facts = (fields = {}) => ({ a: "builder-1", b: "planner", roster: [row("planner"), row("builder-1")], owedBy: [],
-                                  him: new Set(["operator"]), cache: true, when, ...fields });
+                                  him: new Set(["operator"]), hasCache: true, when, ...fields });
 const held = (messages, fields = {}) => ({ messages, earlier: null, count_today: 0, ...fields });
 
 const PLAN = [
@@ -71,7 +71,7 @@ test("the header: one message, none today, nobody owing; an unbound reader and n
   const one = threadView(held([PLAN[3]], { count_today: 1 }), facts({ roster: [row("planner"), row("builder-1", { live: false })] }));
   assert.equal(one.header, "builder-1 and planner · 1 message today");
   assert.equal(one.messages[0].rest, "· 18:28 · wants one reply · not read yet, builder-1 isn't running");
-  const none = threadView(held([PLAN[3]]), facts({ cache: false }));
+  const none = threadView(held([PLAN[3]]), facts({ hasCache: false }));
   assert.equal(none.header, "builder-1 and planner");
   assert.equal(none.messages[0].rest, "· 18:28 · wants one reply · not read yet");
 });

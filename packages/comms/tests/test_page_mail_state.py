@@ -58,7 +58,7 @@ def his(rig, to, text="noted", **kw):
 
 def agent(qualified: str) -> dict:
     """A `queued` author that is not the operator."""
-    return {"qualified": qualified, "operator": False}
+    return {"qualified": qualified, "is_operator": False}
 
 
 def owed_ids(body) -> list[str]:
@@ -261,7 +261,7 @@ def test_queued_marks_his_own_waiting_message_as_the_operators(rig, today, name)
         assert wait_until(lambda m=m: queued(m.id))
     assert read()["queued"] == [{"qualified": MAIN, "waiting": 2, "handed": 0,
                                  "from": [agent("planner@proj-a"),
-                                          {"qualified": name, "operator": True}]}]
+                                          {"qualified": name, "is_operator": True}]}]
 
 
 def test_operator_names_are_his_names_whatever_waits(rig, today):

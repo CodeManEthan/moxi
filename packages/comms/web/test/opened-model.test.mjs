@@ -30,10 +30,10 @@ const read = (value, fields = {}) => ({ loading: false, gone: false, failure: nu
 const queue = (messages, more = 0) => read({ state: "up", detail: null, messages, more });
 
 function opened(r, m, name, fields = {}, launched = null) {
-  const { rows } = agentsOf(r, m, { now: NOW, when, cache: true, launched });
+  const { rows } = agentsOf(r, m, { now: NOW, when, hasCache: true, launched });
   const agent = rows.find((x) => x.name === name);
   return openedAgent({ row: agent, to: agent.lead, roster: r.rows, asks: m.asks, queue: queue([]), now: NOW, when,
-                       cache: true, details: false, ...fields });
+                       hasCache: true, showsDetails: false, ...fields });
 }
 
 test("a message and a queue are read as sent; what isn't one is left out", () => {
@@ -68,13 +68,13 @@ test("waits on with no ask names the agent alone; without cache the ask is not c
   const r = roster([bound("planner", { awaiting: ["builder-1"] }), bound("builder-1")]);
   assert.equal(opened(r, mail(), "planner").after[0].tail, null);
   const m = mail({ asks: [{ asker: "planner", awaited: "builder-1", message_id: "7", at: at("18:28"), read: false }] });
-  assert.equal(opened(r, m, "planner", { cache: false }).after[0].tail,
+  assert.equal(opened(r, m, "planner", { hasCache: false }).after[0].tail,
                "for one reply to its 18:28 message, which builder-1 has not read");
 });
 
 test("a cold cache says since when, and that mail does not wake it; without cache no link", () => {
   const r = roster([bound("reviewer", { cache: { kind: "cold", until: at("18:35") } })]);
-  assert.deepEqual(opened(r, mail(), "reviewer", { cache: false }).before,
+  assert.deepEqual(opened(r, mail(), "reviewer", { hasCache: false }).before,
                    [{ key: "cache", label: "Cache", value: "cold since 18:35", tail: COLD_TAIL, link: null }]);
   assert.deepEqual(opened(roster([bound("reviewer")]), mail(), "reviewer").before, []);
 });
@@ -117,7 +117,7 @@ test("a name with two addresses offers both; directed by gathers the name's addr
 });
 
 test("details: the address, adapter, tier, bound at, the session, and the help sentence's words", () => {
-  const got = opened(roster([bound("planner")]), mail(), "planner", { details: true });
+  const got = opened(roster([bound("planner")]), mail(), "planner", { showsDetails: true });
   assert.deepEqual(got.details.map((line) => [line.label, line.value]), [
     ["Address", "planner"], ["Adapter", "claude"], ["Tier", "worker"], ["Bound at", "12:00"], ["Session", "s-planner"],
   ]);
@@ -125,8 +125,8 @@ test("details: the address, adapter, tier, bound at, the session, and the help s
   assert.equal(HELP, "A name is held by one session at a time.");
   const asker = openedAgent({
     row: agentsOf(roster([]), mail({ owed: [{ message_id: "9", author: "scout", at: at("19:02"), text: "?" }] }),
-                  { now: NOW, when, cache: true }).rows[0],
-    to: "scout", roster: [], asks: [], queue: queue([]), now: NOW, when, cache: true, details: true });
+                  { now: NOW, when, hasCache: true }).rows[0],
+    to: "scout", roster: [], asks: [], queue: queue([]), now: NOW, when, hasCache: true, showsDetails: true });
   assert.deepEqual(asker.details.map((line) => line.label), ["Address"]);
   assert.equal(asker.sessionId, null);
 });
@@ -145,14 +145,14 @@ const join = (r, entries) => joinRunning({ state: "up", detail: null, count: ent
 test("with launcher: Session leads, linked to its transcript with sessions; launcher's cache wins", () => {
   const r = roster([bound("planner", { cache: { kind: "warm", until: at("19:50") } })]);
   const launched = join(r, [entry("planner", { waits: { kind: "agents", count: 1 }, covered: true })]);
-  const got = opened(r, mail(), "planner", { sessions: true }, launched);
+  const got = opened(r, mail(), "planner", { hasSessions: true }, launched);
   assert.deepEqual(got.before, [
     { key: "session", label: "Session", value: "planner's session · claude", tail: null,
       link: { kind: "sessions", route: "claude/s-planner" } },
     { key: "cache", label: "Cache", value: "warm until 20:04", tail: "kept warm while 1 agent works", link: { kind: "cache" } },
   ]);
   // Without sessions: no link.
-  assert.equal(opened(r, mail(), "planner", { sessions: false }, launched).before[0].link, null);
+  assert.equal(opened(r, mail(), "planner", { hasSessions: false }, launched).before[0].link, null);
 });
 
 test("with launcher: an estimated time says est.; a cold one since when; no cache read keeps comms'", () => {
@@ -160,7 +160,7 @@ test("with launcher: an estimated time says est.; a cold one since when; no cach
   const est = join(r, [entry("planner", { cache: { state: "warm", until: iso("20:04"), estimated: true } })]);
   assert.equal(opened(r, mail(), "planner", {}, est).before[1].value, "warm until 20:04, est.");
   const cold = join(r, [entry("planner", { cache: { state: "cold", until: iso("18:40"), estimated: false } })]);
-  assert.deepEqual(opened(r, mail(), "planner", { cache: false }, cold).before[1],
+  assert.deepEqual(opened(r, mail(), "planner", { hasCache: false }, cold).before[1],
                    { key: "cache", label: "Cache", value: "cold since 18:40", tail: COLD_TAIL, link: null });
   const unread = join(r, [entry("planner", { cache: null })]);
   assert.deepEqual(opened(r, mail(), "planner", {}, unread).before.map((line) => [line.key, line.value]),
@@ -169,5 +169,5 @@ test("with launcher: an estimated time says est.; a cold one since when; no cach
 
 test("without launcher: no Session line", () => {
   const r = roster([bound("planner")]);
-  assert.deepEqual(opened(r, mail(), "planner", { sessions: true }).before, []);
+  assert.deepEqual(opened(r, mail(), "planner", { hasSessions: true }).before, []);
 });

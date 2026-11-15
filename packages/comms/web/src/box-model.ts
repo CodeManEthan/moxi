@@ -154,7 +154,7 @@ export interface BoxOptions {
   /** The server's time now, epoch seconds. */
   now: () => number;
   /** The cache module is installed: `Deliver` is offered and `held` can be set. */
-  cache: boolean;
+  hasCache: boolean;
 }
 
 /** The box written to one address, set to answer `reply` or none. */
@@ -206,7 +206,7 @@ export class SendBox {
   /** What `check` and `send` post. */
   body(): Record<string, unknown> {
     const body: Record<string, unknown> = { to: this.to, text: this.text, posture: this.posture,
-                                            held: this.#options.cache && this.held };
+                                            held: this.#options.hasCache && this.held };
     if (this.reply !== null) body.reply_to = this.reply.message_id;
     return body;
   }
@@ -224,7 +224,7 @@ export class SendBox {
   }
 
   setHeld(held: boolean): void {
-    if (held === this.held || !this.#options.cache) return;
+    if (held === this.held || !this.#options.hasCache) return;
     this.held = held;
     void this.check();
   }
@@ -296,7 +296,7 @@ export class SendBox {
   view({ when, queue = null }: { when: (at: number) => string; queue?: Queue | null }): BoxView {
     const checkAnswer = this.checked?.answer ?? null;
     let deliver: BoxView["deliver"] = null;
-    if (this.#options.cache) {
+    if (this.#options.hasCache) {
       deliver = heldCold(checkAnswer) ? { word: NEXT_TURN, menu: null }
         : { word: this.held ? NEXT_TURN : NOW,
             menu: DELIVERIES.map((one) => ({ value: one.held, label: one.word, says: null, current: one.held === this.held })) };

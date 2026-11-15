@@ -469,7 +469,7 @@ def _queued(store: Store, rows, known: dict[str, Authored],
             who = known[str(mid)] = authored(store.conn, msg)
         if all(author["qualified"] != who.qualified for author in entry["from"]):
             entry["from"].append({"qualified": who.qualified,
-                                  "operator": who.qualified in him})
+                                  "is_operator": who.qualified in him})
     return [out[name] for name in sorted(out)]
 
 

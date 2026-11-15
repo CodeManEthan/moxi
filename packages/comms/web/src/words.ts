@@ -116,9 +116,9 @@ export interface Reader {
   /** A session holds the address. */
   bound: boolean;
   /** The cache module is installed. */
-  cache: boolean;
+  hasCache: boolean;
   /** In a thread, the hold names whose turn: `held until <name>'s next turn`. */
-  thread?: boolean;
+  inThread?: boolean;
 }
 
 /** The name a line gives an address: the part before `@`. */
@@ -136,8 +136,8 @@ export function readWords(row: Delivery, reader: Reader): string | null {
   switch (row.state) {
     case "waiting":
       if (!reader.bound) return `not read yet, ${name} isn't running`;
-      if (!reader.cache) return "not read yet";
-      return reader.thread ? `not read yet, held until ${name}'s next turn` : "not read yet, held until its next turn";
+      if (!reader.hasCache) return "not read yet";
+      return reader.inThread ? `not read yet, held until ${name}'s next turn` : "not read yet, held until its next turn";
     case "handed":
     case "in_digest":
       return "not read yet";

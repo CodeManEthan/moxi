@@ -26,11 +26,11 @@ function poster(...answers) {
   return { post, calls, release: (result) => held.shift()(result) };
 }
 
-function boxOf(stub, { reply = null, cache = true, to = "reviewer" } = {}) {
+function boxOf(stub, { reply = null, hasCache = true, to = "reviewer" } = {}) {
   const changes = [];
   const acted = [];
   const box = new SendBox(to, reply, {
-    post: stub.post, onChange: () => changes.push(1), onActed: (act) => acted.push(act), now: () => at("19:11"), cache,
+    post: stub.post, onChange: () => changes.push(1), onActed: (act) => acted.push(act), now: () => at("19:11"), hasCache,
   });
   return { box, changes, acted };
 }
@@ -134,7 +134,7 @@ test("a check held for a cold cache shows Deliver at its next turn with no menu"
 
 test("without cache: no Deliver, and nothing is held", async () => {
   const stub = poster(ok(answer("would-send")), ok(answer("would-send")));
-  const { box } = boxOf(stub, { cache: false });
+  const { box } = boxOf(stub, { hasCache: false });
   box.setHeld(true);
   await box.check();
   assert.equal(stub.calls.length, 1);

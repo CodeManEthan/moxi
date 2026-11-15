@@ -21,7 +21,7 @@ const bound = (qualified, fields = {}) =>
 const waiting = (qualified, count, since) => ({ qualified, count, since: at(since) });
 const roster = (rows, waits = []) => ({ state: "up", detail: null, rows, waiting: waits, today: "2026-11-12" });
 // An author as the server marks it: the fixtures' operator is the name `operator`.
-const author = (qualified, operator = qualified === "operator") => ({ qualified, operator });
+const author = (qualified, isOperator = qualified === "operator") => ({ qualified, isOperator });
 const queued = (qualified, waiting, from = [], handed = 0) =>
   ({ qualified, waiting, handed, from: from.map((who) => (typeof who === "string" ? author(who) : who)) });
 const mail = (fields = {}) => ({ state: "up", detail: null, today: "2026-11-12", queued: [], owed: [], asks: [],
@@ -30,7 +30,7 @@ const owed = (author, hhmm, id = "1000000000000000001") =>
   ({ message_id: id, author, at: at(hhmm), text: "Is it ready?" });
 const warm = (hhmm) => ({ kind: "warm", until: at(hhmm) });
 
-const agents = (r, m = null, options = {}) => agentsOf(r, m, { now: NOW, when, cache: true, ...options });
+const agents = (r, m = null, options = {}) => agentsOf(r, m, { now: NOW, when, hasCache: true, ...options });
 const only = (r, m, options) => {
   const { rows } = agents(r, m, options);
   assert.equal(rows.length, 1, JSON.stringify(rows.map((x) => x.name)));
@@ -59,7 +59,8 @@ test("the mail state: what is not one is left out, owed oldest first", () => {
   const got = parseMailState({
     state: "up", detail: null, today: "2026-11-12",
     queued: [{ qualified: "a", waiting: 1, handed: 0,
-               from: [author("b"), 3, "c", { qualified: "d" }, { qualified: "e", operator: "yes" }] },
+               from: [{ qualified: "b", is_operator: false }, 3, "c", { qualified: "d" },
+                      { qualified: "e", is_operator: "yes" }, { qualified: "f", operator: true }] },
              { qualified: "x", waiting: -1, handed: 0, from: [] }],
     owed: [owed("b", "18:00", "2"), owed("c", "17:00", "3"), { ...owed("d", "17:00"), message_id: 12 }],
     asks: [{ asker: "a", awaited: "b", message_id: "4", at: 1, read: false },
@@ -299,7 +300,7 @@ test("a bound address that is not the lead has a line with its cache fact and wh
   const got = only(r, mail());
   assert.equal(got.lead, "tester");
   assert.deepEqual(got.note.lines.map((line) => line.text), ["tester@a", "tester@b · cold · 2 messages held"]);
-  assert.equal(only(r, mail(), { cache: false }).note.lines[1].text, "tester@b · cold · 2 messages not read yet");
+  assert.equal(only(r, mail(), { hasCache: false }).note.lines[1].text, "tester@b · cold · 2 messages not read yet");
 });
 
 test("the second case under owed, and mail as the second case always on the row", () => {
@@ -399,7 +400,7 @@ test("from you: the server's mark decides, not the author's name", () => {
 
 test("without cache: no fact, and held mail reads not read yet", () => {
   const r = roster([bound("reviewer")], [waiting("reviewer", 1, "18:50")]);
-  const got = only(r, mail({ queued: [queued("reviewer", 1, ["operator"])] }), { cache: false });
+  const got = only(r, mail({ queued: [queued("reviewer", 1, ["operator"])] }), { hasCache: false });
   assert.equal(got.fact, null);
   assert.deepEqual(got.line, { lead: "1 message not read yet", heavy: false, more: "from you 18:50" });
 });
@@ -407,7 +408,7 @@ test("without cache: no fact, and held mail reads not read yet", () => {
 test("without launcher and without cache: the rows keep their cases and words", () => {
   const r = roster([bound("builder-1"), row("docs-writer")],
                    [waiting("builder-1", 2, "18:28"), waiting("docs-writer", 1, "17:40")]);
-  const { rows } = agents(r, mail(), { cache: false, launched: null });
+  const { rows } = agents(r, mail(), { hasCache: false, launched: null });
   assert.deepEqual(rows.map((x) => [x.name, x.case, x.where, x.fact?.text ?? null, x.line.lead]), [
     ["docs-writer", "mail", null, "1 message waiting", "not running"],
     ["builder-1", "held", null, null, "2 messages not read yet"],

@@ -93,10 +93,10 @@ export interface OpenedFacts {
   now: number;
   when: (at: number) => string;
   /** The cache module is installed. */
-  cache: boolean;
+  hasCache: boolean;
   /** The sessions module is installed: `Session` links to the session's transcript. */
-  sessions?: boolean;
-  details: boolean;
+  hasSessions?: boolean;
+  showsDetails: boolean;
 }
 
 const unique = (items: readonly string[]): string[] => [...new Set(items)];
@@ -114,9 +114,9 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
   if (launched !== null) {
     const { name, harness, route } = launched.session;
     before.push({ key: "session", label: SESSION_LABEL, value: [name, harness].filter(Boolean).join(" · "), tail: null,
-                  link: facts.sessions && route !== null ? { kind: "sessions", route } : null });
+                  link: facts.hasSessions && route !== null ? { kind: "sessions", route } : null });
   }
-  const cacheLink: Link | null = facts.cache ? { kind: "cache" } : null;
+  const cacheLink: Link | null = facts.hasCache ? { kind: "cache" } : null;
   const cache = rosterRow?.cache ?? null;
   const theirs = launched?.cache ?? null;
   if (theirs !== null) {
@@ -160,7 +160,7 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
       tail = `for one reply to its ${when(ask.at)} message`;
       if (ask.read === false) {
         tail += `, which ${name} has not read`;
-        if (facts.cache) tail += `: it is held until ${name}'s next turn`;
+        if (facts.hasCache) tail += `: it is held until ${name}'s next turn`;
       }
     }
     after.push({ key: `waits:${awaited}`, label: WAITS_ON, value: name, tail, link: { kind: "thread", a: to, b: awaited } });
@@ -178,7 +178,7 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
   }
 
   let details: Line[] | null = null;
-  if (facts.details) {
+  if (facts.showsDetails) {
     details = [{ key: "address", label: ADDRESS_LABEL, value: to, tail: null, link: null }];
     const add = (key: string, label: string, text: string | null): void => {
       if (text) details?.push({ key, label, value: text, tail: null, link: null });

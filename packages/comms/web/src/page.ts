@@ -539,8 +539,8 @@ export class CommsPage extends LitElement {
     const mail = this.#mail;
     if (feed === null || mail === null) return null;
     const frame = frameModel({
-      roster: feed, kept: this.#kept, mail, now: feed.now(), today: this.#today, cache: installed("cache"),
-      launcher: installed("launcher"), waitedMs: Date.now() - this.#openedAt, at: this.#at, placed: this.#placed,
+      roster: feed, kept: this.#kept, mail, now: feed.now(), today: this.#today, hasCache: installed("cache"),
+      hasLauncher: installed("launcher"), waitedMs: Date.now() - this.#openedAt, at: this.#at, placed: this.#placed,
       launched: installed("launcher") ? joinRunning(this.#running, this.#kept?.value.rows ?? [], this.#when) : null,
       presses: this.#presses, runningLine: installed("launcher") ? this.#runningLine : null,
       messagesRead: this.#messages !== null && !this.#messages.loading,
@@ -615,7 +615,7 @@ export class CommsPage extends LitElement {
       : [this.#todayRead, ...this.#days].flatMap((read) => read?.messages ?? [])
         .find((message) => between(message, pair.a, pair.b, him))?.message_id ?? null;
     const view = messagesView(this.#todayRead, this.#days, {
-      bound: (qualified) => rows.some((row) => row.qualified === qualified && row.live), cache: installed("cache"),
+      bound: (qualified) => rows.some((row) => row.qualified === qualified && row.live), hasCache: installed("cache"),
       him: (tag) => him.has(tag),
     }, this.#when, this.#today);
     if (view.groups.length === 0 && view.before === null && thread === null) return nothing;
@@ -658,7 +658,7 @@ export class CommsPage extends LitElement {
     }
     const view = threadView(held, {
       a: reads.a, b: reads.b, roster: this.#kept?.value.rows ?? [], him,
-      owedBy: (this.#mail?.value?.owed ?? []).map((entry) => entry.author), cache: installed("cache"), when: this.#when,
+      owedBy: (this.#mail?.value?.owed ?? []).map((entry) => entry.author), hasCache: installed("cache"), when: this.#when,
     });
     const earlier = view.earlier;
     const lastId = view.lastId;
@@ -746,7 +746,7 @@ export class CommsPage extends LitElement {
     const command = empty.command;
     return html`<div class="quietline" data-line="empty">${empty.line}</div>
       <div class="first" data-part="empty"><p>${empty.sentence}</p>
-        ${empty.launch ? html`<p>${this.#link("ui", "", LAUNCH_FROM_HOME, { cls: "x", action: "launch-home" })}</p>` : nothing}
+        ${empty.offersLaunch ? html`<p>${this.#link("ui", "", LAUNCH_FROM_HOME, { cls: "x", action: "launch-home" })}</p>` : nothing}
         ${command !== null ? html`<p><code>${command}</code> <button type="button" class="x" data-action="copy-command"
           @click=${() => void this.#copy("command", command)}>${this.#copied === "command" ? COPIED : COPY}</button></p>`
           : nothing}</div>`;
@@ -817,8 +817,8 @@ export class CommsPage extends LitElement {
       : { loading: true, gone: false, failure: null, value: null };
     const view = openedAgent({
       row: item.row, to, roster, asks: this.#mail?.value?.asks ?? [], queue, now,
-      when: (at) => whenWords(at, this.#today), cache: installed("cache"), sessions: installed("sessions"),
-      details: this.#details,
+      when: (at) => whenWords(at, this.#today), hasCache: installed("cache"), hasSessions: installed("sessions"),
+      showsDetails: this.#details,
     });
     const sessionId = view.sessionId;
     return html`<div class="det" data-part="opened" data-to=${to}>
@@ -983,7 +983,7 @@ export class CommsPage extends LitElement {
       else {
         const box: SendBox = new SendBox(to, reply, {
           post: (path, body) => api("comms", path, body), onChange: () => this.requestUpdate(),
-          onActed: () => this.#acted(box), now: () => this.#feed?.now() ?? Date.now() / 1000, cache: installed("cache"),
+          onActed: () => this.#acted(box), now: () => this.#feed?.now() ?? Date.now() / 1000, hasCache: installed("cache"),
         });
         this.#box = box;
         void box.check();

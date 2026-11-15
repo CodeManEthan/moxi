@@ -76,8 +76,8 @@ export interface FrameFacts {
   now: number | null;
   /** The newest `today` the page holds. */
   today: string | null;
-  cache: boolean;
-  launcher: boolean;
+  hasCache: boolean;
+  hasLauncher: boolean;
   /** Each bound address's running launch, with launcher installed; null without it. */
   launched?: ReadonlyMap<string, Launched> | null;
   /** The presses of `Keep warm` waiting, and the notes refused ones leave. */
@@ -140,7 +140,7 @@ export interface Empty {
   line: string;
   sentence: string;
   /** `Launch one from Home`, with launcher. */
-  launch: boolean;
+  offersLaunch: boolean;
   /** The command to give a session a name, with `Copy`, without launcher. */
   command: string | null;
 }
@@ -259,7 +259,7 @@ export function frameModel(facts: FrameFacts, clock: Clock = LOCAL): Frame {
   const stale = !up;
   const mailValue = mail.value;
   const agents = shown === null || facts.now === null ? { rows: [], others: [] }
-    : agentsOf(shown, mailValue, { now: facts.now, when, cache: facts.cache, launched: facts.launched ?? null });
+    : agentsOf(shown, mailValue, { now: facts.now, when, hasCache: facts.hasCache, launched: facts.launched ?? null });
 
   let down: Down | null = null;
   if (value.state === "offline") down = { what: DOWN_WHAT, line: DOWN_LINE, copy: DOCTOR };
@@ -282,7 +282,7 @@ export function frameModel(facts: FrameFacts, clock: Clock = LOCAL): Frame {
   const him = operatorAddresses(mailValue);
   const empty = up && value.rows.length === 0 && value.waiting.every((entry) => him.has(entry.qualified))
     && agents.rows.length === 0
-    ? { line: NO_AGENTS, sentence: WHAT_AN_AGENT_IS, launch: facts.launcher, command: facts.launcher ? null : NAME_COMMAND }
+    ? { line: NO_AGENTS, sentence: WHAT_AN_AGENT_IS, offersLaunch: facts.hasLauncher, command: facts.hasLauncher ? null : NAME_COMMAND }
     : null;
   const openName = opened.kind === "agent" || opened.kind === "mail" ? opened.name : null;
   const presses = facts.presses ?? NO_PRESSES;

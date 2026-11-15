@@ -75,12 +75,12 @@ test("the postures' menu, and the box's first posture", () => {
 
 test("a recipient's row: unread and why, and each way it left the queue", () => {
   const row = (state, qualified = "builder-2@kestrel-web") => ({ qualified, state, held: false, takeable: true });
-  const full = { bound: true, cache: true };
+  const full = { bound: true, hasCache: true };
   assert.equal(readWords(row("waiting"), full), "not read yet, held until its next turn");
-  assert.equal(readWords(row("waiting"), { ...full, thread: true }), "not read yet, held until builder-2's next turn");
-  assert.equal(readWords(row("waiting"), { bound: false, cache: true }), "not read yet, builder-2 isn't running");
-  assert.equal(readWords(row("waiting"), { bound: false, cache: false }), "not read yet, builder-2 isn't running");
-  assert.equal(readWords(row("waiting"), { bound: true, cache: false }), "not read yet");
+  assert.equal(readWords(row("waiting"), { ...full, inThread: true }), "not read yet, held until builder-2's next turn");
+  assert.equal(readWords(row("waiting"), { bound: false, hasCache: true }), "not read yet, builder-2 isn't running");
+  assert.equal(readWords(row("waiting"), { bound: false, hasCache: false }), "not read yet, builder-2 isn't running");
+  assert.equal(readWords(row("waiting"), { bound: true, hasCache: false }), "not read yet");
   assert.equal(readWords(row("handed"), full), "not read yet");
   assert.equal(readWords(row("in_digest"), full), "not read yet");
   assert.equal(readWords(row("withdrawn"), full), "taken back");

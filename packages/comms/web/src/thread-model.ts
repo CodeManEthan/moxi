@@ -162,7 +162,7 @@ export interface ThreadFacts {
   owedBy: readonly string[];
   /** The addresses that are the operator. */
   him: ReadonlySet<string>;
-  cache: boolean;
+  hasCache: boolean;
   when: (at: number) => string;
 }
 
@@ -205,7 +205,7 @@ export function threadView(held: ThreadHeld, facts: ThreadFacts): ThreadView {
   const messages = held.messages.map((message): ThreadMessage => {
     const said = message.withdrawn ? [TAKEN_BACK]
       : [...new Set(message.rows.filter(shown).map((row) => readWords(row, { bound: bound(row.qualified),
-                                                                             cache: facts.cache, thread: true }))
+                                                                             hasCache: facts.hasCache, inThread: true }))
         .filter((words): words is string => words !== null))];
     const rest = [when(message.at), wantsWords(message.posture, message.reply_to), ...said]
       .filter((part): part is string => part !== null && part !== "");

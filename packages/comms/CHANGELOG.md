@@ -59,8 +59,8 @@
   gateway does not reach it.
 - comms' page server has a new read, `GET /api/mail-state`, from the delivery books and
   the record's last day, asking the daemon nothing: `queued`, each name's waiting and
-  in-session rows with the authors of the waiting ones (each `{qualified, operator}`,
-  `operator` true for the operator, by the name `operator` or one the directory gives
+  in-session rows with the authors of the waiting ones (each `{qualified, is_operator}`,
+  `is_operator` true for the operator, by the name `operator` or one the directory gives
   him); `owed`, the verified `[reply-once]` asks to the operator that no later message
   of his answers; `asks`, the open `[reply-once]` asks between agents, with whether the
   awaited name has read it; `last`, each name's newest message; and `operator_names`,
