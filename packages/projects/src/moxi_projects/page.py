@@ -4,6 +4,10 @@
                              now; only those of `kind` when it is given; this server's
                              home folder, and whether notes is installed
     GET  /api/project        one project, by `key` (matched ignoring case)
+    GET  /api/folder         what is at `path` as typed (`~` taken as this server's
+                             home): whether it is a directory and a git repository, the
+                             project it is in and how, and the key its last segment
+                             would make, and whether that key is taken
     GET  /api/kinds          the kinds a project may have, and every contribution or kind
                              that can't be used, with why
     GET  /api/where          the store file this server reads and writes, the git it
@@ -71,6 +75,7 @@ _MAYBE_PATH = lb.Out("string", mark="path", nullable=True)
 _SAYS = lb.Out("string", mark="redact")
 _MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)
 _NAMES = lb.Out("list", items=_TEXT)
+_MAYBE_BOOL = lb.Out("bool", nullable=True)
 
 _PROJECT_FIELDS = {
     "key": _TEXT,
@@ -88,8 +93,7 @@ PROJECT = lb.Out("table", items=_PROJECT_FIELDS)
 #: One project in the list: a `PROJECT` and `exists`, true when its root is a directory
 #: now, false when nothing is there or it is not a directory, null when this server
 #: can't say (the `stat` failed another way, or did not answer within the list's bound).
-LISTED = lb.Out("table", items={**_PROJECT_FIELDS,
-                                "exists": lb.Out("bool", nullable=True)})
+LISTED = lb.Out("table", items={**_PROJECT_FIELDS, "exists": _MAYBE_BOOL})
 
 #: One kind: `module` is `projects` for a built-in one; `mint` is how a create makes its
 #: root, `git`, `dir` or `refuse` (the page hides create for `refuse`).
@@ -104,6 +108,18 @@ PROJECTS = {"projects": lb.Out("list", items=LISTED), "home": _MAYBE_PATH,
             "notes_installed": lb.Out("bool")}
 ONE = {"project": PROJECT}
 KINDS = {"found": lb.Out("list", items=KIND), "broken": lb.Out("list", items=BROKEN)}
+#: What the Add panel says under its folder field, for the `path` typed. `path` is that
+#: path with a leading `~` taken as this server's home, made normal; null, with every
+#: other field, for a relative path, `~user`, or a `~` path while nothing places the
+#: home. `exists`: whether it is a directory now; `git`: whether `<path>/.git` exists,
+#: null when `exists` is false; each null when its `stat` did not answer within the
+#: bound. `project`: the key of the project the path is in, or null; `how` the path
+#: stands to it: `root` (its root), `inside` (under its root) or `worktree` (matched
+#: through a linked git worktree's main tree). `key`: the path's last segment when it is a
+#: valid key, else null; `taken`: whether a project already has that key, ignoring case.
+#: `project`, `how` and `taken` are null when the store can't be read.
+AT_PATH = {"path": _MAYBE_PATH, "exists": _MAYBE_BOOL, "git": _MAYBE_BOOL,
+          "project": _MAYBE, "how": _MAYBE, "key": _MAYBE, "taken": _MAYBE_BOOL}
 #: `store` is the store file; `git` the git a create would run, null when there is none
 #: on this server's PATH; `note` the line an add, a set or a remove would be refused with
 #: now, since this server would write elsewhere than the user's terminal or can't tell,
@@ -164,6 +180,8 @@ PAGE = lb.Page(
                  query={"kind": _MAYBE_NAME}, returns=PROJECTS),
         lb.Route("/api/project", "read", _target("project"), query={"key": _KEY},
                  returns=ONE),
+        lb.Route("/api/folder", "read", _target("at_path"),
+                 query={"path": lb.Field("string", max=PATH_MAX)}, returns=AT_PATH),
         lb.Route("/api/kinds", "read", _target("kinds"), returns=KINDS),
         lb.Route("/api/where", "read", _target("where"), returns=WHERE),
         lb.Route(STATUS_ROUTE, "read", _target("remove_status"),
@@ -179,6 +197,6 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "BROKEN", "BUDGET", "KIND", "KINDS", "LISTED",
-           "ONE", "PAGE", "PROJECT", "PROJECTS", "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE",
-           "WRITTEN"]
+__all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "AT_PATH", "BROKEN", "BUDGET", "KIND", "KINDS",
+           "LISTED", "ONE", "PAGE", "PROJECT", "PROJECTS", "SET_BODY", "STATUS",
+           "STATUS_ROUTE", "WHERE", "WRITTEN"]

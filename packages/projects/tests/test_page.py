@@ -178,7 +178,8 @@ def test_the_gate_matrix_passes():
 def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     routes = {r["path"]: r for r in LB.export(page.PAGE)["routes"]}
     assert {p for p, r in routes.items() if r["kind"] == "read"} == {
-        "/api/projects", "/api/project", "/api/kinds", "/api/where", "/api/remove-status"}
+        "/api/projects", "/api/project", "/api/folder", "/api/kinds", "/api/where",
+        "/api/remove-status"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/set", "/api/agents-add", "/api/agents-remove", "/api/remove"}
     assert {p for p, r in routes.items() if r.get("confirmed")} == {"/api/remove"}
@@ -210,7 +211,7 @@ def test_every_root_is_marked_path_and_every_sentence_redact():
                               ("/api/agents-remove", "project"))
              for field in ("root", "notes_root")}
     assert {k for k, v in marks.items() if v == "path"} == roots | {
-        "/api/projects home", "/api/where store", "/api/where git"}
+        "/api/projects home", "/api/folder path", "/api/where store", "/api/where git"}
     assert {k for k, v in marks.items() if v == "redact"} == {
         "/api/kinds broken[].reason", "/api/add notes[]", "/api/add warnings[]",
         "/api/set notes[]", "/api/where note",
@@ -384,6 +385,159 @@ def test_notes_installed_says_whether_notes_is(site):
     site.module("notes")
     moxi.modules.reset()
     assert read("/api/projects")["notes_installed"] is True
+
+
+# -- the folder read --------------------------------------------------------------------
+
+def at_path(path) -> dict:
+    from urllib.parse import quote
+
+    return read("/api/folder", f"path={quote(str(path), safe='')}")
+
+
+NOTHING = dict.fromkeys(("path", "exists", "git", "project", "how", "key", "taken"))
+
+
+def test_a_git_dir_a_plain_one_and_a_missing_one(tmp_path, own_pool, store_path):
+    repo = tmp_path / "finch-scripts"
+    (repo / ".git").mkdir(parents=True)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert at_path(repo) == {"path": str(repo), "exists": True, "git": True,
+                               "project": None, "how": None, "key": "finch-scripts",
+                               "taken": False}
+    assert at_path(plain)["exists"] is True and at_path(plain)["git"] is False
+    gone = at_path(tmp_path / "not-yet")
+    assert gone["exists"] is False and gone["git"] is None and gone["key"] == "not-yet"
+    assert not store_path.exists()
+
+
+def test_a_worktrees_git_file_counts_as_git(tmp_path, own_pool):
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    (tree / ".git").write_text("gitdir: /somewhere\n")
+    assert at_path(tree)["git"] is True
+
+
+def test_a_file_is_not_a_dir(tmp_path, own_pool):
+    a_file = tmp_path / "a-file"
+    a_file.write_text("")
+    assert at_path(a_file)["exists"] is False and at_path(a_file)["git"] is None
+
+
+def test_how_the_path_stands_to_the_project_it_is_in(tmp_path, own_pool):
+    root = tmp_path / "proj"
+    (root / "src").mkdir(parents=True)
+    _register(("Proj", root))
+    at_root = at_path(str(root) + os.sep)
+    assert (at_root["path"], at_root["project"], at_root["how"]) == (str(root), "Proj",
+                                                                     "root")
+    assert at_root["key"] == "proj" and at_root["taken"] is True
+    inside = at_path(root / "src")
+    assert (inside["project"], inside["how"], inside["taken"]) == ("Proj", "inside", False)
+    sibling = tmp_path / "proj2"
+    sibling.mkdir()
+    assert at_path(sibling)["project"] is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlinked_spelling_of_a_root_is_that_root(tmp_path, own_pool):
+    root = tmp_path / "real"
+    root.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(root)
+    _register(("real", root))
+    assert at_path(link)["how"] == "root"
+
+
+def test_a_linked_worktree_outside_any_root_is_a_worktree(tmp_path, own_pool):
+    main = tmp_path / "repos" / "main"
+    (main / ".git" / "worktrees" / "wt").mkdir(parents=True)
+    gitdir = main / ".git" / "worktrees" / "wt"
+    (gitdir / "commondir").write_text("../..\n")
+    tree = tmp_path / "scratch" / "wt"
+    tree.mkdir(parents=True)
+    (tree / ".git").write_text(f"gitdir: {gitdir}\n")
+    _register(("main", main))
+    body = at_path(tree)
+    assert (body["project"], body["how"], body["git"]) == ("main", "worktree", True)
+
+
+def test_a_tilde_path_is_taken_as_the_home(tmp_path, own_pool, monkeypatch):
+    home = tmp_path / "home"
+    (home / "code" / "finch").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    assert at_path("~/code/finch")["path"] == str(home / "code" / "finch")
+    assert at_path("~/code/finch")["exists"] is True
+    assert at_path("~")["path"] == str(home)
+    assert at_path("~/")["path"] == str(home)
+
+
+@pytest.mark.parametrize("typed", ["code/finch", "", ".", "~someone/code", "~someone"])
+def test_a_relative_path_or_another_users_home_says_nothing(typed, own_pool):
+    assert at_path(typed) == NOTHING
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="HOME and the user database")
+def test_a_tilde_path_with_no_home_says_nothing(monkeypatch, own_pool, tmp_path):
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    assert at_path("~/code") == NOTHING
+    assert at_path(tmp_path)["path"] == str(tmp_path)
+
+
+def test_a_last_segment_that_fails_the_key_rules_gives_no_key(tmp_path, own_pool):
+    for name in ("has space", "con", "ends."):
+        body = at_path(tmp_path / name)
+        assert body["key"] is None and body["taken"] is None, name
+
+
+def test_a_taken_key_is_found_ignoring_case(tmp_path, own_pool):
+    _register(("Finch", tmp_path / "elsewhere"))
+    body = at_path(tmp_path / "finch")
+    assert (body["key"], body["taken"], body["project"]) == ("finch", True, None)
+
+
+def test_a_store_that_cant_be_read_answers_the_rest(tmp_path, own_pool, store_path):
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_bytes(b"not a database at all" * 100)
+    (tmp_path / "x").mkdir()
+    body = at_path(tmp_path / "x")
+    assert body == {"path": str(tmp_path / "x"), "exists": True, "git": False,
+                    "project": None, "how": None, "key": "x", "taken": None}
+
+
+def test_a_path_stat_that_hangs_reads_null_inside_the_bound_and_is_not_asked_again(
+        tmp_path, monkeypatch):
+    slow = tmp_path / "slow"
+    slow.mkdir()
+    let_go = threading.Event()
+    asked: list[str] = []
+
+    def stat(path):
+        asked.append(path)
+        if path == str(slow):
+            let_go.wait(30)
+        return os.stat(path)
+
+    monkeypatch.setattr(pagestat, "_POOL", pagestat.Pool(stat=stat))
+    try:
+        start = time.monotonic()
+        body = at_path(slow)
+        assert time.monotonic() - start < 2
+        assert body["exists"] is None and body["git"] is False and body["key"] == "slow"
+        assert at_path(slow)["exists"] is None
+        assert asked.count(str(slow)) == 1
+    finally:
+        let_go.set()
+
+
+def test_the_path_read_writes_nothing(golden_copy, store_path, tmp_path, own_pool):
+    before = store_path.read_bytes(), store_path.stat().st_mtime_ns
+    at_path(tmp_path / "new-one")
+    at_path(os.path.join(golden_copy, "alpha"))
+    assert (store_path.read_bytes(), store_path.stat().st_mtime_ns) == before
+    assert not (tmp_path / "new-one").exists()
 
 
 def test_project_matches_its_key_ignoring_case(golden_copy):

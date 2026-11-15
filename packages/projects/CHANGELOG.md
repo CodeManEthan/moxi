@@ -9,6 +9,10 @@
   now, null when the server can't say within 250 ms), and the answer `home` (the page
   server's home folder) and `notes_installed`. A root on a mount that hangs holds at most
   four of the page server's threads and never the list.
+- The page serves `/api/folder?path=`, what the Add panel says under its folder field:
+  the path with a leading `~` taken as the page server's home, whether it is a directory
+  and a git repository, the project it is in and how (`root`, `inside`, `worktree`), the
+  key its last segment would make and whether that key is taken. It writes nothing.
 
 ## 0.1.4 (2026-11-08)
 

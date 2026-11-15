@@ -7,7 +7,9 @@ so every store call, contribution and `git init` here runs off the loop. None ca
 **Reads** call the read API's functions (`list_projects`, `get`, `kinds`) and the remove
 status read, and never write. The list adds whether each root is a directory now, asked
 through `pagestat`, which never lets a read wait on a hung mount past its bound, the home
-folder this server places and whether notes is installed. `/api/where` names the store file this server reads and the
+folder this server places and whether notes is installed. `/api/folder` says what is at
+a typed path for the Add panel: whether it is a directory and a git repository (through
+`pagestat` too), the project it is in by `for_path` and how, and the key it would make. `/api/where` names the store file this server reads and the
 git a create would run, since the page server takes the browser shell's environment and
 not the terminal's, and the two can differ. Its `note` is the line a write would be
 refused with now (below), or null.
@@ -49,12 +51,13 @@ it is answered at once by the map above, and nothing is written.
 
 from __future__ import annotations
 
+import os
 import shutil
 from typing import Any
 
 import moxi.paths
 
-from moxi_projects import acts, api, contributions, pagecheck, pagestat, store
+from moxi_projects import acts, api, contributions, pagecheck, pagestat, rules, store
 from moxi_projects.api import DEFAULT_KIND, Busy, Project, ProjectsError
 from moxi_projects.errors import NoGit
 from moxi_projects.page import STATUS_ROUTE, lb
@@ -126,6 +129,79 @@ def project(call: Any) -> dict[str, Any]:
         return {"project": _project(api.get(call.query["key"]))}
     except ProjectsError as exc:
         raise _answer(exc) from None
+
+
+#: The separators that may follow a leading `~`: `/` everywhere, and a backslash too on Windows.
+_TILDE_SEPS = ("/", "\\") if os.name == "nt" else ("/",)
+
+
+def expand_tilde(path: str, home: str | None) -> str | None:
+    """`path` with a leading `~` or `~<separator>` taken as `home`; `path` itself when it
+    has no leading `~`; None for `~user`, or for a `~` path while `home` is None."""
+    if not path.startswith("~"):
+        return path
+    rest = path[1:]
+    if rest and not rest.startswith(_TILDE_SEPS):
+        return None
+    if home is None:
+        return None
+    return os.path.join(home, rest.lstrip("".join(_TILDE_SEPS))) if rest else home
+
+
+def _same(a: str, b: str) -> bool:
+    return os.path.normcase(a) == os.path.normcase(b)
+
+
+def _under(path: str, root: str) -> bool:
+    base = os.path.normcase(root)
+    return os.path.normcase(path).startswith(base.rstrip(os.sep) + os.sep)
+
+
+def _how(path: str, root: str) -> str:
+    """How `path` stands to the project `for_path` found it in, whose root is `root`:
+    `root`, `inside`, else `worktree`. Each is compared as written and as resolved, since
+    `for_path` matches a symlinked spelling too."""
+    root = os.path.normpath(root)
+    spellings = [(path, root), (os.path.realpath(path), os.path.realpath(root))]
+    if any(_same(a, b) for a, b in spellings):
+        return "root"
+    if any(_under(a, b) for a, b in spellings):
+        return "inside"
+    return "worktree"
+
+
+_AT_PATH_NONE = dict.fromkeys(("path", "exists", "git", "project", "how", "key",
+                               "taken"))
+#: `<path>/.git` exists, as a directory or a worktree's file.
+_GIT = {pagestat.DIR: True, pagestat.OTHER: True, pagestat.MISSING: False, None: None}
+
+
+def at_path(call: Any) -> dict[str, Any]:
+    """`GET /api/folder?path=P`: what the Add panel says under its folder field (the
+    route's shape says each field). A read: no write, no `mkdir`, no git process. The two
+    `stat`s go through `pagestat`, under the list's bound."""
+    typed = expand_tilde(call.query["path"], _home())
+    if typed is None or "\0" in typed or not os.path.isabs(typed):
+        return dict(_AT_PATH_NONE)
+    path = os.path.normpath(typed)
+    git_path = os.path.join(path, ".git")
+    seen = pagestat.look([path, git_path])
+    exists = _EXISTS[seen[path]]
+    try:
+        key = rules.check_key(os.path.basename(path))
+    except ProjectsError:
+        key = None
+    try:
+        found = api.for_path(path)
+        taken = (None if key is None else
+                 any(p.key.casefold() == key.casefold() for p in api.list_projects()))
+    except ProjectsError:
+        found = taken = None
+    return {"path": path, "exists": exists,
+            "git": None if exists is False else _GIT[seen[git_path]],
+            "project": found.key if found else None,
+            "how": _how(path, found.root) if found else None,
+            "key": key, "taken": taken}
 
 
 def kinds(call: Any) -> dict[str, Any]:
@@ -287,5 +363,6 @@ def remove(call: Any) -> Any:
     return link
 
 
-__all__ = ["GIT_TIMEOUT", "KEY_REUSED", "projects", "project", "kinds", "where",
-           "remove_status", "add", "set_fields", "agents_add", "agents_remove", "remove"]
+__all__ = ["GIT_TIMEOUT", "KEY_REUSED", "expand_tilde", "projects", "project", "at_path",
+           "kinds", "where", "remove_status", "add", "set_fields", "agents_add",
+           "agents_remove", "remove"]
