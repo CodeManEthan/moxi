@@ -59,7 +59,9 @@ def rows(*, times: bool = True) -> dict[str, list[tuple]]:
                                  "ORDER BY project, slug").fetchall(),
             "rounds": conn.execute("SELECT * FROM rounds ORDER BY project, slug").fetchall(),
             "items": conn.execute("SELECT * FROM items ORDER BY project, slug, position")
-                         .fetchall()}
+                         .fetchall(),
+            "landings": conn.execute("SELECT * FROM landings "
+                                     "ORDER BY project, slug, position").fetchall()}
     finally:
         conn.close()
 
@@ -273,8 +275,9 @@ def test_an_index_of_the_first_schema_is_brought_up_by_the_next_write(home):
     [(status, ended)] = conn.execute("SELECT status, ended FROM rounds").fetchall()
     conn.close()
     assert status == "dropped"
+    # This event holds no numbers, so none are kept.
     assert json.loads(ended) == {"how": "dropped", "by": "operator",
-                                 "record": "comms:30", "at": AT}
+                                 "record": "comms:30", "at": AT, "numbers": None}
     assert index.disagreements([home]) == []
 
 
@@ -479,3 +482,119 @@ def test_each_way_the_index_and_the_logs_differ_is_named(home):
         index.Disagreement("proj-a/a-round", "has a row in the index and no log")]
     index.rebuild([home])
     assert index.disagreements([home]) == []
+
+
+def test_the_index_keeps_a_round_s_numbers_and_numbers_it_was_not_given_differ(home):
+    at = open_round(home)
+    write.record(at, by="planner", at=AT, event=lambda view, result: write.Entry(
+        "round.closed", {"numbers": {"folds": 2}}))
+    assert index.read("proj-a", home.rounds_dir, "a-round").ended["numbers"] == {"folds": 2}
+
+    conn = sqlite3.connect(paths.index_file())
+    conn.execute("UPDATE rounds SET ended = json_set(ended, '$.numbers.folds', 3)")
+    conn.commit()
+    conn.close()
+
+    assert index.disagreements([home]) == [index.Disagreement(
+        "proj-a/a-round", "has rows in the index that its log does not give")]
+
+
+# -- landings ------------------------------------------------------------------------------
+
+def commission(at: write.Where, stage="B1", *, repo="proj-a", target="main") -> None:
+    write.record(at, by="planner", at=AT, event=lambda view, result: write.Entry(
+        "build.commissioned", {"stage": stage, "repo": repo, "branch": f"work-{stage}",
+                               "base": "a" * 40, "target": target, "builder": "coder"}))
+
+
+def merged(at: write.Where, stage="B1", *, landing="c" * 40, state="ok",
+           kind="merge") -> None:
+    write.record(at, by="planner", at=AT, event=lambda view, result: write.Entry(
+        "finish.action", {"stage": stage, "tip": "b" * 40, "id": kind, "kind": kind,
+                          "state": state, "landing": landing, "target_before": "a" * 40}))
+
+
+def test_a_finish_s_merge_is_kept_with_its_build_s_repo_and_target(home):
+    at = open_round(home)
+    commission(at)
+    merged(at)
+    [row] = rows()["landings"]
+    assert row == ("proj-a", "a-round", 0, "B1", 2, 3, "proj-a", "main", "c" * 40,
+                   "a" * 40, "b" * 40)
+    [landing] = index.read("proj-a", home.rounds_dir, "a-round").landings
+    assert (landing.stage, landing.landing, landing.target_before) == (
+        "B1", "c" * 40, "a" * 40)
+
+
+def test_only_a_merge_made_or_found_is_a_landing(home):
+    at = open_round(home)
+    commission(at)
+    merged(at, state="failed", landing="1" * 40)
+    merged(at, kind="push", landing="2" * 40)
+    merged(at, state="found", landing="3" * 40)
+    assert [one.landing for one in index.read("proj-a", home.rounds_dir,
+                                              "a-round").landings] == ["3" * 40]
+
+
+def test_a_landing_stays_after_its_build_is_dropped(home):
+    at = open_round(home)
+    commission(at)
+    merged(at)
+    write.record(at, by="planner", at=AT, event=lambda view, result: write.Entry(
+        "build.dropped", {"stage": "B1", "by": "operator", "record": "comms:30"}))
+    assert len(index.read("proj-a", home.rounds_dir, "a-round").landings) == 1
+
+
+def test_landings_are_rebuilt_from_the_logs(home):
+    at = open_round(home)
+    commission(at)
+    merged(at)
+    written = rows(times=False)
+    paths.index_file().unlink()
+    index.rebuild([home])
+    assert rows(times=False) == written and len(written["landings"]) == 1
+
+
+def test_the_landings_of_a_repo_and_target_are_read_from_every_round_of_every_project(
+        home, tmp_path):
+    first = open_round(home, "a-round")
+    commission(first)
+    merged(first, landing="1" * 40)
+    commission(first, "B2", target="release")
+    merged(first, "B2", landing="2" * 40)
+    other = folders.Home("proj-b", tmp_path / "other")
+    other.rounds_dir.mkdir()
+    second = open_round(other, "b-round")
+    commission(second, "B1")
+    merged(second, landing="3" * 40)
+    commission(second, "B2", repo="proj-b")
+    merged(second, "B2", landing="4" * 40)
+    found = index.landings([home, other], repo="proj-a", target="main")
+    assert [(one.round, one.landing.landing) for one in found] == [
+        ("proj-a/a-round", "1" * 40), ("proj-b/b-round", "3" * 40)]
+
+
+def test_a_landing_appended_elsewhere_is_read_from_the_log_and_nothing_is_written(home):
+    at = open_round(home)
+    commission(at)
+    log.append(at.round_log, "finish.action",
+               {"stage": "B1", "tip": "b" * 40, "id": "merge", "kind": "merge",
+                "state": "ok", "landing": "c" * 40, "target_before": "a" * 40},
+               by="pilot")
+    before = files(home.rounds_dir, paths.data_dir(), paths.state_dir())
+    found = index.landings([home], repo="proj-a", target="main")
+    assert [one.landing.landing for one in found] == ["c" * 40]
+    assert rows()["landings"] == []
+    assert files(home.rounds_dir, paths.data_dir(), paths.state_dir()) == before
+
+
+def test_a_landing_row_the_log_does_not_give_is_a_disagreement(home):
+    at = open_round(home)
+    commission(at)
+    merged(at)
+    conn = sqlite3.connect(paths.index_file())
+    conn.execute("UPDATE landings SET landing = ?", ("d" * 40,))
+    conn.commit()
+    conn.close()
+    assert [one.problem for one in index.disagreements([home])] == [
+        "has rows in the index that its log does not give"]

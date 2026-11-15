@@ -222,6 +222,12 @@ def called(state: str | None) -> str:
 
 # -- what the index keeps ----------------------------------------------------------------
 
+def asker(by: str | None, builder: str | None = None) -> str | None:
+    """Who asked a question, as a listing says it: the asker, and for a question that
+    came up in a build, the builder it was asked for."""
+    return by if builder is None else f"{by} for {builder}"
+
+
 def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
     """The questions of `state` that are recorded as open or parked, each as `(id, body)`
     for the index. The body holds the record as the log leaves it, at the depth it has:
@@ -240,6 +246,8 @@ def waiting(state: states.State) -> Iterator[tuple[str, Mapping]]:
         body = {"text": question.text, "from": question.origin,
                 "blocks": None if question.blocks is None else stored(question.blocks),
                 "state": question.state, "by": question.by, "at": question.at}
+        if question.builder is not None:
+            body["builder"] = question.builder
         if question.until is not None:
             body["until"] = question.until
             if (not question.until.startswith(UNTIL_ROUND)
@@ -270,7 +278,8 @@ def listed(body: Mapping, *, on_closed: Callable[[str], bool] | None = None) -> 
     return OPEN if came else PARKED
 
 
-__all__ = ["OPEN", "PARKED", "RULED", "WITHDRAWN", "MOVED", "LEFT", "ALL", "NONE", "ROUND_ID",
+__all__ = ["asker",
+           "OPEN", "PARKED", "RULED", "WITHDRAWN", "MOVED", "LEFT", "ALL", "NONE", "ROUND_ID",
            "PROJECT_ID", "STAGE", "UNTIL_ROUND", "UNSTAGE", "find", "next_id",
            "parse_blocks", "said", "stored", "holds_every", "recorded_stages",
            "finished_stages", "left_stages", "unrecorded", "stages_said", "is_closed",

@@ -1,7 +1,34 @@
 # Changelog
 
+## 0.1.9 (unreleased)
+
+- A settings key may carry page fields, which say how a settings page shows it: `label`,
+  `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal` and
+  `elsewhere`. They change nothing a key is or how it is read. The schema reader checks
+  each, refuses them on a retired key, and refuses a schema that marks more than seven
+  keys `common`. A module that fills them needs `moxi>=0.1.9`: an older core refuses its
+  schema for the unknown fields. `moxi.config` names them in `PAGE_FIELDS` and the cap in
+  `COMMON_MAX`; `moxi.config.Key` takes them by keyword only.
+- `moxi config <module> show --json` carries each key's page fields: strings or null,
+  `common` and `pick` as bools, `choices` as `{value, words}` rows in the enum's order,
+  `hurts` and `terminal` as tables or null.
+- `moxi config set` and `moxi config unset` take `--json`: the command prints one object,
+  `{changed, problem, fix, units}`, and nothing else on stdout, with a refusal's problem
+  and fix apart and the lines applying the module's units said in `units`. The exit codes
+  are unchanged. `problem` is the bare predicate (`is not a setting of demo`) when the
+  refusal is about the value of the key being set, and otherwise the whole sentence naming
+  what it is about: the config file (locked, not valid TOML), another key in it, the
+  module, or the module's settings schema.
+- A change refused because the module's settings schema cannot be read raises the
+  schema's own `SchemaError`, naming the key at fault, in place of a `ConfigError` that
+  named only the schema's file. The exit code is still 3.
+- The core's own keys carry their page fields.
+
 ## 0.1.8 (unreleased)
 
+- `moxi.proc.run` takes `output`, a file path: the child's stdout and stderr both go
+  straight to that file, created 0600 or appended to, so a long run's output is not held
+  in memory.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi.config`: `set` is now `set_value`; `moxi.place`:
   `FOLDER_NOTE` is now `DIR_NOTE`; `moxi.place.Harness`: `folder` is now `harness_dir`.
@@ -9,6 +36,17 @@
   not read.
 - The catalogue gains `rounds` (`moxi-rounds`), so `moxi install rounds` and `moxi
   modules --available` know it by name. Its version is 3.
+- `moxi modules --available --refresh` fetches the catalogue a released core shipped,
+  not main's: it lists the `moxi-v<version>` tags and, from the highest down, at most
+  three, takes the first whose version PyPI has. No released version keeps the shipped
+  copy, as a missing file did. `moxi.catalogue.URL` is gone; `TAGS_URL`, `INDEX_URL`
+  and `FILE_URL` name the three reads.
+- A catalogue entry may say `unreleased = true`; `moxi install NAME` then refuses with
+  "not on PyPI yet; install it from a checkout with --from" unless `--from` gives its
+  source. `moxi.catalogue.Entry` gains `unreleased`.
+- Every catalogue entry says `unreleased = true`, since no module has a released version
+  yet; a core release after a module's first release drops its mark. The catalogue's
+  version is 5.
 - The terminal record's set holds `OPENCODE_CONFIG_DIR`, so a page check can compare
   OpenCode's home.
 

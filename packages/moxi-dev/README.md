@@ -148,7 +148,10 @@ Code, tests and docs in this repository give their reasons in plain words. The t
 check, which `moxi-dev check` runs over every text file git doesn't ignore, refuses short
 reference ids that point into notes a reader of the repository can't see: a capital
 letter and a number in square brackets, a section sign with a number, a severity word
-with a number, and a few more shapes listed in `moxi_dev/tags.py`. Its line names the
+with a number, and a few more. Those are the shapes of moxi-publishing's `ruling-tag` and
+`round-pointer` rules, read from `moxi_publishing.rules`, so this check and publishing's
+scan of a public repo refuse the same text; to them it adds two shapes only this
+repository's own records use, a D-number and a finding id (below). Its line names the
 file, the line and the text it refused. Write the reason the id stood for instead.
 
 Some text has to look like an id because it is data, such as the input a test feeds the
@@ -177,7 +180,12 @@ publishing needs on every package, whatever the change touched:
   `classifiers` and `[project.urls]`, has a `CHANGELOG.md` whose first version heading
   is its version and which its source distribution's `only-include`, when it sets one,
   lists, and its README links to nothing by a relative path (PyPI shows the README,
-  where such a link leads nowhere; a link to a heading of the same page is fine).
+  where such a link leads nowhere; a link to a heading of the same page is fine);
+- a README link to a file in the repository, `<Repository URL>/blob/<ref>/<path>`,
+  names the package's own release tag at its current version as the ref
+  (`moxi-comms-v0.3.0`), so the page the index shows for a version links to that
+  version's files. The tag scheme and the CHANGELOG heading reader are
+  moxi-publishing's, which moxi-dev requires.
 
 Each problem's line names the package, the field and the fix. After `moxi-dev new`,
 the catalogue line is the one thing left to add by hand.

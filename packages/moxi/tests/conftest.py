@@ -124,6 +124,36 @@ def see_only(root: Path, monkeypatch) -> None:
     monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))
 
 
+def released_catalogue_text() -> str:
+    """The shipped catalogue as the core release after its modules' first releases ships
+    it: one version higher, with no `unreleased` mark."""
+    import re
+    from importlib.resources import files
+
+    text = (files("moxi") / "catalogue.toml").read_text(encoding="utf-8")
+    text = text.replace("unreleased = true\n", "")
+    return re.sub(r"(?m)^version = ([0-9]+)$",
+                  lambda found: f"version = {int(found.group(1)) + 1}", text)
+
+
+@pytest.fixture(autouse=True)
+def _released_catalogue(monkeypatch):
+    """Every listed module as released: the shipped catalogue marks the modules not on the
+    index yet, and the install and uninstall tests install listed names from it. A test of
+    the mark, or of the shipped copy itself, reads its own."""
+    import moxi.catalogue as catalogue
+
+    real = catalogue.load
+
+    def load(env=None):
+        found = real(env)
+        return catalogue.Catalogue(found.version, tuple(
+            catalogue.Entry(e.name, e.distribution, e.summary) for e in found.entries),
+            found.source)
+
+    monkeypatch.setattr(catalogue, "load", load)
+
+
 @pytest.fixture(autouse=True)
 def _no_real_core_roots(tmp_path_factory, monkeypatch):
     """The core's own roots, uv's tool directory and the user site point into tmp, so

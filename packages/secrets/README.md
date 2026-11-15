@@ -162,7 +162,13 @@ There are two files, read with `Allowlist.read(public, private)`:
 - The private file takes lines of every set, and `text:` lines for private names. It must
   lie inside a directory named `.git` (a repo's own is `<git common dir>/secrets-allow-private`)
   or in secrets' config directory, checked after every link is resolved, so git never
-  tracks it.
+  tracks it. A caller judging a repo passes its common git dir as `git_dir`, which counts
+  whatever it is named (a bare clone's, say). A private file that doesn't exist adds no
+  line, wherever it would be.
+
+`Allowlist.from_text(public_text, private)` takes the public file's content as text
+instead, for a caller that judges a snapshot rather than the work tree: a git hook reads
+`.secrets-allow` from the index, a push check from the commit it judges.
 
 A malformed line raises `AllowlistError` naming the file and the line number, never the
 line's text. A line that allows a whole set everywhere is refused: its path and match are
@@ -239,5 +245,5 @@ modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/secrets/LICENSE). The vendored gitleaks rules are gitleaks' own, under its MIT
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-secrets-v0.1.0/packages/secrets/LICENSE). The vendored gitleaks rules are gitleaks' own, under its MIT
 licence in `src/moxi_secrets/rules/upstream/LICENSE`.

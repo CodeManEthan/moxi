@@ -1022,8 +1022,11 @@ def rules(path: str | os.PathLike) -> list[str]:
 def status(path: str | os.PathLike | None = None) -> list[dict]:
     """Each indexed repo, or the one at `path`: its git hooks as `git-hooks list --json`
     prints them. Each repo's `pieces` lists every registered piece with its id, event,
-    enabled, fail policy, order, settings and whether a doctor record of it is open, and
-    its `records` each doctor record repo has open for it (`_records.open_of`)."""
+    enabled, fail policy, order, settings and whether a doctor record of it is open; its
+    `events` how git reaches each event's pieces (`via`), the existing git hook, and
+    `command`, the text git runs for it as repo wrote it (the config entry's command, the
+    shim, or the launcher; None when it can't be read or nothing of repo's runs); and its
+    `records` each doctor record repo has open for it (`_records.open_of`)."""
     version = _version(need=False)
     index = indexed()
     if path is not None:
@@ -1087,7 +1090,7 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
     running = state.events()
     for event in sorted({p["event"] for p in listed if p["event"] in EVENTS}):
         info: dict = {"pieces": [p["id"] for p in listed if p["event"] == event],
-                      "via": None, "existing": None, "chain_line": None}
+                      "via": None, "existing": None, "chain_line": None, "command": None}
         hook = repo.hooks_dir / event
         if event not in running:
             # Every piece of it is disabled, so nothing of repo's is there to check.
@@ -1099,6 +1102,7 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                 problems.append(Problem(f"{event} has pieces but no config entry",
                                         f"moxi repo git-hooks refresh {_arg(repo.root)}"))
             else:
+                info["command"] = command
                 problems += _guard_problems(event, command, python, runner, repo.root)
             if _runnable(hook) and shim.shim_event(hook) is None:
                 info["existing"] = f"{hook}, run by git after the pieces"
@@ -1108,6 +1112,7 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
             local = repo.hooks_dir / (event + shim.LOCAL)
             if hook in mine:
                 text = hook.read_text(encoding="utf-8", errors="replace")
+                info["command"] = text
                 problems += _guard_problems(event, text, python, runner, repo.root)
             elif mine:
                 # A manager that moves a hook aside as `<event>.legacy` runs it from its
@@ -1119,8 +1124,9 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                     state="ok" if runs else "fail"))
                 if runs:
                     # It still runs, so its guard's two paths matter as the shim's do.
-                    problems += _guard_problems(event, mine[0].read_text(
-                        encoding="utf-8", errors="replace"), python, runner, repo.root)
+                    info["command"] = mine[0].read_text(encoding="utf-8", errors="replace")
+                    problems += _guard_problems(event, info["command"], python, runner,
+                                                repo.root)
             else:
                 problems.append(Problem(f"{event}: repo's shim is missing or another tool "
                                         "replaced it",
@@ -1142,8 +1148,10 @@ def _status_of(repo: Repo, *, in_index: bool, version, good: dict) -> dict:
                                         f"moxi repo git-hooks refresh {_arg(repo.root)}",
                                         state="fail" if present else "warn"))
             else:
-                problems += _guard_problems(event, repo.launcher.read_text(
-                    encoding="utf-8", errors="replace"), python, runner, repo.root)
+                info["command"] = repo.launcher.read_text(encoding="utf-8",
+                                                          errors="replace")
+                problems += _guard_problems(event, info["command"], python, runner,
+                                            repo.root)
         events[event] = info
     for event, path, fixable in gitconf.leftovers(repo, state):
         if shim.shim_event(path) is not None:
@@ -1194,13 +1202,20 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     return out
 
 
-#: Each name this module hands out for another module -> the module it comes from. Four
+#: Each name this module hands out for another module -> the module it comes from. Seven
 #: are not package exports: `SpecError`, which `save_spec` raises; `saved_spec`, the spec a
-#: name last saved; `last_commit_time`, when an author last committed; and `PATHSPEC_VARS`,
-#: the environment variables that change how git reads a pathspec.
+#: name last saved; `last_commit_time`, when an author last committed; `PATHSPEC_VARS`,
+#: the environment variables that change how git reads a pathspec; `interpreter`, the
+#: Python the git hook entries run; `resolve_project`, the path a PATH argument names,
+#: which may be a project key; and `ProjectUnavailable`, which it raises with an exit
+#: code in `code`.
 REEXPORTS = {**_PACKAGE_EXPORTS, "SpecError": "moxi_repo.committer",
              "saved_spec": "moxi_repo.committer", "last_commit_time": "moxi_repo.committer",
-             "PATHSPEC_VARS": "moxi_repo.gitrun"}
+             "PATHSPEC_VARS": "moxi_repo.gitrun", "interpreter": "moxi_repo.gitconf",
+             "resolve_project": "moxi_repo.projects",
+             "ProjectUnavailable": "moxi_repo.projects", "resolve_repo": "moxi_repo.gitconf",
+             "NotARepo": "moxi_repo.gitconf", "comment_prefix": "moxi_repo.commit_rules",
+             "quote_arg": "moxi_repo.run"}
 
 
 def __getattr__(name):

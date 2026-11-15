@@ -8,7 +8,8 @@ Each is a `RoundsError`, carrying `reason`, `fix` and `exit_code`:
 - `TooNew` (exit 3), an `Unreadable`: the line was written in a log format this code does
   not know.
 - `Refused` (exit 3): a verb's conditions are not all met. `unmet` holds every one that
-  is not, each an `Unmet` with the command that meets it. Nothing was written.
+  is not, each an `Unmet` with the command that meets it. Nothing was written, unless
+  `done` names what the verb did and recorded before it was refused.
 - `Locked` (exit 3): another process held a lock past the wait. `file` is the lock file
   and `holder` the pid written in it.
 - `BadName` (exit 2): a round's name is not `<project>/<slug>`.
@@ -99,15 +100,22 @@ class Unmet:
 
 class Refused(RoundsError):
     """A verb was refused because the conditions in `unmet` do not hold. Every one that
-    does not hold is there, not only the first, and the verb wrote nothing."""
+    does not hold is there, not only the first. The verb wrote nothing, unless `done`
+    says, a line each, what it did and recorded before the refusal: a verb that acts in
+    steps, as `finish` does, is refused at a later one with the earlier ones standing."""
 
     exit_code = exits.REFUSED
 
-    def __init__(self, unmet: Iterable[Unmet]):
+    def __init__(self, unmet: Iterable[Unmet], *, done: Iterable[str] = ()):
         self.unmet = tuple(unmet)
+        self.done = tuple(done)
         if not self.unmet:
             raise ValueError("a refusal names at least one unmet condition")
         lines = ["refused, with nothing written:"]
+        if self.done:
+            lines = ["refused after acting; what was done is recorded and stands:"]
+            lines += [f"  done: {one}" for one in self.done]
+            lines.append("refused because:")
         for one in self.unmet:
             lines += [f"  - {one.reason}", f"    run: {one.fix}"]
         super().__init__("\n".join(lines))

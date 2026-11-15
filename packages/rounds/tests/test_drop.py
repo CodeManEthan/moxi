@@ -9,8 +9,8 @@ import json
 import pytest
 from moxi import cli
 
-from moxi_rounds import (asking, dropping, holds, index, log, marking, moving, opening,
-                         questions, ruling, state, write)
+from moxi_rounds import (asking, dropping, holds, index, log, marking, moving, numbers,
+                         opening, questions, ruling, state, write)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import BadArgument, Locked, NoRound, Refused
 
@@ -102,11 +102,15 @@ def test_the_operator_drops_a_round_that_holds_his_rulings(rounds, capsys):
 
     [event] = added(round_log(rounds), before)
     assert event == {"actor": "curator", "type": "round.dropped", "at": event["at"],
-                     "by": "operator", "record": "comms:30", "questions": {}}
+                     "by": "operator", "record": "comms:30", "tips": [],
+                     "questions": {},
+                     "numbers": numbers.of(state.fold(log.read(round_log(rounds))[:-1]),
+                                           ended_at=event["at"])}
     found = held(round_log(rounds))
     assert found.status == state.DROPPED
     assert found.ended == state.Ended(how="dropped", by="operator", record="comms:30",
-                                      actor="curator", at=event["at"])
+                                      actor="curator", at=event["at"],
+                                      numbers=event["numbers"])
     assert not log.exists(project_log(rounds))
     out, err = capsys.readouterr()
     assert out.splitlines() == [
@@ -428,7 +432,7 @@ def test_a_round_that_was_never_opened_is_not_dropped(rounds, capsys):
 @pytest.mark.parametrize("argv", [
     [A], [A, "--by", "checker", "--record", "comms:30"],
     ["proj-a", "--by", "operator", "--record", "comms:30"],
-    [A, "B1", "--by", "operator", "--record", "comms:30"],
+    [A, "B1", "B2", "--by", "operator", "--record", "comms:30"],
     ["--by", "operator", "--record", "comms:30"]])
 def test_a_call_that_cant_be_read_is_a_usage_error(rounds, capsys, argv):
     before = logs(rounds)
@@ -544,7 +548,7 @@ def test_a_question_a_correction_leaves_unanswered_in_an_ended_round_waits_nowhe
 
     assert main(["list", A, "--questions"]) == 0
     out = capsys.readouterr().out
-    assert ": 0 open, 0 parked\n" in out
+    assert ": 0 open, 0 parked, 0 to ratify\n" in out
     assert "This round has ended: dropped by operator at " in out
     docket, _heading, left = out.partition(
         "## Waiting for a new round: not put to the operator\n")
@@ -783,7 +787,8 @@ def test_a_dropped_round_is_shown_as_dropped_with_who_and_when(rounds, capsys):
     assert found["status"] == "dropped"
     assert found["ended"] == {"how": "dropped", "by": "operator", "record": "comms:30",
                               "actor": "planner", "at": DROPPED_AT,
-                              "questions": {"Q1": "P1"}}
+                              "questions": {"Q1": "P1"},
+                              "numbers": log.read(round_log(rounds))[-1]["numbers"]}
     assert found["questions"][0]["moved_to"] == "P1"
     assert found["history"][-1]["type"] == "round.dropped"
 
@@ -804,7 +809,8 @@ def test_the_index_keeps_how_a_round_ended(rounds):
     drop()
     kept = index.read("proj-a", rounds, "a-round")
     assert (kept.status, kept.ended) == ("dropped", {
-        "how": "dropped", "by": "operator", "record": "comms:30", "at": DROPPED_AT})
+        "how": "dropped", "by": "operator", "record": "comms:30", "at": DROPPED_AT,
+        "numbers": log.read(round_log(rounds))[-1]["numbers"]})
 
     # The same from the logs alone, and from an index made again.
     from moxi_rounds import folders, paths

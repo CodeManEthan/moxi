@@ -93,13 +93,13 @@ def test_the_open_rounds_of_every_project_are_listed_with_flow_and_counts(
     ask(C, at=T2)
 
     assert printed(capsys) == (
-        f"{A}   open   flow fix   step commission of B1, not-built   "
+        f"{A}   open   flow fix   step commission of B1, waiting   "
         "open questions: 2   parked: 1   "
         "rulings not shown: 2\n"
-        f"{B}   open   flow fix   step commission, not-built   "
+        f"{B}   open   flow fix   step commission, ready   "
         "open questions: 0   parked: 0   "
         "rulings not shown: 0\n"
-        f"{C}   open   flow fix   step commission, not-built   "
+        f"{C}   open   flow fix   step commission, waiting   "
         "open questions: 1   parked: 0   "
         "rulings not shown: 0\n")
 
@@ -116,18 +116,18 @@ def test_the_rounds_as_data_are_the_rounds_as_lines(rounds, capsys):
     assert found["rounds"] == [
         {"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
          "status": "open", "flow": "fix",
-         "step": {"step": "commission", "stage": "B1", "state": "not-built"},
+         "step": {"step": "commission", "stage": "B1", "state": "waiting"},
          "counts": {"open": 1, "parked": 0, "not_shown": 1}, "standing": None,
          "ended": None},
         {"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),
          "status": "open", "flow": "fix",
-         "step": {"step": "commission", "stage": None, "state": "not-built"},
+         "step": {"step": "commission", "stage": None, "state": "ready"},
          "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
          "ended": None},
         {"name": C, "project": "proj-b",
          "folder": str(rounds.parent.parent / "notes-b" / "rounds" / "c-round"),
          "status": "open", "flow": "fix",
-         "step": {"step": "commission", "stage": None, "state": "not-built"},
+         "step": {"step": "commission", "stage": None, "state": "ready"},
          "counts": {"open": 0, "parked": 0, "not_shown": 0}, "standing": None,
          "ended": None}]
 
@@ -137,7 +137,7 @@ def test_a_project_named_keeps_the_rounds_to_its_own(rounds, capsys):
     assert [one["name"] for one in data(capsys, "proj-b")["rounds"]] == [C]
     assert data(capsys, "proj-b")["project"] == "proj-b"
     assert printed(capsys, "proj-b").splitlines() == [
-        f"{C}   open   flow fix   step commission, not-built   "
+        f"{C}   open   flow fix   step commission, ready   "
         "open questions: 0   parked: 0   "
         "rulings not shown: 0"]
 
@@ -171,6 +171,11 @@ def test_no_open_round_is_among_the_ended_ones(rounds, capsys):
     assert found["ended"] is True and found["rounds"] == []
 
 
+def numbers_of(rounds, slug):
+    """The numbers the event that ended the round `slug` holds."""
+    return log.read(log.round_log(rounds / slug))[-1]["numbers"]
+
+
 def test_a_dropped_round_is_listed_only_among_the_ended_with_how_and_when(
         rounds, capsys):
     rule(B, text=RULED)
@@ -181,7 +186,7 @@ def test_a_dropped_round_is_listed_only_among_the_ended_with_how_and_when(
     [found] = data(capsys, "--closed")["rounds"]
     assert (found["name"], found["status"]) == (B, "dropped")
     assert found["ended"] == {"how": "dropped", "by": "operator", "record": "comms:30",
-                              "at": T6}
+                              "at": T6, "numbers": numbers_of(rounds, "b-round")}
     assert found["counts"] == {"open": 0, "parked": 0, "not_shown": 1}
     assert printed(capsys, "--closed") == printed(capsys, "proj-a", "--closed") == (
         f"{B}   dropped by operator at {T6}, record comms:30   flow fix   "
@@ -194,7 +199,8 @@ def test_a_dropped_round_is_listed_the_same_with_no_index(rounds, capsys):
     paths.index_file().unlink()
 
     assert listing.rounds(ended=True).rounds[0].ended == {
-        "how": "dropped", "by": "lead", "record": "comms:30", "at": T6}
+        "how": "dropped", "by": "lead", "record": "comms:30", "at": T6,
+        "numbers": numbers_of(rounds, "b-round")}
 
 
 def test_nothing_of_a_dropped_round_waits_on_the_operator(rounds, capsys):
@@ -277,7 +283,7 @@ def test_a_project_whose_own_log_cant_be_read_is_named_and_its_counts_not_known(
 
     out = printed(capsys)
     assert out.splitlines()[0] == (
-        f"{A}   open   flow fix   step commission of B1, not-built   "
+        f"{A}   open   flow fix   step commission of B1, waiting   "
         "open questions: 1   parked: 0   "
         "rulings not shown: not known")
     assert "logs that can't be read, whose records are not listed:" in out
@@ -336,6 +342,12 @@ parked questions, not put to him:
   {A} Q2: {OTHER}
     from: comms:11   blocks: B2   state: parked   by: scout   at: {T2}   until: B2
 
+open waiting items:
+  none
+
+major decisions not yet ruled:
+  none
+
 rulings not yet shown to him:
   proj-a, not yet shown, through {T5}; once he has read them: moxi rounds rule \
 proj-a readback={T5} --record PTR
@@ -344,6 +356,9 @@ proj-a readback={T5} --record PTR
   proj-b, not yet shown, through {T3}; once he has read them: moxi rounds rule \
 proj-b readback={T3} --record PTR
     proj-b S1: {RULED} (record: https://example.test/said)
+
+builds idle, gone, empty, unclear, sharing or not read:
+  none
 """
 
 
@@ -352,8 +367,9 @@ def test_what_waits_as_data_holds_the_same_rows(rounds, capsys):
 
     found = data(capsys, "--waiting")
 
-    assert list(found) == ["computed", "project", "open", "parked", "not_shown",
-                           "unreadable", "no_folder"]
+    assert list(found) == ["computed", "project", "open", "parked", "waits",
+                           "decisions", "not_shown", "builds", "unreadable",
+                           "no_folder"]
     assert found["computed"] == NOW and found["project"] is None
     assert [(one["holder"], one["id"]) for one in found["open"]] == [
         ("proj-a", "P1"), (A, "Q1"), (C, "Q1")]
@@ -436,11 +452,20 @@ open questions:
 parked questions, not put to him:
   none
 
+open waiting items:
+  none
+
+major decisions not yet ruled:
+  none
+
 rulings not yet shown to him:
+  none
+
+builds idle, gone, empty, unclear, sharing or not read:
   none
 """
     found = data(capsys, "--waiting")
-    assert found["open"] == found["parked"] == found["not_shown"] == []
+    assert found["open"] == found["parked"] == found["waits"] == found["not_shown"] == []
 
 
 def test_a_question_ruled_or_a_ruling_shown_waits_no_longer(rounds, capsys):
@@ -556,7 +581,7 @@ def test_a_project_that_is_not_known_is_refused(rounds, capsys):
 @pytest.mark.parametrize("argv", [
     ["--waiting", "--closed"], ["--waiting", "--questions"],
     ["proj-a", "--closed", "--questions"], ["--view", "docket"], ["--out", "somewhere"],
-    ["--waiting", "--out", "somewhere"], ["--dormant"], ["--numbers"], [""],
+    ["--waiting", "--out", "somewhere"], ["--dormant"], [""],
     ["proj-a", "proj-b"]])
 def test_a_listing_that_cant_be_read_is_a_usage_error(rounds, capsys, argv):
     assert main(["list", *argv]) == 2
@@ -575,3 +600,69 @@ def test_help_says_what_each_listing_is(capsys):
     for part in ("--waiting", "--closed", "--questions", "--json",
                  "what waits on the operator", "the rounds that have ended"):
         assert part in said
+
+
+# -- the numbers -------------------------------------------------------------------------
+
+def close(round_dir, slug, held, *, at=T6):
+    """End a round with a closing event that holds `held` as its numbers, or none."""
+    log.append(log.round_log(round_dir / slug), "round.closed",
+               {} if held is None else {"numbers": held}, by="planner", at=at)
+
+
+def test_the_numbers_of_the_closed_rounds_are_summed_and_a_dropped_one_s_are_not(
+        rounds, tmp_path, capsys):
+    close(rounds, "a-round", {"folds": 1, "step_time_s": {"commission B1": 30},
+                              "findings": {"major": 1, "minor": 0}})
+    close(tmp_path / "notes-b" / "rounds", "c-round",
+          {"folds": 2, "step_time_s": {"commission B1": 5, "build B1": 60},
+           "findings": {"major": 0, "minor": 2}})
+    dropping.drop(B, by="operator", record="comms:30", run_by="planner", at=T6)
+
+    found = data(capsys, "--numbers")
+
+    assert found["rounds"] == [A, C] and found["uncounted"] == []
+    assert found["numbers"] == {"folds": 3,
+                                "step_time_s": {"commission B1": 35, "build B1": 60},
+                                "findings": {"major": 1, "minor": 2}}
+    text = printed(capsys, "--numbers")
+    assert text.startswith("numbers of 2 closed rounds\n  design: passes 0, ")
+    assert "\n  time in steps: commission B1 35s, build B1 1m\n" in text
+    assert data(capsys, "proj-a", "--numbers")["rounds"] == [A]
+
+
+def test_a_closed_round_whose_closing_holds_no_numbers_is_named_and_not_summed(
+        rounds, capsys):
+    close(rounds, "a-round", None)
+
+    found = data(capsys, "proj-a", "--numbers")
+
+    assert (found["rounds"], found["numbers"], found["uncounted"]) == ([], {}, [A])
+    assert printed(capsys, "proj-a", "--numbers") == (
+        "no round of proj-a has closed with its numbers\n"
+        f"closed with no numbers, not summed: {A}\n")
+
+
+def test_a_round_whose_log_can_t_be_read_is_named_and_not_summed(rounds, capsys):
+    close(rounds, "b-round", {"folds": 1})
+    spoil(rounds)
+
+    found = data(capsys, "proj-a", "--numbers")
+
+    assert found["rounds"] == [B] and found["numbers"] == {"folds": 1}
+    [reason] = found["unreadable"]
+    assert str(log.round_log(rounds / "a-round")) in reason
+
+
+def test_the_numbers_are_the_same_with_no_index(rounds, capsys):
+    close(rounds, "a-round", {"folds": 1})
+    paths.index_file().unlink()
+    assert listing.numbers("proj-a", refresh=False).numbers == {"folds": 1}
+
+
+def test_the_numbers_are_a_listing_of_their_own(rounds, capsys):
+    for other in ("--closed", "--waiting", "--questions"):
+        assert main(["list", "--numbers", other]) == 2
+        assert "are each a listing of their own" in capsys.readouterr().err
+    assert main(["list", A, "--numbers"]) == 3
+    assert f"moxi rounds show {A}" in capsys.readouterr().err

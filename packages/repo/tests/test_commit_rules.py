@@ -490,7 +490,8 @@ def test_a_committer_pass_over_tag_shaped_file_names_passes_the_piece(demo, caps
 
 def test_the_module_keeps_to_the_standard_library():
     """The piece runs inside the git hook: its module imports nothing outside the standard
-    library but the runner's own `moxi_repo.pieces`."""
+    library but the runner's own `moxi_repo.pieces` and `moxi_repo.run`, and, inside
+    `commit_rules_problems` only, which judges a commit already made, `moxi_repo.gitrun`."""
     import ast
     import sys
 
@@ -502,7 +503,7 @@ def test_the_module_keeps_to_the_standard_library():
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module)
     outside = {m for m in imported if m.split(".")[0] not in sys.stdlib_module_names}
-    assert outside == {"moxi_repo.pieces"}
+    assert outside == {"moxi_repo.pieces", "moxi_repo.run", "moxi_repo.gitrun"}
 
 
 def test_seeds_and_setting_checks_are_registered_for_the_piece():
@@ -510,3 +511,27 @@ def test_seeds_and_setting_checks_are_registered_for_the_piece():
     assert PIECE in api.SEEDS and PIECE in api.SETTING_CHECKS
     assert api.SETTING_CHECKS[PIECE]("refused-trailer", ["[unclosed"]) is None
     assert api.SETTING_CHECKS[PIECE]("tag-pattern", ["[ok]"]) is None
+
+
+# -- commit_rules_problems: the piece's rules judged after the commit -------------------------
+
+def test_commit_rules_problems_reads_the_piece_settings_of_the_repo(demo):
+    import moxi_repo
+
+    repo = demo.repo("alpha-notes")
+    message = "Fix TAG-12\n\nBody.\n\nRound: proj-a/one\n"
+    assert moxi_repo.commit_rules_problems(repo, message) == []
+    api.add(repo, PIECE, sets=["refused-trailer=Round", r"tag-pattern=\bTAG-[0-9]+\b"])
+    problems = moxi_repo.commit_rules_problems(repo, message)
+    assert any('line 1 has "TAG-12"' in p for p in problems), problems
+    assert any("Round" in p for p in problems), problems
+    assert moxi_repo.commit_rules_problems(repo, "Fix it\n\nBody.\n") == []
+    # A made commit's every line is its own: git kept a comment-prefixed line and anything
+    # below a scissors line, so both are judged.
+    git(repo, "config", "core.commentChar", ";")
+    assert moxi_repo.commit_rules_problems(repo, "Fix it\n; TAG-12 here\n") != []
+    assert moxi_repo.commit_rules_problems(repo, "Fix it\n# TAG-12 here\n") != []
+    scissors = "; " + "-" * 24 + " >8 " + "-" * 24
+    assert moxi_repo.commit_rules_problems(repo, f"Fix it\n{scissors}\nTAG-12\n") != []
+    api.disable(repo, PIECE)
+    assert moxi_repo.commit_rules_problems(repo, message) == []

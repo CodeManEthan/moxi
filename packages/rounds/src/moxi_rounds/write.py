@@ -109,11 +109,13 @@ class Where:
 @dataclass(frozen=True)
 class Entry:
     """One event a verb appends: its type, its fields, and the log it goes to (`ROUND` or
-    `PROJECT`)."""
+    `PROJECT`). `at` is the event's own time, for an event that holds something counted
+    up to it; left out, the write's."""
 
     type: str
     fields: Mapping[str, object]
     log: str = ROUND
+    at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,12 +187,24 @@ def _close(where: Where, round_events: Sequence[dict], *, by: str,
     # they import this module.
     from . import closing
 
+    from moxi.config import ConfigError
+
+    from . import settings as own
+
     if where.slug is None:
         return None
-    entry = closing.entry(state.fold(round_events))
+    try:
+        ratify = own.round_setting(own.load(), where.project, closing.RATIFY)
+    except ConfigError:
+        # Whether its decisions are to be ruled can't be read, so the round stays
+        # open; the next write closes it once the config reads.
+        return None
+    # One time for the event and for its numbers, whose last stretch ends at it.
+    when = log.stamp() if at is None else at
+    entry = closing.entry(state.fold(round_events), ratify=str(ratify), at=when)
     if entry is None:
         return None
-    return log.append(where.round_log, entry.type, entry.fields, by=by, at=at)
+    return log.append(where.round_log, entry.type, entry.fields, by=by, at=when)
 
 
 #: The callbacks every write calls after its append, in order, each with the `Written`.
@@ -250,6 +264,16 @@ def record(where: Where, *, by: str,
     result = act(view)
     with hold():
         return append(_read(where, facts, opens=opens), result)
+
+
+def look(where: Where, *, facts: Callable[[Where], object] | None = None,
+         wait_s: float = WAIT_S, env=None) -> View:
+    """Read `where` under its lock, as a write's first step reads it, and append
+    nothing. A verb whose long act is made of several writes, each taking the lock for
+    itself, reads the logs between them with this. Raises `Locked`, `NoLog` and
+    `Unreadable` as `record` does."""
+    with _hold(where, with_project=False, wait_s=wait_s, env=env):
+        return _read(where, facts, opens=False)
 
 
 # -- the locks ---------------------------------------------------------------------------
@@ -352,7 +376,8 @@ def _append(view: View, entries: list[Entry], result: object, *, by: str,
     after = {ROUND: list(view.events), PROJECT: list(view.project_events)}
     for entry in entries:
         path = where.round_log if entry.log == ROUND else where.project_log
-        written = log.append(path, entry.type, entry.fields, by=by, at=at)
+        written = log.append(path, entry.type, entry.fields, by=by,
+                             at=at if entry.at is None else entry.at)
         appended.append(written)
         after[entry.log].append(written)
     failed = []
@@ -380,4 +405,4 @@ def _append(view: View, entries: list[Entry], result: object, *, by: str,
 
 __all__ = ["WAIT_S", "ROUND", "PROJECT", "ROUND_LOCKS_DIR", "PROJECT_LOCKS_DIR",
            "ON_APPEND", "round_lock", "project_lock",
-           "Where", "Entry", "View", "Written", "Gate", "record", "watching"]
+           "Where", "Entry", "View", "Written", "Gate", "record", "look", "watching"]

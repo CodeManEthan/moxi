@@ -294,8 +294,9 @@ def print_preview(found: Preview, *, action: str, common_dir, out: TextIO,
     if not judge.private_place_ok(common_dir):
         print(f"notes: the notes repo's git dir {common_dir} is not a folder named .git, "
               "so secrets reads no private allowlist for it: no private allowance can "
-              "apply, every file with a hit stays left out and every push with one is "
-              "refused", file=out)
+              "apply, every file with a private name stays left out and every push with "
+              "one is refused, and a private file put there is refused, so no allowance "
+              "applies at all", file=out)
         return
     print(f"notes: the private allowlist is {private_allowlist(common_dir)}, in the git "
           "dir, where git never tracks it", file=out)
