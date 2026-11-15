@@ -12,6 +12,9 @@
                       the open asks between agents, and each address's newest message
     GET /api/queue    one address's messages in the books' queue, oldest first, each
                       with that address's row first
+    GET /api/thread   the messages between two addresses, or by or to one, oldest
+                      first, and on a refresh the newer ones and the two addresses'
+                      rows in the books
 
 The roster and its stream answer from `api.roster_rows()`, which `moxi comms agents
 --json` prints, and the `Roster` it was joined from; the mail read from one
@@ -197,6 +200,33 @@ QUEUE = {
     "more": lb.Out("int"),
 }
 
+#: `/api/thread?a=&b=&before=&after=&limit=`: the messages between the addresses `a`
+#: and `b` (by one, with a tag naming the other), or by or to `a` without `b`, oldest
+#: first. Without `after`: the newest `limit` below `before` (or the newest of all), and
+#: `earlier`, the pair's messages before the oldest sent, how many and the oldest one's
+#: time, or null when there are none; `changed` is null. With `after` (the newest
+#: message id the page holds), a refresh: every message of the pair above it, `earlier`
+#: null, and `changed`, each message at or below `after` with a row in the books for `a`
+#: or `b`, with those rows; a message the page holds that `changed` doesn't list has no
+#: row for either. `count_today` is the pair's messages today, `today` the page
+#: server's local date. `state` and `detail` are as `MESSAGES`'; an error answers no
+#: message.
+THREAD = {
+    "state": lb.Out("string"),
+    "detail": lb.Out("string", nullable=True),
+    "today": lb.Out("string"),
+    "messages": lb.Out("list", items=MESSAGE),
+    "count_today": lb.Out("int"),
+    "earlier": lb.Out("table", nullable=True, items={
+        "count": lb.Out("int"),
+        "first_at": lb.Out("float"),
+    }),
+    "changed": lb.Out("list", nullable=True, items=lb.Out("table", items={
+        "message_id": lb.Out("string"),
+        "rows": lb.Out("list", items=DELIVERY),
+    })),
+}
+
 PAGE = lb.Page(
     routes=(
         lb.Route("/api/roster", "read", "moxi_comms.pagehandlers:roster",
@@ -215,9 +245,16 @@ PAGE = lb.Page(
         lb.Route("/api/queue", "read", "moxi_comms.pagereads:queue",
                  query={"name": lb.Field("string", max=200)},
                  returns=QUEUE),
+        lb.Route("/api/thread", "read", "moxi_comms.pagereads:thread",
+                 query={"a": lb.Field("string", max=200),
+                        "b": lb.Field("string", required=False, max=200),
+                        "before": lb.Field("string", required=False, max=20),
+                        "after": lb.Field("string", required=False, max=20),
+                        "limit": lb.Field("int", required=False, max=100)},
+                 returns=THREAD),
     ),
     assets="web",
 )
 
 __all__ = ["DELIVERY", "MAIL", "MAIL_STATE", "MESSAGE", "MESSAGES", "PAGE", "QUEUE", "ROSTER",
-           "ROW"]
+           "ROW", "THREAD"]

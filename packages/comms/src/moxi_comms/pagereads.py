@@ -28,7 +28,9 @@ no list shows, is left out and not counted. Its rows come from one query of the 
 `queue` and one of `dropped` for every message an answer carries, and its author from
 `attribution.from_record`, run only on the messages the answer carries. A read that
 weighs every message of a window (`/api/mail-state`) names an agent's or a module's
-post by its `author_id`, with no directory query (`authored`).
+post by its `author_id`, with no directory query (`authored`); so does a thread's read,
+which weighs every message of the record (`/api/thread`), and a refresh of a thread
+reads only the messages above the newest one the page holds.
 
 `/api/mail-state` decides whether an ask was answered by `replies`, the rule the
 daemon's `awaiting` uses, applied over the record: with the operator as the answerer for
@@ -54,7 +56,8 @@ from . import attribution, constants, directory, machine_line, replies
 from .owed import epoch_of
 from .paths import comms_db
 from .provision import NAMES
-from .record import AUTHOR_IDENTITY, AUTHOR_RESERVED, open_record
+from .record import (AUTHOR_IDENTITY, AUTHOR_OPERATOR, AUTHOR_OPERATOR_OLD, AUTHOR_RESERVED,
+                     open_record)
 from .replies import SentEntry
 from .scoping import GLOBAL, OPERATOR_NAME, identity_of, qualify, split_tag, tag_matches
 from .store import open_read
@@ -65,6 +68,10 @@ LIMIT = 12
 DAY_PAGE = 200
 #: How many of one address's rows `/api/queue` sends.
 QUEUE_CAP = 50
+#: `/api/thread`'s `limit` when the query names none.
+THREAD_LIMIT = 6
+#: How many messages each step back reads when a thread is read from the record.
+THREAD_PAGE = 500
 
 #: The record's one time spelling, UTC.
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
@@ -252,17 +259,22 @@ def book_rows(conn: sqlite3.Connection, ids) -> dict[str, list[dict[str, Any]]]:
     mids = sorted({int(i) for i in ids})
     if not mids:
         return {}
-    marks = ", ".join("?" * len(mids))
+    return _rows_where(conn, f"message_id IN ({', '.join('?' * len(mids))})", mids)
+
+
+def _rows_where(conn: sqlite3.Connection, where: str,
+                params: list) -> dict[str, list[dict[str, Any]]]:
+    # The `queue` and `dropped` rows `where` keeps, as `page.DELIVERY`s: {message id:
+    # [row]}, by qualified name. `where` holds only `?` marks and column names.
     out: dict[str, list[dict[str, Any]]] = {}
     for mid, name, state, held, once in conn.execute(
-            "SELECT message_id, name, state, held, digested_once FROM queue "
-            f"WHERE message_id IN ({marks})", mids):
+            f"SELECT message_id, name, state, held, digested_once FROM queue WHERE {where}",
+            params):
         out.setdefault(str(mid), []).append(
             {"qualified": name, "state": state, "held": bool(held),
              "takeable": not once})
     for mid, name, reason in conn.execute(
-            f"SELECT message_id, name, reason FROM dropped WHERE message_id IN ({marks})",
-            mids):
+            f"SELECT message_id, name, reason FROM dropped WHERE {where}", params):
         out.setdefault(str(mid), []).append(
             {"qualified": name, "state": reason, "held": False, "takeable": False})
     for rows in out.values():
@@ -535,7 +547,160 @@ def queue(call: Any) -> dict[str, Any]:
     return answer(empty, read)
 
 
+# --- /api/thread --------------------------------------------------------------------------
+
+
+class _Pair:
+    """Which messages are between `a` and `b`, or, without `b`, by or to `a`: by one
+    with a tag naming the other by the one rule (`scoping.identity_of`).
+
+    A message's author is read from its `author_id` with its `author_kind`, with no
+    directory query: an agent's or a module's `author_id` is its qualified name, and
+    the operator's kinds are the operator. An address is the operator when it is
+    `operator` or a name the directory gives him (read once per read); a tag naming
+    `operator` names him. Any other kind (a webhook's) is attributed once per author.
+    """
+
+    def __init__(self, conn: sqlite3.Connection, a: str, b: str | None) -> None:
+        self.conn = conn
+        self.a, self.b = a, b
+        names = {str(row[0]) for row in conn.execute("SELECT name FROM operators")}
+        self.him = frozenset({OPERATOR_NAME, *names})
+        # A tag naming either side spells that side's name, so a line zero without it
+        # is passed over before it is parsed.
+        self.spelled = {side: (split_tag(side)[0], *((OPERATOR_NAME,) if side in self.him
+                                                     else ()))
+                        for side in (a, b) if side is not None}
+        self._others: dict[tuple, frozenset[str]] = {}
+
+    def _author(self, msg) -> frozenset[str]:
+        # The addresses the message's author is.
+        kind = msg.author_kind
+        if kind in (AUTHOR_IDENTITY, AUTHOR_RESERVED):
+            name, scope = split_tag(msg.author_id)
+            return frozenset({qualify(name, scope or GLOBAL)})
+        if kind in (AUTHOR_OPERATOR, AUTHOR_OPERATOR_OLD):
+            return self.him
+        key = (kind, msg.author_id, msg.author_display)
+        if key not in self._others:
+            self._others[key] = frozenset({authored(self.conn, msg).qualified})
+        return self._others[key]
+
+    def _names(self, line: machine_line.MachineLine, side: str) -> bool:
+        for tag in line.recipients:
+            named = identity_of(tag)
+            if named == side or (named == OPERATOR_NAME and side in self.him):
+                return True
+        return False
+
+    def _spells(self, msg, side: str) -> bool:
+        zero = msg.content.partition("\n")[0]
+        return any(word in zero for word in self.spelled[side])
+
+    def match(self, msg) -> Read | None:
+        """`msg` as a `Read` when it is a listable message of the pair, else None."""
+        author = self._author(msg)
+        a, b = self.a, self.b
+        if b is None:
+            if a not in author and not self._spells(msg, a):
+                return None
+        elif not ((a in author and self._spells(msg, b))
+                  or (b in author and self._spells(msg, a))):
+            return None
+        found = readable([msg])
+        if not found:
+            return None
+        line = found[0].line
+        if b is None:
+            keep = a in author or self._names(line, a)
+        else:
+            keep = ((a in author and self._names(line, b))
+                    or (b in author and self._names(line, a)))
+        return found[0] if keep else None
+
+
+def thread(call: Any) -> dict[str, Any]:
+    """`GET /api/thread?a=&b=&before=&after=&limit=`: the messages between the addresses
+    `a` and `b`, or by or to `a` without `b`, oldest first: the newest `limit` (6 by
+    default) below `before`, read newest first back through the whole record, with
+    `earlier`, the pair's messages before the oldest sent; or, with `after`, every one
+    above it and `changed`, the books' rows of `a` and `b` for the messages at or below
+    it. `count_today` is the pair's messages today. A failure is a 200 with `state`
+    `error`, never a 500."""
+    query = call.query
+    today = _today()
+    empty = {"today": today.isoformat(), "messages": [], "count_today": 0,
+             "earlier": None, "changed": None}
+
+    def read() -> dict[str, Any]:
+        a = _address(query.get("a"))
+        b = query.get("b")
+        if b is not None:
+            b = _address(b)
+        before = query_id(query.get("before"))
+        after = query_id(query.get("after"))
+        limit = _limit(query.get("limit"), THREAD_LIMIT)
+        if before is not None and after is not None:
+            raise _Refused(BAD_QUERY)
+        out = dict(empty)
+        with opened() as store:
+            if store is None:
+                return out
+            pair = _Pair(store.conn, a, b)
+            if after is None:
+                found, out["earlier"] = _back_through(store, pair, before, limit)
+            else:
+                found = [r for r in map(pair.match,
+                                        store.record.history(store.room, after=after))
+                         if r is not None]
+                out["changed"] = _changed(store.conn, [a, *([b] if b else [])], after)
+            out["messages"] = shaped(store, found)
+            start, _ = day_bounds(today)
+            out["count_today"] = sum(pair.match(msg) is not None
+                                     for msg in store.record.since(store.room, start))
+        return out
+
+    return answer(empty, read)
+
+
+def _back_through(store: Store, pair: _Pair, before: str | None,
+                  limit: int) -> tuple[list[Read], dict[str, Any] | None]:
+    # The record newest first from `before`, a page at a time, to its start: the
+    # newest `limit` of the pair's messages, oldest first, and how many come before
+    # them with the oldest one's time.
+    kept: list[Read] = []
+    count, first_at = 0, 0.0
+    cursor = before
+    while True:
+        page = store.record.history(store.room, before=cursor, limit=THREAD_PAGE)
+        for msg in reversed(page):
+            r = pair.match(msg)
+            if r is None:
+                continue
+            if len(kept) < limit:
+                kept.append(r)
+            else:
+                count += 1
+                first_at = r.at
+        if len(page) < THREAD_PAGE:
+            break
+        cursor = page[0].id
+    kept.reverse()
+    return kept, ({"count": count, "first_at": float(first_at)} if count else None)
+
+
+def _changed(conn: sqlite3.Connection, names: list[str],
+             after: str) -> list[dict[str, Any]]:
+    # Each message at or below `after` with a row for one of `names` in the books, with
+    # those names' rows, by message id.
+    marks = ", ".join("?" * len(names))
+    rows = _rows_where(conn, f"name IN ({marks}) AND message_id <= ?",
+                       [*names, int(after)])
+    return [{"message_id": mid, "rows": rows[mid]} for mid in sorted(rows, key=int)]
+
+
 __all__ = ["BAD_QUERY", "DAY_PAGE", "LIMIT", "NO_CURSOR", "QUEUE_CAP", "READ_ERROR",
-           "Authored", "Read", "Store", "answer", "authored", "book_rows", "day_bounds",
-           "earlier", "local_day", "mail_state", "messages", "opened", "query_id", "queue",
-           "readable", "sent_entry", "shaped", "stamp"]
+           "THREAD_LIMIT", "THREAD_PAGE", "Authored", "Read", "Store", "answer", "authored",
+           "book_rows", "day_bounds", "earlier", "local_day", "mail_state", "messages",
+           "opened", "query_id", "queue", "readable", "sent_entry", "shaped", "stamp",
+           "thread"]
