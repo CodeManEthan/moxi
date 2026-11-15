@@ -236,6 +236,8 @@ class Gateway:
         self.shell_port: int | None = None
         self.switch = False
         self.extra = False
+        #: Whether a reading has been applied, so `switch` and `extra` hold what it read.
+        self.has_read = False
         self.current = False
         #: Why the gateway is off on the tunnel's side, or the record's failure.
         self.tunnel_reason: str | None = None
@@ -274,6 +276,12 @@ class Gateway:
     def endpoint(self) -> str | int | None:
         """The endpoint the tunnel's target must name: the socket path, or the TCP port."""
         return self.path if self.kind == "unix" else self.port
+
+    @property
+    def installed(self) -> bool:
+        """Whether the `gateway` extra is installed: as the last reading found it, else
+        looked up now."""
+        return self.extra if self.has_read else bool(self._extra())
 
     @property
     def holding(self) -> bool:
@@ -335,7 +343,7 @@ class Gateway:
     def apply(self, reading: Reading) -> str | None:
         """Apply one reading to the profile and the mount. Returns the provider whose uid
         is to be found again, or None."""
-        self.switch, self.extra = reading.switch, reading.extra
+        self.switch, self.extra, self.has_read = reading.switch, reading.extra, True
         self.current, self.tunnel_reason = reading.tunnel.current, reading.tunnel.reason
         read = reading.tunnel.address
         self.refused = read == REFUSED
