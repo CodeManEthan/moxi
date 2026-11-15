@@ -56,6 +56,9 @@ READBACK = "readback="
 #: What starts the item of a skip, the ruling that a step is not done; the step's name
 #: follows, and for a step of one stage the stage's id.
 SKIP = "skip:"
+#: What starts the item of a skip of one finish action for one stage; the stage's id
+#: follows, then `=` and the action's id.
+SKIP_ACTION = "skip-action:"
 #: What starts the item of a ruling that moves the round to another flow; the flow's
 #: name follows.
 FLOW = "flow:"
@@ -208,6 +211,8 @@ KINDS: tuple[Kind, ...] = (
     # Readers take the skips that stand, so one taken back leaves its step due again
     # with nothing more said.
     Kind("a skip", _starts(SKIP), undo=lambda ruling: {}),
+    # The same for a finish action: one taken back is run again by the next finish.
+    Kind("a skip of a finish action", _starts(SKIP_ACTION), undo=lambda ruling: {}),
     Kind("a change of flow", _starts(FLOW), instead=_move_it_again, again=False),
     Kind("a stage taken out of the plan", _starts(UNSTAGE), instead=_declare_it_again,
          again=False),
@@ -376,8 +381,8 @@ def _said(rules: str | None) -> str:
     return "stands on its own" if rules is None else f"rules {rules}"
 
 
-__all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "READBACK", "SKIP", "FLOW",
-           "UNSTAGE", "UNAFTER",
+__all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "READBACK", "SKIP",
+           "SKIP_ACTION", "FLOW", "UNSTAGE", "UNAFTER",
            "ALONE", "ID", "Kind",
            "KINDS", "kind_of", "item_of", "stands", "live", "find", "standing", "put_by",
            "ended", "can_be_taken_back", "taking_back", "replaces"]

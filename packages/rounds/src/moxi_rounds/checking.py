@@ -262,6 +262,7 @@ def seen_of(state: states.State, name: str, *, settings,
             head=head, since=since, drift=moved, reported=reported,
             target_before=before, holds_target=holds, tree=tree,
             check_on=own.build_setting(settings, build.repo, "check_on"),
+            actions=tuple(own.build_setting(settings, build.repo, "finish")),
             shares=tuple(now.shares))
     return found
 

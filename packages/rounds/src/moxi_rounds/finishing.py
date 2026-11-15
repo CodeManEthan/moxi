@@ -14,8 +14,10 @@ tip as read (its head, once the branch is gone), in this order:
 4. Run the repo's finish actions in order, each under its `id`, and record each one's
    result as `finish.action` before the next starts; each record takes the round's
    lock for that write only. An action whose record at `T` is `ok` or `found` is not
-   run again; one recorded `failed`, or with no record, is run. A failed action is
-   recorded `failed` and ends the verb (`ActionFailed`, exit 1); nothing is undone.
+   run again; one recorded `failed`, or with no record, is run. An action the operator
+   skipped for the stage is not run and counts as done, with no record of its own. A
+   failed action is recorded `failed` and ends the verb (`ActionFailed`, exit 1);
+   nothing is undone.
 5. Under the round's lock, read the log again and append `finish.done` when the log
    holds none for the build and the gates read on the log (`AFTER`: verification,
    findings, the check, questions, steps of the user's own) still hold at `T`; else
@@ -57,8 +59,11 @@ commit id, so nothing the gates did not read is pushed. It runs in the repo's ro
 build's worktree, its output going to the caller's terminal, for at most its
 `timeout_s` (no limit without one). `started` is recorded before it runs, so a finish
 that dies while it runs leaves a record saying so. A command whose newest record at `T`
-is `started` with no result may have done its work: this version refuses it, naming
-when it started, and runs nothing.
+is `started` with no result may have done its work: it is run again when its `repeat`
+is set, or once when the caller passes its id as `again`, and either way the run says
+why (`Action.again`); otherwise `finish` refuses, names when it started and the two ways
+on, and runs nothing. `finish_actions` has the rules, which the finish step's row reads
+too.
 """
 
 from __future__ import annotations
@@ -72,23 +77,27 @@ from pathlib import Path
 from moxi import exit as exits
 from moxi import proc
 
-from . import (builds, checking, finish_gates, finish_lock, folders, gitreads, open_builds,
-               places, questions, write)
+from . import (builds, checking, finish_actions, finish_gates, finish_lock, folders,
+               gitreads, open_builds, places, questions, write)
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, Refused, Unmet
 from .gitreads import Git, GitError, environment
 
 #: The event of one finish action's result, and of a whole finish done.
-ACTION = "finish.action"
+ACTION = finish_actions.ACTION
 DONE = "finish.done"
 #: The states of a finish action's record: run and passed, run and failed, or a merge
 #: found already on the target.
-OK, FAILED, FOUND = "ok", "failed", "found"
+OK, FAILED, FOUND = finish_actions.OK, finish_actions.FAILED, finish_actions.FOUND
 #: The state of a command's record appended before it runs.
-STARTED = "started"
+STARTED = finish_actions.STARTED
 #: The states of a record that mean the action is not run again.
-SETTLED = (OK, FOUND)
+SETTLED = finish_actions.SETTLED
+#: Why a command that started and has no result is run again.
+REPEAT, AGAIN = finish_actions.REPEAT, finish_actions.AGAIN
+#: The state an action the operator skipped is given here; it is never recorded.
+SKIPPED = "skipped"
 #: The gates read again under the finish lock before any action is run: those another
 #: finish may have changed by moving the target.
 UNDER_LOCK = (finish_gates.DRIFT, finish_gates.TARGET, finish_gates.WORK,
@@ -122,9 +131,13 @@ class ActionFailed(RoundsError):
 @dataclass(frozen=True)
 class Action:
     """One finish action as this finish recorded or passed it: its `id` and `kind`, the
-    `state` recorded (`OK`, `FAILED`, `FOUND`), or `ran` false when a record at the tip
-    already settled it; a merge's `landing` and `target_before`; what it printed, or for
-    a merge found made by hand (`hand_merge`), what that merge put on the target."""
+    `state` recorded (`OK`, `FAILED`, `FOUND`, `STARTED`), or `ran` false when a record
+    at the tip already settled it or the operator skipped it (`skipped_by`, his ruling;
+    `state` is then `SKIPPED`); a merge's `landing` and `target_before`; what it
+    printed, or for a merge found made by hand (`hand_merge`), what that merge put on
+    the target. A command's `started` record that runs it again after an earlier start
+    with no result says why in `again` (`REPEAT`, `AGAIN`) and when that one started in
+    `started_at`."""
 
     id: str
     kind: str
@@ -135,6 +148,9 @@ class Action:
     output: str = ""
     kept: str | None = None
     hand_merge: bool = False
+    again: str | None = None
+    started_at: str | None = None
+    skipped_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -157,11 +173,14 @@ class Finished:
 
 def finish(name: str, stage: str, *, actor: str, settings=None,
            wait_s: float = write.WAIT_S, at: str | None = None, env=None,
-           on_action: Callable[[Action], None] | None = None) -> Finished:
+           on_action: Callable[[Action], None] | None = None,
+           again: str | None = None) -> Finished:
     """Finish the open build of `stage` in the round `name`. `settings` is what
     `settings.load()` gives, read now when left out. `on_action` is called with each
-    action this finish records, as soon as its record is on the log, so a caller can
-    say what was done even when the finish is refused later.
+    action this finish records, a command's `started` included, as soon as its record
+    is on the log, so a caller can say what was done even when the finish is refused
+    later. `again` is the id of a command that started at the tip and has no result,
+    to be run once more; any other id is refused.
 
     Raises what `folders.home` raises for a round that can't be found; `Refused` with
     every unmet gate, a held finish lock, a branch that moved, a checkout of the target
@@ -172,7 +191,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
     where = write.Where(home.project, home.folder, slug)
-    again = f"moxi rounds finish {name} {stage}"
+    rerun = f"moxi rounds finish {name} {stage}"
 
     view = write.look(where, wait_s=wait_s, env=env)
     build = _open_build(view.state, name, stage)
@@ -182,8 +201,12 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
     # whose branch was gone is read as gone.
     at_tip = None if seen.tip is None else {stage: tip}
     found = [one.unmet for one in _gates(view, name, stage, seen, tip, settings)]
-    actions = own.finish_actions(own.build_setting(settings, build.repo, "finish"))
-    found += _commands_blocked(view.state, build, tip, actions, name=name)
+    actions = own.build_setting(settings, build.repo, "finish")
+    if again is not None:
+        found += finish_actions.again_refused(view.state, build, tip, actions, again,
+                                              name=name, repo=build.repo)
+    found += finish_actions.blocked(view.state, build, tip, actions, name=name,
+                                    worktree_gone=seen.tree is None, again=again)
     if found:
         raise Refused(found)
 
@@ -206,14 +229,20 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                           if one.number in UNDER_LOCK]
         if target_head is None:
             unmet.append(Unmet(f"the target {build.target} is no longer a branch of "
-                               f"{build.repo}", f"make {build.target} again, then {again}"))
+                               f"{build.repo}",
+                               f"make {build.target} again, then {rerun}"))
         if unmet:
             raise Refused(unmet)
 
         done = []
-        settled = _records(view.state, build, tip)
+        settled = finish_actions.records(view.state, build, tip)
+        passed = finish_actions.skipped(view.state, stage)
         for action in actions:
             last = settled.get(action["id"])
+            if action["id"] in passed:
+                done.append(Action(action["id"], action["do"], SKIPPED, ran=False,
+                                   skipped_by=passed[action["id"]]))
+                continue
             if last is not None and last.get("state") in SETTLED:
                 done.append(Action(action["id"], action["do"], last["state"], ran=False,
                                    landing=last.get("landing"),
@@ -232,13 +261,18 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                                 stage=stage)
                 if result is None:
                     result = _merge(root, build, tip, target_head, settings=settings,
-                                    action_id=action["id"], again=again)
+                                    action_id=action["id"], rerun=rerun)
             elif action["do"] == own.PUSH:
                 landing = next((one.landing for one in done if one.kind == own.MERGE),
                                None)
                 result = _push(root, build, tip, action, landing=landing)
             else:
-                append(Action(action["id"], own.COMMAND, STARTED))
+                why = finish_actions.run_again(action, last, again=again)
+                started = Action(action["id"], own.COMMAND, STARTED, again=why,
+                                 started_at=None if why is None else last.get("at"))
+                append(started)
+                if on_action is not None:
+                    on_action(started)
                 result = _command(view.state, name, build, root, tip, action)
             append(result)
             done.append(result)
@@ -318,46 +352,11 @@ def _gates(view, name: str, stage: str, seen, tip: str, settings) -> tuple:
         closed=lambda round_name: questions.is_closed(round_name, settings))
 
 
-def _commands_blocked(state: states.State, build: builds.Build, tip: str,
-                      actions: list[dict], *, name: str) -> list[Unmet]:
-    """Why a command action due at `tip` can't be run: it started and has no result,
-    or the build's worktree it runs in is gone."""
-    records = _records(state, build, tip)
-    worktree = checking.commission_of(state, build).get("worktree")
-    found = []
-    for action in actions:
-        last = records.get(action["id"])
-        if action["do"] != own.COMMAND or (last is not None
-                                           and last.get("state") in SETTLED):
-            continue
-        if last is not None and last.get("state") == STARTED:
-            found.append(Unmet(
-                f"the finish action {action['id']} of {build.stage} started at "
-                f"{last.get('at')} and has no result: it may have done its work, so it "
-                "is not run again", f"look at what it did; moxi rounds show {name}"))
-        elif not (worktree and Path(str(worktree)).is_dir()):
-            found.append(Unmet(
-                f"the finish action {action['id']} runs in {build.stage}'s worktree, "
-                f"which is gone from {worktree}", f"moxi rounds show {name}"))
-    return found
-
-
 def _moved(seen, tip: str, *, name: str, stage: str) -> list[Unmet]:
     if seen.tip is None or seen.tip == tip:
         return []
     return [Unmet(f"{stage}'s branch moved from {tip[:12]} to {seen.tip[:12]} since its "
                   "gates were read", f"moxi rounds finish {name} {stage}")]
-
-
-def _records(state: states.State, build: builds.Build, tip: str) -> dict[str, dict]:
-    """The newest `finish.action` record of each action id for the build at `tip`."""
-    newest: dict[str, dict] = {}
-    for event in state.history:
-        if (event["type"] == ACTION and event["n"] > build.n
-                and event.get("stage") == build.stage and event.get("tip") == tip
-                and isinstance(event.get("id"), str)):
-            newest[event["id"]] = event
-    return newest
 
 
 def _kept(state: states.State, build: builds.Build) -> tuple[Path, ...]:
@@ -443,7 +442,7 @@ def _command(state: states.State, name: str, build: builds.Build, root: Path, ti
 # -- the merge ---------------------------------------------------------------------------
 
 def _merge(root: Path, build: builds.Build, tip: str, target_head: str, *, settings,
-           action_id: str, again: str) -> Action:
+           action_id: str, rerun: str) -> Action:
     git = _MergeGit(root)
     place = git.checkout_of(build.target)
     added = None
@@ -458,13 +457,13 @@ def _merge(root: Path, build: builds.Build, tip: str, target_head: str, *, setti
         if there.has_changes():
             unmet.append(Unmet(f"the checkout of {build.target} at {place} holds "
                                "uncommitted changes, so the merge can't be made there",
-                               f"commit or remove them, then {again}"))
+                               f"commit or remove them, then {rerun}"))
         head = there.head()
         if head != target_head:
             unmet.append(Unmet(f"the checkout of {build.target} at {place} is at "
                                f"{str(head)[:12]}, not the target's head "
                                f"{target_head[:12]}",
-                               f"bring that checkout to {build.target}, then {again}"))
+                               f"bring that checkout to {build.target}, then {rerun}"))
         if unmet:
             raise Refused(unmet)
         code, output = there.merge(tip, f"Merge branch '{build.branch}'")
@@ -478,7 +477,7 @@ def _merge(root: Path, build: builds.Build, tip: str, target_head: str, *, setti
                 f"merging {build.branch} at {tip[:12]} into {build.target} conflicts; "
                 "the merge was aborted",
                 f"git merge --no-ff {build.target} in the build's worktree, run moxi "
-                f"rounds check, then {again}")])
+                f"rounds check, then {rerun}")])
         if code != 0:
             return Action(action_id, own.MERGE, FAILED, output=output)
         landing = there.head()
@@ -550,6 +549,7 @@ class _MergeGit(Git):
         return done.returncode, said
 
 
-__all__ = ["ACTION", "DONE", "OK", "FAILED", "FOUND", "STARTED", "SETTLED", "UNDER_LOCK",
+__all__ = ["ACTION", "DONE", "OK", "FAILED", "FOUND", "STARTED", "SETTLED", "REPEAT",
+           "AGAIN", "SKIPPED", "UNDER_LOCK",
            "AFTER", "CHECKOUT_PREFIX", "MERGE_TIMEOUT_S", "PUSH_TIMEOUT_S", "ActionFailed",
            "Action", "Finished", "finish"]

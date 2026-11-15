@@ -96,8 +96,9 @@ index keeps the step the log alone gives, and marks it so (`at`).
   though it carries the holds on its stage from the start; done once the build is
   finished. Until then it waits for every gate of `finish_gates.unmet` that does not
   hold at the build's tip, each named with its number and the command that meets it
-  (`Step.gates`), and is ready once all hold. It is read from what `Asked.seen` says of
-  the stage's build.
+  (`Step.gates`), and for what keeps `finish` from running a command action
+  (`finish_actions.blocked`); it is ready once none is left. It is read from what
+  `Asked.seen` says of the stage's build.
 
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
@@ -117,8 +118,8 @@ import dataclasses
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
-from . import (brake, builds, checking, findings, finish_gates, flows, holds, questions,
-               skips, stages, tracing, versions)
+from . import (brake, builds, checking, findings, finish_actions, finish_gates, flows,
+               holds, questions, skips, stages, tracing, versions)
 from . import ci as ci_reads
 from . import state as states
 from .errors import Unmet
@@ -168,7 +169,8 @@ class Seen:
     when that could not be read; `tree`, the worktree as `finish` reads it: None where
     it no longer exists, else `clean`, `changed` (a tracked change or an untracked path)
     or `elsewhere` (made on another machine); `check_on`, the repo's setting of that
-    name; `shares`, the `(round, stage)` of each build it shares commits with;
+    name; `actions`, the repo's finish actions, each with its `id`; `shares`, the
+    `(round, stage)` of each build it shares commits with;
     `problem`, what kept the build from being read, in which case nothing else is
     known."""
 
@@ -186,6 +188,7 @@ class Seen:
     holds_target: bool | None = None
     tree: str | None = None
     check_on: str = "merged"
+    actions: tuple[Mapping, ...] = ()
     shares: tuple[tuple[str, str], ...] = ()
     problem: Unmet | None = None
 
@@ -485,8 +488,14 @@ def _finish(state: states.State, about: Asked) -> Step:
         return Step(FINISH, WAITING, stage=stage, waits=(seen.problem,))
     found = finish_gates.unmet(state, stage, seen=seen, name=about.name,
                                closed=about.closed, register=about.register)
-    return Step(FINISH, WAITING if found else READY, stage=stage,
-                waits=tuple(one.unmet for one in found),
+    waits = [one.unmet for one in found]
+    build = builds.current(state, stage)
+    tip = seen.tip or seen.head
+    if build is not None and tip is not None:
+        # The verb refuses these before it runs anything, so the row waits for them.
+        waits += finish_actions.blocked(state, build, tip, seen.actions,
+                                        name=about.name, worktree_gone=seen.tree is None)
+    return Step(FINISH, WAITING if waits else READY, stage=stage, waits=tuple(waits),
                 gates=tuple(one.number for one in found))
 
 

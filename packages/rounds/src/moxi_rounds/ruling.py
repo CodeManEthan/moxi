@@ -39,7 +39,8 @@ withdrawn takes none of the four.
 
 **Skips and the flow.** `skip:<step>`, or `skip:<step>:<stage>` for a step of one
 stage, says the step is not done; `skips` has what may be skipped and what a skip of
-the questions step lets its stage past. `flow:<name>` moves the round to another flow,
+the questions step lets its stage past. `skip-action:<stage>=<id>` says one finish
+action is not run for one stage and counts as done. `flow:<name>` moves the round to another flow,
 with that flow's steps as the config has them then; `stepping` has the rules. A change
 of flow is corrected by another change of flow, and is neither replaced nor taken
 back. Both are acts on the process, of a round.
@@ -732,6 +733,21 @@ def _skip(item: str, asked: Asked) -> Form | None:
                 found=lambda view: skips.fields(step, stage, view, asked.supersedes))
 
 
+def _skip_action(item: str, asked: Asked) -> Form | None:
+    """A skip of one finish action for one stage: `finish` does not run it and treats
+    it as done. The ruling's event is the whole of it."""
+    parsed = skips.parse_action(item)
+    if parsed is None:
+        return None
+    stage, action = parsed
+    _of_the_round(asked, "a skip of a finish action")
+    settings = own.load() if asked.settings is None else asked.settings
+    return Form(kind=PROCESS, rules=item, fields=_said(asked),
+                gates=tuple(skips.action_gates(stage, action, name=asked.name,
+                                               settings=settings,
+                                               supersedes=asked.supersedes)))
+
+
 def _flow(item: str, asked: Asked) -> Form | None:
     """A move of the round to another flow, any the config has: the event holds the
     new name and its steps, and is the whole of the move."""
@@ -821,8 +837,8 @@ def _readback(item: str, asked: Asked) -> Form | None:
 #: The builders of the forms that rule an item, each `fn(item, asked) -> Form | None`,
 #: None when the item is not its own. The first that knows the item builds the form.
 _ITEM_FORMS: tuple[Callable[[str, Asked], Form | None], ...] = (
-    _answer, _park, _narrow, _withdraw, _revoke, _readback, _skip, _flow, _unstage,
-    _unafter, _decide)
+    _answer, _park, _narrow, _withdraw, _revoke, _readback, _skip, _skip_action, _flow,
+    _unstage, _unafter, _decide)
 
 
 def _form(item: str | None, asked: Asked) -> Form:

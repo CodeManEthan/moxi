@@ -360,8 +360,9 @@ def _declare_rule(verbs) -> None:
             "an ITEM it rules a question: answers it, parks it, narrows what it holds "
             "up, or withdraws it. A later ruling corrects an earlier one: with "
             "--supersedes it replaces it, and the ITEM revoke:C<n> takes it back. "
-            "The ITEM skip:STEP says a step is not done, and flow:NAME moves the "
-            "round to another flow. unstage:B<n> takes a stage out of the plan, and "
+            "The ITEM skip:STEP says a step is not done, skip-action:B<n>=ID that "
+            "finish does not run one finish action for a stage and treats it as done, "
+            "and flow:NAME moves the round to another flow. unstage:B<n> takes a stage out of the plan, and "
             "unafter:B<n>=B<m> takes one stage off what another waits for. "
             "B<n>.M<k>=accept or B<n>.M<k>=reject rules a decision a build's report "
             "declared; a rejected one is a waiting item until its fix is marked done. "
@@ -381,7 +382,9 @@ def _declare_rule(verbs) -> None:
                              "and puts nothing in its place; skip:STEP for a "
                              "step of the round (verify-design, ratify, retro) or "
                              "skip:STEP:B<n> for a step of one stage (docket, "
-                             "check, verify-build, a step of your own); flow:NAME, "
+                             "check, verify-build, a step of your own); "
+                             "skip-action:B<n>=ID, the finish action ID that finish "
+                             "does not run for B<n> and treats as done; flow:NAME, "
                              "the flow the round follows from then on; "
                              "unstage:B<n>, a stage with no open or finished build "
                              "that leaves the plan for good; unafter:B<n>=B<m>, a "
@@ -1207,6 +1210,10 @@ def _declare_finish(verbs) -> None:
                              "checked out there")
     parser.add_argument("stage", metavar="STAGE", nargs="?",
                         help="the stage whose build is finished, B<n>; given with ROUND")
+    parser.add_argument("--again", metavar="ID",
+                        help="run once more the command action ID, which started and "
+                             "has no result at the tip, once you have looked at what "
+                             "it did; taken for no other action")
     _writes(parser)
 
 
@@ -1227,9 +1234,16 @@ def _finish(args, out) -> int:
         # Said as it is recorded, so it is seen even when the finish is refused after.
         if one.hand_merge:
             print(f"found hand merge {str(one.landing)[:12]}: {one.output}", file=out)
+        elif one.state == finishing.STARTED and one.again is not None:
+            why = ("its repeat is set" if one.again == finishing.REPEAT
+                   else "--again asked for it")
+            # Said before it runs, since what it prints follows.
+            print(f"{one.id}: started at {one.started_at} and has no result; run "
+                  f"again, as {why}", file=out, flush=True)
 
     try:
-        done = finishing.finish(name, stage, actor=_actor(args), on_action=on_action)
+        done = finishing.finish(name, stage, actor=_actor(args), on_action=on_action,
+                                again=args.again)
     except finishing.ActionFailed as failed:
         if failed.output:
             print(failed.output, file=out)
@@ -1239,7 +1253,9 @@ def _finish(args, out) -> int:
         print(f"cleared the finish lock of a holder that had ended: {done.cleared}",
               file=out)
     for one in done.actions:
-        how = one.state if one.ran else f"{one.state} before, not run again"
+        how = (f"skipped by the operator, {one.skipped_by}; not run"
+               if one.skipped_by is not None
+               else one.state if one.ran else f"{one.state} before, not run again")
         landed = ("" if one.landing is None else
                   f": {one.landing[:12]} on the target, which was at "
                   f"{str(one.target_before)[:12]}")

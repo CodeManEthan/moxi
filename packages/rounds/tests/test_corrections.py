@@ -769,13 +769,14 @@ def test_a_ruling_that_corrects_nothing_is_refused_on_a_round_that_has_ended(
     ("unstage:B2", "a stage taken out of the plan", "unstage:B2"),
     ("unafter:B3=B2", "a wait taken off a stage", "unafter:B3=B2"),
     ("B2.M1=accept", "a ruling of a decision", "B2.M1"),
-    ("B2.M1=reject", "a ruling of a decision", "B2.M1")])
+    ("B2.M1=reject", "a ruling of a decision", "B2.M1"),
+    ("skip-action:B2=pr", "a skip of a finish action", "skip-action:B2=pr")])
 def test_each_ruling_has_its_kind_and_the_thing_it_rules(rules, name, item):
     assert corrections.kind_of(rules).name == name
     assert corrections.item_of(rules) == item
 
 
-@pytest.mark.parametrize("rules", ["credit:B2", "skip-action:B2=pr", ""])
+@pytest.mark.parametrize("rules", ["credit:B2", ""])
 def test_a_ruling_of_no_kind_in_the_table_has_none(rules):
     assert corrections.kind_of(rules) is None and corrections.item_of(rules) is None
 

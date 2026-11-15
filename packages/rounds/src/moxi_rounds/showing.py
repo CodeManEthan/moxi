@@ -800,9 +800,11 @@ def version_lines(listed: list[dict], standing: str | None = None,
 
 
 def _skips(state: states.State) -> list[dict]:
-    """The skips that stand: the ruling, the step, its stage for a step of one stage,
-    the pointer and when; a skip of the questions step with the questions it lets its
-    stage past now, and the ones it listed and lets past no longer."""
+    """The skips that stand, oldest first: the ruling, the step, its stage for a step
+    of one stage, the pointer and when; a skip of the questions step with the
+    questions it lets its stage past now, and the ones it listed and lets past no
+    longer. A skip of a finish action is one of `finish` for its stage, with the
+    `action`'s id; it skips that action, not the step."""
     listed = []
     for skip in skips.live(state):
         one = {"id": skip.id, "step": skip.step, "stage": skip.stage,
@@ -810,12 +812,18 @@ def _skips(state: states.State) -> list[dict]:
         if skip.step == skips.QUESTIONS:
             one.update(covers=list(skip.covers), let_go=list(skip.let_go))
         listed.append(one)
-    return listed
+    for skip in skips.action_live(state):
+        listed.append({"id": skip.id, "step": findings.FINISH, "stage": skip.stage,
+                       "action": skip.action, "record": skip.record, "at": skip.at})
+    return sorted(listed, key=lambda one: one["at"])
 
 
 def skip_line(one: dict) -> str:
     """A skip that stands, in a line: `check for B2, by C3 (record comms:12)`, and
     for the questions step what it lets its stage past."""
+    if "action" in one:
+        return (f"the finish action {one['action']} for {one['stage']}, by {one['id']} "
+                f"(record {one['record']})")
     line = f"{skips.said(one['step'], one['stage'])}, by {one['id']}"
     if "covers" in one:
         line += f", past {', '.join(one['covers']) or 'no question'}"
