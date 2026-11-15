@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `moxi_ui.testing` makes the `--ui-traces` directory when the run starts, a relative one
+  taken from where pytest started, so a failed browser test keeps its trace there even
+  when the directory is outside every test's tmp (a directory in the repository). The
+  teardown that keeps a trace no longer makes that directory, which the test kit's fence
+  refused: every failing browser test also errored and kept no trace.
 - `moxi_ui.testing.phone` gains the two helpers a module's phone test needs:
   `gateway_shell(home, site=(), *, port=None, enabled=True, address=True, start=True,
   **options)`, a gateway-mode test shell with its port set, its tunnel address written and

@@ -42,7 +42,10 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     page on the shell's document at `/m/ui/`. A shell is signed in once, through its
     sign-in page; each context after that starts from the cookie and key that sign-in
     stored, and a fresh sign-in replaces them once the shell refuses them. A trace is kept
-    for a failed test, in `--ui-traces` (`<pytest's temp root>/ui-traces` by default).
+    for a failed test, in `--ui-traces` (`<pytest's temp root>/ui-traces` by default). A
+    relative `--ui-traces` is taken from the directory pytest started in, and the plugin
+    makes that directory when the run starts, before any test is fenced in, so it may lie
+    outside every test's tmp (a directory in the repository, as CI keeps them).
     Each context closes when the test ends.
 `ui_context`, `ui_page`
     One `ui_contexts()` context, and its first page, signed in on `ui_shell`.
@@ -88,6 +91,8 @@ import pytest
 WAIT_MS = 5000
 
 _REPORTS = pytest.StashKey[dict[str, Any]]()
+#: The `--ui-traces` directory this run was given, made when the run started.
+_TRACES_DIR = pytest.StashKey[Path]()
 #: Each test shell's stored sign-in: the browser state (cookie and key) one sign-in left.
 _SIGNED_IN: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakKeyDictionary()
 KEY_ITEM = "moxi-ui-key"
@@ -105,6 +110,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--ui-traces", default=None, metavar="DIR",
                     help="where a failed browser test's Playwright trace goes (default "
                          "<pytest's temp root>/ui-traces)")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    given = config.getoption("--ui-traces")
+    if given:
+        traces_dir = config.invocation_params.dir / given
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        config.stash[_TRACES_DIR] = traces_dir
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
@@ -240,10 +253,13 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
         for n, context in enumerate(opened):
             try:
                 if failed:
-                    given = request.config.getoption("--ui-traces")
-                    where = Path(given) if given else tmp_path_factory.getbasetemp() / "ui-traces"
-                    os.makedirs(where, exist_ok=True)
-                    context.tracing.stop(path=str(where / f"{name}-{n}.zip"))
+                    # A test's fence refuses even a makedirs that would find the directory
+                    # there, so it is called only for the default one, in pytest's temp root.
+                    traces_dir = request.config.stash.get(_TRACES_DIR, None) \
+                        or tmp_path_factory.getbasetemp() / "ui-traces"
+                    if not traces_dir.is_dir():
+                        os.makedirs(traces_dir, exist_ok=True)
+                    context.tracing.stop(path=str(traces_dir / f"{name}-{n}.zip"))
                 else:
                     context.tracing.stop()
             finally:
