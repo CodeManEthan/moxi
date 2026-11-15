@@ -14,7 +14,9 @@ import asyncio
 import gc
 import json
 import logging
+import sqlite3
 import sys
+import threading
 import warnings
 
 import pytest
@@ -25,7 +27,7 @@ from moxi_comms import api, machine_line, page, pageacts, store
 from moxi_comms.paths import comms_db
 
 from test_page import PORT, TOKEN, run, served
-from test_page_messages import MAIN, backend, set_row, store_fds  # noqa: F401 -- a fixture, found by name
+from test_page_messages import MAIN, backend, set_row  # noqa: F401 -- a fixture, found by name
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="comms runs on Linux only")
@@ -456,27 +458,56 @@ def test_his_credential_is_in_no_take_back_answer_or_log_line(rig, caplog, capsy
 
 # --- connections ---------------------------------------------------------------------------
 
-def test_no_connection_stays_open_after_each_act_answers(rig):
-    # With the cyclic collector off, a record an act left open would hold its descriptors
-    # on comms.db past the answer, and its finalizer would warn when collected.
+def test_no_connection_stays_open_after_each_act_answers(rig, monkeypatch):
+    # Every connection opened on a thread while it runs an act's verb is kept, and each
+    # must be closed by the time the act answers. With the cyclic collector off, one left
+    # open would also warn when collected. The daemon's own connections open on its
+    # threads and are not counted.
+    acting = threading.local()
+    opened: list[sqlite3.Connection] = []
+    connect = sqlite3.connect
+
+    def counted(*a, **kw):
+        conn = connect(*a, **kw)
+        if getattr(acting, "on", False):
+            opened.append(conn)
+        return conn
+
+    def run_as_act(verb):
+        def wrapped(*a, **kw):
+            acting.on = True
+            try:
+                return verb(*a, **kw)
+            finally:
+                acting.on = False
+        return wrapped
+
+    def still_open() -> int:
+        count = 0
+        for conn in opened:
+            try:
+                conn.execute("SELECT 1")
+            except sqlite3.ProgrammingError:
+                continue
+            count += 1
+        return count
+
+    monkeypatch.setattr(sqlite3, "connect", counted)
+    for name in ("check", "send", "delete"):
+        monkeypatch.setattr(api, name, run_as_act(getattr(api, name)))
     gc.collect()
     gc.disable()
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", ResourceWarning)
-            first = send()["message_id"]            # the daemon opens what it keeps
-            assert wait_until(lambda: books_row(first)[0] == "waiting")
-            before = store_fds()
-            for _ in range(3):
-                assert check()["outcome"] == "would-send"
-            assert store_fds() == before
-            mids = [send()["message_id"] for _ in range(3)]
-            assert all(mids)
-            assert wait_until(lambda: all(books_row(mid)[0] == "waiting" for mid in mids))
-            assert store_fds() == before
-            for mid in mids:
-                assert take_back(mid)["outcome"] == "deleted"
-            assert store_fds() == before
+            assert check()["outcome"] == "would-send"
+            assert opened and still_open() == 0
+            mid = send()["message_id"]
+            assert mid and still_open() == 0
+            assert wait_until(lambda: books_row(mid)[0] == "waiting")
+            seen = len(opened)
+            assert take_back(mid)["outcome"] == "deleted"
+            assert len(opened) > seen and still_open() == 0
             gc.collect()
         assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
     finally:
