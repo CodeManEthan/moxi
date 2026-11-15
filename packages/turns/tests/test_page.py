@@ -270,6 +270,72 @@ def watched(*endpoints, timeout: float = LIVE_S) -> None:
         time.sleep(0.02)
 
 
+class Dirty(threading.Event):
+    """A held session's dirty flag that counts. `sets` is how many times it was set; `read`
+    is how many of those sets a finished read pass covers. The reads thread clears the flag
+    just before a pass, so the pass covers every set made before the clear, and waits on it
+    just after the pass, once the pass's reads have reported."""
+
+    def __init__(self):
+        super().__init__()
+        self._count_lock = threading.Lock()
+        self._sets = 0
+        self._taken = 0
+        self._read = 0
+
+    def set(self):
+        with self._count_lock:
+            self._sets += 1
+            super().set()
+
+    def clear(self):
+        with self._count_lock:
+            self._taken = self._sets
+            super().clear()
+
+    def wait(self, timeout=None):
+        with self._count_lock:
+            self._read = self._taken
+        return super().wait(timeout)
+
+    def counts(self) -> tuple[int, int]:
+        """`(sets, read)`, taken together."""
+        with self._count_lock:
+            return self._sets, self._read
+
+
+def counted_reads(monkeypatch) -> list:
+    """Give each session the reader holds from now on a counting dirty flag; returns the
+    list each new held session joins."""
+    made = []
+
+    class Counted(pagereader._Held):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # The threads start later, in `start()`; this is the first set, as the base's.
+            self.dirty = Dirty()
+            self.dirty.set()
+            made.append(self)
+
+    monkeypatch.setattr(pagereader, "_Held", Counted)
+    return made
+
+
+def read_through(made: list, count: int, timeout: float = LIVE_S) -> None:
+    """Wait until `count` sessions are held, each has opened its watch, and every read each
+    started has reported. A held session's flag is set once when it is made and once when
+    its watch opens, after the watch is in place, so two sets covered by a finished pass
+    means the read the watch's opening asked for has reported, whether it was a pass of its
+    own or the first pass began after it."""
+    deadline = time.monotonic() + timeout
+    while True:
+        seen = [held.dirty.counts() for held in made]
+        if len(seen) == count and all(sets >= 2 and read == sets for sets, read in seen):
+            return
+        assert time.monotonic() < deadline, f"the reads never settled: (sets, read) {seen}"
+        time.sleep(0.02)
+
+
 def turn(data: dict, key: str) -> tuple | None:
     row = row_of(data, key)
     if row is None or row["facts"] is None:
@@ -399,19 +465,22 @@ def test_a_new_endpoint_appears_within_one_rescan(make_endpoint):
     run(go())
 
 
-def test_session_gone_drops_it_and_a_later_scan_does_not_bring_it_back(make_endpoint):
+def test_session_gone_drops_it_and_a_later_scan_does_not_bring_it_back(make_endpoint,
+                                                                         monkeypatch):
     a, _ = make_endpoint(session_id="s-1")
     b, _ = make_endpoint(session_id="s-2")
+    made = counted_reads(monkeypatch)
 
     async def go():
         stream = Stream(served())
         try:
-            # Both first reads have landed before b stops: one landing after the stop would
-            # publish again.
+            # Every read of both sessions has reported before b stops: the first reads and
+            # the facts read each watch's opening asks for. Each facts read carries a new
+            # `at`, so one reporting after the stop would publish again.
             await stream.until(lambda d: len(d["sessions"]) == 2 and all(
                 row["facts"] is not None and row["agents"] is not None
                 for row in d["sessions"]), LIVE_S)
-            await asyncio.to_thread(watched, a, b)
+            await asyncio.to_thread(read_through, made, 2)
             b.stop("the session ended")
             data = await stream.until(lambda d: b.dir.name not in keys(d), LIVE_S)
             assert keys(data) == [a.dir.name]
