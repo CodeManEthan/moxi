@@ -176,6 +176,79 @@ def test_the_band_opens_the_fixture_panel_in_the_same_document_and_back_returns(
     assert ui_page.evaluate("window.__sameDocument") is True
 
 
+# The fixture's page takes the hold through client.js, as a page with changes not saved
+# does; each ask is counted, and the last one's `go` kept.
+_HOLD = """async () => {
+  const client = await import("/m/ui/client.js");
+  window.__asks = 0;
+  window.__release = client.holdLeave((go) => { window.__asks += 1; window.__go = go; });
+}"""
+
+
+def _mark_panel(page) -> None:
+    page.locator("#moxi-panel > *").first.evaluate("(el) => { el.dataset.held = 'yes'; }")
+
+
+def test_a_page_that_holds_is_asked_before_every_move_off_it(ui_shell, ui_page):
+    ui_page.evaluate("window.__sameDocument = true")
+    _pick(ui_page, "fixture")
+    panel = ui_page.locator("#moxi-panel > moxi-fixture-page")
+    expect(panel).to_be_attached()
+    ui_page.evaluate(_HOLD)
+    _mark_panel(ui_page)
+    held = ui_page.locator("#moxi-panel > moxi-fixture-page[data-held=yes]")
+    # The page writes its own address: the entry is replaced and nothing is drawn again.
+    ui_page.evaluate("""async () => (await import("/m/ui/client.js")).setAddress("fixture", "deep")""")
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/deep")
+    expect(held).to_be_attached()
+    # A band pick asks, and moves only when the page says go.
+    _pick(ui_page, "ui")
+    assert ui_page.evaluate("window.__asks") == 1
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/deep")
+    expect(held).to_be_attached()
+    # Back asks too, with the page's own address put back.
+    ui_page.go_back()
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/deep")
+    assert ui_page.evaluate("window.__asks") == 2
+    expect(held).to_be_attached()
+    # navigate() asks.
+    ui_page.evaluate("""async () => (await import("/m/ui/client.js")).navigate("ui", "modules")""")
+    assert ui_page.evaluate("window.__asks") == 3
+    expect(held).to_be_attached()
+    # Go: the hold is released and the move asked last is made.
+    ui_page.evaluate("window.__go()")
+    expect(ui_page).to_have_url(ui_shell.url + "/m/ui/modules")
+    expect(_modules(ui_page).locator(".card[data-module=fixture]")).to_be_visible()
+    # Back from there finds the fixture's page at its own address, and the hold gone.
+    ui_page.go_back()
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/deep")
+    expect(panel).to_be_attached()
+    expect(held).to_have_count(0)
+    assert ui_page.evaluate("window.__sameDocument") is True
+
+
+def test_a_page_that_holds_gets_the_browser_prompt_on_a_load_of_another_document(ui_page):
+    _pick(ui_page, "fixture")
+    expect(ui_page.locator("#moxi-panel > moxi-fixture-page")).to_be_attached()
+    ui_page.evaluate(_HOLD)
+    seen = []
+    ui_page.on("dialog", lambda dialog: (seen.append(dialog.type), dialog.dismiss()))
+    # The browser asks only after the person has done something on the page.
+    ui_page.locator("#moxi-panel").click()
+    ui_page.close(run_before_unload=True)
+    ui_page.wait_for_timeout(500)
+    assert seen == ["beforeunload"]
+
+
+def test_a_page_released_leaves_with_no_prompt(ui_page):
+    _pick(ui_page, "fixture")
+    ui_page.evaluate(_HOLD)
+    ui_page.evaluate("window.__release()")
+    _pick(ui_page, "ui")
+    expect(_modules(ui_page).locator("moxi-ui-home .rows")).to_be_visible()
+    assert ui_page.evaluate("window.__asks") == 0
+
+
 _IN_PANEL = """() => {
   let at = document.activeElement;
   const inside = document.querySelector("#moxi-panel").contains(at);
