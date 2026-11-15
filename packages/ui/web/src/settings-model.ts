@@ -426,13 +426,17 @@ export interface Block {
   keys: Setting[];
 }
 
-/** The keys in schema order, a sub-head starting wherever the `group` changes. */
+/**
+ * The keys under their sub-heads: one block per `group`, drawn once where the group first
+ * appears in the file, gathering every key of that group in file order wherever it sits;
+ * the keys with no group likewise make one block with no sub-head.
+ */
 export function blocksOf(keys: readonly Setting[]): Block[] {
   const out: Block[] = [];
   for (const key of keys) {
     const group = words(key.group);
-    const last = out[out.length - 1];
-    if (last && last.group === group) last.keys.push(key);
+    const block = out.find((found) => found.group === group);
+    if (block) block.keys.push(key);
     else out.push({ group, keys: [key] });
   }
   return out;

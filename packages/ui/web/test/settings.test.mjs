@@ -245,7 +245,17 @@ test("More names the groups in order, then the keys with no group, in lower case
     text: "6 settings: prices, reading, how skills are placed, harness folders, bare.key", changed: "2 changed" });
 });
 
-test("sub-heads follow the schema order, one wherever the group changes", () => {
+test("a group is drawn once, gathering its keys in file order wherever they sit in the file", () => {
+  const keys = [key("ready.wait_s", "int", 1, 1, { group: "Waits" }), key("relaunch.wait_s", "int", 1, 1, { group: "Relaunch" }),
+                key("first.wait_s", "int", 1, 1, { group: "Waits" }), key("loose", "int", 1, 1),
+                key("relaunch.person_s", "int", 1, 1, { group: "Relaunch" }), key("startup.wait_s", "int", 1, 1, { group: "Waits" }),
+                key("other", "int", 1, 1)];
+  assert.deepEqual(blocksOf(keys).map((block) => [block.group, names(block.keys)]), [
+    ["Waits", ["ready.wait_s", "first.wait_s", "startup.wait_s"]], ["Relaunch", ["relaunch.wait_s", "relaunch.person_s"]],
+    [null, ["loose", "other"]]]);
+});
+
+test("sub-heads follow the order their groups first appear in", () => {
   const keys = [key("a", "bool", false, false, { group: "Guards" }), key("b", "bool", false, false, { group: "Guards" }),
                 key("c", "list", [], [], { group: "Sessions" }), key("d", "int", 1, 1)];
   assert.deepEqual(blocksOf(keys).map((block) => [block.group, names(block.keys)]),
