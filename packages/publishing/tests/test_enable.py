@@ -89,6 +89,14 @@ def test_no_github_is_said(repo, names):
     assert any("no GitHub repo is known" in line for line in lines)
 
 
+def test_a_github_repo_already_named_is_kept_and_not_asked_for(repo, names):
+    git(repo, "remote", "add", "origin", "git@github.com:alice/proj-a.git")
+    flag.enable(repo, github="bob/proj-b")
+    lines = flag.enable(repo, sets=["main=main"])
+    assert config(repo, "moxi-publishing.github") == ["bob/proj-b"]
+    assert not any("no GitHub repo is known" in line for line in lines)
+
+
 @pytest.mark.parametrize("pattern", [
     "refs/heads/main", "refs/heads/*", "refs/*", "refs/h*", "*", "refs/tags/*",
     "refs/tags/proj-a-v1.0.0", "refs/tags/docs-*", "refs/t?gs/x", "heads/x",
@@ -117,10 +125,13 @@ def test_word_required_takes_true_or_false(repo, names):
     assert caught.value.code == 2
 
 
-def test_an_unknown_key_is_a_usage_error(repo, names):
+@pytest.mark.parametrize("sets", [["no-such=1"], ["main=a", "main=b"],
+                                  ["drop-trailer=", "drop-trailer=X"]])
+def test_a_set_repo_refuses_writes_nothing(repo, names, sets):
     with pytest.raises(flag.Failure) as caught:
-        flag.enable(repo, sets=["no-such=1"])
+        flag.enable(repo, sets=sets)
     assert caught.value.code == 2
+    assert git(repo, "config", "--get-regexp", "^moxi-", check=False).stdout == ""
 
 
 def test_enable_warns_when_the_private_names_list_is_empty(repo):

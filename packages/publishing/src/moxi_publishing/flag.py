@@ -221,7 +221,11 @@ def _names_empty() -> str | None:
 def enable(path: str | os.PathLike, *, github: str | None = None,
            sets: list[str] | tuple = ()) -> list[str]:
     """Mark the repo at `path` public and register the three pieces. Returns the lines to
-    print. Raises `Failure`; a refused `--set` writes nothing."""
+    print. Raises `Failure`; a refused `--set` writes nothing.
+
+    repo registers the pieces first, judging every `--set` before it writes, and the flag
+    is written after: a run that stops between them leaves pieces that refuse every commit
+    until the flag is there, never a flag with nothing guarding it."""
     from moxi_repo import api
 
     root = resolve(path)
@@ -238,20 +242,21 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
         for key, values in seeds.get(piece, {}).items():
             if key not in planned:
                 given += [f"{key}={value}" for value in values]
-    github = github or _github_from_origin(root)
-    lines = []
-    for key, value in ((FLAG, "true"), (INTERPRETER, api.interpreter()),
-                       *(((GITHUB, github),) if github else ())):
-        done = _git(root, "config", key, value)
-        if done.returncode != 0:
-            raise Failure(f"git config {key} failed in {root}: {done.stderr.strip()}")
-    lines.append(f"marked {root} public ({FLAG})")
+    known = config_get(root, GITHUB)
+    github = github or (None if known else _github_from_origin(root))
     try:
         report = api.add(root, *PIECES, sets=given)
     except api.Failure as exc:
         raise Failure(exc.text, exc.code) from None
-    lines += report.lines + report.problems
-    if not github:
+    for key, value in ((FLAG, "true"), (INTERPRETER, api.interpreter()),
+                       *(((GITHUB, github),) if github else ())):
+        done = _git(root, "config", key, value)
+        if done.returncode != 0:
+            raise Failure(f"git config {key} failed in {root}: {done.stderr.strip()}; the "
+                          "pieces are registered and refuse every commit until moxi "
+                          f"publishing enable {root} runs again")
+    lines = [f"marked {root} public ({FLAG})", *report.lines, *report.problems]
+    if not (github or known):
         lines.append(f"note: no GitHub repo is known; name it with: moxi publishing enable "
                      f"{root} --github OWNER/REPO")
     warning = _names_empty()
