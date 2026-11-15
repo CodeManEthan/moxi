@@ -182,41 +182,49 @@ const STYLES = [BASE, css`
   .gone button { margin-left: 14px; color: var(--moxi-text); }
   .gone p { margin: 2px 0 0; }
 
-  .detail { display: grid; gap: var(--moxi-gap); min-width: 0; margin: 9px 0 3px; padding-top: 8px;
-            border-top: 1px solid var(--moxi-border); cursor: auto; }
+  .detail { min-width: 0; margin: 9px 0 3px; padding-top: 8px; border-top: 1px solid var(--moxi-border);
+            font-size: 13px; line-height: 18px; cursor: auto; }
   /* The opened project: one labelled row each, the label dim at the left, the link dim at
-     the right; heavy words in the text's own colour, only heavier. */
-  .opened { display: grid; gap: 6px; min-width: 0; }
-  .orow { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 2px 14px; align-items: baseline;
+     the right. A line's first phrase is in the text's colour and the rest dim; heavy words
+     in the text's own colour, only heavier. */
+  .opened { min-width: 0; }
+  .orow { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; padding: 3px 0; align-items: baseline;
           min-width: 0; }
   .orow .ok { color: var(--moxi-text-dim); }
   .orow .ol { min-width: 0; overflow-wrap: anywhere; }
   .orow .ol p { margin: 0; }
-  .orow .ol strong { font-weight: 600; }
-  .orow .oa { color: var(--moxi-text-dim); text-decoration: none; white-space: nowrap; }
+  .orow .ol .d { color: var(--moxi-text-dim); }
+  .orow .ol strong { font-weight: 600; color: var(--moxi-text); }
+  .orow .oa { padding-left: 18px; color: var(--moxi-text-dim); text-decoration: none; white-space: nowrap; }
   .orow .oa:hover { text-decoration: underline; }
-  .orow button.oa { padding: 0; margin: 0; border: 0; background: none; font: inherit; cursor: pointer; color: var(--moxi-text); }
-  .foot { display: flex; gap: 14px; }
+  .orow button.oa { padding: 0 0 0 18px; margin: 0; border: 0; background: none; font: inherit; cursor: pointer;
+                    color: var(--moxi-text); }
+  /* Under the rows' words: Edit in the text's colour and Remove dim; while the remove step
+     is open, Remove in the text's colour and Edit dim. */
+  .foot { display: flex; gap: 18px; padding: 9px 0 0 76px; }
   .foot button { padding: 0; margin: 0; border: 0; background: none; font: inherit; cursor: pointer;
                  color: var(--moxi-text-dim); }
-  .foot button[aria-pressed="true"] { color: var(--moxi-text); }
+  .foot button.on { color: var(--moxi-text); }
   /* The remove step, under the foot and in line with the rows' words: its question
      heavier, its rows labelled as the opened project's are, then its buttons. */
-  .step { display: grid; gap: 6px; margin: 4px 0 2px 110px; padding-top: 10px; border-top: 1px solid var(--moxi-border);
+  .step { display: grid; gap: 6px; margin: 10px 0 2px 76px; padding-top: 10px; border-top: 1px solid var(--moxi-border);
           min-width: 0; }
-  .step .orow { grid-template-columns: 76px minmax(0, 1fr) auto; }
-  .step .q { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .step .orow { padding: 0; }
+  .step .q { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
   .step p.dim { margin: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
-  .step .then { padding-left: 90px; }
+  .step .then { padding-left: 76px; }
+  .step .btns.then { padding-left: 0; }
   .step .btns { display: flex; align-items: center; gap: 18px; padding: 4px 0 2px; }
   .step button.btn { padding: 5px 13px; border: 1px solid var(--moxi-border-strong); border-radius: 7px; background: none;
-                     color: var(--moxi-text); font: inherit; cursor: pointer; }
+                     color: var(--moxi-text); font: inherit; font-size: 14px; line-height: 20px; cursor: pointer; }
   .step button.btn:hover:not(:disabled) { background: var(--moxi-bg-hover); }
   .step button.btn:disabled { color: var(--moxi-text-dim); border-color: var(--moxi-border); cursor: default; }
-  .step button.lnk { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); font: inherit; cursor: pointer; }
+  .step button.lnk { padding: 0; border: 0; background: none; color: var(--moxi-text-dim); font: inherit; font-size: 14px;
+                     line-height: 20px; cursor: pointer; }
   @media (max-width: 720px) {
     .orow { grid-template-columns: minmax(0, 1fr) auto; }
-    .orow .ok { grid-column: 1 / -1; font-size: 13px; }
+    .orow .ok { grid-column: 1 / -1; }
+    .foot { padding-left: 0; }
     .step { margin-left: 0; }
     .step .orow { grid-template-columns: minmax(0, 1fr) auto; }
     .step .then { padding-left: 0; }
@@ -895,9 +903,11 @@ export class ProjectsPage extends LitElement {
     return html`<div class="detail">
       <div class="opened" data-part="opened">${rows.map((item) => this.#openedRow(project, item))}</div>
       <div class="foot" data-part="foot">
-        <button type="button" data-action="edit" aria-pressed=${this.#openFor === "edit" ? "true" : "false"}
+        <button type="button" data-action="edit" class=${this.#openFor === "remove" ? "" : "on"}
+          aria-pressed=${this.#openFor === "edit" ? "true" : "false"}
           @click=${() => this.#editOpen(project)}>${EDIT}</button>
-        <button type="button" data-action="remove" aria-pressed=${this.#openFor === "remove" ? "true" : "false"}
+        <button type="button" data-action="remove" class=${this.#openFor === "remove" ? "on" : ""}
+          aria-pressed=${this.#openFor === "remove" ? "true" : "false"}
           @click=${() => this.#removeOpen(project)}>${REMOVE}</button>
       </div>
       ${this.#openFor === "remove" && this.#step?.key === project.key ? this.#stepPart(project, this.#step) : nothing}
@@ -979,8 +989,9 @@ export class ProjectsPage extends LitElement {
   #openedRow(project: Listed, item: OpenedRow) {
     const link = item.link;
     return html`<div class="orow" data-label=${item.label}><span class="ok">${item.label}</span>
-      <div class="ol">${item.lines.map((one) => html`<p>${one.parts.map((part, n) => html`${n > 0 ? JOIN : ""}${
-        part.heavy ? html`<strong>${part.text}</strong>` : part.text}`)}</p>`)}</div>
+      <div class="ol">${item.lines.map((one) => html`<p class=${one.dim ? "d" : ""}>${one.parts.map((part, n) =>
+        part.heavy ? html`${n > 0 ? html`<span class="d">${JOIN}</span>` : ""}<strong>${part.text}</strong>`
+          : n > 0 ? html`<span class="d">${JOIN}${part.text}</span>` : part.text)}</p>`)}</div>
       ${link !== null ? this.#pageLink(link.module, link.text, link.route)
         : item.changeFolder ? html`<button type="button" class="oa fix" data-action="change-folder"
           @click=${() => this.#editOpen(project)}>${CHANGE_FOLDER}</button>` : nothing}

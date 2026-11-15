@@ -15,9 +15,13 @@ export interface Shown {
   heavy: boolean;
 }
 
-/** One line of an opened row. */
+/** One line of an opened row. Its first phrase is drawn in the text's colour and the rest
+ * dim, a heavy one heavier in the text's colour; a `dim` line is dim throughout. */
 export interface ShownLine {
   parts: Shown[];
+  /** The line is a quieter one: a count after lines (`7 more this week`), the line under
+   * a line that leads with heavy words, or `no lead`. */
+  dim: boolean;
 }
 
 /** One labelled row of the opened project: label at the left, lines, link or act at the right. */
@@ -44,7 +48,7 @@ export interface OpenedFacts {
 export const MISSING_SAYS =
   "Moxi keeps the project's name and settings. Point it at where the folder went, or remove the project.";
 
-const line = (...texts: string[]): ShownLine => ({ parts: texts.map((text) => ({ text, heavy: false })) });
+const line = (...texts: string[]): ShownLine => ({ parts: texts.map((text) => ({ text, heavy: false })), dim: false });
 
 /** `a`, `a and b`, `a, b and c`. */
 export function joinNames(names: readonly string[]): string {
@@ -70,7 +74,8 @@ export function agentPhrase(reports: readonly Report[], key: string, name: strin
   return where === null ? says[0].state : `${says[0].state} ${where}`;
 }
 
-/** The `Agents` row's line: `<lead> leads`, the lead's phrase, then who also works here. */
+/** The `Agents` row's line: `<lead> leads`, the lead's phrase, then who also works here;
+ * `no lead`, dim, for none. */
 export function agentsLine(project: Listed, reports: readonly Report[]): ShownLine {
   const texts: string[] = [];
   if (project.lead !== null) {
@@ -82,7 +87,7 @@ export function agentsLine(project: Listed, reports: readonly Report[]): ShownLi
   if (others.length > 0) {
     texts.push(`${joinNames(others)} ${others.length === 1 ? "also works here" : "also work here"}`);
   }
-  if (texts.length === 0) texts.push("no lead");
+  if (texts.length === 0) return { ...line("no lead"), dim: true };
   return line(...texts);
 }
 
@@ -91,7 +96,8 @@ export function folderRow(project: Listed, home: string | null): OpenedRow {
   const root = homeForm(project.root, home);
   if (project.exists === false) {
     return { label: "Folder", link: null, changeFolder: true,
-             lines: [{ parts: [{ text: `${root} doesn't exist`, heavy: true }] }, line(MISSING_SAYS)] };
+             lines: [{ parts: [{ text: `${root} doesn't exist`, heavy: true }], dim: false },
+                     { ...line(MISSING_SAYS), dim: true }] };
   }
   return { label: "Folder", lines: [line(root, kindPhrase(project.kind))], link: null, changeFolder: false };
 }
@@ -110,7 +116,8 @@ interface Merged {
  * The reports' sections for `key`, one row per label: lines in order, the first link in
  * order whose module is installed, the lowest rank. A counted part counts the sessions no
  * lower order claimed, with its after-lines words once a line is drawn above it; a line
- * with nothing left to draw is left out, and so is a section.
+ * with nothing left to draw is left out, and so is a section. A line of counts after
+ * lines, and a line under one that leads with heavy words, is dim.
  */
 export function mergedSections(reports: readonly Report[], key: string,
                                installed: ReadonlySet<string>): Merged[] {
@@ -132,11 +139,17 @@ export function mergedSections(reports: readonly Report[], key: string,
       }
       for (const raw of section.lines) {
         const parts: Shown[] = [];
+        let counts = true;
         for (const part of raw.parts) {
           const text = partText(part, claimed, { afterLines: merged.lines.length > 0 });
-          if (text !== null) parts.push({ text, heavy: part.heavy });
+          if (text === null) continue;
+          parts.push({ text, heavy: part.heavy });
+          counts &&= part.count !== null;
         }
-        if (parts.length > 0) merged.lines.push({ parts });
+        if (parts.length === 0) continue;
+        const above = merged.lines.at(-1);
+        const dim = (counts && above !== undefined) || above?.parts[0].heavy === true;
+        merged.lines.push({ parts, dim });
       }
     }
   }

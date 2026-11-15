@@ -134,6 +134,59 @@ def test_the_fixtures_sections_join_the_opened_project_ranked_first_with_their_l
         "project/atlas-api")
 
 
+#: For each labelled row of the opened project: the left of its label and of its words, its
+#: words' colour, the label's (dim), each dim phrase's text, and its words' height and line
+#: height; and the foot's acts, each with its left and colour.
+_LOOK = """item => {
+  const colour = (el) => getComputedStyle(el).color;
+  const rows = [...item.querySelectorAll('[data-part="opened"] .orow')].map((row) => {
+    const words = row.querySelector('.ol');
+    return {
+      label: row.dataset.label, size: getComputedStyle(row).fontSize,
+      labelX: row.querySelector('.ok').getBoundingClientRect().left, wordsX: words.getBoundingClientRect().left,
+      text: colour(words), dim: colour(row.querySelector('.ok')),
+      dims: [...words.querySelectorAll('.d')].map((el) => [el.textContent.trim(), colour(el)]),
+      height: words.getBoundingClientRect().height, line: parseFloat(getComputedStyle(words).lineHeight),
+    };
+  });
+  const acts = [...item.querySelectorAll('[data-part="foot"] button')].map((el) =>
+    [el.textContent.trim(), el.getBoundingClientRect().left, colour(el)]);
+  return { rows, acts };
+}"""
+
+
+def test_the_opened_project_draws_each_lines_tail_dim_in_a_76_px_column(fixture_shell, fixture_page):
+    fixture_page.set_viewport_size({"width": 1280, "height": 800})
+    kit.say(fixture_shell, kit.full_report(fixture_shell))
+    item = opened(fixture_page, "atlas-api")
+    expect(words(item, "Sessions")).to_contain_text("3 more this week")
+    look = item.evaluate(_LOOK)
+    by = {row["label"]: row for row in look["rows"]}
+    for row in look["rows"]:
+        assert row["size"] == "13px", row
+        assert row["wordsX"] - row["labelX"] == 76, row
+        assert row["text"] != row["dim"], row
+        assert all(colour == row["dim"] for _, colour in row["dims"]), row
+    # The first phrase in the text's colour, the rest dim.
+    assert [text for text, _ in by["Folder"]["dims"]] == ["· a code project"]
+    assert [text for text, _ in by["Agents"]["dims"]] == ["· running now in slot 4",
+                                                         "· planner and reviewer also work here"]
+    assert [text for text, _ in by["Services"]["dims"]] == ["· api-server running"]
+    assert "3 more this week" in [text for text, _ in by["Sessions"]["dims"]]
+    # At 1280 the Agents line fits on one line.
+    assert by["Agents"]["height"] < 2 * by["Agents"]["line"], by["Agents"]
+    # The foot under the words: Edit in the text's colour, Remove dim.
+    (edit, edit_x, edit_colour), (remove, _, remove_colour) = look["acts"]
+    assert (edit, remove) == ("Edit", "Remove")
+    assert edit_x == by["Folder"]["wordsX"]
+    assert (edit_colour, remove_colour) == (by["Folder"]["text"], by["Folder"]["dim"])
+    # With the remove step open, Remove in the text's colour and Edit dim.
+    item.locator('[data-part="foot"] [data-action="remove"]').click()
+    expect(item.locator('[data-part="remove"]')).to_be_visible()
+    look = item.evaluate(_LOOK)
+    assert [colour for _, _, colour in look["acts"]] == [by["Folder"]["dim"], by["Folder"]["text"]]
+
+
 def test_an_agent_that_isnt_running_says_so_after_its_name(fixture_shell, fixture_page):
     kit.say(fixture_shell, kit.full_report(fixture_shell))
     item = opened(fixture_page, "kestrel-web")

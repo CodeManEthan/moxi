@@ -54,8 +54,8 @@ test("Notes only while notes is installed and the project has a notes folder", (
 test("a missing folder: its heavy words, what Moxi keeps, and Change folder", () => {
   const [folder] = opened({ ...ATLAS, exists: false });
   assert.equal(folder.changeFolder, true);
-  assert.deepEqual(folder.lines, [{ parts: [{ text: "~/code/atlas-api doesn't exist", heavy: true }] },
-                                  { parts: [{ text: MISSING_SAYS, heavy: false }] }]);
+  assert.deepEqual(folder.lines, [{ parts: [{ text: "~/code/atlas-api doesn't exist", heavy: true }], dim: false },
+                                  { parts: [{ text: MISSING_SAYS, heavy: false }], dim: true }]);
   assert.equal(MISSING_SAYS,
                "Moxi keeps the project's name and settings. Point it at where the folder went, or remove the project.");
 });
@@ -84,8 +84,20 @@ test("ranked sections lead, then Folder and Agents, then the rest by order", () 
   assert.deepEqual(rows[1].lines[0].parts, [{ text: "queue-worker failed at 18:31", heavy: true },
                                             { text: "exited 1, not running", heavy: false }]);
   assert.deepEqual(rows[1].link, { text: "Services", module: "services", route: "" });
+  assert.deepEqual(rows.map((row) => row.lines.map((one) => one.dim)).flat().filter(Boolean), [],
+                   "a line of its own is not dim; only its phrases after the first are");
   assert.deepEqual(rows[6].link, { text: "Usage", module: "usage", route: "project/atlas-api" });
   assert.equal(rows[0].link, null);
+});
+
+test("the line under one that leads with heavy words is dim; the one after it is not", () => {
+  const services = report(50, { sections: [{ label: "Services", rank: 30, lines: [
+    { parts: [{ text: "queue-worker failed at 18:31", heavy: true }, { text: "exited 1, not running" }] },
+    { parts: [{ text: "atlas-dev running since 08:12" }, { text: "triage-agent every hour" }] },
+    { parts: [{ text: "docs-preview running" }] },
+  ] }] });
+  const [row] = opened(ATLAS, [services]);
+  assert.deepEqual(row.lines.map((one) => one.dim), [false, true, false]);
 });
 
 test("sections of one label from two reports are one row: lines in order, first link, lowest rank", () => {
@@ -128,8 +140,10 @@ test("counted lines: running lines claim their sessions, so the count after them
   const rows = opened(ATLAS, [launcher, sessions]);
   assert.deepEqual(texts(rows[2]), ["planner-Nov-08-2026 12:45 · slot 3", "builder-1-Nov-08-2026 11:00 · slot 4",
                                     "3 more this week"]);
+  assert.deepEqual(rows[2].lines.map((one) => one.dim), [false, false, true], "the count after lines is dim");
   const alone = opened(ATLAS, [sessions]);
   assert.deepEqual(texts(alone[2]), ["5 sessions this week"], "with no line above, its own words");
+  assert.equal(alone[2].lines[0].dim, false);
   const allRunning = report(20, { sections: [{ label: "Sessions",
                                                lines: [{ parts: [{ text: "", count: more, claims: ["claude/a", "claude/b"] }] }] }] });
   assert.deepEqual(texts(opened(ATLAS, [launcher, allRunning])[2]).length, 2, "a count of 0 is not drawn");
@@ -202,6 +216,8 @@ test("the Agents line's three forms", () => {
   assert.equal(line({ associated: [] }), "builder-1 leads");
   assert.equal(line({ lead: null, associated: ["planner"] }), "planner also works here");
   assert.equal(line({ lead: null, associated: [] }), "no lead");
+  assert.equal(agentsLine({ ...ATLAS, lead: null, associated: [] }, []).dim, true, "no lead is dim");
+  assert.equal(agentsLine(ATLAS, []).dim, false);
   assert.equal(joinNames([]), "");
   assert.equal(joinNames(["a"]), "a");
 });
