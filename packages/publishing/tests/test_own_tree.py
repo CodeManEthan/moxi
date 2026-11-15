@@ -23,9 +23,8 @@ _WHOLE_TREE = (pytest.mark.slow, pytest.mark.touches("packages/publishing/**"))
 @pytest.mark.parametrize("check", ["tags", pytest.param("refs", marks=_WHOLE_TREE),
                                    pytest.param("naming", marks=_WHOLE_TREE)])
 def test_moxi_devs_checks_pass_on_the_package(check):
-    import importlib
-
-    scanner = importlib.import_module(f"moxi_dev.{check}")
+    # The release test's venv holds no workspace member, so moxi-dev may be absent there.
+    scanner = pytest.importorskip(f"moxi_dev.{check}")
     found = [str(hit) for hit in scanner.scan(WORKSPACE) if hit.path.startswith(PREFIX)]
     assert found == []
 
