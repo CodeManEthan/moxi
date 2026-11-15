@@ -14,8 +14,8 @@ tip as read (its head, once the branch is gone), in this order:
 4. Run the repo's finish actions in order, each under its `id`, and record each one's
    result as `finish.action` before the next starts; each record takes the round's
    lock for that write only. An action whose record at `T` is `ok` or `found` is not
-   run again. A failed action is recorded `failed` and ends the verb (`ActionFailed`,
-   exit 1); nothing is undone.
+   run again; one recorded `failed`, or with no record, is run. A failed action is
+   recorded `failed` and ends the verb (`ActionFailed`, exit 1); nothing is undone.
 5. Under the round's lock, read the log again and append `finish.done` when the log
    holds none for the build and the gates read on the log (`AFTER`: verification,
    findings, the check, questions, steps of the user's own) still hold at `T`; else
@@ -36,6 +36,16 @@ aborted and refused with the way through: merge the target into the branch in th
 build's worktree, check, and finish again. A merge that fails otherwise (a hook refused
 it, say) is aborted too, and recorded as failed.
 
+**A merge found in git.** Before a merge is made, the build is read as step 3 read it:
+when it is already `merged` (by a hand merge, or by a fast-forward of the target onto
+its branch), the merge is not made again but recorded `found`, with the landing and
+`P` that read gives: the bringing merge and its first parent for a hand merge, the tip
+and the target before it for a fast-forward. A hand merge's record carries what it put
+on the target, `git diff --shortstat` of its first parent and itself, for the caller to
+print. That covers a merge made by hand, and one a stopped finish made and did not
+record. A build merged by a landing of its own on record at another tip is refused:
+recording that landing again would give the build two landings no head tells apart.
+
 This version runs the `merge` action; a repo whose finish names an action of another
 kind is refused before anything is run.
 """
@@ -43,14 +53,15 @@ kind is refused before anything is run.
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from moxi import exit as exits
 from moxi import proc
 
-from . import builds, checking, finish_gates, finish_lock, folders, places, questions, write
+from . import (builds, checking, finish_gates, finish_lock, folders, open_builds, places,
+               questions, write)
 from . import settings as own
 from . import state as states
 from .errors import RoundsError, Refused, Unmet
@@ -97,8 +108,9 @@ class ActionFailed(RoundsError):
 @dataclass(frozen=True)
 class Action:
     """One finish action as this finish recorded or passed it: its `id` and `kind`, the
-    `state` recorded (`OK`, `FAILED`), or `ran` false when a record at the tip already
-    settled it; a merge's `landing` and `target_before`; and what it printed."""
+    `state` recorded (`OK`, `FAILED`, `FOUND`), or `ran` false when a record at the tip
+    already settled it; a merge's `landing` and `target_before`; what it printed, or for
+    a merge found made by hand (`hand_merge`), what that merge put on the target."""
 
     id: str
     kind: str
@@ -108,6 +120,7 @@ class Action:
     target_before: str | None = None
     output: str = ""
     kept: str | None = None
+    hand_merge: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,9 +140,12 @@ class Finished:
 
 
 def finish(name: str, stage: str, *, actor: str, settings=None,
-           wait_s: float = write.WAIT_S, at: str | None = None, env=None) -> Finished:
+           wait_s: float = write.WAIT_S, at: str | None = None, env=None,
+           on_action: Callable[[Action], None] | None = None) -> Finished:
     """Finish the open build of `stage` in the round `name`. `settings` is what
-    `settings.load()` gives, read now when left out.
+    `settings.load()` gives, read now when left out. `on_action` is called with each
+    action this finish records, as soon as its record is on the log, so a caller can
+    say what was done even when the finish is refused later.
 
     Raises what `folders.home` raises for a round that can't be found; `Refused` with
     every unmet gate, a held finish lock, a branch that moved, a checkout of the target
@@ -149,7 +165,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
     # Read again at `T` after the actions only where `T` was the branch's tip: a build
     # whose branch was gone is read as gone.
     at_tip = None if seen.tip is None else {stage: tip}
-    found = [one.unmet for one in _found(view, name, stage, seen, tip, settings)]
+    found = [one.unmet for one in _gates(view, name, stage, seen, tip, settings)]
     actions = own.finish_actions(own.build_setting(settings, build.repo, "finish"))
     found += _not_run(actions, build.repo)
     if found:
@@ -165,10 +181,12 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
             write.record(where, actor=actor, event=lambda _view, _result: cleared,
                          wait_s=wait_s, at=at, env=env)
         view = write.look(where, wait_s=wait_s, env=env)
-        seen = _seen(view, name, stage, settings)
+        read = open_builds.of_round(name, [build.repo], settings=settings)
+        seen = _seen(view, name, stage, settings, read=read)
+        status = read[stage].status
         target_head = Git(root).branch(build.target)
         moved = _moved(seen, tip, name=name, stage=stage)
-        unmet = moved or [one.unmet for one in _found(view, name, stage, seen, tip, settings)
+        unmet = moved or [one.unmet for one in _gates(view, name, stage, seen, tip, settings)
                           if one.number in UNDER_LOCK]
         if target_head is None:
             unmet.append(Unmet(f"the target {build.target} is no longer a branch of "
@@ -185,8 +203,11 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                                    landing=last.get("landing"),
                                    target_before=last.get("target_before")))
                 continue
-            result = _merge(root, build, tip, target_head, settings=settings,
-                            action_id=action["id"], again=again)
+            result = _found(status, root, tip, action_id=action["id"], name=name,
+                            stage=stage)
+            if result is None:
+                result = _merge(root, build, tip, target_head, settings=settings,
+                                action_id=action["id"], again=again)
             write.record(where, actor=actor, event=lambda _view, _result, result=result: (
                 write.Entry(ACTION, {"stage": stage, "tip": tip, "id": result.id,
                                      "kind": result.kind, "state": result.state,
@@ -194,6 +215,8 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
                                      "target_before": result.target_before})),
                 wait_s=wait_s, at=at, env=env)
             done.append(result)
+            if on_action is not None:
+                on_action(result)
             if result.state == FAILED:
                 raise ActionFailed(name, stage, result.id, result.output)
 
@@ -203,7 +226,7 @@ def finish(name: str, stage: str, *, actor: str, settings=None,
             now = _seen(view, name, stage, settings, refuse=False, tips=at_tip)
             if isinstance(now, Unmet):
                 return [now]
-            return [one.unmet for one in _found(view, name, stage, now, tip, settings)
+            return [one.unmet for one in _gates(view, name, stage, now, tip, settings)
                     if one.number in AFTER]
 
         def event(view, _result):
@@ -244,11 +267,14 @@ def _ended(state: states.State, stage: str) -> bool:
 
 
 def _seen(view, name: str, stage: str, settings, *, refuse: bool = True,
-          tips: Mapping[str, str] | None = None):
+          tips: Mapping[str, str] | None = None, read=None):
     """What git and the settings say now of the stage's build, at the tip `tips` gives
-    it, else at its branch's tip now; with `refuse` false, the problem that kept it
-    from being read is given back as an `Unmet` instead of raised."""
-    seen = checking.seen_of(view.state, name, settings=settings, tips=tips).get(stage)
+    it, else at its branch's tip now; `read` is the round's open builds as
+    `open_builds.of_round` read them, read here when left out. With `refuse` false,
+    the problem that kept it from being read is given back as an `Unmet` instead of
+    raised."""
+    seen = checking.seen_of(view.state, name, settings=settings, tips=tips,
+                            read=read).get(stage)
     problem = (Unmet(f"{stage}'s build can't be read", f"moxi rounds show {name}")
                if seen is None else seen.problem)
     if problem is None:
@@ -258,7 +284,7 @@ def _seen(view, name: str, stage: str, settings, *, refuse: bool = True,
     raise Refused([problem])
 
 
-def _found(view, name: str, stage: str, seen, tip: str, settings) -> tuple:
+def _gates(view, name: str, stage: str, seen, tip: str, settings) -> tuple:
     return finish_gates.unmet(
         view.state, stage, seen=seen, tip=tip, name=name, register=view.project_state,
         closed=lambda round_name: questions.is_closed(round_name, settings))
@@ -291,6 +317,31 @@ def _records(state: states.State, build: builds.Build, tip: str) -> dict[str, di
                 and isinstance(event.get("id"), str)):
             newest[event["id"]] = event
     return newest
+
+
+# -- a merge found in git ----------------------------------------------------------------
+
+def _found(status: builds.Status, root: Path, tip: str, *, action_id: str, name: str,
+           stage: str) -> Action | None:
+    """The merge action recorded `found` when the build, as `status` read it, is already
+    merged into its target; None when it is not, and the merge is to be made."""
+    if status.state != builds.MERGED:
+        return None
+    if status.by == builds.HAND_MERGE:
+        merge = str(status.hand_merge)
+        return Action(action_id, own.MERGE, FOUND, landing=merge,
+                      target_before=status.target_before,
+                      output=_MergeGit(root).shortstat(f"{merge}^1", merge),
+                      hand_merge=True)
+    if status.by == builds.FAST_FORWARD:
+        return Action(action_id, own.MERGE, FOUND, landing=tip,
+                      target_before=status.target_before)
+    raise Refused([Unmet(
+        f"{stage}'s build is on its target by a merge of its own finish at another tip, "
+        f"and its branch is now at {tip[:12]}, which holds nothing more; recording that "
+        "merge again would leave the build's landings telling no head apart",
+        f"move {stage}'s branch back to the tip its finish merged, then moxi rounds "
+        f"finish {name} {stage}")])
 
 
 # -- the merge ---------------------------------------------------------------------------
@@ -377,6 +428,11 @@ class _MergeGit(Git):
     def merging(self) -> bool:
         code, _ = self._run("rev-parse", "--verify", "--quiet", "MERGE_HEAD", ok=(0, 1))
         return code == 0
+
+    def shortstat(self, start: str, end: str) -> str:
+        """What `git diff --shortstat` says of `start` to `end`, one line."""
+        _, out = self._run("diff", "--shortstat", start, end)
+        return out.strip()
 
     def abort(self) -> None:
         self._run("merge", "--abort")

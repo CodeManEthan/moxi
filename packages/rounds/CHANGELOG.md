@@ -130,7 +130,11 @@ does not yet build.
   it landed and the target before it, and records the build finished when the gates
   read on the log still hold at the tip it merged, even if the branch has moved since. A conflict is aborted and refused; a failed action is
   recorded and undoes nothing, and the next finish runs it again; an action recorded
-  `ok` at the tip is not run again. It runs the `merge` action alone.
+  `ok` at the tip is not run again. A merge already on the target, made by hand, by a
+  fast-forward of the target or by a finish that stopped before recording it, is
+  recorded `found` with where it landed and the target before it, and is not made
+  again; a hand merge is printed as `found hand merge <commit>:` with what it put on
+  the target. It runs the `merge` action alone.
 - The finish lock: one finish at a time per repo and target, held as the ref
   `refs/rounds/finishing/<into>` (or the repo's `lock_ref`) pointing at a blob with the
   holder's line. A holder on this machine whose process has ended is cleared in one

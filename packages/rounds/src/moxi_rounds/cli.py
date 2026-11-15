@@ -1223,8 +1223,13 @@ def _finish(args, out) -> int:
         raise BadArgument(f"{name} is named with no stage, and a finish is of one build",
                           f"moxi rounds finish {name} B<n>, or moxi rounds finish in the "
                           "build's worktree")
+    def on_action(one) -> None:
+        # Said as it is recorded, so it is seen even when the finish is refused after.
+        if one.hand_merge:
+            print(f"found hand merge {str(one.landing)[:12]}: {one.output}", file=out)
+
     try:
-        done = finishing.finish(name, stage, actor=_actor(args))
+        done = finishing.finish(name, stage, actor=_actor(args), on_action=on_action)
     except finishing.ActionFailed as failed:
         if failed.output:
             print(failed.output, file=out)
