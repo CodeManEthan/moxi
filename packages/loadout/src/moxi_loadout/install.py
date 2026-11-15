@@ -245,7 +245,7 @@ def global_preview(loadout_dir=None, *, resolver=planner.resolve_key,
     from moxi_loadout import globalfile
     from moxi_loadout import harness as hz
 
-    plan, run = _plan(folder, resolver, git_seconds)
+    plan, run = _plan(loadout_dir, resolver, git_seconds)
     mode, shared = plan.manifest.global_mode, plan.manifest.global_file
 
     def parts(harness: str) -> list[str]:
@@ -494,7 +494,7 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
     for level, line in opencode_reads_claude(plan, ran[0], after=True):
         said.append((level, line))
         lines.append(line)
-    repo_link.sync(machine.source, machine.reinstall_on_commit, say=say)
+    repo_link.sync(machine.source, enabled=machine.reinstall_on_commit, say=say)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
                    planner.exit_code(codes), global_lines=said)
 

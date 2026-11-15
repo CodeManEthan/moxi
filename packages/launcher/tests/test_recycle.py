@@ -619,12 +619,12 @@ def usage_group(tmp_path, monkeypatch):
     monkeypatch.delenv("MOXI_LAUNCHER_HOME", raising=False)
     monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
     assert store.path().is_relative_to(tmp_path)
-    connection = store.connect()
-    launched(connection)
+    conn = store.connect()
+    launched(conn)
     mark.reset()
-    yield SimpleNamespace(mark=mark, conn=connection)
+    yield SimpleNamespace(mark=mark, conn=conn)
     mark.reset()
-    connection.close()
+    conn.close()
 
 
 def through_usage(group, at):

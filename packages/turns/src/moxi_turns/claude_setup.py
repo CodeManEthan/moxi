@@ -413,10 +413,10 @@ def install_plugins(root: Path | None = None) -> list[str]:
     return lines
 
 
-def _manifest_version(folder: Path) -> str | None:
+def _manifest_version(plugin_dir: Path) -> str | None:
     """The version a plugin folder's manifest names, or None when it names none."""
     try:
-        version = json.loads((folder / ".claude-plugin" / "plugin.json")
+        version = json.loads((plugin_dir / ".claude-plugin" / "plugin.json")
                              .read_text("utf-8")).get("version")
     except (OSError, ValueError, AttributeError):
         return None
@@ -567,7 +567,7 @@ def _user_scope_runner() -> bool | None:
 _LEG_LINE = re.compile(r"^const LEG = (\d+)\s*$", re.MULTILINE)
 
 
-def _installed_runner_rows(Row, module) -> list:
+def _installed_runner_rows(row_type, module) -> list:
     """The runner Claude Code runs at user scope is its cached copy, not the placed one:
     one row comparing that copy's leg with the endpoint's. No row when the runner is not
     installed at user scope or Claude Code cannot say."""
@@ -579,7 +579,7 @@ def _installed_runner_rows(Row, module) -> list:
     name = "claude installed runner"
     where = entry.get("installPath")
     if not isinstance(where, str) or not where:
-        return [Row(module, name, "warn",
+        return [row_type(module, name, "warn",
                     f"Claude Code names no folder for {RUNNER}@{MARKETPLACE}, so its leg "
                     "cannot be read")]
     try:
@@ -589,13 +589,13 @@ def _installed_runner_rows(Row, module) -> list:
     else:
         why = "names no leg"
     if found is None:
-        return [Row(module, name, "warn", f"the runner at {where} {why}")]
+        return [row_type(module, name, "warn", f"the runner at {where} {why}")]
     have = int(found.group(1))
     if have == LEG:
-        return [Row(module, name, "ok",
+        return [row_type(module, name, "ok",
                     f"version {entry.get('version', '?')} at {where}, leg {have} as the "
                     "endpoint")]
-    return [Row(module, name, "fail",
+    return [row_type(module, name, "fail",
                 f"version {entry.get('version', '?')} at {where} speaks leg {have}, the "
                 f"endpoint leg {LEG}: every session it loads in runs without turns",
                 "moxi install turns")]

@@ -637,7 +637,7 @@ def test_a_session_without_a_key_gets_every_waiting_handoff_as_another_seats(con
     assert store.picked(conn, "lead") == [] and store.picked(conn, "planner") == []
 
 
-def test_a_session_without_a_key_in_an_empty_folder_gets_nothing(conn, endpoint):
+def test_a_session_without_a_key_in_an_empty_handoff_dir_gets_nothing(conn, endpoint):
     launch_claude(conn, preset_kind=None, preset_name=None)
     assert listen_handoff.answer(start("claude", CLAUDE_ID, "r1")) is None
 

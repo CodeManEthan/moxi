@@ -3269,6 +3269,8 @@ launcher	packages/launcher/src/moxi_launcher/keepwarm.py	return Verdict(None, ge
 launcher	packages/launcher/src/moxi_launcher/keepwarm.py	said = "opened" if opened.new else f"is already open (since {opened.hold.opened_at})"	keep	opened	opened
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	if env.get(listeners.RELAUNCH):	use	listeners.RELAUNCH	listeners.RELAUNCH_ENV
 launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	if env.get(listeners.REQUEST):	use	listeners.REQUEST	listeners.REQUEST_ENV
+launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	where = handoffs.folder(_cwd(event, env), create=key is not None)	use	handoffs.folder	handoffs.handoff_dir
+launcher	packages/launcher/src/moxi_launcher/listen_handoff.py	where = handoffs.folder_of_row(row, create=key is not None)	use	handoffs.folder_of_row	handoffs.handoff_dir_of_row
 launcher	packages/launcher/src/moxi_launcher/listeners.py	-	name	RELAUNCH	RELAUNCH_ENV
 launcher	packages/launcher/src/moxi_launcher/listeners.py	-	name	REQUEST	REQUEST_ENV
 launcher	packages/launcher/src/moxi_launcher/module.py	"sessions": {"script": "sessions.js", "title": "Sessions", "contract": 1,	keep	sessions	sessions
@@ -3943,6 +3945,7 @@ launcher	packages/launcher/tests/test_handoffs.py	assert (found.key, found.folde
 launcher	packages/launcher/tests/test_handoffs.py	assert (found.key, found.folder, found.request_id) == ("lead", handoffs.own_handoffs_dir(),	use	folder	handoff_dir
 launcher	packages/launcher/tests/test_handoffs.py	assert handoffs.folder_of_row(launch) == notes.answer["folder"]	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	assert handoffs.handoff_dir_of_row(launch) == notes.answer["folder"]	keep	folder	folder
+launcher	packages/launcher/tests/test_handoffs.py	files	name	folder	handoff_dir
 launcher	packages/launcher/tests/test_handoffs.py	notes.answer["folder"] = None	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	return answer["folder"]	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	test_the_folder_is_not_made_when_create_is_off	name	folder	handoff_dir
@@ -4032,6 +4035,7 @@ launcher	packages/launcher/tests/test_launch.py	test_a_launch_with_a_handoff_key
 launcher	packages/launcher/tests/test_launch.py	test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row	name	own_folder	own_handoffs_dir
 launcher	packages/launcher/tests/test_launch.py	turns	name	directory	turns_dir
 launcher	packages/launcher/tests/test_launch.py	wait_for(lambda: log.exists() and "delivered" in log.read_text(), timeout=30)	keep	delivered	delivered
+launcher	packages/launcher/tests/test_listeners.py	-	name	test_a_session_without_a_key_in_an_empty_folder_gets_nothing	test_a_session_without_a_key_in_an_empty_handoff_dir_gets_nothing
 launcher	packages/launcher/tests/test_listeners.py	-	name	test_the_own_folder_is_the_handoffs_store	test_the_own_dir_is_the_handoffs_store
 launcher	packages/launcher/tests/test_listeners.py	-	name	test_with_notes_a_launched_seat_is_pointed_into_notes_folder	test_with_notes_a_launched_seat_is_pointed_into_notes_dir
 launcher	packages/launcher/tests/test_listeners.py	-	name	test_with_notes_a_session_by_hand_is_pointed_into_notes_folder	test_with_notes_a_session_by_hand_is_pointed_into_notes_dir
@@ -4374,6 +4378,7 @@ launcher	packages/launcher/tests/test_recycle.py	home = env.get("HOME", "/users/
 launcher	packages/launcher/tests/test_recycle.py	home = environ.get("HOME", "/users/me")	keep	HOME	HOME
 launcher	packages/launcher/tests/test_recycle.py	launched(conn, base_env={"HOME": "/users/ann", "CLAUDE_CONFIG_DIR": "~/.seat",	keep	HOME	HOME
 launcher	packages/launcher/tests/test_recycle.py	launched(connection, base_env={"HOME": "/users/ann", "CLAUDE_CONFIG_DIR": "~/.seat",	keep	HOME	HOME
+launcher	packages/launcher/tests/test_recycle.py	return group.mark.run_handlers(crossing, wait=5.0)	keep	wait	wait
 launcher	packages/launcher/tests/test_recycle.py	self._closed.set()	keep	set	set
 launcher	packages/launcher/tests/test_recycle.py	self.closed += 1	keep	closed	closed
 launcher	packages/launcher/tests/test_recycle.py	self.commands, self.closed = [], 0	keep	closed	closed
@@ -4384,6 +4389,7 @@ launcher	packages/launcher/tests/test_recycle.py	store.add_run_event(conn, run.r
 launcher	packages/launcher/tests/test_recycle.py	test_a_claude_launch_with_its_own_config_dir_reads_its_cache_under_it	name	connection	conn
 launcher	packages/launcher/tests/test_recycle.py	test_a_relaunch_crossing_keeps_its_line_when_the_store_is_locked	name	locker	lock_conn
 launcher	packages/launcher/tests/test_recycle.py	test_the_crossing_handler_gives_up_on_a_locked_store_within_its_bound	name	locker	lock_conn
+launcher	packages/launcher/tests/test_recycle.py	usage_group	name	connection	conn
 launcher	packages/launcher/tests/test_relaunch.py	-	name	_folder	_handoff_dir
 launcher	packages/launcher/tests/test_relaunch.py	-	name	environ	test_env
 launcher	packages/launcher/tests/test_relaunch.py	-	name	test_a_relative_handoff_is_read_from_the_working_folder	test_a_relative_handoff_is_read_from_the_working_dir
@@ -4627,6 +4633,7 @@ loadout	packages/loadout/src/moxi_loadout/doctor.py	"eval", "exec", "exit", "exp
 loadout	packages/loadout/src/moxi_loadout/doctor.py	_NOT_OK = ("missing", "stale", "modified", "blocked", "would-commit", "bad-source")	keep	stale	stale
 loadout	packages/loadout/src/moxi_loadout/doctor.py	if all(r.state in ("missing", "stale") for r in bad):	keep	stale	stale
 loadout	packages/loadout/src/moxi_loadout/doctor.py	if any(s not in ("ok", "off") for s in states.values()):	keep	any	any
+loadout	packages/loadout/src/moxi_loadout/doctor.py	if warns or any(s not in ("ok", "off") for s in states.values()):	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/doctor.py	skills.setdefault(name.partition("/")[0], set()).add(name)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/doctor.py	skills.setdefault(r["module"], set()).add(str(r.get("item")))	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/entries.py	"""Whether the MCP server `record` names is in its file now; None when the file	keep	record	record
@@ -4646,6 +4653,7 @@ loadout	packages/loadout/src/moxi_loadout/entries.py	harness = first.entry.harne
 loadout	packages/loadout/src/moxi_loadout/entries.py	if (a.where.kind if a.entry else a.record.get("kind")) == "mcp" \	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/entries.py	if any((e.file, e.kind, e.key) == (r.get("file"), kind, key)	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/entries.py	if any(e.harness == "codex" and e.kind in ("hook", "rules") for e in out):	keep	any	any
+loadout	packages/loadout/src/moxi_loadout/entries.py	if any(e.harness == "opencode" and e.file == str(hz.settings_file("opencode"))	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/entries.py	if any(e.harness == "opencode" for e in out):	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/entries.py	if any(records.index(x) in used for x in others):	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/entries.py	if command is None or any(isinstance(x, dict) and x.get("command") == command	keep	any	any
@@ -4659,6 +4667,7 @@ loadout	packages/loadout/src/moxi_loadout/entries.py	run.refused[file] = str(exc
 loadout	packages/loadout/src/moxi_loadout/entries.py	start = text.find("<!-- moxi loadout: from ")	keep	find	find
 loadout	packages/loadout/src/moxi_loadout/entries.py	unknown = sorted(set(native) - {"rules"})	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/entries.py	used: set[int] = set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/entries.py	want, carried = wanted(manifest, folder, table, run, records)	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/entries.py	wanted	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/entries.py	| ({"environment": env} if env else {}))	keep	environment	environment
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	"""Whether `root` is the top of the work tree that holds `folder`."""	use	folder	loadout_dir
@@ -4671,8 +4680,16 @@ loadout	packages/loadout/src/moxi_loadout/gitpiece.py	if not link.changes(ctx.ro
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	if not link.changes(ctx.root, range=span, paths=paths, timeout=GIT_SECONDS):	use	timeout=	timeout_s=
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	run	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/gitpiece.py	timeout=GIT_SECONDS)	use	timeout=	timeout_s=
+loadout	packages/loadout/src/moxi_loadout/globalfile.py	__all__ = ["MARKER", "GENERATED_MARKER", "END", "part_path", "parts", "reads", "read", "assemble",	keep	MARKER	MARKER
+loadout	packages/loadout/src/moxi_loadout/globalfile.py	if word in others or any(_one_edit(word, h) for h in hz.HARNESSES):	keep	any	any
+loadout	packages/loadout/src/moxi_loadout/globalfile.py	j = text.find("*/", i + 2)	keep	find	find
+loadout	packages/loadout/src/moxi_loadout/globalfile.py	j = text.find("\n", i)	keep	find	find
+loadout	packages/loadout/src/moxi_loadout/globalfile.py	k = text.find("\n" if rest.startswith("//") else "*/", j)	keep	find	find
+loadout	packages/loadout/src/moxi_loadout/globalfile.py	others = set(table) - set(hz.HARNESSES)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/harness.py	-	name	_environ	_env
 loadout	packages/loadout/src/moxi_loadout/harness.py	backup	name	folder	backup_dir
+loadout	packages/loadout/src/moxi_loadout/harness.py	given = _environ(env).get("OPENCODE_CONFIG_DIR")	use	_environ	_env
+loadout	packages/loadout/src/moxi_loadout/harness.py	given = _environ(env).get("XDG_CONFIG_HOME")	use	_environ	_env
 loadout	packages/loadout/src/moxi_loadout/harness_row.py	__all__ = ["NAME", "KIND", "ITEM", "KEY", "wanted", "record_of", "present", "add",	keep	NAME	NAME
 loadout	packages/loadout/src/moxi_loadout/harness_row.py	return NAME in rows or any(NAME in line for line in lines)	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/homes.py	(`moxi.place.folders`);	use	moxi.place.folders`	moxi.place.harness_dirs`
@@ -4706,12 +4723,14 @@ loadout	packages/loadout/src/moxi_loadout/install.py	_cover	name	folder	target_d
 loadout	packages/loadout/src/moxi_loadout/install.py	_install	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	_install	name	folders	touched_dirs
 loadout	packages/loadout/src/moxi_loadout/install.py	_plan	name	folder	loadout_dir
+loadout	packages/loadout/src/moxi_loadout/install.py	brings = any(w.kind == planner.GLOBAL_KIND and w.harness == "claude"	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/install.py	f"{os.path.join(v.folder, ignores.IGNORE)}")	keep	folder	folder
 loadout	packages/loadout/src/moxi_loadout/install.py	f"{os.path.join(v.folder, ignores.IGNORE)}")	use	folder	target_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	for name, res in plan.refused.items():	keep	refused	refused
 loadout	packages/loadout/src/moxi_loadout/install.py	global_preview	name	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	have.setdefault(os.path.dirname(str(p.path)), set()).add(p.path.name)	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/install.py	if any(want is w for w in seeded) or (	keep	any	any
+loadout	packages/loadout/src/moxi_loadout/install.py	if not after and any(r.state == "missing" for r in theirs):	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/install.py	if r.state not in ("missing", "stale"))	keep	stale	stale
 loadout	packages/loadout/src/moxi_loadout/install.py	if scope.item is not None and not any(	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/install.py	install	name	folder	loadout_dir
@@ -4720,6 +4739,7 @@ loadout	packages/loadout/src/moxi_loadout/install.py	names = have.get(folder, se
 loadout	packages/loadout/src/moxi_loadout/install.py	names = have.get(target_dir, set()) | {os.path.basename(t) for t in targets}	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/install.py	needs.setdefault(v.folder, []).append(target)	keep	folder	folder
 loadout	packages/loadout/src/moxi_loadout/install.py	needs.setdefault(v.folder, []).append(target)	use	folder	target_dir
+loadout	packages/loadout/src/moxi_loadout/install.py	plan, run = _plan(folder, resolver, git_seconds)	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/install.py	record = plan.record(step)	keep	record	record
 loadout	packages/loadout/src/moxi_loadout/install.py	replaced: set[int] = set()   # the seeded wants `--replace` places over an occupant	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/install.py	return {v.folder for v in verdicts.values()}	keep	folder	folder
@@ -4798,6 +4818,7 @@ loadout	packages/loadout/src/moxi_loadout/planner.py	mine = plan.folder / _FOLDE
 loadout	packages/loadout/src/moxi_loadout/planner.py	mine = plan.folder / _FOLDERS[kind] / filename	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/planner.py	mine = plan.folder / _KIND_DIRS[kind] / filename	use	folder	loadout_dir
 loadout	packages/loadout/src/moxi_loadout/planner.py	out = set()	keep	set	set
+loadout	packages/loadout/src/moxi_loadout/planner.py	out, seen = [], set()	keep	set	set
 loadout	packages/loadout/src/moxi_loadout/planner.py	plan.lines += [r.line for r in manifest.refused]	keep	refused	refused
 loadout	packages/loadout/src/moxi_loadout/planner.py	project_dir = machine.project_folders.get(harness, {}).get(_KIND_DIRS[kind])	use	project_folders	project_dirs
 loadout	packages/loadout/src/moxi_loadout/planner.py	project_dir = machine.project_folders.get(want.harness, {}).get(_KIND_DIRS[want.kind])	use	project_folders	project_dirs
@@ -4885,6 +4906,7 @@ loadout	packages/loadout/src/moxi_loadout/writes.py	remove	name	folder	loadout_d
 loadout	packages/loadout/src/moxi_loadout/writes.py	set_mode	name	folder	loadout_dir
 loadout	packages/loadout/tests/conftest.py	-	name	folder	loadout_dir
 loadout	packages/loadout/tests/conftest.py	HARNESS_HOMES = ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME")	keep	HOME	HOME
+loadout	packages/loadout/tests/conftest.py	HARNESS_HOMES = ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME",	keep	HOME	HOME
 loadout	packages/loadout/tests/conftest.py	The kit (`moxi_dev.testing`) already points `HOME`, `MOXI_HOME`, every `MOXI_<MODULE>_HOME`,	keep	HOME	HOME
 loadout	packages/loadout/tests/conftest.py	dist = find(cls, module)	keep	find	find
 loadout	packages/loadout/tests/conftest.py	monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))	keep	find	find
@@ -4932,19 +4954,24 @@ loadout	packages/loadout/tests/test_browser_drift.py	test_the_blocks_link_on_the
 loadout	packages/loadout/tests/test_browser_drift.py	test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_browser_drift.py	test_the_drift_block_keeps_the_contract	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_browser_drift.py	test_the_page_keeps_the_contract_and_holds_the_drift_block	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_page.py	(folder / "global.claude.md").write_text("Claude only.\n", encoding="utf-8")	use	folder	loadout_dir
 loadout	packages/loadout/tests/test_browser_page.py	(loadout_dir / "skills" / name).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/test_browser_page.py	-	name	folder	loadout_dir_fixture
 loadout	packages/loadout/tests/test_browser_page.py	-	name	make_folder	make_loadout_dir
 loadout	packages/loadout/tests/test_browser_page.py	assert (Path(shell.env["HOME"]) / "my-loadout" / "loadout.toml").read_text() == BASE	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	assert any(name.startswith("Turn ") for name in found), sorted(found)	keep	any	any
 loadout	packages/loadout/tests/test_browser_page.py	assert any(url.endswith(f"/m/loadout/api/{route}") for url in check.requests), check.requests	keep	any	any
+loadout	packages/loadout/tests/test_browser_page.py	assert f"@{folder / 'global.md'}" in claude_md.read_text()	use	folder	loadout_dir
 loadout	packages/loadout/tests/test_browser_page.py	assert not (Path(shell.env["HOME"]) / ".claude" / "skills").exists()	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	claude_md = Path(shell.env["HOME"]) / ".claude" / "CLAUDE.md"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	claude_md.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_browser_page.py	codex_md = Path(shell.env["HOME"]) / ".codex" / "AGENTS.md"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	every_control	kwonly	enabled	enabled
 loadout	packages/loadout/tests/test_browser_page.py	expect(job).to_have_attribute("data-state", "done", timeout=30_000)	keep	timeout	timeout
 loadout	packages/loadout/tests/test_browser_page.py	expect(job).to_have_attribute("data-state", "refused")	keep	refused	refused
+loadout	packages/loadout/tests/test_browser_page.py	f"claude reads {folder / 'global.md'} and {folder / 'global.claude.md'}")	use	folder	loadout_dir
+loadout	packages/loadout/tests/test_browser_page.py	f"codex reads {folder / 'global.md'}, no part")	use	folder	loadout_dir
 loadout	packages/loadout/tests/test_browser_page.py	folder = Path(shell.env["HOME"]) / "my-loadout"	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	home = Path(shell.env["HOME"])	keep	HOME	HOME
 loadout	packages/loadout/tests/test_browser_page.py	home = Path(shell.env["HOME"]).resolve()	keep	HOME	HOME
@@ -4977,20 +5004,46 @@ loadout	packages/loadout/tests/test_entries.py	assert any("not for opencode" in 
 loadout	packages/loadout/tests/test_entries.py	assert any("not plain JSON" in line for line in out.lines)	keep	any	any
 loadout	packages/loadout/tests/test_entries.py	assert any("opencode.json" in n for n in notes)	keep	any	any
 loadout	packages/loadout/tests/test_entries.py	assert any("trust" in n for n in out.notes)	keep	any	any
+loadout	packages/loadout/tests/test_entries.py	assert not any("AGENTS.md" in n for n in notes)	keep	any	any
 loadout	packages/loadout/tests/test_entries.py	assert not any(h == harness_name for h, _ in recorded)	keep	any	any
 loadout	packages/loadout/tests/test_entries.py	assert set(install.status().rows and [r.state for r in install.status().rows]) == {"ok"}	keep	set	set
 loadout	packages/loadout/tests/test_entries.py	assert set(r.state for r in install.status().rows) == {"ok"}	keep	set	set
 loadout	packages/loadout/tests/test_entries.py	lo	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_entries.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/test_entries.py	write	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_global.py	_edited_generated_claude	name	f	fh
+loadout	packages/loadout/tests/test_global.py	and r.harness == "opencode"} == {("opencode", "stale"), ("opencode", "missing")}	keep	stale	stale
+loadout	packages/loadout/tests/test_global.py	assert any("claude's part" in line for line in out.text())	keep	any	any
 loadout	packages/loadout/tests/test_global.py	assert any("global mode MODE" in n for n in out.notes)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any("global.claud.md" in n for n in out.notes)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any("updated global global for codex" in line for line in out.lines)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any(b.read_bytes() == edited for b in backups)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any(line.startswith("--replace global:global@codex: refused") for line in out.lines)	keep	any	any
 loadout	packages/loadout/tests/test_global.py	assert any(r.kind == "global" and r.harness == "codex" and r.state == "modified"	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any(str(_gen("claude")) in n and "edited by hand" in n for n in out.notes)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any(str(codex) in line and str(claude) in line and "separate files" in line	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any(str(jsonc) in n and tilde in n for n in notes)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any(str(link) in line and named in line for line in out.text()), out.text()	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert any(str(plain) in n and "global.*" in n for n in notes)	keep	any	any
 loadout	packages/loadout/tests/test_global.py	assert cli.main(["global", "show", "--diff"]) == 0	keep	show	show
 loadout	packages/loadout/tests/test_global.py	assert cli.main(["global", "show", "--json"]) == 0	keep	show	show
+loadout	packages/loadout/tests/test_global.py	assert cli.main(["global", "show"]) == 0	keep	show	show
+loadout	packages/loadout/tests/test_global.py	assert not any("codex" in line for line in install.install().lines)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert not any("global.old.md" in n for n in out.notes)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert not any("rules.md" in n for n in notes)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert not any(r.state == "modified" for r in out.rows)	keep	any	any
+loadout	packages/loadout/tests/test_global.py	assert out.code == 0 and any("AGENTS.override.md" in line for line in out.lines)	keep	any	any
 loadout	packages/loadout/tests/test_global.py	harness.global_file("codex").parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_global.py	harness.opencode_home().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_global.py	home.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/test_global.py	lo	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_global.py	mode	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_global.py	os.symlink(lo, home / "folder")	keep	folder	folder
+loadout	packages/loadout/tests/test_global.py	override.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 loadout	packages/loadout/tests/test_global.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+loadout	packages/loadout/tests/test_global.py	test_a_hand_edit_to_the_generated_file_is_kept_until_replace	name	f	fh
+loadout	packages/loadout/tests/test_global.py	test_an_edited_generated_file_no_placement_uses_is_left_with_a_note	name	f	fh
+loadout	packages/loadout/tests/test_global.py	test_if_absent_to_managed_keeps_an_edited_generated_file_placed	name	f	fh
 loadout	packages/loadout/tests/test_homes.py	"the home folder"} <= set(expected)	keep	set	set
 loadout	packages/loadout/tests/test_homes.py	("XDG_CONFIG_HOME", "OpenCode's home"), ("HOME", "the home folder")])	keep	HOME	HOME
 loadout	packages/loadout/tests/test_homes.py	-	name	test_a_job_reading_a_project_by_key_compares_projects_folders	test_a_job_reading_a_project_by_key_compares_project_dirs
@@ -11078,6 +11131,8 @@ turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	PACKAGE_FOLDER	PACKAG
 turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	_market_folder	_marketplace_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	-	name	_same_folder	_same_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	_endpoint_file_row	name	Row	row_type
+turns	packages/turns/src/moxi_turns/claude_setup.py	_installed_runner_rows	name	Row	row_type
+turns	packages/turns/src/moxi_turns/claude_setup.py	_manifest_version	name	folder	plugin_dir
 turns	packages/turns/src/moxi_turns/claude_setup.py	_version_row	name	Row	row_type
 turns	packages/turns/src/moxi_turns/claude_setup.py	data = json.dumps({"command": str(command), "environment": sys.prefix,	keep	environment	environment
 turns	packages/turns/src/moxi_turns/claude_setup.py	if not any(p.path == key and p.state == "ok" for p in done):	keep	any	any
@@ -11309,15 +11364,20 @@ turns	packages/turns/src/moxi_turns/guards/__init__.py	unknown = sorted(set(t) -
 turns	packages/turns/src/moxi_turns/guards/__init__.py	who: str = "any"	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/question.py	if any(not is_launch_prompt(p.text, args) for p in asked):	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/question.py	pairs = set(zip(words, words[1:]))	keep	set	set
+turns	packages/turns/src/moxi_turns/guards/question.py	return set(prose_words).isdisjoint(words)	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/removal.py	"""The refusal for `command` run in `cwd` under `env`'s `HOME`, or None to let it run.	keep	HOME	HOME
 turns	packages/turns/src/moxi_turns/guards/removal.py	A `cwd` or `HOME` that is not an absolute path counts as unknown."""	keep	HOME	HOME
 turns	packages/turns/src/moxi_turns/guards/removal.py	The rules read the call's working directory and the launch's `HOME`. A command that is not	keep	HOME	HOME
+turns	packages/turns/src/moxi_turns/guards/removal.py	_closing_line	kwonly	tabs	tabs
 turns	packages/turns/src/moxi_turns/guards/removal.py	_word_passes	kwonly	has_rmdir	has_rmdir
 turns	packages/turns/src/moxi_turns/guards/removal.py	and any("c" in m.group(0) for t in texts for m in C_WORD.finditer(t)))	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/removal.py	found = rules(command, _absolute(cwd), _absolute((env or {}).get("HOME") or None))	keep	HOME	HOME
 turns	packages/turns/src/moxi_turns/guards/removal.py	has_rmdir = any(RMDIR.search(t) for t in texts)	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/removal.py	if any(CD.search(t) and RM.search(t) and "*" in t for t in texts):	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/removal.py	if any(RM.search(t) for t in texts):	keep	any	any
+turns	packages/turns/src/moxi_turns/guards/removal.py	j = raw.find("\n", i)	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/removal.py	k = raw.find("\n", j)	keep	find	find
+turns	packages/turns/src/moxi_turns/guards/removal.py	return "T" if any(CD.search(t) and RM.search(t) and "*" in t for t in texts) else ""	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/removal.py	return (any(SHELL_NAME.search(t) for t in texts)	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/removal.py	return any(C_REMOVAL.search(t) for t in (raw, stripped, unbraced))	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/removal.py	workspace = {_fold(p) for p in _with_parents(cwd)} | set(_with_parents(_fold(cwd)))	keep	set	set
@@ -11332,6 +11392,7 @@ turns	packages/turns/src/moxi_turns/guards/run.py	matches (`main`: no agent id, 
 turns	packages/turns/src/moxi_turns/guards/run.py	outcomes[gid] = future.result(timeout=max(0.0, deadline - self._clock()))	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/guards/run.py	return cls(guard_id, calls, data.get("who") or "any", match, flags,	keep	any	any
 turns	packages/turns/src/moxi_turns/guards/run.py	return self._loaded	keep	_loaded	_loaded
+turns	packages/turns/src/moxi_turns/guards/run.py	self._allowed_at_ask: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/run.py	self._clean: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/guards/run.py	self._loaded = loaded	keep	_loaded	_loaded
 turns	packages/turns/src/moxi_turns/guards/run.py	self._loaded: Loaded | None = None	keep	_loaded	_loaded
@@ -11355,6 +11416,7 @@ turns	packages/turns/src/moxi_turns/hooktimes.py	thread.join(timeout=2.0)	keep	t
 turns	packages/turns/src/moxi_turns/listeners.py	Floors	name	any	has_floor
 turns	packages/turns/src/moxi_turns/listeners.py	_text	kwonly	done	done
 turns	packages/turns/src/moxi_turns/listeners.py	listed = set(registry.start_order())	keep	set	set
+turns	packages/turns/src/moxi_turns/listeners.py	out, _ = proc.communicate(stdin, timeout=max(0.0, wait_s))	keep	timeout	timeout
 turns	packages/turns/src/moxi_turns/listeners.py	read.done.set()	keep	set	set
 turns	packages/turns/src/moxi_turns/listeners.py	seen: set[str] = set()	keep	set	set
 turns	packages/turns/src/moxi_turns/listeners.py	self._said: set[tuple[str, str]] = set()	keep	set	set
@@ -11664,6 +11726,7 @@ turns	packages/turns/tests/test_claude_process.py	_alive	name	f	fh
 turns	packages/turns/tests/test_claude_process.py	assert p.wait(timeout=5) == 0	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_process.py	assert p.wait(timeout=5) == 2	keep	timeout	timeout
 turns	packages/turns/tests/test_claude_process.py	p.wait(timeout=5)	keep	timeout	timeout
+turns	packages/turns/tests/test_claude_setup.py	(cache / "hooks").mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_claude_setup.py	-	name	test_a_launch_through_launch_additions_names_the_placed_folders	test_a_launch_through_launch_additions_names_the_placed_dirs
 turns	packages/turns/tests/test_claude_setup.py	-	name	test_a_read_only_runner_folder_is_a_setup_error	test_a_read_only_runner_dir_is_a_setup_error
 turns	packages/turns/tests/test_claude_setup.py	-	name	test_claude_plugin_dirs_returns_both_folders_and_writes_nothing	test_claude_plugin_dirs_returns_both_dirs_and_writes_nothing
@@ -11927,6 +11990,7 @@ turns	packages/turns/tests/test_guard_run.py	("record", "guard:t.f"), ("record",
 turns	packages/turns/tests/test_guard_run.py	-	name	test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_directory	test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_dir
 turns	packages/turns/tests/test_guard_run.py	Rig.call	name	input	tool_input
 turns	packages/turns/tests/test_guard_run.py	assert [e["id"] for e in runner.tables.get(timeout=2)] == ["t.a", "t.new"]	keep	timeout	timeout
+turns	packages/turns/tests/test_guard_run.py	assert any("was left to the person" in t for t in texts)	keep	any	any
 turns	packages/turns/tests/test_guard_run.py	assert kinds == [("record", "guard:t.f"), ("clear", "guard:t.f"),	keep	record	record
 turns	packages/turns/tests/test_guard_run.py	assert len(set(ORDER)) == len(ORDER)	keep	set	set
 turns	packages/turns/tests/test_guard_run.py	assert len(set(names)) == len(names)	keep	set	set
@@ -11939,6 +12003,7 @@ turns	packages/turns/tests/test_guard_run.py	g.set()	keep	set	set
 turns	packages/turns/tests/test_guard_run.py	gate.set()	keep	set	set
 turns	packages/turns/tests/test_guard_run.py	kinds = [(w[0], w[2] if w[0] == "record" else w[1]) for w in r.written()]	keep	record	record
 turns	packages/turns/tests/test_guard_run.py	record=lambda text, key, fix: self.records.append(("record", text, key, fix)),	keep	record	record
+turns	packages/turns/tests/test_guard_run.py	texts = [rec[1] for rec in r.records if rec[0] == "record"]	keep	record	record
 turns	packages/turns/tests/test_guard_run.py	{"HOME": "/h"}, tuple(prompts))	keep	HOME	HOME
 turns	packages/turns/tests/test_guard_run.py	{"id": "t.a", "calls": ["Bash"], "who": "any", "match": {"command": "rm"},	keep	any	any
 turns	packages/turns/tests/test_guard_run.py	{"id": "t.b", "calls": ["Agent"], "who": "any", "match": None, "match_flags": "",	keep	any	any
@@ -11968,11 +12033,14 @@ turns	packages/turns/tests/test_install_without_claude.py	_project	name	f	fh
 turns	packages/turns/tests/test_install_without_claude.py	wheels	name	directory	package_dir
 turns	packages/turns/tests/test_listeners.py	-	name	test_the_environment_metadata_group_loads	test_the_env_metadata_group_loads
 turns	packages/turns/tests/test_listeners.py	assert [b.module for b in reg.broken] == ["bad"] and why in reg.broken[0].reason	keep	bad	bad
+turns	packages/turns/tests/test_listeners.py	assert any("exited with 3" in m for m in logged)	keep	any	any
+turns	packages/turns/tests/test_listeners.py	assert any("not UTF-8" in m for m in logged)	keep	any	any
 turns	packages/turns/tests/test_listeners.py	assert ep.after_tool("Bash", tool_use_id="u1", agent_id="a1", is_error=True) \	keep	is_error	is_error
 turns	packages/turns/tests/test_listeners.py	assert not any(c[0] == "cache" for c in listener_targets.CALLS)	keep	any	any
 turns	packages/turns/tests/test_listeners.py	env={"HOME": "/h"}, **kw)	keep	HOME	HOME
 turns	packages/turns/tests/test_listeners.py	ep, fake = make_endpoint(registry=reg, env=env)	keep	env	env
 turns	packages/turns/tests/test_listeners.py	ep.gone("the session ended")	use	gone	on_gone
+turns	packages/turns/tests/test_listeners.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
 turns	packages/turns/tests/test_listeners.py	reg = registry(Entry("bad", rows), Entry("good", [("ready", "listener_targets:cache")]))	keep	bad	bad
 turns	packages/turns/tests/test_opencode_host.py	"environ"})	keep	environ	environ
 turns	packages/turns/tests/test_opencode_host.py	-	name	test_a_dead_hosts_directory_is_swept_with_its_instructions	test_a_dead_hosts_dir_is_swept_with_its_instructions
@@ -12025,9 +12093,12 @@ turns	packages/turns/tests/test_page.py	self._gone.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	self.dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_page.py	self.held.set()	keep	set	set
 turns	packages/turns/tests/test_shipped_guards.py	@pytest.mark.parametrize(("cwd", "refused"), [	keep	refused	refused
+turns	packages/turns/tests/test_shipped_guards.py	None, {"HOME": rc.HOME})	keep	HOME	HOME
 turns	packages/turns/tests/test_shipped_guards.py	assert REMOVAL.calls == {"claude": ("Bash",)} and REMOVAL.who == "any"	keep	any	any
+turns	packages/turns/tests/test_shipped_guards.py	assert len(labels) == len(set(labels)) and len(labels) > 250	keep	set	set
 turns	packages/turns/tests/test_shipped_guards.py	assert len(labels) == len(set(labels)) and len(labels) > 500	keep	set	set
 turns	packages/turns/tests/test_shipped_guards.py	assert set(table) == {"turns.removal", "turns.question-mode"}	keep	set	set
+turns	packages/turns/tests/test_shipped_guards.py	assert verdict(removal.judge(call_for(command))) == ("pass" if "R" in text else "T")	keep	R	R
 turns	packages/turns/tests/test_shipped_guards.py	env = dict(os.environ, HOME="/home/user")	keep	HOME	HOME
 turns	packages/turns/tests/test_shipped_guards.py	env = {} if home is rc.UNSET else {"HOME": home}	keep	HOME	HOME
 turns	packages/turns/tests/test_shipped_guards.py	return set(module.QUESTIONS)	keep	set	set

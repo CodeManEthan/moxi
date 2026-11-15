@@ -122,9 +122,9 @@ def test_the_pointer_names_the_path_and_date(tmp_path):
 # -- other seats' handoffs -----------------------------------------------------------------
 
 
-def files(folder, *names):
+def files(handoff_dir, *names):
     for name in names:
-        (folder / name).write_text("x", encoding="utf-8")
+        (handoff_dir / name).write_text("x", encoding="utf-8")
 
 
 def test_a_trailing_count_is_a_count_only_beside_the_name_without_it(tmp_path):

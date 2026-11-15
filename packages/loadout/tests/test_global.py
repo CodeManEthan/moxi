@@ -504,8 +504,8 @@ def test_a_hand_edit_to_the_generated_file_is_kept_until_replace(lo):
     mode(lo, "if-absent")
     assert install.install().code == 0
     claude = harness.global_file("claude")
-    with open(claude, "a") as f:
-        f.write("My own line.\n")
+    with open(claude, "a") as fh:
+        fh.write("My own line.\n")
     edited = _gen("claude").read_bytes()
     out = install.install()
     assert out.code == 3 and _rows(out, "modified") == {"claude"}
@@ -530,8 +530,8 @@ def _edited_generated_claude(lo, more: str = "") -> bytes:
     (lo / "global.claude.md").write_text("Claude only.\n")
     kit.manifest(lo, '[global]\nmode = "if-absent"\n' + more)
     assert install.install().code == 0
-    with open(harness.global_file("claude"), "a") as f:
-        f.write("My own line.\n")
+    with open(harness.global_file("claude"), "a") as fh:
+        fh.write("My own line.\n")
     return _gen("claude").read_bytes()
 
 
@@ -591,8 +591,8 @@ def test_an_edited_generated_file_no_placement_uses_is_left_with_a_note(lo):
     (lo / "global.claude.md").write_text("Claude only.\n")
     mode(lo, "if-absent")
     assert install.install().code == 0
-    with open(_gen("claude"), "a") as f:
-        f.write("Mine.\n")
+    with open(_gen("claude"), "a") as fh:
+        fh.write("Mine.\n")
     os.unlink(harness.global_file("claude"))
     harness.global_file("claude").write_text("theirs\n")
     out = install.install()
@@ -683,8 +683,8 @@ def test_if_absent_to_managed_keeps_an_edited_generated_file_placed(lo):
     (lo / "global.claude.md").write_text("Claude only.\n")
     mode(lo, "if-absent")
     assert install.install().code == 0
-    with open(_gen("claude"), "a") as f:
-        f.write("Mine.\n")
+    with open(_gen("claude"), "a") as fh:
+        fh.write("Mine.\n")
     edited = _gen("claude").read_bytes()
     assert cli.main(["global", "mode", "managed"]) == 3
     claude = harness.global_file("claude")

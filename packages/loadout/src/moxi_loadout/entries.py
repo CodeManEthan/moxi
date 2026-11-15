@@ -574,7 +574,7 @@ def plan(manifest, loadout_dir, data: dict, *, claims=None) -> Run:
     table, _ = place.harnesses()
     records = [r for r in data.get("entries", []) if isinstance(r, dict)
                and r.get("kind") not in KEPT_ELSEWHERE]
-    want, carried = wanted(manifest, folder, table, run, records)
+    want, carried = wanted(manifest, loadout_dir, table, run, records)
     claims = {} if claims is None else claims
     for where in want + [r for r in records
                          if (r.get("item"), r.get("harness")) not in carried]:
