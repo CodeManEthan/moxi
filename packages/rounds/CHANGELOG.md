@@ -160,6 +160,9 @@ does not yet build.
   until `sweep.armed` is true; one run at a time, starting no removal after 60 seconds;
   each removal and trash move and delete is a line of `sweep.jsonl`, the store `sweeps`.
   The doctor's `leftovers` row is its dry run.
+- The sweep at a session's start: with turns installed, a listener on `ready` starts the
+  sweep in a detached process when `sweep.at_start` and `sweep.armed` are both on and
+  the last removing run began more than ten minutes ago, and returns at once.
 - `mark ROUND B<n> --brief FILE` sizes a worker's brief: its data block names one
   slice of the stage within `slice_minutes`, or one verification, or neither for a
   stage that declares no slices, which is one slice; the pass is recorded as

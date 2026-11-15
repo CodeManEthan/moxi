@@ -13,6 +13,7 @@ SUMMARY = ("A piece of work tracked from design to landing: its questions, rulin
 OPTIONAL = {
     "notes": "Gives the default notes folder of a project that names none, for a "
              "relative rounds folder.",
+    "turns": "Runs the leftover sweep at a session's start, when sweep.at_start is on.",
 }
 GATED = {}
 #: rounds reads its root locators through `moxi.paths` and no other variable.

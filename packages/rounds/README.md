@@ -670,6 +670,11 @@ trash entry the sweep moved and did not delete, because a run stopped, is delete
 the next run; anything else in the trash is reported and left. The doctor's
 `leftovers` row is the same dry run.
 
+With turns installed, `sweep.at_start = true` and the sweep armed, each session's start
+(and resume, clear or compaction) starts the sweep in a detached process of its own,
+unless the last removing run began less than ten minutes ago; the session waits on
+nothing. Without turns the sweep runs only by hand and in the doctor.
+
 A build is `unclear` when its target was fast-forwarded onto its work and nothing on
 record says the branch held that work first. The operator either drops it or credits
 it: `rule ROUND credit:B<n> --record PTR` records the head as the build's work, and the
@@ -860,6 +865,10 @@ that is absolute, or `dir` inside the notes folder the project's own record name
 (`moxi projects set KEY --notes-root DIR`); a project with neither is refused, with both
 fixes. With the `notes` extra (`moxi-notes`), a project that names no notes folder gets
 the one notes gives it by default.
+
+rounds works without the turns module too. With turns, rounds' listener on a session's
+`ready` event runs the sweep of leftover folders when `sweep.at_start` is on; rounds
+imports nothing of turns, and turns finds the listener by its entry point.
 
 ## Install
 

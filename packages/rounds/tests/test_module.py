@@ -27,11 +27,13 @@ def test_the_announcement_names_the_command_the_settings_and_their_check():
     assert found.summary and "\n" not in found.summary
 
 
-def test_notes_is_the_one_optional_module():
+def test_notes_and_turns_are_the_optional_modules():
     found = modules.load("rounds")
     assert dict(found.optional) == {
         "notes": "Gives the default notes folder of a project that names none, for a "
-                 "relative rounds folder."}
+                 "relative rounds folder.",
+        "turns": "Runs the leftover sweep at a session's start, when sweep.at_start is "
+                 "on."}
     assert dict(found.gated) == {}
 
 

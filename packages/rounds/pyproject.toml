@@ -35,6 +35,10 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 rounds = "moxi_rounds.module"
 
+# The sweep at a session's start, called by turns in a session's endpoint process.
+[project.entry-points."moxi.turns.listeners"]
+rounds = "moxi_rounds.listeners"
+
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]
 
