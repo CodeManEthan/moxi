@@ -739,7 +739,9 @@ def _head(found: Shown) -> dict:
             "flow": state.flow, "steps": state.steps,
             "step": None if at is None else at.data(),
             "close": (None if state.status != states.OPEN
-                      else {"waits": list(closing.waits(state, closed=found.closed))}),
+                      else {"waits": list(closing.waits(
+                          state, closed=found.closed,
+                          ratify=closing.ratify_of(settings, found.name)))}),
             "skips": _skips(state), "stages": _stages(state),
             "versions": _versions(state), "standing": str(versions.standing(state)),
             "trace": tracing.shown(state, found.register),

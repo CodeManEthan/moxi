@@ -16,7 +16,6 @@ ROUND = "proj-a/a-round"
 ASKED = "Do agent-read times follow the settings?"
 PTR = "comms:1234567"
 SHOWN = "comms:1234599"
-BUILDS = "a close, which this version does not make for a round that builds"
 
 FLOWS = """\
     [flows.paper]
@@ -294,18 +293,99 @@ def test_a_stage_in_the_plan_keeps_a_round_that_builds_nothing_open(folder):
 
 # -- a flow that builds ------------------------------------------------------------------
 
-@pytest.mark.parametrize("flow", ["full", "small", "fix"])
-def test_a_round_whose_flow_builds_does_not_close(opened, capsys, flow):
-    folder = opened(flow)
-    if flow != "fix":
-        fold(folder)
-    if flow == "full":
-        verdict(folder)
+BASE = "0" * 40
+TIP = "1" * 40
 
-    assert waits(folder) == (BUILDS,)
-    assert status(folder) == "open"
-    assert "round.closed" not in types(folder)
-    assert f"close waits for: {BUILDS}\n" in run(capsys, "show", ROUND)
+
+def built(folder, *, finished=True, decisions=(), report="build"):
+    """B1 declared, commissioned and, when `finished`, finished, through the log, with
+    a report of kind `report` (none when None) listing `decisions` (`(id, weight)`)."""
+    path = log.round_log(folder)
+    log.append(path, "stage.declared",
+               {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+               actor="planner")
+    log.append(path, "build.commissioned",
+               {"stage": "B1", "repo": "proj-a", "branch": "work", "base": BASE,
+                "target": "main", "builder": "coder", "build": "0123456789abcdef"},
+               actor="planner")
+    listed = [{"id": id_, "text": "a choice", "weight": weight, "forecloses": False}
+              for id_, weight in decisions]
+    if report == "build":
+        log.append(path, "verdict.recorded",
+                   {"kind": "build", "verdict": "publishable", "pass": "full",
+                    "stage": "B1", "head": TIP, "by": "critic", "decisions": listed},
+                   actor="critic")
+    elif report == "majors":
+        log.append(path, "verdict.recorded",
+                   {"kind": "majors", "stages": ["B1"], "by": "critic",
+                    "decisions": [{**one, "stage": "B1"} for one in listed]},
+                   actor="critic")
+    if finished:
+        log.append(path, "finish.done", {"stage": "B1", "tip": TIP}, actor="coder")
+
+
+def test_a_round_that_builds_waits_for_its_open_build(opened):
+    folder = opened("fix")
+    built(folder, finished=False)
+    assert {"stage B1, not finished", "build of B1, open"} <= set(waits(folder))
+
+
+def test_a_round_that_builds_with_nothing_planned_waits_for_a_finished_stage(opened):
+    folder = opened("fix")
+    assert "a finished stage: the plan holds none" in waits(folder)
+
+
+def test_a_finished_build_whose_report_declares_no_decision_leaves_nothing_to_wait_for(
+        opened):
+    folder = opened("fix")
+    built(folder)
+    assert waits(folder) == ()
+
+
+@pytest.mark.parametrize("report", [None, "majors"])
+def test_a_finished_build_with_no_report_declaring_its_decisions_holds_the_close(
+        opened, report):
+    folder = opened("fix")
+    built(folder, report=report)
+    if report is None:
+        assert waits(folder) == ("a report that declares the decisions of B1's build: a "
+                                 "build report, or a majors report naming B1",)
+        assert closing.waits(folded(folder), ratify="off") == ()
+    else:
+        assert waits(folder) == ()
+
+
+def test_an_unruled_major_decision_holds_the_close_and_its_ruling_closes_the_round(
+        opened):
+    folder = opened("fix")
+    built(folder, decisions=[("M1", "major"), ("M2", "minor")])
+    assert waits(folder) == ("decision B1.M1, major and not yet ruled",)
+
+    rule("B1.M1=accept")
+
+    assert status(folder) == "closed"
+
+
+@pytest.mark.parametrize("past", ["off", "skip"])
+def test_a_ratify_setting_of_off_or_a_skip_of_ratify_lets_an_unruled_major_past(
+        opened, write_config, past):
+    folder = opened("fix")
+    built(folder, decisions=[("M1", "major")])
+    if past == "off":
+        write_config(FLOWS + '\n[defaults]\nratify = "off"\n')
+        assert closing.waits(folded(folder), ratify="off") == ()
+        # The next write reads the setting and closes the round.
+        rule(text="a placeholder ruling")
+    else:
+        rule("skip:ratify")
+    assert status(folder) == "closed"
+
+
+def test_a_round_with_a_retro_step_waits_for_it_after_its_build(opened):
+    folder = opened("small")
+    fold(folder)
+    built(folder)
+    assert waits(folder) == ("step retro, not-built",)
 
 
 # -- the verb whose write closes a round says so -----------------------------------------
@@ -414,7 +494,7 @@ def test_a_close_that_failed_is_reported_and_made_by_the_next_write(
         folder, monkeypatch, capsys):
     fold(folder)
     with monkeypatch.context() as patched:
-        def fails(_state):
+        def fails(_state, **_given):
             raise OSError("no room")
         patched.setattr(closing, "entry", fails)
         made = rule("skip:verify-design")
@@ -434,7 +514,7 @@ def test_a_verb_stopped_before_the_close_leaves_it_to_the_next_write(
         folder, monkeypatch, capsys):
     fold(folder)
     with monkeypatch.context() as patched:
-        def stops(_state):
+        def stops(_state, **_given):
             raise KeyboardInterrupt
         patched.setattr(closing, "entry", stops)
         with pytest.raises(KeyboardInterrupt):
@@ -450,7 +530,7 @@ def test_a_write_that_appends_nothing_still_makes_a_close_that_stopped_short(
         folder, monkeypatch, capsys):
     fold(folder)
     with monkeypatch.context() as patched:
-        def fails(_state):
+        def fails(_state, **_given):
             raise OSError("no room")
         patched.setattr(closing, "entry", fails)
         rule("skip:verify-design")
@@ -512,7 +592,7 @@ def test_a_write_to_a_closed_round_does_not_close_it_again(closed, capsys):
 def test_a_dropped_round_is_not_closed_by_a_later_write(folder, monkeypatch, capsys):
     fold(folder)
     with monkeypatch.context() as patched:
-        patched.setattr(closing, "entry", lambda _state: None)
+        patched.setattr(closing, "entry", lambda _state, **_given: None)
         rule("skip:verify-design")
         dropping.drop(ROUND, by="operator", record=PTR, actor="planner")
 
@@ -653,8 +733,10 @@ def test_what_a_close_waits_for_is_read_from_the_state_alone(folder):
 
 def test_a_part_added_to_the_condition_is_asked_with_the_rest(folder, monkeypatch):
     fold(folder)
-    monkeypatch.setattr(closing, "CONDITIONS",
-                        (*closing.CONDITIONS, lambda _state, _closed: iter(["a placeholder"])))
+    def placeholder(_state, _closed, _ratify):
+        return iter(["a placeholder"])
+
+    monkeypatch.setattr(closing, "CONDITIONS", (*closing.CONDITIONS, placeholder))
 
     rule("skip:verify-design")
 

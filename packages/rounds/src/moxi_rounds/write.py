@@ -185,9 +185,19 @@ def _close(where: Where, round_events: Sequence[dict], *, actor: str,
     # they import this module.
     from . import closing
 
+    from moxi.config import ConfigError
+
+    from . import settings as own
+
     if where.slug is None:
         return None
-    entry = closing.entry(state.fold(round_events))
+    try:
+        ratify = own.round_setting(own.load(), where.project, closing.RATIFY)
+    except ConfigError:
+        # Whether its decisions are to be ruled can't be read, so the round stays
+        # open; the next write closes it once the config reads.
+        return None
+    entry = closing.entry(state.fold(round_events), ratify=str(ratify))
     if entry is None:
         return None
     return log.append(where.round_log, entry.type, entry.fields, actor=actor, at=at)

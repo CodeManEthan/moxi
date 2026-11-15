@@ -148,7 +148,7 @@ def test_a_decision_holds_no_stage_and_no_question_s_place(built):
     now = folded(folder)
 
     close = [line for condition in closing.CONDITIONS
-             for line in condition(now, lambda _name: False)]
+             for line in condition(now, lambda _name: False, "majors")]
     assert not any("M1" in line for line in close)
     assert now.questions == []
 

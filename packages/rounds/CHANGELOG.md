@@ -162,6 +162,10 @@ does not yet build.
   `finish` and `drop` write a line there for each trash move and delete of theirs, so a
   trash entry one of them left when stopped is deleted by the next sweep. The doctor's
   `leftovers` row is its dry run.
+- A round whose flow has a `build` step closes itself once every stage in its plan is
+  finished, no build is open, every major decision of a finished build is ruled and
+  every finished build has a report that declares its decisions, unless `ratify` is
+  skipped or the project's `ratify` is `off`.
 - The sweep at a session's start: with turns installed, a listener on `ready` starts the
   sweep in a detached process when `sweep.at_start` and `sweep.armed` are both on and
   the last removing run began more than ten minutes ago, and returns at once.
@@ -211,7 +215,6 @@ does not yet build.
   `tiers`, `models` and per-project tables. The keys of the parts not built yet are declared and checked,
   and nothing reads them.
 - Not in this version: builds, checks, verifying and finishing a build, decisions, the
-  retrospective and a round's numbers, prepared answers and parent rounds. A round
-  whose flow has a `build` step does not close, and ends by `drop`.
+  retrospective and a round's numbers, prepared answers and parent rounds.
 - rounds needs moxi 0.1.7 or later and moxi-projects 0.1.4 or later. The `notes` extra
   gives a project that names no notes folder notes' default one.

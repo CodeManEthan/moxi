@@ -8,10 +8,19 @@ that stopped short is made by the next write, whatever that write is.
 `waits(state)` is the close condition, as what is still waited for. Each function in
 `CONDITIONS` is one part of it and gives a line for each thing that part waits for:
 
-- every step of the round's flow is done or skipped, and every stage of its plan is
-  finished;
-- no question holds the close (`holds.on_close`): none is open or parked;
-- no waiting item is open (`waiting_items`).
+- the plan is done: every step of the round's flow is done or skipped, and every stage
+  of its plan is finished; a flow with a `build` step needs at least one finished stage;
+- nothing is open: no build is open, no question holds the close (`holds.on_close`),
+  none open or parked, and no waiting item is open (`waiting_items`);
+- every major decision that reached the target is ruled, and every finished build has
+  a report that declares its decisions, a build report or a majors report naming its
+  stage; unless the operator skipped `ratify` or the project's `ratify` setting is
+  `off`.
+
+The `ratify` step is read in the third part and not as a step: it is due exactly while
+that part waits, and the project's setting it reads is passed in (`ratify`), since
+nothing here reads the config. A round with a `retro` step waits for that step like
+any other.
 
 Whether the round closes reads its own log alone: a question parked until another
 round closes keeps this one open whether or not that round has closed. How such a
@@ -20,8 +29,8 @@ has closed: whoever prints the lines beside its own reading of the questions pas
 `closed`, the answer it read them with, so one question has one state in what it
 prints.
 
-A round whose flow has a `build` step does not close itself in this version, even
-once its stages are finished, and `waits` says only that. It ends by being dropped.
+A finished build reads as done in every step of its stage without a read of git, so
+the close reads no git.
 
 The closing event holds nothing yet: `entry` is where what a round is closed with is
 added.
@@ -31,7 +40,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 
-from . import flows, holds, questions, stages, steps, write
+from . import builds as built
+from . import decisions, findings, flows, folders, holds, questions, report_block, skips
+from . import stages, steps, write
+from . import settings as own
 from . import waits as waiting_items
 from . import state as states
 
@@ -40,8 +52,12 @@ CLOSED = "round.closed"
 #: The step whose presence in a flow means the round builds.
 BUILD = "build"
 
-#: What a round whose flow has a `build` step waits for, in this version.
-NOT_IN_THIS_VERSION = "a close, which this version does not make for a round that builds"
+#: The step that ratifies decisions, which the close reads as its third part.
+RATIFY = "ratify"
+#: The project's `ratify` setting that puts no decision to the operator.
+RATIFY_OFF = "off"
+#: The setting read when none is passed.
+RATIFY_DEFAULT = "majors"
 
 
 Closed = Callable[[str], bool]
@@ -53,24 +69,30 @@ def _never(_name: str) -> bool:
     return False
 
 
-def _plan_done(state: states.State, closed: Closed) -> Iterator[str]:
-    """The plan is done: each step of the flow is done or skipped, and each stage of
-    the plan is finished."""
+def _plan_done(state: states.State, closed: Closed, ratify: str) -> Iterator[str]:
+    """The plan is done: each step of the flow is done or skipped, each stage of the
+    plan is finished, and a round that builds has finished at least one."""
     for step in steps.of(state, closed=closed):
-        # The questions step waits for exactly the open questions, which are named
-        # one by one below.
-        if step.step != steps.QUESTIONS and not step.settled:
+        # The questions step waits for exactly the open questions, and the ratify
+        # step for exactly what the third part names; each is named one by one there.
+        if step.step not in (steps.QUESTIONS, RATIFY) and not step.settled:
             yield f"step {steps.said(step.data())}"
     finished = questions.finished_stages(state)
-    for stage in stages.in_plan(state):
+    planned = stages.in_plan(state)
+    for stage in planned:
         if stage.id not in finished:
             yield f"stage {stage.id}, not finished"
+    if builds(state) and not planned:
+        yield "a finished stage: the plan holds none"
 
 
-def _nothing_open(state: states.State, closed: Closed) -> Iterator[str]:
-    """Nothing is open: no question holds the close, and no waiting item is open.
-    Which questions hold it is the hold rule's to say; this names each as it reads
-    now."""
+def _nothing_open(state: states.State, closed: Closed, ratify: str) -> Iterator[str]:
+    """Nothing is open: no build, no question that holds the close, and no waiting
+    item. Which questions hold it is the hold rule's to say; this names each as it
+    reads now."""
+    for build in built.builds(state):
+        if build.ended is None and not _finished(state, build):
+            yield f"build of {build.stage}, open"
     for question in holds.on_close(state):
         reads = questions.current(question, state, closed=closed)
         yield f"question {question.id}, {reads}"
@@ -78,12 +100,54 @@ def _nothing_open(state: states.State, closed: Closed) -> Iterator[str]:
         yield f"waiting item {wait.key}, open"
 
 
+def _ratified(state: states.State, closed: Closed, ratify: str) -> Iterator[str]:
+    """Every major decision that reached the target is ruled, and every finished
+    build has a report that declares its decisions; or `ratify` is skipped or off."""
+    if not flows.has(state.steps, RATIFY) or ratify == RATIFY_OFF:
+        return
+    if skips.is_skipped(state, RATIFY):
+        return
+    for stage in stages.in_plan(state):
+        build = built.current(state, stage.id)
+        if build is None or not _finished(state, build):
+            continue
+        if not _declared(state, build):
+            yield (f"a report that declares the decisions of {stage.id}'s build: a "
+                   f"build report, or a majors report naming {stage.id}")
+        for decision in decisions.of_build(state, build):
+            if decision.weight == report_block.MAJOR and decision.state == decisions.OPEN:
+                yield f"decision {decision.key}, major and not yet ruled"
+
+
+def _finished(state: states.State, build: built.Build) -> bool:
+    """Whether `build` is its stage's finished build: the finish is recorded after its
+    commission and before the stage's next."""
+    return any(event["type"] == "finish.done" and event.get("stage") == build.stage
+               and findings.within(state, build, event.get("n"))
+               for event in state.history)
+
+
+def _declared(state: states.State, build: built.Build) -> bool:
+    """Whether a report recorded while `build` was its stage's declares its decisions:
+    a build report of it, or a majors report whose stages name it."""
+    for event in states.with_rereads(state):
+        if (event.get("type") != "verdict.recorded"
+                or not findings.within(state, build, event.get("n"))):
+            continue
+        if event.get("kind") == report_block.BUILD and event.get("stage") == build.stage:
+            return True
+        if (event.get("kind") == report_block.MAJORS
+                and build.stage in (event.get("stages") or ())):
+            return True
+    return False
+
+
 #: The parts of the close condition, in the order their lines are given. Each takes
-#: the round's state and what answers whether another round is closed, and gives a
-#: line for each thing it waits for. That answer may change how a line reads, never
-#: whether the part gives one.
-CONDITIONS: tuple[Callable[[states.State, Closed], Iterator[str]], ...] = (
-    _plan_done, _nothing_open)
+#: the round's state, what answers whether another round is closed, and the project's
+#: `ratify` setting, and gives a line for each thing it waits for. That answer may
+#: change how a line reads, never whether the part gives one.
+CONDITIONS: tuple[Callable[[states.State, Closed, str], Iterator[str]], ...] = (
+    _plan_done, _nothing_open, _ratified)
 
 
 def builds(state: states.State) -> bool:
@@ -91,29 +155,36 @@ def builds(state: states.State) -> bool:
     return flows.has(state.steps, BUILD)
 
 
-def waits(state: states.State, *, closed: Closed | None = None) -> tuple[str, ...]:
+def waits(state: states.State, *, closed: Closed | None = None,
+          ratify: str | None = None) -> tuple[str, ...]:
     """What the close of the round `state` is of waits for, a line each; empty when
     nothing is, which is when the round closes. It reads the state alone.
 
     `closed` answers whether another round, by name, is closed, for how a question
     parked until one is reads in its line; left out, no round reads as closed and
-    such a question is named as parked. The lines are as many either way."""
-    if builds(state):
-        return (NOT_IN_THIS_VERSION,)
+    such a question is named as parked. The lines are as many either way. `ratify`
+    is the project's `ratify` setting (`ratify_of`), `majors` when left out."""
     asked = _never if closed is None else closed
-    return tuple(line for condition in CONDITIONS for line in condition(state, asked))
+    setting = RATIFY_DEFAULT if ratify is None else ratify
+    return tuple(line for condition in CONDITIONS
+                 for line in condition(state, asked, setting))
 
 
-def is_due(state: states.State) -> bool:
+def ratify_of(settings, name: str) -> str:
+    """The `ratify` setting of the project the round `name` is of."""
+    return str(own.round_setting(settings, folders.split(name)[0], RATIFY))
+
+
+def is_due(state: states.State, *, ratify: str | None = None) -> bool:
     """Whether the round is to be closed now: it is open and its close waits for
     nothing."""
-    return state.status == states.OPEN and not waits(state)
+    return state.status == states.OPEN and not waits(state, ratify=ratify)
 
 
-def entry(state: states.State) -> write.Entry | None:
+def entry(state: states.State, *, ratify: str | None = None) -> write.Entry | None:
     """The event that closes the round `state` is of, or None while it is not to be
     closed: it has ended, or its close waits for something."""
-    return write.Entry(CLOSED, {}) if is_due(state) else None
+    return write.Entry(CLOSED, {}) if is_due(state, ratify=ratify) else None
 
 
 def said(waited: tuple[str, ...] | list[str]) -> str:
@@ -123,5 +194,5 @@ def said(waited: tuple[str, ...] | list[str]) -> str:
     return f"close waits for: {'; '.join(waited)}"
 
 
-__all__ = ["CLOSED", "BUILD", "NOT_IN_THIS_VERSION", "CONDITIONS", "builds", "waits",
-           "is_due", "entry", "said"]
+__all__ = ["CLOSED", "BUILD", "RATIFY", "RATIFY_OFF", "RATIFY_DEFAULT", "CONDITIONS",
+           "builds", "waits", "ratify_of", "is_due", "entry", "said"]

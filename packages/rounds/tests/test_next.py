@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from moxi_rounds import (asking, dropping, freezing, log, next_step, opening,
-                         report_block, ruling, steps, verdicts)
+from moxi_rounds import (asking, closing, dropping, freezing, log, next_step, opening,
+                         report_block, ruling, showing, steps, verdicts)
 from moxi_rounds.cli import main
 
 ROUND = "proj-a/a-round"
@@ -503,8 +503,7 @@ def test_the_data_holds_each_group_and_each_warning(opened, capsys):
              "questions": [],
              "waits": [{"reason": "the design is not verified: it stands at none",
                         "fix": f"moxi rounds next {ROUND}"}]}],
-        "close": {"waits": ["a close, which this version does not make for a round "
-                            "that builds"]},
+        "close": {"waits": list(closing.waits(showing.show(ROUND).state))},
         "warnings": [
             {"what": "not-shown",
              "text": f"not yet shown to the operator: {ROUND} {made} {SAID}",

@@ -224,7 +224,8 @@ def test_a_second_finish_of_a_finished_build_is_refused_and_writes_nothing(ready
     before, main_before = events(path), repo.rev("main")
     with pytest.raises(Refused) as refused:
         finishing.finish(ROUND, "B1", actor="coder")
-    assert "is finished: nothing is left to do" in refused.value.unmet[0].reason
+    # The finish was the round's last step, so its write closed the round.
+    assert "is closed" in refused.value.unmet[0].reason
     assert events(path) == before and repo.rev("main") == main_before
 
 
@@ -265,8 +266,8 @@ def test_a_dead_holders_lock_is_cleared_and_recorded_before_the_merge(ready, rep
     done = finishing.finish(ROUND, "B1", actor="coder")
 
     assert done.cleared == line
-    kinds = [one["type"] for one in events(path)][-3:]
-    assert kinds == ["lock.cleared", "finish.action", "finish.done"]
+    kinds = [one["type"] for one in events(path)][-4:]
+    assert kinds == ["lock.cleared", "finish.action", "finish.done", "round.closed"]
     (cleared,) = of_type(path, "lock.cleared")
     assert (cleared["ref"], cleared["holder"]) == (LOCK, line)
     assert lock_ref(repo) is None

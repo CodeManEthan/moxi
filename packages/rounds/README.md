@@ -46,8 +46,7 @@ So a round moves through its design, the design's verification and its questions
 each stage commissioned, built and checked, and stops there: `next` prints each later
 step as not built. A stage's `build` step is ready once it is commissioned and done once
 git reads its branch as holding work (`building`) or merged; `next`, `show` and `list`
-read git for it. A round whose flow has no `build` step closes itself (see Closing); any
-other ends only by `drop`. Config keys that belong to the parts
+read git for it. A round closes itself (see Closing). Config keys that belong to the parts
 above are declared and checked, and nothing reads them yet (see Config).
 
 ## Commands
@@ -604,8 +603,12 @@ closed round is listed by `list --closed`, and its note says when it closed. Lik
 one it takes no new question and no new ruling; a correction of one of its rulings is
 still recorded, and its rulings are still marked as shown.
 
-A round whose flow has a `build` step does not close itself in this version, even once
-its stages are finished: `show` says so, and such a round ends by `drop`.
+A round whose flow has a `build` step closes once every stage in its plan is finished,
+no build is open, and its decisions are settled: every major decision of a finished
+build is ruled, and every finished build has a report that declares its decisions (a
+build report, or a majors report naming its stage). The operator's skip of `ratify`, or
+the project's `ratify = "off"`, lets the decisions past. A flow with a `retro` step
+waits for it too, until that step is skipped; the retro report is not in this version.
 
 ## Dropping a round
 

@@ -388,7 +388,9 @@ def read(name: str, *, settings=None) -> dict:
                               checking.seen_of(found.state, found.name,
                                                settings=settings)),
             "close": (None if found.state.status != states.OPEN
-                      else {"waits": list(closing.waits(found.state, closed=found.closed))}),
+                      else {"waits": list(closing.waits(
+                          found.state, closed=found.closed,
+                          ratify=closing.ratify_of(settings, found.name)))}),
             "warnings": _warnings(found)}
 
 

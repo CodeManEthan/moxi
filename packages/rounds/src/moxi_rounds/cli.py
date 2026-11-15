@@ -172,8 +172,9 @@ further pass is run, and the design stands at `lead-decision`.
 No verb closes a round. A round closes itself on the write that leaves its close
 nothing to wait for: in a flow with no `build` step, every step done or skipped, no
 question open or parked, and no stage left in its plan. `show` says what the close
-of an open round waits for. A round whose flow has a `build` step does not close
-itself; it ends by `drop`.
+of an open round waits for. A round whose flow has a `build` step closes once every
+stage is finished, no build is open, and every major decision of a finished build is
+ruled, unless `ratify` is skipped or off.
 `drop` ends a round short of its work: the operator drops any round, and the lead one
 that holds none of the operator's acts. Its open and parked questions go to the
 project's list, where they hold up nothing, and `open` of a later round of the project

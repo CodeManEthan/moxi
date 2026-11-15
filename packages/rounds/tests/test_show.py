@@ -37,6 +37,11 @@ def rounds(tmp_path, add_project, capsys):
     capsys.readouterr()
     return tmp_path / "notes" / "rounds"
 
+#: What the close of a `fix` round just opened waits for: each step, and a stage.
+NONE = "a finished stage: the plan holds none"
+OPENED_WAITS = ("step commission, ready", "step build, not-due", "step check, not-due",
+                "step verify-build, not-due", "step finish, not-due", NONE)
+
 
 def ask(target=A, text=SAID, *, at=T2, actor="scout", origin="comms:11", **more):
     return asking.ask(target, text, actor=actor, origin=origin, at=at, **more)
@@ -80,7 +85,7 @@ round {B}   open   flow fix ({names})
 description: a placeholder round
 folder: {rounds / "b-round"}
 step: commission, ready
-close waits for: a close, which this version does not make for a round that builds
+close waits for: {'; '.join(OPENED_WAITS)}
 
 builds: 0
 
@@ -115,8 +120,7 @@ history: 1 event
         "steps": steps,
         "step": {"step": "commission", "stage": None, "state": "ready",
                  "waits": [], "questions": []},
-        "close": {"waits": ["a close, which this version does not make for a round "
-                            "that builds"]},
+        "close": {"waits": [*OPENED_WAITS]},
         "skips": [], "stages": [], "versions": [],
         "standing": "none", "trace": None, "threads": [],
         "register_unreadable": None}

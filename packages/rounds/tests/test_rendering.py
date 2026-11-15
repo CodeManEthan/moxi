@@ -45,6 +45,12 @@ def rounds(tmp_path, add_project, capsys):
     capsys.readouterr()
     return tmp_path / "notes" / "rounds"
 
+#: What the close of a `fix` round with no stage waits for: each step, and a stage.
+_REST = ("step build, not-due; step check, not-due; step verify-build, not-due; "
+         "step finish, not-due; a finished stage: the plan holds none")
+OPENED_CLOSE = f"step commission, ready; {_REST}"
+HELD_CLOSE = f"step commission, waiting; {_REST}; question Q2, parked; question Q3, open"
+
 
 def ask(target=A, text=SAID, *, at=T2, actor="scout", origin="comms:11", **more):
     return asking.ask(target, text, actor=actor, origin=origin, at=at, **more)
@@ -103,7 +109,7 @@ a placeholder round
 fix: {steps(B)}
 
 - step: commission, ready
-- close waits for: a close, which this version does not make for a round that builds
+- close waits for: {OPENED_CLOSE}
 
 ## Builds
 
@@ -180,7 +186,7 @@ fix: {steps()}
 - step: commission, waiting
 - waits for: Q3 holds every stage, so it holds B1 the moment commission declares it: {THIRD}
 - fix: the operator rules it (moxi rounds rule proj-a/a-round Q3 --text TEXT --record PTR), withdraws or parks it (moxi rounds rule proj-a/a-round withdraw:Q3 --record PTR, or park:Q3 --until WHAT), or narrows it (moxi rounds rule proj-a/a-round narrow:Q3=LIST|none --record PTR)
-- close waits for: a close, which this version does not make for a round that builds
+- close waits for: {HELD_CLOSE}
 
 ## Builds
 
