@@ -4,6 +4,15 @@
 
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
+- comms' page in the browser UI shell, `/m/comms/`, is rebuilt around the agents: one
+  row per agent name, ordered by what it needs from you (an ask for your reply, mail no
+  session takes, a warm session nothing keeps warm, then the rest by their newest
+  message), each opened in place with its mail in the books, what it waits on and a
+  send box that checks how a message would go before `Send` and can take a message back;
+  under them today's messages, earlier days on `Show`, and threads opened in place; and
+  `Other names` for the names with nothing waiting. Opening something writes the page's
+  address (`agent/`, `reply/`, `thread/`, `mail/`, `others`). The README's "In the
+  browser" says what each part shows and what launcher, cache and sessions add.
 - comms has a row on Home in the browser UI shell, the `mail` component
   (`<moxi-comms-mail>`, order 200). When mail waits for names no live session holds it
   says so on one line, `3 messages waiting · curator and scout aren't running`, the count
