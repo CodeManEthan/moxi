@@ -4,9 +4,11 @@ The record holds every variable of the core set that is set in the recording run
 environment, with its exact value, and nothing else. An empty value is kept as empty; a
 name absent from the record was unset. Values compare as strings.
 
-The core set is every name read by the resolvers a page's check may use: `Layout`'s
-methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.harness_dirs` and
-`paths.which`. `in_set(name)` matches it by name, so recording needs no module discovery:
+The core set is every name read by the resolvers a page's check may use: the core's own,
+`Layout`'s methods, `paths.core()`, `paths.core_lock`, `paths.home`, `place.harness_dirs`
+and `paths.which`, and each harness's own home variable, which a module's page may resolve
+though no core resolver reads it (`OPENCODE_CONFIG_DIR`). `in_set(name)` matches it by
+name, so recording needs no module discovery:
 
 - `MOXI_HOME`, `MOXI_DEVICE`, and `MOXI_<P>_<S>` for any prefix `<P>` and `<S>` one of
   `paths.LOCATORS` or `DEVICE`, but not `MOXI_ANCHOR_HOME`, which places the record
