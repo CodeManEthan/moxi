@@ -60,11 +60,13 @@ its switch, for example `moxi config set turns guards.removal true`:
 
 - **The removal guard** (`turns.removal`, switch `guards.removal`): refuses a Claude Code
   shell command that Claude Code's own dangerous-removal check would stop for your
-  approval even in bypass mode, where an unattended agent would sit blocked. Its rules
-  are coarse text rules: an `rm` or `rmdir` beside a `cd` and a `*`, beside a word that is
-  not a plain path, beside more than 64 substitutions, or inside a shell's `-c` script.
-  It skips the body of a quoted heredoc (`<<'EOF'`) fed to `cat`, `tee`, `python3 -` or
-  `node -`, so file content can go there.
+  approval even in bypass mode, where an unattended agent would sit blocked. Its one
+  rule is coarse and reads text: an `rm` or `rmdir` beside a `cd` and a `*`, where Claude
+  Code can't tell which directory the `*` means. It skips the body of a quoted heredoc
+  (`<<'EOF'`) fed to `cat`, `tee`, `python3 -` or `node -`, so file content can go there.
+  Claude Code's other removal stops (your working directory or a directory above it, a
+  path it can't read, a shell's `-c` script) can be refused by a guard of your own at the
+  ask step, below.
 - **The no-nested-agents guard** (`turns.no-nested-agents`, switch
   `guards.no_nested_agents`): refuses a subagent's call to start a subagent of its own
   (Claude Code's `Agent` and `Task`, Codex's `spawn_agent`), and tells it to report to

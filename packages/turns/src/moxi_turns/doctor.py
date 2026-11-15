@@ -15,7 +15,7 @@ names each guard on, its step, what turned it on and where it runs on each harne
 that does not load, whose judge does not import or whose `match` does not compile, and for a
 switch that fails the core's check, listed or not, and `warn` for one on the list whose
 module is not installed, whose import took over `IMPORT_WARN_MS`, or (the removal guard)
-when the installed Claude Code is newer than the one its rules were checked against;
+when the installed Claude Code is newer than the one its rule was checked against;
 `guard <id>: <harness>` says, as information, that a guard on covers no call there or
 that the harness has no pre-tool point. A guard's breaks are records the core shows.
 The doctor adds readings and denies nothing.
@@ -207,7 +207,7 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
             if newer:
                 warns.setdefault(o.id, []).append(
                     f"the installed Claude Code is {newer}, newer than "
-                    f"{removal.CHECKED_CLAUDE}, which its rules were checked against; "
+                    f"{removal.CHECKED_CLAUDE}, which its rule was checked against; "
                     "Claude Code's own removal handling may have moved")
 
     if loaded.on:

@@ -18,7 +18,7 @@ from moxi_turns import config, guards, module
 from moxi_turns.guards import Allow, Deny, Guard, Prompt, ToolCall
 
 #: The removal guard's pre-filter, as the design gives it.
-REMOVAL_MATCH = r"""\b(r[\\'"{}$]*m([\\'"{}$]*d[\\'"{}$]*i[\\'"{}$]*r)?)(?![A-Za-z_])"""
+REMOVAL_MATCH = r"""\b(r[\\'"]*m([\\'"]*d[\\'"]*i[\\'"]*r)?)(?![A-Za-z_])"""
 
 
 class Entry:
@@ -206,9 +206,9 @@ def test_match_compiles_ascii_and_case_blind_under_i():
     g = Guard("removal", {"claude": ("Bash",)}, match={"command": REMOVAL_MATCH},
               match_flags="i", judge="a:b")
     rx = guards.compile_match(g)["command"]
-    for text in ("rm -rf /x", "R''M x", r"r\m -rf /x", "r{}m x", "r$'m' x", "rmdir d"):
+    for text in ("rm -rf /x", "R''M x", r"r\m -rf /x", "r\"m\" x", "rmdir d"):
         assert rx.search(text), text
-    assert not rx.search("rmx") and not rx.search("form")
+    assert not rx.search("rmx") and not rx.search("form") and not rx.search("r{}m x")
     assert guards.compile_match(Guard("x", {}, deny="no")) == {}
     assert guards.compile_match(Guard("x", {}, match={"a": "A"}, deny="n"))["a"].search(
         "a") is None

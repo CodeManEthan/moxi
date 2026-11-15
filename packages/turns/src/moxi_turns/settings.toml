@@ -57,7 +57,7 @@ read = "use"
 [guards.removal]
 type = "bool"
 default = false
-doc = "Run the removal guard: refuse shell removals Claude Code would stop for approval."
+doc = "Run the removal guard: refuse a shell command with a cd, an rm and a *, which Claude Code would stop for approval."
 read = "use"
 
 [guards.no_nested_agents]

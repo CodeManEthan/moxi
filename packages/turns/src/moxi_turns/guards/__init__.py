@@ -743,9 +743,9 @@ def judge_of(found: Found) -> Callable[[ToolCall], object]:
 # -- turns' own guards -------------------------------------------------------------------
 
 #: The removal guard's pre-filter on `command`: an `rm` or `rmdir` word, any case, with any
-#: run of `\`, `'`, `"`, `{`, `}` and `$` between its letters, since the judge also reads
-#: the command with those deleted. It passes every command the judge could refuse.
-REMOVAL_MATCH = r"""\b(r[\\'"{}$]*m([\\'"{}$]*d[\\'"{}$]*i[\\'"{}$]*r)?)(?![A-Za-z_])"""
+#: run of `\`, `'` and `"` between its letters, since the judge also reads the command with
+#: those deleted. It passes every command the judge could refuse.
+REMOVAL_MATCH = r"""\b(r[\\'"]*m([\\'"]*d[\\'"]*i[\\'"]*r)?)(?![A-Za-z_])"""
 #: The no-nested-agents guard's refusal.
 NO_NESTED_AGENTS_DENY = (
     "Subagents may not start subagents. Finish what you can, then end your turn with a "
@@ -759,8 +759,8 @@ GUARDS = (
     Guard(name="removal", calls={"claude": ("Bash",)}, match={"command": REMOVAL_MATCH},
           match_flags="i", judge="moxi_turns.guards.removal:judge", on_error="allow",
           switch="guards.removal",
-          doc="Refuse shell removals Claude Code would stop for the user's approval even in "
-              "bypass mode."),
+          doc="Refuse a shell command with a cd, an rm and a *, which Claude Code would stop "
+              "for the user's approval even in bypass mode."),
     Guard(name="no-nested-agents",
           calls={"claude": ("Agent", "Task"), "codex": ("spawn_agent",)}, who="agents",
           deny=NO_NESTED_AGENTS_DENY, switch="guards.no_nested_agents",
