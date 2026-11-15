@@ -4,7 +4,7 @@ of that tree; `--ci` without the private names or the private allowlist."""
 from __future__ import annotations
 
 import pytest
-from conftest import git, token
+from conftest import fingerprint, git, token
 
 from moxi_publishing import cli
 
@@ -69,8 +69,6 @@ def test_ci_leaves_out_private_names_but_not_credentials(repo, names, capsys):
 
 def test_the_allowlists_are_read_from_the_tree_scanned(repo, names, capsys):
     value = token(23)
-    from moxi_secrets.scan import fingerprint
-
     put(repo, "b.md", f"key = {value}\nsee {POINTER}\n")
     allow = "\t".join(("b.md", "credentials/*", fingerprint(value), "2026-01-02", "why"))
     (repo / ".secrets-allow").write_text(allow + "\n", encoding="utf-8")

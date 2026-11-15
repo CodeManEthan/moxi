@@ -7,9 +7,11 @@ would, and prints its time as JSON; `test_cost.py` reads it.
     python cost_driver.py push REMOTE URL STDIN_LINE
     python cost_driver.py scan [--ci]
 
-It runs in the repo it judges (its working directory). Before the piece's module it loads
-only what repo's hook runner holds before it calls a piece, so the import time is the
-piece's own, and the run's time takes in every first-use load (secrets' sets, patterns).
+It runs in the repo it judges (its working directory). A piece's module imports nothing
+from repo, so its import time is its own. A piece reaches repo's api on first use, so the
+run's timing starts before that api is loaded and takes in every first-use load (repo's
+api, secrets' sets, patterns). It also takes in the hook runner's own two modules, which a
+real hook has loaded already: a few milliseconds over, on the safe side.
 """
 
 from __future__ import annotations
@@ -19,9 +21,6 @@ import json
 import sys
 import time
 
-import moxi_repo.pieces  # noqa: F401 -- loaded by the hook runner before any piece
-import moxi_repo.run  # noqa: F401 -- loaded by the hook runner before any piece
-
 
 def _timed(call):
     start = time.perf_counter()
@@ -29,9 +28,16 @@ def _timed(call):
     return time.perf_counter() - start, result
 
 
-def main(argv: list[str]) -> dict:
-    from moxi_repo.pieces import HookContext
+def _piece(piece, event: str, **context):
+    """`piece` called with a hook context, repo's api loaded inside the call."""
+    def call():
+        from moxi_repo.api import HookContext
 
+        return piece(HookContext(event, **context))
+    return call
+
+
+def main(argv: list[str]) -> dict:
     what = argv[0]
     if what == "import":
         took, _ = _timed(lambda: importlib.import_module(argv[1]))
@@ -45,20 +51,19 @@ def main(argv: list[str]) -> dict:
     if what == "message":
         from moxi_publishing import message
 
-        ctx = HookContext("commit-msg", args=(argv[1],),
-                          settings={"drop-trailer": ["Claude-Session", "Commit-Check"]})
-        took, outcome = _timed(lambda: message.commit_msg(ctx))
+        took, outcome = _timed(_piece(
+            message.commit_msg, "commit-msg", args=(argv[1],),
+            settings={"drop-trailer": ["Claude-Session", "Commit-Check"]}))
     elif what == "content":
         from moxi_publishing import content
 
-        ctx = HookContext("pre-commit")
-        took, outcome = _timed(lambda: content.pre_commit(ctx))
+        took, outcome = _timed(_piece(content.pre_commit, "pre-commit"))
     else:
         from moxi_publishing import push
 
-        ctx = HookContext("pre-push", args=(argv[1], argv[2]),
-                          stdin=(argv[3] + "\n").encode("ascii"), settings={"main": ["main"]})
-        took, outcome = _timed(lambda: push.pre_push(ctx))
+        took, outcome = _timed(_piece(
+            push.pre_push, "pre-push", args=(argv[1], argv[2]),
+            stdin=(argv[3] + "\n").encode("ascii"), settings={"main": ["main"]}))
     return {"s": took, "kind": outcome.kind, "lines": list(outcome.lines)}
 
 

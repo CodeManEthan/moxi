@@ -227,14 +227,14 @@ def test_a_replay_committed_by_hand_is_judged(pub):
 
 
 def test_a_committer_commit_is_judged_alike(pub):
-    import moxi_repo
+    from moxi_repo import api
 
     (pub / "notes").mkdir()
     (pub / "notes" / "today.md").write_text("today\n", encoding="utf-8")
-    spec = moxi_repo.Spec(name="proj/snapshot", root=str(pub), paths=("notes",),
-                          author=("operator", "operator@example.test"), push=None,
-                          trailers=lambda changes, since: [("Claude-Session", LINK)])
-    result = moxi_repo.commit(spec)
+    spec = api.Spec(name="proj/snapshot", root=str(pub), paths=("notes",),
+                    author=("operator", "operator@example.test"), push=None,
+                    trailers=lambda changes, since: [("Claude-Session", LINK)])
+    result = api.commit(spec)
     assert result.status == "committed", result.line()
     assert "Claude-Session" not in last_message(pub)
 

@@ -16,11 +16,11 @@ def config(repo, key):
 
 
 def test_enable_marks_the_repo_and_registers_the_three_pieces_with_seeds(repo, names):
-    from moxi_repo import gitconf
+    from moxi_repo import api
 
     lines = flag.enable(repo)
     assert config(repo, "moxi-publishing.public") == ["true"]
-    assert config(repo, "moxi-publishing.interpreter") == [gitconf.interpreter()]
+    assert config(repo, "moxi-publishing.interpreter") == [api.interpreter()]
     have = flag.registered(str(repo))
     assert sorted(have) == sorted(PIECES)
     assert all(piece["enabled"] for piece in have.values())

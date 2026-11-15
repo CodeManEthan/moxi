@@ -44,6 +44,17 @@ def token(seed: int = 7) -> str:
                                  for _ in range(36))
 
 
+def fingerprint(value: str) -> str:
+    """The fingerprint an allowlist line names for the credential `value`: the one
+    secrets' scan gives the hit that spans the whole value."""
+    import moxi_secrets
+
+    found = {hit.fingerprint for hit in moxi_secrets.scan(value, ("credentials",))
+             if (hit.start, hit.end) == (0, len(value))}
+    assert len(found) == 1, (value, found)
+    return found.pop()
+
+
 @pytest.fixture(scope="session")
 def template(tmp_path_factory) -> Path:
     """A repo with one commit, made once and copied into each test that wants one."""

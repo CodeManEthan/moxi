@@ -4,7 +4,7 @@ allowlists of the index; and the patch reader under it."""
 from __future__ import annotations
 
 import pytest
-from conftest import commit, git, public_repo, token, write_config
+from conftest import commit, fingerprint, git, public_repo, token, write_config
 
 from moxi_publishing import content
 
@@ -19,12 +19,6 @@ NAMES = ('[private_names]\nwords = ["bobsecret", "laterword"]\n'
 @pytest.fixture
 def pub(repo, names):
     return public_repo(repo, PIECE)
-
-
-def fingerprint(value: str) -> str:
-    from moxi_secrets.scan import fingerprint as fp
-
-    return fp(value)
 
 
 def allow_line(path, which, match):

@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 import pytest
-from conftest import commit, git, public_repo, token, write_config
+from conftest import commit, fingerprint, git, public_repo, token, write_config
 
 PIECE = "publishing/push"
 POINTER = "0123abcd9" + "@" + "2026-01-02"
@@ -217,8 +217,6 @@ def test_a_diff_attribute_hides_nothing(pub):
 
 
 def test_the_allowlists_are_read_from_the_pushed_commit(pub):
-    from moxi_secrets.scan import fingerprint
-
     value = token(32)
     allow = "\t".join(("a.ini", "credentials/*", fingerprint(value), "2026-01-02", "why"))
     (pub / ".secrets-allow").write_text(allow + "\n", encoding="utf-8")

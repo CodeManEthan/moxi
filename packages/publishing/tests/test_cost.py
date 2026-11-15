@@ -17,6 +17,7 @@ tests/test_cost.py`; `-s` shows the numbers.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import random
@@ -62,6 +63,11 @@ def text_of(rng: random.Random, size: int) -> str:
         out.append(line)
         total += len(line) + 1
     return "\n".join(out) + "\n"
+
+
+def re2_installed() -> bool:
+    """Whether google-re2 is installed here: secrets runs every pattern on it when it is."""
+    return importlib.util.find_spec("re2") is not None
 
 
 def drive(cwd: Path, *args: str) -> dict:
@@ -180,9 +186,7 @@ def generated_tree(tmp_path_factory, template):
 @pytest.mark.timed
 @pytest.mark.parametrize("ci", [False, True], ids=["local", "ci"])
 def test_scan_of_a_4_mb_tree_within_budget(generated_tree, names, gitenv, ci):
-    from moxi_secrets import engine
-
-    if engine.re2_module() is None:
+    if not re2_installed():
         pytest.skip("the scan's budget is set on RE2, which isn't installed here")
     tracked = git(generated_tree, "ls-files", "-z").stdout.split("\0")
     size = sum((generated_tree / path).stat().st_size for path in tracked if path)

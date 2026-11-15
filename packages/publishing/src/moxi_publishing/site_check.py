@@ -3,14 +3,16 @@ test, when a package of the wheel under test imports from anywhere but the venv'
 site-packages, such as the checkout the tests sit in.
 
 It runs where only the wheel, its dependencies, the test tools and the test fence are
-installed, so it imports nothing beyond the standard library and pytest. `moxi publishing ci siblings`
-copies this file beside the run and loads it with `-p`; the names to check are in the
-environment variable below, separated by commas.
+installed, so it imports nothing beyond the standard library. It never imports pytest:
+publishing doesn't depend on it, and the session pytest hands the hook carries what it
+needs. `moxi publishing ci siblings` copies this file beside the run and loads it with
+`-p`; the names to check are in the environment variable below, separated by commas.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 
 #: The import names of the wheel under test, separated by commas.
 NAMES_ENV = "MOXI_PUBLISHING_SITE_CHECK_NAMES"
@@ -44,9 +46,16 @@ def outside(names, roots) -> list[str]:
 
 def pytest_collection_finish(session) -> None:
     # After collection, so a path a conftest or a test module put on sys.path counts too.
-    import pytest
-
     names = [n for n in os.environ.get(NAMES_ENV, "").split(",") if n]
     problems = outside(names, site_roots())
-    if problems:
-        pytest.exit("; ".join(problems), returncode=1)
+    if not problems:
+        return
+    text = "site check: " + "; ".join(problems)
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(text, red=True)
+    else:
+        sys.stderr.write(text + "\n")
+    # pytest ends a session that raises its own Failed as a failed run, exit status 1,
+    # before any test runs.
+    raise session.Failed(text)
