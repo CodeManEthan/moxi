@@ -70,6 +70,10 @@ export interface Listing {
 /** One global instruction file and what the next install makes of it. */
 export interface GlobalFile {
   file: string;
+  /** The harness that reads the file. */
+  harness: string;
+  /** What the harness reads through loadout: the shared file, then its part while in use. */
+  parts: string[];
   changes: boolean;
   /** A unified diff of the change, or, for a file `if-absent` placed, why its state isn't ok. */
   diff: string;
@@ -183,7 +187,8 @@ function isSection(value: unknown): value is Section {
 }
 
 function isGlobalFile(value: unknown): value is GlobalFile {
-  return isObj(value) && isStr(value.file) && typeof value.changes === "boolean"
+  return isObj(value) && isStr(value.file) && isStr(value.harness) && isStrings(value.parts)
+    && typeof value.changes === "boolean"
     && isStr(value.diff) && typeof value.placed === "boolean" && isStrOrNull(value.state);
 }
 

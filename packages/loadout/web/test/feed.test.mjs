@@ -122,10 +122,12 @@ test("the listing, the global preview and the projects read their shapes", () =>
   assert.deepEqual(parseListing(listing), listing);
   assert.equal(parseListing({ ...listing, items: [{ kind: "skill" }] }), null);
   const global = { problem: null, mode: "managed", chosen: true,
-                   files: [{ file: "/h/.claude/CLAUDE.md", changes: true, diff: "+x", placed: false,
-                             state: null }] };
+                   files: [{ file: "/h/.claude/CLAUDE.md", harness: "claude",
+                             parts: ["/l/global.md", "/l/global.claude.md"], changes: true,
+                             diff: "+x", placed: false, state: null }] };
   assert.deepEqual(parseGlobal(global), global);
   assert.equal(parseGlobal({ ...global, chosen: "yes" }), null);
+  assert.equal(parseGlobal({ ...global, files: [{ ...global.files[0], parts: "/l/global.md" }] }), null);
   const projects = { projects: [{ key: "alpha", root: "/w/alpha" }], reason: null };
   assert.deepEqual(parseProjects(projects), projects);
   assert.deepEqual(parseProjects({ projects: [], reason: "projects isn't installed" }),

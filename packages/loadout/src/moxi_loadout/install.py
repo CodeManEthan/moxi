@@ -6,7 +6,10 @@
    them into the manifest, and record them in loadout's ledger;
 2. read the manifest, the settings and the ledger, and build the whole plan
    (`moxi_loadout.planner`);
-3. write the generated agent files of the wants in scope;
+3. write the generated agent and global files of the wants in scope (a generated global
+   file edited by hand that `--replace` names is backed up first; a `--replace` of the
+   global file in a run scoped with `--user` or `--project` is refused, since that run
+   never writes the global file);
 4. plan through the core placer and apply the steps in scope: each `add`, `update` and
    `keep`; each `remove` whose record names a section in scope (a `remove` with no record
    only in an unscoped run in which every section resolved); a refusal `--replace` names,
@@ -23,8 +26,8 @@
    file once, and the ledger with their records straight after, `SIGINT` and `SIGTERM`
    deferred across both;
 6. write loadout's ledger: a record per placement made or kept and per entry written or
-   kept, none for one removed; then delete each generated agent file nothing uses any
-   more, unless it was edited by hand (a note names it);
+   kept, none for one removed; then delete each generated agent or global file nothing
+   uses any more, unless it was edited by hand (a note names it);
 7. with repo installed and the folder in a git work tree, register the two git hook
    pieces there while `reinstall_on_commit` is on, or remove them while it is off
    (`moxi_loadout.repo_link`); a failure is a line, not an exit code.
@@ -37,12 +40,17 @@ Locks are always taken in one order: `install.lock`, the core lock, the manifest
 `status` builds the same plan and applies nothing; it takes no lock. `install --dry-run`
 is `status` over the run's scope.
 
+Both warn when OpenCode would read Claude's text (`opencode_reads_claude`): OpenCode
+reads `~/.claude/CLAUDE.md` while its own `AGENTS.md` is absent, so while loadout's
+block isn't there and Claude's file brings in Claude's part, OpenCode reads that part.
+`status` reads the file as an install would leave it, `install` as it left it.
+
 Exit codes: `status` 0 when every item is `ok` or `off`, else 1. `install` 0 when every
 item in scope is `ok` or `off` afterwards; 1 an error (a bad source, a failed write, a
 state still missing after the write); 3 refused (`blocked`, `modified` or `would-commit`
-left, a `--replace` that names nothing refused, a project section refused); 75 a lock held
-past its wait, or projects busy. 1 wins over 3, 3 over 75. A refusal outside the scope is
-a line, not a code.
+left, a `--replace` that names nothing refused, a `--replace` of the global file in a
+scoped run, a project section refused); 75 a lock held past its wait, or projects busy.
+1 wins over 3, 3 over 75. A refusal outside the scope is a line, not a code.
 """
 
 from __future__ import annotations
@@ -70,13 +78,15 @@ SKIPPED = "the would-commit check skipped"
 class Outcome:
     """What a run came to: its `rows` (every want for `status`, those in scope for
     `install`), the `lines` said on the way, `notes`, and the exit `code`. `status` also
-    gives the generated agent files no agent uses (`orphans`, see `orphans`)."""
+    gives the generated agent and global files nothing uses (`orphans`, see `orphans`)."""
 
     rows: list[Row] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     code: int = 0
     orphans: list[tuple[str, str]] = field(default_factory=list)
+    #: The global file's notes and warns, `(level, line)`, for the doctor's global row.
+    global_lines: list[tuple[str, str]] = field(default_factory=list)
 
     def as_json(self) -> dict:
         counts: dict[str, int] = {}
@@ -110,6 +120,9 @@ def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
     placer's own 10 seconds a call when None)."""
     plan, run = _plan(folder, resolver, git_seconds)
     notes = _check_placed(plan, ignores.Git() if git is None else git)
+    for level, line in opencode_reads_claude(plan, run, after=False):
+        run.global_lines.append((level, line))
+        run.lines.append(line)
     rows = [r for r in planner.rows(plan) + entries.rows(run) + _ignore_rows(plan.ledger)
             if _shown(scope, r)]
     code = 0 if all(r.state in FINE for r in rows) else ERROR
@@ -118,7 +131,53 @@ def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key,
         notes.append(differ)
     return Outcome(rows, list(plan.lines) + run.lines,
                    list(dict.fromkeys(plan.notes + run.notes + notes)), code,
-                   orphans(plan, plan.ledger))
+                   orphans(plan, plan.ledger), run.global_lines)
+
+
+def opencode_reads_claude(plan: planner.Plan, run: entries.Run, *,
+                          after: bool) -> list[tuple[str, str]]:
+    """The warn, as `(level, line)`, when OpenCode reads Claude's part through its
+    fallback, else none. It holds when Claude's file is `~/.claude/CLAUDE.md` (under the
+    home folder, not `CLAUDE_CONFIG_DIR`) and brings in Claude's part (`managed`: its part
+    line is wanted; `if-absent`: it is loadout's placement of the generated file), and
+    OpenCode's home folder exists while its `AGENTS.md` doesn't, a dangling link counted
+    absent as OpenCode reads it. With `after` false, a file the run would write counts as
+    there. The line names why the block isn't there and the fixes."""
+    from moxi_loadout import globalfile
+    from moxi_loadout import harness as hz
+
+    found = plan.manifest
+    mode, source = found.global_mode, found.global_file
+    if mode not in ("managed", "if-absent") or source is None:
+        return []
+    if mode == "managed":
+        brings = run.claude_part
+    else:
+        brings = any(w.kind == planner.GLOBAL_KIND and w.harness == "claude"
+                     and w.generated is not None and w.state is None for w in plan.wants)
+    try:
+        user_home = hz._home(None)
+    except LookupError:
+        return []
+    claude, target = hz.global_file("claude"), hz.global_file("opencode")
+    if not brings or os.path.abspath(claude) != os.path.abspath(
+            user_home / ".claude" / "CLAUDE.md"):
+        return []
+    if not hz.opencode_home().is_dir() or os.path.exists(target):
+        return []
+    theirs = [r for r in planner.rows(plan) + entries.rows(run)
+              if r.kind == "global" and r.harness == "opencode"]
+    if not after and any(r.state == "missing" for r in theirs):
+        return []
+    why = next((r.reason for r in theirs if r.state not in FINE + ("missing",)
+                and r.reason), None)
+    if why is None:
+        why = ("OpenCode has no row in the core's harness table" if not theirs
+               else "loadout hasn't written it")
+    part = globalfile.part_path(source, "claude")
+    return [("warn", f"OpenCode reads {claude}, which brings in Claude's part {part}, "
+             f"because loadout's block isn't in {target}: {why}; correct that, or set "
+             "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 for OpenCode")]
 
 
 def _check_placed(plan: planner.Plan, git: ignores.Git) -> list[str]:
@@ -175,27 +234,47 @@ def global_preview(folder=None, *, resolver=planner.resolve_key,
                    git_seconds: float | None = None) -> dict:
     """What the next install makes of each global file, for `global show`:
     `{"mode": <the manifest's mode>, "files": [...]}`. Each file the managed part edits is
-    `{"file", "changes", "diff"}`, `diff` a unified diff from the file as it is to the file
-    after install (empty when unchanged). Each global file `if-absent` places is
-    `{"file", "changes", "placed": True, "state", "diff"}`, `diff` then the reason its
-    state isn't `ok`. Takes no lock, writes nothing; `git_seconds` as for `status`."""
+    `{"file", "harness", "parts", "changes", "diff"}`, `diff` a unified diff from the file
+    as it is to the file after install (empty when unchanged). Each global file
+    `if-absent` places is `{"file", "harness", "parts", "changes", "placed": True, "state",
+    "diff"}`, `diff` then the reason its state isn't `ok`. `parts` are the absolute paths
+    the harness reads through loadout: the shared file, then its part while in use (none
+    in `off`). Takes no lock, writes nothing; `git_seconds` as for `status`."""
     import difflib
 
+    from moxi_loadout import globalfile
+    from moxi_loadout import harness as hz
+
     plan, run = _plan(folder, resolver, git_seconds)
+    mode, shared = plan.manifest.global_mode, plan.manifest.global_file
+
+    def parts(harness: str) -> list[str]:
+        if mode == "off" or shared is None or harness not in hz.HARNESSES:
+            return []
+        return [str(p) for p in globalfile.reads(shared, harness)]
+
     shown = entries.preview(run)
+    owner = {}
+    for a in run.actions:
+        where = a.where
+        owner[where.file if a.entry else where.get("file")] = (
+            where.harness if a.entry else where.get("harness", ""))
     out = []
     for path, (now, then) in sorted(shown.items()):
         a, b = now.decode("utf-8", "replace"), then.decode("utf-8", "replace")
         diff = "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True),
                                             path, f"{path} after install"))
-        out.append({"file": path, "changes": a != b, "diff": diff})
+        h = owner.get(path, "")
+        out.append({"file": path, "harness": h, "parts": parts(h), "changes": a != b,
+                    "diff": diff})
     for w in plan.wants:
         if w.kind == planner.GLOBAL_KIND:
             state, reason, _ = planner.state_of(w)
             out.append({"file": str(w.item.dest if w.item else w.harness),
+                        "harness": w.harness, "parts": parts(w.harness),
                         "changes": state != "ok", "placed": True, "state": state,
                         "diff": reason})
-    return {"mode": plan.manifest.global_mode, "files": out}
+    return {"mode": mode, "files": out}
 
 
 # -- install --------------------------------------------------------------------------------
@@ -287,11 +366,18 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     found = manifest_mod.load(machine.source)
     lines.extend(r.line for r in found.refused)
     claims = _claims(replace)
+    refused = _global_claims_out_of_scope(claims, scope)
+    lines.extend(refused)
+    _replace_generated_global(claims, machine.backups_keep, say)
     written: list[Row] = []
     notes: list[str] = []
+    said: list[tuple[str, str]] = []
+    ran: list[entries.Run] = []
 
     def harness_entries() -> None:
         run = entries.plan(found, machine.source, data, claims=claims)
+        ran.append(run)
+        said.extend(run.global_lines)
         # The entries and their records land together: an interrupt waits for the ledger
         # write, so an entry loadout wrote is never left unrecorded (the next run would
         # take it for the user's).
@@ -402,10 +488,14 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
                 w.scope == name and (w.kind, w.name) == scope.item for w in plan.wants):
             continue
         rows.append(Row(name, "section", name, "*", "blocked", res.line, None, res.code))
-    codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
+    codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(
+        unclaimed or refused)
+    for level, line in opencode_reads_claude(plan, ran[0], after=True):
+        said.append((level, line))
+        lines.append(line)
     repo_link.sync(machine.source, machine.reinstall_on_commit, say=say)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
-                   planner.exit_code(codes))
+                   planner.exit_code(codes), global_lines=said)
 
 
 def _cover(in_scope, plain, forced, seeded, placed, data, rows, say) -> set[str]:
@@ -515,30 +605,76 @@ def _moved(step, mine: set[str], old_source) -> bool:
 
 
 def _write_generated(want, claims: dict[str, bool], say) -> None:
-    """Write `want`'s generated agent file when it needs writing: missing, out of date
+    """Write `want`'s generated agent or global file when it needs writing: missing, out of date
     with its header intact, or edited by hand and named by `--replace`."""
     from moxi.files import atomic_write
 
     if want.generated is None or want.state is not None:
         return
     path, data, current = want.generated
-    if current == "same":
+    if current == "same" or data is None:
         return
     if current == "modified" and not _claimed(claims, want):
         return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     atomic_write(path, data, mode=0o644)
     want.generated = (path, data, "same")
     if current == "modified":
         say(f"rewrote {path}, which was edited by hand")
 
 
+def _global_claims_out_of_scope(claims: dict[str, bool], scope: Scope) -> list[str]:
+    """Each `--replace global:...` in a run that leaves the global file out, taken out of
+    the claims with its refusal line. The global file is written only by a whole install
+    and the global verbs, so a run scoped with `--user` or `--project` that took the
+    replace would back up and delete an edited generated file it never writes again,
+    leaving the harness's global file a link to nothing."""
+    if scope.covers(None, planner.GLOBAL_KIND, planner.GLOBAL_KIND):
+        return []
+    out = []
+    for text in [c for c in claims if c.startswith("global:")]:
+        del claims[text]
+        out.append(f"--replace {text}: refused, since a run scoped with --user or --project "
+                   f"leaves the global file out; run moxi loadout install --replace {text} "
+                   "with neither")
+    return out
+
+
+def _replace_generated_global(claims: dict[str, bool], keep: int, say) -> None:
+    """Each generated global file edited by hand that a `--replace global:global@<harness>`
+    names: its bytes backed up under the harness's backups, then deleted, so the run
+    writes it afresh (or places the shared file, when the harness has no part)."""
+    from moxi_loadout import globalfile
+    from moxi_loadout import harness as hz
+
+    for text in claims:
+        if not text.startswith("global:"):
+            continue
+        which = text.rsplit("@", 1)[-1]
+        for h in hz.HARNESSES if which == "*" else (which,):
+            path = globalfile.generated_path(h)
+            if globalfile.generated_state(path) != "modified":
+                continue
+            kept = hz.backup(path, h, path.read_bytes(), keep)
+            path.unlink()
+            claims[text] = True
+            say(f"backed up {path}, which was edited by hand, to {kept}; install writes it "
+                "again")
+
+
 def generated_in_use(data: dict, wanted: Iterable = ()) -> set[str]:
-    """The generated agent files still in use, by real path: those `wanted` names, those
-    a record in loadout's ledger was placed from, and those a placement of loadout's
-    links to (so a lost ledger keeps them too)."""
+    """The generated agent and global files still in use, by real path: those `wanted`
+    names, those a record in loadout's ledger was placed from, those a placement of
+    loadout's links to (so a lost ledger keeps them too), and those a harness global file
+    links to."""
     from moxi import place
 
+    from moxi_loadout import harness as hz
+
     out = {os.path.realpath(p) for p in wanted}
+    for h in hz.HARNESSES:
+        if os.path.islink(hz.global_file(h)):
+            out.add(os.path.realpath(hz.global_file(h)))
     for record in data["placed"].values():
         item = record.get("place")
         if isinstance(item, dict) and isinstance(item.get("source"), str):
@@ -550,34 +686,45 @@ def generated_in_use(data: dict, wanted: Iterable = ()) -> set[str]:
 
 
 def orphans(plan: planner.Plan, data: dict) -> list[tuple[str, str]]:
-    """Each generated agent file no want names and no placement uses any more, with its
-    state: `ok` as it was generated, `modified` when edited by hand."""
-    from moxi_loadout import convert, stores
+    """Each generated agent or global file no want names and no placement uses any more,
+    with its state: `ok` as it was generated, `modified` when edited by hand."""
+    from moxi_loadout import convert, globalfile, stores
+    from moxi_loadout import harness as hz
 
-    used = generated_in_use(data, [w.generated[0] for w in plan.wants if w.generated])
+    wanted = [w.generated[0] for w in plan.wants if w.generated]
+    used = generated_in_use(data, wanted)
+    # A generated global file is in use while a want names it or a harness reads it.
+    reached = {os.path.realpath(p) for p in wanted} | {
+        os.path.realpath(hz.global_file(h)) for h in hz.HARNESSES}
     out = []
     for top, _, names in os.walk(stores.generated_dir()):
         for name in sorted(names):
             path = os.path.join(top, name)
-            if os.path.realpath(path) in used:
+            mine = globalfile.is_generated(path)
+            if os.path.realpath(path) in (reached if mine else used):
                 continue
-            state = convert.state(path)
+            state = globalfile.generated_state(path) if mine else convert.state(path)
             if state in ("ok", "modified"):
                 out.append((path, state))
     return out
 
 
 def _drop_generated(plan: planner.Plan, data: dict, say) -> list[str]:
-    """Delete each generated agent file no want names and no placement uses any more,
+    """Delete each generated agent or global file no want names and no placement uses any more,
     as it was generated; one edited by hand is left, and named in the note returned."""
+    from moxi_loadout import globalfile
+
     notes = []
     for path, state in orphans(plan, data):
+        what = "harness" if globalfile.is_generated(path) else "agent"
         if state == "ok":
             os.unlink(path)
-            say(f"deleted {path}, which no agent uses any more")
+            say(f"deleted {path}, which no {what} uses any more")
         else:
-            notes.append(f"{path} was edited by hand and no agent uses it any more; "
-                         "copy the edit into its source if you want it, then delete it")
+            into = ("the global file or the harness's part" if what == "harness"
+                    else "its source")
+            notes.append(f"{path} was edited by hand and no {what} uses it any more; "
+                         f"copy the edit into {into} if you want it, then delete it")
     return notes
 
 
