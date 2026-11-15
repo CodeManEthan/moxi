@@ -486,9 +486,13 @@ export class CommsPage extends LitElement {
     this.requestUpdate();
   }
 
+  /** Opens `address` and writes it as the browser's address. A route the page can't read
+   * is left as it is: rewritten, the shell's next modules event would place the page
+   * again at the new route, and the line that says so would go. */
   #setAt(address: Address): void {
     this.#at = address;
-    const path = addressWrite(address.piece === "unknown" ? NOTHING_OPEN : address, location.pathname);
+    if (address.piece === "unknown") return;
+    const path = addressWrite(address, location.pathname);
     if (path !== null) history.replaceState(history.state, "", path);
   }
 
