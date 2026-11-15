@@ -64,11 +64,18 @@ other, so its row says when the stage reads as skipped.
   where that is not given the step waits on a read of git. A stage whose repo declares
   no check has no `check` step, where `Asked.seen` says so.
 
-**What git says.** The `build` and `check` rows read a stage's open build as the
+**What git says.** The `build` and `check` rows, and a command step's, read a stage's open build as the
 caller read it from git (`Asked.seen`, which `checking.seen_of` gives). Every reader
 of a step passes it. A caller that read nothing of git gets such a step as `WAITING`
 on that read, with `Step.unread` set, and is to read git before it says the step: the
 index keeps the step the log alone gives, and marks it so (`at`).
+
+- a command step of the user's own, of a stage: done once the newest run recorded
+  under its name passed at the build's tip with the argv of its entry in the round's
+  recorded flow, its placeholders filled for the build there, and once the build is
+  finished. Until then it waits for the build to have work. A run of one step is never
+  read for another. It is read from what `Asked.seen` says of the stage's build.
+  (`command_row` gives its row; `row_of` finds it for a step the flow lists.)
 
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
@@ -125,13 +132,15 @@ class Seen:
     `state`, the build's state as git reads it; `tip`, its branch's tip; `clean`,
     whether its worktree is on this machine with the build's branch checked out and
     nothing uncommitted; `check`, the argv the repo's check gives now at the tip, None
-    when the repo declares no check; `problem`, what kept the build from being read,
-    in which case nothing else is known."""
+    when the repo declares no check; `values`, what the placeholders of a command read
+    for the build at the tip (`checking.values`); `problem`, what kept the build from
+    being read, in which case nothing else is known."""
 
     state: str | None = None
     tip: str | None = None
     clean: bool = False
     check: tuple[str, ...] | None = None
+    values: Mapping[str, str] | None = None
     problem: Unmet | None = None
 
 
@@ -356,10 +365,51 @@ def _check(state: states.State, about: Asked) -> Step:
     return Step(CHECK, WAITING if waits else READY, stage=stage, waits=tuple(waits))
 
 
+def command_row(step: str) -> Row:
+    """The row of the command step `step` of the user's own."""
+
+    def row(state: states.State, about: Asked) -> Step:
+        stage = about.stage
+        built = None if stage is None else stages.build_of(state, stage)
+        if built is None:
+            return Step(step, NOT_DUE, stage=stage)
+        if built == stages.FINISHED:
+            return Step(step, DONE, stage=stage)
+        seen = (about.seen or {}).get(stage)
+        if seen is None:
+            return _not_read(step, stage, f"whether {stage}'s run of {step} passed at its "
+                             "tip", about.name)
+        if seen.problem is not None:
+            return Step(step, WAITING, stage=stage, waits=(seen.problem,))
+        entry = checking.step_entry(state, step)
+        if (entry is not None and seen.tip is not None and seen.values is not None
+                and checking.passes(state, stage, step, tip=seen.tip,
+                                    argv=checking.fill(entry["argv"], seen.values))):
+            return Step(step, DONE, stage=stage)
+        if seen.state not in checking.WITH_WORK:
+            return Step(step, WAITING, stage=stage, waits=(Unmet(
+                f"{stage} has no work to run {step} on: it reads {seen.state}",
+                "commit the build's work on its branch"),))
+        return Step(step, READY, stage=stage)
+
+    return row
+
+
 #: The function that says each step's state. A step with no row reads `NOT_BUILT`,
-#: and a skipped step is read before its row is asked.
+#: and a skipped step is read before its row is asked. A command step of the user's
+#: own has no row here: `row_of` gives it its own.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
                         COMMISSION: _commission, BUILD: _build, CHECK: _check}
+
+
+def row_of(step: str, entry: Mapping | None) -> Row | None:
+    """The row of the step `step`, whose entry in the flow is `entry`: its row in
+    `ROWS`, the command row for a command step of the user's own, else None."""
+    row = ROWS.get(step)
+    if (row is None and entry is not None and flows.is_user_step(entry)
+            and entry.get("does") == flows.COMMAND):
+        return command_row(step)
+    return row
 
 
 # -- a hold on a stage -------------------------------------------------------------------
@@ -429,7 +479,7 @@ def _read(state: states.State, step: str, entry: Mapping | None, about: Asked) -
     # questions it lists, and the stage is held again by one asked afterwards.
     if step != QUESTIONS and skips.is_skipped(state, step, about.stage):
         return Step(step, SKIPPED, stage=about.stage, entry=entry)
-    row = ROWS.get(step)
+    row = row_of(step, entry)
     if row is not None:
         return dataclasses.replace(row(state, about), entry=entry)
     waits = ()
@@ -548,6 +598,6 @@ def said(step: Mapping | None) -> str:
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
            "SETTLED", "HELD", "COMMISSION", "BUILD", "CHECK", "Seen", "Asked", "Step", "Row",
-           "ROWS", "answer",
+           "ROWS", "command_row", "row_of", "answer",
            "held_by", "held_unbuilt", "order", "of", "one", "is_settled", "current", "at",
            "said"]

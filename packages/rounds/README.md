@@ -88,7 +88,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
-| `moxi rounds check [ROUND B<n>] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed |
+| `moxi rounds check [ROUND B<n>] [--step NAME] [--timeout-s N]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; its whole process tree is ended at the check's `timeout_s`, or `--timeout-s`. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, rulings not yet shown |
@@ -145,6 +145,14 @@ steps = [
   { step = "verify-design", by = "checker", model = "second", recheck_model = "third" },
 ]
 ```
+
+A flow may also list steps of your own, done for each stage before `finish`. One that
+runs a command is written `{ step = "staging", does = "command", before = "finish", by =
+"builder", argv = ["./stage.sh", "{tip}"], timeout_s = 900 }`: `moxi rounds check
+--step staging` runs its `argv`, with the same placeholders as a check, and the step is
+done at a build's tip once the newest run recorded under its name passed there with the
+`argv` the round's flow recorded. A run of one step never counts for another, nor for
+the repo's check.
 
 `open` records the flow's steps in the round, and the round follows what was recorded,
 whatever the config says since. `mark ROUND --flow NAME` moves a round up: to a flow

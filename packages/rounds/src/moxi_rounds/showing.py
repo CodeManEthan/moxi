@@ -26,7 +26,7 @@ says so.
 A project is not shown: its rounds are listed.
 
 Its builds are shown each with what its commission recorded, the newest run of its
-repo's check, and, while it is open, its state as read from git now (`open_builds`):
+repo's check and of each command step of the user's own, and, while it is open, its state as read from git now (`open_builds`):
 whether it is idle, the builds it shares commits with, or what kept it from being read.
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
@@ -355,7 +355,10 @@ def _builds(found: Shown) -> list:
                                                   "scratch", "host", "build", "at")},
                "ended": one.ended, "state": one.ended, "by": None, "why": None,
                "head": None, "idle": False, "shares": [], "problem": None,
-               "check": _check_run(found.state, one)}
+               "check": _check_run(found.state, one),
+               "step_runs": [run for run in (
+                   _check_run(found.state, one, step) for step in _command_steps(found.state))
+                   if run is not None]}
         now = read.get(one.stage) if one.ended is None else None
         if now is not None and now.build.n == one.n:
             data = now.data()
@@ -368,31 +371,39 @@ def _builds(found: Shown) -> list:
     return listed
 
 
-def _check_run(state: states.State, build: builds.Build) -> dict | None:
-    """The newest run of the repo's check recorded for `build`, as data: its commit,
-    exit code, duration, output file and when it was recorded; None with no run."""
+def _command_steps(state: states.State) -> list[str]:
+    """The command steps of the user's own the round's flow lists, in its order."""
+    return [str(entry.get("step")) for entry in state.steps
+            if checking.step_entry(state, str(entry.get("step"))) is not None]
+
+
+def _check_run(state: states.State, build: builds.Build,
+               step: str = checking.CHECK) -> dict | None:
+    """The newest run of `step` (the repo's check unless named) recorded for `build`, as
+    data: the step, its commit, exit code, duration, output file and when it was
+    recorded; None with no run."""
     found = None
     for event in state.history:
         if (event["n"] > build.n and event["type"] == checking.RAN
                 and event.get("stage") == build.stage
-                and event.get("step") == checking.CHECK):
+                and event.get("step") == step):
             found = event
         if (event["n"] > build.n and event.get("stage") == build.stage
                 and event["type"] == "build.commissioned"):
             break
     if found is None:
         return None
-    return {key: found.get(key) for key in ("commit", "exit_code", "duration_s", "output",
-                                            "at")}
+    return {key: found.get(key) for key in ("step", "commit", "exit_code", "duration_s",
+                                            "output", "at")}
 
 
 def check_line(run: dict) -> str:
-    """The newest check run of a build in words: `check passed at 81c7f5b` or `check
-    failed (exit 1) at 81c7f5b`."""
+    """The newest run of a step for a build in words: `check passed at 81c7f5b` or
+    `staging failed (exit 1) at 81c7f5b`."""
     code = run["exit_code"]
     how = ("passed" if code == 0 else "ended at its time limit" if code is None
            else f"failed (exit {code})")
-    return f"check {how} at {str(run['commit'])[:7]}"
+    return f"{run.get('step') or checking.CHECK} {how} at {str(run['commit'])[:7]}"
 
 
 def build_line(one: dict) -> str:
@@ -418,8 +429,9 @@ def _build_lines(listed: list) -> list[str]:
         lines.append(f"  {build_line(one)}")
         lines += [f"    {key}: {one[key]}" for key in ("worktree", "scratch")
                   if one[key] is not None]
-        if one.get("check") is not None:
-            lines.append(f"    {check_line(one['check'])}, output {one['check']['output']}")
+        for run in [one.get("check"), *one.get("step_runs", ())]:
+            if run is not None:
+                lines.append(f"    {check_line(run)}, output {run['output']}")
         if one["record"] is not None:
             lines.append(f"    go: {one['record']}")
     return lines

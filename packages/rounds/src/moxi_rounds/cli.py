@@ -955,9 +955,10 @@ def _commission(args, out) -> int:
 def _declare_check(verbs) -> None:
     said = ("Run the repo's declared check for a build at its tip, in the build's "
             "worktree, and record the run: its commit, that commit's merge-base with "
-            "the target, the argv, its exit code and duration. Its output goes to "
-            "check-<n>.log in the build's scratch folder. Nothing is recorded when the "
-            "tip or the worktree changed while it ran.")
+            "the target, the argv, its exit code and duration. With --step, run a "
+            "command step of the round's flow the same way, recorded under its name. "
+            "Its output goes to check-<n>.log in the build's scratch folder. Nothing is "
+            "recorded when the tip or the worktree changed while it ran.")
     parser = verbs.add_parser("check", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", nargs="?",
                         help="the round, <project>/<slug>; left out in a build's "
@@ -965,9 +966,12 @@ def _declare_check(verbs) -> None:
                              "checked out there")
     parser.add_argument("stage", metavar="STAGE", nargs="?",
                         help="the stage whose build is checked, B<n>; given with ROUND")
+    parser.add_argument("--step", metavar="NAME",
+                        help="run the command step NAME of the round's flow, a step of "
+                             "your own, in place of the repo's check")
     parser.add_argument("--timeout-s", metavar="N", type=float, dest="timeout_s",
                         help="end the run's whole process tree after N seconds, in place "
-                             "of the check's own timeout_s")
+                             "of the check's or the step's own timeout_s")
     _writes(parser)
 
 
@@ -984,11 +988,12 @@ def _check(args, out) -> int:
         raise BadArgument(f"{name} is named with no stage, and a check is of one build",
                           f"moxi rounds check {name} B<n>, or moxi rounds check in the "
                           "build's worktree")
-    ran = checking.check(name, stage, actor=_actor(args), timeout_s=args.timeout_s)
+    ran = checking.check(name, stage, actor=_actor(args), step=args.step,
+                         timeout_s=args.timeout_s)
     code = ran.exit_code
     how = ("passed" if ran.passed else "was ended at its time limit" if code is None
            else f"failed: exit {code}")
-    print(f"check {ran.name} {ran.stage} at {ran.commit[:12]}: {how}, in "
+    print(f"{ran.step} {ran.name} {ran.stage} at {ran.commit[:12]}: {how}, in "
           f"{ran.duration_s:g} s", file=out)
     print(f"ran: {shlex.join(ran.argv)}", file=out)
     print(f"output: {ran.output}", file=out)

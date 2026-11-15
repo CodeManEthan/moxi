@@ -60,6 +60,10 @@ does not yet build.
   worktree changed meanwhile records nothing. A check counts only at the tip it ran at
   and with the command the repo declares now; `show` and the round note give each
   build's newest run.
+- `check --step NAME` runs a command step of the user's own from the round's flow the
+  way `check` runs the repo's check, and records the run under the step's name. The
+  step is done once its newest run passed at the build's tip; `next` prints the command,
+  and `show` and the round note give each such step's newest run.
 - A stage's `build` step is not due until it is commissioned, ready until git reads its
   build as holding work or merged, and done from then on. `next`, `show`, `list` and the
   read API read git for it, so a round moves from `commission` through `build` to

@@ -1,22 +1,25 @@
-"""`check`: run a build's check at its tip and record the run; and what a gate compares.
+"""`check`: run a build's check, or a command step of the user's own, at its tip and
+record the run; and what a gate compares.
 
 **What a gate compares.** A step's gate reads the newest `check.ran` of the build whose
 `step` is that step's name, and no other record (`newest`). It passes at tip `T` when that
 record's commit is `T`, its exit code is 0, and its argv is the argv the step's command
 gives now, its placeholders filled for the build at `T` (`passes`, `why_not`). For the
 repo's check that command is the repo's `check.command` as the settings have it when the
-gate is read (`argv_now`). A pass at an older commit, a run of another step, and a pass of
-a command the repo no longer declares do not count.
+gate is read (`argv_now`); for a command step of the user's own (`check --step NAME`),
+the `argv` of the step's entry in the round's recorded flow (`step_entry`). A pass at an
+older commit, a run of another step, and a pass of a command the repo no longer declares
+do not count. A run of one step is never read for another.
 
-**The command line** is split as a shell would split it and run with no shell. Each word
-may hold the placeholders `{round}`, `{stage}`, `{repo}`, `{root}`, `{branch}`, `{tip}`
+**The command line** is split as a shell would split it and run with no shell; a step of
+the user's own gives its words as a list. Each word may hold the placeholders `{round}`, `{stage}`, `{repo}`, `{root}`, `{branch}`, `{tip}`
 and `{into}`, filled in for the build (`fill`); any other text in braces is left as it is.
 
 **The run** (`check`), through the write path, with the round's lock held only to read
 and to append:
 
-1. Under the lock: the build of the stage is open; its repo declares a check; its
-   worktree was made on this machine and is there, has the build's branch checked out
+1. Under the lock: the build of the stage is open; its repo declares a check, or the
+   round's flow has the command step named; its worktree was made on this machine and is there, has the build's branch checked out
    and holds nothing uncommitted; its scratch folder is there; the build has work (it
    reads `building` or `merged`). The tip `T` is read then, with the merge-base of `T`
    and the target's head. Any of these that does not hold refuses the verb, having run
@@ -25,7 +28,7 @@ and to append:
    environment less every `GIT_` variable, its stdout and stderr written straight to
    `check-<n>.log` in the scratch folder (`n` one above the highest there), and its
    whole process tree ended at the time limit: `timeout_s` when given, else the check's
-   own `timeout_s`, else none.
+   or the step's own `timeout_s`, else none.
 3. Under the lock again: the tip must still be `T` and the worktree still clean, so the
    commit recorded is what ran. If either changed, nothing is recorded and the verb says
    so. Otherwise `check.ran` is appended with the stage, the step, `T`, the merge-base,
@@ -49,7 +52,7 @@ from pathlib import Path
 
 from moxi import proc
 
-from . import builds, folders, gitreads, open_builds, paths, places, write
+from . import builds, flows, folders, gitreads, open_builds, paths, places, write
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet
@@ -155,6 +158,16 @@ def passes(state: states.State, stage: str, step: str, *, tip: str,
 
 # -- what is read of a build -------------------------------------------------------------
 
+def step_entry(state: states.State, step: str) -> Mapping | None:
+    """The entry of the command step `step` of the user's own in the round's recorded
+    flow, or None when the flow has no such step."""
+    for entry in state.steps:
+        if (entry.get("step") == step and flows.is_user_step(entry)
+                and entry.get("does") == flows.COMMAND):
+            return entry
+    return None
+
+
 def commission_of(state: states.State, build: builds.Build) -> dict:
     """The `build.commissioned` event of `build`."""
     return next(event for event in state.history if event["n"] == build.n)
@@ -217,7 +230,8 @@ def seen_of(state: states.State, name: str, *, settings,
         found[build.stage] = steps.Seen(
             state=now.status.state, tip=tip, clean=clean,
             check=None if argv is None and declared(settings, build.repo) is None
-            else tuple(argv or ()))
+            else tuple(argv or ()),
+            values=None if tip is None else values(name, build, root=root, tip=tip))
     return found
 
 
@@ -260,17 +274,20 @@ class _Look:
     timeout_s: float | None = None
 
 
-def check(name: str, stage: str, *, actor: str, timeout_s: float | None = None,
-          settings=None, wait_s: float = write.WAIT_S, at: str | None = None,
-          env=None) -> Ran:
+def check(name: str, stage: str, *, actor: str, step: str | None = None,
+          timeout_s: float | None = None, settings=None, wait_s: float = write.WAIT_S,
+          at: str | None = None, env=None) -> Ran:
     """Run the repo's check for the build of `stage` in the round `name` at its tip,
-    and record the run. `timeout_s` is the run's time limit in place of the check's
-    own. `settings` is what `settings.load()` gives, read now when left out.
+    and record the run; with `step`, run that command step of the user's own instead,
+    and record the run under its name. `timeout_s` is the run's time limit in place of
+    the check's or the step's own. `settings` is what `settings.load()` gives, read now
+    when left out.
 
-    Raises `BadArgument` for no stage or a time limit that is not above 0, what
-    `folders.home` raises for a round that can't be found, and `Refused` with every
-    condition that does not hold before the run, or with what changed during it, in
-    which case nothing is recorded."""
+    Raises `BadArgument` for no stage, a time limit that is not above 0, and a `step`
+    whose name no step of the user's own can have; what `folders.home` raises for a
+    round that can't be found; and `Refused` with every condition that does not hold
+    before the run, or with what changed during it, in which case nothing is
+    recorded."""
     if not isinstance(stage, str) or not stage.strip():
         raise BadArgument("no stage is named, so no build is known to check",
                           f"moxi rounds check {name} B<n>, or run moxi rounds check in "
@@ -278,17 +295,19 @@ def check(name: str, stage: str, *, actor: str, timeout_s: float | None = None,
     if timeout_s is not None and (isinstance(timeout_s, bool) or timeout_s <= 0):
         raise BadArgument(f"{timeout_s!r} is no time limit",
                           "give --timeout-s a number of seconds above 0")
+    _step_name(name, stage, step)
     project, slug = folders.split(name)
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
     name = f"{home.project}/{slug}"
-    again = f"moxi rounds check {name} {stage}"
+    run_as = CHECK if step is None else step
+    again = f"moxi rounds check {name} {stage}" + ("" if step is None else f" --step {step}")
     looked: dict[int, _Look] = {}
 
     def look(view) -> _Look:
         if id(view) not in looked:
-            looked[id(view)] = _look(view, name=name, stage=stage, settings=settings,
-                                     again=again, timeout_s=timeout_s)
+            looked[id(view)] = _look(view, name=name, stage=stage, step=step,
+                                     settings=settings, again=again, timeout_s=timeout_s)
         return looked[id(view)]
 
     def act(view):
@@ -302,10 +321,11 @@ def check(name: str, stage: str, *, actor: str, timeout_s: float | None = None,
         except subprocess.TimeoutExpired:
             code = None
         except OSError as error:
-            raise RoundsError(f"the check {shlex.join(found.argv)} could not be started "
-                              f"in {found.worktree}: {error}",
-                              "fix the check's command in the settings, then "
-                              f"{again}") from None
+            where = ("the check's command in the settings" if step is None
+                     else f"the argv of the step {step} in the round's flow")
+            raise RoundsError(f"the command {shlex.join(found.argv)} could not be "
+                              f"started in {found.worktree}: {error}",
+                              f"fix {where}, then {again}") from None
         return code, round(time.monotonic() - started, 3), output
 
     first: list[_Look] = []
@@ -317,7 +337,7 @@ def check(name: str, stage: str, *, actor: str, timeout_s: float | None = None,
             raise Refused(moved)
         code, duration_s, output = result
         return write.Entry(RAN, {
-            "stage": stage, "step": CHECK, "commit": before.tip,
+            "stage": stage, "step": run_as, "commit": before.tip,
             "merge_base": before.merge_base, "argv": list(before.argv),
             "exit_code": code, "duration_s": duration_s, "output": str(output)})
 
@@ -332,10 +352,29 @@ def check(name: str, stage: str, *, actor: str, timeout_s: float | None = None,
         gates=[gate_and_keep],
         act=act, event=event, long_act=True, wait_s=wait_s, at=at, env=env)
     one = written.events[-1]
-    return Ran(name=name, stage=stage, step=CHECK, commit=one["commit"],
+    return Ran(name=name, stage=stage, step=run_as, commit=one["commit"],
                merge_base=one["merge_base"], argv=tuple(one["argv"]),
                exit_code=one["exit_code"], duration_s=one["duration_s"],
                output=Path(one["output"]), event=one, failed=written.failed)
+
+
+def _step_name(name: str, stage: str, step: str | None) -> None:
+    """Refuse a `step` that names no step of the user's own: a name that is not text, a
+    name with a dot, and the repo's check, which is run with no step named."""
+    plain = f"moxi rounds check {name} {stage}"
+    if step is None:
+        return
+    if not isinstance(step, str) or not step.strip():
+        raise BadArgument("--step names no step",
+                          "name a command step of the round's flow, or leave --step out")
+    if "." in step:
+        raise BadArgument(
+            f"{step} has a dot, and no step of your own has one: such a name is rounds' "
+            "own record of a run", f"name a command step of the round's flow: {plain} "
+            "--step NAME")
+    if step == CHECK:
+        raise BadArgument(f"{CHECK} is the repo's declared check, and is run with no "
+                          "--step", plain)
 
 
 def _moved(before: _Look, *, name: str, stage: str, again: str) -> list[Unmet]:
@@ -368,7 +407,30 @@ def _output_file(scratch: Path) -> Path:
     return scratch / OUTPUT.format(n=max(taken, default=0) + 1)
 
 
-def _look(view, *, name: str, stage: str, settings, again: str,
+def _command(state: states.State, build: builds.Build, step: str | None, *, name: str,
+             settings) -> tuple[list[str] | None, float | None, Unmet | None]:
+    """The words of the command a run of `step` (the repo's check when None) runs,
+    placeholders as written, and its own time limit; or why there is none."""
+    if step is None:
+        words = declared(settings, build.repo)
+        if words is None:
+            return None, None, Unmet(
+                f"{build.repo} declares no check, so a build in it has no check step",
+                f'set check = {{ command = "...", timeout_s = N }} in '
+                f"[projects.{build.repo}] of {paths.LAYOUT.config_file()}")
+        return words, own.build_setting(settings, build.repo, "check").get("timeout_s"), None
+    entry = step_entry(state, step)
+    if entry is None:
+        commands = [str(one.get("step")) for one in state.steps if flows.is_user_step(one)
+                    and one.get("does") == flows.COMMAND]
+        listed = ", ".join(commands) if commands else "none"
+        return None, None, Unmet(
+            f"the flow {state.flow} of {name} has no step {step} that runs a command (its "
+            f"command steps: {listed})", f"moxi rounds show {name}")
+    return [str(word) for word in entry["argv"]], entry.get("timeout_s"), None
+
+
+def _look(view, *, name: str, stage: str, step: str | None, settings, again: str,
           timeout_s: float | None) -> _Look:
     found = _Look(unmet=[])
     state = view.state
@@ -382,13 +444,10 @@ def _look(view, *, name: str, stage: str, settings, again: str,
                                  show))
         return found
     found.build = build
-    config = paths.LAYOUT.config_file()
-    words = declared(settings, build.repo)
-    if words is None:
-        found.unmet.append(Unmet(
-            f"{build.repo} declares no check, so a build in it has no check step",
-            f'set check = {{ command = "...", timeout_s = N }} in '
-            f"[projects.{build.repo}] of {config}"))
+    words, own_timeout_s, missing = _command(state, build, step, name=name,
+                                             settings=settings)
+    if missing is not None:
+        found.unmet.append(missing)
         return found
     commissioned = commission_of(state, build)
     worktree = Path(str(commissioned.get("worktree") or ""))
@@ -421,8 +480,7 @@ def _look(view, *, name: str, stage: str, settings, again: str,
         return found
     if found.tip is not None:
         found.argv = fill(words, values(name, build, root=root, tip=found.tip))
-    check_timeout = own.build_setting(settings, build.repo, "check").get("timeout_s")
-    found.timeout_s = timeout_s if timeout_s is not None else check_timeout
+    found.timeout_s = timeout_s if timeout_s is not None else own_timeout_s
     return found
 
 
@@ -464,5 +522,6 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build, *, na
 
 
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "fill", "declared",
-           "values", "argv_now", "runs", "newest", "why_not", "passes", "commission_of",
+           "values", "argv_now", "runs", "newest", "why_not", "passes", "step_entry",
+           "commission_of",
            "Tip", "read_tip", "seen_of", "Ran", "check"]

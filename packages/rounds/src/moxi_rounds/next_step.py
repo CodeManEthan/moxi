@@ -31,7 +31,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
 A step with no row in `steps.ROWS` is printed as not built in this version, with the
 holds on its stage. **A later step's lines** are a row of `LINES`: the step's name ->
 a function `(found, step) -> dict` that gives the group's `reads`, `write` and `then`,
-and any key of its own; the head of the group and its waits are filled in for it.
+and any key of its own; the head of the group and its waits are filled in for it. A
+command step of the user's own has its lines from `_command`.
 
 A tier's model is what the `models` setting names for the tier, as `model_of` gives
 it from `model_tiers.models_of`, the same reader that places a report's model in a
@@ -165,6 +166,14 @@ def _check(found: showing.Shown, step: steps.Step) -> dict:
                      "in the build's worktree"]}
 
 
+def _command(found: showing.Shown, step: steps.Step) -> dict:
+    """The lines of a command step of the user's own."""
+    name = step.step
+    return {"reads": _named(step),
+            "then": [f"moxi rounds check {found.name} {step.stage} --step {name}, or "
+                     f"moxi rounds check --step {name} in the build's worktree"]}
+
+
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
 #: and `then`, and any key of its own.
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
@@ -192,6 +201,9 @@ def _group(found: showing.Shown, step: steps.Step, models) -> dict:
              "tier": entry.get("model"), "model": None, "reads": [], "write": None,
              "then": [], "questions": list(step.questions), "waits": _waits(step)}
     lines = LINES.get(step.step)
+    if (lines is None and step.entry is not None and flows.is_user_step(step.entry)
+            and step.entry.get("does") == flows.COMMAND):
+        lines = _command
     if group["built"] and lines is not None:
         group.update(lines(found, step))
     group["model"] = model_of(models, group["tier"])

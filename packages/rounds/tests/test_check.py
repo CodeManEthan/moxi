@@ -465,3 +465,211 @@ def test_a_skip_of_the_check_lets_the_stage_past_it_whatever_git_reads(build):
                                      check=("placeholder",)))
 
     assert found.state == steps.SKIPPED
+
+
+# -- a command step of the user's own ----------------------------------------------------
+
+STEPPED = """
+    [flows.mine]
+    steps = [
+      {{ step = "build", by = "builder" }},
+      {{ step = "staging", does = "command", before = "finish", by = "builder", argv = {argv}{limit} }},
+      {{ step = "security-review", does = "report", before = "finish", by = "checker" }},
+      {{ step = "finish", by = "builder" }},
+    ]
+"""
+
+
+@pytest.fixture
+def stepped(repo, write_config, tmp_path, capsys):
+    """`stepped(code, *words, timeout_s=None, check=None)`: the round, in a flow whose
+    command step `staging` runs a Python script holding `code` with `words` after it,
+    with B1 on the branch `work` commissioned and one commit made on it; with `check`,
+    the repo declares that command as its check. Returns `(round log, worktree repo,
+    the commission, the script)`."""
+
+    def make(code: str, *words: str, timeout_s: int | None = None,
+             check: str | None = None):
+        script = tmp_path / "staging.py"
+        script.write_text(textwrap.dedent(code), encoding="utf-8")
+        limit = "" if timeout_s is None else f", timeout_s = {timeout_s}"
+        config = STEPPED.format(argv=json.dumps([PY, str(script), *words]), limit=limit)
+        if check is not None:
+            config += f"[projects.proj-a]\ncheck = {{ command = {json.dumps(check)} }}\n"
+        write_config(config)
+        opening.open_round(ROUND, description="a placeholder round", actor="planner",
+                           flow="mine")
+        path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
+        log.append(path, "stage.declared",
+                   {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+                   actor="planner")
+        made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+        tree = type(repo)(made.worktree)
+        tree.commit("work.txt", "the work")
+        capsys.readouterr()
+        return path, tree, made, script
+
+    return make
+
+
+def test_a_command_step_runs_its_argv_in_the_worktree_recorded_under_its_name(stepped):
+    path, tree, made, script = stepped("import os; print(os.getcwd())", "{tip}",
+                                       "{stage}")
+
+    done = checking.check(ROUND, "B1", actor="coder", step="staging")
+
+    [event] = ran(path)
+    assert (event["step"], event["commit"], event["argv"], event["exit_code"]) == (
+        "staging", tree.rev(), [PY, str(script), tree.rev(), "B1"], 0)
+    assert Path(event["output"]) == made.scratch / "check-1.log"
+    assert Path(event["output"]).read_text().strip() == str(made.worktree)
+    assert (done.step, done.passed) == ("staging", True)
+
+
+def test_a_command_step_runs_in_a_repo_that_declares_no_check(stepped):
+    path, _tree, _made, _script = stepped(PASS)
+
+    checking.check(ROUND, "B1", actor="coder", step="staging")
+
+    assert [one["step"] for one in ran(path)] == ["staging"]
+
+
+def test_a_command_step_s_own_time_limit_applies(stepped):
+    path, _tree, _made, _script = stepped("import time; time.sleep(60)", timeout_s=1)
+
+    checking.check(ROUND, "B1", actor="coder", step="staging")
+
+    assert ran(path)[0]["exit_code"] is None
+
+
+def test_the_verb_runs_a_command_step_from_the_build_s_worktree(
+        stepped, monkeypatch, capsys):
+    path, _tree, made, _script = stepped(PASS)
+    monkeypatch.chdir(made.worktree)
+
+    assert main(["check", "--step", "staging"]) == 0
+
+    assert ran(path)[0]["step"] == "staging"
+    assert f"staging {ROUND} B1 at" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["check.local", "staging.extra"])
+def test_a_step_name_with_a_dot_is_refused(stepped, name):
+    path, _tree, _made, _script = stepped(PASS)
+    before = path.read_bytes()
+
+    assert main(["check", ROUND, "B1", "--step", name]) == 2
+
+    assert path.read_bytes() == before
+
+
+def test_the_repo_s_check_named_as_a_step_is_refused(stepped):
+    path, _tree, _made, _script = stepped(PASS, check=f"{PY} -c pass")
+    before = path.read_bytes()
+
+    assert main(["check", ROUND, "B1", "--step", "check"]) == 2
+
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("name", ["deploy", "security-review", "build"])
+def test_a_step_that_is_no_command_step_of_the_flow_is_refused(stepped, name):
+    path, _tree, _made, _script = stepped(PASS)
+    before = path.read_bytes()
+
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", actor="coder", step=name)
+
+    assert (f"the flow mine of {ROUND} has no step {name} that runs a command (its "
+            "command steps: staging)") in str(caught.value)
+    assert path.read_bytes() == before
+
+
+def stepped_step(path: Path, name: str = "staging") -> steps.Step | None:
+    from moxi_rounds import settings as own
+
+    state = folded(path)
+    return steps.one(state, name, "B1", name=ROUND,
+                     seen=checking.seen_of(state, ROUND, settings=own.load()))
+
+
+def test_the_command_step_is_done_once_a_run_of_it_passed_at_the_tip(stepped):
+    path, tree, _made, _script = stepped(PASS)
+    assert stepped_step(path).state == steps.READY
+
+    checking.check(ROUND, "B1", actor="coder", step="staging")
+    assert stepped_step(path).state == steps.DONE
+
+    tree.commit("more.txt")
+    assert stepped_step(path).state == steps.READY
+
+
+def test_a_failed_run_of_the_command_step_leaves_it_ready(stepped):
+    path, _tree, _made, _script = stepped("raise SystemExit(2)")
+
+    assert main(["check", ROUND, "B1", "--step", "staging"]) == 1
+
+    assert stepped_step(path).state == steps.READY
+
+
+def test_a_run_of_one_step_is_never_read_for_another(stepped):
+    path, _tree, _made, _script = stepped(PASS, check=f"{PY} -c pass")
+
+    checking.check(ROUND, "B1", actor="coder")
+    assert (stepped_step(path).state, stepped_step(path, "check").state) == (
+        steps.READY, steps.DONE)
+
+    checking.check(ROUND, "B1", actor="coder", step="staging")
+    assert stepped_step(path).state == steps.DONE
+
+
+def test_the_command_step_waits_on_git_where_git_was_not_read(stepped):
+    path, _tree, _made, _script = stepped(PASS)
+
+    found = steps.one(folded(path), "staging", "B1", name=ROUND)
+
+    assert (found.state, found.unread) == (steps.WAITING, True)
+
+
+def test_the_command_step_is_not_due_before_the_stage_is_commissioned(
+        repo, write_config, tmp_path):
+    write_config(STEPPED.format(argv=json.dumps([PY, "-c", "pass"]), limit=""))
+    opening.open_round(ROUND, description="a placeholder round", actor="planner",
+                       flow="mine")
+    path = log.round_log(tmp_path / "notes" / "rounds" / "a-round")
+    log.append(path, "stage.declared",
+               {"id": "B1", "repo": "proj-a", "branch": "work", "after": []},
+               actor="planner")
+
+    assert steps.one(folded(path), "staging", "B1").state == steps.NOT_DUE
+
+
+def test_next_prints_the_command_step_with_the_command_that_runs_it(stepped, capsys):
+    from moxi_rounds import next_step
+
+    _path, _tree, _made, _script = stepped(PASS)
+
+    [group, *_] = next_step.read(ROUND)["groups"]
+
+    assert (group["step"], group["stage"], group["state"]) == ("staging", "B1",
+                                                               steps.READY)
+    assert group["then"] == [f"moxi rounds check {ROUND} B1 --step staging, or moxi "
+                             "rounds check --step staging in the build's worktree"]
+    checking.check(ROUND, "B1", actor="coder", step="staging")
+    assert next_step.read(ROUND)["groups"][0]["step"] == "security-review"
+
+
+def test_show_and_the_round_note_give_a_command_step_s_newest_run(stepped, tmp_path):
+    from moxi_rounds import showing
+
+    _path, tree, _made, _script = stepped(PASS)
+    checking.check(ROUND, "B1", actor="coder", step="staging")
+
+    [row] = json.loads(showing.as_json(showing.show(ROUND)))["builds"]
+    assert row["check"] is None
+    assert [(one["step"], one["commit"]) for one in row["step_runs"]] == [
+        ("staging", tree.rev())]
+    assert (f"staging passed at {tree.rev()[:7]}, output"
+            in showing.as_text(showing.show(ROUND)))
+    note = (tmp_path / "notes" / "rounds" / "a-round" / "round-note.md").read_text()
+    assert f"staging passed at {tree.rev()[:7]}" in note
