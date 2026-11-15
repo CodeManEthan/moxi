@@ -143,6 +143,16 @@ def test_the_fixture_reads_while_placed_and_never_once_removed(fixture_shell, fi
     assert kit.reads(fixture_shell) == gone
 
 
+def test_the_fixture_hides_itself_with_nothing_the_content_policy_refuses(fixture_shell, fixture_page):
+    messages: list[str] = []
+    fixture_page.on("console", lambda message: messages.append(message.text))
+    _place(fixture_page, kit.given(fixture_shell), None)
+    _reported(fixture_page, None)
+    assert fixture_page.evaluate("() => getComputedStyle(window.__facts).display") == "none"
+    fixture_page.wait_for_timeout(200)
+    assert not [text for text in messages if "Content Security Policy" in text], messages
+
+
 def test_the_fixture_keeps_the_component_contract(fixture_shell, fixture_page,
                                                    ui_component_check):
     ui_component_check(fixture_page, "fixture", "project-facts",

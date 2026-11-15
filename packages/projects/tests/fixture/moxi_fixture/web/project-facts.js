@@ -65,9 +65,13 @@ if (!customElements.get(TAG)) {
 
     connectedCallback() {
       if (this.shadowRoot === null) {
-        const style = document.createElement("style");
-        style.textContent = ":host { display: none; }";
-        this.attachShadow({ mode: "open" }).append(style);
+        // A constructed sheet, which the shell's content policy lets in where a <style>
+        // element is refused; the root holds an empty slot, since it draws nothing.
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(":host { display: none; }");
+        const root = this.attachShadow({ mode: "open" });
+        root.adoptedStyleSheets = [sheet];
+        root.append(document.createElement("slot"));
       }
       this.last = undefined;
       document.addEventListener("visibilitychange", this.shown);
