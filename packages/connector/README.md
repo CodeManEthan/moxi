@@ -56,7 +56,7 @@ sign-in again from Claude. Use a code only for a sign-in you started yourself.
 A code is minted only when an installed module can tell an agent session's processes from
 your terminal and says yes. comms provides that check: a shell or process inside a live
 comms session is refused. Without such a module, `moxi connector code` refuses and says
-so. [`docs/security.md`](https://github.com/CodeManEthan/moxi/blob/main/packages/connector/docs/security.md) says what the check stops and what it doesn't.
+so. [`docs/security.md`](https://github.com/CodeManEthan/moxi/blob/moxi-connector-v0.1.0/packages/connector/docs/security.md) says what the check stops and what it doesn't.
 
 A sign-in lasts `refresh_days` (30) after Claude last refreshed it. Claude refreshes on
 its own; when a grant expires or is revoked, Claude asks you to sign in again, with a new
@@ -125,8 +125,8 @@ The first line installs `moxi`, the core, whose README covers the `moxi` command
 repository, [CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), lists the other
 modules.
 
-Read [`docs/security.md`](https://github.com/CodeManEthan/moxi/blob/main/packages/connector/docs/security.md) before you turn it on.
+Read [`docs/security.md`](https://github.com/CodeManEthan/moxi/blob/moxi-connector-v0.1.0/packages/connector/docs/security.md) before you turn it on.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/connector/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-connector-v0.1.0/packages/connector/LICENSE).

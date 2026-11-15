@@ -606,6 +606,15 @@ def _set_up(demo, via: str, pieces_: list[str]) -> Path:
 
 
 @pytest.mark.parametrize("via", VIAS)
+def test_status_gives_the_text_git_runs_for_each_event(demo, via):
+    repo = _set_up(demo, via, ["demo/gate"])
+    info = api.status(repo)[0]["events"]["pre-commit"]
+    assert info["via"] == {"config": "config entry"}.get(via, via)
+    # Each form names the interpreter, as one sh word with forward slashes.
+    assert gitconf.interpreter().replace("\\", "/") in info["command"]
+
+
+@pytest.mark.parametrize("via", VIAS)
 @pytest.mark.parametrize("lost", ["interpreter", "runner"])
 def test_a_lost_interpreter_or_runner_gives_the_guards_one_line(demo, via, lost):
     good = str(demo.hook_env["python"])

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `Allowlist.from_text(public_text, private)`: the public allowlist from text a caller
+  read (from git's index or a commit), the private file read as `Allowlist.read` reads
+  it.
+- The private allowlist's place is checked only when the file exists, and `read` and
+  `from_text` take `git_dir`, a repo's common git dir, as a place for it whatever that
+  directory is named.
+
 ## 0.1.0 (2026-11-08)
 
 The first public release.

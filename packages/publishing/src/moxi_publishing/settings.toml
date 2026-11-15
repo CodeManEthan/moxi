@@ -1,0 +1,37 @@
+# The publishing module's config schema. The file it governs is CONFIG/publishing/config.toml;
+# `moxi config publishing` shows every key and `moxi config publishing init` writes the file.
+# Every key is read at its use. A value that can differ between repos is not here: it is a
+# piece setting in that repo's own git config, and the `defaults.*` keys only seed those
+# settings when `moxi publishing enable` first registers a piece in a repo.
+
+[provenance.rules]
+type = "list"
+items = "str"
+default = ["session-link", "session-pointer", "message-id", "quoted-ruling", "ruling-tag", "round-pointer"]
+doc = "Which provenance rules run on commit messages and files. Remove one to switch it off."
+read = "use"
+
+[push.word_pattern]
+type = "string"
+default = '^\S+$'
+doc = "The regular expression a push word (MOXI_PUBLISHING_PUSH_WORD) must match in full."
+read = "use"
+
+[defaults.drop_trailers]
+type = "list"
+items = "str"
+default = ["Claude-Session", "Commit-Check"]
+doc = "Seeds a repo's drop-trailer setting when enable first registers the message piece there: trailer keys removed at commit. A key on the repo's pass-trailer is never dropped."
+read = "use"
+
+[defaults.main]
+type = "string"
+default = "main"
+doc = "Seeds a repo's main setting when enable first registers the push piece there: the branch deletions are judged against."
+read = "use"
+
+[defaults.word_required]
+type = "bool"
+default = false
+doc = "Seeds a repo's word-required setting when enable first registers the push piece there: whether a push needs MOXI_PUBLISHING_PUSH_WORD."
+read = "use"

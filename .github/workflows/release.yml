@@ -1,0 +1,210 @@
+# The release of one package, on its release tag <distribution>-v<version>: the tag gate,
+# the public scan of the tagged tree, one build tested from a fresh install, the test
+# against the published siblings, the gate again with the build's files, the upload to
+# the package index, then the GitHub Release. Each job needs the one before, so a GitHub
+# Release exists only for a version the index has. The upload waits for a reviewer to
+# approve the pypi environment; that approval and the index's trusted publisher, which
+# hands a token only to this file's publish job in that environment, are what hold
+# against a bad commit, since this run uses the workflow file and the code of the tagged
+# commit. The publish job, the one job that can get an upload token, runs none of that
+# code: only the two pinned actions that fetch the build and upload it.
+#
+# Which re-run is for which failure:
+# - A job before publish failed for a reason outside the commit (a runner, the network):
+#   "Re-run failed jobs" on the run's page. Nothing reached the index, so the gate passes.
+# - The run never started: `gh workflow run release.yml --ref <tag>`. It builds again, so
+#   use it only while the index holds no file of the version.
+# - Publish stopped halfway, the index holding some of the files: re-run the verify job
+#   from the run's page, which runs publish and release again after it; never "Re-run all
+#   jobs", so the files stay this run's build. The verify job passes when every file the
+#   index holds is one of the build's, and the upload skips the files the index has.
+# - Publish passed and the release job failed: "Re-run failed jobs" runs the release job
+#   alone; it adds the files to a GitHub Release that exists.
+# - A failure the tagged commit carries (a test, a gate check): the version is used up,
+#   since a release tag never moves. Release the next version.
+# Written by `moxi publishing workflows write`; the doctor warns when this file differs.
+# Actions are pinned to a release commit, with its version beside it.
+
+name: release
+
+on:
+  push:
+    tags: ["*-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      # Files of the version already on the index pass here; the verify job compares
+      # them with the build's before the upload.
+      - name: the tag gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --locked moxi publishing ci gate "$TAG" --github "$GITHUB_REPOSITORY"
+
+  scan:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: the public scan of the tagged tree
+        run: uv run --locked moxi publishing scan --ci --rev "refs/tags/$TAG"
+
+  build:
+    needs: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      # The distribution is the tag up to its last -v, which the gate has matched to a
+      # workspace member.
+      - name: build the sdist and the wheel, once
+        run: uv build --package "${TAG%-v*}" --out-dir dist
+      - name: the release notes, the CHANGELOG section of the version
+        run: |
+          mkdir notes
+          uv run --locked moxi publishing ci notes "$TAG" > notes/notes.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: notes
+          path: notes
+          if-no-files-found: error
+      # A fresh venv holding the wheel, the extras whose siblings are published, the
+      # newest published siblings, and the test tools uv.lock pins. The one workspace
+      # member in it is moxi-dev, installed from this checkout without its requirements,
+      # whose pytest plugin each package's conftest loads. It first checks the package
+      # imports from site-packages.
+      - name: the whole test suite against the installed wheel
+        run: uv run --locked moxi publishing ci siblings "$TAG" --artifact dist --resolution highest
+
+  siblings:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: the suite against the newest and the lowest published siblings admitted
+        run: uv run --locked moxi publishing ci siblings "$TAG" --artifact dist
+
+  # The gate once more, now with the build: files of the version the index already holds
+  # pass only when each is one of these. No upload token here, so the repo's code runs.
+  verify:
+    needs: siblings
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: the tag gate, with the files the index may already hold judged against these
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --locked moxi publishing ci gate "$TAG" --github "$GITHUB_REPOSITORY" --artifact dist
+
+  # Holds the upload token, so it runs no code of the repo's: no checkout, no run step.
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          packages-dir: dist/
+          skip-existing: true
+          attestations: true
+
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: notes
+          path: notes
+      - name: the GitHub Release, or its files when a re-run finds it made
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" --notes-file notes/notes.md
+          fi

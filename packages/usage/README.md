@@ -614,10 +614,10 @@ object's `"unknown"` list.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/usage/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-usage-v0.2.1/packages/usage/LICENSE).
 
 The shipped model table, `data/models.json`, is derived from LiteLLM's
 `model_prices_and_context_window.json` (MIT, Copyright (c) 2023 Berri AI). LiteLLM's
 license notice ships beside it as
-[`data/LICENSE-litellm`](https://github.com/CodeManEthan/moxi/blob/main/packages/usage/src/moxi_usage/data/LICENSE-litellm),
+[`data/LICENSE-litellm`](https://github.com/CodeManEthan/moxi/blob/moxi-usage-v0.2.1/packages/usage/src/moxi_usage/data/LICENSE-litellm),
 in the wheel and the source distribution.

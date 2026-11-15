@@ -945,4 +945,4 @@ lists the other modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/rounds/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.0/packages/rounds/LICENSE).

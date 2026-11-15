@@ -86,4 +86,4 @@ core writes units for: a systemd user manager, launchd or Task Scheduler.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/cache/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-cache-v0.1.6/packages/cache/LICENSE).

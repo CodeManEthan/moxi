@@ -652,4 +652,4 @@ upgrade moxi-cache first: a restart alone doesn't help.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/launcher/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-launcher-v0.1.3/packages/launcher/LICENSE).
