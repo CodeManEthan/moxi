@@ -19,6 +19,7 @@ import sys
 import time
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 #: What projects' part may add to `sys.modules`.
 ALLOWED = frozenset({
@@ -92,4 +93,4 @@ def test_projects_part_of_the_hook_path_stays_under_its_budget(golden_copy, tmp_
     ms = read_ms - floor_ms
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else float("nan")
     print(f"\nprojects' part of the hook path: {ms:.1f} ms at load average {load:.2f}")
-    assert ms < BUDGET_MS
+    assert ms < BUDGET_MS * timed_slack()

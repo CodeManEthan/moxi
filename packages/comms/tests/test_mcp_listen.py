@@ -21,6 +21,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import timed_slack
 from conftest import write_config
 from test_mcp_endpoint import (  # noqa: F401  (fixtures)
     INITIALIZE,
@@ -624,7 +625,7 @@ def test_the_daemon_tries_the_bind_for_five_seconds_before_bind_failed(serving, 
         serving(port=held.getsockname()[1])
         took = time.monotonic() - began
         assert endpoint()["why"] == "bind-failed"
-    assert 5.0 <= took < 7.0
+    assert 5.0 <= took < 7.0 * timed_slack()
     assert [r["revoked_at"] for r in rows()] == [None]
 
 

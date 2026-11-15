@@ -16,6 +16,7 @@ import sys
 import textwrap
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi import cli, files, paths, terminal
 from moxi.terminal import _record, _walk
@@ -487,4 +488,4 @@ def test_an_unchanged_step_costs_under_two_milliseconds(fence):
         before = ms(base)
         differences.append(ms(step) - before)
     cost = statistics.quantiles(differences, n=4, method="inclusive")[0]
-    assert cost < UNCHANGED_MS, f"an unchanged step costs {cost:.2f} ms"
+    assert cost < UNCHANGED_MS * timed_slack(), f"an unchanged step costs {cost:.2f} ms"

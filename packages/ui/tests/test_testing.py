@@ -4,6 +4,7 @@ contract and width checks in a browser."""
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -356,3 +357,64 @@ def test_the_testing_extra_needs_a_platformdirs_that_reads_the_windows_overrides
 
     wanted = [line for line in requires("moxi-ui") or [] if line.startswith("platformdirs")]
     assert wanted == ["platformdirs>=4.11.3; (sys_platform == 'win32') and extra == 'testing'"]
+
+
+#: A browser's install directory, as Playwright names it: `chromium-1248`,
+#: `chromium_headless_shell-1248`, `firefox-1555`, `webkit-2370`.
+_INSTALL_DIR = re.compile(r"[a-z_]+-[0-9]+")
+
+
+def _browsers_dir(executable: str | os.PathLike) -> Path:
+    """The directory Playwright installs its browsers in, found from one browser's
+    executable: the parent of the nearest ancestor named `<name>-<digits>`. On Linux that
+    is three levels up; on macOS the executable sits deeper, inside an `.app` bundle."""
+    for parent in Path(executable).parents:
+        if _INSTALL_DIR.fullmatch(parent.name):
+            return parent.parent
+    raise AssertionError(f"no `<name>-<digits>` directory above {executable}")
+
+
+@pytest.mark.parametrize("executable", [
+    "/home/u/.cache/ms-playwright/chromium_headless_shell-1248/chrome-linux/headless_shell",
+    "/home/u/.cache/ms-playwright/firefox-1555/firefox/firefox",
+    "/Users/u/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-mac-arm64/"
+    "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    "/Users/u/Library/Caches/ms-playwright/webkit-2370/pw_run.sh",
+])
+def test_the_browsers_dir_is_found_from_a_linux_or_a_macos_executable(executable):
+    assert _browsers_dir(executable) == Path(executable.split("/ms-playwright/")[0],
+                                             "ms-playwright")
+
+
+def test_a_path_with_no_install_dir_above_it_is_refused():
+    with pytest.raises(AssertionError, match="no `<name>-<digits>` directory"):
+        _browsers_dir("/usr/bin/chromium")
+
+
+@pytest.mark.browser
+def test_a_failed_browser_test_keeps_its_trace_where_ui_traces_says(tmp_path, ui_browser):
+    # The trace directory is outside the inner run's fence, as a repository directory is
+    # in CI: the plugin makes it before any test is fenced, and the teardown that keeps
+    # the trace makes nothing.
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "conftest.py").write_text('pytest_plugins = ["moxi_dev.testing"]\n')
+    (run_dir / "test_fails.py").write_text(textwrap.dedent("""
+        from types import SimpleNamespace
+
+        def test_a_page_that_fails(ui_contexts):
+            context = ui_contexts(SimpleNamespace(url="http://127.0.0.1:9/"), sign_in=False)
+            context.new_page().set_content("<p>here</p>")
+            assert False, "fails on purpose"
+    """))
+    traces_dir = tmp_path / "traces"
+    browsers_dir = _browsers_dir(ui_browser.browser_type.executable_path)
+    done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                           "--ui-browser", ui_browser.browser_type.name,
+                           "--ui-traces", str(traces_dir), str(run_dir)],
+                          cwd=run_dir, capture_output=True, text=True, timeout=120,
+                          env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers_dir)})
+    assert done.returncode == 1, done.stdout + done.stderr
+    summary = done.stdout.strip().splitlines()[-1]
+    assert "1 failed" in summary and "error" not in summary, done.stdout
+    assert [p.suffix for p in traces_dir.iterdir()] == [".zip"]

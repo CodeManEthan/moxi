@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `MOXI_TEST_TIMED_SLACK=<factor>`, read once when pytest starts, is how much slower than
+  the machine that set the budgets this one may be; `timed_slack()` returns it (1.0 when
+  unset), inside a fenced test too. Every upper bound on a wall-clock measurement in a
+  `timed` test is multiplied by it; lower bounds, ratios and counts are not. A value that
+  is not a finite number of at least 1 stops the run.
 - The tag check reads its shapes from moxi-publishing's `ruling-tag` and `round-pointer`
   rules, adding only the D-number and finding-id shapes, so it refuses what publishing's
   scan refuses. It now refuses more: among others, `round` and any home and slug joined by

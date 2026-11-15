@@ -610,6 +610,7 @@ comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	self.held_ids = set(
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	self.held_ids: set[str] = set()	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	self.injected.append(text)	keep	injected	injected
 comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	self.injected: list = []          # every digest text injected (test visibility)	keep	injected	injected
+comms	packages/comms/src/moxi_comms/adapters/claude_shim.py	if self._client is not None and self._client.connected:	keep	_client	_client
 comms	packages/comms/src/moxi_comms/adapters/codex.py	#: The claim's root. None in a test that hands in its own `find`.	keep	find	find
 comms	packages/comms/src/moxi_comms/adapters/codex.py	CodexAdapter	name	delivered	on_delivered
 comms	packages/comms/src/moxi_comms/adapters/codex.py	CodexAdapter._fall_back	name	e	exc
@@ -1427,6 +1428,7 @@ comms	packages/comms/tests/claim_kit.py	self.closed = threading.Event()	keep	clo
 comms	packages/comms/tests/claim_kit.py	self.closed.set()	keep	set	set
 comms	packages/comms/tests/claim_kit.py	self.sessions.append(s)	keep	sessions	sessions
 comms	packages/comms/tests/claim_kit.py	self.sessions: list = []	keep	sessions	sessions
+comms	packages/comms/tests/claim_kit.py	assert self.closed.wait(LIVE_S), "the close handler never ran"	keep	closed	closed
 comms	packages/comms/tests/conftest.py	"""Every file under `folder`, with its size and modification time."""	keep	folder	folder
 comms	packages/comms/tests/conftest.py	Rig._run_cli	name	environ	env
 comms	packages/comms/tests/conftest.py	Rig.cli	name	environ	cli_env
@@ -2266,6 +2268,8 @@ comms	packages/comms/tests/test_opencode_adapter.py	high = max(int(m.id) for m i
 comms	packages/comms/tests/test_opencode_adapter.py	keys = set(keys_of(config))	keep	set	set
 comms	packages/comms/tests/test_opencode_adapter.py	rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,	keep	record	record
 comms	packages/comms/tests/test_opencode_adapter.py	send(rig, "refused")	keep	refused	refused
+comms	packages/comms/tests/test_opencode_adapter.py	assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), LIVE_S)	keep	any	any
+comms	packages/comms/tests/test_opencode_adapter.py	assert wait_until(lambda: first.closed.is_set(), LIVE_S)	keep	closed	closed
 comms	packages/comms/tests/test_opencode_home_check.py	assert any(pid == proc.pid for pid, _ in check.other_opencode())	keep	any	any
 comms	packages/comms/tests/test_opencode_home_check.py	assert set(removed) == set(remove)	keep	set	set
 comms	packages/comms/tests/test_opencode_home_check.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -2445,6 +2449,19 @@ comms	packages/comms/tests/test_queue.py	shim._client.call("max_id")	keep	_clien
 comms	packages/comms/tests/test_queue.py	shim.on_turn_boundary(idle=True)	keep	idle	idle
 comms	packages/comms/tests/test_queue.py	with rig.record._txn(write=True) as st:	keep	record	record
 comms	packages/comms/tests/test_queue.py	with rig.record._write() as conn:	keep	record	record
+comms	packages/comms/tests/test_reconnect_mail.py	"""An OpenCode adapter over a fake server, and how many of its posts carry `MARK`."""	keep	MARK	MARK
+comms	packages/comms/tests/test_reconnect_mail.py	"""A Codex adapter over a fake hosted session, and how many hand-ins carry `MARK`."""	keep	MARK	MARK
+comms	packages/comms/tests/test_reconnect_mail.py	return sum(MARK in handed.text for handed in session.delivered)	keep	delivered	delivered
+comms	packages/comms/tests/test_reconnect_mail.py	self.holding.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	code, out = rig.send(qualified, MARK, sender=dict(name="main", scope="proj-a"))	keep	fail	fail
+comms	packages/comms/tests/test_reconnect_mail.py	gate.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	hold.armed.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,	keep	record	record
+comms	packages/comms/tests/test_reconnect_mail.py	return [handed for handed in session.delivered if MARK in handed.text]	keep	delivered	delivered
+comms	packages/comms/tests/test_reconnect_mail.py	code, out = rig.send(qualified, MARK, "--interrupt",	keep	fail	fail
+comms	packages/comms/tests/test_reconnect_mail.py	hold.go.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	late.set()	keep	set	set
+comms	packages/comms/tests/test_reconnect_mail.py	decline.armed.set()	keep	set	set
 comms	packages/comms/tests/test_register_concurrency.py	calls = instrument(rig.record)	keep	record	record
 comms	packages/comms/tests/test_register_concurrency.py	entered.set()	keep	set	set
 comms	packages/comms/tests/test_register_concurrency.py	f"{[round(s, 3) for s in contended]} against a {HOLD:.2f}s round trip -- the "	keep	round	round
@@ -2608,6 +2625,17 @@ comms	packages/comms/tests/test_shim_events.py	shim = rig.shim(start=False,  nam
 comms	packages/comms/tests/test_shim_events.py	shim = rig.shim(start=False, name="reviewer", scope="proj-a",	keep	start	start
 comms	packages/comms/tests/test_shim_events.py	shim._on_close = lambda: (inner(), closed.set())	keep	set	set
 comms	packages/comms/tests/test_shim_events.py	shim._supervisor.join(timeout=5.0)	keep	timeout	timeout
+comms	packages/comms/tests/test_shim_reconnect_mail.py	return shim.on_turn_boundary(idle=True)	keep	idle	idle
+comms	packages/comms/tests/test_shim_reconnect_mail.py	armed. While held, once `MARK` is queued, it runs `flush` on another thread.	keep	MARK	MARK
+comms	packages/comms/tests/test_shim_reconnect_mail.py	lambda: any(MARK in str(p) for p in list(shim.queue)), HOLD_S)	keep	any	any
+comms	packages/comms/tests/test_shim_reconnect_mail.py	code, out = rig.send("reviewer@proj-a", MARK, *flags,	keep	fail	fail
+comms	packages/comms/tests/test_shim_reconnect_mail.py	code, out = rig.send("reviewer@proj-a", MARK, *flags,	keep	interrupt	interrupt
+comms	packages/comms/tests/test_shim_reconnect_mail.py	hold.armed.set()	keep	set	set
+comms	packages/comms/tests/test_shim_reconnect_mail.py	rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,	keep	record	record
+comms	packages/comms/tests/test_shim_reconnect_mail.py	client = shim._client	keep	_client	_client
+comms	packages/comms/tests/test_shim_reconnect_mail.py	late.set()	keep	set	set
+comms	packages/comms/tests/test_shim_reconnect_mail.py	decline.armed.set()	keep	set	set
+comms	packages/comms/tests/test_shim_reconnect_mail.py	code, out = rig.send("reviewer@proj-a", MARK, sender=dict(name="main", scope="proj-a"))	keep	fail	fail
 comms	packages/comms/tests/test_shutdown.py	assert reviewer.held_ids == set()	keep	set	set
 comms	packages/comms/tests/test_shutdown.py	out, _ = proc.communicate(timeout=20)	keep	timeout	timeout
 comms	packages/comms/tests/test_smoke_scripts.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
@@ -5354,6 +5382,10 @@ moxi	packages/moxi/src/moxi/cli.py	path.parent.mkdir(parents=True, exist_ok=True
 moxi	packages/moxi/src/moxi/cli.py	print(f"    last {_DONE.get(record.get('op'), 'changed')} by "	keep	changed	changed
 moxi	packages/moxi/src/moxi/cli.py	seen = set() if _seen is None else _seen	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	shortcut_text	name	windows	is_windows
+moxi	packages/moxi/src/moxi/cli.py	help="print one JSON object, {changed, problem, fix, units}, and "	keep	help	help
+moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	set	set
+moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	any	any
+moxi	packages/moxi/src/moxi/cli.py	print(json.dumps({"changed": changed, "problem": problem, "fix": fix, "units": units}))	keep	changed	changed
 moxi	packages/moxi/src/moxi/config.py	-	name	set	set_value
 moxi	packages/moxi/src/moxi/config.py	Key.__init__	name	type	value_type
 moxi	packages/moxi/src/moxi/config.py	_change(module, key, "set", value, by=by)	keep	set	set
@@ -5384,6 +5416,28 @@ moxi	packages/moxi/src/moxi/config.py	raise bad(f"has type {kind!r}", f"use one 
 moxi	packages/moxi/src/moxi/config.py	raise bad(f"has unknown field(s) {', '.join(unknown)}",	keep	bad	bad
 moxi	packages/moxi/src/moxi/config.py	raise bad(f"lacks {required}", f"give it a {required}")	keep	bad	bad
 moxi	packages/moxi/src/moxi/config.py	with a `type` (or a `retired`) is a key; any other table groups keys. So the schema	keep	type	type
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"is retired but has {', '.join(shown)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has {field} {text!r}, which is not one line of text",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has a {field} of {len(text)} characters, more than {most}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has unit but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has the unit {found['unit']!r}, more than two words",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has {field} {spec[field]!r}, not a bool",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has pick but is {_a(kind)}", "remove pick; only an enum has a pick list")	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has choices but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad("has choices that are not a table of words",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has choices for {value!r}, which is not one of its values",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has choices {words!r} for {value!r}, which is not one line of "	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad("has hurts that is not a table", f"give hurts as a table of "	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has unknown hurts field(s) {', '.join(unknown)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts.when {hurts.get('when')!r}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts.{field} {hurts.get(field)!r}, which is not one line of "	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts.stays {stays!r}, not a bool",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has hurts.stays but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has terminal but is {_a(kind)}",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	if not isinstance(terminal, dict) or set(terminal) != {"on", "off"}:	keep	set	set
+moxi	packages/moxi/src/moxi/config.py	raise bad("has a terminal that is not a table of on and off",	keep	bad	bad
+moxi	packages/moxi/src/moxi/config.py	raise bad(f"has terminal.{state} {terminal[state]!r}, which is not one line "	keep	bad	bad
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	can call `record`. The doctor's runner and checks live in `moxi.doctor._run`, which the	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/_run.py	"""Why `record` can't be written in place, or None: the file, when it exists, and the	keep	record	record
@@ -5853,6 +5907,7 @@ moxi	packages/moxi/tests/test_config.py	assert s["local.record"] == Path(env["HO
 moxi	packages/moxi/tests/test_config.py	assert set(s.sources.values()) == {"default"}	keep	set	set
 moxi	packages/moxi/tests/test_config.py	env = {"HOME": str(tmp_path), "MOXI_DEMO_CONFIG_HOME": str(tmp_path / "config")}	keep	HOME	HOME
 moxi	packages/moxi/tests/test_config.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_config_page.py	assert cli.main(["config", module, "show", "--json"]) == 0	keep	show	show
 moxi	packages/moxi/tests/test_config_set.py	("demo", "private_names", "set", "ui"),	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	("set", "block", (True,)),	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	("set", "block", (True,)),	use	set	set_value
@@ -5878,6 +5933,26 @@ moxi	packages/moxi/tests/test_config_set.py	run(capsys, "config", "set", "demo",
 moxi	packages/moxi/tests/test_config_set.py	run(capsys, "config", "set", "demo", "tags", "--add", "plain words")	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	run(capsys, "config", "set", "demo", "tags", "--add", '{name = "x"}')	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	s = config.load("demo", schema, path=named, env={"HOME": str(tmp_path)})	keep	HOME	HOME
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "local.retain_days", "7", "--by", "ui") == (	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	0, {"changed": True, "problem": None, "fix": None, "units": []})	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x") == (	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	0, {"changed": False, "problem": None, "fix": None, "units": []})	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is True	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is True	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is False	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	assert change_json(capsys, "set", "demo", "tags", "--add", "x")[1]["changed"] is False	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	(("set", "demo", "block", "maybe"), 2, "cannot be 'maybe', which is not a bool",	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	(("set", "demo", "local.retain_dayz", "1"), 2, "is not a setting of demo",	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert out["changed"] is False and out["fix"] == fix and out["units"] == []	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "name", "kept")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert (code, out) == (2, {"changed": False, "problem": "is a name kept back",	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "name", "boom")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "block", "true")	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert code == 75 and out["changed"] is False	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	for argv in (("set", "demo", "block", "true"), ("unset", "demo", "block")):	keep	set	set
+moxi	packages/moxi/tests/test_config_set.py	assert code == 2 and out["changed"] is False	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	"changed": False,	keep	changed	changed
+moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "local.retain_days", "seven")	keep	set	set
 moxi	packages/moxi/tests/test_doctor.py	-	name	test_the_core_s_records_are_in_the_core_s_state_directory	test_the_core_s_records_are_in_the_core_s_state_dir
 moxi	packages/moxi/tests/test_doctor.py	assert set(got) == {"commit:abc", "other"}	keep	set	set
 moxi	packages/moxi/tests/test_doctor.py	assert set(records(home)) == {"a"}	keep	set	set
@@ -6447,6 +6522,11 @@ moxi	packages/moxi/tests/test_units.py	assert set(w.plan(only=["relay"])) == {("
 moxi	packages/moxi/tests/test_units.py	textwrap.dedent(source.format(flag=False, tool=str(tool))))	keep	flag	flag
 moxi	packages/moxi/tests/test_units.py	textwrap.dedent(source.format(flag=True, tool=str(tool))))	keep	flag	flag
 moxi	packages/moxi/tests/test_units.py	w.module(units_from=source.format(flag=False, tool=str(tool)))	keep	flag	flag
+moxi	packages/moxi/tests/test_units.py	assert cli.main(["config", "set", "demo", "relay.enabled", "true", "--json"]) == 1	keep	set	set
+moxi	packages/moxi/tests/test_units.py	assert (done["changed"], done["problem"], done["fix"]) == (True, None, None)	keep	changed	changed
+moxi	packages/moxi/tests/test_units.py	assert any("Access denied." in line for line in done["units"])	keep	any	any
+moxi	packages/moxi/tests/test_units.py	assert any("retries the units" in line for line in done["units"])	keep	any	any
+moxi	packages/moxi/tests/test_units.py	assert done["changed"] is True and done["units"]	keep	changed	changed
 moxi	packages/moxi/tests/test_units_acts.py	"""`off` (here, not on this system) and `nobackend` make no read, and a failed `show`	keep	show	show
 moxi	packages/moxi/tests/test_units_acts.py	"systemctl", "--user", "show", "--property=Version"]	keep	show	show
 moxi	packages/moxi/tests/test_units_acts.py	[acted] = act("services", ["backup.timer"], foreign=True)	keep	foreign	foreign
@@ -13226,6 +13306,8 @@ turns	packages/turns/tests/test_page.py	return next((row for row in data["sessio
 turns	packages/turns/tests/test_page.py	self._gone.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	self.dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_page.py	self.held.set()	keep	set	set
+turns	packages/turns/tests/test_page.py	super().set()	keep	set	set
+turns	packages/turns/tests/test_page.py	self.dirty.set()	keep	set	set
 turns	packages/turns/tests/test_shipped_guards.py	@pytest.mark.parametrize(("cwd", "refused"), [	keep	refused	refused
 turns	packages/turns/tests/test_shipped_guards.py	None, {"HOME": rc.HOME})	keep	HOME	HOME
 turns	packages/turns/tests/test_shipped_guards.py	assert REMOVAL.calls == {"claude": ("Bash",)} and REMOVAL.who == "any"	keep	any	any
@@ -13793,6 +13875,7 @@ ui	packages/ui/src/moxi_ui/testing/__init__.py	group.addoption("--ui-traces", de
 ui	packages/ui/src/moxi_ui/testing/__init__.py	help="the browser moxi_ui.testing's browser fixtures run (default chromium)")	keep	help	help
 ui	packages/ui/src/moxi_ui/testing/__init__.py	help="where a failed browser test's Playwright trace goes (default "	keep	help	help
 ui	packages/ui/src/moxi_ui/testing/__init__.py	pending: set[Any] = set()	keep	set	set
+ui	packages/ui/src/moxi_ui/testing/__init__.py	traces_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/src/moxi_ui/testing/__init__.py	ui_browser	name	err	exc
 ui	packages/ui/src/moxi_ui/testing/browser.py	"?.shadowRoot?.querySelector('*') != null", timeout=RENDER_MS)	keep	timeout	timeout
 ui	packages/ui/src/moxi_ui/testing/browser.py	check_component	name	err	exc

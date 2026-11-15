@@ -457,7 +457,7 @@ def test_a_value_turned_on_stays_on_through_a_launch_that_fails_or_is_refused(fa
 
 
 def test_a_value_turned_on_is_let_go_of_once_its_command_is_copied(fake, ui_context):
-    ui_context.grant_permissions(["clipboard-read", "clipboard-write"])
+    kit.ready_copying(ui_context)
     page = ui_context.pages[0]
     piece = home_at(page, 1400)
     panel = open_options(piece)
@@ -476,7 +476,7 @@ def test_a_value_turned_on_is_let_go_of_once_its_command_is_copied(fake, ui_cont
     body = press(page, piece)
     assert body["values"]["permission_mode"] == "bypassPermissions" and body["off_posture"] is True, body
     expect(piece.locator('.said [data-line="copied"]')).to_be_visible()
-    assert "bypassPermissions" in page.evaluate("navigator.clipboard.readText()")
+    assert "bypassPermissions" in kit.copied(page)
     # The copied command was the launch: the value is no longer set, and nothing says it is.
     expect(changed_line(piece)).to_have_count(0)
     expect(piece.locator(".opt")).to_have_text("Options")
@@ -489,7 +489,7 @@ def test_a_value_turned_on_is_let_go_of_once_its_command_is_copied(fake, ui_cont
     body = press(page, piece)
     assert body["values"]["permission_mode"] == "default" and "off_posture" not in body, body
     expect(piece.locator('.said [data-line="copied"]')).to_be_visible()
-    assert "bypassPermissions" not in page.evaluate("navigator.clipboard.readText()")
+    assert "bypassPermissions" not in kit.copied(page)
     expect(asked.get_by_role("button", name="Turn on")).to_be_visible()
     expect(changed_line(piece)).to_have_count(0)
 

@@ -101,8 +101,8 @@ import {
 import type { ListLine, SessionLists } from "./sessions-model.ts";
 import { openedLimit, openedRow, readingKey, windowPath } from "./window-model.ts";
 import {
-  COPY_ID, newestModel, OPEN_IN_SESSIONS, openedKeys, openedPaths, openedSession, placedRow, restartPath, SESSION_CHART,
-  sessionChart,
+  BARS_NAME, COPY_ID, newestModel, OPEN_IN_SESSIONS, openedKeys, openedPaths, openedSession, placedRow, restartPath,
+  SESSION_CHART, sessionChart, WINDOW_NAME,
 } from "./opened-session.ts";
 import type { Item, OpenedSession, Part, SessionChart } from "./opened-session.ts";
 import {
@@ -414,6 +414,8 @@ export class UsagePage extends LitElement {
   #openedReads: { requests: Feed<Report<RequestRow, RequestsTotal>>; terms: Feed<Report<TermsRow, TermsTotal>>;
              session: Feed<Report<AgentRow>>; restart: Feed<RestartPoint> | null; model: string | null } | null = null;
   #openedKey: string | null = null;
+  /** The canvas the chart's words are measured on; null where the page has none. */
+  #measuring: CanvasRenderingContext2D | null | undefined = undefined;
   /** The opened subagent's requests, read with the session's query. */
   #agentRead: Feed<Report<RequestRow, RequestsTotal>> | null = null;
   #agentPath: string | null = null;
@@ -1360,7 +1362,7 @@ export class UsagePage extends LitElement {
                                                  session: opened.session, restart: opened.restart, today });
     const requests = opened.requests.value;
     const width = this.#detWidth();
-    const chart = requests === null ? null : sessionChart(requests, heldState().measure, width, today);
+    const chart = requests === null ? null : sessionChart(requests, heldState().measure, width, this.#textWidth, today);
     const part = this.sessionPart;
     const agents = opened.session.value;
     const lines = agents === null ? [] : subagentLines(agents, today);
@@ -1483,7 +1485,8 @@ export class UsagePage extends LitElement {
     const today = this.#today();
     const model = openedAgent(read, today);
     const requests = read.value;
-    const chart = requests === null ? null : sessionChart(requests, heldState().measure, this.#detWidth(true), today);
+    const chart = requests === null ? null
+      : sessionChart(requests, heldState().measure, this.#detWidth(true), this.#textWidth, today);
     const table = this.agentPart === "table";
     return html`<div class="det" data-part="agent">
       ${model.items.map((item) => this.#detItem(item,
@@ -1495,10 +1498,21 @@ export class UsagePage extends LitElement {
     </div>`;
   }
 
+  /** The width of one of the chart's words: measured on a canvas in the chart text's size,
+   * 11px, and the face the page's font stack resolves to here. Where the page can't draw
+   * on a canvas, a width that is wider than most faces': 0.7 of the size per character. */
+  #textWidth = (text: string): number => {
+    if (this.#measuring === undefined) this.#measuring = document.createElement("canvas").getContext("2d");
+    const pen = this.#measuring;
+    if (pen === null) return text.length * 11 * 0.7;
+    pen.font = `11px ${getComputedStyle(this).fontFamily}`;
+    return pen.measureText(text).width;
+  };
+
   /** The opened session's chart: a bar per request above, the context it sent below. */
   #sessionChart(chart: SessionChart) {
     const S = SESSION_CHART;
-    const after = chart.end + 6;
+    const after = chart.end + S.gap;
     return html`<svg class="ch ses-ch" data-part="session-chart" role="img" aria-label=${chart.aria} width=${chart.width}
       height=${S.height} viewBox="0 0 ${chart.width} ${S.height}">${svg`
       <text x="0" y=${S.barTop + 5} data-part="top">${chart.top}</text>
@@ -1507,9 +1521,9 @@ export class UsagePage extends LitElement {
       ${chart.bars.map((bar) => svg`<rect class=${bar.dearest ? "bar now" : "bar"} data-n=${bar.n} x=${bar.x} y=${bar.y}
         width=${bar.width} height=${bar.height}></rect>`)}
       <line class="ax" x1=${S.left} x2=${chart.end} y1=${S.barBase + 0.5} y2=${S.barBase + 0.5}></line>
-      <text x=${after} y=${S.barBase}>a request</text>
+      <text x=${after} y=${S.barBase}>${BARS_NAME}</text>
       ${chart.window === null ? nothing : svg`<path class="dash" data-part="window" d=${chart.window.d}></path>
-        <text x="0" y=${chart.window.y + 3.5}>${chart.window.words}</text><text x=${after} y=${chart.window.y + 3.5}>window</text>`}
+        <text x="0" y=${chart.window.y + 3.5}>${chart.window.words}</text><text x=${after} y=${chart.window.y + 3.5}>${WINDOW_NAME}</text>`}
       <path class="ln" data-part="context" d=${chart.line}></path>
       ${chart.dot === null ? nothing : svg`<circle class="dot" cx=${chart.dot.x} cy=${chart.dot.y} r="3.5"></circle>
         <text class="v" data-part="last-context" x=${after} y=${chart.dot.y + 4}>${chart.dot.words}</text>`}
