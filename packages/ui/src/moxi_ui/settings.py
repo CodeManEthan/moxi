@@ -4,6 +4,7 @@ only through `moxi config` in a fresh process.
     GET  /m/ui/api/settings[?module=m]   the sections, one per module with settings
     POST /m/ui/api/settings/set          `moxi config set <module> <key> ...`
     POST /m/ui/api/settings/unset        `moxi config unset <module> <key>`
+    POST /m/ui/api/settings/save         one module's changes, each its own command
 
 The shell imports no module's code, so it never reads a schema itself. A section is what
 `moxi config <module> show --json` printed, run as `[python(), "-P", "-m", "moxi", ...]`
@@ -28,10 +29,29 @@ absent, one edited on another page (`elsewhere`), and ui's `gateway.*` keys, whi
 page counts itself while it shows the phone's group. A `module` the listing doesn't hold
 is answered with no section, and no command runs for it.
 
-A write that `moxi config` refuses (exit 2 or 3) is a 422 with the command's text and fix;
-a settings file that stays locked (exit 75) is a 409. Exit 1 means the value was written
-and applying the module's units failed: the answer carries the command's lines as a
-warning and the fix `moxi install <module>`.
+Every write first reads the module's schema with its own `moxi config <module> show
+--json`, and takes from that read alone, never from the request, whether the key is a
+setting of the module, its type, its value now, and whether it is changed at the terminal
+(its `terminal` page field): such a key is refused before any command, so no page turns it
+on or off.
+
+A save sends the module and four lists of equal length: `keys`, `values` (each new value
+as JSON text), `resets` (true to unset the key) and `was` (the value the page read, as
+JSON text). One schema read covers the save. The changes run in the order sent, each as
+one `moxi config set --json` or `unset --json`, and nothing is rolled back. A change whose
+`was` is not the value the read holds is `moved` and not written, with `problem` the value
+now read, as JSON text. Each answers one result: `saved`, `unchanged`, `refused` (with the
+command's `problem` and `fix`), `moved`, `busy` (the file's lock was held) or `failed`. A
+`failed` result with a `warning` was written and applying the module's units failed
+(`lines` are theirs, `fix` is `moxi install <module>`); with no `problem` and no
+`warning`, the command did not finish and may or may not have written; else `problem`
+says why nothing was written. When the schema read fails, every change is `failed` with
+its error and nothing runs.
+
+On `set` and `unset`, a write that `moxi config` refuses (exit 2 or 3) is a 422 with the
+command's text and fix; a settings file that stays locked (exit 75) is a 409. Exit 1 means
+the value was written and applying the module's units failed: the answer carries the
+command's lines as a warning and the fix `moxi install <module>`.
 
 Whoever starts the shell can name settings its pages may not change for that run, in
 `MOXI_UI_LOCKED_SETTINGS`: full keys, `<module>.<key>`, separated by commas or spaces. An
@@ -51,13 +71,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 from moxi import proc
 from moxi.names import HARNESS, is_module_name
 from moxi.paths import Layout, core, home, python
-from moxi_ui.loopback.api import Conflict, Field, Out, Refused, Route
+from moxi_ui.loopback.api import BadRequest, Conflict, Field, Out, Refused, Route
 
 __all__ = [
     "CHANGE_SHAPE",
@@ -67,25 +88,34 @@ __all__ = [
     "MARK_NOW",
     "MARK_SWITCH",
     "ROUTES",
+    "SAVE_SHAPE",
     "SETTINGS_SHAPE",
+    "SchemaRead",
+    "WRITE_TIMEOUT",
     "change",
     "change_argv",
     "descriptor",
     "file_of",
+    "find_key",
     "is_changed",
     "is_drawn",
     "is_locked",
     "locked_entries",
     "logins_of",
+    "read_schema",
     "read_section",
+    "save_one",
     "section_modules",
     "show_argv",
     "spell",
     "switches_of",
 ]
 
-#: Seconds one `moxi config` run may take.
+#: Seconds one `moxi config` read may take.
 CONFIG_TIMEOUT = 10.0
+#: Seconds one `moxi config set` or `unset` may take: past the 10 s the command waits for
+#: the file's lock, so a run waiting on it says busy before it is stopped.
+WRITE_TIMEOUT = 20.0
 #: How many `show` runs one read of the view runs at once.
 READS_AT_ONCE = 2
 BY = "ui"
@@ -156,9 +186,21 @@ SETTINGS_SHAPE = {"sections": Out("list", items=SECTION_SHAPE), "listed": _STRIN
 
 CHANGE_SHAPE = {"ok": Out("bool"), "lines": _STRINGS, "warning": _STRING, "fix": _STRING}
 
+#: One change's result in a save: `outcome` is `saved`, `unchanged`, `refused`, `moved`,
+#: `busy` or `failed`; `mark` the key's mark, when the module's schema names it.
+RESULT_SHAPE = Out("table", items={
+    "key": Out("string"), "outcome": Out("string"), "problem": _STRING, "fix": _STRING,
+    "mark": _STRING, "warning": _STRING, "lines": _STRINGS,
+})
+
+SAVE_SHAPE = {"saved_at": Out("float"), "results": Out("list", items=RESULT_SHAPE)}
+
 _MODULE_FIELD = Field("string", max=64)
 _KEY_FIELD = Field("string", max=200)
 _VALUE_FIELD = Field("string", required=False, max=65536)
+#: The most changes one save carries.
+SAVE_MAX = 64
+_JSON_FIELD = Field("list", max=SAVE_MAX, items=Field("string", max=65536))
 
 
 # --- locked keys ------------------------------------------------------------------------
@@ -448,21 +490,23 @@ def show_argv(module: str) -> list[str]:
 
 
 def change_argv(module: str, key: str, *, value: str | None = None, add: str | None = None,
-                remove: str | None = None, unset: bool = False) -> list[str]:
-    """`moxi config set` or `unset` of one key, by `ui`, in the spawn rule's form. The
-    value follows `--` and an item rides on its flag, so one starting with `-` is never
-    read as an option."""
+                remove: str | None = None, unset: bool = False,
+                as_json: bool = False) -> list[str]:
+    """`moxi config set` or `unset` of one key, by `ui`, in the spawn rule's form, with
+    `--json` when `as_json`. The value follows `--` and an item rides on its flag, so one
+    starting with `-` is never read as an option."""
     head = [str(python()), "-P", "-m", "moxi", "config"]
+    by = ["--by", BY, *(["--json"] if as_json else [])]
     if unset:
-        return [*head, "unset", "--by", BY, "--", module, key]
+        return [*head, "unset", *by, "--", module, key]
     given = [v is not None for v in (value, add, remove)]
     if sum(given) != 1:
         raise ValueError("give exactly one of value, add or remove")
     if add is not None:
-        return [*head, "set", "--by", BY, f"--add={add}", "--", module, key]
+        return [*head, "set", *by, f"--add={add}", "--", module, key]
     if remove is not None:
-        return [*head, "set", "--by", BY, f"--remove={remove}", "--", module, key]
-    return [*head, "set", "--by", BY, "--", module, key, value]
+        return [*head, "set", *by, f"--remove={remove}", "--", module, key]
+    return [*head, "set", *by, "--", module, key, value]
 
 
 def _decode(data: bytes | str | None) -> str:
@@ -505,6 +549,44 @@ def _valid_module(module: str) -> bool:
     return module == HARNESS or is_module_name(module)
 
 
+class SchemaRead(NamedTuple):
+    """One read of `moxi config <module> show --json`: its keys in order, or why it gave
+    none. `ended` is false when the command did not run to its end."""
+
+    keys: list[dict[str, Any]] | None
+    error: str | None = None
+    fix: str | None = None
+    ended: bool = True
+
+
+def read_schema(module: str, *, cwd: str, env: Mapping[str, str] | None,
+                run: Callable[..., subprocess.CompletedProcess] = proc.run) -> SchemaRead:
+    """`module`'s keys as `moxi config <module> show --json` prints them, run in a fresh
+    process. Blocking; never raises."""
+    if not _valid_module(module):
+        return SchemaRead(None, f"{module!r} is not a module name")
+    try:
+        done = run(show_argv(module), timeout_s=CONFIG_TIMEOUT, cwd=cwd, env=env)
+    except subprocess.TimeoutExpired:
+        return SchemaRead(None, f"moxi config {module} show ran past {CONFIG_TIMEOUT:g} s",
+                      ended=False)
+    except OSError as exc:
+        return SchemaRead(None, f"moxi config could not run: {exc}", ended=False)
+    try:
+        data = json.loads(done.stdout)
+    except (ValueError, TypeError):
+        data = None
+    if isinstance(data, Mapping) and isinstance(data.get("error"), str):
+        # The file won't parse.
+        return SchemaRead(None, data["error"], _text(data.get("fix")))
+    if not isinstance(data, list):
+        text = _stderr_text(done.stderr) or f"moxi config {module} show exited " \
+                                             f"{done.returncode} with no answer"
+        return SchemaRead(None, text)
+    return SchemaRead([item for item in data
+                   if isinstance(item, Mapping) and isinstance(item.get("name"), str)])
+
+
 def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
                  listing: Mapping[str, Mapping[str, Any]] | None = None,
                  platform: str | None = None, locked: Iterable[str] = (),
@@ -513,34 +595,65 @@ def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
     fresh process. `listing` is `moxi modules --json`'s entries by name, for the
     daemons' switches and which modules are present; `locked` the entries whose keys
     are marked locked. Blocking; never raises."""
-    if not _valid_module(module):
-        return _section(module, error=f"{module!r} is not a module name")
-    try:
-        done = run(show_argv(module), timeout_s=CONFIG_TIMEOUT, cwd=cwd, env=env)
-    except subprocess.TimeoutExpired:
-        return _section(module, env=env, error=f"moxi config {module} show ran past "
-                                               f"{CONFIG_TIMEOUT:g} s")
-    except OSError as exc:
-        return _section(module, env=env, error=f"moxi config could not run: {exc}")
-    try:
-        data = json.loads(done.stdout)
-    except (ValueError, TypeError):
-        data = None
-    if isinstance(data, Mapping) and isinstance(data.get("error"), str):
-        # The file won't parse: the section is read-only and says why.
-        return _section(module, env=env, error=data["error"], fix=_text(data.get("fix")))
-    if not isinstance(data, list):
-        text = _stderr_text(done.stderr) or f"moxi config {module} show exited " \
-                                             f"{done.returncode} with no answer"
-        return _section(module, env=env, error=text)
+    schema = read_schema(module, cwd=cwd, env=env, run=run)
+    if schema.keys is None:
+        # A file that won't parse makes the section read-only, saying why.
+        return _section(module, env=env, error=schema.error, fix=schema.fix)
     listing = listing or {}
     own = listing.get(module) or {}
     present = ([name for name, entry in listing.items() if entry.get("state") == "present"]
                if listing else None)
     keys = [descriptor(module, item, switches=switches_of(own), present=present,
                        platform=platform, logins=logins_of(own), locked=locked, env=env)
-            for item in data if isinstance(item, Mapping) and isinstance(item.get("name"), str)]
+            for item in schema.keys]
     return _section(module, keys=keys, env=env)
+
+
+def find_key(keys: Iterable[Mapping[str, Any]], key: str) -> Mapping[str, Any] | None:
+    """Key `key` in a schema read's keys, or None when the read doesn't list it. An entry
+    of a switch table, `<table>.<entry>`, is found as a bool key of its own whose value is
+    the entry's (off when the file doesn't hold it)."""
+    keys = list(keys)
+    for item in keys:
+        if item.get("name") == key:
+            return item
+    table, dot, entry = key.rpartition(".")
+    if not dot:
+        return None
+    for item in keys:
+        if item.get("name") == table and item.get("switch_table") is True:
+            found = [e for e in item.get("entries") or () if isinstance(e, Mapping)
+                     and e.get("name") == entry]
+            named_by = found[0].get("named_by") or () if found else ()
+            return {"name": key, "type": "bool", "default": False, "read": "use",
+                    "value": found[0].get("value") is True if found else False,
+                    "terminal": None, "entry": True,
+                    "daemon": any(isinstance(by, str) and by.startswith("daemon:")
+                                  for by in named_by)}
+    return None
+
+
+def _terminal_problem(terminal: Mapping[str, Any], wanted: Any) -> str:
+    """`is changed at the terminal: <command>`, the command for the value `wanted` (true,
+    false, or, unknown, either)."""
+    if wanted is True or wanted is False:
+        return f"is changed at the terminal: {terminal['on' if wanted else 'off']}"
+    return f"is changed at the terminal: {terminal['on']} or {terminal['off']}"
+
+
+def _terminal(item: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    terminal = item.get("terminal")
+    if isinstance(terminal, Mapping) and isinstance(terminal.get("on"), str) \
+            and isinstance(terminal.get("off"), str):
+        return terminal
+    return None
+
+
+def _schema_refusal(module: str, schema: SchemaRead) -> Exception:
+    text = schema.error or f"moxi config {module} show gave no answer"
+    if schema.fix:
+        text = f"{text}; fix: {schema.fix}"
+    return Refused(text) if schema.ended else Conflict(text)
 
 
 def change(module: str, key: str, *, value: str | None = None, add: str | None = None,
@@ -550,8 +663,9 @@ def change(module: str, key: str, *, value: str | None = None, add: str | None =
     """One `moxi config set` or `unset` run in a fresh process: the change answer, or
     `Refused` (422: the command's text and fix) or `Conflict` (409: the file is busy, or
     the run did not end). A key that `locked` holds, or that holds a locked key, is refused
-    before a command is built.
-    Every route that writes a setting calls this. Blocking."""
+    before a command is built. Then the module's schema is read in its own run: a key it
+    doesn't list, and a key changed at the terminal, are refused before the write.
+    The set and unset routes call this. Blocking."""
     if not _valid_module(module):
         raise Refused(f"{module!r} is not a module name")
     if not key:
@@ -563,10 +677,20 @@ def change(module: str, key: str, *, value: str | None = None, add: str | None =
         argv = change_argv(module, key, value=value, add=add, remove=remove, unset=unset)
     except ValueError as exc:
         raise Refused(str(exc)) from None
+    schema = read_schema(module, cwd=cwd, env=env, run=run)
+    if schema.keys is None:
+        raise _schema_refusal(module, schema)
+    item = find_key(schema.keys, key)
+    if item is None:
+        raise Refused(f"{key} is not a setting of {module}")
+    if (terminal := _terminal(item)) is not None:
+        wanted = item.get("default") if unset else {"true": True, "false": False}.get(
+            (value or "").strip().lower())
+        raise Refused(f"{module} {key} {_terminal_problem(terminal, wanted)}")
     try:
-        done = run(argv, timeout_s=CONFIG_TIMEOUT, cwd=cwd, env=env)
+        done = run(argv, timeout_s=WRITE_TIMEOUT, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
-        raise Conflict(f"moxi config ran past {CONFIG_TIMEOUT:g} s; the change may not "
+        raise Conflict(f"moxi config ran past {WRITE_TIMEOUT:g} s; the change may not "
                        "be written") from None
     except OSError as exc:
         raise Conflict(f"moxi config could not run: {exc}") from None
@@ -594,6 +718,111 @@ def section_modules(listing: Iterable[Mapping[str, Any]]) -> list[str]:
                    if entry.get("state") == "present" and entry.get("settings")
                    and isinstance(entry.get("name"), str))
     return [HARNESS, *names]
+
+
+def _result(key: str, outcome: str, *, problem: str | None = None, fix: str | None = None,
+            mark: str | None = None, warning: str | None = None,
+            lines: Sequence[str] = ()) -> dict[str, Any]:
+    return {"key": key, "outcome": outcome, "problem": problem, "fix": fix, "mark": mark,
+            "warning": warning, "lines": list(lines)}
+
+
+def _parsed(text: str) -> tuple[bool, Any]:
+    try:
+        return True, json.loads(text)
+    except ValueError:
+        return False, None
+
+
+def _same(a: Any, b: Any) -> bool:
+    """Whether two parsed JSON values are the same value: `true` is never `1`."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    return a == b
+
+
+def _key_mark(module: str, item: Mapping[str, Any], own: Mapping[str, Any],
+              platform: str | None) -> str:
+    if item.get("entry"):
+        return MARK_SWITCH if item.get("daemon") else MARK_NOW
+    return _mark(module, str(item.get("name")), item.get("read"), switches_of(own),
+                 platform or sys.platform, logins_of(own))
+
+
+def save_one(module: str, key: str, *, value: str, reset: bool, was: str,
+             keys: Sequence[Mapping[str, Any]], cwd: str, env: Mapping[str, str] | None,
+             locked: Iterable[str] = (), own: Mapping[str, Any] | None = None,
+             platform: str | None = None,
+             run: Callable[..., subprocess.CompletedProcess] = proc.run) -> dict[str, Any]:
+    """One change of a save: its result, after at most one `moxi config set --json` or
+    `unset --json`. `keys` is the save's one schema read, which alone decides whether
+    `key` is a setting, its type, its value now and whether it is changed at the terminal;
+    `own` is the module's entry of `moxi modules --json`, for the mark. Blocking; never
+    raises."""
+    item = find_key(keys, key)
+    if item is None:
+        return _result(key, "refused", problem=f"is not a setting of {module}")
+    mark = _key_mark(module, item, own or {}, platform)
+    if is_locked(module, key, locked):
+        return _result(key, "refused", mark=mark,
+                       problem="is locked for this run of the shell, so it can't be "
+                               "changed from a page")
+    ok, wanted = (True, item.get("default")) if reset else _parsed(value)
+    if not ok:
+        return _result(key, "refused", mark=mark, problem="the value sent is not JSON text")
+    if (terminal := _terminal(item)) is not None:
+        return _result(key, "refused", mark=mark, problem=_terminal_problem(terminal, wanted))
+    ok, read_as = _parsed(was)
+    if not ok:
+        return _result(key, "refused", mark=mark, problem="was is not JSON text")
+    now = item.get("value")
+    if not _same(now, read_as):
+        return _result(key, "moved", mark=mark, problem=_json_text(now))
+    type_ = str(item.get("type"))
+    if reset:
+        argv = change_argv(module, key, unset=True, as_json=True)
+    else:
+        if type_ == "path" and wanted is None:
+            wanted = ""
+        try:
+            spelled = spell(wanted, type_)
+        except TypeError:
+            spelled = None
+        if spelled is None:
+            return _result(key, "refused", mark=mark,
+                           problem=f"the value sent can't be a {type_}")
+        argv = change_argv(module, key, value=spelled, as_json=True)
+    try:
+        done = run(argv, timeout_s=WRITE_TIMEOUT, cwd=cwd, env=env)
+    except subprocess.TimeoutExpired:
+        # It may or may not have written: no problem and no warning say so.
+        return _result(key, "failed", mark=mark)
+    except OSError as exc:
+        return _result(key, "failed", mark=mark, problem=f"moxi config could not run: {exc}")
+    ok, answer = _parsed(_decode(done.stdout).strip())
+    if not ok or not isinstance(answer, Mapping):
+        lines = [line for line in _stderr_text(done.stderr).splitlines() if line.strip()]
+        return _result(key, "failed", mark=mark, problem=lines[-1] if lines else
+                       f"moxi config exited {done.returncode} with no answer")
+    problem, fix = _text(answer.get("problem")), _text(answer.get("fix"))
+    units = [line for line in answer.get("units") or () if isinstance(line, str)]
+    code = done.returncode
+    if code == 0:
+        return _result(key, "saved" if answer.get("changed") is not False else "unchanged",
+                       mark=mark, lines=units)
+    if code in (2, 3):
+        return _result(key, "refused", problem=problem, fix=fix, mark=mark)
+    if code == 75:
+        return _result(key, "busy", problem=problem, mark=mark)
+    if code == 1:
+        return _result(key, "failed", mark=mark, lines=units, fix=f"moxi install {module}",
+                       warning="the value is written, and applying the module's units failed")
+    return _result(key, "failed", problem=problem or f"moxi config exited {code}", fix=fix,
+                   mark=mark)
 
 
 # --- the handlers -----------------------------------------------------------------------
@@ -647,6 +876,41 @@ def _change(call: Any, *, unset: bool) -> dict[str, Any]:
                   cwd=str(shell.layout.runtime_dir()), env=shell.starters.child_env())
 
 
+async def save(call: Any) -> dict[str, Any]:
+    """`POST /api/settings/save`: one module's changes, each its own command, in the order
+    sent, after one read of the module's schema. A module the listing doesn't hold runs
+    nothing: each change is refused."""
+    from moxi import aio
+
+    from .page import current
+
+    shell = current()
+    body = call.body
+    module, keys, values = body["module"], body["keys"], body["values"]
+    resets, was = body["resets"], body["was"]
+    if not len(keys) == len(values) == len(resets) == len(was):
+        raise BadRequest("keys", "keys, values, resets and was differ in length")
+    listing, _ = await _listing(shell)
+    if module not in section_modules(listing):
+        results = [_result(key, "refused", problem=f"is not a setting of {module}")
+                   for key in keys]
+        return {"saved_at": time.time(), "results": results}
+    own = next((entry for entry in listing if entry.get("name") == module), {})
+    cwd, env = str(shell.layout.runtime_dir()), shell.starters.child_env()
+    locked = _locked_now()
+    schema = await aio.offload(lambda: read_schema(module, cwd=cwd, env=env))
+    results = []
+    for key, value, reset, before in zip(keys, values, resets, was, strict=True):
+        if schema.keys is None:
+            results.append(_result(key, "failed", problem=schema.error, fix=schema.fix))
+            continue
+        results.append(await aio.offload(lambda key=key, value=value, reset=reset,
+                                         before=before: save_one(
+            module, key, value=value, reset=reset, was=before, keys=schema.keys, cwd=cwd,
+            env=env, locked=locked, own=own)))
+    return {"saved_at": time.time(), "results": results}
+
+
 def set_key(call: Any) -> dict[str, Any]:
     """`POST /api/settings/set`: `moxi config set`, with one of `value`, `add` or
     `remove`. Blocking: the base runs it on a worker thread."""
@@ -670,4 +934,11 @@ ROUTES = (
           returns=CHANGE_SHAPE, body_cap=256 * 1024),
     Route("/api/settings/unset", "act", f"{_HERE}:unset_key",
           body={"module": _MODULE_FIELD, "key": _KEY_FIELD}, returns=CHANGE_SHAPE),
+    Route("/api/settings/save", "act", f"{_HERE}:save",
+          body={"module": _MODULE_FIELD,
+                "keys": Field("list", max=SAVE_MAX, items=_KEY_FIELD),
+                "values": _JSON_FIELD, "resets": Field("list", max=SAVE_MAX,
+                                                       items=Field("bool")),
+                "was": _JSON_FIELD},
+          returns=SAVE_SHAPE, body_cap=256 * 1024),
 )

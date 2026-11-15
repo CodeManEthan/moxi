@@ -182,7 +182,7 @@ def test_a_sections_count_leaves_out_what_the_page_does_not_draw_among_its_rows(
              _key("gateway.port", "int", 1, 1), _key("gateway.enabled", "bool", value=False,
                                                        default=False)]
     listing = {"demo": {"state": "present"}, "ui": {"state": "present"}}
-    run = Run(stdout=json.dumps(items).encode())
+    run = Run(stdout=json.dumps(items).encode(), schema=None)
     demo = settings.read_section("demo", cwd="/rt", env=None, listing=listing, run=run)
     # Another module's gateway keys are its own rows.
     assert demo["count"] == 4 and len(demo["keys"]) == 6
@@ -206,7 +206,7 @@ def test_a_sections_file_writes_the_home_as_a_tilde(tmp_path):
     near = {"HOME": str(tmp_path / "c"), "XDG_CONFIG_HOME": str(tmp_path / "conf")}
     assert not settings.file_of("demo", near).startswith("~")
     assert settings.file_of("Not A Module", env) is None
-    run = Run(stdout=b"[]")
+    run = Run(stdout=b"[]", schema=None)
     assert settings.read_section("demo", cwd="/rt", env=env, run=run)["file"] == \
         "~/.config/moxi/demo/config.toml"
 
@@ -214,20 +214,42 @@ def test_a_sections_file_writes_the_home_as_a_tilde(tmp_path):
 # --- the commands, recorded --------------------------------------------------------------
 
 
+#: The schema read a recorded write is checked against: every key the recorded writes
+#: name, and two switch tables.
+SCHEMA = [*EIGHT, *(_key(name, "int", 1, 1) for name in (
+    "idle_s", "port", "gateway.port", "adopt", "adopted_too", "gateway")),
+    _key("gateway.enabled", "bool", value=False, default=False,
+         terminal={"on": "moxi ui gateway enable", "off": "moxi ui gateway disable"}),
+    _key("jobs", "table", {}, {}, items="bool", switch_table=True, entries=[
+        {"name": "c", "value": False, "source": "default", "named_by": ["daemon:watch"]}]),
+    _key("adopted", "table", {}, {}, items="bool", switch_table=True, entries=[])]
+
+
 class Run:
-    def __init__(self, code=0, stdout=b"", stderr=b"", raises=None):
+    """A recorded `moxi config`: a `show` answers `schema` (when it is not None), and
+    every other run answers `code`, `stdout` and `stderr`, or raises `raises`."""
+
+    def __init__(self, code=0, stdout=b"", stderr=b"", raises=None, schema=SCHEMA):
         self.code, self.stdout, self.stderr, self.raises = code, stdout, stderr, raises
+        self.schema = schema
         self.calls = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append((argv, kwargs))
+        if self.schema is not None and "show" in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.schema).encode(), b"")
         if self.raises is not None:
             raise self.raises
         return subprocess.CompletedProcess(argv, self.code, self.stdout, self.stderr)
 
+    @property
+    def writes(self):
+        """The runs that were not a schema read."""
+        return [(argv, kwargs) for argv, kwargs in self.calls if "show" not in argv]
+
 
 def test_every_command_is_python_dash_p_dash_m_moxi_from_the_runtime_dir():
-    run = Run(stdout=json.dumps(EIGHT).encode())
+    run = Run(stdout=json.dumps(EIGHT).encode(), schema=None)
     section = settings.read_section("demo", cwd="/rt", env={"A": "1"}, run=run)
     assert section["error"] is None and len(section["keys"]) == 8
     argv, kwargs = run.calls[0]
@@ -242,16 +264,17 @@ def test_every_command_is_python_dash_p_dash_m_moxi_from_the_runtime_dir():
 
 
 def test_a_file_that_wont_parse_makes_the_section_read_only_with_its_text():
-    run = Run(code=1, stdout=json.dumps({"error": "bad TOML at line 2", "fix": "fix it"}).encode())
+    run = Run(code=1, stdout=json.dumps({"error": "bad TOML at line 2", "fix": "fix it"}).encode(),
+              schema=None)
     section = settings.read_section("demo", cwd="/rt", env=None, run=run)
     assert section == {"module": "demo", "keys": [], "error": "bad TOML at line 2",
                        "fix": "fix it", "readonly": True,
                        "file": settings.file_of("demo"), "count": 0}
-    gone = settings.read_section("demo", cwd="/rt", env=None,
-                                 run=Run(code=2, stderr=b"moxi: demo is not installed\n"))
+    gone = settings.read_section("demo", cwd="/rt", env=None, run=Run(
+        code=2, stderr=b"moxi: demo is not installed\n", schema=None))
     assert gone["readonly"] and gone["error"] == "demo is not installed"
-    slow = settings.read_section("demo", cwd="/rt", env=None,
-                                 run=Run(raises=subprocess.TimeoutExpired("x", 10)))
+    slow = settings.read_section("demo", cwd="/rt", env=None, run=Run(
+        raises=subprocess.TimeoutExpired("x", 10), schema=None))
     assert slow["readonly"] and "ran past" in slow["error"]
 
 
@@ -458,7 +481,7 @@ def test_each_form_of_write_to_a_key_that_holds_a_locked_entry_is_refused(write)
     for key in ("adopted.yy", "adopt", "adopted_too"):
         assert settings.change("services", key, cwd="/rt", env=None, locked=locked, run=run,
                                **write)["ok"]
-    assert len(run.calls) == 3
+    assert len(run.writes) == 3
 
 
 @pytest.mark.parametrize("locked", [(), settings.locked_entries(""), {"ui.gateway.p"},
@@ -472,14 +495,14 @@ def test_a_key_no_entry_names_is_written_in_each_form(locked):
             assert settings.change("ui", key, cwd="/rt", env=None, locked=locked, run=run,
                                    **write)["ok"]
         assert [[key for key in ("idle_s", "gateway.port") if key in argv]
-                for argv, _ in run.calls] == [["idle_s"], ["gateway.port"]]
+                for argv, _ in run.writes] == [["idle_s"], ["gateway.port"]]
 
 
 def test_the_read_marks_exactly_the_locked_keys_and_entries():
     table = _switch_table(entries=[
         {"name": "a", "value": True, "source": "file", "named_by": []},
         {"name": "b", "value": False, "source": "file", "named_by": []}])
-    run = Run(stdout=json.dumps([*EIGHT, table]).encode())
+    run = Run(stdout=json.dumps([*EIGHT, table]).encode(), schema=None)
 
     def marked(locked):
         keys = settings.read_section("demo", cwd="/rt", env=None, locked=locked,
@@ -597,12 +620,13 @@ def test_both_routes_refuse_a_write_to_a_key_that_holds_a_locked_entry(site, mon
             assert status == 422, (what, body, data)
             assert data == {"refused": LOCKED_TEXT.format("ui", "gateway")}
             assert config.read_bytes() == file and _history() == history
-        # The locked entry keeps its value, and the key beside it saves.
+        # The locked entry keeps its value. The key beside it is not locked, and is
+        # changed at the terminal.
         status, data = shell.post("set", key="gateway.enabled", value="true")
-        assert status == 200 and data["ok"]
+        assert status == 422 and data["refused"].endswith("moxi ui gateway enable")
         keys = shell.keys()
         assert keys["gateway.port"]["value"] == "8498" and keys["gateway.port"]["locked"]
-        assert keys["gateway.enabled"]["value"] == "true"
+        assert keys["gateway.enabled"]["value"] == "false"
         assert not keys["gateway.enabled"]["locked"]
         # A key that only shares letters with the locked one is not locked.
         monkeypatch.setenv(settings.LOCKED_ENV, "ui.idle_sx.x,ui.por.t")
