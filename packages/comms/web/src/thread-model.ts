@@ -48,7 +48,7 @@ export interface ThreadAnswer {
   messages: Message[];
   count_today: number;
   earlier: ThreadEarlier | null;
-  /** On a refresh, the rows of the messages at or below `after`; null on a first read. */
+  /** On a refresh, the rows of the messages from `oldest` to `after`; null on a first read. */
   changed: Changed[] | null;
 }
 
@@ -87,13 +87,16 @@ export function parseThread(data: unknown): ThreadAnswer | null {
   };
 }
 
-/** The route of a read of `/api/thread`. */
-export function threadPath({ a, b, before = null, after = null, limit = null }
-  : { a: string; b: string | null; before?: string | null; after?: string | null; limit?: number | null }): string {
+/** The route of a read of `/api/thread`. A refresh names `after`, the newest message held,
+ * and `oldest`, the oldest, so the server reads the rows of what the page holds and no more. */
+export function threadPath({ a, b, before = null, after = null, oldest = null, limit = null }
+  : { a: string; b: string | null; before?: string | null; after?: string | null; oldest?: string | null;
+      limit?: number | null }): string {
   const query = new URLSearchParams({ a });
   if (b !== null) query.set("b", b);
   if (before !== null) query.set("before", before);
   if (after !== null) query.set("after", after);
+  if (oldest !== null) query.set("oldest", oldest);
   if (limit !== null) query.set("limit", String(limit));
   return `api/thread?${query}`;
 }
@@ -324,7 +327,9 @@ export class ThreadReads {
         this.#cursor = cursor;
       }
     } else {
-      const answer = await this.#read(threadPath({ a, b, after: newest }));
+      // Holding none, the page needs no rows: the bound is the newest id itself.
+      const oldest = held.messages.length > 0 ? held.messages[0].message_id : newest;
+      const answer = await this.#read(threadPath({ a, b, after: newest, oldest }));
       if (this.#closed) return;
       if (answer !== null) this.held = refreshed(this.held ?? held, answer, b, a);
     }

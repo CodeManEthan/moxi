@@ -51,6 +51,7 @@ test("the read's route: the pair or one address, the cursors, the limit", () => 
                "api/thread?a=builder-1&b=planner&limit=6");
   assert.equal(threadPath({ a: "builder-2@kestrel-web", b: null, after: "12" }), "api/thread?a=builder-2%40kestrel-web&after=12");
   assert.equal(threadPath({ a: "a", b: "b", before: "10", limit: THREAD_MORE }), "api/thread?a=a&b=b&before=10&limit=20");
+  assert.equal(threadPath({ a: "a", b: null, after: "12", oldest: "7" }), "api/thread?a=a&after=12&oldest=7");
 });
 
 test("the drawn thread: the header, each message's wants, the unread hold, the foot", () => {
@@ -140,7 +141,7 @@ function getter(...answers) {
   return { get, calls };
 }
 
-test("the reads: the first, a refresh above the newest held, Show earlier, a failure kept as a line", async () => {
+test("the reads: the first, a refresh from the oldest held to the newest, Show earlier, a failure kept as a line", async () => {
   const ok = (fields) => ({ status: 200, data: answer(fields) });
   const stub = getter(ok({ messages: PLAN.slice(2), count_today: 2, earlier: { count: 2, first_at: at("12:58") } }),
                       ok({ messages: [], count_today: 2, changed: [] }),
@@ -153,7 +154,7 @@ test("the reads: the first, a refresh above the newest held, Show earlier, a fai
   await reads.refresh();
   assert.deepEqual([reads.loading, reads.held.messages.length, reads.today], [false, 2, "2026-11-12"]);
   await reads.refresh();
-  assert.equal(stub.calls[1], "api/thread?a=builder-1&b=planner&after=1000000000000000013");
+  assert.equal(stub.calls[1], "api/thread?a=builder-1&b=planner&after=1000000000000000013&oldest=1000000000000000012");
   assert.deepEqual(reads.held.messages[1].rows, []);
   await reads.showEarlier();
   assert.equal(stub.calls[2], "api/thread?a=builder-1&b=planner&before=1000000000000000012&limit=20");
@@ -161,6 +162,8 @@ test("the reads: the first, a refresh above the newest held, Show earlier, a fai
   await reads.showEarlier();
   assert.equal(stub.calls.length, 3);
   await reads.refresh();
+  assert.equal(stub.calls[3], "api/thread?a=builder-1&b=planner&after=1000000000000000013&oldest=1000000000000000010",
+               "after Show earlier, the bound is the oldest message it added");
   assert.equal(reads.failure, "comms' page server answered 502");
   assert.equal(reads.held.messages.length, 4);
   assert.ok(changes >= 5);
@@ -172,7 +175,8 @@ test("an empty thread's refresh reads above the newest message the lists held; a
                                                           newestKnown: () => "1000000000000000012" });
   await reads.refresh();
   await reads.refresh();
-  assert.equal(stub.calls[1], "api/thread?a=builder-1&b=planner&after=1000000000000000012");
+  assert.equal(stub.calls[1], "api/thread?a=builder-1&b=planner&after=1000000000000000012&oldest=1000000000000000012",
+               "holding none, the bound is the newest id itself");
   assert.equal(reads.held.messages.length, 1);
   const closed = new ThreadReads("a", "b", { get: getter({ status: 200, data: answer({ messages: [PLAN[0]] }) }).get,
                                              onChange: () => {}, newestKnown: () => null });
