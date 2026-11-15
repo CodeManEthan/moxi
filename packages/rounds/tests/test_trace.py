@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from moxi_rounds import freezing, log, opening, ruling, state, tracing, versions
+from moxi_rounds import freezing, log, opening, ruling, state, steps, tracing, versions
 from moxi_rounds.cli import main
 from moxi_rounds.errors import NoLog
 
@@ -680,3 +680,26 @@ def test_where_the_check_is_off_only_the_stale_rows_are_shown(
     assert (found["version"], found["asked"]) == (1, False)
     assert found["stale_now"] == [
         {"id": first, "replaced_by": later, "revoked_by": None}]
+
+
+def test_what_replaced_an_inherited_ruling_after_the_freezing_holds_the_stage(opened):
+    one = rule(target="proj-a")
+    scoped = rule(target="proj-a", text="Rows are sorted by date.",
+                  scope="proj-b:src/**")
+    round_dir = opened(one, scoped)
+    fold(round_dir, row(one), row(scoped))
+    assert tracing.holding(folded(round_dir), "B1", register(round_dir)) == ()
+
+    later = rule(target="proj-a", text="Times are shown in UTC.", supersedes=one)
+    narrower = rule(target="proj-a", text="Rows are sorted by name.",
+                    scope="proj-b:src/**", supersedes=scoped)
+
+    # A standing ruling holds a stage when its scope names no repo or the stage's.
+    assert ids(tracing.holding(folded(round_dir), "B1", register(round_dir))) == [later]
+    assert narrower not in ids(tracing.holding(folded(round_dir), "B2", register(round_dir)))
+    # Without the project's log, only the round's own rulings are read.
+    assert tracing.holding(folded(round_dir), "B1") == ()
+    found = steps.one(folded(round_dir), "commission", "B1", name=ROUND,
+                      register=register(round_dir))
+    assert [one.reason.split(" until ")[0] for one in found.waits][-1:] == [
+        f"{later} holds B1"]

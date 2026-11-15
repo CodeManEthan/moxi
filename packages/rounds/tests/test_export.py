@@ -153,13 +153,16 @@ def test_the_export_says_what_it_is_of_and_when_it_was_computed(rounds):
 
     assert {key: of_round[key] for key in ("of", "project", "round", "view",
                                            "computed")} == {
-        "of": A, "project": "proj-a", "round": A, "view": "docket", "computed": NOW}
+        "of": A, "project": "proj-a", "round": A, "view": None, "computed": NOW}
     assert {key: of_project[key] for key in ("of", "project", "round", "view",
                                              "computed")} == {
         "of": "proj-a", "project": "proj-a", "round": None, "view": None,
         "computed": NOW}
     assert list(of_round) == ["of", "project", "round", "view", "computed", "entries",
-                              "ended", "left", "unreadable", "read_back"]
+                              "ratify", "covers", "later", "ended", "left",
+                              "unreadable", "read_back"]
+    assert (of_project["ratify"], of_project["covers"], of_project["later"]) == (
+        None, None, [])
 
 
 def test_out_with_json_writes_the_two_files_and_prints_their_paths(
@@ -385,7 +388,7 @@ def test_the_docket_holds_every_open_question_of_the_round(rounds):
 
     assert named(entry.data() for entry in found.entries) == [
         (A, "Q1", "open"), (A, "Q2", "open"), (A, "Q3", "open"), (A, "Q4", "open")]
-    assert found.view == "docket" and found.open == found.entries
+    assert found.view is None and found.open == found.entries
 
 
 @pytest.mark.parametrize("ratify", ["majors", "majors+minors", "off"])
@@ -402,14 +405,18 @@ def test_no_setting_leaves_an_open_question_off_the_docket(
     assert named(entries()) == [(A, "Q1", "open"), (A, "Q2", "open")]
 
 
-def test_naming_the_docket_gives_what_no_view_gives(rounds, capsys):
+def test_naming_the_docket_gives_the_questions_of_what_no_view_gives(rounds, capsys):
     ask()
     park(A, "Q1")
     ask(text=OTHER, at=T2)
 
-    assert printed(capsys, A, "--questions", "--view", "docket") == printed(
-        capsys, A, "--questions")
-    assert export.questions_of(A, view="docket") == export.questions_of(A)
+    docket, both = export.questions_of(A, view="docket"), export.questions_of(A)
+    markdown = printed(capsys, A, "--questions", "--view", "docket")
+
+    assert docket.entries == both.entries
+    assert (docket.view, docket.ratify, docket.covers) == ("docket", None, None)
+    assert "## Ratification" not in markdown and "## Open" in markdown
+    assert "## Ratification" in printed(capsys, A, "--questions")
 
 
 def test_parked_questions_follow_under_their_own_heading(rounds, capsys):
@@ -430,7 +437,7 @@ def test_parked_questions_follow_under_their_own_heading(rounds, capsys):
     assert THIRD in opened and SAID not in opened and OTHER not in opened
     assert SAID in parked and OTHER in parked and THIRD not in parked
     assert "- state: parked\n" in parked and "- until: B2" in parked
-    assert "docket, computed 2026-01-03T00:00:00Z: 1 open, 2 parked" in markdown
+    assert "computed 2026-01-03T00:00:00Z: 1 open, 2 parked, 0 to ratify" in markdown
 
 
 def test_a_parked_question_whose_wait_is_over_is_on_the_docket_as_open(rounds):
@@ -613,6 +620,268 @@ def test_with_every_ruling_shown_the_section_is_there_and_empty(rounds, capsys):
         "none, of the rulings of proj-a that could be read")
 
 
+# -- a round's export: the ratification --------------------------------------------------
+
+def built(rounds, stage, *, finished=True):
+    """Record a build of `stage` commissioned, and finished as a later verb will."""
+    log.append(log.round_log(rounds / "a-round"), "build.commissioned", {
+        "stage": stage, "repo": "proj-a", "branch": f"branch-{stage.lower()}",
+        "base": "2" * 40, "target": "main", "builder": "coder"}, by="planner")
+    if finished:
+        finish(rounds, stage)
+
+
+def decided(rounds, stage, *listed, report="report.md"):
+    """Record a report of `stage` declaring the decisions `listed`, each `(id, weight,
+    forecloses)`."""
+    log.append(log.round_log(rounds / "a-round"), "verdict.recorded", {
+        "kind": "build", "stage": stage, "by": "critic", "report": report,
+        "decisions": [{"id": id_, "weight": weight, "forecloses": forecloses,
+                       "text": f"as built: {stage}.{id_}"}
+                      for id_, weight, forecloses in listed]}, by="critic")
+
+
+def ratify_setting(write_config, value):
+    write_config(f"""\
+        [projects.proj-a]
+        ratify = "{value}"
+        sitting_at = 0
+        """)
+
+
+def ids(found):
+    return [entry.id for entry in found]
+
+
+def test_the_ratification_covers_the_finished_builds_and_puts_off_the_rest(rounds):
+    built(rounds, "B1")
+    built(rounds, "B2", finished=False)
+    decided(rounds, "B1", ("M1", "major", False), ("M2", "minor", False))
+    decided(rounds, "B2", ("M1", "major", False), ("M2", "minor", False),
+            report="other.md")
+
+    found = export.questions_of(A, view="ratify")
+    data = found.data()
+
+    assert (found.view, found.ratify, found.covers) == ("ratify", "majors", ("B1",))
+    assert ids(found.entries) == ["B1.M1"]
+    assert ids(found.later) == ["B2.M1"]
+    assert data["covers"] == ["B1"]
+    assert [one["id"] for one in data["later"]] == ["B2.M1"]
+    [entry] = data["entries"]
+    assert {key: entry[key] for key in ("holder", "id", "state", "stage", "weight",
+                                        "forecloses", "blocks", "from", "by")} == {
+        "holder": A, "id": "B1.M1", "state": "open", "stage": "B1", "weight": "major",
+        "forecloses": False, "blocks": "none", "from": "report.md", "by": "critic"}
+    assert "group" not in entry and "alone" not in entry
+
+
+def test_a_build_finished_since_brings_its_decisions_into_a_later_export(rounds):
+    built(rounds, "B1")
+    built(rounds, "B2", finished=False)
+    decided(rounds, "B2", ("M1", "major", False))
+    before = export.questions_of(A, view="ratify")
+
+    finish(rounds, "B2")
+    after = export.questions_of(A, view="ratify")
+
+    assert (before.covers, ids(before.entries), ids(before.later)) == (
+        ("B1",), [], ["B2.M1"])
+    assert (after.covers, ids(after.entries), ids(after.later)) == (
+        ("B1", "B2"), ["B2.M1"], [])
+
+
+def dropped(rounds, stage):
+    """Record the stage's open build dropped, as a later verb will."""
+    log.append(log.round_log(rounds / "a-round"), "build.dropped",
+               {"stage": stage, "by": "operator", "record": "comms:40"},
+               by="planner")
+
+
+def test_a_decision_only_a_dropped_build_declared_is_in_no_view(rounds):
+    built(rounds, "B1", finished=False)
+    decided(rounds, "B1", ("M1", "major", False))
+    dropped(rounds, "B1")
+    built(rounds, "B1", finished=False)
+    decided(rounds, "B1", ("M2", "major", False), report="again.md")
+    unfinished = export.questions_of(A, view="ratify")
+
+    finish(rounds, "B1")
+    found = export.questions_of(A, view="ratify")
+
+    assert (unfinished.covers, ids(unfinished.entries), ids(unfinished.later)) == (
+        (), [], ["B1.M2"])
+    assert (found.covers, ids(found.entries), ids(found.later)) == (
+        ("B1",), ["B1.M2"], [])
+
+
+def test_a_dropped_build_s_decision_listed_again_by_the_next_build_is_its_own(
+        rounds, write_config):
+    ratify_setting(write_config, "majors+minors")
+    built(rounds, "B1", finished=False)
+    decided(rounds, "B1", ("M1", "major", False), ("M2", "minor", False))
+    dropped(rounds, "B1")
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M2", "minor", False), report="again.md")
+
+    found = export.questions_of(A, view="ratify")
+
+    assert (found.covers, ids(found.entries), ids(found.later)) == (
+        ("B1",), ["B1.M2"], [])
+
+
+def test_a_stage_whose_last_build_was_dropped_puts_nothing_off(rounds):
+    built(rounds, "B1", finished=False)
+    decided(rounds, "B1", ("M1", "major", False))
+    dropped(rounds, "B1")
+
+    found = export.questions_of(A, view="ratify")
+
+    assert (found.covers, ids(found.entries), ids(found.later)) == ((), [], [])
+
+
+def test_a_majors_report_s_decision_is_the_build_open_when_it_was_recorded(rounds):
+    built(rounds, "B1", finished=False)
+    log.append(log.round_log(rounds / "a-round"), "verdict.recorded", {
+        "kind": "majors", "by": "critic", "report": "majors.md", "stages": ["B1"],
+        "decisions": [{"id": "M1", "stage": "B1", "weight": "major",
+                       "forecloses": False, "text": "as built: B1.M1"}]},
+        by="critic")
+    dropped(rounds, "B1")
+    built(rounds, "B1")
+
+    found = export.questions_of(A, view="ratify")
+
+    assert (found.covers, ids(found.entries), ids(found.later)) == (("B1",), [], [])
+
+
+def test_a_ruled_decision_is_in_no_view(rounds):
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M1", "major", False), ("M2", "major", False))
+
+    rule(item="B1.M1=accept", at=T5)
+
+    found = export.questions_of(A, view="ratify")
+    assert ids(found.entries) == ["B1.M2"]
+
+
+def test_majors_and_minors_adds_the_minor_decisions_as_one_group(
+        rounds, write_config, capsys):
+    ratify_setting(write_config, "majors+minors")
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M1", "minor", False), ("M2", "major", True),
+            ("M3", "minor", False), ("M4", "major", False))
+    decided(rounds, "B2", ("M1", "minor", False), report="other.md")
+
+    found = export.questions_of(A, view="ratify")
+    data = found.data()
+    markdown = printed(capsys, A, "--questions", "--view", "ratify")
+
+    # The major ones first, each an entry of its own; then the group.
+    assert ids(found.entries) == ["B1.M2", "B1.M4", "B1.M1", "B1.M3"]
+    assert [one.get("group") for one in data["entries"]] == [
+        None, None, "minors", "minors"]
+    assert ids(found.grouped) == ["B1.M1", "B1.M3"]
+    # A minor decision of a build not finished is not put off to a later export.
+    assert found.later == ()
+    assert "## Ratification: minor decisions, one group: B1.M1, B1.M3\n" in markdown
+    assert "- B1.M1: as built: B1.M1\n" in markdown
+    assert f"moxi rounds rule {A} B<n>.M<k>=accept|reject --record PTR" in markdown
+    # A group is drawn, not answered: each of its decisions is ruled on its own.
+    rule(item="B1.M1=accept", at=T5)
+    assert ids(export.questions_of(A, view="ratify").grouped) == ["B1.M3"]
+
+
+def test_a_decision_that_forecloses_is_an_entry_of_its_own_in_every_view(
+        rounds, write_config, capsys):
+    ratify_setting(write_config, "majors+minors")
+    built(rounds, "B1")
+    built(rounds, "B2", finished=False)
+    decided(rounds, "B1", ("M1", "major", True), ("M2", "minor", False))
+    decided(rounds, "B2", ("M1", "major", True), report="other.md")
+
+    found = export.questions_of(A)
+    markdown = printed(capsys, A, "--questions")
+    of_project = export.questions_of("proj-a").data()
+
+    [alone] = [one for one in found.data()["entries"] if one["id"] == "B1.M1"]
+    assert alone["alone"] is True and "group" not in alone
+    assert found.data()["later"][0]["alone"] is True
+    assert f"### {A} B1.M1: as built: B1.M1\n" in markdown
+    assert f"### {A} B2.M1: as built: B2.M1\n" in markdown
+    assert "B1.M1" not in markdown.split("one group:")[1].split("\n")[0]
+    assert all(one["alone"] for one in of_project["entries"] if one.get("forecloses"))
+
+
+def test_off_puts_no_decision_to_him_and_names_what_it_covers(
+        rounds, write_config, capsys):
+    ratify_setting(write_config, "off")
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M1", "major", False))
+    decided(rounds, "B2", ("M1", "major", False), report="other.md")
+
+    found = export.questions_of(A, view="ratify")
+    markdown = printed(capsys, A, "--questions", "--view", "ratify")
+
+    assert (found.ratify, found.covers, found.entries, found.later) == (
+        "off", ("B1",), (), ())
+    assert "no decision: the project's ratify setting is off" in markdown
+
+
+def test_with_no_view_the_docket_comes_first_then_the_ratification(rounds, capsys):
+    ask()
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M1", "major", False))
+
+    found = export.questions_of(A)
+    markdown = printed(capsys, A, "--questions")
+
+    assert ids(found.entries) == ["Q1", "B1.M1"]
+    assert (ids(found.open), ids(found.decisions)) == (["Q1"], ["B1.M1"])
+    assert "computed 2026-01-03T00:00:00Z: 1 open, 0 parked, 1 to ratify" in markdown
+    assert markdown.index("## Open") < markdown.index("## Ratification") < (
+        markdown.index("## Rulings not yet shown"))
+    assert "Covers the finished builds: B1." in markdown
+    assert ids(export.questions_of(A, view="docket").entries) == ["Q1"]
+    ratified = export.questions_of(A, view="ratify")
+    assert ids(ratified.entries) == ["B1.M1"]
+    assert "## Open" not in printed(capsys, A, "--questions", "--view", "ratify")
+
+
+def test_the_ratification_s_json_and_markdown_are_one_reading(rounds, capsys, tmp_path):
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M1", "major", False))
+
+    data = json.loads(printed(capsys, A, "--questions", "--view", "ratify", "--json"))
+    printed(capsys, A, "--questions", "--view", "ratify", "--out", str(tmp_path / "out"))
+
+    assert data == export.questions_of(A, view="ratify").data()
+    assert json.loads((tmp_path / "out" / "questions.json").read_text(
+        encoding="utf-8")) == data
+
+
+def test_a_round_that_has_ended_puts_no_decision_to_him(rounds):
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M1", "major", False))
+    log.append(log.round_log(rounds / "a-round"), "round.dropped",
+               {"by": "operator", "record": "comms:13"}, by="planner")
+
+    found = export.questions_of(A, view="ratify")
+
+    assert found.ended is not None and found.entries == () and found.later == ()
+
+
+def test_the_ratification_writes_nothing(rounds, capsys):
+    built(rounds, "B1")
+    decided(rounds, "B1", ("M1", "major", False))
+    printed(capsys, A, "--questions")
+    before = log.round_log(rounds / "a-round").read_bytes()
+
+    printed(capsys, A, "--questions", "--view", "ratify")
+
+    assert log.round_log(rounds / "a-round").read_bytes() == before
+
+
 # -- what can't be listed ----------------------------------------------------------------
 
 def test_questions_with_no_round_or_project_named_is_refused(rounds, capsys):
@@ -624,7 +893,7 @@ def test_questions_with_no_round_or_project_named_is_refused(rounds, capsys):
 
 
 @pytest.mark.parametrize("argv", [
-    [A, "--questions", "--view", "ratify"], [A, "--questions", "--view"],
+    [A, "--questions", "--view", "majors"], [A, "--questions", "--view"],
     [A, "--questions", "--out"], ["proj-a/A-Round", "--questions"]])
 def test_a_listing_that_cant_be_read_is_a_usage_error(rounds, capsys, argv):
     assert main(["list", *argv]) == 2
@@ -633,7 +902,7 @@ def test_a_listing_that_cant_be_read_is_a_usage_error(rounds, capsys, argv):
 
 def test_a_view_that_is_none_of_a_rounds_is_a_usage_error():
     with pytest.raises(BadArgument):
-        export.questions_of(A, view="ratify")
+        export.questions_of(A, view="majors")
 
 
 def test_a_round_that_was_never_opened_is_refused(rounds, capsys):

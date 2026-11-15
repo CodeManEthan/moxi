@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from moxi_rounds import (asking, dropping, freezing, log, next_step, opening,
-                         report_block, ruling, steps, verdicts)
+from moxi_rounds import (asking, closing, dropping, freezing, log, next_step, opening,
+                         report_block, ruling, showing, steps, verdicts)
 from moxi_rounds.cli import main
 
 ROUND = "proj-a/a-round"
@@ -200,10 +200,20 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
         f"then:  moxi rounds verdict {ROUND} <your report>",
         "waits: nothing",
         "",
-        f"round {ROUND}   flow full   stage B1   step commission   not built in this "
-        "version",
+        f"round {ROUND}   flow full   stage B1   step commission",
+        f"then:  moxi rounds commission {ROUND} B1 --builder NAME",
+        "waits: the design is not verified: it stands at none",
+        f"  fix: moxi rounds next {ROUND}",
         f"waits: Q1 holds B1: {ASKED}",
-        f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR"]
+        f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR",
+        "",
+        # The docket is ready too, and is the round's own: the operator may rule while
+        # the design is verified.
+        f"round {ROUND}   flow full   step docket   by operator",
+        "questions: Q1",
+        f"export: moxi rounds list {ROUND} --questions --view docket",
+        f"then:  moxi rounds rule {ROUND} Q1 --text TEXT --record PTR",
+        "waits: nothing"]
     do(capsys, said(printed, "then:")[0],
        **{"<your report>": str(report(round_dir, "fold-first"))})
 
@@ -235,17 +245,16 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
     assert printed[:5] == [
         f"round {ROUND}   flow full   step docket   by operator",
         "questions: Q1",
-        f"export: moxi rounds list {ROUND} --questions",
+        f"export: moxi rounds list {ROUND} --questions --view docket",
         f"then:  moxi rounds rule {ROUND} Q1 --text TEXT --record PTR",
         "waits: nothing"]
     assert ASKED in do(capsys, said(printed, "export:")[0])
     do(capsys, said(printed, "then:")[0], TEXT=SAID, PTR=PTR)
 
     printed = lines(capsys)
-    assert printed[0] == (
-        f"round {ROUND}   flow full   stage B1   step commission   not built in this "
-        "version")
-    assert said(printed, "waits:") == []
+    assert printed[:3] == [f"round {ROUND}   flow full   stage B1   step commission",
+                       f"then:  moxi rounds commission {ROUND} B1 --builder NAME",
+                       "waits: nothing"]
 
 
 def test_a_design_that_builds_nothing_ends_at_no_step(opened, capsys):
@@ -334,9 +343,12 @@ def test_a_flow_with_no_questions_step_prints_the_hold_on_each_stage(opened, cap
 
     head = f"round {ROUND}   flow small   stage"
     assert printed == [
-        f"{head} B1   step commission   not built in this version",
+        f"{head} B1   step commission",
+        f"then:  moxi rounds commission {ROUND} B1 --builder NAME",
+        "waits: nothing",
         "",
-        f"{head} B2   step commission   not built in this version",
+        f"{head} B2   step commission",
+        f"then:  moxi rounds commission {ROUND} B2 --builder NAME",
         f"waits: Q1 holds B2: {ASKED}",
         f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR"]
 
@@ -414,9 +426,11 @@ def test_a_step_that_waits_says_each_thing_the_lines_before_did_not(opened, caps
         said(printed, "waits:")[0], group(capsys)["why"]]
 
 
-def test_a_step_that_is_not_built_says_only_the_holds_on_its_stage(opened, capsys):
+def test_a_step_that_is_not_built_says_only_the_holds_on_its_stage(opened, capsys,
+                                                                   monkeypatch):
     round_dir = opened("small")
     fold(round_dir, stage("B1"))
+    monkeypatch.delitem(steps.ROWS, "commission")
 
     assert lines(capsys) == [
         f"round {ROUND}   flow small   stage B1   step commission   not built in this "
@@ -431,6 +445,8 @@ def test_a_built_step_that_does_not_wait_says_it_waits_for_nothing(
     verdict(round_dir, "publishable")
     monkeypatch.setitem(steps.ROWS, "commission", lambda _state, about: steps.Step(
         "commission", state, stage=about.stage))
+    # Past a done step, the next is printed: one that is not built says no waits.
+    monkeypatch.delitem(steps.ROWS, "build")
 
     assert said(lines(capsys), "waits:") == (["nothing"] if state != "done" else [])
 
@@ -489,11 +505,13 @@ def test_the_data_holds_each_group_and_each_warning(opened, capsys):
              "questions": [], "waits": [], "pass": "re-check",
              "why": "the design changed since v1, the last version a pass read",
              "version": 2, "since": 1, "instead": [], "files": [first, second]},
-            {"step": "commission", "stage": "B1", "state": "not-built", "built": False,
+            {"step": "commission", "stage": "B1", "state": "waiting", "built": True,
              "by": None, "tier": None, "model": None, "reads": [], "write": None,
-             "then": [], "questions": [], "waits": []}],
-        "close": {"waits": ["a finished stage, which this version does not build, so "
-                            "the round does not close in it"]},
+             "then": [f"moxi rounds commission {ROUND} B1 --builder NAME"],
+             "questions": [],
+             "waits": [{"reason": "the design is not verified: it stands at none",
+                        "fix": f"moxi rounds next {ROUND}"}]}],
+        "close": {"waits": list(closing.waits(showing.show(ROUND).state))},
         "warnings": [
             {"what": "not-shown",
              "text": f"not yet shown to the operator: {ROUND} {made} {SAID}",
@@ -580,6 +598,23 @@ def test_a_design_edited_since_it_was_frozen_is_warned_of(round_dir, capsys):
 
     assert said(lines(capsys), "warning:") == ["design.md changed since v1 was frozen"]
     assert warned(capsys, "design-changed")[0]["fix"] == f"moxi rounds fold {ROUND}"
+
+
+def test_commission_waits_on_a_design_edited_since_it_was_frozen_as_the_verb_does(
+        opened, capsys):
+    round_dir = opened("small")
+    fold(round_dir, stage("B1"))
+    assert said(lines(capsys), "waits:") == ["nothing"]
+
+    design(round_dir, stage("B1"))
+
+    printed = [line.strip() for line in lines(capsys)]
+    assert printed[0] == f"round {ROUND}   flow small   stage B1   step commission"
+    assert said(printed, "waits:") == ["design.md changed since v1 was frozen"]
+    assert said(printed, "fix:")[0] == f"moxi rounds fold {ROUND}"
+    assert group(capsys)["state"] == "waiting"
+    assert main(["commission", ROUND, "B1", "--builder", "coder"]) != 0
+    assert "design.md changed since v1 was frozen" in capsys.readouterr().err
 
 
 def test_a_design_never_frozen_is_not_warned_of(round_dir, capsys):
@@ -718,11 +753,14 @@ def test_a_word_that_is_no_kind_of_block_is_bad_arguments(capsys):
 
 # -- which round -------------------------------------------------------------------------
 
-def test_with_no_round_it_says_a_round_is_needed(capsys):
+def test_with_no_round_outside_a_build_s_worktree_it_names_the_round_to_give(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
     assert main(["next"]) == 2
 
     err = capsys.readouterr().err
-    assert "a round is needed" in err
+    assert "no round is named" in err
     assert "moxi rounds next <project>/<slug>" in err
 
 
@@ -730,3 +768,33 @@ def test_a_project_s_key_is_bad_arguments_and_names_the_listing(round_dir, capsy
     assert main(["next", "proj-a"]) == 2
 
     assert "moxi rounds list proj-a" in capsys.readouterr().err
+
+
+# -- commission ---------------------------------------------------------------------------
+
+def test_a_light_flow_with_no_stage_names_the_commission_that_declares_one(opened,
+                                                                          capsys):
+    opened("fix")
+
+    printed = lines(capsys)
+
+    assert printed[0].startswith(f"round {ROUND}   flow fix   step commission")
+    assert said(printed, "then:") == [
+        f"moxi rounds commission {ROUND} --repo KEY --branch NAME --builder NAME "
+        "[--slice ID=TEXT --minutes N]..."]
+    assert "waits: nothing" in printed
+
+
+def test_five_stages_that_are_builds_point_at_child_rounds_and_four_do_not(round_dir,
+                                                                          capsys):
+    fold(round_dir, *(stage(f"B{n}") for n in range(1, 5)))
+    assert not [line for line in lines(capsys) if "child round" in line]
+
+    fold(round_dir, *(stage(f"B{n}") for n in range(1, 6)))
+
+    [warning] = said(lines(capsys), "warning:")
+    assert warning == (f"{ROUND} plans 5 stages that are builds (B1, B2, B3, B4, B5); a "
+                       "part of the work that stands on its own can be a child round, "
+                       "run as a round of its own")
+    data = json.loads(run(capsys, "next", ROUND, "--json"))
+    assert [one["what"] for one in data["warnings"]] == [next_step.MANY_STAGES]

@@ -2,6 +2,9 @@
 
 ## 0.1.8 (unreleased)
 
+- `moxi.proc.run` takes `output`, a file path: the child's stdout and stderr both go
+  straight to that file, created 0600 or appended to, so a long run's output is not held
+  in memory.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi.config`: `set` is now `set_value`; `moxi.place`:
   `FOLDER_NOTE` is now `DIR_NOTE`; `moxi.place.Harness`: `folder` is now `harness_dir`.

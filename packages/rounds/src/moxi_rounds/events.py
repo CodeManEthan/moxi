@@ -58,8 +58,8 @@ TYPES = _types(
                "added", "pending"),
               required=("version", "digest")),
     # A report's verdict: what kind of report and pass, the verdict word, what it read
-    # (a design version, or a stage with its head and merge-base), the user step it is
-    # for, the model and author, the report file and its digest, and what its block
+    # (a design version, a stage with its head and merge-base, or for a majors report
+    # the `stages` it covers), the user step it is for, the model and author, the report file and its digest, and what its block
     # listed. A design report's verdict that finds its version publishable is also the
     # whole of what it applies: `applied` lists what that version's block took away
     # and this event takes out of the record (for a hold, `gone` are the stages taken
@@ -67,19 +67,21 @@ TYPES = _types(
     # each with `why`. `flags` are what is noted of
     # the report and refuses nothing.
     EventType("verdict.recorded",
-              ("kind", "pass", "verdict", "design", "stage", "head", "merge_base", "step",
-               "model", "by", "report", "sha256", "findings", "waits", "decisions",
-               "applied", "not_applied", "flags")),
+              ("kind", "pass", "verdict", "design", "stage", "stages", "head",
+               "merge_base", "step", "model", "by", "report", "sha256", "findings",
+               "waits", "decisions", "applied", "not_applied", "flags")),
     # A question was put: its id, sentence, origin and what it holds up, its state, and
     # who asked it and when, which outlive a move to another log. `record` is the
     # operator's pointer when the question is his own; it is then the origin too.
     # `options` are the choices it offers, each key with its one line. A question
     # brought here from another log also says the record it was there (`moved_from`),
     # what it held up in the round it left (`held`), what a parked one waits for
-    # (`until`) and the keys that were `retired` from it.
+    # (`until`) and the keys that were `retired` from it. A question that came up in
+    # a build names that build's `builder`, whom the asker asked it for.
     EventType("question.asked",
               ("id", "text", "from", "blocks", "state", "asked_by", "asked_at", "record",
-               "options", "prepared", "until", "retired", "moved_from", "held"),
+               "options", "prepared", "until", "retired", "moved_from", "held",
+               "builder"),
               required=("id", "text", "from", "blocks", "state", "asked_by", "asked_at")),
     # A question changed by something that is no ruling: its state or what it holds
     # up, with who changed it and the operator's pointer when the change needs one;
@@ -110,32 +112,43 @@ TYPES = _types(
     # another log names the record it became there, `moved_to`. A skip of the questions
     # step for a stage lists the questions it lets that stage past, `covers`. A ruling
     # of the round's flow holds the name the flow had (`was`), the new name (`flow`)
-    # and its `steps`, and is the whole of the move. A ruling
+    # and its `steps`, and is the whole of the move. The operator's credit of a
+    # fast-forward names the build by its commission's line (`build`) and holds the
+    # head it credits (`head`). A ruling
     # that replaces an earlier one names it in `supersedes`, and one that takes an
     # earlier one back in `revokes`; the earlier ruling's line is never changed.
     EventType("ruling.recorded",
               ("id", "text", "record", "reason", "scope", "stages", "kind", "rules",
                "chose", "question", "state", "until", "blocks", "covers", "supersedes",
-               "revokes", "moved_to", "was", "flow", "steps"),
+               "revokes", "moved_to", "was", "flow", "steps", "build", "head"),
               required=("id", "record", "kind")),
     # Rulings of this log were put in front of the operator: their ids, and the pointer
     # to where he was shown them.
     EventType("ruling.shown", ("ids", "record"), required=("ids", "record")),
     # A build began: its stage, repo, branch, the commit it was cut from, the branch it
-    # is headed for, its worktree and scratch folder, its builder, and the go pointer.
+    # is headed for, its worktree and scratch folder, its builder, the go pointer, the
+    # machine that made its folders (`host`) and the id their markers carry (`build`).
     EventType("build.commissioned",
               ("stage", "repo", "branch", "base", "target", "worktree", "scratch",
-               "builder", "record")),
+               "builder", "record", "host", "build")),
     # A command ran for a build: the step it ran as, the commit, that commit's merge-base
-    # with the target, the argv, and how it went.
+    # with the target, the argv, and how it went: its exit code (None for a run ended at
+    # its time limit), its duration and the file its output went to.
     EventType("check.ran",
               ("stage", "step", "commit", "merge_base", "argv", "exit_code", "duration_s",
                "output")),
+    # CI was read for a build: the commit, its merge-base with the target, the two
+    # argvs that ran, each workflow by path with the id it read as, its reading and its
+    # run's url, and the whole reading.
+    EventType("ci.read",
+              ("stage", "commit", "merge_base", "status_argv", "ids_argv", "workflows",
+               "reading")),
     # A finding or a waiting item moved to a new state.
     EventType("finding.marked", ("id", "state", "commits", "record")),
     EventType("wait.marked", ("id", "state", "commits", "record")),
-    # A slice's brief was sized: the file, its digest and the result.
-    EventType("brief.sized", ("stage", "slice", "brief", "sha256", "result")),
+    # A brief was sized: the stage, the one slice or verification it is for, the file,
+    # its digest and the result.
+    EventType("brief.sized", ("stage", "slice", "verify", "brief", "sha256", "result")),
     # One finish action reached a state at a build's tip; a merge also holds where it
     # landed and the target's head before it.
     EventType("finish.action",
@@ -144,15 +157,20 @@ TYPES = _types(
     EventType("finish.done", ("stage", "tip")),
     # A dead holder's finish lock was cleared.
     EventType("lock.cleared", ("ref", "holder")),
-    # A build or the whole round was withdrawn: by whom, the pointer, each branch's tip,
-    # and where the questions went.
+    # A build or the whole round was withdrawn: by whom, the pointer, each open build's
+    # branch and its tip (`tips`, each `{"stage", "repo", "branch", "tip"}`, the tip
+    # None for a branch that is not there), and, for a round, where the questions
+    # went.
     EventType("build.dropped", ("stage", "by", "record", "tips", "questions")),
-    EventType("round.dropped", ("by", "record", "tips", "questions")),
+    EventType("round.dropped", ("by", "record", "tips", "questions", "numbers")),
     # A thread of design verification was closed or its risk accepted.
     EventType("thread.decided", ("thread", "decision", "record")),
-    # A record was derived again: what, each field's old and new value, and what was
-    # read to derive it.
-    EventType("repair", ("what", "fields", "read")),
+    # A record was derived again: what (`base`, the base of the open build of
+    # `stage`, or `report`, the record of the verdict on line `verdict`), each
+    # field's old and new value, and what was read to derive it: git's answer, or
+    # the report's file and digest.
+    EventType("repair", ("what", "stage", "verdict", "fields", "read"),
+              required=("what", "fields")),
     # The round ended, with its numbers.
     EventType("round.closed", ("numbers",)),
 )

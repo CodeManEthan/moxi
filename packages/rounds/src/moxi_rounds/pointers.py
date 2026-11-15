@@ -12,6 +12,11 @@ is one token, with no white space, of one of four shapes:
 
 Only the shape is checked. Nothing here reads a message, a session, a page or a file, so
 a pointer of a right shape that points at nothing is accepted.
+
+A question has one more shape of origin, which no act of the operator's takes: the
+build it came up in, `build:<stage>@<commit>`, the stage and the tip of its build when
+the question was asked (`build_origin`). Only `ask --build` writes it, so `shape`
+does not know it and no flag accepts it.
 """
 
 from __future__ import annotations
@@ -36,6 +41,21 @@ _SESSION = re.compile(r"[0-9A-Fa-f]{8,}@([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-
                       r"(:[0-9]{2})?)Z")
 _URL = re.compile(r"https://[^/?#]+.*")
 _FILE = re.compile(r"file:([^#]+)#(.+)")
+
+#: The shape of a question's origin in a build, as `build_origin` writes it.
+BUILD = "build"
+_BUILD = re.compile(r"build:([^@\s]+)@([0-9a-f]{40})")
+
+
+def build_origin(stage: str, tip: str) -> str:
+    """The origin of a question that came up in the build of `stage`, whose tip was
+    `tip` when it was asked."""
+    return f"{BUILD}:{stage}@{tip}"
+
+
+def is_build_origin(origin: object) -> bool:
+    """Whether `origin` is the origin `build_origin` writes."""
+    return isinstance(origin, str) and _BUILD.fullmatch(origin) is not None
 
 
 def shape(pointer: object) -> str | None:
@@ -99,5 +119,5 @@ def _is_under(path: str) -> bool:
     return all(part not in ("", "..") for part in path.split("/"))
 
 
-__all__ = ["COMMS", "SESSION", "URL", "FILE", "SHAPES", "shape", "number", "same",
-           "unmet"]
+__all__ = ["COMMS", "SESSION", "URL", "FILE", "SHAPES", "BUILD", "shape", "number",
+           "same", "unmet", "build_origin", "is_build_origin"]

@@ -352,6 +352,8 @@ def _arrival(question: state.Question, held: state.State, *, new_id: str, source
         "asked_at": question.at, "moved_from": source}
     if question.record is not None:
         fields["record"] = question.record
+    if question.builder is not None:
+        fields["builder"] = question.builder
     if question.options:
         fields["options"] = dict(question.options)
     if question.retired:

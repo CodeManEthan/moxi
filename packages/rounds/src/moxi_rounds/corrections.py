@@ -36,7 +36,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
-from . import ending, flows, questions
+from . import builds, ending, flows, questions
 from . import state as states
 from .errors import Unmet
 
@@ -56,9 +56,16 @@ READBACK = "readback="
 #: What starts the item of a skip, the ruling that a step is not done; the step's name
 #: follows, and for a step of one stage the stage's id.
 SKIP = "skip:"
+#: What starts the item of a skip of one finish action for one stage; the stage's id
+#: follows, then `=` and the action's id.
+SKIP_ACTION = "skip-action:"
 #: What starts the item of a ruling that moves the round to another flow; the flow's
 #: name follows.
 FLOW = "flow:"
+
+#: What starts the item of the operator's credit of a fast-forward to a build; the
+#: stage's id follows.
+CREDIT = builds.CREDIT
 
 #: What starts the items of the rulings that take a stage out of the plan, and one
 #: stage off what another waits for.
@@ -72,6 +79,8 @@ ALONE = ""
 ID = re.compile(r"[CS]([1-9][0-9]*)")
 
 _QUESTION = re.compile(r"[QP][1-9][0-9]*")
+#: The item of a ruling of a decision: its key, `=` and what he chose.
+_DECISION = re.compile(r"B[1-9][0-9]*\.M[1-9][0-9]*=[a-z]+")
 
 
 @dataclass(frozen=True)
@@ -206,11 +215,23 @@ KINDS: tuple[Kind, ...] = (
     # Readers take the skips that stand, so one taken back leaves its step due again
     # with nothing more said.
     Kind("a skip", _starts(SKIP), undo=lambda ruling: {}),
+    # The same for a finish action: one taken back is run again by the next finish.
+    Kind("a skip of a finish action", _starts(SKIP_ACTION), undo=lambda ruling: {}),
     Kind("a change of flow", _starts(FLOW), instead=_move_it_again, again=False),
     Kind("a stage taken out of the plan", _starts(UNSTAGE), instead=_declare_it_again,
          again=False),
     Kind("a wait taken off a stage", _starts(UNAFTER), instead=_mark_it_after,
          again=False),
+    # The build's state is read with the credits that stand, so one taken back leaves
+    # it unclear again with nothing more said. A second credit of the build needs it
+    # unclear again, which the first credit, standing, does not leave it.
+    Kind("a credit of a fast-forward", _starts(CREDIT), undo=lambda ruling: {},
+         again=False),
+    # Readers take the decision rulings that stand, so one taken back leaves the
+    # decision open with nothing more said.
+    Kind("a ruling of a decision",
+         lambda rules: rules.partition("=")[0]
+         if rules and _DECISION.fullmatch(rules) else None, undo=lambda ruling: {}),
 )
 
 
@@ -369,8 +390,8 @@ def _said(rules: str | None) -> str:
     return "stands on its own" if rules is None else f"rules {rules}"
 
 
-__all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "READBACK", "SKIP", "FLOW",
-           "UNSTAGE", "UNAFTER",
+__all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "READBACK", "SKIP",
+           "SKIP_ACTION", "FLOW", "CREDIT", "UNSTAGE", "UNAFTER",
            "ALONE", "ID", "Kind",
            "KINDS", "kind_of", "item_of", "stands", "live", "find", "standing", "put_by",
            "ended", "can_be_taken_back", "taking_back", "replaces"]
