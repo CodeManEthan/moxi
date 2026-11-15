@@ -207,7 +207,8 @@ def entry(state: states.State, *, ratify: str | None = None,
     is appended at, which the round's time in its last step runs to."""
     if not is_due(state, ratify=ratify):
         return None
-    return write.Entry(CLOSED, {"numbers": counted.of(state, ended_at=at)})
+    return write.Entry(CLOSED, {"numbers": counted.of(
+        state, ended_at=at, ratify=RATIFY_DEFAULT if ratify is None else ratify)})
 
 
 def said(waited: tuple[str, ...] | list[str]) -> str:

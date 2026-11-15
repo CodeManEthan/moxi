@@ -220,6 +220,27 @@ def test_a_commit_after_the_verdict_owes_verification_until_a_mark_names_it(buil
     assert "check B1" not in found
 
 
+def test_ratify_gets_time_only_where_the_project_asks_for_it(built):
+    report = {**build_report(word="publishable"), "decisions": [
+        {"id": "M1", "text": "a choice", "weight": "major", "forecloses": False}]}
+    for kind, body in (check_ran(TIP), ("verdict.recorded", report),
+                       ("finish.done", {"stage": "B1", "tip": TIP})):
+        append(built, kind, body)
+    events = timed(log.read(log.round_log(built)), 0, 10, 30, 40, 60, 90)
+    end = log.stamp(1_000_000 + 150)
+
+    asked = numbers.step_time_s(events, ended_at=end, ratify="majors")
+    off = numbers.step_time_s(events, ended_at=end, ratify="off")
+
+    # Once B1 is finished its major decision is unruled: the ratify step is due from
+    # then to the end, unless the project sets ratify off, when the flow never asks it.
+    assert asked["ratify"] == 60
+    assert "ratify" not in off
+    assert {key: value for key, value in asked.items() if key != "ratify"} == off
+    folded = state.fold(events)
+    assert "ratify" not in numbers.of(folded, ended_at=end, ratify="off")["step_time_s"]
+
+
 def test_with_no_ending_time_the_count_stops_at_the_last_event(built):
     events = timed(log.read(log.round_log(built)), 0, 10, 30)
     assert numbers.step_time_s(events) == {"commission": 10, "commission B1": 20}

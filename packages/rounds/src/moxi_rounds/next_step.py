@@ -237,9 +237,11 @@ def _finish(found: showing.Shown, step: steps.Step) -> dict:
 def _retro(found: showing.Shown, step: steps.Step) -> dict:
     """The round's retrospective: the numbers as they stand, which the round's ending
     will hold, the note and the reports, the report's block, and the verdict."""
+    settings = own.load() if found.settings is None else found.settings
     return {"reads": ["the numbers below", str(found.round_dir / rendering.NOTE_FILE),
                       f"the reports in {found.round_dir}", *_named(step)],
-            "numbers": counted.of(found.state),
+            "numbers": counted.of(found.state,
+                                  ratify=closing.ratify_of(settings, found.name)),
             "write": (f"a report in {found.round_dir} with the block from: moxi rounds "
                       f"next --schema {report_block.RETRO}"),
             "then": [f"moxi rounds verdict {found.name} <your report>"]}

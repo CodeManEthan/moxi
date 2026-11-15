@@ -136,13 +136,17 @@ def logged(state: states.State) -> dict[str, steps.Seen]:
 _DUE = (steps.READY, steps.WAITING)
 
 
-def step_time_s(events: Iterable[dict], *, ended_at: str | None = None) -> dict[str, int]:
+def step_time_s(events: Iterable[dict], *, ended_at: str | None = None,
+                ratify: str | None = None) -> dict[str, int]:
     """How long each step of the round whose log holds `events` was due, in whole
     seconds, in the order each first came due. The time from one event to the next
     goes to every step that was `ready` or `waiting` after the first of them, and the
     time from the last to `ended_at` (the time of the event that ends the round, as
     `log.stamp` writes one) to every step due then. Steps are read from the log alone,
-    an open build as `logged` gives it. A stretch whose ends don't both read as times,
+    an open build as `logged` gives it, and `ratify`, the project's `ratify` setting,
+    as the ratify step reads it: with it `off` the step is never asked and gets no
+    time. Left out, the setting reads as not read, and the step is due while a major
+    decision is unruled. A stretch whose ends don't both read as times,
     or that runs backwards, as two machines' clocks can make it, counts nothing."""
     spent: dict[str, int] = {}
     due: list[str] = []
@@ -154,11 +158,13 @@ def step_time_s(events: Iterable[dict], *, ended_at: str | None = None) -> dict[
         for key in due:
             spent[key] = spent.get(key, 0) + until - since
 
+    settings_read = {} if ratify is None else {None: steps.Seen(ratify=ratify)}
     for folded in states.folding(events):
         now = _seconds(folded.history[-1]["at"])
         add(now)
         due = [] if folded.status != states.OPEN else [
-            _key(one) for one in steps.of(folded, on_closed=_never, seen=logged(folded))
+            _key(one) for one in steps.of(folded, on_closed=_never,
+                                          seen={**logged(folded), **settings_read})
             if one.state in _DUE]
         since = now
     if ended_at is not None:
@@ -180,10 +186,12 @@ def lead_decisions(events: Iterable[dict]) -> int:
     return count
 
 
-def of(state: states.State, *, ended_at: str | None = None) -> dict:
+def of(state: states.State, *, ended_at: str | None = None,
+       ratify: str | None = None) -> dict:
     """The numbers of the round `state` is of, as data. `ended_at` is the time of the
     event that ends the round, which the last stretch of `step_time_s` runs to; left
-    out, the time stops at the log's last event."""
+    out, the time stops at the log's last event. `ratify` is the project's setting, as
+    `step_time_s` takes it."""
     history = list(state.history)
     verdicts = [one for one in states.with_rereads(state)
                 if one.get("type") == "verdict.recorded"]
@@ -202,7 +210,7 @@ def of(state: states.State, *, ended_at: str | None = None) -> dict:
         "folds": len(frozen),
         "records_only_folds": sum(bool(one.get("records_only")) for one in frozen),
         "lead_decisions": lead_decisions(history),
-        "step_time_s": step_time_s(history, ended_at=ended_at),
+        "step_time_s": step_time_s(history, ended_at=ended_at, ratify=ratify),
         "findings": {name: severity[name] for name in report_block.SEVERITIES},
         "rechecks": sum(one.get("pass") == report_block.RECHECK for one in verdicts),
         "drift_rechecks": sum(one.get("pass") == report_block.DRIFT for one in verdicts),

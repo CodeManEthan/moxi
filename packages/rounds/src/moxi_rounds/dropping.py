@@ -54,8 +54,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import (builds, checking, ending, folders, index, log, moving, open_builds, pointers,
-               questions, removal, sweeping, waits, write)
+from . import (builds, checking, closing, ending, folders, index, log, moving, open_builds,
+               pointers, questions, removal, sweeping, waits, write)
 from . import numbers as counted
 from . import settings as own
 from . import state as states
@@ -226,7 +226,8 @@ def drop(name: str, *, by: str, record: str | None, run_by: str,
         entries.append(write.Entry("round.dropped", {
             "by": by, "record": record,
             "tips": [_tip(one) for one in builds.builds(view.state) if one.ended is None],
-            "questions": went, "numbers": counted.of(view.state, ended_at=when)},
+            "questions": went, "numbers": counted.of(
+                view.state, ended_at=when, ratify=closing.ratify_of(settings, name))},
             at=when))
         return entries
 
