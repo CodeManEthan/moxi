@@ -5,6 +5,7 @@ agents to read beside the logs.
                                            skips that stand, its design's newest
                                            version and standing, the lead's
                                            decisions on threads, its stages, its
+                                           builds with their state, its
                                            questions by state, its rulings, the
                                            verdicts of its design and its history
     <rounds folder>/rulings.md             the project's register: its standing rulings
@@ -326,9 +327,26 @@ def _history(shown_as: dict) -> list[str]:
     return lines
 
 
+def _builds(shown_as: dict) -> list[str]:
+    # A build's folders and host are this machine's, and a file names no machine.
+    listed = shown_as["builds"]
+    if not listed:
+        return ["No build."]
+    lines = []
+    for one in listed:
+        lines += _item(showing.build_line(one))
+        said = [f"commissioned: {one['at']}"]
+        if one["record"] is not None:
+            said.append(f"go: {one['record']}")
+        for line in said:
+            lines += _item(line, indent="  ")
+    return lines
+
+
 #: The parts of a round's note, in the order they are written.
 PARTS: tuple[Part, ...] = (
     Part("Flow", _flow),
+    Part("Builds", _builds),
     Part("Questions", _questions),
     Part("Rulings", _rulings),
     Part("Verdicts", _verdicts),

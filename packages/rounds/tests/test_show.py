@@ -82,6 +82,8 @@ folder: {rounds / "b-round"}
 step: commission, not-built
 close waits for: a finished stage, which this version does not build, so the round does not close in it
 
+builds: 0
+
 questions: none
 
 rulings: none
@@ -96,7 +98,7 @@ history: 1 event
                            "ended", "description", "parent", "inherits", "flow",
                            "steps", "step", "close", "skips",
                            "stages", "versions", "standing", "trace", "threads",
-                           "register_unreadable", "questions",
+                           "register_unreadable", "builds", "questions",
                            "rulings", "verdicts", "history"]
     assert {key: found[key] for key in list(found)[:21]} == {
         "name": B, "project": "proj-a", "slug": "b-round",
@@ -121,10 +123,10 @@ def test_the_step_the_round_is_at_is_shown_with_what_it_waits_for(rounds, capsys
     held = {"reason": f"Q1 holds B1: {SAID}",
             "fix": f"moxi rounds rule {A} Q1 --text TEXT --record PTR"}
     assert data(capsys)["step"] == {
-        "step": "commission", "stage": "B1", "state": "not-built", "waits": [held],
+        "step": "commission", "stage": "B1", "state": "waiting", "waits": [held],
         "questions": []}
     assert printed(capsys, A).splitlines()[3:6] == [
-        "step: commission of B1, not-built", f"  waits for: {held['reason']}",
+        "step: commission of B1, waiting", f"  waits for: {held['reason']}",
         f"    fix: {held['fix']}"]
 
 

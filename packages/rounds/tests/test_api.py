@@ -146,7 +146,7 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
     assert listing["rounds"][0] == {
         "name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
         "status": "open", "flow": "fix",
-        "step": {"step": "commission", "stage": "B1", "state": "not-built"},
+        "step": {"step": "commission", "stage": "B1", "state": "waiting"},
         "counts": {"open": 1, "parked": 1, "not_shown": 3}, "standing": None,
         "ended": None}
     [ended] = api.rounds(status="closed")["rounds"]
@@ -170,12 +170,12 @@ def test_the_calls_hold_what_the_rounds_hold(rounds):
 
 def test_the_calls_say_what_step_a_round_is_at(rounds):
     assert [one["step"] for one in api.rounds()["rounds"]] == [
-        {"step": "commission", "stage": "B1", "state": "not-built"},
+        {"step": "commission", "stage": "B1", "state": "waiting"},
         {"step": "commission", "stage": None, "state": "not-built"},
         {"step": "commission", "stage": None, "state": "not-built"}]
     assert api.rounds(status="closed")["rounds"][0]["step"] is None
     at = api.round(A)["step"]
-    assert (at["step"], at["stage"], at["state"]) == ("commission", "B1", "not-built")
+    assert (at["step"], at["stage"], at["state"]) == ("commission", "B1", "waiting")
 
 
 def test_a_line_the_index_has_not_seen_is_in_what_every_call_gives(rounds, capsys):

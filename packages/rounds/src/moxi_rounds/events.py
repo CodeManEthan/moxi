@@ -122,10 +122,11 @@ TYPES = _types(
     # to where he was shown them.
     EventType("ruling.shown", ("ids", "record"), required=("ids", "record")),
     # A build began: its stage, repo, branch, the commit it was cut from, the branch it
-    # is headed for, its worktree and scratch folder, its builder, and the go pointer.
+    # is headed for, its worktree and scratch folder, its builder, the go pointer, the
+    # machine that made its folders (`host`) and the id their markers carry (`build`).
     EventType("build.commissioned",
               ("stage", "repo", "branch", "base", "target", "worktree", "scratch",
-               "builder", "record")),
+               "builder", "record", "host", "build")),
     # A command ran for a build: the step it ran as, the commit, that commit's merge-base
     # with the target, the argv, and how it went.
     EventType("check.ran",

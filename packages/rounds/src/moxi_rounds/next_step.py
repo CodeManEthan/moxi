@@ -18,7 +18,8 @@ What is read is one dict (`read`), printed as lines (`as_text`) or as JSON
   re-check compares, and `instead`, what is done in place of a pass.
 - `close`: for an open round, `waits`, what its close waits for (`closing.waits`). It
   is printed for a round at no step, where nothing else says why it is still open.
-- `warnings`: what the lead should know and no step waits for.
+- `warnings`: what the lead should know beside the steps: a ruling that holds a stage
+  until the design has a row for it is said here as well as in that stage's wait.
 
 A step with no row in `steps.ROWS` is printed as not built in this version, with the
 holds on its stage. **A later step's lines** are a row of `LINES`: the step's name ->
@@ -127,10 +128,16 @@ def _docket(found: showing.Shown, step: steps.Step) -> dict:
                      for question_id in step.questions]}
 
 
+def _commission(found: showing.Shown, step: steps.Step) -> dict:
+    return {"then": [f"moxi rounds commission {found.name} {step.stage} "
+                     "--builder NAME"]}
+
+
 #: Each step's own lines: the step's name -> what gives the group's `reads`, `write`
 #: and `then`, and any key of its own.
 LINES: dict[str, Callable[[showing.Shown, steps.Step], dict]] = {
-    steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket}
+    steps.DESIGN: _design, steps.VERIFIES: _verify_design, steps.QUESTIONS: _docket,
+    steps.COMMISSION: _commission}
 
 
 def _waits(step: steps.Step) -> list[dict]:
@@ -160,8 +167,10 @@ def _group(found: showing.Shown, step: steps.Step, models) -> dict:
 
 
 def _groups(found: showing.Shown, models) -> list[dict]:
-    every = steps.of(found.state, name=found.name, closed=found.closed)
-    at = steps.current(found.state, name=found.name, closed=found.closed)
+    every = steps.of(found.state, name=found.name, closed=found.closed,
+                     register=found.register)
+    at = steps.current(found.state, name=found.name, closed=found.closed,
+                       register=found.register)
     if at is None:
         return []
     groups = [_group(found, at, models)]
@@ -217,7 +226,7 @@ def _warnings(found: showing.Shown) -> list[dict]:
     for stage in stages.in_plan(state):
         if stages.build_of(state, stage.id) is not None:
             continue
-        for one in tracing.holding(state, stage.id):
+        for one in tracing.holding(state, stage.id, found.register):
             warnings.append(_warning(
                 HOLDS_STAGE, f"{one.id} holds {stage.id} until a version of the "
                              f"design has a row for it: {one.text}",

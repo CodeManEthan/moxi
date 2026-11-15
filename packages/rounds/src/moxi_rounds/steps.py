@@ -40,13 +40,20 @@ other, so its row says when the stage reads as skipped.
   questions in `Step.questions`; done when none does. Asked of one stage, it reads the
   questions that hold that stage: skipped where a skip for the stage stands and nothing
   holds it.
+- `commission` of a stage: done once the stage has a build that is open or finished.
+  Until then it waits for a frozen design where the flow has a design step, a
+  verified one where it verifies the design (each step skipped counts as done), no
+  question holding the stage, every stage in its `after` finished, and, where the
+  trace check was asked for, a row for every ruling that applies to the stage. Asked
+  with no stage, or of a stage that stands for a child round, it is not built.
 
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
-wait for. A stage's `commission` and `finish` carry these as their `waits` while their
-rows are not built, so a round whose flow has no questions step still shows the hold, on
+wait for. A stage's `commission` and `finish` carry these as their `waits` even where
+their rows are not built, so a round whose flow has no questions step still shows the hold, on
 the stage it stops.
 
-Nothing here reads a file, the config or git: a round's state is the whole input.
+Nothing here reads a file, the config or git: a round's state, with its project's
+for the standing rulings, is the whole input.
 Whether `design.md` still has the bytes that were frozen is not a step's state; a verb
 that needs the design as it was verified asks `versions.unchanged` beside this.
 """
@@ -92,11 +99,13 @@ class Asked:
     """What a row is asked about: `name`, the round's name, for the commands it
     prints; `stage`, for a step of one stage; `closed`, which answers whether a round,
     by name, is closed, for a question parked until one is (`questions.is_closed` when
-    None)."""
+    None); `register`, the state of the project's log, for the standing rulings a
+    stage's trace rows owe (with None, only the round's own rulings are read)."""
 
     name: str = "ROUND"
     stage: str | None = None
     closed: Callable[[str], bool] | None = None
+    register: states.State | None = None
 
 
 @dataclass(frozen=True)
@@ -178,9 +187,45 @@ def _docket(state: states.State, about: Asked) -> Step:
     return Step(QUESTIONS, READY if asked else DONE, questions=asked)
 
 
+COMMISSION = "commission"
+
+
+def _commission(state: states.State, about: Asked) -> Step:
+    stage = None if about.stage is None else stages.find(state, about.stage)
+    if stage is None or stage.round is not None:
+        # The step with no stage is the form that declares one as it commissions it,
+        # and a stage that stands for a child round has no build: neither is built.
+        return Step(COMMISSION, NOT_BUILT, stage=about.stage,
+                    waits=() if stage is None else held_by(
+                        state, stage.id, name=about.name, closed=about.closed))
+    if stages.build_of(state, stage.id) is not None:
+        return Step(COMMISSION, DONE, stage=stage.id)
+    name = about.name
+    waits: list[Unmet] = []
+    if not is_settled(state, DESIGN, closed=about.closed):
+        waits.append(Unmet("no version of the design is frozen",
+                           f"moxi rounds fold {name}"))
+    if not is_settled(state, VERIFIES, closed=about.closed):
+        word = versions.standing(state).word
+        waits.append(Unmet(f"the design is not verified: it stands at {word}",
+                           f"moxi rounds next {name}"))
+    waits += held_by(state, stage.id, name=name, closed=about.closed)
+    waits += [Unmet(f"{stage.id} waits for {other}, which is not finished",
+                    f"moxi rounds next {name}")
+              for other in stages.waits_for(state, stage.id)]
+    fold = f"moxi rounds fold {name}"
+    waits += [Unmet(f"{one.id} holds {stage.id} until a version of the design has a "
+                    f"row for it: {one.text}",
+                    f"give {versions.DESIGN_FILE} a row for {one.id}, then {fold}")
+              for one in tracing.holding(state, stage.id, about.register)]
+    return Step(COMMISSION, WAITING if waits else READY, stage=stage.id,
+                waits=tuple(waits))
+
+
 #: The function that says each step's state. A step with no row reads `NOT_BUILT`,
 #: and a skipped step is read before its row is asked.
-ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket}
+ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
+                        COMMISSION: _commission}
 
 
 # -- a hold on a stage -------------------------------------------------------------------
@@ -239,32 +284,34 @@ def _read(state: states.State, step: str, entry: Mapping | None, about: Asked) -
     return Step(step, NOT_BUILT, stage=about.stage, waits=waits, entry=entry)
 
 
-def _each(state: states.State, name: str,
-          closed: Callable[[str], bool] | None) -> Iterator[Step]:
+def _each(state: states.State, name: str, closed: Callable[[str], bool] | None,
+          register: states.State | None) -> Iterator[Step]:
     planned = [stage.id for stage in stages.in_plan(state)]
     for step, entry in order(state.steps):
         of_stages = planned if _is_of_a_stage(step) and planned else [None]
         for stage in of_stages:
-            yield _read(state, step, entry, Asked(name, stage, closed))
+            yield _read(state, step, entry, Asked(name, stage, closed, register))
 
 
 def of(state: states.State, *, name: str = "ROUND",
-       closed: Callable[[str], bool] | None = None) -> tuple[Step, ...]:
+       closed: Callable[[str], bool] | None = None,
+       register: states.State | None = None) -> tuple[Step, ...]:
     """Every step of the round `state` is of, in order, each with its state. `name`
-    is the round's name, for the commands a wait prints, and `closed` answers whether
-    a round, by name, is closed (`questions.is_closed` when left out)."""
-    return tuple(_each(state, name, closed))
+    is the round's name, for the commands a wait prints, `closed` answers whether
+    a round, by name, is closed (`questions.is_closed` when left out), and `register`
+    is the state of the project's log (see `Asked`)."""
+    return tuple(_each(state, name, closed, register))
 
 
 def one(state: states.State, step: str, stage: str | None = None, *,
-        name: str = "ROUND",
-        closed: Callable[[str], bool] | None = None) -> Step | None:
+        name: str = "ROUND", closed: Callable[[str], bool] | None = None,
+        register: states.State | None = None) -> Step | None:
     """The step `step` of the round, for the stage `stage` when it is a step of one
     stage; None when the round's flow has no such step. The questions step asked of
     a stage reads the questions that hold that stage."""
     for found, entry in order(state.steps):
         if found == step:
-            return _read(state, step, entry, Asked(name, stage, closed))
+            return _read(state, step, entry, Asked(name, stage, closed, register))
     return None
 
 
@@ -277,12 +324,14 @@ def is_settled(state: states.State, step: str, stage: str | None = None, *,
 
 
 def current(state: states.State, *, name: str = "ROUND",
-            closed: Callable[[str], bool] | None = None) -> Step | None:
+            closed: Callable[[str], bool] | None = None,
+            register: states.State | None = None) -> Step | None:
     """The step the round is at: the first, in order, that is neither done nor
     skipped. None when every step is, and for a round that has ended."""
     if state.status != states.OPEN:
         return None
-    return next((step for step in _each(state, name, closed) if not step.settled), None)
+    return next((step for step in _each(state, name, closed, register)
+                 if not step.settled), None)
 
 
 # -- what the index keeps ----------------------------------------------------------------
@@ -322,5 +371,5 @@ def said(step: Mapping | None) -> str:
 
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
-           "SETTLED", "HELD", "Asked", "Step", "Row", "ROWS", "answer", "held_by", "order", "of",
+           "SETTLED", "HELD", "COMMISSION", "Asked", "Step", "Row", "ROWS", "answer", "held_by", "order", "of",
            "one", "is_settled", "current", "at", "said"]

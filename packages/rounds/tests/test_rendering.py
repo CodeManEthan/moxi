@@ -105,6 +105,10 @@ fix: {steps(B)}
 - step: commission, not-built
 - close waits for: a finished stage, which this version does not build, so the round does not close in it
 
+## Builds
+
+No build.
+
 ## Questions
 
 No question.
@@ -163,6 +167,10 @@ fix: {steps()}
 
 - step: commission, not-built
 - close waits for: a finished stage, which this version does not build, so the round does not close in it
+
+## Builds
+
+No build.
 
 ## Questions
 
@@ -278,7 +286,7 @@ def test_a_note_lists_what_showing_the_round_gives(rounds, capsys):
         assert f"- {one['id']}: {one['text']}" in text
         assert f"  {one['id']}: {one['text']}" in printed
     assert [part.title for part in rendering.PARTS] == [
-        "Flow", "Questions", "Rulings", "Verdicts", "History"]
+        "Flow", "Builds", "Questions", "Rulings", "Verdicts", "History"]
     headings = [line[3:] for line in text.splitlines() if line.startswith("## ")]
     assert headings == [part.title for part in rendering.PARTS]
 

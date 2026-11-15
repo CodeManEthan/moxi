@@ -38,6 +38,10 @@ does not yet build.
 - The trace check, for a project that sets `trace`: a design carries a row for every
   ruling it follows and every commitment it makes, checked when the version is frozen.
   `open --inherits` names the standing rulings a round starts from.
+- `commission` builds a stage once its step waits for nothing: the branch cut from the
+  target, its worktree and scratch folder each with a marker, the build recorded with
+  its id and host; a rerun keeps only its own stopped run's worktree. `show`, the round
+  note and `list --waiting` give each build with its state read from git.
 - `next` says the step a round is at, who does it and at which tier, what they read,
   the command that completes it and what it waits for; `next --schema` prints the empty
   data block of a report.

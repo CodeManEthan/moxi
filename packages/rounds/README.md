@@ -84,6 +84,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND B<n> --after B<m>[,...]` | make a stage wait for more stages |
 | `moxi rounds mark ROUND thread:NAME --close\|--accept-risk --record PTR` | the lead's decision on a design that was sent back twice in a row |
 | `moxi rounds mark ROUND\|PROJECT C<n>\|S<n>[,...] --shown --record PTR` | say that rulings were shown to the operator as recorded |
+| `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, and record the build; `--existing` builds on a branch that is there |
 | `moxi rounds show ROUND [--json]` | one round: status, flow, the step it is at, what its close waits for, its design and stages, questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, rulings not yet shown |

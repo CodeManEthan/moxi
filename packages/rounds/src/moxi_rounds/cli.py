@@ -3,6 +3,8 @@
     moxi rounds open ROUND --description TEXT [--flow NAME] [--record PTR] [--as NAME]
     moxi rounds fold ROUND [--records-only --record PTR] [--as NAME]
     moxi rounds verdict ROUND REPORT.md [--as NAME]
+    moxi rounds commission ROUND STAGE --builder NAME [--record PTR] [--existing]
+                           [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
     moxi rounds ask ROUND|PROJECT ID [--option K=TEXT]... [--retire K]... [--as NAME]
@@ -75,6 +77,16 @@ design is frozen again. One full pass reads a design; a second report of a full 
 is recorded with the flag `extra-full-pass`. A report whose model is in a weaker tier
 of the `models` setting than its pass is held to is recorded with the flag
 `model-below-tier`.
+`commission` authorizes the build of a stage of the plan once its step waits for
+nothing: it reads the target (the repo's `into` setting, else the branch checked out
+at the project's root) and takes the target's head as the build's base, cuts the
+stage's branch from it and adds its worktree under `worktree_dir` as
+`<repo>/<branch>`, makes its scratch folder in rounds' cache directory, writes a
+marker naming the build in each, and records the build. A `/` or `%` in a branch is
+written `%2F` or `%25` in a path. `--existing` builds on a branch that is there, and
+is refused when it shares commits with another open build. A commission stopped before
+it recorded the build is run again: it keeps the worktree whose marker names its own
+stopped run, and refuses any other folder at either place, naming it.
 `mark ROUND thread:NAME --close` or `--accept-risk`, with `--record` naming where the
 lead wrote why, is the lead's decision on a thread of the design's verification, made
 once the last two verdicts each sent the design back and it was frozen since: no
@@ -822,6 +834,48 @@ def _verdict(args, out) -> int:
     return codes.OK
 
 
+# -- commission --------------------------------------------------------------------------
+
+def _declare_commission(verbs) -> None:
+    said = ("Commission a stage of the round's plan: cut its branch from the target, "
+            "add its worktree and make its scratch folder, each with a marker naming "
+            "the build, and record the build.")
+    parser = verbs.add_parser("commission", help=said, description=said)
+    parser.add_argument("round", metavar="ROUND",
+                        help="the round's name, <project>/<slug>")
+    parser.add_argument("stage", metavar="STAGE", help="the stage to build, B<n>")
+    parser.add_argument("--builder", metavar="NAME", required=True,
+                        help="who builds it")
+    parser.add_argument("--record", metavar="PTR",
+                        help="a pointer to where the operator gave the go, when he did")
+    parser.add_argument("--existing", action="store_true",
+                        help="build on the stage's branch that is already there, in "
+                             "place of cutting it; refused when it shares commits with "
+                             "another open build")
+    _writes(parser)
+
+
+def _commission(args, out) -> int:
+    from . import commissioning
+
+    made = commissioning.commission(args.round, args.stage, builder=args.builder,
+                                    actor=_actor(args), record=args.record,
+                                    existing=args.existing)
+    print(f"commissioned {made.name} {made.stage}   builder {made.builder}", file=out)
+    print(f"repo {made.repo}   branch {made.branch}   base {made.base[:7]}   "
+          f"target {made.target}", file=out)
+    print(f"worktree {made.worktree}", file=out)
+    print(f"scratch  {made.scratch}", file=out)
+    print("         (logs and probes only: removed when the build ends)", file=out)
+    print(f"build {made.build}   host {made.host}", file=out)
+    if made.adopted:
+        print("kept: the worktree a stopped run of this commission left", file=out)
+    if made.record is not None:
+        print(f"go: {made.record}", file=out)
+    _warn_of(made.failed, args.prog, args.verb)
+    return codes.OK
+
+
 # -- drop --------------------------------------------------------------------------------
 
 def _declare_drop(verbs) -> None:
@@ -1005,7 +1059,7 @@ def _list_questions(args, out) -> int:
 
 #: The function that declares each verb's arguments, in the order `--help` lists them.
 _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict,
-                                  _declare_ask,
+                                  _declare_commission, _declare_ask,
                                   _declare_rule,
                                   _declare_mark, _declare_drop, _declare_next,
                                   _declare_show,
@@ -1013,7 +1067,7 @@ _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
 _VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict,
-                               "ask": _ask, "rule": _rule,
+                               "commission": _commission, "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "next": _next,
                                "show": _show,
                                "list": _list}

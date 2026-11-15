@@ -296,7 +296,7 @@ def test_the_round_is_at_the_questions_step_once_its_design_is_verified(folder):
     verdict(folder, "publishable")
     assert at(folder) == ("docket", None, steps.READY)
     rule("Q1", text="They do.")
-    assert at(folder) == ("commission", "B1", steps.NOT_BUILT)
+    assert at(folder) == ("commission", "B1", steps.READY)
 
 
 # -- a skip ------------------------------------------------------------------------------
@@ -376,10 +376,10 @@ def test_a_skip_of_the_questions_step_lets_its_stage_past_for_everything_that_as
     rule("skip:docket:B1")
     found = folded(folder)
     assert steps.held_by(found, "B1", name=ROUND) == ()
-    assert steps.one(found, "commission", "B1").waits == ()
+    assert holds(steps.one(found, "commission", "B1")) == []
     assert steps.one(found, "finish", "B1").waits == ()
-    assert len(steps.one(found, "commission", "B2").waits) == 1
-    assert not any(one.waits for one in steps.of(found) if one.stage == "B1")
+    assert len(holds(steps.one(found, "commission", "B2"))) == 1
+    assert not any(holds(one) for one in steps.of(found) if one.stage == "B1")
     if flow == "full":
         assert steps.one(found, "docket", "B1").state == steps.SKIPPED
         assert steps.one(found, "docket", "B2").questions == ("Q1",)
@@ -401,8 +401,7 @@ def test_a_question_asked_after_the_skip_holds_the_stage_again(folder):
     later = ask("B1")
     found = step(folder, "docket", "B1")
     assert (found.state, found.questions) == (steps.READY, (later,))
-    assert [one.reason for one in step(folder, "commission", "B1").waits] == [
-        f"{later} holds B1: {ASKED}"]
+    assert holds(step(folder, "commission", "B1")) == [f"{later} holds B1: {ASKED}"]
 
 
 def test_a_stage_no_question_holds_and_no_skip_names_is_done_with_its_questions(folder):
@@ -412,11 +411,17 @@ def test_a_stage_no_question_holds_and_no_skip_names_is_done_with_its_questions(
 
 # -- a flow with no questions step -------------------------------------------------------
 
+def holds(found) -> list[str]:
+    """What a step waits for that is a question holding its stage."""
+    return [one.reason for one in found.waits if " holds B" in one.reason
+            and one.reason.startswith("Q")]
+
+
 def test_a_flow_with_no_questions_step_shows_the_hold_on_the_stage_it_stops(opened):
     folder = opened("small")
     fold(folder, question("Q1", blocks='["B1"]'), stage("B1"))
     found = steps.current(folded(folder), name=ROUND)
-    assert (found.step, found.stage, found.state) == ("commission", "B1", steps.NOT_BUILT)
+    assert (found.step, found.stage, found.state) == ("commission", "B1", steps.WAITING)
     assert [(one.reason, one.fix) for one in found.waits] == [
         (f"Q1 holds B1: {ASKED}", f"moxi rounds rule {ROUND} Q1 --text TEXT --record PTR")]
     assert [(one.step, bool(one.waits)) for one in steps.of(folded(folder))
@@ -429,8 +434,8 @@ def test_a_flow_with_no_questions_step_shows_the_hold_on_the_stage_it_stops(open
 
 # -- a step with no row ------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["commission", "build", "check", "verify-build",
-                                  "finish", "ratify", "retro"])
+@pytest.mark.parametrize("name", ["build", "check", "verify-build", "finish", "ratify",
+                                  "retro"])
 def test_a_step_with_no_row_is_not_built_and_never_read_as_done(folder, name):
     fold(folder, stage("B1"))
     found = step(folder, name, "B1" if name not in ("ratify", "retro") else None)

@@ -1,6 +1,7 @@
 """Reads of a repo's git, as the build states ask them.
 
 `Git(root)` runs plain git in the repo at `root` and answers one question per method:
+which branch is checked out at the root, whether a name is one git takes for a branch,
 which commit a branch is, which of some commits git still has, a commit's tree,
 parents and commit date, whether one commit is an ancestor of another, the merge bases
 of two, the one commit of several that has the others as ancestors, the merge that
@@ -84,6 +85,21 @@ class Git:
         """The commit the local branch `name` points at, or None when there is no such
         branch."""
         return self._commit(f"refs/heads/{name}")
+
+    def checked_out(self) -> str | None:
+        """The branch checked out at the root, or None when its head is detached."""
+        code, out = self._run("symbolic-ref", "--quiet", "HEAD", ok=(0, 1))
+        ref = out.strip()
+        if code != 0 or not ref.startswith("refs/heads/"):
+            return None
+        return ref[len("refs/heads/"):]
+
+    def is_branch_name(self, name: str) -> bool:
+        """Whether git takes `name` as the name of a branch."""
+        if not name or name.startswith("-"):
+            return False
+        code, _out = self._run("check-ref-format", "--branch", name, ok=(0, 1, 128))
+        return code == 0
 
     def _commit(self, ref: str) -> str | None:
         code, out = self._run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",

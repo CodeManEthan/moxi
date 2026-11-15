@@ -25,6 +25,10 @@ says so.
 
 A project is not shown: its rounds are listed.
 
+Its builds are shown each with what its commission recorded and, while it is open,
+its state as read from git now (`open_builds`): whether it is idle, the builds it
+shares commits with, or what kept it from being read.
+
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
 its key, what it reads from a `Shown`, and how that reads as lines. What a round is
 doing now, its current step, is in the head as `steps.current` gives it.
@@ -40,8 +44,8 @@ from pathlib import Path
 
 from moxi import store
 
-from . import (closing, folders, index, log, questions, shown, skips, steps, tracing,
-               versions)
+from . import (builds, closing, folders, index, log, open_builds, questions, shown, skips,
+               steps, tracing, versions)
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, NoLog, NoRound, Refused, Unmet, Unreadable
@@ -59,7 +63,8 @@ class Shown:
 
     A round whose log can't be read has its error in `unreadable` and no `state`. When
     only the project's log can't be read, `register` is None and its error is in
-    `register_unreadable`. `closed` answers whether a round, by name, is closed."""
+    `register_unreadable`. `closed` answers whether a round, by name, is closed, and
+    `settings` are rounds' settings, read when a build's state is (None: read then)."""
 
     name: str
     project: str
@@ -71,6 +76,7 @@ class Shown:
     unreadable: Unreadable | None = None
     register_unreadable: Unreadable | None = None
     closed: Callable[[str], bool] | None = None
+    settings: object = None
 
 
 def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
@@ -115,7 +121,8 @@ def show(name: str, *, settings=None, refresh: bool = True) -> Shown:
         register_unreadable = error
     return Shown(**found, state=state, register=register,
                  register_unreadable=register_unreadable,
-                 closed=lambda round_name: questions.is_closed(round_name, settings))
+                 closed=lambda round_name: questions.is_closed(round_name, settings),
+                 settings=settings)
 
 
 def _refreshed(home: folders.Home, slug: str) -> index.Summary:
@@ -324,7 +331,68 @@ def verdict_lines(listed: list) -> list[str]:
 
 
 #: The kinds of record a round is shown with, in the order they are shown.
+def _builds(found: Shown) -> list:
+    """Each build of the round in the order commissioned: what its commission
+    recorded, how it ended when it did, and for an open build its state as read from
+    git now, whether it is idle and the builds it shares commits with, or the problem
+    that kept it from being read."""
+    every = builds.builds(found.state)
+    if not every:
+        return []
+    events = {event["n"]: event for event in found.state.history}
+    read = open_builds.of_round(found.name, [one.repo for one in every if one.ended is None],
+                                settings=found.settings)
+    listed = []
+    for one in every:
+        event = events.get(one.n, {})
+        row = {"stage": one.stage, "repo": one.repo, "branch": one.branch,
+               "base": one.base, "target": one.target, "n": one.n,
+               **{key: event.get(key) for key in ("builder", "record", "worktree",
+                                                  "scratch", "host", "build", "at")},
+               "ended": one.ended, "state": one.ended, "by": None, "why": None,
+               "head": None, "idle": False, "shares": [], "problem": None}
+        now = read.get(one.stage) if one.ended is None else None
+        if now is not None and now.build.n == one.n:
+            data = now.data()
+            row.update({key: data[key] for key in ("state", "by", "why", "head", "idle",
+                                                   "shares", "problem")})
+        elif one.ended is None:
+            row["problem"] = {"reason": f"the repo {one.repo} could not be read",
+                              "fix": "moxi projects list"}
+        listed.append(row)
+    return listed
+
+
+def build_line(one: dict) -> str:
+    """A build in a line: `B1: proj-a on work, base 81c7f5b, target main, builder
+    coder; building, idle, shares with proj-a/b-round B2`."""
+    line = (f"{one['stage']}: {one['repo']} on {one['branch']}, base "
+            f"{(one['base'] or '')[:7]}, target {one['target']}, builder "
+            f"{one['builder']}; ")
+    if one["problem"] is not None:
+        return line + f"not read: {one['problem']['reason']}"
+    line += str(one["state"])
+    if one["idle"]:
+        line += ", idle"
+    if one["shares"]:
+        line += ", shares with " + ", ".join(f"{other['round']} {other['stage']}"
+                                             for other in one["shares"])
+    return line
+
+
+def _build_lines(listed: list) -> list[str]:
+    lines = [f"builds: {len(listed)}"]
+    for one in listed:
+        lines.append(f"  {build_line(one)}")
+        lines += [f"    {key}: {one[key]}" for key in ("worktree", "scratch")
+                  if one[key] is not None]
+        if one["record"] is not None:
+            lines.append(f"    go: {one['record']}")
+    return lines
+
+
 SECTIONS: tuple[Section, ...] = (
+    Section("builds", _builds, _build_lines),
     Section("questions", _questions, _question_lines),
     Section("rulings", _rulings, _ruling_lines),
     Section("verdicts", _verdicts, verdict_lines),
@@ -342,7 +410,8 @@ def _head(found: Shown) -> dict:
                                        "problem": error.problem, "reason": error.reason,
                                        "fix": error.fix}}
     state = found.state
-    at = steps.current(state, name=found.name, closed=found.closed)
+    at = steps.current(state, name=found.name, closed=found.closed,
+                       register=found.register)
     return {**head, "status": state.status, "ended": _ended(state),
             "description": state.description,
             "parent": state.parent, "inherits": list(state.inherits),
@@ -559,4 +628,4 @@ def as_text(found: Shown) -> str:
 
 
 __all__ = ["Shown", "Section", "SECTIONS", "show", "data", "as_json", "as_text",
-           "ended_line", "skip_line", "stage_line", "step_lines", "version_lines", "thread_line", "verdict_lines", "history_of"]
+           "ended_line", "skip_line", "stage_line", "build_line", "step_lines", "version_lines", "thread_line", "verdict_lines", "history_of"]

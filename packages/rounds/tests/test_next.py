@@ -200,8 +200,10 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
         f"then:  moxi rounds verdict {ROUND} <your report>",
         "waits: nothing",
         "",
-        f"round {ROUND}   flow full   stage B1   step commission   not built in this "
-        "version",
+        f"round {ROUND}   flow full   stage B1   step commission",
+        f"then:  moxi rounds commission {ROUND} B1 --builder NAME",
+        "waits: the design is not verified: it stands at none",
+        f"  fix: moxi rounds next {ROUND}",
         f"waits: Q1 holds B1: {ASKED}",
         f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR"]
     do(capsys, said(printed, "then:")[0],
@@ -242,10 +244,9 @@ def test_each_command_printed_completes_its_step_through_a_round_s_design(
     do(capsys, said(printed, "then:")[0], TEXT=SAID, PTR=PTR)
 
     printed = lines(capsys)
-    assert printed[0] == (
-        f"round {ROUND}   flow full   stage B1   step commission   not built in this "
-        "version")
-    assert said(printed, "waits:") == []
+    assert printed[:3] == [f"round {ROUND}   flow full   stage B1   step commission",
+                       f"then:  moxi rounds commission {ROUND} B1 --builder NAME",
+                       "waits: nothing"]
 
 
 def test_a_design_that_builds_nothing_ends_at_no_step(opened, capsys):
@@ -334,9 +335,12 @@ def test_a_flow_with_no_questions_step_prints_the_hold_on_each_stage(opened, cap
 
     head = f"round {ROUND}   flow small   stage"
     assert printed == [
-        f"{head} B1   step commission   not built in this version",
+        f"{head} B1   step commission",
+        f"then:  moxi rounds commission {ROUND} B1 --builder NAME",
+        "waits: nothing",
         "",
-        f"{head} B2   step commission   not built in this version",
+        f"{head} B2   step commission",
+        f"then:  moxi rounds commission {ROUND} B2 --builder NAME",
         f"waits: Q1 holds B2: {ASKED}",
         f"  fix: moxi rounds rule {ROUND} Q1 --text TEXT --record PTR"]
 
@@ -414,9 +418,11 @@ def test_a_step_that_waits_says_each_thing_the_lines_before_did_not(opened, caps
         said(printed, "waits:")[0], group(capsys)["why"]]
 
 
-def test_a_step_that_is_not_built_says_only_the_holds_on_its_stage(opened, capsys):
+def test_a_step_that_is_not_built_says_only_the_holds_on_its_stage(opened, capsys,
+                                                                   monkeypatch):
     folder = opened("small")
     fold(folder, stage("B1"))
+    monkeypatch.delitem(steps.ROWS, "commission")
 
     assert lines(capsys) == [
         f"round {ROUND}   flow small   stage B1   step commission   not built in this "
@@ -489,9 +495,12 @@ def test_the_data_holds_each_group_and_each_warning(opened, capsys):
              "questions": [], "waits": [], "pass": "re-check",
              "why": "the design changed since v1, the last version a pass read",
              "version": 2, "since": 1, "instead": [], "files": [first, second]},
-            {"step": "commission", "stage": "B1", "state": "not-built", "built": False,
+            {"step": "commission", "stage": "B1", "state": "waiting", "built": True,
              "by": None, "tier": None, "model": None, "reads": [], "write": None,
-             "then": [], "questions": [], "waits": []}],
+             "then": [f"moxi rounds commission {ROUND} B1 --builder NAME"],
+             "questions": [],
+             "waits": [{"reason": "the design is not verified: it stands at none",
+                        "fix": f"moxi rounds next {ROUND}"}]}],
         "close": {"waits": ["a finished stage, which this version does not build, so "
                             "the round does not close in it"]},
         "warnings": [

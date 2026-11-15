@@ -287,13 +287,45 @@ def unrowed(state: states.State, stage: str) -> tuple[states.Ruling, ...]:
                  and applies_to(one, stage))
 
 
-def holding(state: states.State, stage: str) -> tuple[states.Ruling, ...]:
+def holding(state: states.State, stage: str,
+            register: states.State | None = None) -> tuple[states.Ruling, ...]:
     """The rulings that hold up the stage `stage` until a version of the design cites
-    them: what `unrowed` gives, where the check was asked for when the current
-    version was frozen, and nothing where it was not. A ruling recorded after the
-    freezing is such a ruling, a replacement among them; a ruling that only changed a
-    record is never one, and a row gone stale holds up nothing."""
-    return unrowed(state, stage) if is_asked(state) else ()
+    them, where the check was asked for when the current version was frozen, and
+    nothing where it was not: each id of the trace set as it stands now that has no
+    row in the current version and applies to the stage. A round's ruling applies
+    when it names every stage or this one; a standing ruling when it has no scope or
+    its scope names the repo the stage builds in. So a ruling recorded after the
+    freezing holds, and so does one that replaced a ruling the round was opened with.
+    A ruling that only changed a record is never one, and a row gone stale holds up
+    nothing by itself.
+
+    `register` is the state of the project's log; with None, only the round's own
+    rulings are read."""
+    if not is_asked(state):
+        return ()
+    cited = {one["id"] for one in rows(state)}
+    found = []
+    for ruling_id in trace_set(state, register):
+        if ruling_id in cited:
+            continue
+        one = _find(state, register, ruling_id)
+        if one is None:
+            continue
+        if ruling_id.startswith(_STANDING):
+            if _scope_reaches(one, state, stage):
+                found.append(one)
+        elif applies_to(one, stage):
+            found.append(one)
+    return tuple(found)
+
+
+def _scope_reaches(one: states.Ruling, state: states.State, stage: str) -> bool:
+    """Whether the repos of the scope of `one`, a standing ruling, name the repo the
+    stage builds in: always, for a ruling with no scope."""
+    if not one.scope:
+        return True
+    repo = next((had.repo for had in state.stages if had.id == stage), None)
+    return repo is not None and any(part.get("repo") == repo for part in one.scope)
 
 
 # -- what is shown ------------------------------------------------------------------------
@@ -392,10 +424,7 @@ def _reaches(one: states.Ruling, state: states.State, stage: str) -> bool:
     """Whether the scope of `one`, a ruling that replaced a cited one, names `stage`."""
     if one.stages is not None:
         return applies_to(one, stage)
-    if not one.scope:
-        return True
-    repo = next((had.repo for had in state.stages if had.id == stage), None)
-    return repo is not None and any(part.get("repo") == repo for part in one.scope)
+    return _scope_reaches(one, state, stage)
 
 
 __all__ = ["Stale", "Result", "Given", "NOT_ASKED", "trace_set", "rows", "check",

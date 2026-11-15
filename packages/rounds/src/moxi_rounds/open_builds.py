@@ -160,4 +160,18 @@ def _group(members: list[tuple[index.Summary, builds.Build]],
             for name, found in done.items()}
 
 
-__all__ = ["OpenBuild", "OpenBuilds", "read"]
+def of_round(name: str, repos, *, settings=None) -> dict[str, OpenBuild]:
+    """The open builds of the round `name` by stage, read as `read` reads every open
+    build of each repo of `repos` (so sharing is read against every round). A repo that
+    can't be read at all gives no build here; the caller says so."""
+    found: dict[str, OpenBuild] = {}
+    for repo in dict.fromkeys(repos):
+        try:
+            listed = read(repo, settings=settings)
+        except RoundsError:
+            continue
+        found.update({one.build.stage: one for one in listed.builds if one.round == name})
+    return found
+
+
+__all__ = ["OpenBuild", "OpenBuilds", "read", "of_round"]

@@ -13,8 +13,9 @@ log can't be read is listed as unreadable, in either listing,
 since nothing says which it belongs in.
 
 **What waits on the operator** (`waiting`): across every project, or in one, each open
-question, each parked question with what it waits for, and each project's rulings not
-yet shown to him. The question rows are the ones a project's questions export holds,
+question, each parked question with what it waits for, each project's rulings not
+yet shown to him, and each open build of its rounds that is idle, gone, empty or
+unclear, that shares commits with another, or that git could not read. The question rows are the ones a project's questions export holds,
 from the same function, so the two never differ.
 
 **A later kind of record** joins a listing in one place. A count of the rounds listing
@@ -24,6 +25,7 @@ what one project gives, how the rows read as data, and how they read as lines.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
@@ -32,7 +34,7 @@ from datetime import datetime
 
 from moxi import store
 
-from . import export, folders, index, log, questions, shown, steps
+from . import builds, export, folders, index, log, open_builds, questions, shown, steps
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, Refused, RoundsError, Unmet, Unreadable
@@ -51,6 +53,7 @@ class Project:
     back: shown.ReadBack | None = None
     unreadable: Unreadable | None = None
     settings: object = None
+    builds: tuple = ()
 
 
 # -- the rounds --------------------------------------------------------------------------
@@ -295,6 +298,41 @@ def _list_lines(lists: Sequence, now: str) -> list[str]:
     return lines
 
 
+def _builds_to_look_at(project: Project) -> Sequence:
+    return project.builds
+
+
+def _builds_data(listed: Sequence) -> list:
+    return [one.data() for one in listed]
+
+
+def _build_lines(listed: Sequence, now: str) -> list[str]:
+    lines = []
+    for one in listed:
+        said = one.data()
+        if one.problem is not None:
+            what = f"not read: {one.problem.reason}"
+        else:
+            what = [said["state"]] + (["idle"] if one.idle else [])
+            what = ", ".join(what)
+            if one.shares:
+                what += ", shares with " + ", ".join(f"{name} {stage}"
+                                                     for name, stage in one.shares)
+        lines.append(f"  {one.round} {one.build.stage}: {one.build.repo} on "
+                     f"{one.build.branch}; {what}")
+    return lines
+
+
+#: The states of an open build that a person looks at: what is there may not be
+#: what the build was for.
+LOOK_AT = (builds.GONE, builds.EMPTY, builds.UNCLEAR)
+
+
+def _to_look_at(one) -> bool:
+    return (one.problem is not None or one.idle or bool(one.shares)
+            or one.status.state in LOOK_AT)
+
+
 #: The kinds of row that wait on the operator, in the order they are listed. The two
 #: kinds of question are the rows a project's questions export holds.
 WAITING: tuple[Kind, ...] = (
@@ -302,7 +340,9 @@ WAITING: tuple[Kind, ...] = (
          _question_lines),
     Kind("parked", "parked questions, not put to him", _questions_in(questions.PARKED),
          _entries_data, _question_lines),
-    Kind("not_shown", "rulings not yet shown to him", _lists, _lists_data, _list_lines))
+    Kind("not_shown", "rulings not yet shown to him", _lists, _lists_data, _list_lines),
+    Kind("builds", "builds idle, gone, empty, unclear, sharing or not read",
+         _builds_to_look_at, _builds_data, _build_lines))
 
 
 @dataclass(frozen=True)
@@ -339,6 +379,11 @@ def waiting(project: str | None = None, *, settings=None,
     now = log.stamp() if now is None else now
     found, no_folder = _projects(project, settings, now, refresh=refresh)
     readable = [one for one in found if one.unreadable is None]
+    looked = open_builds.read(settings=settings, now=now)
+    readable = [dataclasses.replace(one, builds=tuple(
+        build for build in looked.builds
+        if build.round.partition("/")[0] == one.home.project and _to_look_at(build)))
+        for one in readable]
     unreadable = [one.unreadable.reason for one in found if one.unreadable is not None]
     for one in readable:
         unreadable += [error.reason

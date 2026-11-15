@@ -93,7 +93,7 @@ def test_the_open_rounds_of_every_project_are_listed_with_flow_and_counts(
     ask(C, at=T2)
 
     assert printed(capsys) == (
-        f"{A}   open   flow fix   step commission of B1, not-built   "
+        f"{A}   open   flow fix   step commission of B1, waiting   "
         "open questions: 2   parked: 1   "
         "rulings not shown: 2\n"
         f"{B}   open   flow fix   step commission, not-built   "
@@ -116,7 +116,7 @@ def test_the_rounds_as_data_are_the_rounds_as_lines(rounds, capsys):
     assert found["rounds"] == [
         {"name": A, "project": "proj-a", "folder": str(rounds / "a-round"),
          "status": "open", "flow": "fix",
-         "step": {"step": "commission", "stage": "B1", "state": "not-built"},
+         "step": {"step": "commission", "stage": "B1", "state": "waiting"},
          "counts": {"open": 1, "parked": 0, "not_shown": 1}, "standing": None,
          "ended": None},
         {"name": B, "project": "proj-a", "folder": str(rounds / "b-round"),
@@ -277,7 +277,7 @@ def test_a_project_whose_own_log_cant_be_read_is_named_and_its_counts_not_known(
 
     out = printed(capsys)
     assert out.splitlines()[0] == (
-        f"{A}   open   flow fix   step commission of B1, not-built   "
+        f"{A}   open   flow fix   step commission of B1, waiting   "
         "open questions: 1   parked: 0   "
         "rulings not shown: not known")
     assert "logs that can't be read, whose records are not listed:" in out
@@ -344,6 +344,9 @@ proj-a readback={T5} --record PTR
   proj-b, not yet shown, through {T3}; once he has read them: moxi rounds rule \
 proj-b readback={T3} --record PTR
     proj-b S1: {RULED} (record: https://example.test/said)
+
+builds idle, gone, empty, unclear, sharing or not read:
+  none
 """
 
 
@@ -353,7 +356,7 @@ def test_what_waits_as_data_holds_the_same_rows(rounds, capsys):
     found = data(capsys, "--waiting")
 
     assert list(found) == ["computed", "project", "open", "parked", "not_shown",
-                           "unreadable", "no_folder"]
+                           "builds", "unreadable", "no_folder"]
     assert found["computed"] == NOW and found["project"] is None
     assert [(one["holder"], one["id"]) for one in found["open"]] == [
         ("proj-a", "P1"), (A, "Q1"), (C, "Q1")]
@@ -437,6 +440,9 @@ parked questions, not put to him:
   none
 
 rulings not yet shown to him:
+  none
+
+builds idle, gone, empty, unclear, sharing or not read:
   none
 """
     found = data(capsys, "--waiting")
