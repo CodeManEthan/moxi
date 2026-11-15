@@ -141,6 +141,8 @@ def test_each_key_carries_its_value_as_json_and_whether_it_is_not_the_default():
     keys = _by_name(settings.descriptor("demo", item) for item in EIGHT)
     assert {name: json.loads(key["json"]) for name, key in keys.items()} == {
         item["name"]: item["value"] for item in EIGHT}
+    assert {name: json.loads(key["default_json"]) for name, key in keys.items()} == {
+        item["name"]: item["default"] for item in EIGHT}
     assert {name for name, key in keys.items() if key["changed"]} == {
         "on", "count", "ratio", "name", "dir", "mode", "tags", "extra"}
     same = [_key("on", "bool", value=False, default=False), _key("count", "int", 1, 1),
@@ -160,6 +162,8 @@ def test_each_key_carries_its_value_as_json_and_whether_it_is_not_the_default():
     rows = [{"name": "claude", "skills": ""}, {"name": "codex", "skills": "/s"}]
     assert json.loads(settings.descriptor("moxi", _key("harnesses", "list", rows, []))["json"]) \
         == rows
+    assert json.loads(settings.descriptor("moxi", _key("harnesses", "list", [], rows))[
+        "default_json"]) == rows
     # A value JSON can't hold reads null.
     assert settings.descriptor("demo", _key("ratio", "float", float("nan"), 1.0))["json"] == "null"
 

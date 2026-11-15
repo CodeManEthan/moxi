@@ -19,8 +19,8 @@ table), since a route's answer is cut to one declared type per field; the form s
 same spelling back. A switch table carries one toggle per entry, each named
 `<table key>.<entry>`. Each key also carries its page fields as `show --json` gives them
 (`label`, `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal`,
-`elsewhere`), its value as JSON text (`json`), and `changed`: true when the value is not
-the default (a switch table: when any entry is on).
+`elsewhere`), its value and its default as JSON text (`json`, `default_json`), and
+`changed`: true when the value is not the default (a switch table: when any entry is on).
 
 The read answers `listed`, the core and every present module with settings, from the
 module snapshot alone. A section adds `file`, the module's config file with the home
@@ -173,7 +173,8 @@ KEY_SHAPE = Out("table", items={
         "when": Out("string"), "says": Out("string"), "confirm": Out("string"),
         "stays": Out("bool")}),
     "terminal": Out("table", nullable=True, items={"on": Out("string"), "off": Out("string")}),
-    "elsewhere": _STRING, "json": Out("string"), "changed": Out("bool"),
+    "elsewhere": _STRING, "json": Out("string"), "default_json": Out("string"),
+    "changed": Out("bool"),
 })
 
 SECTION_SHAPE = Out("table", items={
@@ -472,6 +473,7 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
         "locked": is_locked(module, name, locked),
         **_page_fields(item),
         "json": _json_text(item.get("value")),
+        "default_json": _json_text(item.get("default")),
         "changed": is_changed(item, env=env),
     }
     if switch_table and item.get("declarations") == "unavailable":
