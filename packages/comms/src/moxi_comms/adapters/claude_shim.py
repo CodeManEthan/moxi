@@ -818,12 +818,21 @@ class ClaudeShim:
 
     def _on_close(self) -> None:
         with self._lock:
+            # A connection's reader marks it closed before it runs this, so an installed
+            # client that is still connected is not the one closing: this is a declined
+            # register's connection closing after a newer binding was installed, and that
+            # binding stays online. The claim is told under this lock too, as the install
+            # tells it `bound`, so a close that comes first cannot mark it offline after
+            # the install.
+            if self._client is not None and self._client.connected:
+                return
             was_online = not self.offline
             self.offline = True
             released = self.claims.state == claimfile.STANDBY
+            if not released:
+                self.claims.went_offline()
         if released:
             return                   # standby: the name went elsewhere; nothing to say
-        self.claims.went_offline()
         if was_online and not self._stop.is_set():
             # A close this shim made itself (`stop()`) is no outage.
             self._report("offline", OFFLINE_MESSAGE)

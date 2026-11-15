@@ -35,6 +35,12 @@
   reconnect or relaunch while newer mail went through. The shim now holds that mail
   until the new connection is in place, and injects it at the next idle tick or turn
   end.
+- A Claude session's comms shim no longer gives up its own name while it reconnects to
+  the daemon. When an attempt failed after connecting, that attempt's connection could
+  report its close after the next attempt had bound. The shim then said comms was
+  offline, tried to bind the name it already held, read the refusal as another session
+  holding it, and stayed offline for the rest of the session. A close from a connection
+  the shim has already replaced now changes nothing.
 
 ## 0.3.0 (2026-11-08)
 
