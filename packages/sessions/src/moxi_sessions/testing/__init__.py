@@ -12,12 +12,15 @@ No line a builder writes is cut from a real record.
   `spawn_meta` for a spawned thread's line 1.
 * `OpenCodeDb`: an OpenCode database with the columns OpenCode writes, written in one
   transaction.
+* `today_at`: a time for a record a test means to be today that stays on today's local
+  date in the first minutes after midnight.
 """
 
 from .claude import ClaudeRequest, ClaudeTranscript, usage
 from .codex import CodexRollout, rate_limits, spawn_meta, token_usage, write_imports
 from .opencode import OpenCodeDb
+from .today import today_at
 
 __all__ = ["ClaudeTranscript", "ClaudeRequest", "usage"]
 __all__ += ["CodexRollout", "token_usage", "rate_limits", "write_imports", "spawn_meta"]
-__all__ += ["OpenCodeDb"]
+__all__ += ["OpenCodeDb", "today_at"]

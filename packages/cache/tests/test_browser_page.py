@@ -147,10 +147,11 @@ def test_an_opened_row_has_its_times_to_the_second_and_copies_its_id(shell, ui_c
     warm = group(panel, "warm").locator("moxi-ui-row")
     warm.get_by_role("button", name="Open").click()
     det = warm.locator('[data-part="opened"]')
+    # Near midnight a time falls on the day before or after and carries its word.
     expect(det.locator('[data-line="Last request"]')).to_have_text(
-        re.compile(r"^Last request\s*\S*\d\d:\d\d:\d\d"))
+        re.compile(r"^Last request\s*(?:(?:yesterday|tomorrow) )?\d\d:\d\d:\d\d"))
     expect(det.locator('[data-line="Goes cold"]')).to_have_text(re.compile(
-        r"^Goes cold\s*\S*\d\d:\d\d:\d\d.* · in (49|50) minutes · one hour after the last request$"))
+        r"^Goes cold\s*(?:(?:yesterday|tomorrow) )?\d\d:\d\d:\d\d.* · in (49|50) minutes · one hour after the last request$"))
     # sessions holds no transcript for it: the harness alone, and no link
     expect(det.locator('[data-line="session"]')).to_have_text(re.compile(r"^Session\s*Claude Code$"))
     expect(det.get_by_role("link", name="Sessions")).to_have_count(0)

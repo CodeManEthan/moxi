@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `moxi_sessions.testing` has `today_at`, which times a record a test means to be today
+  so it stays on today's local date in the first minutes after midnight.
+
 ## 0.2.9 (2026-11-10)
 
 - A list row's `prompt` is the newest message in the whole session that the record marks

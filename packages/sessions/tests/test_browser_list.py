@@ -218,11 +218,11 @@ def test_a_row_with_a_typed_message_has_two_lines_and_one_without_has_one(seeded
     expect(two.locator(".where")).to_have_text("proj-a")
     expect(two.locator(".l2")).to_contain_text(re.compile(r"2 subagents\s*·.*You:\s*" + re.escape(PROMPT)))
     expect(two).to_have_attribute("said-by", "you")
-    expect(two).to_have_attribute("time", re.compile(r"^\d"))
+    expect(two).to_have_attribute("time", re.compile(r"^(?:yesterday )?\d"))
     expect(two.get_by_role("button", name="Open")).to_be_visible()
 
     one = row(view, "claude", sid(2))
-    expect(one.locator(".name")).to_have_text(re.compile(r"^proj-b · started today "))
+    expect(one.locator(".name")).to_have_text(re.compile(r"^proj-b · started (?:today|yesterday) "))
     expect(one.locator(".l2")).to_be_hidden()
     expect(one.locator('[slot="acts"]')).to_have_count(0)
     for absent in ("where", "lead", "time", "said-by", "rest", "fact"):
@@ -245,7 +245,7 @@ def test_the_open_act_opens_and_closes_a_row_in_place(seeded, ui_page):
 def test_a_one_line_row_opens_from_the_keyboard_by_its_line(seeded, ui_page):
     view = open_list(ui_page)
     one = row(view, "claude", sid(2))
-    line = one.get_by_role("button", name=re.compile(r"^proj-b · started today "))
+    line = one.get_by_role("button", name=re.compile(r"^proj-b · started (?:today|yesterday) "))
     expect(line).to_have_attribute("aria-expanded", "false")
     # Tab from the row before reaches the line: its first line, then its Open act.
     row(view, "claude", sid(1)).get_by_role("button", name="Open").focus()
