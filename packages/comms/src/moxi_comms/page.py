@@ -217,19 +217,20 @@ QUEUE = {
     "more": lb.Out("int"),
 }
 
-#: `/api/thread?a=&b=&before=&after=&limit=`: the messages between the addresses `a`
-#: and `b` (by one, with a tag naming the other), or by or to `a` without `b`, oldest
-#: first. Without `after`: the newest `limit` below `before` (or the newest of all), and
-#: `earlier`, the pair's messages before the oldest sent, how many and the oldest one's
-#: time, or null when there are none; `changed` is null. With `after` (the newest
-#: message id the page holds), a refresh: every message of the pair above it, `earlier`
-#: null, and `changed`, the read state of every recipient the view shows: between `a`
-#: and `b`, each message at or below `after` with a row in the books for either, with
-#: those rows, so a message the page holds that `changed` doesn't list has no row for
-#: either; without `b`, each of `a`'s messages at or below `after` with a row for any
-#: name, with all its rows, so a message not listed has none. `count_today` is the pair's messages today, `today` the page
-#: server's local date. `state` and `detail` are as `MESSAGES`'; an error answers no
-#: message.
+#: `/api/thread?a=&b=&before=&after=&oldest=&limit=`: the messages between the
+#: addresses `a` and `b` (by one, with a tag naming the other), or by or to `a` without
+#: `b`, oldest first. Without `after`: the newest `limit` below `before` (or the newest of
+#: all), and `earlier`, the pair's messages before the oldest sent, how many and the
+#: oldest one's time, or null when there are none; `changed` is null. With `after` (the
+#: newest message id the page holds) and `oldest` (the oldest it holds), a refresh: every
+#: message of the pair above `after`, `earlier` null, and `changed`, the read state of
+#: every recipient the view shows, for the messages from `oldest` to `after` (from the
+#: first when `oldest` is absent): between `a` and `b`, each with a row in the books for
+#: either, with those rows, so a message the page holds that `changed` doesn't list has
+#: no row for either; without `b`, each of `a`'s with a row for any name, with all its
+#: rows, so a message not listed has none. `oldest` without `after`, or above it, is
+#: refused. `count_today` is the pair's messages today, `today` the page server's local
+#: date. `state` and `detail` are as `MESSAGES`'; an error answers no message.
 THREAD = {
     "state": lb.Out("string"),
     "detail": lb.Out("string", nullable=True),
@@ -313,6 +314,7 @@ PAGE = lb.Page(
                         "b": lb.Field("string", required=False, max=200),
                         "before": lb.Field("string", required=False, max=20),
                         "after": lb.Field("string", required=False, max=20),
+                        "oldest": lb.Field("string", required=False, max=20),
                         "limit": lb.Field("int", required=False, max=100)},
                  returns=THREAD),
         lb.Route("/api/check", "act", "moxi_comms.pageacts:check", body=SEND_BODY,

@@ -630,12 +630,13 @@ class _Pair:
 
 
 def thread(call: Any) -> dict[str, Any]:
-    """`GET /api/thread?a=&b=&before=&after=&limit=`: the messages between the addresses
-    `a` and `b`, or by or to `a` without `b`, oldest first: the newest `limit` (6 by
-    default) below `before`, read newest first back through the whole record, with
+    """`GET /api/thread?a=&b=&before=&after=&oldest=&limit=`: the messages between the
+    addresses `a` and `b`, or by or to `a` without `b`, oldest first: the newest `limit`
+    (6 by default) below `before`, read newest first back through the whole record, with
     `earlier`, the pair's messages before the oldest sent; or, with `after`, every one
-    above it and `changed`, the books' rows of the messages at or below it: `a`'s and
-    `b`'s, or, without `b`, every row of `a`'s messages. `count_today` is the pair's messages today. A failure is a 200 with `state`
+    above it and `changed`, the books' rows of the messages from `oldest` (the oldest the
+    page holds) to `after`: `a`'s and `b`'s, or, without `b`, every row of `a`'s
+    messages. `count_today` is the pair's messages today. A failure is a 200 with `state`
     `error`, never a 500."""
     query = call.query
     today = _today()
@@ -649,8 +650,11 @@ def thread(call: Any) -> dict[str, Any]:
             b = _address(b)
         before = query_id(query.get("before"))
         after = query_id(query.get("after"))
+        oldest = query_id(query.get("oldest"))
         limit = _limit(query.get("limit"), THREAD_LIMIT)
         if before is not None and after is not None:
+            raise _Refused(BAD_QUERY)
+        if oldest is not None and (after is None or int(oldest) > int(after)):
             raise _Refused(BAD_QUERY)
         out = dict(empty)
         with opened() as store:
@@ -663,7 +667,7 @@ def thread(call: Any) -> dict[str, Any]:
                 found = [r for r in map(pair.match,
                                         store.record.history(store.room, after=after))
                          if r is not None]
-                out["changed"] = _changed(store, pair, after)
+                out["changed"] = _changed(store, pair, oldest, after)
             out["messages"] = shaped(store, found)
             start, _ = day_bounds(today)
             out["count_today"] = sum(pair.match(msg) is not None
@@ -699,17 +703,20 @@ def _back_through(store: Store, pair: _Pair, before: str | None,
     return kept, ({"count": count, "first_at": float(first_at)} if count else None)
 
 
-def _changed(store: Store, pair: _Pair, after: str) -> list[dict[str, Any]]:
-    # The read state of every recipient the view shows, for the messages at or below
-    # `after`, by message id. Between two names: each message with a row for `a` or
-    # `b`, with those rows. By or to one name: each of its messages with a row for any
-    # name, with all its rows; a message with no row for `a` is read from the record to
-    # see whether it is `a`'s.
+def _changed(store: Store, pair: _Pair, oldest: str | None,
+             after: str) -> list[dict[str, Any]]:
+    # The read state of every recipient the view shows, for the messages from `oldest`
+    # (from the first, when it is None) to `after`, by message id: bounded by what the
+    # page holds, so its cost follows the view, not the books. Between two names: each
+    # message with a row for `a` or `b`, with those rows. By or to one name: each of its
+    # messages with a row for any name, with all its rows; a message with no row for
+    # `a` is read from the record to see whether it is `a`'s.
+    span = [int(oldest) if oldest is not None else 0, int(after)]
     if pair.b is not None:
-        rows = _rows_where(store.conn, "name IN (?, ?) AND message_id <= ?",
-                           [pair.a, pair.b, int(after)])
+        rows = _rows_where(store.conn, "name IN (?, ?) AND message_id BETWEEN ? AND ?",
+                           [pair.a, pair.b, *span])
     else:
-        rows = _rows_where(store.conn, "message_id <= ?", [int(after)])
+        rows = _rows_where(store.conn, "message_id BETWEEN ? AND ?", span)
         for mid in list(rows):
             if any(row["qualified"] == pair.a for row in rows[mid]):
                 continue

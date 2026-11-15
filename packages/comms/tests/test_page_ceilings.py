@@ -6,8 +6,8 @@ year of mail, most of them for messages the record has since trimmed. Over that:
 
 - the first read of a thread between two names, and of all mail with one name, each
   within 5 s, a sixth of the proxy's 30 s to a read's first byte;
-- the refresh of all mail with one name (`after`), which reads the books' rows of every
-  recipient, within the same 5 s;
+- the refresh of all mail with one name (`after` and `oldest`), which reads the books'
+  rows of every recipient of the messages the page holds, within the same 5 s;
 - `/api/messages` with its `earlier`, and the read of the day its cursor names, each
   within 1 s.
 
@@ -183,10 +183,11 @@ def test_the_page_reads_answer_within_their_ceilings_over_a_full_record(full_rec
     assert len(everyone["messages"]) == pagereads.THREAD_LIMIT
     assert everyone["earlier"]["count"] > pair["earlier"]["count"]
 
-    # The page refreshes from the newest message it holds.
-    newest = everyone["messages"][-1]["message_id"]
+    # The page refreshes above the newest message it holds, with the rows from the
+    # oldest it holds.
+    held = [m["message_id"] for m in everyone["messages"]]
     refreshed = timed("all mail with one name, refresh", THREAD_CEILING_S, read_thread,
-                      a=MAIN, after=newest)
+                      a=MAIN, after=held[-1], oldest=held[0])
     assert refreshed["changed"] and refreshed["earlier"] is None
 
     listed = timed("messages with earlier", MESSAGES_CEILING_S, read_messages)

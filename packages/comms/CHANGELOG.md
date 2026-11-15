@@ -60,15 +60,18 @@
   a row for in the delivery books' queue, waiting or in its session, oldest first, at
   most 50, each in `/api/messages`' shape with that name's row first; `more`, how many
   rows are left. It asks the daemon nothing.
-- comms' page server has a new read, `GET /api/thread?a=&b=&before=&after=&limit=`: the
-  messages between two names (by one, with a recipient tag naming the other), or every
-  message by or to one name without `b`, oldest first, in `/api/messages`' shape: the
-  newest `limit` (6 by default, at most 100) below the message id `before`, with
+- comms' page server has a new read, `GET /api/thread?a=&b=&before=&after=&oldest=&limit=`:
+  the messages between two names (by one, with a recipient tag naming the other), or
+  every message by or to one name without `b`, oldest first, in `/api/messages`' shape:
+  the newest `limit` (6 by default, at most 100) below the message id `before`, with
   `earlier`, how many of theirs came before and the oldest one's time, and
   `count_today`. With `after`, the newest message id the page holds, it reads only the
-  messages above it and adds `changed`: for the messages at or below it, the two names'
-  rows in the delivery books, or, with one name, every row of that name's messages. It
-  asks the daemon nothing.
+  messages above it and adds `changed`: for the messages from `oldest` (the oldest id
+  the page holds; from the first when it is left out) to `after`, the two names' rows
+  in the delivery books, or, with one name, every row of that name's messages. The page
+  sends `oldest` on every refresh, so a refresh reads only the rows of the messages it
+  shows, however large the books grow. `oldest` without `after`, or above it, is
+  refused. It asks the daemon nothing.
 - comms' page server has two acts, `POST /api/check` and `POST /api/send`, which take
   `{to, text, posture, held, reply_to}` (one address, at most 16,000 characters, a
   posture always given) and run `moxi comms send --check` and `moxi comms send` as the

@@ -16,7 +16,7 @@ import urllib.parse
 import pytest
 from conftest import wait_until
 
-from moxi_comms import attribution, client as client_mod, page, pagereads
+from moxi_comms import attribution, client as client_mod, local_record, page, pagereads
 from moxi_comms.paths import comms_db
 
 from test_page import run
@@ -68,7 +68,7 @@ def noise(rig, day):
 def test_the_route_declares_its_query_and_answers_in_the_shared_shape():
     route = next(r for r in page.PAGE.routes if r.path == "/api/thread")
     assert route.kind == "read" and route.gateway is False
-    assert list(route.query) == ["a", "b", "before", "after", "limit"]
+    assert list(route.query) == ["a", "b", "before", "after", "oldest", "limit"]
     assert [k for k, f in route.query.items() if f.required] == ["a"]
     assert route.query["limit"].max == 100
     assert list(route.returns) == KEYS
@@ -274,11 +274,51 @@ def test_all_mail_with_one_name_refreshes_every_recipients_row(rig, today):
         "a thread between two names carries only their rows")
 
 
+def test_a_refresh_reads_only_the_rows_of_the_messages_from_oldest_to_after(
+        rig, today, monkeypatch):
+    """With `oldest`, the oldest message the page holds, `changed` covers the messages
+    from it to `after` alone, and the record is read only for those, so a refresh costs
+    what the view holds, not what the books hold."""
+    below = [post(rig, at(today, 1, i), f"before {i}", to=(OTHER,), by=PLANNER).id
+             for i in range(1, 4)]
+    older = post(rig, at(today, 1, 5), "older of main's", to=(OTHER,), by=MAIN).id
+    first = post(rig, at(today, 1, 10), "held first", to=(OTHER,), by=MAIN).id
+    among = post(rig, at(today, 1, 11), "not main's", to=(OTHER,), by=PLANNER).id
+    last = post(rig, at(today, 1, 12), "held last", to=(OTHER,), by=MAIN).id
+    for mid in (*below, older, first, among, last):
+        assert wait_until(lambda mid=mid: queued(mid, OTHER))
+
+    looked: list[str] = []
+    lookup = local_record.LocalRecord.get_message
+
+    def counted(self, message_id):
+        looked.append(str(message_id))
+        return lookup(self, message_id)
+
+    monkeypatch.setattr(local_record.LocalRecord, "get_message", counted)
+    body = read(a=MAIN, after=last, oldest=first)
+    assert body["state"] == "up" and ids(body) == []
+    assert [c["message_id"] for c in body["changed"]] == [first, last]
+    assert sorted(looked, key=int) == [first, among, last], (
+        "only the messages from oldest to after are read from the record")
+    looked.clear()
+    assert [c["message_id"] for c in read(a=MAIN, after=last)["changed"]] == [
+        older, first, last], "without oldest, from the first"
+    assert set(below) <= set(looked)
+    assert [c["message_id"] for c in read(a=MAIN, after=last, oldest=last)["changed"]] == [
+        last]
+    changed = read(a=MAIN, b=OTHER, after=last, oldest=first)["changed"]
+    assert [c["message_id"] for c in changed] == [first, among, last], (
+        "between two names, their rows from oldest to after")
+
+
 # --- the query and the store -------------------------------------------------------------
 
 @pytest.mark.parametrize("query", [
     {"a": ""}, {"a": MAIN, "b": ""}, {"a": MAIN, "before": "12a"},
     {"a": MAIN, "after": "-1"}, {"a": MAIN, "before": "5", "after": "3"},
+    {"a": MAIN, "oldest": "3"}, {"a": MAIN, "after": "3", "oldest": "5"},
+    {"a": MAIN, "after": "5", "oldest": "3a"},
     {"a": MAIN, "limit": "0"},
 ])
 def test_a_query_the_page_never_sends_is_state_error_and_opens_nothing(
