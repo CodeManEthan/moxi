@@ -45,6 +45,7 @@ Standard library only at import.
 from __future__ import annotations
 
 import os
+import re
 
 #: The piece's declaration, read through the entry point `publishing.push`.
 PUSH = {
@@ -77,6 +78,15 @@ LS_REMOTE_TIMEOUT_S = 10.0
 
 _HEADS = "refs/heads/"
 _TAGS = "refs/tags/"
+
+
+#: A URL's scheme and its userinfo, up to the `@` before the host.
+_USERINFO = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@")
+
+def _shown_url(url: str) -> str:
+    """`url` without its userinfo (`https://user:token@host/...` loses `user:token@`), as
+    it is printed and logged: a remote URL can carry a credential."""
+    return _USERINFO.sub(r"\1", url)
 
 
 def _zero(sha: str) -> bool:
@@ -218,6 +228,8 @@ class _Push(_Reader):
         self.free = [v.strip() for v in settings.get(FREE_REF, ()) if v.strip()]
         self.remote = ctx.args[0] if ctx.args else ""
         self.url = ctx.args[1] if len(ctx.args) > 1 else self.remote
+        # What is printed and logged; a push to a bare URL gives git the URL as the remote.
+        self.shown_remote, self.shown_url = _shown_url(self.remote), _shown_url(self.url)
         self.updates = ctx.updates
         self.word = os.environ.get(WORD_ENV)
         self.commits: list[str] = []
@@ -371,7 +383,7 @@ class _Push(_Reader):
             if u.remote_sha not in here or main is None:
                 self.reasons.append(
                     f"{ref}: can't tell whether {branch} is merged into {self.main}; "
-                    f"fetch first (git fetch {self.remote})")
+                    f"fetch first (git fetch {self.shown_remote})")
             elif not self.is_ancestor(u.remote_sha, main):
                 self.reasons.append(f"{ref}: {branch} is not merged into {self.main}; "
                                     "a branch is deleted only once merged")
@@ -380,7 +392,7 @@ class _Push(_Reader):
             return
         if u.remote_sha not in here:
             self.reasons.append(f"{ref}: the remote's tip isn't here; fetch first "
-                                f"(git fetch {self.remote})")
+                                f"(git fetch {self.shown_remote})")
         elif not self.is_ancestor(u.remote_sha, u.local_sha):
             self.reasons.append(f"{ref}: the push would rewrite {branch}; a public branch "
                                 "is never rewritten")
@@ -412,13 +424,13 @@ class _Push(_Reader):
             if done.returncode != 0:
                 from moxi_publishing.content import _first_line
 
-                self.reasons.append(f"can't ask {self.url} for its refs: "
+                self.reasons.append(f"can't ask {self.shown_url} for its refs: "
                                     f"{_first_line(done.stderr)}")
                 return None
             if done.stdout.strip():
                 self.reasons.append(
-                    f"there are no tracking refs for {self.remote} here, and the remote "
-                    "isn't empty, so what is new to it can't be told; fetch first")
+                    f"there are no tracking refs for {self.shown_remote} here, and the "
+                    "remote isn't empty, so what is new to it can't be told; fetch first")
                 return None
         tips = [u.remote_sha for u in self.updates if not _zero(u.remote_sha)]
         return sorted(set(tracking) | self.present(tips))
@@ -538,7 +550,7 @@ class _Push(_Reader):
         import datetime
 
         return {"time": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
-                "repo": self.ctx.root, "remote": self.remote, "url": self.url,
+                "repo": self.ctx.root, "remote": self.shown_remote, "url": self.shown_url,
                 "word": self.word,
                 "refs": [{"local_ref": u.local_ref, "local_sha": u.local_sha,
                           "remote_ref": u.remote_ref, "remote_sha": u.remote_sha}
