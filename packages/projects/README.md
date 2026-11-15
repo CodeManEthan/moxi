@@ -158,11 +158,18 @@ would run in a terminal, and refuses where that command refuses, before it makes
   module was skipped, that its defaults and checks were not applied, and the fix (repair
   it, or `moxi uninstall` it). `moxi projects add` prints the same warning on one line to
   stderr and exits 0.
-- **Remove.** Remove opens the shell's sheet, which shows the command, the key and the
-  root, and says the files stay. Nothing is sent until you confirm; Cancel sends nothing.
-  The page then shows how it ended: removed, or refused with each reason and the fix. The
-  outcome is kept in the store for a day, so the same request sent again, also after the
-  page server restarts, gets the same answer and doesn't act twice. A store newer than
+- **Remove.** Remove asks once, in a step under the opened project: what goes (the
+  project's entry in Moxi) and what stays (its folder and every file in it), and nothing
+  is sent until you press `Remove from Moxi`; Cancel sends nothing. Before that the page
+  reads what would refuse the remove now (associated agents, and each module that still
+  holds the project, with its sentence), and while anything does the button is dimmed.
+  Removing deletes nothing on disk, only projects' row, and adding the same folder under
+  the same name puts it back. The remove is an ordinary act, not one the shell's sheet
+  confirms: the page's step is the confirmation, and every remove is still refused while
+  anything holds the project. Each press carries a job of its own, under which the outcome
+  is kept in the store for a day, so the same press sent again, two sent at once, or one
+  sent again after the page server restarts, all get the first answer and act once. When
+  an answer is lost, the page reads the outcome kept under its job. A store newer than
   this version of projects reads, an unreadable or locked one, or none yet, is answered at
   once, and nothing is written. `moxi projects remove` in a terminal keeps nothing.
 

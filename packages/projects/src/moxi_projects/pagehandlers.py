@@ -44,20 +44,24 @@ text is the reason and the fix, and a store locked past the wait (exit 75) is a 
 again. A create refused for want of git also names the lasting fix, since the shell's
 PATH is the service manager's.
 
-**Remove** is a confirmed act: its route takes an idempotency key and answers 202 with a
-status link, `/api/remove-status?job=<key>`, which gives the outcome. What a remove comes
-to is kept in the store under its key for a day (`acts.record_status`): removed, or
-refused for a reason about the project (associated agents, a contribution's sentences, a
-contribution that won't load or raises, the key not in the store). A repeat of the key
-finds that row first after the terminal comparison, after a restart too: for the same
-project (compared ignoring case) it answers 202 with the same link, for another a 422. A refusal that is the store's own
-(newer than this code, unreadable, locked, or no store file yet) can't be kept there, so
-it is answered at once by the map above, and nothing is written.
+**Remove** is a plain act: the page's own step in place is the confirmation, and the
+body carries `job`, 32 hexadecimal characters the page mints for each press. It answers
+the outcome at once. What a remove comes to is kept in the store under its `job` for a
+day (`acts.record_status`): removed, or refused for a reason about the project
+(associated agents, a contribution's sentences, a contribution that won't load or raises,
+the key not in the store). The store keeps the first outcome under a `job` and ignores a
+second, and the handler always answers the kept row, so a repeat of a `job`, presses sent
+at once and a restart all answer the first outcome; a `job` kept for another project is a
+422. A refusal that is the store's own (newer than this code, unreadable, locked, or no
+store file yet) can't be kept there, so it is answered at once by the map above, and
+nothing is written. `/api/remove-status?job=` reads a kept outcome again, for a page
+whose answer was lost.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from typing import Any
 
@@ -66,16 +70,18 @@ import moxi.paths
 from moxi_projects import acts, api, contributions, pagecheck, pagestat, rules, store
 from moxi_projects.api import DEFAULT_KIND, Busy, Project, ProjectsError
 from moxi_projects.errors import NoGit
-from moxi_projects.page import STATUS_ROUTE, lb
+from moxi_projects.page import lb
 
 #: How long a create from the page lets `git init` run, in seconds. With the mkdir, the
 #: kill and reap after a timeout and the row's write, the answer still comes inside the
 #: shell's 30 second deadline for an act. The verb keeps `acts.GIT_TIMEOUT`.
 GIT_TIMEOUT = 20
 
-#: What a repeat of a remove's key for another project is told, as loopback says it for
-#: another body within one server's life.
-KEY_REUSED = "this Idempotency-Key was used for another request"
+#: What a remove under a `job` already kept for another project is told.
+KEY_REUSED = "this job was used for another request"
+#: A remove's `job`: hexadecimal characters, this many, which the page mints per press.
+JOB_CHARS = 32
+_JOB = re.compile(f"[0-9a-f]{{{JOB_CHARS}}}")
 
 
 def _answer(exc: ProjectsError) -> Exception:
@@ -247,20 +253,17 @@ def remove_check(call: Any) -> dict[str, Any]:
 
 
 def remove_status(call: Any) -> dict[str, Any]:
-    """`GET /api/remove-status?job=<key>`: what the remove request came to; 422 for a key
-    no request is kept under (an outcome is kept for a day)."""
-    job = call.query["job"]
+    """`GET /api/remove-status?job=<job>`: what the remove pressed under `job` came to,
+    for a page whose answer to the remove was lost; 422 for a `job` no remove is kept
+    under (an outcome is kept for a day)."""
     try:
-        kept = acts.remove_status(job)
+        kept = acts.remove_status(call.query["job"])
     except ProjectsError as exc:
         raise _answer(exc) from None
     if kept is None:
-        raise lb.Refused("no remove request is kept under this key; an outcome is kept "
+        raise lb.Refused("no remove request is kept under this job; an outcome is kept "
                          "for a day")
-    return {"job": kept["job"], "project": kept["project"], "created": kept["created"],
-            "state": kept["state"], "key": kept["key"], "reason": kept.get("reason"),
-            "fix": kept.get("fix"), "sentences": list(kept.get("sentences") or []),
-            "exit_code": kept.get("exit_code")}
+    return _status(kept)
 
 
 # -- acts -----------------------------------------------------------------------------------
@@ -369,43 +372,69 @@ def agents_remove(call: Any) -> dict[str, Any]:
         raise _answer(exc) from None
 
 
-def remove(call: Any) -> Any:
-    """`POST /api/remove`, confirmed: `moxi projects remove KEY` under the request's
-    idempotency key. 202 with the status link for a removal and for every refusal the
-    store keeps; the store's own refusals answered at once, keeping nothing.
+def _status(kept: dict) -> dict[str, Any]:
+    """A kept remove outcome as the `STATUS` shape gives it."""
+    return {"job": kept["job"], "project": kept["project"], "created": kept["created"],
+            "state": kept["state"], "key": kept["key"], "reason": kept.get("reason"),
+            "fix": kept.get("fix"), "sentences": list(kept.get("sentences") or []),
+            "exit_code": kept.get("exit_code")}
 
-    Within one server's life loopback answers a repeat of the key itself, comparing the
-    raw body, so the project's key is compared ignoring case only after a restart, when
-    the kept row answers; the page always resends the same bytes.
 
-    The terminal comparison comes first, before the kept row is looked up: while it
-    refuses, a repeat is refused too, though the status link still reads the kept
-    outcome."""
-    found = contributions.load()
-    _compare(found)
-    key, job = call.body["key"], call.key
-    link = lb.Accepted(f"{STATUS_ROUTE}?job={job}")
+def _kept(job: str, key: str) -> dict[str, Any] | None:
+    """The outcome kept under `job`, answered as `STATUS`; None when none is kept. 422
+    when it was kept for another project (compared ignoring case)."""
     try:
         kept = acts.remove_status(job)
     except ProjectsError as exc:
         raise _answer(exc) from None
-    if kept is not None:
-        if kept["project"].casefold() == key.casefold():
-            return link
+    if kept is None:
+        return None
+    if kept["project"].casefold() != key.casefold():
         raise lb.Refused(KEY_REUSED)
+    return _status(kept)
+
+
+def remove(call: Any) -> dict[str, Any]:
+    """`POST /api/remove`: `moxi projects remove KEY`, keyed by `job`, which the page
+    mints for each press of its remove button; answered at once, as `STATUS`.
+
+    A plain act: the page's own step is the confirmation. What the remove came to is kept
+    under `job` (`acts.record_status`), and the store keeps only the first outcome under
+    a `job`. So the handler answers the row kept under `job`, never its own result: a
+    repeat of a `job` finds that row and acts no more; two presses sent at once under one
+    `job` both reach `acts.remove`, the second meets the first's delete and records
+    nothing over its row, and both answer the first outcome. A `job` kept for another
+    project is a 422. A refusal the store keeps is a 200 whose `state` is `refused`; one
+    that is the store's own (newer, unreadable, locked, no store yet) is answered as the
+    map above says, and keeps nothing.
+
+    The terminal comparison comes first, before the kept row is looked up: while it
+    refuses, a repeat is refused too, though `/api/remove-status` still reads the kept
+    outcome."""
+    found = contributions.load()
+    _compare(found)
+    key, job = call.body["key"], call.body["job"]
+    if not _JOB.fullmatch(job):
+        raise lb.Refused(f"a remove's job is {JOB_CHARS} hexadecimal characters; fix: mint "
+                         "one per press")
+    kept = _kept(job, key)
+    if kept is not None:
+        return kept
     try:
         acts.remove(key, contributions=found, record=acts.record_status(job))
     except ProjectsError as exc:
         # A refusal the store kept has its row; any other is answered here.
-        try:
-            kept = acts.remove_status(job)
-        except ProjectsError as status_exc:
-            raise _answer(status_exc) from None
+        kept = _kept(job, key)
         if kept is None:
             raise _answer(exc) from None
-    return link
+        return kept
+    kept = _kept(job, key)
+    if kept is None:
+        raise lb.Refused("the remove was made, but its outcome can't be read back; fix: "
+                         "read the list again")
+    return kept
 
 
-__all__ = ["GIT_TIMEOUT", "KEY_REUSED", "expand_tilde", "projects", "project", "at_path",
+__all__ = ["GIT_TIMEOUT", "JOB_CHARS", "KEY_REUSED", "expand_tilde", "projects", "project", "at_path",
            "kinds", "where", "remove_check", "remove_status", "add", "set_fields",
            "agents_add", "agents_remove", "remove"]

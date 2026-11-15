@@ -37,7 +37,9 @@ TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 KEY = "K" * 43
-OTHER_KEY = "L" * 43
+#: Jobs as the page mints them, one per press of its remove button.
+JOB = "0123456789abcdef" * 2
+OTHER_JOB = "fedcba9876543210" * 2
 
 posix_only = pytest.mark.skipif(sys.platform == "win32",
                                 reason="the fake git is a POSIX shell script")
@@ -182,8 +184,7 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
         "/api/remove-check", "/api/remove-status"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/set", "/api/agents-add", "/api/agents-remove", "/api/remove"}
-    assert {p for p, r in routes.items() if r.get("confirmed")} == {"/api/remove"}
-    assert routes["/api/remove"]["status"] == "/api/remove-status"
+    assert {p for p, r in routes.items() if r.get("confirmed")} == set()
     assert not any(r["gateway"] or r["stream"] for r in routes.values())
 
 
@@ -217,7 +218,8 @@ def test_every_root_is_marked_path_and_every_sentence_redact():
         "/api/set notes[]", "/api/where note",
         "/api/remove-check refusals[].sentence", "/api/remove-check refusals[].fix",
         "/api/remove-status reason", "/api/remove-status fix",
-        "/api/remove-status sentences[]"}
+        "/api/remove-status sentences[]", "/api/remove reason", "/api/remove fix",
+        "/api/remove sentences[]"}
 
 
 def test_the_announcement_offers_the_page_and_imports_none_of_it():
@@ -939,72 +941,69 @@ def test_agents_add_and_remove(golden_copy):
 
 # -- remove ---------------------------------------------------------------------------------
 
-def status_of(key: str = KEY, app=None) -> dict:
-    status, body = get("/api/remove-status", f"job={key}", app=app)
+def status_of(job: str = JOB, app=None) -> dict:
+    status, body = get("/api/remove-status", f"job={job}", app=app)
     assert status == 200, body
     return body
 
 
-def accepted(answer: tuple[int, dict | None], key: str = KEY) -> None:
-    assert answer == (202, {"status": f"/api/remove-status?job={key}"})
+def removing(key: str, job: str = JOB, app=None) -> dict:
+    """A remove of `key` pressed under `job`, answered 200; its outcome."""
+    status, body = post("/api/remove", {"key": key, "job": job}, app=app)
+    assert status == 200, body
+    assert body == status_of(job)
+    return body
 
 
-def test_a_remove_answers_202_and_its_status_says_removed(golden_copy):
-    accepted(post("/api/remove", {"key": "GAMMA"}, key=KEY))
+def test_a_remove_answers_its_outcome_at_once(golden_copy):
+    body = removing("GAMMA")
     with pytest.raises(api.NotFound):
         api.get("gamma")
-    body = status_of()
-    assert body == {"job": KEY, "project": "gamma", "created": body["created"],
+    assert body == {"job": JOB, "project": "gamma", "created": body["created"],
                     "state": "removed", "key": "gamma", "reason": None, "fix": None,
                     "sentences": [], "exit_code": None}
 
 
-def test_a_project_with_agents_is_refused_through_the_status_link(golden_copy):
-    accepted(post("/api/remove", {"key": "alpha"}, key=KEY))
-    body = status_of()
+def test_a_project_with_agents_is_refused_and_the_refusal_kept(golden_copy):
+    body = removing("alpha")
     assert body["state"] == "refused" and body["exit_code"] == 3
     assert "helper scout" in body["sentences"][0] and "agents remove alpha" in body["fix"]
     assert api.get("alpha")
 
 
-def test_every_contribution_sentence_comes_through_the_status_link(site, golden_copy):
+def test_every_contribution_sentence_comes_in_the_answer(site, golden_copy):
     site.contribution("svc", holds("services run for it; `moxi services stop` frees it"))
     site.contribution("links", holds("two watches name it; `moxi links clear` frees it"))
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
-    assert sorted(status_of()["sentences"]) == [
+    assert sorted(removing("gamma")["sentences"]) == [
         "links: two watches name it; `moxi links clear` frees it",
         "svc: services run for it; `moxi services stop` frees it"]
     assert api.get("gamma")
 
 
-def test_a_contribution_that_wont_load_is_refused_through_the_status_link(site,
-                                                                          golden_copy):
+def test_a_contribution_that_wont_load_is_a_kept_refusal(site, golden_copy):
     site.contribution("broken", "raise ImportError('gone')\n")
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
-    body = status_of()
+    body = removing("gamma")
     assert body["state"] == "refused" and body["exit_code"] == 1
     assert "won't load" in body["sentences"][0] and "moxi uninstall broken" in body["fix"]
     assert api.get("gamma")
 
 
-def test_an_unknown_key_in_a_store_that_exists_is_refused_through_the_status_link(
-        golden_copy):
-    accepted(post("/api/remove", {"key": "nosuch"}, key=KEY))
-    body = status_of()
+def test_an_unknown_key_in_a_store_that_exists_is_a_kept_refusal(golden_copy):
+    body = removing("nosuch")
     assert body["state"] == "refused" and "no project is named 'nosuch'" in body["reason"]
 
 
 def test_no_store_file_is_answered_at_once_and_makes_no_file(store_path):
-    said = refused(post("/api/remove", {"key": "nosuch"}, key=KEY))
+    said = refused(post("/api/remove", {"key": "nosuch", "job": JOB}))
     assert "no project is named 'nosuch'" in said
     assert not store_path.exists() and not store_path.parent.exists()
-    assert "no remove request" in refused(get("/api/remove-status", f"job={KEY}"))
+    assert "no remove request" in refused(get("/api/remove-status", f"job={JOB}"))
 
 
 def test_a_newer_store_is_answered_at_once_and_left_as_it_was(golden_copy, store_path):
     _set_user_version(store_path, api._VERSION + 1)
     before = store_path.read_bytes()
-    assert "newer than" in refused(post("/api/remove", {"key": "gamma"}, key=KEY))
+    assert "newer than" in refused(post("/api/remove", {"key": "gamma", "job": JOB}))
     assert store_path.read_bytes() == before
 
 
@@ -1012,7 +1011,7 @@ def test_an_unreadable_store_is_answered_at_once_and_left_as_it_was(store_path):
     store_path.parent.mkdir(parents=True)
     store_path.write_bytes(b"this is not a database, not at all, " * 200)
     before = store_path.read_bytes()
-    assert refused(post("/api/remove", {"key": "gamma"}, key=KEY))
+    assert refused(post("/api/remove", {"key": "gamma", "job": JOB}))
     assert store_path.read_bytes() == before
 
 
@@ -1022,9 +1021,9 @@ def test_a_store_locked_past_the_wait_is_409_and_keeps_nothing(golden_copy, stor
     holder_conn = sqlite3.connect(store_path, isolation_level=None)
     try:
         holder_conn.execute("BEGIN IMMEDIATE")
-        removed = post("/api/remove", {"key": "gamma"}, key=KEY)
+        removed = post("/api/remove", {"key": "gamma", "job": JOB})
         # A refusal about the project whose own write is locked out is the lock's answer.
-        held = post("/api/remove", {"key": "alpha"}, key=OTHER_KEY)
+        held = post("/api/remove", {"key": "alpha", "job": OTHER_JOB})
     finally:
         holder_conn.execute("ROLLBACK")
         holder_conn.close()
@@ -1032,62 +1031,53 @@ def test_a_store_locked_past_the_wait_is_409_and_keeps_nothing(golden_copy, stor
     assert api.get("gamma") and _status_rows(store_path) == []
 
 
-def test_a_repeat_while_the_first_still_runs_is_409(golden_copy, monkeypatch):
-    entered, release = threading.Event(), threading.Event()
+def test_two_presses_sent_at_once_under_one_job_both_answer_the_first_outcome(
+        golden_copy, store_path, monkeypatch):
+    both_in = threading.Barrier(2, timeout=30)
     real = acts.remove
 
-    def slow(key, **named):
-        entered.set()
-        release.wait(30)
+    def together(key, **named):
+        both_in.wait()
         return real(key, **named)
 
-    monkeypatch.setattr(acts, "remove", slow)
+    monkeypatch.setattr(acts, "remove", together)
 
-    async def both():
+    async def at_once():
         app = served()
-        first = asyncio.create_task(_send(app, "POST", "/api/remove", body={"key": "gamma"},
-                                          key=KEY))
-        for _ in range(1000):
-            if entered.is_set():
-                break
-            await asyncio.sleep(0.01)
-        try:
-            second = await _send(app, "POST", "/api/remove", body={"key": "gamma"},
-                                 key=KEY)
-        finally:
-            release.set()
-        return await first, second
+        return await asyncio.gather(*(
+            _send(app, "POST", "/api/remove", body={"key": "gamma", "job": JOB})
+            for _ in range(2)))
 
-    first, second = asyncio.run(both())
-    assert first[0] == 202 and second[0] == 409
+    first, second = asyncio.run(at_once())
+    assert first[0] == second[0] == 200, (first, second)
+    assert first[1] == second[1] and first[1]["state"] == "removed"
+    assert _status_rows(store_path) == [JOB]
+    with pytest.raises(api.NotFound):
+        api.get("gamma")
 
 
-def test_a_key_sent_with_another_project_is_422_within_a_server_and_after_a_restart(
-        golden_copy):
+def test_a_job_sent_with_another_project_is_422(golden_copy):
     app = served()
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY, app=app))
-    assert post("/api/remove", {"key": "Beta"}, key=KEY, app=app)[0] == 422
-    # A fresh app has no key table: the kept row answers.
-    said = refused(post("/api/remove", {"key": "Beta"}, key=KEY))
-    assert said == pagehandlers.KEY_REUSED
+    removing("gamma", app=app)
+    assert refused(post("/api/remove", {"key": "Beta", "job": JOB}, app=app)) == \
+        pagehandlers.KEY_REUSED
+    assert refused(post("/api/remove", {"key": "Beta", "job": JOB})) == \
+        pagehandlers.KEY_REUSED
     assert api.get("Beta")
 
 
-def test_a_repeat_after_a_restart_reads_the_kept_row_and_acts_no_more(golden_copy,
-                                                                      tmp_path):
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
-    first = status_of()
+def test_a_repeat_of_a_job_answers_the_kept_row_and_acts_no_more(golden_copy, tmp_path):
+    first = removing("gamma")
     # gamma is back: a second run of the act would remove it again.
     acts.add("gamma", root=str(tmp_path / "gamma"))
-    accepted(post("/api/remove", {"key": "GAMMA"}, key=KEY))
-    assert api.get("gamma") and status_of() == first
+    assert removing("GAMMA") == first
+    assert api.get("gamma")
     # A refused one, too.
-    accepted(post("/api/remove", {"key": "alpha"}, key=OTHER_KEY), OTHER_KEY)
-    refusal = status_of(OTHER_KEY)
+    refusal = removing("alpha", OTHER_JOB)
     acts.remove_agent("alpha", "helper")
     acts.remove_agent("alpha", "scout")
-    accepted(post("/api/remove", {"key": "alpha"}, key=OTHER_KEY), OTHER_KEY)
-    assert api.get("alpha") and status_of(OTHER_KEY) == refusal
+    assert removing("alpha", OTHER_JOB) == refusal
+    assert api.get("alpha")
 
 
 def test_a_repeat_past_a_day_is_a_new_act(golden_copy, monkeypatch):
@@ -1095,32 +1085,44 @@ def test_a_repeat_past_a_day_is_a_new_act(golden_copy, monkeypatch):
                         time.gmtime(time.time() - store.STATUS_KEPT - 60))
     with monkeypatch.context() as patched:
         patched.setattr(store, "now", lambda: old)
-        accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
+        post("/api/remove", {"key": "gamma", "job": JOB})
     # The day's row is ignored, so the act runs again and finds no gamma.
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
-    body = status_of()
+    body = removing("gamma")
     assert body["state"] == "refused" and "no project is named 'gamma'" in body["reason"]
 
 
-def test_a_remove_without_its_key_is_refused_before_the_handler(golden_copy):
+def test_a_remove_without_its_job_is_refused_before_the_handler(golden_copy):
     status, _ = post("/api/remove", {"key": "gamma"})
     assert status == 400
     assert api.get("gamma")
 
 
+@pytest.mark.parametrize("job", ["K" * 43, JOB.upper(), JOB[:-1], JOB + "0", ""])
+def test_a_job_that_is_not_32_hex_characters_is_refused(job, golden_copy, store_path):
+    said = refused(post("/api/remove", {"key": "gamma", "job": job}))
+    assert "32 hexadecimal characters" in said
+    assert api.get("gamma") and _status_rows(store_path) == []
+
+
+def test_the_remove_is_an_ordinary_act_with_no_confirm_or_status_link():
+    routes = {r["path"]: r for r in LB.export(page.PAGE)["routes"]}
+    assert not routes["/api/remove"].get("confirmed")
+    assert not routes["/api/remove"].get("status")
+
+
 @pytest.mark.parametrize("outcome", [{"key": "gamma"}, {"state": "removed"}, {}])
 def test_a_kept_outcome_without_its_state_or_key_is_unreadable(outcome, golden_copy,
                                                                store_path):
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
+    removing("gamma")
     conn = sqlite3.connect(store_path)
     try:
         conn.execute("UPDATE remove_status SET outcome = ? WHERE key = ?",
-                     (json.dumps(outcome), KEY))
+                     (json.dumps(outcome), JOB))
         conn.commit()
     finally:
         conn.close()
-    for answer in (get("/api/remove-status", f"job={KEY}"),
-                   post("/api/remove", {"key": "gamma"}, key=KEY)):
+    for answer in (get("/api/remove-status", f"job={JOB}"),
+                   post("/api/remove", {"key": "gamma", "job": JOB})):
         said = refused(answer)
         assert f"the projects store {store_path} can't be read" in said
         assert "fix: move the file aside" in said
@@ -1128,7 +1130,7 @@ def test_a_kept_outcome_without_its_state_or_key_is_unreadable(outcome, golden_c
 
 def test_a_status_read_of_a_version_1_store_answers_no_such_request(v1_copy, store_path):
     before = store_path.read_bytes()
-    assert "no remove request" in refused(get("/api/remove-status", f"job={KEY}"))
+    assert "no remove request" in refused(get("/api/remove-status", f"job={JOB}"))
     assert store_path.read_bytes() == before
 
 
@@ -1188,7 +1190,7 @@ def home_moved(terminal_record) -> str:
 
 
 def submit(route: str, body: dict) -> tuple[int, dict | None]:
-    return post(route, body, key=KEY if route == "/api/remove" else None)
+    return post(route, {**body, "job": JOB} if route == "/api/remove" else body)
 
 
 @pytest.mark.parametrize("differs", [store_moved, no_record, home_moved],
@@ -1206,7 +1208,7 @@ def test_every_write_route_refuses_with_the_line_and_writes_nothing(
     if "root" in sent:
         assert not os.path.lexists(sent["root"])
     # A remove refused this way keeps no row, and its repeat is answered the same.
-    assert acts.remove_status(KEY) is None
+    assert acts.remove_status(JOB) is None
     assert refused(submit(route, sent)) == said
 
 
@@ -1249,11 +1251,11 @@ def test_the_line_names_the_variable_and_the_restart(golden_copy, terminal_recor
 
 
 def test_the_comparison_comes_before_a_removes_kept_row(golden_copy, terminal_record):
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
+    removing("gamma")
     store_moved(terminal_record)
-    # A repeat of the accepted remove, at a fresh page server, is refused now ...
-    assert refused(post("/api/remove", {"key": "gamma"}, key=KEY)) == pagecheck.line()
-    # ... though its status link, a read, still gives the kept outcome.
+    # A repeat of the remove's job is refused now ...
+    assert refused(post("/api/remove", {"key": "gamma", "job": JOB})) == pagecheck.line()
+    # ... though the status read still gives the kept outcome.
     assert status_of()["state"] == "removed"
 
 

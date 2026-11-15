@@ -22,6 +22,11 @@
   Windows), or `~` alone, and expand it to the home folder once the terminal comparison
   has passed, so `~` means what it means in your terminal. `~user` and relative paths
   are still refused.
+- The page's `/api/remove` is an ordinary act instead of a confirmed one, since the page's
+  own step is the confirmation: its body is `{key, job}`, `job` 32 hexadecimal characters
+  the page mints per press, and it answers the outcome at once instead of 202 with a
+  status link. One outcome is kept per `job`, so a repeat or two presses sent at once
+  answer the first. `/api/remove-status?job=` stays, for a lost answer.
 
 ## 0.1.4 (2026-11-08)
 

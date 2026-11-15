@@ -22,7 +22,7 @@ finish by hand. If the row write then fails, the directory stays as made and the
 names the `moxi projects add` that adds its row.
 
 `remove` takes a `record` from the page: what the remove came to is then kept in the
-store under the request's idempotency key, so a repeat of the request gets the same answer
+store under the `job` the page minted for that press, so a repeat of it gets the same answer
 (`record_status`, `remove_status`). The verb passes none and keeps nothing.
 
 `promote` turns one of notes' inbox one-offs into a project. It reaches notes only through
@@ -553,8 +553,8 @@ def _store_exists() -> bool:
 
 
 def record_status(job: str) -> Record:
-    """A `record` for `remove` that keeps its outcome under the request's idempotency key
-    `job`, for `remove_status` to read back."""
+    """A `record` for `remove` that keeps its outcome under `job`, the page's key for
+    that press, for `remove_status` to read back."""
     def record(conn: sqlite3.Connection, outcome: dict) -> None:
         store.keep_remove_status(conn, job, outcome["key"], outcome)
 

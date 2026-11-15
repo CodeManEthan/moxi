@@ -23,8 +23,8 @@
                              [--lead NAME | --no-lead] [--notes-root DIR | --no-notes-root]`
     POST /api/agents-add     `moxi projects agents add KEY NAME`
     POST /api/agents-remove  `moxi projects agents remove KEY NAME`
-    POST /api/remove         `moxi projects remove KEY`, confirmed (202, with the status
-                             link)
+    POST /api/remove         `moxi projects remove KEY`, keyed by the `job` the page
+                             mints per press, answered at once with the outcome
 
 **An act from the page does what the same verb does in the user's terminal, or refuses
 before it makes anything.** Each handler calls the act the verb calls
@@ -66,7 +66,7 @@ STATUS_ROUTE = "/api/remove-status"
 NAME_MAX = 256
 #: The longest path a request takes.
 PATH_MAX = 4096
-#: An idempotency key's length, which a status read's `job` never passes.
+#: The longest `job` a remove or a status read takes.
 JOB_MAX = 64
 
 _TEXT = lb.Out("string")
@@ -140,7 +140,8 @@ WRITTEN = {"project": PROJECT, "notes": lb.Out("list", items=_SAYS)}
 #: An add: a write, and `warnings`, what the add went ahead without (a contribution
 #: skipped since it won't load, with the fix); empty when it went without nothing.
 ADDED = {**WRITTEN, "warnings": lb.Out("list", items=_SAYS)}
-#: A remove request: `state` is `removed` or `refused`; `key` the project's key as
+#: A remove's outcome, as `/api/remove` and `/api/remove-status` answer it: `job` the
+#: press it was kept under; `state` is `removed` or `refused`; `key` the project's key as
 #: stored (as asked when there was none); `project` the key the request was kept under.
 #: A refused one has its `reason`, `fix`, `sentences` (each contribution's, named by its
 #: module, or the reason alone) and the `exit_code` the verb exits with; a removed one has
@@ -168,6 +169,9 @@ ADD_BODY = {"key": _KEY, "root": _MAYBE_DIR, "kind": _MAYBE_NAME, "lead": _MAYBE
 SET_BODY = {"key": _KEY, "root": _MAYBE_DIR, "kind": _MAYBE_NAME, "lead": _MAYBE_NAME,
             "no_lead": _FLAG, "notes_root": _MAYBE_DIR, "no_notes_root": _FLAG}
 AGENT_BODY = {"key": _KEY, "name": _NAME}
+#: A remove: the project's key, and `job`, which the page mints for each press of its
+#: remove button (32 hexadecimal characters; the handler refuses any other).
+REMOVE_BODY = {"key": _KEY, "job": lb.Field("string", max=JOB_MAX)}
 
 
 def _target(name: str) -> str:
@@ -203,11 +207,11 @@ PAGE = lb.Page(
                  returns=ONE),
         lb.Route("/api/agents-remove", "act", _target("agents_remove"), body=AGENT_BODY,
                  returns=ONE),
-        lb.Route("/api/remove", "act", _target("remove"), body={"key": _KEY}, returns={},
-                 confirmed=True, status=STATUS_ROUTE),
+        lb.Route("/api/remove", "act", _target("remove"), body=REMOVE_BODY,
+                 returns=STATUS),
     ),
 )
 
 __all__ = ["ADD_BODY", "ADDED", "AGENT_BODY", "AT_PATH", "BROKEN", "BUDGET", "KIND", "KINDS",
-           "LISTED", "ONE", "PAGE", "PROJECT", "PROJECTS", "REMOVE_CHECK", "SET_BODY",
-           "STATUS", "STATUS_ROUTE", "WHERE", "WRITTEN"]
+           "LISTED", "ONE", "PAGE", "PROJECT", "PROJECTS", "REMOVE_BODY", "REMOVE_CHECK",
+           "SET_BODY", "STATUS", "STATUS_ROUTE", "WHERE", "WRITTEN"]
