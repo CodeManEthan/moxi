@@ -45,6 +45,8 @@ import pytest
 from moxi import modules
 from playwright.sync_api import expect
 
+from moxi_sessions.testing import today_at
+
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="usage's page is checked in a browser on Linux; the "
@@ -76,36 +78,39 @@ def _week(n: int) -> dict:
     """The week's n-th dearest Claude session: fewer requests the further down."""
     return {"harness": "claude", "session": session_id(n), "requests": 16 - n,
             "folder": "proj-a" if n == 0 else "proj-b" if n == 1 else FOLDERS[n % 3],
-            "ago": 40 * 60 if n == 0 else 80 * 60 if n == 1 else 3 * HOUR + 5 * HOUR * n,
+            "ago": 40 * 60 if n == 0 else 80 * 60 if n == 1 else 3 * HOUR + 5 * HOUR * n, "today": n < 2,
             "model": HAIKU if n == 12 else SONNET, "title": TYPED if n == 0 else None,
             "agents": list(AGENTS) if n == 0 else []}
 
 
 #: The sessions, dearest first within the week: the typed one and an unnamed one inside
-#: the 5-hour window, eleven more over the last three days, the last of them on Haiku;
+#: the 5-hour window, both today's, eleven more over the last three days, the last of them on Haiku;
 #: a Codex thread three days ago; two Claude sessions twelve and twenty days ago.
 WEEK = [_week(n) for n in range(13)]
-CODEX = {"harness": "codex", "session": THREAD, "requests": 3, "folder": "proj-b", "ago": 3 * DAY,
+CODEX = {"harness": "codex", "session": THREAD, "requests": 3, "folder": "proj-b", "ago": 3 * DAY, "today": False,
          "model": CODEX_MODEL, "title": None, "agents": []}
 EARLIER = [{"harness": "claude", "session": session_id(20 + k), "requests": 3 - k, "folder": folder,
-            "ago": days * DAY, "model": SONNET, "title": None, "agents": []}
+            "ago": days * DAY, "today": False, "model": SONNET, "title": None, "agents": []}
            for k, (folder, days) in enumerate((("proj-b", 12), ("scratch", 20)))]
 SESSIONS = WEEK + [CODEX] + EARLIER
-#: A session that starts after the page has opened, for the walk that reads new sessions.
+#: A session that starts after the page has opened, for the walk that reads new sessions:
+#: today's, so it adds to today's cost.
 LATE = {"harness": "claude", "session": session_id(30), "requests": 2, "folder": "proj-a", "ago": 10 * 60,
-        "model": SONNET, "title": None, "agents": []}
+        "today": True, "model": SONNET, "title": None, "agents": []}
+#: The oldest of today's sessions, in seconds before the moment.
+TODAY_S = max(spec["ago"] for spec in SESSIONS + [LATE] if spec["today"])
 
 #: Writes the sessions of the JSON list in argv[1] under the harness roots of the
-#: environment it runs in, each in its folder under argv[3], timed from the moment argv[2].
+#: environment it runs in, each in its folder under argv[2], each starting at its `start`.
 SEED = """
 import json, sys
 from pathlib import Path
 from moxi_sessions import api as sessions
 T = sessions.testing
-specs, moment, work = json.loads(sys.argv[1]), float(sys.argv[2]), sys.argv[3]
+specs, work = json.loads(sys.argv[1]), sys.argv[2]
 for spec in specs:
     cwd = work + "/" + spec["folder"]
-    start = moment - spec["ago"]
+    start = spec["start"]
     if spec["harness"] == "codex":
         r = T.CodexRollout(Path(sessions.root("codex")), thread_id=spec["session"], cwd=cwd, start=start)
         r.turn(spec["model"])
@@ -233,8 +238,14 @@ def work_of(shell) -> Path:
     return Path(shell.env["HOME"]) / "work"
 
 
+def start_of(spec: dict, moment: float) -> float:
+    """When `spec`'s session starts: `ago` before the moment, kept on today if it is today's."""
+    return today_at(spec["ago"], oldest_s=TODAY_S, now=moment) if spec["today"] else moment - spec["ago"]
+
+
 def write(shell, specs: list[dict], moment: float) -> None:
-    run(shell, sys.executable, "-c", SEED, json.dumps(specs), repr(moment), str(work_of(shell)))
+    timed = [{**spec, "start": start_of(spec, moment)} for spec in specs]
+    run(shell, sys.executable, "-c", SEED, json.dumps(timed), str(work_of(shell)))
 
 
 def seeded(ui_shells, name: str, leave_out: list[str], moment: float):
@@ -508,7 +519,7 @@ def test_the_last_30_days_go_by_place_and_model_and_a_row_filters_sessions_to_it
         expect(chart.locator("[data-part=sentence]")).to_have_text(
             re.compile(rf"^The most in these 30 days was .+, {MONEY}\. \d+ days had no sessions\.$"))
         # A bar for each day that had a session.
-        days = {time.strftime("%Y-%m-%d", time.localtime(shell.moment - spec["ago"])) for spec in SESSIONS}
+        days = {time.strftime("%Y-%m-%d", time.localtime(start_of(spec, shell.moment))) for spec in SESSIONS}
         expect(chart.locator("svg[data-part=chart] g[data-period]")).to_have_count(len(days))
         models = section(panel, "models")
         expect(models.locator("[data-part=closed]")).to_have_text(

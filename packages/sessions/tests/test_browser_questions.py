@@ -36,7 +36,7 @@ import pytest
 from moxi import modules
 from playwright.sync_api import expect
 
-from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb
+from moxi_sessions.testing import ClaudeTranscript, CodexRollout, OpenCodeDb, today_at
 from test_browser_list import (changed_at, count_line, date_words, day_key, day_label, env_of, filter_button, group,
                                keys, noon, open_list, row, sid, tid)
 from test_browser_opened import open_row, opened
@@ -169,7 +169,7 @@ def seed(env: dict[str, str], now: float) -> str:
 
     * The last hour: a named session with a typed message, a reply and two subagents;
       an unnamed one with a typed message; one in which nobody typed; and one a program
-      started two minutes ago.
+      started two minutes ago, kept on today just after midnight.
     * Yesterday: two started in a terminal, three by a program, and a Codex thread that
       spawned another.
     * Two, four and five days back: a session or two each. Three days back: an OpenCode
@@ -186,7 +186,7 @@ def seed(env: dict[str, str], now: float) -> str:
                                  ("general-purpose", "List the callers", "Found three callers.")))
     claude(root, home, PARSER, now - 1500, folder="code/proj-b", typed=PARSER_PROMPT, reply=PARSER_REPLY)
     claude(root, home, SCRATCH, now - 2700, folder="scratch", reply=SCRATCH_REPLY)
-    claude(root, home, NIGHTLY, now - 120, program=True, took=60)
+    claude(root, home, NIGHTLY, today_at(120, oldest_s=120, now=now), program=True, took=60)
 
     claude(root, home, CHANGELOG, noon(1).timestamp() + 1800, typed="Draft the changelog entry.")
     claude(root, home, QUIET, noon(1).timestamp(), folder="code/proj-b")
@@ -339,7 +339,7 @@ def test_the_last_hours_work_is_under_active_recently_with_no_running_group_or_l
         # What a program started in the last hour is not this group's: it is counted
         # under its own day.
         expect(row(view, "claude", sid(NIGHTLY))).to_have_count(0)
-        today = group(view, datetime.fromtimestamp(moment - 120).strftime("%Y-%m-%d"))
+        today = group(view, datetime.fromtimestamp(moment).strftime("%Y-%m-%d"))
         expect(today.locator('[data-line="program"] span')).to_have_text("1 started by a program")
 
         # Nothing says what runs now: no group but the last hour's, the days and

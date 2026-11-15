@@ -30,14 +30,15 @@ WHEN = rf"(?:\w+ (?:\d+ )?)?{TIME}"
 COST = r"today \$\d+\.\d\d\+?"
 SESSION = "0190b000-0000-7000-8000-0000000000c1"
 
-#: One Claude session of three requests, begun a minute ago: today's cost.
+#: One Claude session of three requests, begun a minute ago and kept on today: today's cost.
 SEED = """
 import sys, time
 from pathlib import Path
 from moxi_sessions import api as sessions
 T = sessions.testing
 t = T.ClaudeTranscript(Path(sessions.root("claude")), session_id=sys.argv[1],
-                       project="-work-proj-a", cwd="/work/proj-a", start=time.time() - 60)
+                       project="-work-proj-a", cwd="/work/proj-a",
+                       start=T.today_at(60, oldest_s=60, now=time.time()))
 for m in range(3):
     t.user("Fix the failing test.")
     t.assistant("Done.", usage=T.usage(input=200, output=1000),
