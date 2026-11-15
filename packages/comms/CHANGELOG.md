@@ -27,6 +27,14 @@
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the
   binding's own connection now changes the link's state when it closes.
+- Waiting mail is no longer skipped when a Claude session's comms shim reconnects to the
+  daemon. The daemon hands mail that waited for the session as soon as it answers the
+  reconnect, and a turn ending, the idle tick, or interrupt mail steered into a running
+  turn could make the shim inject it before it had switched to the new connection. The
+  shim then dropped the message, which did not arrive until the session's next
+  reconnect or relaunch while newer mail went through. The shim now holds that mail
+  until the new connection is in place, and injects it at the next idle tick or turn
+  end.
 
 ## 0.3.0 (2026-11-08)
 
