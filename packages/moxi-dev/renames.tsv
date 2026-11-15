@@ -7276,6 +7276,7 @@ projects	packages/projects/src/moxi_projects/acts.py	raised as without `record`.
 projects	packages/projects/src/moxi_projects/acts.py	record(conn, {"state": "removed", "key": gone.key})	keep	record	record
 projects	packages/projects/src/moxi_projects/acts.py	set_fields	name	notes	notes_installed
 projects	packages/projects/src/moxi_projects/acts.py	store.write(lambda conn: record(conn, outcome))	keep	record	record
+projects	packages/projects/src/moxi_projects/acts.py	"""A `record` for `remove` that keeps its outcome under `job`, the page's key for	keep	record	record
 projects	packages/projects/src/moxi_projects/cli.py	"show": _show, "find": _find, "kinds": _kinds, "agents": _agents}	keep	find	find
 projects	packages/projects/src/moxi_projects/cli.py	"show": _show, "find": _find, "kinds": _kinds, "agents": _agents}	keep	show	show
 projects	packages/projects/src/moxi_projects/cli.py	-	name	_directory	_dir_text
@@ -7350,19 +7351,44 @@ projects	packages/projects/src/moxi_projects/page.py	_MAYBE_DIR = lb.Field("stri
 projects	packages/projects/src/moxi_projects/page.py	_MAYBE_NAME = lb.Field("string", required=False, max=NAME_MAX)	keep	required	required
 projects	packages/projects/src/moxi_projects/page.py	_MAYBE_PATH = lb.Out("string", mark="path", nullable=True)	keep	nullable=	nullable=
 projects	packages/projects/src/moxi_projects/page.py	_MAYBE_SAYS = lb.Out("string", mark="redact", nullable=True)	keep	nullable=	nullable=
+projects	packages/projects/src/moxi_projects/page.py	#: press it was kept under; `state` is `removed` or `refused`; `key` the project's key as	keep	refused	refused
+projects	packages/projects/src/moxi_projects/page.py	_MAYBE_BOOL = lb.Out("bool", nullable=True)	keep	nullable=	nullable=
 projects	packages/projects/src/moxi_projects/pagecheck.py	__all__ = ["STORE", "HOME", "UI_INTERFACE", "places", "line", "unchecked"]	keep	HOME	HOME
 projects	packages/projects/src/moxi_projects/pagecheck.py	return found.api.check(lambda env: places(env, consulted))	keep	ok	ok
 projects	packages/projects/src/moxi_projects/pagecheck.py	user's terminal: another `MOXI_HOME`, `MOXI_PROJECTS_*`, `XDG_DATA_HOME` or `HOME` puts	keep	HOME	HOME
-projects	packages/projects/src/moxi_projects/pagehandlers.py	remove	name	again	status_exc
+projects	packages/projects/src/moxi_projects/pagehandlers.py	if any(_same(a, b) for a, b in spellings):	keep	any	any
+projects	packages/projects/src/moxi_projects/pagehandlers.py	if any(_under(a, b) for a, b in spellings):	keep	any	any
+projects	packages/projects/src/moxi_projects/pagehandlers.py	any(p.key.casefold() == key.casefold() for p in api.list_projects()))	keep	any	any
+projects	packages/projects/src/moxi_projects/pagehandlers.py	project is a 422. A refusal the store keeps is a 200 whose `state` is `refused`; one	keep	refused	refused
+projects	packages/projects/src/moxi_projects/pagestat.py	job.ended.set()	keep	set	set
 projects	packages/projects/src/moxi_projects/rules.py	if any(_bad_char(ch) for ch in name):	keep	any	any
 projects	packages/projects/tests/conftest.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/conftest.py	self.packages: set[str] = set()	keep	set	set
 projects	packages/projects/tests/conftest.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/fixture/moxi_fixture/page.py	STATE.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/projects_page_kit.py	site.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/projects_page_kit.py	info.mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/projects_page_kit.py	(site / "sitecustomize.py").write_text(_HIDE.format(names=set(hidden)), encoding="utf-8")	keep	set	set
+projects	packages/projects/tests/projects_page_kit.py	return Path(shell.env["HOME"])	keep	HOME	HOME
+projects	packages/projects/tests/projects_page_kit.py	where.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/projects_page_kit.py	(home(shell) / LOOSE).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/projects_page_kit.py	loose = {"folder": str(home(shell) / LOOSE), "at": int(now - LOOSE_AGO_S),	keep	folder	folder
+projects	packages/projects/tests/projects_page_kit.py	"projects": projects, "folders": [loose], "more_folders": 0}	keep	folders	folders
 projects	packages/projects/tests/test_browser_components.py	assert any(url.endswith(route) for url in check.requests), check.requests	keep	any	any
 projects	packages/projects/tests/test_browser_components.py	cwd=shell.env["HOME"], stdin=subprocess.DEVNULL,	keep	HOME	HOME
 projects	packages/projects/tests/test_browser_components.py	done = moxi(shell, "projects", "show", key, "--json", check=False)	keep	show	show
 projects	packages/projects/tests/test_browser_components.py	expect(card.locator(".card")).to_have_attribute("data-state", "refused")	keep	refused	refused
 projects	packages/projects/tests/test_browser_components.py	return str(Path(shell.env["HOME"]) / "work" / name)	keep	HOME	HOME
+projects	packages/projects/tests/test_browser_facts.py	assert set(last["projects"]) == keys - {kit.MISSING}	keep	set	set
+projects	packages/projects/tests/test_browser_folders.py	"parts => parts.map(part => part.dataset.part)") == ["projects", "folders"]	keep	folders	folders
+projects	packages/projects/tests/test_browser_folders.py	report["folders"] = [{"folder": path, "at": now - seconds, "parts": [{"text": "1 session this week"}]}	keep	folder	folder
+projects	packages/projects/tests/test_browser_folders.py	report["folders"] = [{"folder": path, "at": now - seconds, "parts": [{"text": "1 session this week"}]}	keep	folders	folders
+projects	packages/projects/tests/test_browser_frame.py	expect(list_part(small_page)).to_have_attribute("data-state", "down", timeout=15_000)	keep	timeout	timeout
+projects	packages/projects/tests/test_browser_frame.py	expect(list_part(small_page)).to_have_attribute("data-state", "refused")	keep	refused	refused
+projects	packages/projects/tests/test_browser_frame.py	@pytest.mark.parametrize(("route", "opened", "path"), [	keep	opened	opened
+projects	packages/projects/tests/test_browser_list.py	"data-state", "up", timeout=REPORT_S * 1000)	keep	timeout	timeout
+projects	packages/projects/tests/test_browser_list.py	expect(row(panel, route.split("/")[1])).to_have_attribute("open", "", timeout=REPORT_S * 1000)	keep	timeout	timeout
+projects	packages/projects/tests/test_browser_opened.py	moved.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/test_browser_page.py	-	name	test_a_lost_add_answer_reads_the_list_again_and_says_the_directory_may_exist	test_a_lost_add_answer_reads_the_list_again_and_says_the_dir_may_exist
 projects	packages/projects/tests/test_browser_page.py	Path(where).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 projects	packages/projects/tests/test_browser_page.py	assert any(url.endswith("/m/projects/api/projects?kind=agent") for url in reads), reads	keep	any	any
@@ -7376,6 +7402,20 @@ projects	packages/projects/tests/test_browser_page.py	moxi(ui_shell, "projects",
 projects	packages/projects/tests/test_browser_page.py	moxi(ui_shell, "projects", "set", "edited", "--root", second)	keep	set	set
 projects	packages/projects/tests/test_browser_page.py	return str(Path(shell.env["HOME"]) / "work" / name)	keep	HOME	HOME
 projects	packages/projects/tests/test_browser_page.py	where_to = str(Path(shell.env["HOME"]) / "work" / "nogit")	keep	HOME	HOME
+projects	packages/projects/tests/test_browser_page.py	return "~/" + Path(path).relative_to(shell.env["HOME"]).as_posix()	keep	HOME	HOME
+projects	packages/projects/tests/test_browser_page.py	expect(said).to_have_attribute("data-outcome", "refused")	keep	refused	refused
+projects	packages/projects/tests/test_browser_page.py	expect(said).to_have_attribute("data-outcome", "done", timeout=30_000)	keep	timeout	timeout
+projects	packages/projects/tests/test_browser_panel.py	(where / ".git").mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/test_browser_panel.py	assert (round(box["x"] + box["width"]), round(box["width"])) == (edge, 400), box	keep	round	round
+projects	packages/projects/tests/test_browser_panel.py	expect(said).to_have_attribute("data-outcome", "done", timeout=30_000)	keep	timeout	timeout
+projects	packages/projects/tests/test_browser_panel.py	expect(said).to_have_attribute("data-outcome", "refused")	keep	refused	refused
+projects	packages/projects/tests/test_browser_panel.py	where.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/test_browser_panel.py	("set", {"key": "atlas-api", "lead": "planner"}),	keep	set	set
+projects	packages/projects/tests/test_browser_panel.py	moved.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/test_browser_panel.py	assert sent(posts) == [("set", {"key": "kestrel-web", "root": "~/code/kestrel-moved"})]	keep	set	set
+projects	packages/projects/tests/test_browser_remove.py	expect(step).to_have_attribute("data-state", "refused")	keep	refused	refused
+projects	packages/projects/tests/test_browser_whole.py	while not any("over 200 characters" in text for text in messages) and time.monotonic() < deadline:	keep	any	any
+projects	packages/projects/tests/test_browser_whole.py	assert any("fixture's project facts refused in part" in text and "over 200 characters" in text	keep	any	any
 projects	packages/projects/tests/test_budget.py	added = set(done.stdout.split())	keep	set	set
 projects	packages/projects/tests/test_cli.py	("set", "gamma", "--kind", "agent"),	keep	set	set
 projects	packages/projects/tests/test_cli.py	("set", "gamma", "--notes-root", ""),	keep	set	set
@@ -7462,6 +7502,14 @@ projects	packages/projects/tests/test_page.py	release.set()	keep	set	set
 projects	packages/projects/tests/test_page.py	return body["refused"]	keep	refused	refused
 projects	packages/projects/tests/test_page.py	test_a_store_locked_past_the_wait_is_409	name	holder	holder_conn
 projects	packages/projects/tests/test_page.py	test_a_store_locked_past_the_wait_is_409_and_keeps_nothing	name	holder	holder_conn
+projects	packages/projects/tests/test_page.py	assert {p for p, r in routes.items() if r.get("confirmed")} == set()	keep	set	set
+projects	packages/projects/tests/test_page.py	let_go.set()	keep	set	set
+projects	packages/projects/tests/test_page.py	assert set(found.values()) == {None}	keep	set	set
+projects	packages/projects/tests/test_page.py	monkeypatch.setenv("HOME", str(tmp_path / "the-home"))	keep	HOME	HOME
+projects	packages/projects/tests/test_page.py	monkeypatch.setenv("HOME", "")	keep	HOME	HOME
+projects	packages/projects/tests/test_page.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
+projects	packages/projects/tests/test_page.py	store_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+projects	packages/projects/tests/test_page.py	assert set(rows) == {"gone", "raises", "svc"}	keep	set	set
 projects	packages/projects/tests/test_promote.py	-	name	test_a_move_back_that_fails_names_both_folders_and_the_add	test_a_move_back_that_fails_names_both_dirs_and_the_add
 projects	packages/projects/tests/test_promote.py	-	name	test_a_one_off_promoted_to_a_project_moves_to_the_folder_notes_computes	test_a_one_off_promoted_to_a_project_moves_to_the_dir_notes_computes
 projects	packages/projects/tests/test_promote.py	-	name	test_a_one_off_promoted_to_a_topic_moves_to_its_topic_folder	test_a_one_off_promoted_to_a_topic_moves_to_its_topic_dir
