@@ -27,6 +27,9 @@
   the page mints per press, and it answers the outcome at once instead of 202 with a
   status link. One outcome is kept per `job`, so a repeat or two presses sent at once
   answer the first. `/api/remove-status?job=` stays, for a lost answer.
+- The README's "Facts on the Projects page" states the contract through which another
+  module adds its facts to the Projects page: a `project-facts` component that reports in
+  a `moxi-project-facts` event, version 1.
 
 ## 0.1.4 (2026-11-08)
 

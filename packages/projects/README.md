@@ -199,6 +199,179 @@ change that was made, or may have been, the add form and the page send
 `moxi-projects-changed` on the document, and every placed picker and card reads its
 route again.
 
+## Facts on the Projects page
+
+The Projects page shows what other modules know of each project (what runs there, its
+cost, a service that failed) without naming any module. Each module adds its facts by
+announcing a component named `project-facts`; the page places every installed module's
+one and draws what each reports. This section is that contract, version 1.
+
+### The rules
+
+1. **Its own interface.** A module's facts reach the page only through its own
+   `project-facts`, which reads only its own module's routes and topics, never another
+   module's (the shell's module list included), and words its facts itself. It re-reads
+   on its own schedule and on its own module's topics. A module installed or removed
+   reaches it only as the page placing or removing it.
+2. **Its module's own judgment.** Where the module judges a row (a verdict, a state, a
+   status), the component reports that judgment, in words a table of its own maps it to,
+   and never works it out again from the raw fields beside it. Whenever the module can't
+   say (the answer's `state` is not `up`, it has a `problem`, the read failed, or the row
+   carries no judgment the table maps), that piece is absent: `null` for the whole
+   report, or that part left out. A judgment the page needs and the module doesn't give
+   is added to the module, never guessed in the browser.
+3. **A fact lives only as long as its read.** Every fact comes from its route's last
+   successful read. A read that fails, is refused, or answers a `state` other than `up`
+   drops exactly the facts that route fed, and the component reports again at once
+   without them (`null` when nothing is left). Its next good read puts them back.
+4. **A joined phrase is true by construction.** A phrase that needs two modules' facts is
+   one part from each, joined by the page only where they agree. A part that says whether
+   something holds carries it as a typed field the page compares without reading words
+   (`runs`, under Agents below). Where two reports disagree, neither half is drawn.
+
+A component that is missing, failing, hung or late draws nothing of itself and changes
+nothing else on the page.
+
+### The component
+
+```python
+COMPONENTS = {
+    "project-facts": {"script": "project-facts.js", "title": "Sessions",
+                      "doc": "What sessions knows of each project",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string"},
+                                     "open": {"type": "string"}}},
+}
+```
+
+`contract: 1` there is the shell's placement contract, not this one; this one's version
+is the report's `version`. The page reads the shell's module list when it opens and again
+on the `ui.modules` topic, and places every present module's `project-facts`, in
+module-name order, in one hidden host. A module listed twice, or whose component the
+shell won't place, is skipped. When the list changes, the page places the components of
+modules now present and removes those of modules gone, with their reports; a component
+already placed is left as it is.
+
+It is given two attributes, and watches both:
+
+- `projects`: JSON, `[{key, root, lead, associated}]`, every project the page holds, each
+  root absolute. Set when the component is placed, and again whenever a key, root, lead
+  or associated agent changes or a project is added or removed.
+- `open`: the key of the project opened on the page, or absent. Set whenever that
+  changes.
+
+**When it reads.** Only while it is connected and the document is visible. It starts its
+reads and subscriptions on connect and stops all of them on disconnect (another page
+placed), pauses its timers while the document is hidden, and reads once when it shows
+again.
+
+**What it may not do.** Read anything of another module's, act, draw anything visible
+(its host is hidden), or work its module's judgment out again. Its words are its own
+page's words for the same fact.
+
+### The report
+
+The component dispatches a bubbling, composed `moxi-project-facts` event whenever what it
+would say changes. Each report replaces that module's last one whole; `null`, or none yet,
+is nothing to say.
+
+```js
+this.dispatchEvent(new CustomEvent("moxi-project-facts", {
+  bubbles: true, composed: true,
+  detail: {
+    version: 1,
+    order: 20,
+    activity: "all",
+    gathers: "sessions",
+    projects: {
+      alpha: {
+        at: 1763221740,
+        parts: [{ text: "", count: { one: "active recently", many: "active recently" },
+                  claims: ["claude/0f3c…"] }],
+      },
+    },
+    folders: [{ folder: "/home/me/code/finch-scripts", at: 1763218800,
+                parts: [{ text: "2 sessions this week" }] }],
+    more_folders: 0,
+  },
+}));
+```
+
+| field | what it means |
+|---|---|
+| `version` | `1`. A report with any other is refused whole. |
+| `order` | A whole number from 0 to 999: its parts, lines and sections sit in this order, lower first. A missing or wrong one reads as 500. |
+| `activity` | Optional. `all`: its `at` covers every record it has; `window`: only some, such as what runs now. A component that reports `at` is an activity source. |
+| `gathers` | Optional. What it gathers under a project (`sessions`, `cost`), for the empty list's sentence. |
+| `projects` | By key, exactly as given in `projects`. Each: `at`, epoch seconds of the newest activity it knows there; `parts`, its phrases for the row's second line; and for the key in `open` only, `sections`, `agents` and `stays` (Remove's `Stays` lines). |
+| `folders` | Optional. Folders, as absolute paths, that no project holds: `{folder, at, parts}`. |
+| `more_folders` | Optional. How many folders it knows past those it lists. |
+
+The types the fields use:
+
+```ts
+Part = { text: string; heavy?: boolean; warn?: boolean; rank?: number; claims?: string[];
+         count?: { one: string; many: string; after_one?: string; after_many?: string } }
+Section = { label: string; rank?: number; lines: Line[];
+            link?: { text: string; module: string; route: string } }
+Line = { parts: Part[]; claims?: string[] }
+Say = { runs: boolean; state: string; where?: string }
+```
+
+- **`rank`** is Home's `needs` scale (10 someone is blocked on you, 20 something waits for
+  you, 30 something is broken, 40 something will run out). A ranked part leads its row's
+  second line, lower rank first, and lifts the row above the order by activity when some
+  component reports activity; with none the list stays by key and nothing rises. A ranked
+  section moves to the top of the opened project. Without a rank, in `order`.
+- **`heavy`** is weight only. **`warn`** is a warning: the text colour at normal weight,
+  after the ranked parts and before the rest; it doesn't lift the row.
+- **Counted parts and claims.** A part with `count` is drawn as a number and words: the
+  page counts its `claims` that no part or line of a lower `order` on the same project
+  already claims, and writes `<n> <one|many>`; in a section, after lines, `after_one` or
+  `after_many` (`3 more this week`). A count of 0 is not drawn. Two modules that see the
+  same session never count it twice. Its `text` may be empty.
+- **A claim** names one session: `<harness>/<session id>`, the harness as Moxi spells it
+  (`claude`, `codex`) and the id the harness writes for that session (Claude Code's
+  session id, Codex's rollout id). A claim that names no session yet (a launch with no id)
+  starts `request/`, which is no harness, and so matches no other module's.
+- **`at`** is epoch seconds, a number. A component whose own time is in another shape
+  turns it into epoch seconds, and leaves `at` out when it doesn't parse. The page says a
+  project or folder was not used only while a component with `activity: "all"` has
+  reported; a `window` source can make a row newer, never unused.
+- **Agents.** `agents` says, for the open project's lead and associated agents by name,
+  `runs` (whether this module says the agent runs now), `state` (its words for that) and,
+  only with `runs` true, `where`. The page draws a phrase after a name only when every
+  report that speaks of it agrees on `runs`: the `state` of the lowest `order`, then, with
+  `runs` true, the `where` of the lowest `order` that gives one. Where they disagree it
+  draws nothing. A `Say` with a `where` and `runs` false is refused.
+- **Sections** with one `label` from two modules are one row: lines in `order`, the first
+  `link` in `order`, the lowest `rank`. A link is drawn only while its `module` is
+  installed, and a press is `navigate(module, route)`.
+- **Folders** with one `folder` from two modules are one row: parts in `order`, `at` the
+  newest. Only an activity source may give a folder an `at`; the page drops `at` from a
+  report with no `activity`, and shows a folder only once some report gives it one. It
+  adds the largest `more_folders` of any activity source to the folders it holds past
+  those it shows.
+
+**What the page refuses.** Another `version` (the whole report); a key it did not give, or
+an agent that is not the open project's; a field of the wrong type; a text over 200
+characters; more than 8 parts on a row or a line, or 6 lines in a section; `sections`,
+`agents` or `stays` on a project that isn't open. A refused field is dropped and logged
+once per module to the console, and the rest of the report is used. Keep a report inside
+these caps: end a section's last line `<n> more` when there is more to say.
+
+**Late, slow and fast reports.** The page draws without waiting for any component. It
+applies reports at most once per animation frame, so reports that arrive within one frame
+are drawn together, and a component that reports in a tight loop re-sorts the list at
+most once a frame.
+
+**Cost.** While the page shows, each placed component keeps its module's page server
+alive with its reads, each within the memory its page declares. Each page server stops
+after its `idle_s` with nothing reading it.
+
+The project's own facts (its folder, kind, agents' names, notes folder and a missing
+folder) are projects' and don't go through the contract.
+
 ## Install
 
 Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/); `git` for
