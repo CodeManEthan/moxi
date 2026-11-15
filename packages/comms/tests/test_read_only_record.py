@@ -256,8 +256,8 @@ def test_the_step_is_read_once_per_connection():
         def other_thread():
             try:
                 reader.history(room)
-            except BaseException as e:  # noqa: BLE001 - the test reads it
-                caught.append(e)
+            except BaseException as exc:  # noqa: BLE001 - the test reads it
+                caught.append(exc)
 
         t = threading.Thread(target=other_thread)
         t.start()

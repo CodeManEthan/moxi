@@ -1138,6 +1138,7 @@ comms	packages/comms/src/moxi_comms/glossary.py	aliases=("expires", "--expires",
 comms	packages/comms/src/moxi_comms/glossary.py	aliases=("record", "backend"),	keep	record	record
 comms	packages/comms/src/moxi_comms/kinds.py	unknown = set(declared) - {"cache", "harness", "evidence"}	keep	set	set
 comms	packages/comms/src/moxi_comms/listener.py	memory_path	name	directory	session_dir
+comms	packages/comms/src/moxi_comms/local_record.py	conn = opener(self.path, timeout=self.busy_timeout_ms / 1000.0,	keep	timeout	timeout
 comms	packages/comms/src/moxi_comms/local_record.py	self._stop.set()	keep	set	set
 comms	packages/comms/src/moxi_comms/local_record.py	self._wake.set()	keep	set	set
 comms	packages/comms/src/moxi_comms/mcp/inprocess.py	InProcessClient._call	name	e	exc
@@ -2441,6 +2442,10 @@ comms	packages/comms/tests/test_queue.py	shim._client.call("max_id")	keep	_clien
 comms	packages/comms/tests/test_queue.py	shim.on_turn_boundary(idle=True)	keep	idle	idle
 comms	packages/comms/tests/test_queue.py	with rig.record._txn(write=True) as st:	keep	record	record
 comms	packages/comms/tests/test_queue.py	with rig.record._write() as conn:	keep	record	record
+comms	packages/comms/tests/test_read_only_record.py	assert set(threading.enumerate()) == threads	keep	set	set
+comms	packages/comms/tests/test_read_only_record.py	old.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+comms	packages/comms/tests/test_read_only_record.py	test_the_step_is_read_once_per_connection.other_thread	name	e	exc
+comms	packages/comms/tests/test_read_only_record.py	threads = set(threading.enumerate())	keep	set	set
 comms	packages/comms/tests/test_register_concurrency.py	calls = instrument(rig.record)	keep	record	record
 comms	packages/comms/tests/test_register_concurrency.py	entered.set()	keep	set	set
 comms	packages/comms/tests/test_register_concurrency.py	f"{[round(s, 3) for s in contended]} against a {HOLD:.2f}s round trip -- the "	keep	round	round
