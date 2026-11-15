@@ -164,6 +164,10 @@ There are two files, read with `Allowlist.read(public, private)`:
   or in secrets' config directory, checked after every link is resolved, so git never
   tracks it.
 
+`Allowlist.from_text(public_text, private)` takes the public file's content as text
+instead, for a caller that judges a snapshot rather than the work tree: a git hook reads
+`.secrets-allow` from the index, a push check from the commit it judges.
+
 A malformed line raises `AllowlistError` naming the file and the line number, never the
 line's text. A line that allows a whole set everywhere is refused: its path and match are
 `*` and its set/rule is `*` or `<set>/*`.

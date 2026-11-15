@@ -341,3 +341,48 @@ def test_a_git_directory_reached_through_a_link_is_still_a_git_directory(tmp_pat
     alias = tmp_path / "alias"
     alias.symlink_to(tmp_path / "real", target_is_directory=True)
     assert len(Allowlist.read(None, alias / ".git" / "allow")) == 1
+
+
+# -- the public file's lines from text ------------------------------------------------------
+
+def test_from_text_reads_the_public_lines_from_the_text_given(tmp_path, private):
+    token, text = token_text(4)
+    fp = scan_mod.fingerprint(token)
+    public_text = "# header\r\n" + line("docs/", "credentials/github-pat", fp) + "\r\n"
+    private_path = private(line("src/", "credentials/*", "*"))
+    for given in (public_text, public_text.encode("utf-8")):
+        allow = Allowlist.from_text(given, private_path)
+        assert len(allow) == 2
+        for path in ("docs/a.md", "src/b.py"):
+            assert scan(text, ("credentials",), path=path, allow=allow) == [], path
+        assert scan(text, ("credentials",), path="lib/c.py", allow=allow) != []
+    # A work tree file of the same name is not read: only the text given counts.
+    (tmp_path / ".secrets-allow").write_text(line("*", "credentials/github-pat", fp) + "\n",
+                                             encoding="utf-8")
+    assert len(Allowlist.from_text(None, None)) == 0
+    assert len(Allowlist.from_text("", None)) == 0
+
+
+def test_from_text_keeps_the_private_files_own_entries_and_its_place_rule(
+        tmp_path, private):
+    path = private(line("*", "private-names/*", "text:x"))
+    assert len(Allowlist.from_text(None, path)) == 1
+    assert len(Allowlist.from_text(None, path.parent / "missing")) == 0
+    with pytest.raises(AllowlistError) as caught:
+        Allowlist.from_text(None, tmp_path / "loose.txt")
+    assert "private" in str(caught.value)
+
+
+@pytest.mark.parametrize("what, bad", BAD_ANYWHERE + BAD_PUBLIC,
+                         ids=[w for w, _ in BAD_ANYWHERE + BAD_PUBLIC])
+def test_from_text_refuses_a_malformed_line_by_its_name_and_number(what, bad):
+    good = line("docs/", "credentials/jwt", "*", why="fine")
+    text = "\n".join(("# header", good, "", bad, good)) + "\n"
+    assert_refused(lambda: Allowlist.from_text(text, public_name=":.secrets-allow"), 4,
+                   ":.secrets-allow")
+
+
+def test_from_text_refuses_bytes_that_are_not_utf8():
+    with pytest.raises(AllowlistError) as caught:
+        Allowlist.from_text(b"\xff\xfe" + line("*", "credentials/jwt", "*").encode())
+    assert ".secrets-allow" in str(caught.value)

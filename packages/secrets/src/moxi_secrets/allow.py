@@ -146,6 +146,43 @@ def private_place_ok(path: Path) -> bool:
     return resolved.is_relative_to(config)
 
 
+def _read_file(path: Path) -> str | None:
+    """`path`'s text as its bytes decode, line ends kept; None when it does not exist."""
+    try:
+        with path.open(encoding="utf-8", newline="") as handle:
+            return handle.read()
+    except FileNotFoundError:
+        return None
+    except UnicodeDecodeError:
+        raise AllowlistError(f"{path}: is not UTF-8") from None
+
+
+def _lines_of(content: str, where: str, *, public: bool) -> list[_Line]:
+    lines = []
+    for n, raw in enumerate(_translated(content).split("\n"), 1):
+        parsed = _parse(raw, where, n, public)
+        if parsed is not None:
+            lines.append(parsed)
+    return lines
+
+
+def _read_private(private: Path | None) -> tuple[list[_Line], str | None]:
+    """The private file's lines and its text, once its place is checked."""
+    if private is None:
+        return [], None
+    from pathlib import Path
+
+    private = Path(private)
+    if not private_place_ok(private):
+        raise AllowlistError(f"{private}: the private allowlist must lie inside a .git "
+                             "directory or the secrets config directory, where git never "
+                             "tracks it")
+    content = _read_file(private)
+    if content is None:
+        return [], None
+    return _lines_of(content, str(private), public=False), content
+
+
 class Allowlist:
     """The lines of a public file, a private file, or both."""
 
@@ -170,30 +207,31 @@ class Allowlist:
         from pathlib import Path
 
         lines = []
-        own_text = None
-        for path, is_public in ((public, True), (private, False)):
-            if path is None:
-                continue
-            path = Path(path)
-            if not is_public and not private_place_ok(path):
-                raise AllowlistError(f"{path}: the private allowlist must lie inside a .git "
-                                     "directory or the secrets config directory, where git "
-                                     "never tracks it")
-            try:
-                with path.open(encoding="utf-8", newline="") as handle:
-                    content = handle.read()
-            except FileNotFoundError:
-                continue
-            except UnicodeDecodeError:
-                raise AllowlistError(f"{path}: is not UTF-8") from None
-            if not is_public:
-                own_text = content
-            text = _translated(content)
-            for n, raw in enumerate(text.split("\n"), 1):
-                parsed = _parse(raw, str(path), n, is_public)
-                if parsed is not None:
-                    lines.append(parsed)
-        return cls(lines, own_text)
+        if public is not None:
+            content = _read_file(Path(public))
+            if content is not None:
+                lines += _lines_of(content, str(public), public=True)
+        private_lines, own_text = _read_private(private)
+        return cls(lines + private_lines, own_text)
+
+    @classmethod
+    def from_text(cls, public_text: str | bytes | None, private: Path | None = None, *,
+                  public_name: str = ".secrets-allow") -> Allowlist:
+        """The public file's lines from `public_text`, its content as the caller read it
+        (from git's index or a commit, say, so the allowances judged are those of the
+        snapshot judged), and the private file read from `private` as `read` reads it.
+        `public_text` None adds no line; bytes are read as UTF-8. An error names the
+        public text `public_name`."""
+        lines = []
+        if public_text is not None:
+            if isinstance(public_text, bytes):
+                try:
+                    public_text = public_text.decode("utf-8")
+                except UnicodeDecodeError:
+                    raise AllowlistError(f"{public_name}: is not UTF-8") from None
+            lines += _lines_of(public_text, public_name, public=True)
+        private_lines, own_text = _read_private(private)
+        return cls(lines + private_lines, own_text)
 
     def keeps(self, hit, text: str, path: str | None) -> bool:
         """True when a line keeps `hit`, found in `text` scanned with `path`."""
