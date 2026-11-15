@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   agentsLabel, ANSWERING, DOCTOR, DOWN_LINE, DOWN_WHAT, frameModel, NAME_COMMAND, NO_AGENTS, NO_LONGER_OWED,
-  NO_SUCH_VIEW, READING, SERVER_ERROR,
+  NO_SUCH_VIEW, otherNamesWords, otherWhere, READING, SERVER_ERROR,
 } from "../src/frame-model.ts";
 
 // Times in UTC, so the words are the same in any zone.
@@ -156,6 +156,15 @@ test("agent/<address> of Other names opens it there; an address the page doesn't
   assert.ok(gone.rows.every((item) => !item.open));
   assert.deepEqual(frame({ at: { piece: "mail", qualified: "nobody" } }).lines.map((l) => l.key), ["address"]);
   assert.deepEqual(frame({ at: { piece: "unknown" } }).lines, [{ key: "address", text: NO_SUCH_VIEW }]);
+});
+
+test("Other names: the line's names, and a send-only name sent by its module", () => {
+  const others = [{ qualified: "ops-watch", sentBy: null, writable: true },
+                  { qualified: "planner@proj-b", sentBy: null, writable: true },
+                  { qualified: "usage", sentBy: "usage", writable: false }];
+  assert.equal(otherNamesWords(others), "ops-watch, planner@proj-b and usage");
+  assert.deepEqual(others.map(otherWhere), [null, null, "sent by usage"]);
+  assert.equal(frame({ at: { piece: "agent", qualified: "ops-watch" } }).opened.kind, "other");
 });
 
 test("mail/<address> opens under its row; thread and others are handed on", () => {

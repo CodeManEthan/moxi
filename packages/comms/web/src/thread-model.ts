@@ -23,6 +23,7 @@ import { readWords, wantsWords } from "./words.ts";
 export const THREAD_FIRST = 6;
 export const THREAD_MORE = 20;
 export const SHOW_EARLIER = "Show earlier";
+export const ALL_MAIL_WITH = "All mail with";
 export const COPY_LAST_ID = "Copy the last message's id";
 export const YOU = "you";
 export const TAKEN_BACK = "taken back";
@@ -172,7 +173,8 @@ export interface ThreadMessage {
 }
 
 export interface ThreadView {
-  /** `planner and builder-1 · 4 messages today · builder-1 owes one reply`. */
+  /** `planner and builder-1 · 4 messages today · builder-1 owes one reply`, or `All mail
+   * with planner · 9 messages today`. */
   header: string;
   /** `31 messages, back to <time>` after `Show earlier`, and the id it reads below. */
   earlier: { text: string; before: string } | null;
@@ -189,7 +191,7 @@ const countWords = (n: number): string => (n === 1 ? "1 message" : `${n} message
 export function threadView(held: ThreadHeld, facts: ThreadFacts): ThreadView {
   const { a, b, him, when } = facts;
   const word = (side: string): string => (him.has(side) ? YOU : side);
-  const parts = [b === null ? word(a) : `${word(a)} and ${word(b)}`];
+  const parts = [b === null ? `${ALL_MAIL_WITH} ${word(a)}` : `${word(a)} and ${word(b)}`];
   if (held.count_today > 0) parts.push(`${countWords(held.count_today)} today`);
   const owes = b === null ? null : owesWords(a, b, facts);
   if (owes !== null) parts.push(owes);

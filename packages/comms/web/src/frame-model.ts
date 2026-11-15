@@ -12,7 +12,7 @@ import type { Address } from "./address-model.ts";
 import { agentsOf, noteText, operatorAddresses } from "./agents-model.ts";
 import type { AgentRow, Launched, MailState, OtherName, Owed, PageRoster } from "./agents-model.ts";
 import type { Failure } from "./feed.ts";
-import { LOCAL } from "./mail-model.ts";
+import { LOCAL, namesWords } from "./mail-model.ts";
 import type { Clock } from "./mail-model.ts";
 import { whenWords } from "./words.ts";
 
@@ -41,6 +41,19 @@ export const ACT_WORDS = { reply: "Reply", message: "Message", "keep-warm": "Kee
 export const CLOSE = "Close";
 /** The label of a thread that opens with no message row between its pair in the lists. */
 export const THREAD_LABEL = "Thread";
+export const OTHER_NAMES = "Other names";
+
+/** The `Other names` line's names: each by its qualified name, the first few and how many
+ * more. */
+export function otherNamesWords(others: readonly OtherName[]): string {
+  return namesWords(others.map((other) => other.qualified));
+}
+
+/** What an entry of `Other names` says after its name: `sent by <module>` for a send-only
+ * name, else nothing. */
+export function otherWhere(other: OtherName): string | null {
+  return other.sentBy !== null ? `sent by ${other.sentBy}` : null;
+}
 
 /** A read as the page holds it: a `Feed`'s state. */
 export interface Read<V> {

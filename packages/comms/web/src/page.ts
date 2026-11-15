@@ -54,9 +54,10 @@ import type { Choice } from "./box-model.ts";
 import { failureWhy, Feed, parseRoster } from "./feed.ts";
 import {
   ACT_WORDS, CLOSE, COPIED, COPIED_MS, COPY, DOWN_LABEL, frameModel, LAUNCH_FROM_HOME, READING, READING_AFTER_MS,
-  readLine, SETTINGS_LINK, SETTINGS_ROUTE, THREAD_LABEL,
+  OTHER_NAMES, otherNamesWords, otherWhere, readLine, SETTINGS_LINK, SETTINGS_ROUTE, THREAD_LABEL,
 } from "./frame-model.ts";
 import type { Down, Empty, Frame, FrameRow, Placed } from "./frame-model.ts";
+import type { OtherName } from "./agents-model.ts";
 import { byHim, parseQueue } from "./messages-model.ts";
 import type { Queue } from "./messages-model.ts";
 import { COPY_ID, DETAILS, HELP, openedAgent, SHOW_ALL, THREAD_LINK } from "./opened-model.ts";
@@ -67,7 +68,7 @@ import {
   rereadPaths, SHOW, todayOf,
 } from "./today-model.ts";
 import type { Messages, ReadDay } from "./today-model.ts";
-import { between, COPY_LAST_ID, SHOW_EARLIER, ThreadReads, threadView } from "./thread-model.ts";
+import { ALL_MAIL_WITH, between, COPY_LAST_ID, SHOW_EARLIER, ThreadReads, threadView } from "./thread-model.ts";
 import { newestDay, whenWords } from "./words.ts";
 
 const TAG = "moxi-comms-page";
@@ -176,6 +177,7 @@ const STYLES = css`
          color: var(--moxi-text-dim); }
   .one button { flex: none; color: var(--moxi-text); }
   .one button:disabled { color: var(--moxi-text-dim); cursor: default; }
+  .one .cut { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .quietline { font-size: 22px; line-height: 32px; text-align: center; letter-spacing: -0.005em; padding: 150px 0 14px; }
   .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; }
@@ -232,7 +234,7 @@ export class CommsPage extends LitElement {
   /** The address the row opened in the last drawing speaks for. */
   #drawnTo: string | null = null;
   /** The thread opened in the last drawing, and its reads. */
-  #drawnThread: { a: string; b: string } | null = null;
+  #drawnThread: { a: string; b: string | null } | null = null;
   #thread: ThreadReads | null = null;
   #details = false;
   /** The ids of the messages cut at four lines, and those shown in full. */
@@ -463,10 +465,14 @@ export class CommsPage extends LitElement {
 
   render() {
     const frame = this.frame();
-    this.#drawnTo = frame?.rows.find((item) => item.open)?.to ?? null;
-    this.#drawnReply = frame?.opened.kind === "agent" ? frame.opened.reply : null;
     const opened = frame?.opened;
-    this.#drawnThread = opened?.kind === "thread" ? { a: opened.a, b: opened.b } : null;
+    // The box and the queue follow an opened agent row's address or an opened other name;
+    // `All mail with` opens its row with neither.
+    this.#drawnTo = opened?.kind === "agent" ? frame?.rows.find((item) => item.open)?.to ?? null
+      : opened?.kind === "other" ? opened.qualified : null;
+    this.#drawnReply = opened?.kind === "agent" ? opened.reply : null;
+    this.#drawnThread = opened?.kind === "thread" ? { a: opened.a, b: opened.b }
+      : opened?.kind === "mail" ? { a: opened.qualified, b: null } : null;
     if (frame === null || frame.state === "gone") return nothing;
     if (frame.state === "loading") {
       return html`${frame.reading !== null ? html`<p class="waiting" data-line="reading" role="status">${frame.reading}</p>`
@@ -477,8 +483,11 @@ export class CommsPage extends LitElement {
       ${frame.lastRead !== null ? html`<p class="note" data-line="last-read">${frame.lastRead}</p>` : nothing}
       ${frame.label !== null ? html`<div class=${frame.stale ? "grps stale" : "grps"} data-part="agents">
         <section class="grp" data-group="agents"><div class="gk" data-line="label">${frame.label}</div>
-          <div class="gl">${repeat(frame.rows, (item) => item.row.name, (item) => this.#row(item, frame.stale))}</div>
-        </section></div>` : nothing}
+          <div class="gl">${repeat(frame.rows, (item) => item.row.name,
+                                   (item) => this.#row(item, frame.stale, frame.opened.kind === "mail"))}</div>
+        </section>${frame.others.length > 0 && !frame.stale ? this.#others(frame) : nothing}</div>`
+        : frame.others.length > 0 && !frame.stale ? html`<div class="grps" data-part="agents">${this.#others(frame)}</div>`
+        : nothing}
       ${frame.empty !== null ? this.#empty(frame.empty) : nothing}
       ${this.#messagesPart(frame.stale)}
       <div class="cfoot" data-part="foot"><span data-line="answering">${frame.foot ?? ""}</span>${
@@ -499,13 +508,20 @@ export class CommsPage extends LitElement {
 
   /** `Today`, `Earlier today`, the days added and `Before today`; dim with no acts while the
    * roster isn't up. */
+  /** The addresses that are the operator: the server's mark, and the authors of his
+   * messages the page holds. */
+  #him(): Set<string> {
+    return new Set(["operator", ...operatorAddresses(this.#mail?.value ?? null),
+                    ...[this.#todayRead, ...this.#days].flatMap((read) =>
+                      (read?.messages ?? []).filter(byHim).map((message) => message.author))]);
+  }
+
   #messagesPart(stale: boolean) {
     const rows = this.#kept?.value.rows ?? [];
-    const him = new Set(["operator", ...operatorAddresses(this.#mail?.value ?? null),
-                         ...[this.#todayRead, ...this.#days].flatMap((read) =>
-                           (read?.messages ?? []).filter(byHim).map((message) => message.author))]);
+    const him = this.#him();
     // The thread opens under the newest message row between its two addresses.
-    const pair = stale ? null : this.#drawnThread;
+    const drawn = this.#drawnThread;
+    const pair = stale || drawn === null || drawn.b === null ? null : { a: drawn.a, b: drawn.b };
     const thread = pair !== null && this.#thread !== null && this.#messages !== null && !this.#messages.loading
       ? this.#thread : null;
     const anchor = thread === null || pair === null ? null
@@ -649,7 +665,31 @@ export class CommsPage extends LitElement {
           : nothing}</div>`;
   }
 
-  #row(item: FrameRow, stale: boolean) {
+  /** `Other names · <names> · Show`; shown, one row each, with `Message` on those that take
+   * mail, and the box under the one opened. */
+  #others(frame: Frame) {
+    const opened = frame.opened;
+    if (opened.kind !== "others" && opened.kind !== "other") {
+      return html`<section class="grp" data-group="others"><div class="gk">${OTHER_NAMES}</div><div class="gl"><div
+        class="one" data-line="others"><span class="cut">${otherNamesWords(frame.others)}</span><button type="button"
+        data-action="show-others" @click=${() => this.open({ piece: "others" })}>${SHOW}</button></div></div></section>`;
+    }
+    const at = opened.kind === "other" ? opened.qualified : null;
+    const row = (other: OtherName) => {
+      const open = other.qualified === at;
+      return html`<moxi-ui-row data-name=${other.qualified} name=${other.qualified}
+          where=${ifDefined(otherWhere(other) ?? undefined)} ?open=${open}>${open
+        ? html`<button type="button" slot="acts" class="do" data-action="close" aria-expanded="true"
+          @click=${() => this.open({ piece: "others" })}>${CLOSE}</button><div class="det" data-part="opened"
+          data-to=${other.qualified}>${this.box(null, other.qualified)}</div>`
+        : other.writable ? html`<button type="button" slot="acts" class="do" data-action="message" @click=${() =>
+          this.#act({ kind: "message", to: other.qualified })}>${ACT_WORDS.message}</button>` : nothing}</moxi-ui-row>`;
+    };
+    return html`<section class="grp" data-group="others"><div class="gk">${OTHER_NAMES}</div><div class="gl">${
+      repeat(frame.others, (other) => other.qualified, row)}</div></section>`;
+  }
+
+  #row(item: FrameRow, stale: boolean, mail: boolean) {
     const { row } = item;
     const toggle = (): void => this.#toggle(item);
     return html`<moxi-ui-row ?toggles=${!stale} data-name=${row.name} name=${row.name} where=${ifDefined(row.where ?? undefined)}
@@ -663,8 +703,15 @@ export class CommsPage extends LitElement {
           @click=${toggle}>${CLOSE}</button>`
         : row.acts.filter((act) => act.kind !== "keep-warm").map((act) => html`<button type="button" slot="acts" class="do"
           data-action=${act.kind} @click=${() => this.#act(act)}>${ACT_WORDS[act.kind]}</button>`)}
-      ${item.open && item.to !== null ? this.opened(item, item.to) : nothing}
+      ${item.open && item.to !== null ? mail ? this.#mailPart() : this.opened(item, item.to) : nothing}
     </moxi-ui-row>`;
+  }
+
+  /** `All mail with <address>`, opened under its row: every message by or to it, as a
+   * thread. */
+  #mailPart() {
+    const thread = this.#thread;
+    return thread !== null && thread.b === null ? this.#threadPart(thread, this.#him()) : nothing;
   }
 
   /** What an opened agent row shows under its lines, speaking for the address `to`: the
@@ -702,7 +749,9 @@ export class CommsPage extends LitElement {
       ${this.#box?.to === to ? this.#said(this.#box.view({ when: this.#when }).taken, "taken") : nothing}
       ${view.after.map((line) => this.#line(line))}
       ${this.box(item, to)}
-      <div class="foot"><button type="button" class="d" data-action="details" aria-expanded=${this.#details ? "true" : "false"}
+      <div class="foot"><button type="button" class="d" data-action="all-mail"
+        @click=${() => this.open({ piece: "mail", qualified: to })}>${ALL_MAIL_WITH} ${to}</button><button type="button"
+        class="d" data-action="details" aria-expanded=${this.#details ? "true" : "false"}
         @click=${() => { this.#details = !this.#details; this.requestUpdate(); }}>${DETAILS}</button></div>
       ${view.details !== null ? html`${view.details.map((line) => this.#line(line))}${sessionId !== null
         ? html`<div class="foot"><button type="button" class="d" data-action="copy-id"
@@ -723,7 +772,7 @@ export class CommsPage extends LitElement {
   #when = (at: number): string => whenWords(at, this.#today);
 
   /** The send box of an opened row, written to `to`, and the line under it. */
-  protected box(_item: FrameRow, to: string): unknown {
+  protected box(_item: FrameRow | null, to: string): unknown {
     const box = this.#box;
     if (box === null || box.to !== to) return nothing;
     const queue = this.#queueFor === to ? this.#queue?.value ?? null : null;

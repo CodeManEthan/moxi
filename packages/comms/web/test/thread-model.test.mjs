@@ -88,6 +88,13 @@ test("with him: you, you owe one reply, no Message to yourself; another recipien
   assert.deepEqual(view.write, ["reviewer"]);
 });
 
+test("All mail with one address: its header, every recipient's row, Message to it", () => {
+  const view = threadView(held([PLAN[3]], { count_today: 9 }), facts({ a: "planner", b: null }));
+  assert.equal(view.header, "All mail with planner · 9 messages today");
+  assert.equal(view.messages[0].rest, "· 18:28 · wants one reply · not read yet, held until builder-1's next turn");
+  assert.deepEqual(view.write, ["planner"]);
+});
+
 test("Show earlier: the count, back to its time, and the cursor below the oldest held", () => {
   const view = threadView(held(PLAN.slice(2), { earlier: { count: 31, first_at: at("09:45") } }), facts());
   assert.deepEqual(view.earlier, { text: "31 messages, back to 09:45", before: "1000000000000000012" });
