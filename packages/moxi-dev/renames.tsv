@@ -8272,6 +8272,7 @@ rounds	packages/rounds/src/moxi_rounds/fixes.py	for one, found in zip(named, who
 rounds	packages/rounds/src/moxi_rounds/fixes.py	if any(not re.fullmatch(r"[0-9a-fA-F]{4,64}", one) for one in named):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/fixes.py	write.Where(home.project, home.folder, slug), actor=by,	use	actor=	by=
 rounds	packages/rounds/src/moxi_rounds/fixes.py	write.Where(home.project, home.folder, slug), actor=by,	use	home.folder	home.rounds_dir
+rounds	packages/rounds/src/moxi_rounds/fixes.py	and set(mark.get("commits") or ()) != set(commits)):	keep	set	set
 rounds	packages/rounds/src/moxi_rounds/flows.py	ROUND = "round"	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/folders.py	"""The notes folder of the project `record`: the one its record names, else the one	keep	record	record
 rounds	packages/rounds/src/moxi_rounds/folders.py	"""The rounds folder the `dir` setting gives the project `record`. Raises	keep	record	record
@@ -9225,6 +9226,8 @@ rounds	packages/rounds/tests/test_commission_block.py	test_the_block_gives_the_l
 rounds	packages/rounds/tests/test_commission_block.py	test_the_block_says_the_build_its_dirs_commands_and_who_finishes_after_what	name	folder	round_dir
 rounds	packages/rounds/tests/test_commission_block.py	test_the_lead_is_told_each_unshown_ruling_and_the_build_is_commissioned_anyway	name	folder	round_dir
 rounds	packages/rounds/tests/test_commission_block.py	test_with_the_trace_check_on_the_block_gives_the_replacement_a_fold_cites	name	folder	round_dir
+rounds	packages/rounds/tests/test_commission_block.py	assert [one["id"] for one in group["changed"]] == [later, taken]	keep	changed	changed
+rounds	packages/rounds/tests/test_commission_block.py	assert [one["id"] for one in group["changed"]] == [second, taken]	keep	changed	changed
 rounds	packages/rounds/tests/test_corrections.py	"record": "comms:12", "kind": "substance", "rules": "Q1", "supersedes": "C1"}	keep	record	record
 rounds	packages/rounds/tests/test_corrections.py	"revokes": "C1", "record": "comms:13", "kind": "process", "rules": "revoke:C1"}	keep	record	record
 rounds	packages/rounds/tests/test_corrections.py	"rules": "hold:B2"}, actor="planner")	use	actor=	by=
@@ -9763,6 +9766,7 @@ rounds	packages/rounds/tests/test_numbers.py	test_the_folds_and_the_lead_s_decis
 rounds	packages/rounds/tests/test_numbers.py	{"stage": "B1", "by": "operator", "record": PTR, "tips": []})	keep	record	record
 rounds	packages/rounds/tests/test_numbers.py	{"thread": "T1", "decision": "lead-decision", "record": PTR})	keep	record	record
 rounds	packages/rounds/tests/test_numbers.py	{"version": 2, "digest": "b" * 64, "records_only": True, "record": PTR})	keep	record	record
+rounds	packages/rounds/tests/test_numbers.py	{"version": 3, "digest": "c" * 64, "records_only": True, "record": PTR})	keep	record	record
 rounds	packages/rounds/tests/test_open.py	-	name	test_a_flow_the_config_does_not_have_is_refused_and_no_folder_is_made	test_a_flow_the_config_does_not_have_is_refused_and_no_dir_is_made
 rounds	packages/rounds/tests/test_open.py	-	name	test_a_folder_that_already_holds_a_log_is_refused_and_left_as_it_was	test_a_dir_that_already_holds_a_log_is_refused_and_left_as_it_was
 rounds	packages/rounds/tests/test_open.py	-	name	test_a_folder_that_is_there_and_empty_is_opened_into	test_a_dir_that_is_there_and_empty_is_opened_into
