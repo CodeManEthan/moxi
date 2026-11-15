@@ -96,7 +96,9 @@ does not yet build.
 - Waiting items: each `[[wait]]` of a build's report, work that can't be done without
   the operator, is an open item of the round, `B<n>.W<k>`, from the moment the report
   is recorded. It holds the round's close and no finish, shows in `show`, the round
-  note and `list --waiting`, and ends with `mark ROUND B<n>.W<k> --done --record PTR`.
+  note and `list --waiting`, and ends with `mark ROUND B<n>.W<k> --done --record PTR`,
+  PTR a pointer or a commit of the build's repo. A later report of the same build may
+  list the item again with the same sentence.
 - Decisions: each `[[decision]]` of a build's report, and of a majors report for the
   ones no build report carries, is a record of the round in a question's basic form,
   `B<n>.M<k>`, with the options `accept` and `reject`. A later report may list one again

@@ -404,8 +404,10 @@ Work that can't be done without the operator, such as a check on his phone, is a
 `[[wait]]` in the report. When the report is recorded each is an open waiting item of
 the round, `B1.W1`, at once. It does not hold the build's finish; it holds the round's
 close, and `list --waiting` lists it, until `mark ROUND B1.W1 --done --record PTR` names
-the report, commit or message that shows it done. Every waiting item a report lists is
-new, and takes an id no earlier report of the stage used.
+the report, commit or message that shows it done; PTR is a pointer, or the id of a commit
+the build's repo holds, recorded whole. A later report of the same build may list an item
+again with the same sentence, and it is the same item; a new item takes an id no earlier
+report of the stage used.
 
 An as-built choice the operator would notice is a `[[decision]]`, with a `weight`
 (`major` or `minor`) and whether it `forecloses` a capability (then it is major). Each
