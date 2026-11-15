@@ -671,7 +671,9 @@ def test_a_panel_script_dropped_while_the_worker_is_replaced_is_placed_on_one_mo
     Firefox ends the replaced worker at once and drops a fetch it is sent then. The modules
     list is held until `/sw.js` is asked for, and a little more, so the panel's script is
     fetched near that moment; loads go on until one has it dropped. The shell finds the script fine and tries
-    once more, and every load's panel is placed.
+    once more, and every load's panel is placed. The held modules list itself is often
+    dropped by the swap too; the client reads it once more, so no load ever says ui is not
+    installed.
 
     The swap's moment moves with the machine's load, so a busy machine may see no drop in
     all the loads. That run skips, saying so: it never took the retry, and the rows in

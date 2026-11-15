@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The prompt's menus open inside the page: each one that would pass 16 px from an edge
+  is shifted back, after it opens and when the window is resized. On a narrow page the
+  plus, the chip and the options word wrap, so no button passes the edge either.
 - The handoff lines answer at a resume as at a startup, and a resume of a launch the
   endpoint holds marks the handoff it shows as picked. After the seat's own pointer, one
   line per other seat's waiting handoff in the same folder, newest first, at most 5, then

@@ -615,9 +615,12 @@ addEventListener("storage", (event) => {
   }
 });
 // Read the modules once before any component runs, so `installed` and `components`
-// answer from the first call; the topic keeps them current.
+// answer from the first call; the topic keeps them current. A read that got no answer is
+// tried once more: Firefox drops a fetch sent to a worker as it is replaced, and without
+// the list the shell would say the page's own module is not installed.
 {
-  const first = await api("ui", "api/modules");
+  let first = await api("ui", "api/modules");
+  if (first.status === 0) first = await api("ui", "api/modules");
   if (first.status === 200) take(first.data);
   push.hub.add("ui.modules", take);
 }

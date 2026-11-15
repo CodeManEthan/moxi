@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- The contract check (`ui_component_check`) waits up to 5 s for each of `tokens` to
+  reach a colour of the placed component, so a part drawn from data that arrives after
+  the first render (a pushed topic's first value) counts. Before, it probed once two
+  frames after the first render, and a slow push failed the check.
+- The shell reads the modules list once more when its first read at load gets no
+  answer. On a phone in Firefox, the gateway's worker being replaced dropped that read,
+  and the page said `No module named ui` until the push stream sent the list.
+- `ui_contexts(color_scheme=...)` also sets the scheme on its signed-in page with
+  `page.emulate_media`, so the page shows it in Firefox too. Firefox kept a context's
+  scheme from every shell document, each sent with `Cross-Origin-Opener-Policy:
+  same-origin`, and a test in dark mode saw light colours.
+- `moxi_ui.testing` makes the `--ui-traces` directory when the run starts, a relative one
+  taken from where pytest started, so a failed browser test keeps its trace there even
+  when the directory is outside every test's tmp (a directory in the repository). The
+  teardown that keeps a trace no longer makes that directory, which the test kit's fence
+  refused: every failing browser test also errored and kept no trace.
 - `moxi_ui.testing.phone` gains the two helpers a module's phone test needs:
   `gateway_shell(home, site=(), *, port=None, enabled=True, address=True, start=True,
   **options)`, a gateway-mode test shell with its port set, its tunnel address written and

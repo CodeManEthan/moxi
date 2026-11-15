@@ -7,8 +7,9 @@ a temp HOME, and runs everything from that install. The index supplies only the
 third-party requirements: each workspace package is installed from the wheel this tree
 built, never from what is published, and the test checks the venv holds exactly those
 wheels at this tree's versions. Everything runs with an environment built from nothing:
-HOME and every XDG root in the temp home, TMPDIR there too, no `MOXI_COMMS_*`, so
-nothing in the developer's shell can pick the backend or a root.
+HOME and every XDG root in the temp home, TMPDIR there too, Python's bytecode cache
+there too (`PYTHONPYCACHEPREFIX`), no `MOXI_COMMS_*`, so nothing in the developer's shell
+can pick the backend or a root.
 
 Part one is the documented install and nothing else. `moxi comms doctor` runs first and must
 say the `local` backend by default, with no slots yet.
@@ -340,6 +341,9 @@ def installed(fence, uv_env):
         "XDG_STATE_HOME": str(home / ".local" / "state"),
         "XDG_CACHE_HOME": str(home / ".cache"),
         "XDG_RUNTIME_DIR": str(home / "run"),
+        # A Python whose stdlib has no .pyc would write them beside the stdlib, outside
+        # the home; the prefix puts every bytecode write in the home.
+        "PYTHONPYCACHEPREFIX": str(home / ".cache" / "pycache"),
         "CLEAN_HOME_AUDIT": str(base / "audit.tsv"),
     }
     (home / "tmp").mkdir()
