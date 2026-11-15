@@ -100,6 +100,14 @@ index keeps the step the log alone gives, and marks it so (`at`).
   (`finish_actions.blocked`); it is ready once none is left. It is read from what
   `Asked.seen` says of the stage's build.
 
+- `ratify`, of the round: ready while a major decision that reached the target is not
+  ruled (`decisions.unruled_majors`), each named with the command that rules it; done
+  once none is left and every stage of the plan is finished, and not due before then.
+  The project's `ratify` setting of `off` makes it done where it would be ready. The
+  setting is read from what `Asked.seen` holds under no stage, the round's own; where
+  that is not given and a decision would make the step ready, it waits on a read of
+  the settings, as a step read from git waits on a read of git.
+
 **A hold.** `held_by(state, stage)` gives what the questions that hold a stage make it
 wait for. A stage's `commission` and `finish` carry these as their `waits` even where
 their rows are not built, so a round whose flow has no questions step still shows the hold, on
@@ -118,8 +126,8 @@ import dataclasses
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
-from . import (brake, builds, checking, findings, finish_actions, finish_gates, flows,
-               holds, questions, skips, stages, tracing, versions)
+from . import (brake, builds, checking, decisions, findings, finish_actions, finish_gates,
+               flows, holds, questions, skips, stages, tracing, versions)
 from . import ci as ci_reads
 from . import state as states
 from .errors import Unmet
@@ -170,9 +178,11 @@ class Seen:
     it no longer exists, else `clean`, `changed` (a tracked change or an untracked path)
     or `elsewhere` (made on another machine); `check_on`, the repo's setting of that
     name; `actions`, the repo's finish actions, each with its `id`; `shares`, the
-    `(round, stage)` of each build it shares commits with;
+    `(round, stage)` of each build it shares commits with; `ratify`, the project's
+    setting of that name;
     `problem`, what kept the build from being read, in which case nothing else is
-    known."""
+    known. What was read for the round's own steps is kept under no stage (`None`),
+    with `ratify` alone filled, so it is there with no build open."""
 
     state: str | None = None
     tip: str | None = None
@@ -190,6 +200,7 @@ class Seen:
     check_on: str = "merged"
     actions: tuple[Mapping, ...] = ()
     shares: tuple[tuple[str, str], ...] = ()
+    ratify: str = "majors"
     problem: Unmet | None = None
 
 
@@ -499,6 +510,31 @@ def _finish(state: states.State, about: Asked) -> Step:
                 gates=tuple(one.number for one in found))
 
 
+
+RATIFY = "ratify"
+#: The project's `ratify` setting that puts no decision to the operator.
+RATIFY_OFF = "off"
+
+
+def _ratify(state: states.State, about: Asked) -> Step:
+    unruled = decisions.unruled_majors(state)
+    if not unruled:
+        planned = stages.in_plan(state)
+        finished = questions.finished_stages(state)
+        done = bool(planned) and all(stage.id in finished for stage in planned)
+        return Step(RATIFY, DONE if done else NOT_DUE)
+    seen = (about.seen or {}).get(None)
+    if seen is None:
+        return Step(RATIFY, WAITING, unread=True, waits=(Unmet(
+            "whether the project's ratify setting puts these decisions to the operator "
+            "is read from the settings, which were not read here",
+            f"moxi rounds next {about.name}"),))
+    if seen.ratify == RATIFY_OFF:
+        return Step(RATIFY, DONE)
+    return Step(RATIFY, READY, waits=tuple(
+        Unmet(f"decision {one.key}, major and not yet ruled: {one.text}",
+              decisions.rule_line(about.name, one.key)) for one in unruled))
+
 def report_row(step: str) -> Row:
     """The row of the report step `step` of the user's own: done at the tip when its
     own newest report is publishable and counts there by the rule the build's
@@ -566,7 +602,7 @@ def command_row(step: str) -> Row:
 #: no row here: `row_of` gives it its own.
 ROWS: dict[str, Row] = {DESIGN: _design, VERIFIES: _verify_design, QUESTIONS: _docket,
                         COMMISSION: _commission, BUILD: _build, CHECK: _check,
-                        VERIFY_BUILD: _verify_build, FINISH: _finish}
+                        VERIFY_BUILD: _verify_build, FINISH: _finish, RATIFY: _ratify}
 
 
 def row_of(step: str, entry: Mapping | None) -> Row | None:
@@ -766,7 +802,8 @@ def said(step: Mapping | None) -> str:
 
 
 __all__ = ["NOT_DUE", "WAITING", "READY", "DONE", "SKIPPED", "STATES", "NOT_BUILT",
-           "SETTLED", "HELD", "COMMISSION", "BUILD", "CHECK", "FINISH", "Seen", "Asked",
+           "SETTLED", "HELD", "COMMISSION", "BUILD", "CHECK", "FINISH", "RATIFY",
+           "RATIFY_OFF", "Seen", "Asked",
            "Step", "Row",
            "ROWS", "report_row", "command_row", "row_of", "answer",
            "held_by", "held_unbuilt", "order", "of", "one", "is_settled", "current", "at",

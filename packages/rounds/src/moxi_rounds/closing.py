@@ -17,9 +17,10 @@ that stopped short is made by the next write, whatever that write is.
   stage; unless the operator skipped `ratify` or the project's `ratify` setting is
   `off`.
 
-The `ratify` step is read in the third part and not as a step: it is due exactly while
-that part waits, and the project's setting it reads is passed in (`ratify`), since
-nothing here reads the config. A round with a `retro` step waits for that step like
+The `ratify` step is read in the third part and not as a step. Its row and that part
+read the same decisions (`decisions.unruled_majors`); the part also waits for each
+finished build's report that declares its decisions. The project's setting it reads
+is passed in (`ratify`), since nothing here reads the config. A round with a `retro` step waits for that step like
 any other.
 
 Whether the round closes reads its own log alone: a question parked until another
@@ -53,9 +54,9 @@ CLOSED = "round.closed"
 BUILD = "build"
 
 #: The step that ratifies decisions, which the close reads as its third part.
-RATIFY = "ratify"
+RATIFY = steps.RATIFY
 #: The project's `ratify` setting that puts no decision to the operator.
-RATIFY_OFF = "off"
+RATIFY_OFF = steps.RATIFY_OFF
 #: The setting read when none is passed.
 RATIFY_DEFAULT = "majors"
 
@@ -91,7 +92,7 @@ def _nothing_open(state: states.State, closed: Closed, ratify: str) -> Iterator[
     item. Which questions hold it is the hold rule's to say; this names each as it
     reads now."""
     for build in built.builds(state):
-        if build.ended is None and not _finished(state, build):
+        if build.ended is None and not decisions.finished(state, build):
             yield f"build of {build.stage}, open"
     for question in holds.on_close(state):
         reads = questions.current(question, state, closed=closed)
@@ -107,25 +108,13 @@ def _ratified(state: states.State, closed: Closed, ratify: str) -> Iterator[str]
         return
     if skips.is_skipped(state, RATIFY):
         return
-    for stage in stages.in_plan(state):
-        build = built.current(state, stage.id)
-        if build is None or not _finished(state, build):
-            continue
+    for build in decisions.finished_builds(state):
         if not _declared(state, build):
-            yield (f"a report that declares the decisions of {stage.id}'s build: a "
-                   f"build report, or a majors report naming {stage.id}")
+            yield (f"a report that declares the decisions of {build.stage}'s build: a "
+                   f"build report, or a majors report naming {build.stage}")
         for decision in decisions.of_build(state, build):
             if decision.weight == report_block.MAJOR and decision.state == decisions.OPEN:
                 yield f"decision {decision.key}, major and not yet ruled"
-
-
-def _finished(state: states.State, build: built.Build) -> bool:
-    """Whether `build` is its stage's finished build: the finish is recorded after its
-    commission and before the stage's next."""
-    return any(event["type"] == "finish.done" and event.get("stage") == build.stage
-               and findings.within(state, build, event.get("n"))
-               for event in state.history)
-
 
 def _declared(state: states.State, build: built.Build) -> bool:
     """Whether a report recorded while `build` was its stage's declares its decisions:

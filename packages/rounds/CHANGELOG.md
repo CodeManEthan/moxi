@@ -166,6 +166,9 @@ does not yet build.
   finished, no build is open, every major decision of a finished build is ruled and
   every finished build has a report that declares its decisions, unless `ratify` is
   skipped or the project's `ratify` is `off`.
+- The `ratify` step: ready while a major decision of a finished build is unruled, each
+  named with the command that rules it; done once none is left and the plan is
+  finished, or when the project's `ratify` is `off`.
 - The sweep at a session's start: with turns installed, a listener on `ready` starts the
   sweep in a detached process when `sweep.at_start` and `sweep.armed` are both on and
   the last removing run began more than ten minutes ago, and returns at once.

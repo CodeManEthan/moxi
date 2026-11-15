@@ -364,8 +364,10 @@ def test_a_failed_run_and_a_run_of_another_step_do_not_count(build, declare):
 
 # -- the step ----------------------------------------------------------------------------
 
-def step(path: Path, **seen) -> steps.Step | None:
-    return steps.one(folded(path), "check", "B1", name=ROUND, seen=seen or None)
+def step(path: Path, seen=None, **by_stage) -> steps.Step | None:
+    """B1's check step, with what was read of the round: `seen` as `seen_of` gives
+    it, or a `Seen` by stage."""
+    return steps.one(folded(path), "check", "B1", name=ROUND, seen=seen or by_stage or None)
 
 
 def test_the_check_step_is_not_due_before_the_build_is_commissioned(repo, tmp_path):
@@ -397,20 +399,20 @@ def test_the_check_step_reads_the_build_as_seen(build, declare):
 
     seen = checking.seen_of(state, ROUND, settings=own.load())
     assert seen["B1"].state == "building" and seen["B1"].clean
-    assert step(path, **seen).state == steps.READY
+    assert step(path, seen).state == steps.READY
 
     (made.worktree / "loose.txt").write_text("loose\n")
     seen = checking.seen_of(state, ROUND, settings=own.load())
-    assert step(path, **seen).state == steps.WAITING
+    assert step(path, seen).state == steps.WAITING
     (made.worktree / "loose.txt").unlink()
 
     checking.check(ROUND, "B1", actor="coder")
     seen = checking.seen_of(folded(path), ROUND, settings=own.load())
-    assert step(path, **seen).state == steps.DONE
+    assert step(path, seen).state == steps.DONE
 
     tree.commit("more.txt")
     seen = checking.seen_of(folded(path), ROUND, settings=own.load())
-    assert step(path, **seen).state == steps.READY
+    assert step(path, seen).state == steps.READY
 
 
 def test_a_build_whose_repo_declares_no_check_has_no_check_step(build):
@@ -420,7 +422,7 @@ def test_a_build_whose_repo_declares_no_check_has_no_check_step(build):
     seen = checking.seen_of(folded(path), ROUND, settings=own.load())
 
     assert seen["B1"].check is None
-    assert step(path, **seen) is None
+    assert step(path, seen) is None
     assert "check" not in [one.step for one in steps.of(folded(path), seen=seen)]
 
 

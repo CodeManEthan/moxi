@@ -29,8 +29,10 @@ then that gives it that stage (`of_build`). A dropped build counts for nothing, 
 decision only a dropped build's reports declared never reached the target; a later
 build of the stage covers only the decisions its own reports declare.
 
-A decision holds no stage. What it holds is the round's close, when it is major and
-reached the target; that, and when one reached it, is the close's to read. It is never
+**The target.** A decision reached the target when a report of its stage's current
+build declared it and that build is finished (`reached`). A decision holds no stage.
+What it holds, when it is major, reached the target and is not ruled (`unruled_majors`),
+is the round's close and its `ratify` step, which both read it here. It is never
 parked, narrowed, moved or withdrawn: those rulings are of asked questions.
 
 Nothing here reads a file, the config or git.
@@ -42,7 +44,7 @@ import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 
-from . import builds, corrections, findings, report_block
+from . import builds, corrections, findings, questions, report_block
 from . import state as states
 
 #: A decision's key outside its report, and the item of a ruling of one.
@@ -172,6 +174,42 @@ def of_build(state: states.State, build: builds.Build) -> tuple[Decision, ...]:
     return tuple(one for one in of_round(state) if one.key in keys)
 
 
+def finished(state: states.State, build: builds.Build) -> bool:
+    """Whether `build` is its stage's finished build: the finish is recorded after its
+    commission and before the stage's next."""
+    return any(event["type"] == "finish.done" and event.get("stage") == build.stage
+               and findings.within(state, build, event.get("n"))
+               for event in state.history)
+
+
+def finished_builds(state: states.State) -> tuple[builds.Build, ...]:
+    """The current build of each stage of the plan, where it is finished, in the
+    order the stages were declared: the builds whose decisions reached the target."""
+    # The plan is read as `stages.in_plan` reads it, which can't be imported here.
+    out = questions.left_stages(state)
+    found = []
+    for stage in state.stages:
+        if stage.id in out:
+            continue
+        build = builds.current(state, stage.id)
+        if build is not None and finished(state, build):
+            found.append(build)
+    return tuple(found)
+
+
+def reached(state: states.State) -> tuple[Decision, ...]:
+    """The decisions that reached the target: those a finished build's reports
+    declared (`finished_builds`, `of_build`), in that order."""
+    return tuple(one for build in finished_builds(state)
+                 for one in of_build(state, build))
+
+
+def unruled_majors(state: states.State) -> tuple[Decision, ...]:
+    """The major decisions that reached the target and are not ruled."""
+    return tuple(one for one in reached(state)
+                 if one.weight == report_block.MAJOR and one.state == OPEN)
+
+
 def find(state: states.State, key: str) -> Decision | None:
     """The decision of the round with that key, or None."""
     return next((one for one in of_round(state) if one.key == key), None)
@@ -201,5 +239,6 @@ def rule_line(name: str, key: str) -> str:
 
 
 __all__ = ["KEY", "ITEM", "ACCEPT", "REJECT", "OPTIONS", "BLOCKS", "OPEN", "RULED",
-           "Decision", "listed", "lighter", "of_round", "of_build", "find", "item",
-           "items", "rule_line"]
+           "Decision", "listed", "lighter", "of_round", "of_build", "finished",
+           "finished_builds", "reached", "unruled_majors", "find", "item", "items",
+           "rule_line"]

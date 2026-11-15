@@ -607,7 +607,9 @@ A round whose flow has a `build` step closes once every stage in its plan is fin
 no build is open, and its decisions are settled: every major decision of a finished
 build is ruled, and every finished build has a report that declares its decisions (a
 build report, or a majors report naming its stage). The operator's skip of `ratify`, or
-the project's `ratify = "off"`, lets the decisions past. A flow with a `retro` step
+the project's `ratify = "off"`, lets the decisions past. While a major decision of a
+finished build is unruled, `next`, `show` and `list` give the round's `ratify` step as
+ready and the operator's, with the command that rules each. A flow with a `retro` step
 waits for it too, until that step is skipped; the retro report is not in this version.
 
 ## Dropping a round
