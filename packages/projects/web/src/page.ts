@@ -392,7 +392,7 @@ export class ProjectsPage extends LitElement {
       this.#close();
     } else if (address.piece === "add") {
       this.#close();
-      this.#adding = {};
+      this.#adding = { mode: "add" };
     } else {
       const key = keyIn(list.value.projects, address.key);
       const project = key === null ? null : this.#find(key);
@@ -733,7 +733,7 @@ export class ProjectsPage extends LitElement {
   #add(): void {
     this.#close();
     this.#unknown = null;
-    this.#adding = {};
+    this.#adding = { mode: "add" };
     this.#write();
     this.requestUpdate();
   }

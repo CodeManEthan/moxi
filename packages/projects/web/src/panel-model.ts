@@ -1,10 +1,13 @@
 // The words and the bodies of the page's panel, worked out with no DOM so the Node tests
 // can read them: what the Add panel says under its folder field, the name it fills from
-// the folder, the `More` fold's line, the body `/api/add` is sent, and what an add came to.
+// the folder, the `More` fold's line, the body `/api/add` is sent, and what an add came to;
+// what the Edit panel holds, the requests a save sends and in what order, and what a save
+// that stopped part way says.
 
 import type { Acted } from "./views.ts";
 import { DEFAULT_KIND, kindOf, warningLine } from "./views.ts";
-import type { Added, Kinds, Listed } from "./feed.ts";
+import type { Added, Kinds, Listed, Project } from "./feed.ts";
+import { joinNames } from "./opened-model.ts";
 import { homeForm, kindPhrase } from "./words.ts";
 
 /** How long the folder field waits after the last key before it reads `/api/folder`. */
@@ -181,4 +184,149 @@ export function addedSaid(acted: Acted<Added>, home: string | null): PanelSaid {
   }
   if (acted.outcome === "refused") return { outcome: "refused", lines: [acted.text] };
   return { outcome: "unknown", lines: [MAY_BE_ADDED] };
+}
+
+// -- Edit ------------------------------------------------------------------------------------------
+
+/** The line under the name, which Edit shows as plain text. */
+export const NAME_STAYS = "The name stays as it is: everything filed under this project is filed by its name.";
+/** The line an open Edit panel shows once its project has changed under values he typed. */
+export const CHANGED_SINCE = "This project has changed since you opened it.";
+/** The line a save whose answer was lost says. */
+export const MAY_BE_SAVED = "It may have been saved.";
+
+/** What the Edit panel holds, as typed, over `base`, the project as last stored by this
+ * panel's own saves, or as it stood when the panel opened. The folders start in `~` form;
+ * `off` holds the names taken off, `added` the names added, `agent` what is typed in `Add
+ * an agent by name`. `stale`: the project has changed elsewhere under values he typed. */
+export interface EditPanel {
+  base: Project;
+  folder: string;
+  kind: string;
+  lead: string;
+  notesRoot: string;
+  off: string[];
+  added: string[];
+  agent: string;
+  stale: boolean;
+}
+
+/** The Edit panel opened over `project`, `home` giving the `~` form of its folders. */
+export function editPanel(project: Project, home: string | null): EditPanel {
+  return { base: project, folder: homeForm(project.root, home), kind: project.kind, lead: project.lead ?? "",
+           notesRoot: project.notes_root === null ? "" : homeForm(project.notes_root, home), off: [], added: [],
+           agent: "", stale: false };
+}
+
+/** The names `Also works here` lists: the project's own, less those taken off, then those
+ * added. */
+export function alsoHere(form: EditPanel): string[] {
+  const off = new Set(form.off);
+  return [...form.base.associated.filter((name) => !off.has(name)), ...form.added];
+}
+
+/** The form with `name` taken off: one of the project's, or one added here. */
+export function takenOff(form: EditPanel, name: string): EditPanel {
+  if (form.added.includes(name)) return { ...form, added: form.added.filter((one) => one !== name) };
+  return form.off.includes(name) ? form : { ...form, off: [...form.off, name] };
+}
+
+/** The form with what is typed in `Add an agent by name` added, once; one taken off comes
+ * back. */
+export function agentAdded(form: EditPanel): EditPanel {
+  const name = form.agent.trim();
+  if (name === "") return form;
+  if (form.off.includes(name)) return { ...form, off: form.off.filter((one) => one !== name), agent: "" };
+  if (form.base.associated.includes(name) || form.added.includes(name)) return { ...form, agent: "" };
+  return { ...form, added: [...form.added, name], agent: "" };
+}
+
+/** A path field changed from `stored`: not empty, and neither the stored path nor its `~`
+ * form. */
+function pathChanged(typed: string, stored: string, home: string | null): boolean {
+  return typed !== "" && typed !== stored && typed !== homeForm(stored, home);
+}
+
+/** `/api/set`'s body for what changed in the form's fields, with the words for each field
+ * saved; null when none did. A path is sent as typed; an emptied lead clears it, as an
+ * emptied notes folder does while notes is installed. */
+export function setChanges(form: EditPanel, { home, notes }: { home: string | null; notes: boolean }):
+    { body: Record<string, string | boolean>; parts: string[] } | null {
+  const base = form.base;
+  const body: Record<string, string | boolean> = { key: base.key };
+  const parts: string[] = [];
+  if (pathChanged(form.folder, base.root, home)) {
+    body.root = form.folder;
+    parts.push("the folder");
+  }
+  if (form.kind !== "" && form.kind !== base.kind) {
+    body.kind = form.kind;
+    parts.push("the kind");
+  }
+  const lead = form.lead.trim();
+  if (lead !== (base.lead ?? "")) {
+    if (lead === "") body.no_lead = true;
+    else body.lead = lead;
+    parts.push("the lead");
+  }
+  if (notes) {
+    if (form.notesRoot === "" && base.notes_root !== null) {
+      body.no_notes_root = true;
+      parts.push("the notes folder");
+    } else if (base.notes_root === null ? form.notesRoot !== "" : pathChanged(form.notesRoot, base.notes_root, home)) {
+      body.notes_root = form.notesRoot;
+      parts.push("the notes folder");
+    }
+  }
+  return parts.length > 0 ? { body, parts } : null;
+}
+
+/** One request of a save, and the words for what it saves. */
+export interface SaveStep {
+  route: "api/agents-remove" | "api/set" | "api/agents-add";
+  body: Record<string, string | boolean>;
+  parts: string[];
+}
+
+/**
+ * The requests a save sends, in an order that can't trip the rule that a lead is never
+ * also one of those who work there: the names taken off, then the fields, then the names
+ * added (what is typed in `Add an agent by name` among them). Only what differs from the
+ * project as stored is sent, so a save after a partial one sends the rest.
+ */
+export function saveSteps(form: EditPanel, { home, notes }: { home: string | null; notes: boolean }): SaveStep[] {
+  const now = agentAdded(form);
+  const key = form.base.key;
+  const steps: SaveStep[] = now.off.filter((name) => form.base.associated.includes(name)).map((name) => ({
+    route: "api/agents-remove", body: { key, name }, parts: [`${name} taken off`] }));
+  const set = setChanges(form, { home, notes });
+  if (set !== null) steps.push({ route: "api/set", ...set });
+  for (const name of now.added.filter((one) => !form.base.associated.includes(one))) {
+    steps.push({ route: "api/agents-add", body: { key, name }, parts: [`${name} added`] });
+  }
+  return steps;
+}
+
+/** Whether he has changed anything in the form from the project it stands over. */
+export function editTouched(form: EditPanel, { home, notes }: { home: string | null; notes: boolean }): boolean {
+  return saveSteps(form, { home, notes }).length > 0;
+}
+
+function sameProject(a: Project, b: Project): boolean {
+  return a.root === b.root && a.kind === b.kind && a.lead === b.lead && a.notes_root === b.notes_root
+    && a.associated.join("\n") === b.associated.join("\n");
+}
+
+/** The form once its project has been read again as `project`: one he hasn't changed starts
+ * again from it; any other keeps his values over the project it stood over, and is stale
+ * while `project` differs from that one. */
+export function editReread(form: EditPanel, project: Project, { home, notes }: { home: string | null; notes: boolean }):
+    EditPanel {
+  if (!editTouched(form, { home, notes })) return editPanel(project, home);
+  return { ...form, stale: !sameProject(project, form.base) };
+}
+
+/** What a save that stopped says: the refusal, after what was saved before it. */
+export function partlySaved(saved: readonly string[], refusal: string): string {
+  return saved.length === 0 ? refusal : `Saved ${joinNames(saved)}. Not saved: ${refusal}`;
 }
