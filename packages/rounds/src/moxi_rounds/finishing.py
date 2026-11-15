@@ -42,7 +42,9 @@ is not finished: those records stand, and a rerun goes on from them.
 **The merge.** `git merge --no-ff T` in the checkout of the target: the worktree that
 has the target checked out, which must hold nothing uncommitted with its `HEAD` at `M`;
 or, when no worktree has it, `<worktree_dir>/<repo>/.finish-<into>`, added for the merge
-and removed after it. `T` is given as the commit id the gates read, so a commit made on
+and removed after it. A checkout at that place that a stopped finish left is finish's own
+too: the merge is made there and it is removed after, and a merge found made is followed
+by its removal. `T` is given as the commit id the gates read, so a commit made on
 the branch after them is not merged; the message names the branch. Its record holds the
 landing, the merge commit, and `P`, the target before it, which is `M`. A conflict is
 aborted and refused with the way through: merge the target into the branch in the
@@ -288,7 +290,9 @@ def finish(name: str, stage: str, *, by: str, settings=None,
             if action["do"] == own.MERGE:
                 result = _found(status, root, tip, action_id=action["id"], name=name,
                                 stage=stage)
-                if result is None:
+                if result is not None:
+                    result = _left_checkout_removed(result, root, build, settings)
+                else:
                     result = _merge(root, build, tip, target_head, settings=settings,
                                     action_id=action["id"], rerun=rerun)
             elif action["do"] == own.PUSH:
@@ -588,16 +592,28 @@ def _command(state: states.State, name: str, build: builds.Build, root: Path, ti
 
 # -- the merge ---------------------------------------------------------------------------
 
+def _own_checkout(build: builds.Build, settings) -> Path:
+    """Where finish adds a checkout of the build's target that no worktree has."""
+    return (places.worktree_dir(settings) / build.repo
+            / f"{CHECKOUT_PREFIX}{places.encode(build.target)}")
+
+
+def _is_own(place: Path, build: builds.Build, settings) -> bool:
+    return place.resolve() == _own_checkout(build, settings).resolve()
+
+
 def _merge(root: Path, build: builds.Build, tip: str, target_head: str, *, settings,
            action_id: str, rerun: str) -> Action:
     git = _MergeGit(root)
     place = git.checkout_of(build.target)
-    if place is not None:
+    # A checkout of the target at finish's own place is finish's own, though a stopped
+    # finish left it: it is merged in and removed after, as one added now would be.
+    if place is not None and not _is_own(place, build, settings):
         return _merge_at(place, build, tip, target_head, action_id=action_id,
                          rerun=rerun)
-    place = (places.worktree_dir(settings) / build.repo
-             / f"{CHECKOUT_PREFIX}{places.encode(build.target)}")
-    git.add_checkout(place, build.target)
+    if place is None:
+        place = _own_checkout(build, settings)
+        git.add_checkout(place, build.target)
     try:
         made = _merge_at(place, build, tip, target_head, action_id=action_id,
                          rerun=rerun)
@@ -641,6 +657,18 @@ def _merge_at(place: Path, build: builds.Build, tip: str, target_head: str, *,
     landing = there.head()
     return Action(action_id, own.MERGE, OK, landing=landing,
                   target_before=target_head, output=output)
+
+
+def _left_checkout_removed(found: Action, root: Path, build: builds.Build,
+                           settings) -> Action:
+    """`found` once the checkout of the target at finish's own place, which a stopped
+    finish left and may have merged in, is removed under the no-lost-work rule; one that
+    rule keeps is named in `kept`."""
+    place = _MergeGit(root).checkout_of(build.target)
+    if place is None or not _is_own(place, build, settings):
+        return found
+    kept = removal.checkout_removal(root, place, settings=settings, repo=build.repo)
+    return found if kept is None else replace(found, kept=f"{kept.place}: {kept.line()}")
 
 
 class _MergeGit(Git):

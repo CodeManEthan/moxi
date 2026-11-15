@@ -193,6 +193,55 @@ def test_a_target_no_worktree_has_is_merged_in_a_checkout_added_and_removed(
     assert repo.git("symbolic-ref", "--short", "HEAD") == "elsewhere"
 
 
+def _left_checkout(repo) -> Path:
+    """A checkout of main at finish's own place, as a finish that stopped left it, with
+    the root on another branch."""
+    repo.switch("elsewhere", new_from="main")
+    place = places.worktree_dir(own.load()) / "proj-a" / ".finish-main"
+    repo.git("worktree", "add", "-q", str(place), "main")
+    return place
+
+
+def test_a_checkout_a_stopped_finish_left_is_merged_in_and_removed(ready, repo):
+    _path, tree = ready
+    place = _left_checkout(repo)
+    before, tip = repo.rev("main"), tree.rev()
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    assert repo.git("rev-list", "--parents", "-n", "1", "main").split()[1:] == [
+        before, tip]
+    assert done.actions[0].kept is None
+    assert not place.exists()
+    assert str(place) not in repo.git("worktree", "list", "--porcelain")
+
+
+def test_a_merge_found_made_in_a_left_checkout_is_followed_by_its_removal(ready, repo):
+    path, _tree = ready
+    place = _left_checkout(repo)
+    type(repo)(place).merge("work")
+    landing = repo.rev("main")
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    assert [(one.state, one.landing) for one in done.actions] == [("found", landing)]
+    assert not place.exists()
+    assert str(place) not in repo.git("worktree", "list", "--porcelain")
+    assert builds.current(states.fold(log.read_round(path)), "B1").ended == (
+        builds.FINISHED)
+
+
+def test_a_left_checkout_holding_work_is_refused_and_kept(ready, repo):
+    place = _left_checkout(repo)
+    (place / "notes.txt").write_text("not committed\n", encoding="utf-8")
+
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", by="coder")
+
+    assert "uncommitted changes" in refused.value.unmet[0].reason
+    assert (place / "notes.txt").read_text() == "not committed\n"
+
+
 def test_the_target_checked_out_in_a_worktree_is_merged_there(ready, repo, tmp_path):
     _path, tree = ready
     repo.switch("elsewhere", new_from="main")
