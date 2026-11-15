@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `moxi_comms.api.send`, `check`, `send_as` and `delete` close the record they opened
+  before they return; before, its connection stayed open until the garbage collector
+  found it.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
 - comms' page in the browser UI shell, `/m/comms/`, is rebuilt around the agents: one

@@ -19,6 +19,8 @@ outside comms.
   `message_id`, `recipients` (one `Recipient` per resolved name, its `delivery` one of
   `DELIVERIES`), `refusal` (a `Refusal`, `code` and `text`, when nothing was posted),
   `notes`, and `lines()`, the verb's text. Branch on the data, never on the text.
+* `send`, `check`, `send_as` and `delete` each close the record they opened before they
+  return, so no connection to it outlives the call.
 
 **The other surfaces.**
 
@@ -163,7 +165,10 @@ def _run(sender, to, text, *, posture, reply_to, new, audience, held, cap, no_ca
             raise ValueError("send needs `to` to name at least one recipient")
         args.reply_to = None if reply_to is None else str(reply_to)
     ctx = _sending.Context(env=sender.sender_env(os.environ), deadline=deadline)
-    return _sending.run(ctx, args, tags=tags)
+    try:
+        return _sending.run(ctx, args, tags=tags)
+    finally:
+        ctx.close()
 
 
 def send_as(module: str, name: str, to, text: str, *, expires=None,
@@ -185,7 +190,10 @@ def send_as(module: str, name: str, to, text: str, *, expires=None,
                            standing=False, new_name=False, interrupt=bool(interrupt),
                            expires=expires, check=False, reply_to=None, message_id=None)
     ctx = _sending.Context(env=dict(os.environ), deadline=timeout_s)
-    return _sending.run_reserved(ctx, args, module=str(module), name=str(name), tags=tags)
+    try:
+        return _sending.run_reserved(ctx, args, module=str(module), name=str(name), tags=tags)
+    finally:
+        ctx.close()
 
 
 def delete(sender: Sender, message_id, *, timeout_s: float = 30.0) -> DeleteResult:
@@ -195,7 +203,10 @@ def delete(sender: Sender, message_id, *, timeout_s: float = 30.0) -> DeleteResu
     if not isinstance(sender, Sender):
         raise TypeError(f"sender must be an api.Sender, not {type(sender).__name__}")
     ctx = _sending.Context(env=sender.sender_env(os.environ), deadline=timeout_s)
-    return _sending.delete(ctx, message_id)
+    try:
+        return _sending.delete(ctx, message_id)
+    finally:
+        ctx.close()
 
 
 # --------------------------------------------------------------------------- reads

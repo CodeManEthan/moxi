@@ -11,9 +11,11 @@ token store holds his credential; the strict app fails a value outside its decla
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import logging
 import sys
+import warnings
 
 import pytest
 from claim_kit import World
@@ -23,7 +25,7 @@ from moxi_comms import api, machine_line, page, pageacts, store
 from moxi_comms.paths import comms_db
 
 from test_page import PORT, TOKEN, run, served
-from test_page_messages import MAIN, backend, set_row  # noqa: F401 -- a fixture, found by name
+from test_page_messages import MAIN, backend, set_row, store_fds  # noqa: F401 -- a fixture, found by name
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="comms runs on Linux only")
@@ -450,3 +452,32 @@ def test_his_credential_is_in_no_take_back_answer_or_log_line(rig, caplog, capsy
         answers = [take_back(mid), take_back(mid), take_back("12a")]
     said = json.dumps(answers) + caplog.text + "".join(capsys.readouterr())
     assert secret and secret not in said
+
+
+# --- connections ---------------------------------------------------------------------------
+
+def test_no_connection_stays_open_after_each_act_answers(rig):
+    # With the cyclic collector off, a record an act left open would hold its descriptors
+    # on comms.db past the answer, and its finalizer would warn when collected.
+    gc.collect()
+    gc.disable()
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+            first = send()["message_id"]            # the daemon opens what it keeps
+            assert wait_until(lambda: books_row(first)[0] == "waiting")
+            before = store_fds()
+            for _ in range(3):
+                assert check()["outcome"] == "would-send"
+            assert store_fds() == before
+            mids = [send()["message_id"] for _ in range(3)]
+            assert all(mids)
+            assert wait_until(lambda: all(books_row(mid)[0] == "waiting" for mid in mids))
+            assert store_fds() == before
+            for mid in mids:
+                assert take_back(mid)["outcome"] == "deleted"
+            assert store_fds() == before
+            gc.collect()
+        assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
+    finally:
+        gc.enable()
