@@ -192,6 +192,37 @@ test("each line-two case, read off the lead", () => {
                    ["idle", null, { lead: "no mail waiting", heavy: false, more: "last message 18:21" }]);
 });
 
+test("a held row and an awaiting row have no idle line three; held over awaiting gives awaiting", () => {
+  const ask = { asker: "planner", awaited: "builder-1", message_id: "9", at: at("18:28"), read: false };
+  const m = mail({ queued: [queued("builder-1", 4, ["planner"])], asks: [ask], last: [{ qualified: "builder-1", at: at("18:28") }] });
+  const held = only(roster([bound("builder-1", { cache: warm("19:22") })], [waiting("builder-1", 4, "18:00")]), m);
+  assert.equal(held.case, "held");
+  assert.equal(held.second, null);
+  assert.equal(noteText(held), null);
+  const awaiting = only(roster([bound("planner", { cache: warm("20:04"), awaiting: ["builder-1"] })]), m);
+  assert.equal(awaiting.case, "awaiting");
+  assert.equal(awaiting.second, null);
+  assert.equal(noteText(awaiting), null);
+  const both = only(roster([bound("planner", { cache: warm("20:04"), awaiting: ["builder-1"] })],
+                           [waiting("planner", 2, "18:10")]), m);
+  assert.equal(both.case, "held");
+  assert.equal(both.second, "awaiting");
+  assert.equal(noteText(both), "warm until 20:04 · waiting on builder-1's reply since 18:28 · builder-1 hasn't read it yet");
+  // Uncovered alone has no line three either.
+  const uncovered = only(roster([bound("builder-1", { cache: warm("19:22") })]), mail(),
+                         { launched: new Map([["builder-1", launched()]]) });
+  assert.equal(uncovered.case, "uncovered");
+  assert.equal(noteText(uncovered), null);
+});
+
+test("an owed row whose lead is bound with nothing waiting: the idle case on line three", () => {
+  const r = roster([bound("planner", { cache: warm("20:04") })]);
+  const got = only(r, mail({ owed: [owed("planner", "19:02")], last: [{ qualified: "planner", at: at("19:02") }] }));
+  assert.equal(got.case, "owed");
+  assert.equal(got.second, "idle");
+  assert.equal(noteText(got), "warm until 20:04 · no mail waiting · last message 19:02");
+});
+
 test("awaiting with no ask in the read says only whose reply; a read ask drops the second part", () => {
   const r = roster([bound("planner", { awaiting: ["builder-1@atlas"] })]);
   assert.deepEqual(only(r, mail()).line, { lead: "waiting on builder-1's reply", heavy: false, more: null });
@@ -248,11 +279,10 @@ test("not running only when no address is bound; else the address that isn't", (
   const got = only(one, mail({ queued: [queued("builder-2@kestrel-web", 1, ["planner"])] }));
   assert.equal(got.lead, "builder-2");
   assert.equal(got.case, "mail");
-  assert.equal(got.second, "idle");
+  // Mail waits at the name, so the lead is not idle: line three is the address line alone.
+  assert.equal(got.second, null);
   assert.deepEqual(got.line, { lead: "builder-2@kestrel-web isn't running", heavy: true, more: null });
-  // The second case leads line three, then the address line.
-  assert.equal(noteText(got),
-               "warm until 20:00 · no mail waiting; builder-2@kestrel-web · 1 message since 16:30, from planner");
+  assert.equal(noteText(got), "builder-2@kestrel-web · 1 message since 16:30, from planner");
 
   const two = roster([bound("builder-2")], [waiting("builder-2@a", 1, "16:30"), waiting("builder-2@b", 2, "17:00")]);
   const both = only(two, null);

@@ -383,7 +383,10 @@ export function namedInFull(roster: PageRoster): Set<string> {
   return new Set(unbound.filter((qualified) => unbound.filter((other) => nameOf(other) === nameOf(qualified)).length > 1));
 }
 
-/** The cases a name meets, highest first. The bound cases are read off the lead alone. */
+/** The cases a name meets, highest first. The bound cases are read off the lead alone;
+ * `idle` (nothing waiting) is met only when the lead is bound and the name meets no case
+ * but `owed`: no mail waits at any of its addresses and the lead is not uncovered, holds no
+ * rows and awaits no one. */
 function casesOf(addresses: readonly Address[], lead: Address): Case[] {
   const met: Case[] = [];
   if (addresses.some((address) => address.owed.length > 0)) met.push("owed");
@@ -392,7 +395,7 @@ function casesOf(addresses: readonly Address[], lead: Address): Case[] {
     if (lead.launched?.uncovered) met.push("uncovered");
     if (heldCount(lead) > 0) met.push("held");
     if ((lead.row?.awaiting.length ?? 0) > 0) met.push("awaiting");
-    met.push("idle");
+    if (met.filter((kind) => kind !== "owed").length === 0) met.push("idle");
   }
   return met;
 }
