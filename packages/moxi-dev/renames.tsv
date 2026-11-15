@@ -7535,14 +7535,14 @@ publishing	packages/publishing/src/moxi_publishing/github.py	"""Everything `show
 publishing	packages/publishing/src/moxi_publishing/github.py	"""What `show` read from GitHub."""	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/github.py	"Gh", "expected_rulesets", "read", "differences", "show", "apply"]	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/github.py	#: The two kinds of ref a ruleset may target that `show` judges.	keep	show	show
-publishing	packages/publishing/src/moxi_publishing/github.py	-	name	ENVIRONMENT	DEPLOYMENT
-publishing	packages/publishing/src/moxi_publishing/github.py	-	name	_environment_differences	_deployment_differences
+publishing	packages/publishing/src/moxi_publishing/github.py	-	name	ENVIRONMENT	GITHUB_ENVIRONMENT
+publishing	packages/publishing/src/moxi_publishing/github.py	-	name	_environment_differences	_github_environment_differences
 publishing	packages/publishing/src/moxi_publishing/github.py	Each ruleset is active with no bypass actors. `show` prints each difference field by	keep	show	show
-publishing	packages/publishing/src/moxi_publishing/github.py	State	name	environment	deployment
-publishing	packages/publishing/src/moxi_publishing/github.py	env = state.environment	use	state.environment	state.deployment
+publishing	packages/publishing/src/moxi_publishing/github.py	State	name	environment	github_environment
+publishing	packages/publishing/src/moxi_publishing/github.py	env = state.environment	use	state.environment	state.github_environment
 publishing	packages/publishing/src/moxi_publishing/github.py	gh.send(request)	keep	fail	fail
 publishing	packages/publishing/src/moxi_publishing/github.py	if not any(p.get("name") == RELEASE_TAGS and p.get("type", "branch") == "tag"	keep	any	any
-publishing	packages/publishing/src/moxi_publishing/github.py	read	name	environment	deployment
+publishing	packages/publishing/src/moxi_publishing/github.py	read	name	environment	github_environment
 publishing	packages/publishing/src/moxi_publishing/github.py	show; `show` says so.	keep	show	show
 publishing	packages/publishing/src/moxi_publishing/message.py	"fail": "closed",	keep	closed	closed
 publishing	packages/publishing/src/moxi_publishing/message.py	gone: set[int] = set()	keep	set	set
@@ -7606,7 +7606,7 @@ publishing	packages/publishing/tests/test_enable.py	assert any("no GitHub repo i
 publishing	packages/publishing/tests/test_enable.py	assert any("private names list is empty" in line for line in lines)	keep	any	any
 publishing	packages/publishing/tests/test_enable.py	assert not any("no GitHub repo is known" in line for line in lines)	keep	any	any
 publishing	packages/publishing/tests/test_enable.py	assert not any("private names" in line for line in lines)	keep	any	any
-publishing	packages/publishing/tests/test_github.py	-	name	test_show_says_when_the_environment_or_a_ruleset_is_missing	test_show_says_when_the_deployment_or_a_ruleset_is_missing
+publishing	packages/publishing/tests/test_github.py	-	name	test_show_says_when_the_environment_or_a_ruleset_is_missing	test_show_says_when_the_github_environment_or_a_ruleset_is_missing
 publishing	packages/publishing/tests/test_github.py	assert cli.main(["github", "show", str(repo)]) == 2	keep	show	show
 publishing	packages/publishing/tests/test_github.py	assert not any(path.endswith("/rulesets/102") for _, path, _ in gh.writes)	keep	any	any
 publishing	packages/publishing/tests/test_push.py	assert set(log_lines()[-1]["commits"]) == set(	keep	set	set

@@ -32,8 +32,8 @@ from moxi_publishing.release import Result
 
 #: How long one `gh api` call may take.
 GH_TIMEOUT_S = 30.0
-#: The environment the release workflow's publish job runs in.
-DEPLOYMENT = "pypi"
+#: The GitHub environment the release workflow's publish job runs in.
+GITHUB_ENVIRONMENT = "pypi"  # noqa: MX3 -- GitHub's own name for it
 #: The release tags the environment may deploy from: `<distribution>-v<version>`.
 RELEASE_TAGS = "*-v*"
 #: The release workflow, as a trusted publisher on the package index names it.
@@ -71,7 +71,7 @@ class State:
 
     repo: dict
     rulesets: list[dict]
-    deployment: dict | None
+    github_environment: dict | None  # noqa: MX3 -- GitHub's own name for it
     tag_policies: list[dict] | None
     account: dict
     notes: list[str] = field(default_factory=list)
@@ -181,17 +181,19 @@ def read(gh: Gh, github: str) -> State:
         full = gh.get(f"repos/{github}/rulesets/{summary['id']}")
         if full is not None:
             rulesets.append(full)
-    deployment = gh.get(f"repos/{github}/environments/{DEPLOYMENT}")
+    github_environment = gh.get(  # noqa: MX3 -- GitHub's own name for it
+        f"repos/{github}/environments/{GITHUB_ENVIRONMENT}")
     policies = None
-    if deployment is not None and (deployment.get("deployment_branch_policy") or {}).get(
+    if github_environment is not None and (
+            github_environment.get("deployment_branch_policy") or {}).get(
             "custom_branch_policies"):
-        found = gh.get(f"repos/{github}/environments/{DEPLOYMENT}"
+        found = gh.get(f"repos/{github}/environments/{GITHUB_ENVIRONMENT}"
                        "/deployment-branch-policies?per_page=100")
         policies = (found or {}).get("branch_policies", [])
     account = gh.get("user")
     if not account:
         raise Failure("gh is signed in to no account; run gh auth login", 1)
-    return State(repo=repo, rulesets=rulesets, deployment=deployment,
+    return State(repo=repo, rulesets=rulesets, github_environment=github_environment,
                  tag_policies=policies, account=account)
 
 
@@ -232,18 +234,19 @@ def _ruleset_differences(github: str, have: dict | None, want: dict) -> list[Dif
     return found
 
 
-def _deployment_differences(github: str, state: State) -> list[Difference]:
-    subject = f"environment {DEPLOYMENT}"
+def _github_environment_differences(  # noqa: MX3 -- GitHub's own name for it
+        github: str, state: State) -> list[Difference]:
+    subject = f"environment {GITHUB_ENVIRONMENT}"
     account = state.account
-    put = Request("PUT", f"repos/{github}/environments/{DEPLOYMENT}", {
+    put = Request("PUT", f"repos/{github}/environments/{GITHUB_ENVIRONMENT}", {
         "reviewers": [{"type": "User", "id": account["id"]}],
         "prevent_self_review": False,
         "deployment_branch_policy": {"protected_branches": False,
                                      "custom_branch_policies": True},
     })
-    policies = f"repos/{github}/environments/{DEPLOYMENT}/deployment-branch-policies"
+    policies = f"repos/{github}/environments/{GITHUB_ENVIRONMENT}/deployment-branch-policies"
     add_tag = Request("POST", policies, {"name": RELEASE_TAGS, "type": "tag"})
-    env = state.deployment
+    env = state.github_environment
     if env is None:
         return [Difference(subject, "missing", (put, add_tag))]
     found = []
@@ -312,7 +315,7 @@ def differences(github: str, state: State, *, main: str) -> list[Difference]:
                 left=f"delete it on GitHub, or: gh api --method DELETE "
                      f"repos/{github}/rulesets/{ruleset.get('id')}"))
     found += _security_differences(github, state.repo)
-    found += _deployment_differences(github, state)
+    found += _github_environment_differences(github, state)
     default = state.repo.get("default_branch")
     if default and default != main:
         found.append(Difference(
@@ -347,7 +350,7 @@ def _publisher_line(root: str, github: str) -> str:
     which = f" ({', '.join(dists)})" if dists else ""
     return (f"PyPI trusted publisher: can't be read from GitHub; on pypi.org each "
             f"distribution{which} needs one for owner {owner}, repository {name}, "
-            f"workflow {WORKFLOW}, environment {DEPLOYMENT}")
+            f"workflow {WORKFLOW}, environment {GITHUB_ENVIRONMENT}")
 
 
 def show(path: str, *, run=None) -> Result:
@@ -386,5 +389,5 @@ def apply(path: str, *, run=None) -> Result:
     return Result(lines, 0)
 
 
-__all__ = ["DEPLOYMENT", "RELEASE_TAGS", "WORKFLOW", "Request", "Difference", "State",
+__all__ = ["GITHUB_ENVIRONMENT", "RELEASE_TAGS", "WORKFLOW", "Request", "Difference", "State",
            "Gh", "expected_rulesets", "read", "differences", "show", "apply"]
