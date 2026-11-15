@@ -7,7 +7,9 @@
 2. read the manifest, the settings and the ledger, and build the whole plan
    (`moxi_loadout.planner`);
 3. write the generated agent and global files of the wants in scope (a generated global
-   file edited by hand that `--replace` names is backed up first);
+   file edited by hand that `--replace` names is backed up first; a `--replace` of the
+   global file in a run scoped with `--user` or `--project` is refused, since that run
+   never writes the global file);
 4. plan through the core placer and apply the steps in scope: each `add`, `update` and
    `keep`; each `remove` whose record names a section in scope (a `remove` with no record
    only in an unscoped run in which every section resolved); a refusal `--replace` names,
@@ -46,9 +48,9 @@ block isn't there and Claude's file brings in Claude's part, OpenCode reads that
 Exit codes: `status` 0 when every item is `ok` or `off`, else 1. `install` 0 when every
 item in scope is `ok` or `off` afterwards; 1 an error (a bad source, a failed write, a
 state still missing after the write); 3 refused (`blocked`, `modified` or `would-commit`
-left, a `--replace` that names nothing refused, a project section refused); 75 a lock held
-past its wait, or projects busy. 1 wins over 3, 3 over 75. A refusal outside the scope is
-a line, not a code.
+left, a `--replace` that names nothing refused, a `--replace` of the global file in a
+scoped run, a project section refused); 75 a lock held past its wait, or projects busy.
+1 wins over 3, 3 over 75. A refusal outside the scope is a line, not a code.
 """
 
 from __future__ import annotations
@@ -364,6 +366,8 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
     found = manifest_mod.load(machine.source)
     lines.extend(r.line for r in found.refused)
     claims = _claims(replace)
+    refused = _global_claims_out_of_scope(claims, scope)
+    lines.extend(refused)
     _replace_generated_global(claims, machine.backups_keep, say)
     written: list[Row] = []
     notes: list[str] = []
@@ -484,7 +488,8 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
                 w.scope == name and (w.kind, w.name) == scope.item for w in plan.wants):
             continue
         rows.append(Row(name, "section", name, "*", "blocked", res.line, None, res.code))
-    codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
+    codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(
+        unclaimed or refused)
     for level, line in opencode_reads_claude(plan, ran[0], after=True):
         said.append((level, line))
         lines.append(line)
@@ -616,6 +621,23 @@ def _write_generated(want, claims: dict[str, bool], say) -> None:
     want.generated = (path, data, "same")
     if current == "modified":
         say(f"rewrote {path}, which was edited by hand")
+
+
+def _global_claims_out_of_scope(claims: dict[str, bool], scope: Scope) -> list[str]:
+    """Each `--replace global:...` in a run that leaves the global file out, taken out of
+    the claims with its refusal line. The global file is written only by a whole install
+    and the global verbs, so a run scoped with `--user` or `--project` that took the
+    replace would back up and delete an edited generated file it never writes again,
+    leaving the harness's global file a link to nothing."""
+    if scope.covers(None, planner.GLOBAL_KIND, planner.GLOBAL_KIND):
+        return []
+    out = []
+    for text in [c for c in claims if c.startswith("global:")]:
+        del claims[text]
+        out.append(f"--replace {text}: refused, since a run scoped with --user or --project "
+                   f"leaves the global file out; run moxi loadout install --replace {text} "
+                   "with neither")
+    return out
 
 
 def _replace_generated_global(claims: dict[str, bool], keep: int, say) -> None:

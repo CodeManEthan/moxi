@@ -480,6 +480,67 @@ def test_a_hand_edit_to_the_generated_file_is_kept_until_replace(lo):
     assert any(b.read_bytes() == edited for b in backups)
 
 
+def _edited_generated_claude(lo, more: str = "") -> bytes:
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    kit.manifest(lo, '[global]\nmode = "if-absent"\n' + more)
+    assert install.install().code == 0
+    with open(harness.global_file("claude"), "a") as f:
+        f.write("My own line.\n")
+    return _gen("claude").read_bytes()
+
+
+@pytest.mark.parametrize("scoped", [["--user"], ["--project", "app"]])
+def test_a_scoped_replace_of_the_generated_file_is_refused_and_keeps_the_edit(
+        lo, tmp_path, capsys, scoped):
+    from moxi_loadout import stores
+
+    app = tmp_path / "app"
+    app.mkdir()
+    edited = _edited_generated_claude(lo, f'\n[project."{app}"]\nskills = []\n')
+    scoped = [s.replace("app", str(app)) for s in scoped]
+    claude = harness.global_file("claude")
+    assert cli.main(["install", "--replace=global:global@claude", *scoped]) == 3
+    said = capsys.readouterr().out
+    assert ("--replace global:global@claude: refused, since a run scoped with --user or "
+            "--project leaves the global file out; run moxi loadout install --replace "
+            "global:global@claude with neither") in said
+    # Nothing deleted, nothing backed up: Claude still reads the edit through its link.
+    assert _gen("claude").read_bytes() == edited
+    assert os.path.realpath(claude) == str(_gen("claude"))
+    assert claude.read_bytes() == edited
+    assert not (stores.backups_dir() / "claude").exists()
+    assert _rows(install.status(), "modified") == {"claude"}
+
+
+def test_the_pages_replace_of_the_generated_file_writes_it_again(lo, capsys):
+    from moxi_loadout import stores
+
+    edited = _edited_generated_claude(lo)
+    claude = harness.global_file("claude")
+    # The verb the page's job runs for this row (test_page holds the act to argv).
+    assert cli.main(["install", "--replace=global:global@claude", "--json"]) == 0
+    capsys.readouterr()
+    assert os.path.realpath(claude) == str(_gen("claude"))
+    assert "My own line." not in claude.read_text() and "Claude only." in claude.read_text()
+    backups = list((stores.backups_dir() / "claude").iterdir())
+    assert any(b.read_bytes() == edited for b in backups)
+    assert "claude" not in _rows(install.status(), "modified")
+
+
+def test_a_scoped_replace_of_a_managed_block_is_refused(lo):
+    mode(lo, "managed")
+    assert install.install().code == 0
+    path = harness.global_file("codex")
+    path.write_text(path.read_text().replace("Be brief.", "Be long."))
+    edited = path.read_bytes()
+    out = install.install(Scope(user=True), replace=["global:global@codex"])
+    assert out.code == 3
+    assert any(line.startswith("--replace global:global@codex: refused") for line in out.lines)
+    assert path.read_bytes() == edited
+    assert install.install(replace=["global:global@codex"]).code == 0
+    assert "Be brief." in path.read_text()
+
+
 def test_an_edited_generated_file_no_placement_uses_is_left_with_a_note(lo):
     (lo / "global.claude.md").write_text("Claude only.\n")
     mode(lo, "if-absent")

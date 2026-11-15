@@ -24,7 +24,10 @@
   part, under loadout's state folder, placed where its global file is absent; a harness
   with no part still gets a link to `global.md`. The generated file's first line names
   the files and a hash; one edited by hand reads `modified` and keeps its placement until
-  `install --replace global:global@<harness>` backs it up and writes it again.
+  `install --replace global:global@<harness>` backs it up and writes it again. Only a
+  whole install writes the global file, so a run scoped with `--user` or `--project`
+  refuses that `--replace` (exit 3) and leaves the file as it is, and the page's Replace
+  on a global row runs the whole install.
 - Harness global files that are one real file (one a link to another, or to another
   harness's part) are left as they are and read `blocked`, so no harness reads another's
   part; uninstall refuses while one is recorded.

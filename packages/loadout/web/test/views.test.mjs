@@ -167,6 +167,13 @@ test("replace names the item for its harness, or the target, in the row's sectio
   assert.equal(canReplace(row({ state: "would-commit" })), false);
 });
 
+test("a global file's Replace runs the whole install, the one run that writes it", () => {
+  const edited = row({ kind: "global", name: "global", state: "modified",
+                       target: "/h/.claude/CLAUDE.md", replaceable: true });
+  assert.equal(canReplace(edited), true);
+  assert.deepEqual(replaceAct(edited).body, { replace: ["global:global@claude"] });
+});
+
 test("Replace is offered where status says --replace places over the row, and only there", () => {
   // A blocked row --replace doesn't fix (another module's placement, a CLI not found).
   assert.equal(canReplace(row({ state: "blocked", reason: "it is ext's placement" })), false);

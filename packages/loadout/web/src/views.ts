@@ -190,11 +190,13 @@ export function canReplace(row: Row): boolean {
   return row.replaceable && replaceValue(row) !== null;
 }
 
-/** The confirmed replace act for one row, and the lines its sheet shows. */
+/** The confirmed replace act for one row, and the lines its sheet shows. A global file's
+ * row runs the whole install, since a run scoped to a section never writes the global file
+ * and refuses its `--replace`. */
 export function replaceAct(row: Row): Act & { sheet: string[] } {
   const value = replaceValue(row) ?? "";
-  const scope = row.scope === null ? {} : row.scope === "user" ? { user: true }
-    : { projects: [row.scope] };
+  const scope = row.scope === null || row.kind === "global" ? {}
+    : row.scope === "user" ? { user: true } : { projects: [row.scope] };
   const where = row.target ?? value;
   const sheet = [
     `Runs moxi loadout install --replace ${value}.`,

@@ -499,6 +499,9 @@ def test_a_job_whose_pid_cant_be_recorded_is_still_accepted(lo, spawned, monkeyp
                       "projects": ["alpha"]},
      ["install", "--replace=skill:review@claude", "--replace=/srv/alpha/.claude/skills/x",
       "--project=alpha"]),
+    # A global file's row: no section, so the job is the whole install that writes it.
+    ("/api/replace", {"replace": ["global:global@claude"]},
+     ["install", "--replace=global:global@claude"]),
     ("/api/global-remove", {}, ["global", "remove"]),
 ])
 def test_a_confirmed_act_runs_as_the_job_its_key_names(lo, spawned, path, body, verb):
