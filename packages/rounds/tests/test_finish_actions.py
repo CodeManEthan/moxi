@@ -146,6 +146,11 @@ def test_a_push_git_refuses_is_recorded_failed(ready, repo, configure):
     assert failed.value.id == "push" and "nowhere" in failed.value.output
     assert actions_of(path) == [("merge", "ok"), ("push", "failed")]
     assert ended(path) is None
+    landing = repo.rev("main")
+    assert failed.value.done == (
+        f"merge (merge): ok, {landing[:12]} on the target",
+        f"B1 reads merged, not finished: its merge {landing[:12]} is on main")
+    assert "done before it, recorded: merge (merge): ok" in failed.value.reason
 
 
 def _remote_away(repo):

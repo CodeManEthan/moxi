@@ -34,7 +34,10 @@ tip as read (its head, once the branch is gone), in this order:
    a later sweep takes the folder once the rule holds.
 
 The finish lock is released however the verb ends once it was taken: only while it
-still points at this finish's own blob.
+still points at this finish's own blob. A refusal or a failed action after the verb
+recorded anything (a dead holder's lock cleared, an action's result) names each thing
+done and recorded, and, when a merge is on the target, that the build reads merged and
+is not finished: those records stand, and a rerun goes on from them.
 
 **The merge.** `git merge --no-ff T` in the checkout of the target: the worktree that
 has the target checked out, which must hold nothing uncommitted with its `HEAD` at `M`;
@@ -126,16 +129,21 @@ PUSH_TIMEOUT_S = 600.0
 
 
 class ActionFailed(RoundsError):
-    """A finish action failed: `id` is the action, `output` what it printed. Its
-    `failed` record is on the log, nothing is undone, and the finish lock is released."""
+    """A finish action failed: `id` is the action, `output` what it printed, and `done`
+    what this finish did and recorded before it, a line each. Its `failed`
+    record is on the log, nothing is undone, and the finish lock is released."""
 
     exit_code = exits.ERROR
 
-    def __init__(self, name: str, stage: str, action_id: str, output: str):
+    def __init__(self, name: str, stage: str, action_id: str, output: str, *,
+                 done: tuple[str, ...] = ()):
         self.id = action_id
         self.output = output
+        self.done = tuple(done)
+        before = "" if not self.done else "; done before it, recorded: " + "; ".join(
+            self.done)
         super().__init__(f"the finish action {action_id} of {stage} failed; it is "
-                         f"recorded as failed, and nothing is undone",
+                         f"recorded as failed, and nothing is undone{before}",
                          f"fix what it printed, then moxi rounds finish {name} {stage}")
 
 
@@ -199,8 +207,10 @@ def finish(name: str, stage: str, *, by: str, settings=None,
 
     Raises what `folders.home` raises for a round that can't be found; `Refused` with
     every unmet gate, a held finish lock, a branch that moved, a checkout of the target
-    that can't take the merge, or a conflict, in which case no action was recorded;
-    `ActionFailed` when an action failed; and `GitError` when git can't be read."""
+    that can't take the merge, a conflict, or gates the log no longer meets after the
+    actions, its `done` naming what this finish recorded before it (empty when it
+    recorded nothing); `ActionFailed` when an action failed, its `done` the same; and
+    `GitError` when git can't be read."""
     project, slug = folders.split(name)
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
@@ -229,11 +239,14 @@ def finish(name: str, stage: str, *, by: str, settings=None,
     taken = finish_lock.take(root, finish_lock.ref_of(settings, build.repo, build.target),
                              by=by, name=name, stage=stage)
     released = None
+    done: list[Action] = []
+    recorded: list[str] = []
     try:
         cleared = finish_lock.cleared_entry(taken)
         if cleared is not None:
             write.record(where, by=by, event=lambda _view, _result: cleared,
                          wait_s=wait_s, at=at, env=env)
+            recorded.append("the finish lock of a holder that had ended was cleared")
         view = write.look(where, wait_s=wait_s, env=env)
         read = open_builds.of_round(name, [build.repo], settings=settings)
         seen = _seen(view, name, stage, settings, read=read)
@@ -249,7 +262,6 @@ def finish(name: str, stage: str, *, by: str, settings=None,
         if unmet:
             raise Refused(unmet)
 
-        done = []
         settled = finish_actions.records(view.state, build, tip)
         passed = finish_actions.skipped(view.state, stage)
         for action in actions:
@@ -270,6 +282,8 @@ def finish(name: str, stage: str, *, by: str, settings=None,
                                          "landing": result.landing,
                                          "target_before": result.target_before})),
                     wait_s=wait_s, at=at, env=env)
+                if result.state != STARTED:
+                    recorded.append(_said(result))
 
             if action["do"] == own.MERGE:
                 result = _found(status, root, tip, action_id=action["id"], name=name,
@@ -294,7 +308,8 @@ def finish(name: str, stage: str, *, by: str, settings=None,
             if on_action is not None:
                 on_action(result)
             if result.state == FAILED:
-                raise ActionFailed(name, stage, result.id, result.output)
+                raise ActionFailed(name, stage, result.id, result.output,
+                                   done=_acts(recorded[:-1], done, build, stage))
 
         def after(view) -> list[Unmet]:
             if _ended(view.state, stage):
@@ -312,6 +327,11 @@ def finish(name: str, stage: str, *, by: str, settings=None,
 
         written = write.record(where, by=by, gates=[after], event=event,
                                wait_s=wait_s, at=at, env=env)
+    except Refused as exc:
+        said = _acts(recorded, done, build, stage)
+        if not said or exc.done:
+            raise
+        raise Refused(exc.unmet, done=said) from None
     finally:
         released = finish_lock.release(taken)
     cleaned = _clean_up(view.state, name, build, tip, done, root, settings=settings,
@@ -321,6 +341,25 @@ def finish(name: str, stage: str, *, by: str, settings=None,
                     event=written.events[-1] if written.events else None,
                     released=released, failed=written.failed, removed=cleaned.removed,
                     kept=cleaned.kept, branch=cleaned.branch)
+
+
+def _acts(recorded: list[str], done: list[Action], build: builds.Build,
+         stage: str) -> tuple[str, ...]:
+    """What a finish stopped before `finish.done` did and recorded, a line each: the
+    `recorded` lines of this run, then, when a merge of this run or one before it is on
+    the target, that the build reads merged and is not finished."""
+    merged = next((one for one in done if one.kind == own.MERGE
+                   and one.state in (OK, FOUND)), None)
+    if merged is None:
+        return tuple(recorded)
+    return (*recorded, f"{stage} reads merged, not finished: its merge "
+            f"{str(merged.landing)[:12]} is on {build.target}")
+
+
+def _said(result: Action) -> str:
+    landed = ("" if result.landing is None
+              else f", {result.landing[:12]} on the target")
+    return f"{result.id} ({result.kind}): {result.state}{landed}"
 
 
 # -- the cleanup -------------------------------------------------------------------------

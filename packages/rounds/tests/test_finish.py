@@ -364,6 +364,53 @@ def test_a_gate_the_log_no_longer_meets_after_the_merge_refuses_and_a_rerun_merg
     assert done.event is not None
 
 
+def test_a_refusal_after_the_merge_names_what_was_done_and_that_it_reads_merged(
+        ready, repo, monkeypatch, capsys):
+    merge = finishing._merge
+
+    def merge_then_ask(*args, **kwargs):
+        made = merge(*args, **kwargs)
+        asking.ask(ROUND, "Is the merge what was wanted?", by="scout",
+                   origin="comms:1234568")
+        return made
+
+    monkeypatch.setattr(finishing, "_merge", merge_then_ask)
+    capsys.readouterr()
+
+    assert main(["finish", ROUND, "B1"]) == 3
+
+    landing = repo.rev("main")
+    err = capsys.readouterr().err
+    assert "nothing written" not in err
+    assert "refused after acting; what was done is recorded and stands:" in err
+    assert f"done: merge (merge): ok, {landing[:12]} on the target" in err
+    assert f"done: B1 reads merged, not finished: its merge {landing[:12]} is on main" in err
+    assert "Q1" in err.split("refused because:")[1]
+
+
+def test_a_refusal_after_a_dead_holder_was_cleared_names_the_clearing(ready, repo,
+                                                                      monkeypatch):
+    path, tree = ready
+    line = finish_lock.holder("pilot", ROUND, "B1", at="2026-01-02T03:04:05Z",
+                              pid=dead_pid()).line
+    repo.git("update-ref", LOCK, _blob(repo, line + "\n"))
+    take = finish_lock.take
+
+    def take_then_commit(*args, **kwargs):
+        taken = take(*args, **kwargs)
+        tree.commit("late.txt", "a commit made after the gates were read")
+        return taken
+
+    monkeypatch.setattr(finish_lock, "take", take_then_commit)
+    with pytest.raises(Refused) as refused:
+        finishing.finish(ROUND, "B1", by="coder")
+
+    assert refused.value.done == (
+        "the finish lock of a holder that had ended was cleared",)
+    assert "nothing written" not in str(refused.value)
+    assert len(of_type(path, "lock.cleared")) == 1 and of_type(path, "finish.action") == []
+
+
 def test_the_cleanup_removes_both_dirs_and_deletes_the_merged_branch(ready, repo):
     path, tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))
