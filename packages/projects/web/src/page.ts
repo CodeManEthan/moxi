@@ -24,9 +24,11 @@
 //   last; reports heard within one frame are drawn together. A module that goes takes
 //   its component and its report with it. The contract is projects' README, "Facts on the
 //   Projects page".
-// - Until the panel, the opened project and the remove step are drawn anew: an opened
-//   project's fields, edit form, lead and agents, and Remove through the shell's confirm
-//   sheet; and projects' add form, placed under the list.
+// - The panel (`panel.ts`): `Add a project`, and the `add` address, open the Add panel at
+//   the window's right edge, and the column moves aside where the window has the room.
+// - Until the panel's Edit and the remove step are drawn, an opened project's `Edit`
+//   shows its edit form, lead and agents, and `Remove` the remove through the shell's
+//   confirm sheet.
 //
 // Every act sends what the same `moxi projects` verb takes, and every control that acts is
 // off while one is on its way. After an act that was done or may have been, the page
@@ -34,7 +36,7 @@
 // page reads the list and the kinds when it opens, when its tab is shown again and on
 // `CHANGED`.
 
-import { css, html, LitElement, noChange, nothing } from "lit";
+import { css, html, LitElement, noChange, nothing, unsafeCSS } from "lit";
 import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { live } from "lit/directives/live.js";
@@ -52,6 +54,8 @@ import { HOLD_MS, JOIN, listView, rowAttributes } from "./list-model.ts";
 import type { ListView, ProjectRow } from "./list-model.ts";
 import { emptySentence, NO_PROJECTS, openedRows } from "./opened-model.ts";
 import type { OpenedRow } from "./opened-model.ts";
+import { PANEL_WIDTH_PX } from "./panel.ts";
+import type { PanelAsk } from "./panel.ts";
 import { BASE } from "./styles.ts";
 import {
   actedOf, actSaid, agentBody, clearLeadBody, editBody, editing, kindChoices, leadBody, MAY_HAVE_ACTED, removedSaid, removeSheet, removeStatusPath, reread, STALE_LINE,
@@ -95,13 +99,22 @@ class Attributes extends Directive {
 }
 const attributes = directive(Attributes);
 
+/** The window's width from which the panel moves the column; under it the panel lies over
+ * the page. */
+const SIDE_FROM_PX = 1100;
+/** Half of the column's width. */
+const HALF_COLUMN_PX = 340;
+
 // The list is the Sessions page's rows under a dim count at the left, at its width; no
 // accent and no warning colour on it. What is not yet drawn anew keeps its old look.
 const STYLES = [BASE, css`
   :host { max-width: 680px; margin: 0 auto; padding: 4px 0 16px; font-size: 14px; line-height: 20px; }
+  /* Beside the panel, where the window has the room, the column stands at the centre of
+     what the panel leaves. */
+  @media (min-width: ${unsafeCSS(SIDE_FROM_PX)}px) {
+    :host([data-side]) { margin-left: calc(50% - ${unsafeCSS(HALF_COLUMN_PX + PANEL_WIDTH_PX / 2)}px); }
+  }
   h3 { margin: 0; font-size: 1em; }
-  section[data-part="add"] { margin-top: calc(var(--moxi-gap) * 2); }
-  section[data-part="add"] > div { min-width: 0; }
   .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); min-width: 0; }
 
   p.state, p.foot { margin: 16px 0 0; padding: 0 2px; overflow-wrap: anywhere; }
@@ -208,14 +221,15 @@ export class ProjectsPage extends LitElement {
   #open: string | null = null;
   /** What the open project was opened for: its address's piece. */
   #openFor: "open" | "edit" | "remove" = "open";
-  /** `Add a project` was pressed, or the address said `add`: the add is what is open. */
-  #adding = false;
+  /** `Add a project` was pressed, or the address said `add`: the add is what is open, in
+   * the panel, which opens with this. */
+  #adding: PanelAsk | null = null;
   /** The route given, opened once the list is read; null once it is. */
   #pending: Address | null = null;
   /** The key of an address that named no project, said at the list's foot. */
   #unknown: string | null = null;
-  /** What takes the view once drawn: the opened row, or the add form. */
-  #scrollTo: "open" | "add" | null = null;
+  /** The opened row takes the view once drawn. */
+  #scrollTo: "open" | null = null;
   /** When the page was connected, for the first read's `Reading…`. */
   #since = Date.now();
   #readingTimer: ReturnType<typeof setTimeout> | null = null;
@@ -225,8 +239,6 @@ export class ProjectsPage extends LitElement {
   /** An act is being sent, or the confirm sheet is open. */
   #sending = false;
   #told: Told | null = null;
-  #placed = false;
-  #missing = false;
 
   // The list's choices: the find field, the kind filter, the `Earlier` fold shown, and the
   // keys in the order last drawn, so the open row keeps its place.
@@ -360,7 +372,7 @@ export class ProjectsPage extends LitElement {
   /** What is open, as an address. */
   #address(): Address {
     if (this.#open !== null) return { piece: this.#openFor, key: this.#open };
-    return this.#adding ? { piece: "add" } : NOTHING_OPEN;
+    return this.#adding !== null ? { piece: "add" } : NOTHING_OPEN;
   }
 
   /** Puts what is open in the browser's address, rewriting the entry the page is on. */
@@ -380,8 +392,7 @@ export class ProjectsPage extends LitElement {
       this.#close();
     } else if (address.piece === "add") {
       this.#close();
-      this.#adding = true;
-      this.#scrollTo = "add";
+      this.#adding = {};
     } else {
       const key = keyIn(list.value.projects, address.key);
       const project = key === null ? null : this.#find(key);
@@ -403,7 +414,7 @@ export class ProjectsPage extends LitElement {
     this.#setOpen(null);
     this.#edit = null;
     this.#openFor = "open";
-    this.#adding = false;
+    this.#adding = null;
   }
 
   /** `project` is open, for `piece`; its edit form starts from it when it wasn't open. */
@@ -415,7 +426,7 @@ export class ProjectsPage extends LitElement {
       this.#agent = "";
     }
     this.#openFor = piece;
-    this.#adding = false;
+    this.#adding = null;
   }
 
   #find(key: string | null): Listed | null {
@@ -595,9 +606,9 @@ export class ProjectsPage extends LitElement {
     const state = listState(list, Date.now() - this.#since);
     if (state.state === "gone") return html`<p class="problem">projects is no longer installed.</p>`;
     return html`${this.#listPart(list, state)}
-      <section data-part="add" ?hidden=${!state.acts}><div data-part="add-form"></div>
-        ${this.#missing ? html`<p class="problem" data-line="no-add">The add form can't be shown here. Run <code>moxi projects add</code> in a terminal.</p>` : nothing}
-      </section>
+      ${this.#adding !== null ? html`<moxi-projects-panel .ask=${this.#adding} .listing=${list.value}
+        .kinds=${this.#kinds?.value ?? null} ?hidden=${!state.acts}
+        @moxi-projects-panel-close=${() => this.#closePanel()}></moxi-projects-panel>` : nothing}
       ${this.#host}`;
   }
 
@@ -718,15 +729,22 @@ export class ProjectsPage extends LitElement {
     this.requestUpdate();
   }
 
-  /** `Add a project`: the add is what is open, and the add form under the list takes the
-   * view, until the panel is drawn. */
+  /** `Add a project`: the add is what is open, in the panel. */
   #add(): void {
     this.#close();
     this.#unknown = null;
-    this.#adding = true;
-    this.#scrollTo = "add";
+    this.#adding = {};
     this.#write();
     this.requestUpdate();
+  }
+
+  /** The panel's `Close`, `Cancel` or Escape: nothing is open, and the focus goes back to
+   * `Add a project`. */
+  #closePanel(): void {
+    this.#adding = null;
+    this.#write();
+    this.requestUpdate();
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('[data-action="add"]')?.focus());
   }
 
   /** The opened project: its labelled rows, then the foot, `Edit` and `Remove`. Until the
@@ -841,20 +859,13 @@ export class ProjectsPage extends LitElement {
       }
     }
     if (this.#scrollTo !== null) {
-      const target = this.#scrollTo === "add" ? this.renderRoot.querySelector('section[data-part="add"]')
-        : this.#open === null ? null : this.renderRoot.querySelector(`moxi-ui-row[data-key="${CSS.escape(this.#open)}"]`);
+      const target = this.#open === null ? null
+        : this.renderRoot.querySelector(`moxi-ui-row[data-key="${CSS.escape(this.#open)}"]`);
       this.#scrollTo = null;
       target?.scrollIntoView({ block: "nearest" });
     }
-    if (this.#placed) return;
-    const host = this.renderRoot.querySelector('[data-part="add-form"]');
-    if (host === null) return;
-    this.#placed = true;
-    const missing = (): void => {
-      this.#missing = true;
-      this.requestUpdate();
-    };
-    place(host, "projects", "add").then((element) => { if (element === null) missing(); }, missing);
+    const panel = this.renderRoot.querySelector<HTMLElement>("moxi-projects-panel");
+    this.toggleAttribute("data-side", panel !== null && !panel.hidden);
   }
 }
 

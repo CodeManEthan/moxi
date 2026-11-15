@@ -1,10 +1,11 @@
 """projects' page in a browser, through a real shell that starts projects' real page server:
 the contract check; a shell whose PATH has no git, where a create names the lasting fix;
 a terminal whose last run placed the store elsewhere than the shell does, after which the
-page's add refuses with the store line; a contribution that won't load, named in the add form, which an add goes ahead
-without and whose warning the form shows beside the success; an add with create in a real
-git; a topic added with no root, whose answer is lost, after which the page reads its list
-again and says the directory may exist; the edit form, which sends only what the user
+Add panel shows the store line above its button and its add refuses with it; a
+contribution that won't load, named under the panel's `Kind`, which an add goes ahead
+without and whose warning the panel shows beside the success; an add with create in a real
+git; an add whose answer is lost, after which the page reads its list again and says it
+may have been added; the edit form, which sends only what the user
 changed when a terminal has changed the project since it was opened; the lead and the
 associated agents; remove through the confirm sheet, where Cancel sends nothing, a refusal
 gives each sentence, a removal takes the row off, and each confirmation sends its own key;
@@ -46,7 +47,7 @@ KEY = re.compile(r"^[A-Za-z0-9_-]{43}$")
 #: The paths a create from the page goes through, for a real-git row put back by a change.
 MINT_GLOBS = ("packages/projects/src/moxi_projects/acts.py",
               "packages/projects/src/moxi_projects/pagehandlers.py",
-              "packages/projects/web/src/add.ts",
+              "packages/projects/web/src/panel.ts",
               "packages/projects/web/src/page.ts",
               "packages/projects/tests/test_browser_page.py")
 
@@ -188,6 +189,20 @@ def tilde(shell, path: str) -> str:
     return "~/" + Path(path).relative_to(shell.env["HOME"]).as_posix()
 
 
+def add_panel(panel):
+    """Presses `Add a project`, and gives the panel."""
+    panel.get_by_role("button", name="Add a project").click()
+    aside = panel.locator('moxi-projects-panel [data-part="panel"]')
+    expect(aside).to_be_visible()
+    return aside
+
+
+def fill_root(aside, path: str) -> None:
+    """Types `path` in the panel's folder field and waits for what is there to be read."""
+    aside.get_by_label("Folder", exact=True).fill(path)
+    expect(aside.get_by_role("button", name="Add project")).to_be_enabled()
+
+
 def changed(page) -> None:
     """Sends the event after which every projects component reads again."""
     page.evaluate("name => document.dispatchEvent(new Event(name))", CHANGED)
@@ -216,7 +231,8 @@ def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
         assert any(url.endswith(f"/m/projects/api/{route}") for url in check.requests), check.requests
     for key in seeded:
         expect(check.locator.locator(f'moxi-ui-row[data-key="{key}"]')).to_have_count(1)
-    expect(check.locator.locator("moxi-projects-add form")).to_have_attribute("data-state", "up")
+    # The add is the panel's, opened by `Add a project`; no add form is placed.
+    expect(check.locator.locator("moxi-projects-add")).to_have_count(0)
 
 
 def test_a_terminal_whose_store_is_elsewhere_refuses_the_add_with_the_store_line(
@@ -234,18 +250,21 @@ def test_a_terminal_whose_store_is_elsewhere_refuses_the_add_with_the_store_line
     # The list still reads: the shell's store, which has no rows.
     expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "empty")
 
-    form = panel.locator("moxi-projects-add")
+    aside = add_panel(panel)
+    # The panel says above its button that a change would be refused, and why.
+    expect(aside.locator('[data-line="note"]')).to_contain_text(line)
     where_to = root(shell, "pagerow")
-    form.get_by_label("Key", exact=True).fill("pagerow")
-    form.get_by_label(re.compile(r"^Root")).fill(where_to)
-    form.get_by_role("button", name="Add").click()
-    said = form.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "error")
+    fill_root(aside, where_to)
+    expect(aside.get_by_label("Name", exact=True)).to_have_value("pagerow")
+    aside.get_by_role("button", name="Add project").click()
+    said = aside.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-outcome", "refused")
     expect(said).to_contain_text(line)
     expect(said).to_contain_text(f"Set MOXI_PROJECTS_DATA_HOME to {moved}")
     expect(said).to_contain_text("moxi ui stop")
-    # Neither store was made.
+    # Neither store was made, and the panel keeps what was typed.
     assert not os.path.exists(here) and not os.path.exists(there)
+    expect(aside.get_by_label("Folder", exact=True)).to_have_value(where_to)
 
 
 def test_a_shell_with_no_git_refuses_a_create_with_the_lasting_fix(
@@ -264,14 +283,14 @@ def test_a_shell_with_no_git_refuses_a_create_with_the_lasting_fix(
     panel = page.locator("#moxi-panel > moxi-projects-page")
     expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "empty")
 
-    form = panel.locator("moxi-projects-add")
+    aside = add_panel(panel)
     where_to = str(Path(shell.env["HOME"]) / "work" / "nogit")
-    form.get_by_label("Key", exact=True).fill("nogit")
-    form.get_by_label(re.compile(r"^Root")).fill(where_to)
-    form.get_by_label("Create the root").check()
-    form.get_by_role("button", name="Add").click()
-    said = form.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "error")
+    fill_root(aside, where_to)
+    expect(aside.locator('[data-line="folder"]')).to_have_text("No folder there yet.")
+    aside.get_by_label("Create the folder and run git init").check()
+    aside.get_by_role("button", name="Add project").click()
+    said = aside.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-outcome", "refused")
     expect(said).to_contain_text("moxi ui stop")
     expect(said).to_contain_text(f"moxi projects add nogit --root {where_to} --create")
     assert not os.path.lexists(where_to)
@@ -288,20 +307,21 @@ def test_a_contribution_that_wont_load_is_named_and_an_add_goes_ahead_with_its_w
     page = ui_contexts(shell).pages[0]
     page.goto("/m/projects/")
     panel = page.locator("#moxi-panel > moxi-projects-page")
-    form = panel.locator("moxi-projects-add")
-    expect(form.locator('[data-line="broken"]')).to_contain_text("broken:")
+    expect(panel.locator('section[data-part="list"]')).to_have_attribute("data-state", "empty")
+    aside = add_panel(panel)
+    # The broken contribution is one dim line under `Kind`, behind `More`.
+    aside.get_by_role("button", name=re.compile(r"More")).click()
+    expect(aside.locator('[data-line="broken"]')).to_contain_text("broken:")
     where = root(shell, "skipping")
-    form.get_by_label("Key", exact=True).fill("skipping")
-    form.get_by_label(re.compile(r"^Root")).fill(where)
-    form.get_by_role("button", name="Add").click()
-    said = form.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "ok")
-    expect(said).to_contain_text(f"Added skipping at {where}.")
-    warning = form.locator('[data-line="warning"]')
-    expect(warning).to_be_visible()
-    expect(warning).to_contain_text("Warning: skipped broken, which won't load")
-    expect(warning).to_contain_text("defaults and checks were not applied")
-    expect(warning).to_contain_text("moxi uninstall broken")
+    Path(where).mkdir(parents=True)
+    fill_root(aside, where)
+    aside.get_by_role("button", name="Add project").click()
+    said = aside.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-outcome", "done")
+    expect(said).to_contain_text("Added skipping at ~/work/skipping.")
+    expect(said).to_contain_text("Warning: skipped broken, which won't load")
+    expect(said).to_contain_text("defaults and checks were not applied")
+    expect(said).to_contain_text("moxi uninstall broken")
     assert shown(shell, "skipping")["root"] == where
 
 
@@ -313,24 +333,23 @@ def test_a_contribution_that_wont_load_is_named_and_an_add_goes_ahead_with_its_w
 def test_an_add_with_create_makes_a_git_repository_that_the_list_then_shows(
         seeded, ui_shell, ui_page):
     panel = open_panel(ui_page)
-    form = panel.locator("moxi-projects-add")
+    aside = add_panel(panel)
     where = root(ui_shell, "minted")
-    form.get_by_label("Key", exact=True).fill("minted")
-    form.get_by_label(re.compile(r"^Root")).fill(where)
-    form.get_by_label("Create the root").check()
-    form.get_by_role("button", name="Add").click()
-    said = form.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "ok", timeout=30_000)
-    expect(said).to_contain_text(f"Added minted at {where}.")
+    fill_root(aside, where)
+    aside.get_by_label("Create the folder and run git init").check()
+    aside.get_by_role("button", name="Add project").click()
+    said = aside.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-outcome", "done", timeout=30_000)
+    expect(said).to_contain_text(f"Added minted at {tilde(ui_shell, where)}.")
     done = subprocess.run(["git", "-C", where, "rev-parse", "--is-inside-work-tree"],
                           env=ui_shell.env, capture_output=True, text=True, check=False)
     assert done.stdout.strip() == "true", done
     assert shown(ui_shell, "minted")["root"] == where
-    # The form sent CHANGED, and the page read its list again.
+    # The panel sent CHANGED, and the page read its list again.
     expect(row(panel, "minted")).to_have_count(1)
 
 
-def test_a_lost_add_answer_reads_the_list_again_and_says_the_dir_may_exist(
+def test_a_lost_add_answer_reads_the_list_again_and_says_it_may_have_been_added(
         seeded, ui_shell, ui_page):
     panel = open_panel(ui_page)
     reads = reads_of(ui_page, "api/projects")
@@ -340,22 +359,20 @@ def test_a_lost_add_answer_reads_the_list_again_and_says_the_dir_may_exist(
         route.fulfill(status=504, json={"error": "timeout"})
 
     ui_page.route("**/m/projects/api/add", lost)
-    form = panel.locator("moxi-projects-add")
-    form.get_by_label("Key", exact=True).fill("lost-topic")
-    form.get_by_role("combobox", name=re.compile(r"^Kind")).select_option("topic")
-    # The root is left empty: notes gives a topic's.
-    form.get_by_label("Create the root").check()
-    form.get_by_role("button", name="Add").click()
-    said = form.locator('[data-line="said"]')
-    expect(said).to_have_attribute("data-tone", "warn")
-    expect(said).to_contain_text("may have acted")
-    expect(said).to_contain_text("The directory may exist now.")
+    aside = add_panel(panel)
+    where = root(ui_shell, "lost-made")
+    Path(where).mkdir(parents=True)
+    fill_root(aside, where)
+    aside.get_by_role("button", name="Add project").click()
+    said = aside.locator('[data-line="said"]')
+    expect(said).to_have_attribute("data-outcome", "unknown")
+    expect(said).to_have_text("It may have been added.")
     ui_page.unroute("**/m/projects/api/add")
-    # The page read its list again, which now holds the topic.
-    expect(row(panel, "lost-topic")).to_have_count(1)
+    # The page read its list again, which now holds it.
+    expect(row(panel, "lost-made")).to_have_count(1)
     assert len(reads) >= 1, reads
-    made = shown(ui_shell, "lost-topic")
-    assert made is not None and made["kind"] == "topic" and Path(made["root"]).is_dir(), made
+    made = shown(ui_shell, "lost-made")
+    assert made is not None and made["root"] == where, made
 
 
 # --- edit ---------------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 """projects' three components and its page in a browser, through a real shell that starts
-projects' real page server: the contract check on all four (the page placing the add
-form; the page in full is test_browser_page.py's); the picker listing every
+projects' real page server: the contract check on all four (the page opening its add
+in its panel; the page in full is test_browser_page.py's); the picker listing every
 project with its root, or only those of a kind, and sending its host a bubbling, composed
 `moxi-change` whose detail is the key and nothing else; the card for a key and for a key
 that names no project; and the add form hiding "create" for a kind whose mint is
@@ -133,14 +133,17 @@ def shown(shell, key: str) -> dict | None:
 
 # --- the contract --------------------------------------------------------------------------
 
-def test_the_page_keeps_the_contract_and_holds_the_add_form(seeded, ui_page,
-                                                            ui_component_check):
+def test_the_page_keeps_the_contract_and_opens_its_add_in_the_panel(seeded, ui_page,
+                                                                    ui_component_check):
     check = ui_component_check(ui_page, "projects", "page", keep=True)
     assert check.element == "moxi-projects-page"
     # The shell's top line names the page; the page draws no heading of its own.
     expect(check.locator.locator("h1")).to_have_count(0)
     expect(check.locator.locator('moxi-ui-row[data-key="alpha"]')).to_have_count(1)
-    expect(check.locator.locator("moxi-projects-add form")).to_have_attribute("data-state", "up")
+    # No add form is placed on it: `Add a project` opens the panel.
+    expect(check.locator.locator("moxi-projects-add")).to_have_count(0)
+    check.locator.get_by_role("button", name="Add a project").click()
+    expect(check.locator.locator('moxi-projects-panel [data-part="panel"]')).to_be_visible()
 
 
 @pytest.mark.parametrize(("name", "attrs", "route"), [

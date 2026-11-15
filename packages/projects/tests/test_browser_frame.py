@@ -119,8 +119,14 @@ def test_each_address_opens_what_it_names(small_page, route, opened, path):
         # Until the Edit panel, the opened project's own folder field takes the focus.
         focused = panel_of(small_page).evaluate("page => page.shadowRoot.activeElement?.name ?? null")
         assert focused == "root"
+    aside = panel_of(small_page).locator('moxi-projects-panel [data-part="panel"]')
     if route == "add":
-        expect(panel_of(small_page).locator('section[data-part="add"]')).to_be_in_viewport()
+        # The Add panel, empty, its folder field focused.
+        expect(aside).to_be_visible()
+        expect(aside.get_by_label("Folder", exact=True)).to_be_focused()
+        expect(aside.get_by_label("Folder", exact=True)).to_have_value("")
+    else:
+        expect(aside).to_have_count(0)
 
 
 def test_an_address_that_names_no_project_opens_the_list_and_says_so(small_page):
@@ -159,6 +165,16 @@ def test_open_and_close_rewrite_the_address_and_back_leaves_the_page(small_page)
     expect_path(small_page, f"/m/projects/edit/{kit.MISSING}")
     panel_of(small_page).get_by_role("button", name="Add a project").click()
     expect(open_rows(small_page)).to_have_count(0)
+    expect_path(small_page, "/m/projects/add")
+    # The panel's `Close` closes the add; Escape too.
+    panel_of(small_page).locator('moxi-projects-panel [data-action="close"]').click()
+    expect_path(small_page, "/m/projects/")
+    expect(panel_of(small_page).locator("moxi-projects-panel")).to_have_count(0)
+    panel_of(small_page).get_by_role("button", name="Add a project").click()
+    expect_path(small_page, "/m/projects/add")
+    small_page.keyboard.press("Escape")
+    expect_path(small_page, "/m/projects/")
+    panel_of(small_page).get_by_role("button", name="Add a project").click()
     expect_path(small_page, "/m/projects/add")
     row(small_page, "kestrel-web").get_by_role("button", name="kestrel-web").click()
     expect_path(small_page, "/m/projects/open/kestrel-web")
@@ -215,7 +231,7 @@ def test_a_page_server_that_isnt_answering_keeps_the_last_list_dim_with_no_acts(
     for gone in ('[slot="acts-one"]', '[slot="acts"]', '[data-action="add"]', "moxi-ui-row[open]",
                  "moxi-ui-row[toggles]"):
         expect(panel.locator(gone)).to_have_count(0)
-    expect(panel.locator('section[data-part="add"]')).to_be_hidden()
+    expect(panel.locator('moxi-projects-panel [data-part="panel"]')).to_have_count(0)
     # Every word is dim, the rows' own included.
     dim = panel.evaluate("""page => {
       const kept = page.shadowRoot.querySelector(".grps.kept");
@@ -250,7 +266,7 @@ def test_a_store_that_refuses_shows_its_reason_and_fix_and_no_rows(small_shell, 
         panel = panel_of(small_page)
         expect(panel.locator("moxi-ui-row")).to_have_count(0)
         expect(panel.locator('[data-action="add"]')).to_have_count(0)
-        expect(panel.locator('section[data-part="add"]')).to_be_hidden()
+        expect(panel.locator("moxi-projects-panel")).to_have_count(0)
     finally:
         for path in where.parent.glob(f"{where.name}*"):
             path.unlink()
