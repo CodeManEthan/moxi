@@ -169,6 +169,43 @@ def test_a_commit_and_its_revert_read_empty_with_commits_of_its_own(a_round, git
     assert (status.state, status.has_own_commits) == (EMPTY, True)
 
 
+def test_a_branch_rebased_onto_the_moved_target_reads_building_with_no_repair(
+        a_round, git_repo):
+    base = git_repo.rev("main")
+    a_round.commission(base=base)
+    git_repo.switch("work", new_from="main")
+    git_repo.commit("feature.txt")
+    git_repo.switch("main")
+    moved = git_repo.commit("target-only.txt")
+    git_repo.switch("work")
+    git_repo.git("rebase", "-q", "main")
+    status = read(a_round, git_repo)
+    assert (status.state, status.head, status.merge_base) == (
+        BUILDING, git_repo.rev("work"), moved)
+
+
+@pytest.mark.parametrize("onto", ["squash", "cherry-pick"])
+def test_work_put_on_the_target_by_hand_reads_building_then_empty_once_merged_back(
+        a_round, git_repo, onto):
+    a_round.commission(base=git_repo.rev("main"))
+    git_repo.switch("work", new_from="main")
+    first = git_repo.commit("feature.txt")
+    git_repo.commit("more.txt")
+    git_repo.switch("main")
+    if onto == "squash":
+        git_repo.git("merge", "-q", "--squash", "work")
+        git_repo.git("commit", "-q", "-m", "the work, squashed")
+    else:
+        git_repo.git("cherry-pick", first, git_repo.rev("work"))
+    status = read(a_round, git_repo)
+    assert status.state == BUILDING
+    git_repo.switch("work")
+    git_repo.merge("main")
+    status = read(a_round, git_repo)
+    assert (status.state, status.has_own_commits) == (EMPTY, True)
+    assert builds.drop_by(status) == builds.OPERATOR
+
+
 def test_the_target_merged_into_an_empty_branch_reads_empty_before_and_after_it_moves(
         a_round, git_repo):
     a_round.commission(base=git_repo.rev("main"))
