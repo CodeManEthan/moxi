@@ -9,10 +9,12 @@ finishes and what must be true first; what the build step reads; the rulings the
 build follows; the stage's slices; the operator's skips that reach it; and the repo's
 own `brief` lines.
 
-**The rulings a build follows** are exactly the ones the design's rows cite for the
-stage, each as it stands now (`tracing.given`): a cited ruling that was replaced is
-given as the one in its place, marked with the id the row cites, and one that was
-taken back is left out. Nothing else from the register is in the block.
+**The rulings a build follows** are the ones `tracing.given` gives for the stage, each
+as it stands now. In a flow with a design step they are exactly the ones its rows cite
+for the stage: a cited ruling that was replaced is given as the one in its place,
+marked with the id the row cites, and one that was taken back is left out. With no
+design step, or a skipped one, they are the round's own rulings that say what is built and name every stage or this
+one. Nothing else from the register is in the block.
 
 **What the lead is told** after the block, by the same call that commissioned the
 build, so neither is a gate: each of the block's rulings the operator has not been
@@ -21,9 +23,11 @@ each holder; and each standing ruling that stands, names the stage's repo in its
 and is cited by no row, for the lead to check.
 
 **What changed since the block.** `changed(...)` gives, for a stage with an open build,
-each ruling recorded after the block was printed that applies to the stage: a new one,
-one that replaces a ruling that applied, and one that takes such a ruling back. `next`
-prints them with the stage, so a correction reaches a build already commissioned.
+each ruling recorded after the block was printed that is among the rulings the build
+follows (`tracing.follows`, the same definition the block reads), one that replaces
+such a ruling, and one that takes such a ruling back. `next` prints them with the
+stage, so a correction reaches a build already commissioned. With a design step, a
+ruling no row cites is told once a version's row cites it.
 """
 
 from __future__ import annotations
@@ -254,33 +258,12 @@ def _commissioned(state: states.State, stage: str) -> dict | None:
                 None)
 
 
-def _reached(state: states.State, register: states.State | None,
-             one: states.Ruling, stage: str) -> bool:
-    """Whether `one` applied to the stage: a round's ruling that says what is built and
-    names every stage or this one; a standing ruling, or one it replaced, that the
-    round was opened with or a row cites, and whose scope reaches the stage's repo."""
-    if one.id is None:
-        return False
-    if one.id.startswith(_ROUND):
-        return one.kind == ruling.SUBSTANCE and tracing.applies_to(one, stage)
-    if register is None or one.kind != ruling.SUBSTANCE:
-        return False
-    owed = set(state.inherits) | {row["id"] for row in tracing.rows(state)}
-    seen, back = set(), one
-    while back is not None and back.id not in seen:
-        if back.id in owed:
-            return tracing.scope_reaches(one, state, stage)
-        seen.add(back.id)
-        back = (None if back.supersedes is None
-                else corrections.find(register, back.supersedes))
-    return False
-
-
 def changed(state: states.State, register: states.State | None,
             stage: str) -> tuple[Change, ...]:
     """What changed for the open build of `stage` since its block was printed: each
-    ruling recorded after its commission, in the round's log or the register, that
-    applies to the stage, replaces a ruling that did, or takes one back. Empty for a
+    ruling recorded after its commission, in the round's log or the register, that is
+    among the rulings the build follows, replaces one that is, or takes one back, as
+    `tracing.follows` reads them now. Empty for a
     stage with no open build. `register` is the project's state; with None only the
     round's rulings are read."""
     event = _commissioned(state, stage)
@@ -298,16 +281,16 @@ def changed(state: states.State, register: states.State | None,
     for one, held in sorted(found, key=lambda pair: pair[0].at):
         if one.revokes is not None:
             back = corrections.find(held, one.revokes)
-            if back is not None and _reached(state, register, back, stage):
+            if back is not None and tracing.follows(state, register, back, stage):
                 said.append(Change(one, revokes=back.id, was=back.text))
             continue
         if one.kind != ruling.SUBSTANCE:
             continue
         earlier = None if one.supersedes is None else corrections.find(held, one.supersedes)
-        if earlier is not None and (_reached(state, register, earlier, stage)
-                                    or _reached(state, register, one, stage)):
+        if earlier is not None and (tracing.follows(state, register, earlier, stage)
+                                    or tracing.follows(state, register, one, stage)):
             said.append(Change(one, replaces=earlier.id))
-        elif earlier is None and _reached(state, register, one, stage):
+        elif earlier is None and tracing.follows(state, register, one, stage):
             said.append(Change(one))
     return tuple(said)
 

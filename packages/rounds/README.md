@@ -585,6 +585,13 @@ now: once it is replaced, the ruling that stands in its place is owed the row, a
 once it is taken back it is owed none. The setting is read at each freezing, so turning it on or off reaches a
 round at its next version.
 
+The rows are also what a build is given. The commission block prints, as each stands
+now, the rulings the rows cite for the stage, whether `trace` is on or off; in a flow
+with no design step, or with the design skipped, it prints the round's own rulings that
+say what is built and name every stage or that one, and the project's standing rulings
+reach the lead only as `not cited, check:` lines. `next` tells an open build each
+ruling of that same set recorded, replaced or taken back after its block was printed.
+
 ## Closing
 
 No command closes a round. After every write to a round, rounds asks whether its close

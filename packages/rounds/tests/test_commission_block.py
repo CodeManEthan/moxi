@@ -219,7 +219,6 @@ def test_next_tells_a_build_each_correction_recorded_since_its_block(round_dir, 
     commission(capsys)
     later = rule(text="Times are shown in UTC.", supersedes=first)
     taken = rule(f"revoke:{other}")
-    new = rule(text="Lists show twenty rows.")
     elsewhere = rule(text="Only B2 pages scroll.", stages="B2")
 
     found = next_step.read(ROUND)
@@ -229,10 +228,72 @@ def test_next_tells_a_build_each_correction_recorded_since_its_block(round_dir, 
             "Times are shown in UTC.\n") in said
     assert (f"changed since your block: {taken} takes back {other}: "
             "Rows are sorted by name.\n") in said
-    assert f"changed since your block: {new}: Lists show twenty rows.\n" in said
     assert f"changed since your block: {elsewhere}" not in said
     [group] = [one for one in found["groups"] if one["stage"] == "B1"]
-    assert [one["id"] for one in group["changed"]] == [later, taken, new]
+    assert [one["id"] for one in group["changed"]] == [later, taken]
+
+
+def test_a_ruling_no_row_cites_is_told_once_a_version_cites_it(round_dir, capsys):
+    # The block gives what the rows cite, so `next` tells only what the block would
+    # give now: a new ruling reaches the build once a fold's row cites it.
+    first = rule()
+    ready(round_dir, row(first))
+    commission(capsys)
+    new = rule(text="Lists show twenty rows.")
+
+    assert commission_block.changed(folded(round_dir), register(round_dir), "B1") == ()
+
+    fold(round_dir, row(first), row(new))
+
+    changed = commission_block.changed(folded(round_dir), register(round_dir), "B1")
+    assert [one.ruling.id for one in changed] == [new]
+    assert [one.ruling.id for one in tracing.given(
+        folded(round_dir), register(round_dir), "B1")] == [first, new]
+
+
+# -- a round with no design --------------------------------------------------------------
+
+@pytest.fixture
+def fix_round(repo, tmp_path, capsys):
+    """`a-fix` opened in the fix flow, which has no design step; returns its folder."""
+    opening.open_round("proj-a/a-fix", description="a placeholder round", by="planner",
+                       flow="fix")
+    capsys.readouterr()
+    return tmp_path / "notes" / "rounds" / "a-fix"
+
+
+def commission_fix(capsys) -> str:
+    assert main(["commission", "proj-a/a-fix", "--repo", "proj-a", "--branch", "work",
+                 "--builder", "coder", "--slice", "1a=the log", "--minutes", "30"]) == 0
+    return capsys.readouterr().out
+
+
+def test_with_no_design_the_block_and_next_give_the_rounds_rulings_for_the_stage(
+        fix_round, capsys):
+    first = rule(target="proj-a/a-fix")
+    rule(target="proj-a", text="Logs are kept a year.", standing=True, scope="proj-a")
+
+    said = commission_fix(capsys)
+
+    assert f"rulings this build follows:\n  {first}  {SAID} ({PTR})\n" in said
+    assert "  S1  Logs are kept a year." not in said
+    assert "not cited, check: S1 Logs are kept a year.\n" in said
+
+    second = rule(target="proj-a/a-fix", text="Logs are JSON lines.")
+    rule(target="proj-a", text="Logs are kept a month.", standing=True,
+         supersedes="S1")
+    taken = rule(f"revoke:{first}", target="proj-a/a-fix")
+
+    found = next_step.read("proj-a/a-fix")
+    [group] = [one for one in found["groups"] if one["stage"] == "B1"]
+    assert [one["id"] for one in group["changed"]] == [second, taken]
+    said = next_step.as_text(found)
+    assert f"changed since your block: {second}: Logs are JSON lines.\n" in said
+    assert f"changed since your block: {taken} takes back {first}: {SAID}\n" in said
+    assert "Logs are kept a month." not in said
+    assert [one.ruling.id for one in tracing.given(
+        state.fold(log.read(log.round_log(fix_round))), register(fix_round),
+        "B1")] == [second]
 
 
 def test_nothing_recorded_before_the_block_is_told_as_changed(round_dir, capsys):
