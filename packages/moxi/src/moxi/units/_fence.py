@@ -44,6 +44,9 @@ from dataclasses import dataclass
 TIMEOUT = 30.0
 #: The variable that carries task refs to the PowerShell read.
 TASK_REFS_ENV = "MOXI_TASK_REFS"
+#: The variable that lets a test run a real supervisor. moxi-dev owns it, but a user
+#: install has no moxi-dev, so the core keeps its own copy.
+REAL_SUPERVISOR_ENV = "MOXI_TEST_REAL_SUPERVISOR"  # noqa: MX2 -- the core cannot import moxi-dev
 #: The most characters one environment variable holds on Windows; a longer ref list is
 #: split over more than one call.
 TASK_REFS_MAX = 32_767
@@ -186,8 +189,6 @@ def under_pytest() -> bool:
 def default_runner() -> Runner:
     """The runner that starts the real program, through `moxi.proc.run` (its own process
     group, stdin closed, the whole group ended at the time limit)."""
-    from moxi_dev.testing import REAL_SUPERVISOR_ENV
-
     if under_pytest() and os.environ.get(REAL_SUPERVISOR_ENV) != "1":
         raise SupervisorRefused(
             "a real supervisor call under pytest; pass a fake runner, or set "

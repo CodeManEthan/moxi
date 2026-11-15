@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 
 import pytest
 
@@ -127,6 +129,19 @@ def test_the_real_runner_is_refused_under_pytest(monkeypatch):
     monkeypatch.delenv(testing.REAL_SUPERVISOR_ENV, raising=False)
     with pytest.raises(_fence.SupervisorRefused):
         Fence("systemd").run("daemon-reload")
+
+
+def test_the_real_runner_is_built_on_an_install_without_moxi_dev():
+    # A user install has no moxi-dev: the fence and its real runner must not need it.
+    code = ("import sys; sys.modules['moxi_dev'] = None; "
+            "from moxi.units import _fence; "
+            "print(callable(_fence.default_runner()), 'moxi_dev.testing' in sys.modules)")
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("PYTEST_CURRENT_TEST", testing.REAL_SUPERVISOR_ENV)}
+    done = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
+                          text=True, timeout=60, check=False)
+    assert (done.returncode, done.stdout, done.stderr) == (0, "True False\n", "")
+    assert _fence.REAL_SUPERVISOR_ENV == testing.REAL_SUPERVISOR_ENV
 
 
 # -- backend() -----------------------------------------------------------------------------
