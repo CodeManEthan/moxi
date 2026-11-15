@@ -109,20 +109,63 @@ def test_verdict_prints_each_waiting_item_with_the_command_that_ends_it(built, c
     assert f"once done: moxi rounds mark {ROUND} B1.W1 --done --record PTR" in out
 
 
-def test_a_later_report_that_lists_a_waiting_item_s_id_again_is_refused(built):
+def test_a_later_report_of_the_build_that_restates_a_waiting_item_names_the_same_item(
+        built):
+    folder, tree = built
+    verify(folder, tree.rev(), ("W1", PAGE))
+
+    again = verify(folder, tree.rev(), ("W1", PAGE), ("W2", "another check"),
+                   name="second.md")
+
+    found = waits.of_round(folded(folder))
+    assert [(one.key, one.report) for one in found] == [
+        ("B1.W1", "report.md"), ("B1.W2", "second.md")]
+    assert [one.key for one in again.opened] == ["B1.W2"]
+
+
+def test_a_restated_waiting_item_that_is_done_stays_done(built):
+    folder, tree = built
+    verify(folder, tree.rev(), ("W1", PAGE))
+    done()
+
+    verify(folder, tree.rev(), ("W1", PAGE), name="second.md")
+
+    [one] = waits.of_round(folded(folder))
+    assert (one.state, one.record) == ("done", DONE_AT)
+
+
+def test_a_restated_waiting_item_id_with_another_sentence_is_refused_naming_both(built):
     folder, tree = built
     verify(folder, tree.rev(), ("W1", PAGE))
     before = raw(folder)
 
     with pytest.raises(Refused) as refused:
-        verify(folder, tree.rev(), ("W1", PAGE), name="second.md")
+        verify(folder, tree.rev(), ("W1", "read the page aloud"), name="second.md")
+
+    said = str(refused.value)
+    assert f"the waiting item B1.W1 is on record as '{PAGE}'" in said
+    assert "the report lists W1 as 'read the page aloud'" in said
+    assert raw(folder) == before
+
+
+def test_a_waiting_item_id_a_dropped_build_s_report_used_is_refused(built, git_repo):
+    from moxi_rounds import commissioning
+
+    folder, tree = built
+    verify(folder, tree.rev(), ("W1", PAGE))
+    log.append(log.round_log(folder), "build.dropped", {"stage": "B1"}, actor="planner")
+    git_repo.git("worktree", "remove", "--force", str(tree.root))
+    git_repo.git("branch", "-D", "work")
+    made = commissioning.commission(ROUND, "B1", builder="coder", actor="planner")
+    again = type(git_repo)(made.worktree)
+    again.commit("work.txt", "the work again")
+
+    with pytest.raises(Refused) as refused:
+        verify(folder, again.rev(), ("W1", PAGE), name="second.md")
 
     said = str(refused.value)
     assert "the waiting item W1 is new, and an earlier report of B1 used the id W1" in said
     assert f"moxi rounds mark {ROUND} B1.W1 --done --record PTR" in said
-    assert raw(folder) == before
-    verify(folder, tree.rev(), ("W2", "another check"), name="second.md")
-    assert [one.key for one in waits.open_of(folded(folder))] == ["B1.W1", "B1.W2"]
 
 
 def test_a_waiting_item_holds_the_close_and_not_the_finish(built):
@@ -248,3 +291,29 @@ def test_an_item_the_round_does_not_hold_or_a_bad_key_is_refused(built, capsys):
     with pytest.raises(BadArgument):
         done(key="B1.L1")
     assert main(["mark", ROUND, "W1", "--done", "--record", DONE_AT]) == 2
+
+
+def test_a_commit_of_the_build_s_repo_is_a_pointer_and_its_whole_id_is_recorded(built):
+    folder, tree = built
+    verify(folder, tree.rev(), ("W1", PAGE))
+    commit = tree.rev()
+
+    marked = done(record=commit[:9])
+
+    assert marked.wait.record == commit
+    [event] = [one for one in log.read(log.round_log(folder))
+               if one["type"] == "wait.marked"]
+    assert event["record"] == commit
+
+
+def test_a_commit_the_build_s_repo_does_not_hold_is_refused(built):
+    folder, tree = built
+    verify(folder, tree.rev(), ("W1", PAGE))
+    before = raw(folder)
+
+    said = refusal(record="0123abc")
+
+    assert "0123abc names no one commit that proj-a holds" in said
+    assert raw(folder) == before
+    # Shorter than seven hex digits is no commit id, and no pointer either.
+    assert "is not a pointer to what shows it done" in refusal(record="abc12")

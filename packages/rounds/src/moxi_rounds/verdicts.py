@@ -26,8 +26,9 @@ builder is refused; the name is the report's own word, so this catches a mistake
 bad faith. The report lists every finding the build holds as open, in some state, and
 a finding new to the build takes an id no earlier report of the stage used
 (`findings`). Each waiting item the report lists is an open waiting item of the round
-from the moment it is recorded, and takes an id no earlier report of the stage used
-(`waits`). Each decision it lists is a record of the round in a question's basic
+from the moment it is recorded, and takes an id no earlier report of the stage used;
+a later report of the same build may list an item again with the sentence on record,
+and it is the same item (`waits`). Each decision it lists is a record of the round in a question's basic
 form, and stays on it: a decision listed again may be as heavy or heavier, never
 lighter (`decisions`). A
 report whose model the `models` setting places in a weaker tier than the
@@ -256,9 +257,20 @@ def _of_build(state: states.State, block: report_block.ReportBlock, *, name: str
                 f"the finding {one.id} is new to {stage}'s build, and an earlier report "
                 f"of {stage} used the id {one.id}: an old id never names a new finding",
                 "give it an id no report of the stage used"))
-    # A report declares each waiting item it lists: an item stays the round's until
-    # it is marked done, so a report never lists one again.
+    # A report restates its lists in full, so an item an earlier report of this build
+    # declared may be listed again; its id then names that item and no other.
+    declared = {one.id: one for one in waits.of_build(state, build)}
     for one in block.waits:
+        was = declared.get(one.id)
+        if was is not None:
+            if was.text != one.text:
+                unmet.append(Unmet(
+                    f"the waiting item {was.key} is on record as {was.text!r}, from "
+                    f"{was.report}, and the report lists {one.id} as {one.text!r}: an "
+                    "id names one item, and a new item takes a new id",
+                    f"list {one.id} with the sentence on record, or give the new item "
+                    "an id no report of the stage used"))
+            continue
         if one.id in used:
             unmet.append(Unmet(
                 f"the waiting item {one.id} is new, and an earlier report of {stage} "

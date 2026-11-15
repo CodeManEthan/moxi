@@ -16,17 +16,22 @@ a pointer to the report, commit or message that shows it done:
 `done` and the pointer. A mark run again for an item already done finds it and writes
 nothing, so a mark stopped after its append is simply run again.
 
-**Ids.** Every waiting item of a report is new: a report declares work, and an item it
-declared once stays the round's until it is done. So a waiting item takes an id that no
+**Ids.** A report of a build restates its lists in full, so a later report of the same
+build may list a waiting item an earlier one declared: the same id with the same
+sentence names the same item, and adds no second one. A new item takes an id that no
 earlier report of its stage used, a dropped build's included, as a new finding does.
 An item keeps its key when its build is dropped: what waits on the operator still does.
+
+**The pointer** that shows an item done is one of the four shapes, or the id of a
+commit (7 to 40 hex digits) that the repo of its stage's build holds; the mark records
+that commit's whole id.
 
 **A rejected decision** owes a fix, so it is a waiting item too, `B2.M1 rejected: fix
 owed`, from the ruling that rejects it until a mark after that ruling names the fix. A
 rejection that is taken back or replaced by an acceptance owes nothing.
 
 Nothing here reads a file, the config or git, except `done`, which writes the round's
-log.
+log and reads git for a commit given as the pointer.
 """
 
 from __future__ import annotations
@@ -35,16 +40,20 @@ import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
-from . import decisions, ending, folders, pointers, write
+from . import builds, decisions, ending, findings, folders, pointers, write
 from . import settings as own
 from . import state as states
-from .errors import BadArgument, NoLog, NoRound, Unmet
+from .errors import BadArgument, NoLog, NoRound, RoundsError, Unmet
+from .gitreads import Git
 
 #: The event of a mark of a waiting item.
 MARKED = "wait.marked"
 #: The states a waiting item is in.
 OPEN = "open"
 DONE = "done"
+
+#: A commit given as the pointer that shows an item done.
+COMMIT = re.compile(r"[0-9a-fA-F]{7,40}")
 
 #: A waiting item's key: `B2.W1` for one a report declared, `B2.M1` for the fix a
 #: rejected decision owes.
@@ -132,6 +141,13 @@ def of_round(state: states.State) -> tuple[Wait, ...]:
     return tuple(found.values())
 
 
+def of_build(state: states.State, build: builds.Build) -> tuple[Wait, ...]:
+    """The waiting items the reports of `build` declared, in the order declared."""
+    reports = {one.n for one in findings.verdicts_of(state, build)}
+    return tuple(one for one in of_round(state)
+                 if one.report is not None and one.raised in reports)
+
+
 def open_of(state: states.State) -> tuple[Wait, ...]:
     """The waiting items of the round that are still open, in the order declared."""
     return tuple(one for one in of_round(state) if one.open)
@@ -198,13 +214,19 @@ def done(target: str, key: str, *, record: str | None, actor: str, settings=None
         if record is None:
             return Unmet("a waiting item is marked done with a pointer to the report, "
                          f"commit or message that shows it done; PTR below is one "
-                         f"token: {pointers.SHAPES}", again)
+                         f"token: {pointers.SHAPES}, or a commit's id", again)
+        if COMMIT.fullmatch(record):
+            whole = _commit(view.state, key, record)
+            return whole if isinstance(whole, Unmet) else None
         return pointers.unmet(record, again, names="what shows it done")
 
     def marked(view, result):
         if not find(view).open:
             return None
-        return write.Entry(MARKED, {"id": key, "state": DONE, "record": record})
+        pointer = record
+        if COMMIT.fullmatch(record):
+            pointer = _commit(view.state, key, record)
+        return write.Entry(MARKED, {"id": key, "state": DONE, "record": pointer})
 
     try:
         written = write.record(
@@ -220,5 +242,25 @@ def done(target: str, key: str, *, record: str | None, actor: str, settings=None
     return Done(name=name, wait=after, event=written.events[0], failed=written.failed)
 
 
-__all__ = ["MARKED", "OPEN", "DONE", "KEY", "Wait", "of_round", "open_of", "items",
-           "mark_line", "Done", "done"]
+def _commit(state: states.State, key: str, given: str) -> str | Unmet:
+    """The whole id of the commit `given` names in the repo of the build of the stage
+    of the item `key`, or what is unmet when that repo holds no such one commit."""
+    stage = key.split(".", 1)[0]
+    build = builds.current(state, stage)
+    if build is None:
+        return Unmet(f"{stage} has no build, so there is no repo to find the commit "
+                     f"{given} in", "give a pointer to what shows the item done")
+    try:
+        _key, root = folders.root(build.repo)
+        whole = Git(root).commit_of(given)
+    except RoundsError as error:
+        return Unmet(error.reason, error.fix or "give a pointer to what shows it done")
+    if whole is None:
+        return Unmet(f"{given} names no one commit that {build.repo} holds",
+                     "give the id of the commit that shows the item done, as git log "
+                     "prints it")
+    return whole
+
+
+__all__ = ["MARKED", "OPEN", "DONE", "COMMIT", "KEY", "Wait", "of_round", "of_build",
+           "open_of", "items", "mark_line", "Done", "done"]

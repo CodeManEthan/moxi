@@ -97,7 +97,9 @@ merge of the target that brought no change to the build's paths; otherwise a re-
 of the commits since is owed. Each `[[wait]]` of a build's report, work that waits on
 the operator, is an open waiting item of the round, `B<n>.W<k>`, from the moment the
 report is recorded. It holds the round's close and is listed by `list --waiting` until
-`mark ROUND B<n>.W<k> --done --record PTR` names what shows it done. Each
+`mark ROUND B<n>.W<k> --done --record PTR` names what shows it done, PTR a pointer
+or the id of a commit the build's repo holds. A later report of the same build may list
+the item again with the same sentence; it is the same item. Each
 `[[decision]]`, an as-built choice the operator would notice, is a record of the round,
 `B<n>.M<k>`, with the options `accept` and `reject`, until he rules it with `rule ROUND
 B<n>.M<k>=accept|reject --record PTR`; a later report may list it again as heavy or
@@ -660,7 +662,8 @@ def _declare_mark(verbs) -> None:
                            "as --commit and --no-behaviour-change")
     form.add_argument("--done", action="store_true",
                       help="a waiting item is done: the work a build's report said "
-                           "waits on the operator; needs --record")
+                           "waits on the operator; needs --record, a pointer or "
+                           "the id of a commit the build's repo holds")
     form.add_argument("--flow", metavar="NAME",
                       help="move the round up to this flow: one later in the tiers "
                            "that has every step the round follows, or the round's "
