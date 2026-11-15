@@ -280,9 +280,9 @@ cache	packages/cache/tests/test_browser_questions.py	held[name] = sorted(set(car
 cache	packages/cache/tests/test_browser_questions.py	home = shell.env["HOME"]	keep	HOME	HOME
 cache	packages/cache/tests/test_browser_questions.py	none = {"harness": "claude", "name": None, "folder": None, "started": None}	keep	folder	folder
 cache	packages/cache/tests/test_browser_questions.py	on_both.run	name	failed	exc
-cache	packages/cache/tests/test_browser_questions.py	re.compile(rf"^Last reading {hhmm(moment + 90)}$"), timeout=10_000)	keep	timeout	timeout
-cache	packages/cache/tests/test_browser_questions.py	re.compile(rf"^Not reading since {hhmm(moment - 120)}$"), timeout=10_000)	keep	timeout	timeout
-cache	packages/cache/tests/test_browser_questions.py	re.compile(rf"^Stopped at {hhmm(moment - 120)}$"), timeout=10_000)	keep	timeout	timeout
+cache	packages/cache/tests/test_browser_questions.py	re.compile(rf"^Last reading (?:yesterday |tomorrow )?{hhmm(moment + 90)}$"), timeout=10_000)	keep	timeout	timeout
+cache	packages/cache/tests/test_browser_questions.py	re.compile(rf"^Not reading since (?:yesterday |tomorrow )?{hhmm(moment - 120)}$"), timeout=10_000)	keep	timeout	timeout
+cache	packages/cache/tests/test_browser_questions.py	re.compile(rf"^Stopped at (?:yesterday |tomorrow )?{hhmm(moment - 120)}$"), timeout=10_000)	keep	timeout	timeout
 cache	packages/cache/tests/test_browser_questions.py	shell = ui_shells(leave_out=leave_out, env={"CLAUDE_CONFIG_DIR": str(base / "claude-home")})	keep	env	env
 cache	packages/cache/tests/test_claude_clock.py	assert (got.kind, got.age_seconds, got.ttl_seconds) == ("warm", 0.0, 3600)	use	got.age_seconds	got.age_s
 cache	packages/cache/tests/test_claude_clock.py	assert (got.kind, got.age_seconds, got.ttl_seconds) == ("warm", 0.0, 3600)	use	got.ttl_seconds	got.ttl_s
@@ -13756,7 +13756,7 @@ usage	packages/usage/tests/test_browser_questions.py	"folder": "proj-a" if n == 
 usage	packages/usage/tests/test_browser_questions.py	(work_of(shell) / folder).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_browser_questions.py	(work_of(shell) / work_dir).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 usage	packages/usage/tests/test_browser_questions.py	-	name	FOLDERS	WORK_DIRS
-usage	packages/usage/tests/test_browser_questions.py	CODEX = {"harness": "codex", "session": THREAD, "requests": 3, "folder": "proj-b", "ago": 3 * DAY,	keep	folder	folder
+usage	packages/usage/tests/test_browser_questions.py	CODEX = {"harness": "codex", "session": THREAD, "requests": 3, "folder": "proj-b", "ago": 3 * DAY, "today": False,	keep	folder	folder
 usage	packages/usage/tests/test_browser_questions.py	EARLIER = [{"harness": "claude", "session": session_id(20 + k), "requests": 3 - k, "folder": folder,	use	: folder,	: dir_name,
 usage	packages/usage/tests/test_browser_questions.py	LATE = {"harness": "claude", "session": session_id(30), "requests": 2, "folder": "proj-a", "ago": 10 * 60,	keep	folder	folder
 usage	packages/usage/tests/test_browser_questions.py	assert not [line for line in step if any(found in line for found in ids)], step	keep	any	any
@@ -13789,7 +13789,7 @@ usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b3", "folder": "proj-b", "model": HAIKU, "requests": 3},	keep	folder	folder
 usage	packages/usage/tests/test_browser_sections.py	{"session": "0190b000-0000-7000-8000-0000000000b4", "folder": "loose", "model": SONNET, "requests": 1},	keep	folder	folder
 usage	packages/usage/tests/test_browser_sessions.py	"Cost"} <= set(heads), heads	keep	set	set
-usage	packages/usage/tests/test_browser_sessions.py	EARLIER = [{"session": session_id(20 + n), "folder": "proj-b", "hours_ago": 24 * days,	keep	folder	folder
+usage	packages/usage/tests/test_browser_sessions.py	EARLIER = [{"session": session_id(20 + n), "folder": "proj-b", "hours_ago": 24 * days, "today": False,	keep	folder	folder
 usage	packages/usage/tests/test_browser_sessions.py	WEEK = [{"session": session_id(n), "folder": "proj-a" if n % 2 == 0 else "proj-b",	keep	folder	folder
 usage	packages/usage/tests/test_browser_sessions.py	t.assistant("Done.", usage=T.usage(input=200, output=1000),	use	input=	input_tokens=
 usage	packages/usage/tests/test_browser_whole.py	("folders", place, f"section[data-group={place}] [data-part=rows] .tr2"),	keep	folders	folders

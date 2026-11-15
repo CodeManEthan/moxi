@@ -89,6 +89,11 @@ with moxi.files.lock(store.lock_path()):
 """
 
 TIME = r"\d{1,2}:\d\d(?: [AP]M)?"
+#: The day word before a time the page names against the page server's date: none on that
+#: date, else `yesterday` or `tomorrow`, since every such time here is within hours of now
+#: and so may fall on either side of midnight.
+DAY = r"(?:(?:yesterday|tomorrow) )?"
+WHEN = rf"{DAY}{TIME}"
 WHAT_USAGE_DOES = ("Usage adds up what your sessions cost from the transcripts on this "
                    "machine, and shows your plan limits once a session has reported them.")
 
@@ -173,8 +178,8 @@ def test_the_limits_lead_the_page_with_the_group_that_fills_soonest_first(seeded
     expect(groups).to_have_count(2)
     expect(groups.nth(0)).to_have_attribute("data-harness", "codex")
     expect(groups.nth(1)).to_have_attribute("data-harness", "claude")
-    expect(groups.nth(0).locator(".gk")).to_have_text(re.compile(rf"^Codex\s*read {TIME}$"))
-    expect(groups.nth(1).locator(".gk")).to_have_text(re.compile(rf"^Claude\s*read {TIME}$"))
+    expect(groups.nth(0).locator(".gk")).to_have_text(re.compile(rf"^Codex\s*read {WHEN}$"))
+    expect(groups.nth(1).locator(".gk")).to_have_text(re.compile(rf"^Claude\s*read {WHEN}$"))
     # The limits come before Cost, and nothing comes before them but the warning line.
     order = panel.evaluate("""el => [...el.shadowRoot.children]
         .filter((node) => node.dataset && node.dataset.part).map((node) => node.dataset.part)""")
@@ -189,8 +194,8 @@ def test_a_limit_row_says_its_percent_its_line_and_when_it_fills_and_resets(seed
     five = limit(panel, "codex/codex/300")
     expect(five.locator("span").first).to_have_text("5-hour")
     expect(five.locator(".u")).to_have_text("79% used")
-    expect(five.locator(".w b")).to_have_text(re.compile(rf"^fills {TIME}$"))
-    expect(five.locator(".w")).to_have_text(re.compile(rf"^fills {TIME}, resets {TIME}$"))
+    expect(five.locator(".w b")).to_have_text(re.compile(rf"^fills {WHEN}$"))
+    expect(five.locator(".w")).to_have_text(re.compile(rf"^fills {WHEN}, resets {WHEN}$"))
     expect(five.locator("svg.m")).to_have_attribute(
         "aria-label", re.compile(r"^79% used, (5\d|60)% of the window gone$"))
     fill = float(five.locator("svg.m rect.fill").get_attribute("width"))
@@ -218,7 +223,7 @@ def test_a_reading_of_an_ended_period_is_one_dim_row_in_words(seeded, seeded_pag
     panel = open_page(seeded_page)
     row = limit(panel, "claude/plan/10080")
     expect(row).to_have_attribute("data-state", "reset")
-    expect(row).to_have_text(re.compile(rf"^Weekly\s*·\s*reset {TIME}$"))
+    expect(row).to_have_text(re.compile(rf"^Weekly\s*·\s*reset {WHEN}$"))
     expect(row.locator("svg")).to_have_count(0)
     dim = panel.locator("[data-group=limits] .gk").first.evaluate("el => getComputedStyle(el).color")
     assert row.evaluate("el => getComputedStyle(el).color") == dim
@@ -228,9 +233,9 @@ def test_the_warning_line_names_the_limit_that_fills_before_it_resets(seeded, se
     panel = open_page(seeded_page)
     warning = panel.locator("[data-part=warning]")
     expect(warning.locator("b")).to_have_text(
-        re.compile(rf"^Codex's 5-hour limit fills at {TIME}$"))
+        re.compile(rf"^Codex's 5-hour limit fills {DAY}at {TIME}$"))
     expect(warning).to_have_text(re.compile(
-        rf"^Codex's 5-hour limit fills at {TIME}, an hour before it resets$"))
+        rf"^Codex's 5-hour limit fills {DAY}at {TIME}, an hour before it resets$"))
     weight = warning.locator("b").evaluate("el => getComputedStyle(el).fontWeight")
     assert weight == "600"
 
@@ -254,7 +259,7 @@ def test_cost_gives_today_seven_days_and_thirty_each_with_the_period_before(seed
     caption = cost.locator("[data-part=caption]")
     expect(caption).to_contain_text("Estimated from a local price table. Not billing data.")
     expect(caption.get_by_role("link", name="Prices")).to_be_visible()
-    expect(caption.locator("[data-part=read]")).to_have_text(re.compile(rf"^sessions read {TIME}$"))
+    expect(caption.locator("[data-part=read]")).to_have_text(re.compile(rf"^sessions read {WHEN}$"))
 
 
 # --- the foot and its lines ----------------------------------------------------------------
@@ -264,7 +269,7 @@ def test_the_foot_says_when_the_sessions_were_read_and_the_files_by_harness(seed
     foot = foot_of(panel)
     expect(foot).to_have_attribute("data-state", "up")
     expect(foot.locator(".last")).to_have_text(
-        re.compile(rf"^Sessions read {TIME} · 2 files: Claude 2$"))
+        re.compile(rf"^Sessions read {WHEN} · 2 files: Claude 2$"))
     expect(foot.get_by_role("button", name="Read new sessions")).to_be_visible()
     # The foot closes the page: the filter line, the chart and the sections sit between
     # Cost and it.
@@ -331,7 +336,7 @@ def test_an_index_with_no_request_says_nothing_is_counted_and_reads_new_sessions
     expect(block.locator(".quietline")).to_have_text("Nothing counted yet")
     expect(block.locator(".first p").first).to_have_text(re.compile(
         "^" + re.escape(WHAT_USAGE_DOES)
-        + rf" It found no sessions when it last looked, at {TIME}\.$"))
+        + rf" It found no sessions when it last looked, {DAY}at {TIME}\.$"))
     for gone in ("[data-group=limits]", "[data-group=cost]", "[data-part=below]",
                  "[data-part=foot]", "code"):
         expect(panel.locator(gone)).to_have_count(0)
@@ -340,7 +345,7 @@ def test_an_index_with_no_request_says_nothing_is_counted_and_reads_new_sessions
     expect(panel.locator("[data-group=cost]")).to_be_visible()
     expect(block).to_have_count(0)
     expect(foot_of(panel).locator(".last")).to_have_text(
-        re.compile(rf"^Sessions read {TIME} · 1 file: Claude 1$"))
+        re.compile(rf"^Sessions read {WHEN} · 1 file: Claude 1$"))
 
 
 def test_while_a_pass_runs_the_foot_leads_with_it_and_the_act_is_absent(own_shell):
@@ -366,7 +371,7 @@ def test_while_a_pass_runs_the_foot_leads_with_it_and_the_act_is_absent(own_shel
         holder.wait(timeout=30)
     expect(foot).to_have_attribute("data-state", "up", timeout=30_000)
     expect(foot.locator(".last")).to_have_text(
-        re.compile(rf"^Sessions read {TIME} · 2 files: Claude 2$"))
+        re.compile(rf"^Sessions read {WHEN} · 2 files: Claude 2$"))
     expect(foot.get_by_role("button", name="Read new sessions")).to_be_visible()
 
 

@@ -40,7 +40,7 @@ WINDOW_API = re.compile(r"/api/window\?")
 LIST_API = re.compile(r"/api/list\?")
 SESSION_API = re.compile(r"/api/session\?")
 #: The second line of the header: the harness's id, the model, and from when to when.
-FACTS = re.compile(r"^claude · claude-model-x · today \d.* to \d.*$")
+FACTS = re.compile(r"^claude · claude-model-x · (?:today|yesterday) \d.* to (?:today )?\d.*$")
 
 
 def named(root: Path, home: str, at: float, *, turns: int = TURNS) -> Path:
@@ -158,7 +158,7 @@ def test_a_named_session_has_the_way_back_its_name_and_its_facts_on_two_lines(se
 def test_an_unnamed_session_is_named_by_its_dir_and_when_it_started(seeded, ui_page):
     panel = open_route(ui_page, f"claude/{sid(2)}")
     top = head(panel)
-    expect(top.locator('[data-line="name"]')).to_have_text(re.compile(r"^proj-b · started today \d"))
+    expect(top.locator('[data-line="name"]')).to_have_text(re.compile(r"^proj-b · started (?:today|yesterday) \d"))
     expect(top.locator('[data-line="where"]')).to_have_count(0)
     expect(top.locator('[data-line="facts"]')).to_have_text(FACTS)
     expect(top).not_to_contain_text(sid(2))

@@ -35,15 +35,19 @@ def session_id(n: int) -> str:
 
 
 #: Fourteen sessions this week, dearest first, the dearest with a typed name; then two
-#: more twelve and twenty days ago. Each costs less than the one before it.
+#: more twelve and twenty days ago. Each costs less than the one before it. The two
+#: dearest are today's.
 WEEK = [{"session": session_id(n), "folder": "proj-a" if n % 2 == 0 else "proj-b",
-         "hours_ago": 0.02 * (n + 1) if n < 2 else 2 + 5 * n, "requests": 16 - n,
+         "hours_ago": 0.02 * (n + 1) if n < 2 else 2 + 5 * n, "today": n < 2, "requests": 16 - n,
          "title": "fix the tests" if n == 0 else None} for n in range(14)]
-EARLIER = [{"session": session_id(20 + n), "folder": "proj-b", "hours_ago": 24 * days,
+EARLIER = [{"session": session_id(20 + n), "folder": "proj-b", "hours_ago": 24 * days, "today": False,
             "requests": 3 - n, "title": None} for n, days in enumerate((12, 20))]
+#: The oldest of today's sessions, in hours before the moment.
+TODAY_HOURS = max(spec["hours_ago"] for spec in WEEK if spec["today"])
 
 #: Writes the sessions of the JSON list in argv[1] under the harness roots of the
-#: environment it runs in, each of its own number of requests.
+#: environment it runs in, each of its own number of requests, with model argv[2]; those
+#: marked today are kept on today, the oldest of them argv[3] hours old.
 SEED = """
 import json, sys, time
 from pathlib import Path
@@ -52,9 +56,10 @@ T = sessions.testing
 now = time.time()
 for spec in json.loads(sys.argv[1]):
     cwd = "/work/" + spec["folder"]
+    age_s = spec["hours_ago"] * 3600
+    start = T.today_at(age_s, oldest_s=float(sys.argv[3]) * 3600, now=now) if spec["today"] else now - age_s
     t = T.ClaudeTranscript(Path(sessions.root("claude")), session_id=spec["session"],
-                           project=cwd.replace("/", "-"), cwd=cwd,
-                           start=now - spec["hours_ago"] * 3600)
+                           project=cwd.replace("/", "-"), cwd=cwd, start=start)
     if spec["title"]:
         t.title(spec["title"])
     for m in range(spec["requests"]):
@@ -76,7 +81,7 @@ def run(shell, *argv: str) -> str:
 @pytest.fixture(scope="module")
 def shell(ui_shells, ui_shell_options):
     shell = ui_shells(**ui_shell_options)
-    run(shell, sys.executable, "-c", SEED, json.dumps(WEEK + EARLIER), MODEL)
+    run(shell, sys.executable, "-c", SEED, json.dumps(WEEK + EARLIER), MODEL, repr(TODAY_HOURS))
     run(shell, sys.executable, "-m", "moxi", "usage", "index")
     return shell
 
