@@ -39,6 +39,8 @@ export const COPIED = "Copied";
 export const COPIED_MS = 2000;
 export const ACT_WORDS = { reply: "Reply", message: "Message", "keep-warm": "Keep warm" } as const;
 export const CLOSE = "Close";
+/** The label of a thread that opens with no message row between its pair in the lists. */
+export const THREAD_LABEL = "Thread";
 
 /** A read as the page holds it: a `Feed`'s state. */
 export interface Read<V> {

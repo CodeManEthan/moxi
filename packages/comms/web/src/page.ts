@@ -25,6 +25,10 @@
 // Under the agents, the messages (`today-model.ts`): `Today`, newest first, each with `Open`
 // for its thread; `Earlier today · N more · Show`, which adds thirty; and `Before today ·
 // N messages, back to <day> · Show`, which adds that day under its own label and moves down.
+// A thread (`thread-model.ts`) opens in place under the newest message row between its two
+// addresses, that row's act then `Close`; when the lists show none, it opens as a group of
+// its own above them. It reads its last six, `Show earlier` adds twenty, and it is read
+// again with the mail, above the newest message it holds.
 //
 // It reads `/api/roster`, then follows the topic `roster`. It reads `/api/mail-state`,
 // today's `/api/messages` and the opened address's `/api/queue` with them, when it opens, when the roster's waiting mail
@@ -41,7 +45,7 @@ import { api, installed, navigate, subscribe } from "/m/ui/client.js";
 
 import { addressWrite, NOTHING_OPEN, parseAddress, sameAddress, threadAddress } from "./address-model.ts";
 import type { Address } from "./address-model.ts";
-import { parseMailState, parsePageRoster } from "./agents-model.ts";
+import { operatorAddresses, parseMailState, parsePageRoster } from "./agents-model.ts";
 import type { Act, MailState, Owed, PageRoster } from "./agents-model.ts";
 import {
   CHECK_AGAIN, DELIVER, FROM, OPERATOR, REPLY_WANTED, SEND, SendBox, TAKE_BACK, TEXT_MAX_CHARS,
@@ -49,8 +53,8 @@ import {
 import type { Choice } from "./box-model.ts";
 import { failureWhy, Feed, parseRoster } from "./feed.ts";
 import {
-  ACT_WORDS, CLOSE, COPIED, COPIED_MS, COPY, DOWN_LABEL, frameModel, LAUNCH_FROM_HOME, READING_AFTER_MS, readLine,
-  SETTINGS_LINK, SETTINGS_ROUTE,
+  ACT_WORDS, CLOSE, COPIED, COPIED_MS, COPY, DOWN_LABEL, frameModel, LAUNCH_FROM_HOME, READING, READING_AFTER_MS,
+  readLine, SETTINGS_LINK, SETTINGS_ROUTE, THREAD_LABEL,
 } from "./frame-model.ts";
 import type { Down, Empty, Frame, FrameRow, Placed } from "./frame-model.ts";
 import { byHim, parseQueue } from "./messages-model.ts";
@@ -63,6 +67,7 @@ import {
   rereadPaths, SHOW, todayOf,
 } from "./today-model.ts";
 import type { Messages, ReadDay } from "./today-model.ts";
+import { between, COPY_LAST_ID, SHOW_EARLIER, ThreadReads, threadView } from "./thread-model.ts";
 import { newestDay, whenWords } from "./words.ts";
 
 const TAG = "moxi-comms-page";
@@ -115,6 +120,22 @@ const STYLES = css`
   .det .foot { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 9px 0 0 92px; }
   .det .foot button, .det .r button { font-size: 13px; line-height: 18px; }
   .det .help { padding: 3px 0 0 92px; color: var(--moxi-text-dim); }
+  .det .foot.flush { padding-left: 0; }
+  .det .foot.flush button:not(.d) { color: var(--moxi-text); }
+
+  /* A thread, opened in place under a message row: the header, then each message's line
+     and its text, a rule between two. */
+  .thr .cap { color: var(--moxi-text-dim); padding: 1px 0 5px; overflow-wrap: anywhere; }
+  .thr .note { padding: 3px 0; }
+  .thr .day { padding: 8px 0 6px; color: var(--moxi-text-dim); }
+  .thr .day button { color: var(--moxi-text); }
+  .thr .day button:disabled { color: var(--moxi-text-dim); cursor: default; }
+  .thr .tm { padding: 7px 0 6px; }
+  .thr .tm + .tm, .thr .day + .tm { border-top: 1px solid var(--moxi-border); }
+  .thr .h { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .thr .h .d { color: var(--moxi-text-dim); }
+  .thr .tm .msg { font-size: 14px; line-height: 20px; margin-top: 2px; max-width: 540px; }
+  .thr .tm > button { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
 
   /* The send box: the text, then one line of controls with Send at its right, the only
      piece in the accent; the line under it says how the message would go or went. */
@@ -210,6 +231,9 @@ export class CommsPage extends LitElement {
   #queue: Feed<Queue> | null = null;
   /** The address the row opened in the last drawing speaks for. */
   #drawnTo: string | null = null;
+  /** The thread opened in the last drawing, and its reads. */
+  #drawnThread: { a: string; b: string } | null = null;
+  #thread: ThreadReads | null = null;
   #details = false;
   /** The ids of the messages cut at four lines, and those shown in full. */
   #cut = new Set<string>();
@@ -251,6 +275,7 @@ export class CommsPage extends LitElement {
     void this.#messages?.refresh();
     void this.#rereadDays();
     void this.#queue?.refresh();
+    void this.#thread?.refresh();
   }
 
   /** Reads again each message the page shows of the days before today, so their read
@@ -320,6 +345,8 @@ export class CommsPage extends LitElement {
     this.#messages?.close();
     this.#messages = null;
     this.#queue?.close();
+    this.#thread?.close();
+    this.#thread = null;
     this.#box?.close();
     this.#box = null;
     this.#feed = this.#mail = this.#queue = null;
@@ -438,6 +465,8 @@ export class CommsPage extends LitElement {
     const frame = this.frame();
     this.#drawnTo = frame?.rows.find((item) => item.open)?.to ?? null;
     this.#drawnReply = frame?.opened.kind === "agent" ? frame.opened.reply : null;
+    const opened = frame?.opened;
+    this.#drawnThread = opened?.kind === "thread" ? { a: opened.a, b: opened.b } : null;
     if (frame === null || frame.state === "gone") return nothing;
     if (frame.state === "loading") {
       return html`${frame.reading !== null ? html`<p class="waiting" data-line="reading" role="status">${frame.reading}</p>`
@@ -472,20 +501,33 @@ export class CommsPage extends LitElement {
    * roster isn't up. */
   #messagesPart(stale: boolean) {
     const rows = this.#kept?.value.rows ?? [];
-    const him = new Set(["operator", ...[this.#todayRead, ...this.#days].flatMap((read) =>
-      (read?.messages ?? []).filter(byHim).map((message) => message.author))]);
+    const him = new Set(["operator", ...operatorAddresses(this.#mail?.value ?? null),
+                         ...[this.#todayRead, ...this.#days].flatMap((read) =>
+                           (read?.messages ?? []).filter(byHim).map((message) => message.author))]);
+    // The thread opens under the newest message row between its two addresses.
+    const pair = stale ? null : this.#drawnThread;
+    const thread = pair !== null && this.#thread !== null && this.#messages !== null && !this.#messages.loading
+      ? this.#thread : null;
+    const anchor = thread === null || pair === null ? null
+      : [this.#todayRead, ...this.#days].flatMap((read) => read?.messages ?? [])
+        .find((message) => between(message, pair.a, pair.b, him))?.message_id ?? null;
     const view = messagesView(this.#todayRead, this.#days, {
       bound: (qualified) => rows.some((row) => row.qualified === qualified && row.live), cache: installed("cache"),
       him: (tag) => him.has(tag),
     }, this.#when, this.#today);
-    if (view.groups.length === 0 && view.before === null) return nothing;
+    if (view.groups.length === 0 && view.before === null && thread === null) return nothing;
     const show = (key: string, read: () => Promise<void>) => html`<button type="button" data-action=${key}
       ?disabled=${stale || this.#showing !== null} @click=${() => void this.#show(key, read)}>${SHOW}</button>`;
     return html`<div class=${stale ? "grps msgs stale" : "grps msgs"} data-part="messages">
+      ${thread !== null && anchor === null ? html`<section class="grp" data-group="thread"><div class="gk">${THREAD_LABEL}</div>
+        <div class="gl">${this.#threadPart(thread, him)}</div></section>` : nothing}
       ${view.groups.map((group) => html`<section class="grp" data-group=${group.key}><div class="gk">${group.label}</div>
         <div class="gl">${repeat(group.rows, (row) => row.message_id, (row) => html`<moxi-ui-row data-message=${
-          row.message_id} name=${row.name} where=${ifDefined(row.where || undefined)} fact=${row.time} lead=${row.text}>${
-          !stale && row.thread !== null ? html`<button type="button" slot="acts" class="do" data-action="open-thread"
+          row.message_id} name=${row.name} where=${ifDefined(row.where || undefined)} fact=${row.time} lead=${row.text}
+          ?open=${thread !== null && row.message_id === anchor}>${thread !== null && row.message_id === anchor
+          ? html`<button type="button" slot="acts" class="do" data-action="close-thread" aria-expanded="true"
+            @click=${() => this.open(NOTHING_OPEN)}>${CLOSE}</button>${this.#threadPart(thread, him)}`
+          : !stale && row.thread !== null ? html`<button type="button" slot="acts" class="do" data-action="open-thread"
             @click=${() => this.open(threadAddress(row.thread?.a ?? "", row.thread?.b ?? ""))}>${OPEN}</button>` : nothing}
           </moxi-ui-row>`)}${group.show !== null && group.key !== "today" ? html`<div class="one" data-line="more"><span>${
           group.more}</span>${show(`more:${group.key}`, () => this.#readMore(group.show?.day ?? null,
@@ -497,6 +539,46 @@ export class CommsPage extends LitElement {
         <div class="gl"><div class="one" data-line="before"><span>${view.before.text}</span>${show("before", () =>
           this.#readDay(view.before?.earlier.day ?? "", view.before?.earlier.before ?? ""))}</div></div></section>`
         : nothing}
+    </div>`;
+  }
+
+  /** An opened thread: its header, `Show earlier`, its messages oldest first, each cut at
+   * four lines with `Show all`, and its foot; `Reading…` while its first read is out. */
+  #threadPart(reads: ThreadReads, him: ReadonlySet<string>) {
+    const held = reads.held;
+    const failed = reads.failure !== null
+      ? html`<p class="note" data-line="thread-failed" role="status">The thread can't be read: ${
+        reads.failure.replace(/\.$/, "")}.</p>` : nothing;
+    if (held === null) {
+      return html`<div class="det thr" data-part="thread">${reads.loading
+        ? html`<p class="note" data-line="reading" role="status">${READING}</p>` : nothing}${failed}</div>`;
+    }
+    const view = threadView(held, {
+      a: reads.a, b: reads.b, roster: this.#kept?.value.rows ?? [], him,
+      owedBy: (this.#mail?.value?.owed ?? []).map((entry) => entry.author), cache: installed("cache"), when: this.#when,
+    });
+    const earlier = view.earlier;
+    const lastId = view.lastId;
+    return html`<div class="det thr" data-part="thread" data-a=${reads.a} data-b=${reads.b ?? ""}>
+      <p class="cap" data-line="thread-header">${view.header}</p>
+      ${earlier !== null ? html`<p class="day" data-line="show-earlier"><button type="button" data-action="show-earlier"
+        ?disabled=${reads.showing} @click=${() => void reads.showEarlier()}>${SHOW_EARLIER}</button> · ${earlier.text}</p>`
+        : nothing}
+      ${repeat(view.messages, (one) => one.message_id, (one) => {
+        const key = `thread:${one.message_id}`;
+        return html`<div class="tm" data-message=${one.message_id}><p class="h">${one.author} <span class="d">${one.rest
+          }</span></p><p class=${this.#whole.has(key) ? "msg" : "msg cut"} data-message=${key}>${one.text}</p>${
+          this.#cut.has(key) && !this.#whole.has(key) ? html`<button type="button" class="d" data-action="show-all"
+            @click=${() => { this.#whole.add(key); this.requestUpdate(); }}>${SHOW_ALL}</button>` : nothing}</div>`;
+      })}
+      <div class="foot flush">${view.write.map((side) => html`<button type="button" data-action="message-side"
+        data-address=${side} @click=${() => {
+          this.#focusBox = true;
+          this.open({ piece: "agent", qualified: side });
+        }}>${ACT_WORDS.message} ${side}</button>`)}${lastId !== null ? html`<button type="button" class="d"
+        data-action="copy-last-id" @click=${() => void this.#copy("last-id", lastId)}>${
+        this.#copied === "last-id" ? COPIED : COPY_LAST_ID}</button>` : nothing}</div>
+      ${failed}
     </div>`;
   }
 
@@ -734,6 +816,21 @@ export class CommsPage extends LitElement {
         : new Feed<Queue>(() => api("comms", `api/queue?name=${encodeURIComponent(to)}`), parseQueue,
                           () => this.requestUpdate(), { clocked: false });
       void this.#queue?.refresh();
+    }
+    const pair = this.#drawnThread;
+    if (pair?.a !== this.#thread?.a || pair?.b !== this.#thread?.b) {
+      this.#thread?.close();
+      this.#thread = pair === null ? null : new ThreadReads(pair.a, pair.b, {
+        get: (path) => api("comms", path),
+        onChange: () => {
+          this.#today = newestDay(this.#today, this.#thread?.today ?? null);
+          this.requestUpdate();
+        },
+        newestKnown: () => this.#todayRead?.messages[0]?.message_id ?? null,
+      });
+      void this.#thread?.refresh();
+      // Its `Reading…` shows while the first read is out.
+      if (this.#thread !== null) this.requestUpdate();
     }
     if ((this.#box?.to ?? null) !== to) {
       this.#box?.close();
