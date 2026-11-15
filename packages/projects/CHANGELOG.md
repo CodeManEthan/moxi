@@ -18,6 +18,10 @@
   reason and fix of one that won't load, raises or answers out of shape. It gathers them
   all rather than stopping at the first. `Contributions.remove_check` gives the
   contributions' rows.
+- The page's add and set take a root and a notes root starting with `~/` (or `~\` on
+  Windows), or `~` alone, and expand it to the home folder once the terminal comparison
+  has passed, so `~` means what it means in your terminal. `~user` and relative paths
+  are still refused.
 
 ## 0.1.4 (2026-11-08)
 

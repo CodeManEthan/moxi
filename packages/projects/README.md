@@ -142,7 +142,10 @@ would run in a terminal, and refuses where that command refuses, before it makes
   Open a project to see its fields and edit its root, its kind and, while the
   notes module is installed, its notes root (`moxi projects set`), set or clear its lead,
   and add or remove associated agents (`moxi projects agents add` and `remove`). A root
-  must be an absolute path; the page refuses a relative one or one starting with `~`.
+  must be an absolute path, or start with `~/` (`~\` too on Windows), or be `~` alone:
+  the page expands `~` to the home folder only once it has found the shell's home is your
+  terminal's (the check above), so `~` means what it means in your terminal. It refuses a
+  relative path, `~user`, and a `~` path while nothing places the home.
 - **Add.** The form `moxi projects add` takes: key, root (leave it empty when the kind's
   module gives one), kind, lead, the notes root while the notes module is installed, and
   create for a kind that makes its root. Create is hidden for a kind that refuses it. The

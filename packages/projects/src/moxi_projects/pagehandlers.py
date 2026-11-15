@@ -27,9 +27,14 @@ compared. This server never records.
 
 **Acts** call the acts the verbs call, with the body's values as the verb's flags:
 `acts.add`, `acts.set_fields`, `acts.add_agent`, `acts.remove_agent` and `acts.remove`.
-Each refuses before it makes anything, as the verb does. Paths are taken as sent and must
-be absolute: a relative one, or one starting with `~`, is refused, because this server's
-working directory and home are not the user's terminal's. Besides the terminal
+Each refuses before it makes anything, as the verb does. Paths must be absolute: a
+relative one is refused, because this server's working directory is not the user's
+terminal's. A leading `~` or `~/` (on Windows `~\\` too) in a root or a notes root is
+expanded, only once the terminal comparison has passed and only with the home folder
+`moxi.paths.home()` places, the resolver the comparison itself placed the home with; the
+comparison refuses while that home differs from the terminal's, so the expansion is the
+terminal's own. `~user`, and a `~` path while nothing places the home, are left as sent
+and refused as not absolute. Besides the terminal
 comparison, the one change from the verb is a create's bound: `git init` gets
 `GIT_TIMEOUT`, 20 seconds, so a mint that hangs answers, with its message naming what is
 left and how to finish, inside the shell's 30 second deadline for an act.
@@ -278,13 +283,32 @@ def _no_git_fix(body: dict) -> str:
             f"`{' '.join(words)} --create` in a terminal")
 
 
+#: The fields of an add or a set whose leading `~` is expanded.
+_PATH_FIELDS = ("root", "notes_root")
+
+
+def _expand_homes(body: dict) -> dict:
+    """`body` with a leading `~` in its root and notes root expanded by `expand_tilde`,
+    with the home `moxi.paths.home()` places. Call it only after `_compare` passed. A
+    value it can't expand (`~user`, or no home) is left as sent, for the act to refuse."""
+    out = dict(body)
+    for name in _PATH_FIELDS:
+        value = body.get(name)
+        if not isinstance(value, str) or not value.startswith("~"):
+            continue
+        expanded = expand_tilde(value, _home())
+        if expanded is not None:
+            out[name] = expanded
+    return out
+
+
 def add(call: Any) -> dict[str, Any]:
     """`POST /api/add`: `moxi projects add`, with `create` its `--create`, under the
     page's `git init` bound. `warnings` holds what the add went ahead without: a
     contribution skipped since it won't load, and the fix."""
     found = contributions.load()
     _compare(found)
-    body = call.body
+    body = _expand_homes(call.body)
     try:
         added = acts.add(body["key"], root=body.get("root"),
                          kind=body.get("kind", DEFAULT_KIND), lead=body.get("lead"),
@@ -305,7 +329,7 @@ def set_fields(call: Any) -> dict[str, Any]:
     `--no-lead` and `--no-notes-root`."""
     found = contributions.load()
     _compare(found)
-    body = call.body
+    body = _expand_homes(call.body)
     changes: dict[str, str | None] = {}
     for name in ("root", "kind"):
         if body.get(name) is not None:

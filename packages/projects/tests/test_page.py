@@ -705,9 +705,9 @@ def test_an_add_that_skips_nothing_answers_no_warnings(tmp_path):
     assert done("/api/add", {"key": "web", "root": str(tmp_path / "web")})["warnings"] == []
 
 
-@pytest.mark.parametrize("root", ["relative/web", "~/web", "~"])
-def test_a_root_that_is_relative_or_starts_with_a_tilde_is_refused(root, tmp_path,
-                                                                   monkeypatch, store_path):
+@pytest.mark.parametrize("root", ["relative/web", "~someone/web", "~someone"])
+def test_a_root_that_is_relative_or_another_users_home_is_refused(root, tmp_path,
+                                                                  monkeypatch, store_path):
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
@@ -721,10 +721,84 @@ def test_a_root_that_is_relative_or_starts_with_a_tilde_is_refused(root, tmp_pat
     assert not store_path.exists() and list(cwd.iterdir()) == []
 
 
-def test_a_set_to_a_relative_root_is_refused(golden_copy):
-    said = refused(post("/api/set", {"key": "gamma", "root": "~/elsewhere"}))
+@pytest.mark.parametrize("root", ["elsewhere", "~someone/elsewhere"])
+def test_a_set_to_a_relative_root_is_refused(root, golden_copy):
+    said = refused(post("/api/set", {"key": "gamma", "root": root}))
     assert "is not an absolute path" in said
     assert api.get("gamma").root == os.path.join(golden_copy, "gamma")
+
+
+# -- ~ on add and set -------------------------------------------------------------------
+
+@pytest.fixture
+def home_dir(tmp_path, monkeypatch, terminal_record) -> str:
+    """HOME set to a folder of the test's own, in this process and in the terminal's
+    record alike, so the comparison passes."""
+    home = tmp_path / "the-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    terminal_record()
+    return str(home)
+
+
+def test_an_add_expands_a_tilde_root_by_the_home(home_dir, store_path):
+    body = done("/api/add", {"key": "finch", "root": "~/code/finch"})
+    assert body["project"]["root"] == os.path.join(home_dir, "code", "finch")
+    assert api.get("finch").root == os.path.join(home_dir, "code", "finch")
+    assert done("/api/add", {"key": "home-itself", "root": "~"})["project"]["root"] == \
+        home_dir
+
+
+@posix_only
+def test_an_add_with_create_makes_the_expanded_root(home_dir, monkeypatch, tmp_path):
+    monkeypatch.setenv("PATH", fake_git(tmp_path / "bin", "exit 0"))
+    done("/api/add", {"key": "made", "root": "~/made", "create": True, "kind": "project"})
+    assert os.path.isdir(os.path.join(home_dir, "made"))
+
+
+def test_a_notes_root_is_expanded_too(home_dir, site):
+    site.module("notes")
+    moxi.modules.reset()
+    body = done("/api/add", {"key": "noted", "root": "~/code/noted",
+                             "notes_root": "~/notes/noted"})
+    assert body["project"]["notes_root"] == os.path.join(home_dir, "notes", "noted")
+
+
+def test_a_set_expands_a_tilde_root(home_dir, golden_copy):
+    body = done("/api/set", {"key": "gamma", "root": "~/moved"})
+    assert body["project"]["root"] == os.path.join(home_dir, "moved")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="HOME and the user database")
+def test_a_tilde_root_with_no_home_is_refused(monkeypatch, terminal_record, store_path):
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    terminal_record()
+    said = refused(post("/api/add", {"key": "finch", "root": "~/code/finch"}))
+    assert "is not an absolute path" in said
+    assert not store_path.exists()
+
+
+def test_a_tilde_root_is_refused_by_the_comparison_before_any_expansion(
+        home_dir, terminal_record, monkeypatch, store_path):
+    words = store_moved(terminal_record)
+
+    def never(*args, **kwargs):
+        raise AssertionError("expanded before the comparison passed")
+
+    monkeypatch.setattr(pagehandlers, "expand_tilde", never)
+    for route, sent in (("/api/add", {"key": "finch", "root": "~/code/finch"}),
+                        ("/api/set", {"key": "gamma", "root": "~/moved"})):
+        assert refused(post(route, sent)).startswith(words)
+    assert not store_path.exists()
+
+
+def test_a_home_that_differs_from_the_terminals_refuses_a_tilde_root(
+        home_dir, terminal_record, store_path):
+    terminal_record(terminal(HOME=os.path.join(home_dir, "other")))
+    said = refused(post("/api/add", {"key": "finch", "root": "~/code/finch"}))
+    assert "the home folder" in said
+    assert not store_path.exists()
 
 
 # -- add ------------------------------------------------------------------------------------
