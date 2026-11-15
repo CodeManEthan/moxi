@@ -431,7 +431,7 @@ A checker reads a build and records a report of `kind = "build"` with `verdict`.
 block names the `stage` and the `head` it read, the tip of the build's branch or an
 ancestor of it, so a fix committed while the report was written does not make it
 unrecordable. A report by the build's builder is refused. Each `[[finding]]` becomes a
-finding of the build, `B1.L1` outside the report, and the newest report that lists a
+finding of the build, `B<n>.L<n>` outside the report, and the newest report that lists a
 finding sets its state: `open`, `fixed` or `no-action`. A report lists every finding
 the build holds as open, so none is dropped by being left out, and a finding new to the
 build takes an id no earlier report of the stage used, a dropped build's included.
@@ -458,7 +458,7 @@ one that does not hold with its number and the command that meets it:
 No skip meets gates 9 and 10, and `finish` itself is never skipped.
 
 The lead may mark a `minor` or `note` finding fixed without a re-check: `mark ROUND
-B1.L3 --fixed --commit SHA [--commit SHA]... --no-behaviour-change`, naming every
+B<n>.L<n> --fixed --commit SHA [--commit SHA]... --no-behaviour-change`, naming every
 commit of the fix, each on the build's branch. The flag is the lead's statement that
 the fix changes nothing a command, hook or page reads, decides, writes, refuses or
 accepts; without it, and for a `blocker` or `major`, the mark is refused and the fix

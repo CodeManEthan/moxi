@@ -44,3 +44,16 @@ packages/rounds/tests/test_report_block.py	L9	data: a finding id in the report b
 packages/rounds/tests/test_state.py	L1	data: the finding id of a made-up finding the state test records
 packages/rounds/tests/test_verdict.py	L1	data: a finding id in the made-up reports the verdict tests record
 packages/rounds/tests/test_verdict.py	L2	data: a finding id in the made-up reports the verdict tests record
+packages/rounds/tests/test_findings.py	L1	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_findings.py	L2	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_findings.py	L9	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_finish_gates.py	L1	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_fixes.py	L1	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_fixes.py	L2	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_numbers.py	L1	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_numbers.py	L2	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_repairs.py	L1	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_repairs.py	L2	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_scripted_round.py	L1	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_step_reports.py	L1	data: a finding id the rounds module records, as test data
+packages/rounds/tests/test_waits.py	L1	data: a finding id the rounds module records, as test data

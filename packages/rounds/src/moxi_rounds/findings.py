@@ -1,10 +1,10 @@
 """The findings of a build: what the reports of its verification found, and the state
 each is in now.
 
-A finding is a record of one build, keyed `B2.L1` outside the report that raised it: its
-severity, its state, its text, and the step whose report raised it (`verify-build` for a
-report of the build). `of_build(state, build)` gives each finding of a build in the order
-raised, as the reports recorded for it leave it.
+A finding is a record of one build, keyed `B<n>.L<n>` outside the report that raised it:
+its severity, its state, its text, and the step whose report raised it (`verify-build`
+for a report of the build). `of_build(state, build)` gives each finding of a build in the
+order raised, as the reports recorded for it leave it.
 
 **The newest report decides.** A report of a build lists every finding the build holds as
 open, in some state, so a report can't drop one by leaving it out. The newest report that
@@ -72,7 +72,7 @@ class Finding:
 
     @property
     def key(self) -> str:
-        """Its id outside the report: `B2.L1`."""
+        """Its id outside the report: `B<n>.L<n>`."""
         return f"{self.stage}.{self.id}"
 
     @property

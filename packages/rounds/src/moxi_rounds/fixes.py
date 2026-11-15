@@ -1,8 +1,8 @@
-"""The lead's mark of a finding fixed: `mark ROUND B2.L3 --fixed --commit SHA...
+"""The lead's mark of a finding fixed: `mark ROUND B<n>.L<n> --fixed --commit SHA...
 --no-behaviour-change`.
 
 `fix(round, key, commits, no_behaviour_change=..., actor=...)` appends one
-`finding.marked` event: the finding's key (`B2.L3`), its new state, `fixed`, and the
+`finding.marked` event: the finding's key (`B<n>.L<n>`), its new state, `fixed`, and the
 whole id of every commit of the fix. It sets the finding's state as a report would, and
 the commits it names count as covered when the build's verification is read at a tip
 (`findings.why_not_counted`), so a small fix after the verdict needs no re-check.

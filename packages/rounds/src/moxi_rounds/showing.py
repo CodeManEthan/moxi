@@ -380,7 +380,7 @@ def _repairs(found: Shown) -> list:
 
 def repair_line(one: dict) -> str:
     """A repair in words: `base of B2: 1a2b3c4d5e6f to 0f9e8d7c6b5a`, or `verdict on
-    line 12 (designs/r.md): added finding L3, waiting item W1`."""
+    line 12 (designs/r.md): added finding L<n>, waiting item W<n>`."""
     fields = one["fields"] if isinstance(one.get("fields"), dict) else {}
     if one.get("what") == states.BASE:
         change = fields.get("base") or {}
@@ -525,7 +525,7 @@ def build_verdict_line(one: dict) -> str:
 
 
 def finding_line(one: dict) -> str:
-    """A finding in words: `finding B1.L1: major, open: the text`."""
+    """A finding in words: `finding B<n>.L<n>: major, open: the text`."""
     return f"finding {one['id']}: {one['severity']}, {one['state']}: {one['text']}"
 
 
