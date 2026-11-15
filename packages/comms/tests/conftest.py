@@ -500,8 +500,8 @@ def join_threads(before: set, timeout: float | None = None) -> None:
     back, and writes there (a shim's reader marking its claim file offline after the
     test's tmp is gone, or under the real runtime directory). So whatever a test
     started ends inside it, while its roots still point into its tmp. `timeout` None
-    is `WAIT`."""
-    timeout = WAIT if timeout is None else timeout
+    is `LIVE_S`: the threads must end, and how fast is not the claim."""
+    timeout = LIVE_S if timeout is None else timeout
     deadline = time.monotonic() + timeout
     while True:
         left = [t for t in _others(before) if t.is_alive()]
