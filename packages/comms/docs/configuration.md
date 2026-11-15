@@ -180,7 +180,7 @@ is set on each row. The key lists are in `adapters/codex_roster.py` and
 
 | variable | | what it does |
 |---|---|---|
-| `MOXI_COMMS_OPERATOR` | public | set in your own terminal to send as the operator, the human. Its value is the operator's user id, which `moxi-comms-provision` and the daemon's first-start log line print. The lane also needs the operator token in the store. A shell that also carries `MOXI_COMMS_NAME`, or that runs inside an agent's session, is refused. |
+| `MOXI_COMMS_OPERATOR` | public | set in your own terminal to send as the operator, the human. Its value is the operator's user id, which `moxi-comms-provision` and the daemon's first-start log line print. The lane also needs the operator token in the store. A shell that also carries `MOXI_COMMS_NAME`, or that runs inside an agent's session, is refused. The page's send box reads it from the page server's environment, and without it sends as the one operator comms' directory holds (see the README's "Who the page's send box trusts"). |
 | `MOXI_COMMS_SECRET_<KEY>` | public | the `env` step of the credential chain. `<KEY>` is the secret id upper-cased, with every run of non-alphanumerics folded to one underscore: `comms/operator/token` reads `MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN`. |
 | `MOXI_COMMS_MOCK_BACKEND` | test | the JSON store of the `mock` backend |
 | `CLAUDE_CONFIG_DIR` | Claude Code's | where a reader finds Claude Code's transcripts (`projects/` in it); default `~/.claude` |

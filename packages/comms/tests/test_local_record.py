@@ -44,7 +44,7 @@ def post(record, channel_id, text, username="planner"):
 
 
 def test_both_backends_expose_the_remaining_posting_contract():
-    active = {"post_as_user", "post_as_identity", "history", "get_message",
+    active = {"post_as_user", "post_as_identity", "history", "count_before", "get_message",
               "subscribe", "create_channel", "delete_channel", "register_principal"}
     retired = {"create_webhook", "resolve_secret", "execute_webhook", "webhook_channel"}
     for backend in (LocalRecord, MockRecord):

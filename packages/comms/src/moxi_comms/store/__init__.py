@@ -26,6 +26,7 @@ from .open import (
     MARKED,
     MIGRATE_LOCK,
     UNMARKED,
+    StepMismatch,
     StoreRefused,
     Unmoved,
     open_read,
@@ -36,6 +37,6 @@ from .open import (
 )
 from .schema import ID_BASE, META_MIGRATED_FROM, META_NEXT_ID, STEPS, TABLES
 
-__all__ = ["ABSENT", "MARKED", "MIGRATE_LOCK", "UNMARKED", "StoreRefused", "Unmoved",
-           "open_read", "open_write", "path", "state_of", "zero_two_files", "ID_BASE",
-           "META_MIGRATED_FROM", "META_NEXT_ID", "STEPS", "TABLES"]
+__all__ = ["ABSENT", "MARKED", "MIGRATE_LOCK", "UNMARKED", "StepMismatch", "StoreRefused",
+           "Unmoved", "open_read", "open_write", "path", "state_of", "zero_two_files",
+           "ID_BASE", "META_MIGRATED_FROM", "META_NEXT_ID", "STEPS", "TABLES"]

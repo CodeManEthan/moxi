@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `moxi_comms.api.send`, `check`, `send_as` and `delete` close the record they opened
+  before they return; before, its connection stayed open until the garbage collector
+  found it.
 - Waiting mail is no longer skipped when an OpenCode or Codex adapter reconnects to the
   daemon. The daemon hands mail that waited for the agent as soon as it answers the
   reconnect, and the adapter could try to deliver it before it had switched to the new
@@ -18,6 +21,15 @@
   changes nothing.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
+- comms' page in the browser UI shell, `/m/comms/`, is rebuilt around the agents: one
+  row per agent name, ordered by what it needs from you (an ask for your reply, mail no
+  session takes, a warm session nothing keeps warm, then the rest by their newest
+  message), each opened in place with its mail in the books, what it waits on and a
+  send box that checks how a message would go before `Send` and can take a message back;
+  under them today's messages, earlier days on `Show`, and threads opened in place; and
+  `Other names` for the names with nothing waiting. Opening something writes the page's
+  address (`agent/`, `reply/`, `thread/`, `mail/`, `others`). The README's "In the
+  browser" says what each part shows and what launcher, cache and sessions add.
 - comms has a row on Home in the browser UI shell, the `mail` component
   (`<moxi-comms-mail>`, order 200). When mail waits for names no live session holds it
   says so on one line, `3 messages waiting · curator and scout aren't running`, the count
@@ -35,8 +47,69 @@
   no live session holds, newest `since` last. `name` is the part before `@`, or the
   qualified name when two names listed share it. `state` and `detail` are as
   `/api/roster`'s. It is the one route of comms the phone's gateway serves; it carries
-  names, counts and times, and no message text. `/api/roster` and its stream don't
-  change.
+  names, counts and times, and no message text.
+- `moxi_comms.api.RosterRow` has a new field, `cache`: a live name's cache as the
+  daemon's `session` answer reads it, a `CacheFact(kind, until)` with `kind` `warm` or
+  `cold` and `until` when it goes cold or went cold (epoch seconds, rounded to the whole
+  second); None for a standing row, any other read, and every row on a box without the
+  cache module. `moxi comms agents --json` prints it on each row, `{kind, until}` or
+  null.
+- `moxi_comms.api.roster_rows()` takes `with_roster=True` and then returns `(rows,
+  roster)`, the `Roster` the rows were joined from, from the one `agents` call.
+- comms' page server's `/api/roster` carries `today`, the server's local date
+  (`YYYY-MM-DD`), and, with its `roster` topic, `waiting`: `{qualified, count, since}`
+  for every name with mail queued, bound or not, oldest `since` first. Each row carries
+  `cache`, `{kind, until}` or null, as `RosterRow`'s.
+- comms' page server has a new read, `GET /api/messages?day=&before=&limit=`: one day's
+  messages (today by default; an earlier day is read back from the message id `before`),
+  newest first, at most `limit` (12 by default, at most 500), each with its author and
+  tier, recipients, posture, reply, text, whether it was withdrawn, and each recipient's
+  row in the delivery books (`waiting`, `handed`, `in_digest`, or why it left:
+  `withdrawn`, `expired`, `reserved`); `more`, how many of the day's are left; and
+  `earlier`, how many messages came before the day and the cursor that reads the newest
+  of them. Message ids are strings. It reads comms' record and books on connections that
+  can't write and asks the daemon nothing, so it answers with the daemon down; a store
+  comms' daemon has not yet moved or migrated answers `state` `error`. The phone's
+  gateway does not reach it.
+- comms' page server has a new read, `GET /api/mail-state`, from the delivery books and
+  the record's last day, asking the daemon nothing: `queued`, each name's waiting and
+  in-session rows with the authors of the waiting ones (each `{qualified, is_operator}`,
+  `is_operator` true for the operator, by the name `operator` or one the directory gives
+  him); `owed`, the verified `[reply-once]` asks to the operator that no later message
+  of his answers; `asks`, the open `[reply-once]` asks between agents, with whether the
+  awaited name has read it; `last`, each name's newest message; and `operator_names`,
+  the names that are the operator (`operator` and each the directory gives him), which
+  the page makes no agent row of. An ask is answered by the rule the daemon's
+  `awaiting` uses, now one shared function: a later message to the asker threaded to the
+  ask, or with any posture but `[no reply]`.
+- comms' page server has a new read, `GET /api/queue?name=`: the messages one name has
+  a row for in the delivery books' queue, waiting or in its session, oldest first, at
+  most 50, each in `/api/messages`' shape with that name's row first; `more`, how many
+  rows are left. It asks the daemon nothing.
+- comms' page server has a new read, `GET /api/thread?a=&b=&before=&after=&oldest=&limit=`:
+  the messages between two names (by one, with a recipient tag naming the other), or
+  every message by or to one name without `b`, oldest first, in `/api/messages`' shape:
+  the newest `limit` (6 by default, at most 100) below the message id `before`, with
+  `earlier`, how many of theirs came before and the oldest one's time, and
+  `count_today`. With `after`, the newest message id the page holds, it reads only the
+  messages above it and adds `changed`: for the messages from `oldest` (the oldest id
+  the page holds; from the first when it is left out) to `after`, the two names' rows
+  in the delivery books, or, with one name, every row of that name's messages. The page
+  sends `oldest` on every refresh, so a refresh reads only the rows of the messages it
+  shows, however large the books grow. `oldest` without `after`, or above it, is
+  refused. It asks the daemon nothing.
+- comms' page server has two acts, `POST /api/check` and `POST /api/send`, which take
+  `{to, text, posture, held, reply_to}` (one address, at most 16,000 characters, a
+  posture always given) and run `moxi comms send --check` and `moxi comms send` as the
+  operator's lane, with `--new-name`. The operator is `MOXI_COMMS_OPERATOR` in the page
+  server's environment, else the directory's one operator; with neither the act refuses
+  with `operator-unknown`. Each answers `{outcome, message_id, recipients, refusal}`:
+  each recipient's `delivery` and `cold_at`, and the refusal's `code`, never the verb's
+  text. Neither is reachable through the phone's gateway.
+- comms' page server has a third act, `POST /api/take-back` with `{message_id}`, which
+  runs `moxi comms remove` as the operator: `{outcome, withdrawn, delivered, expired,
+  refusal}`, the refusal its `code` only; an id that is not all digits is refused with
+  `message-id-shape`. It is not reachable through the phone's gateway.
 - The connector's status and tools no longer say `offline` while another binding holds
   its identity: the close of a bind the daemon refused could land after the link had
   noted the name held, and turned the state to `offline` until the next try. Only the
