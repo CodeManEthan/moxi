@@ -237,6 +237,17 @@ check passes, makes the annotated tag, whose message is the package's CHANGELOG 
 It pushes nothing: `git push origin <tag>` does, and the push piece runs the gate again.
 It prints each check, and exits 3 when the gate refuses.
 
+### The first release of a workspace
+
+Every package requires the core, and check 5 wants a published version of each member a
+package requires, so the core `moxi` is released first, at a version every member's
+requirement on it admits. Its catalogue marks `unreleased = true` on each module with no
+released version, which check 7 then passes; until a later core release drops those
+marks, `moxi install <module>` from that core wants `--from`. The other packages follow in
+dependency order, each after every member it requires (here `moxi-secrets` and
+`moxi-repo` before `moxi-publishing`, and `moxi-publishing` before `moxi-dev`), at most
+three tags per push. A core release after a module's first release drops its mark.
+
 ### The workflow files
 
 `moxi publishing workflows write [PATH]` writes two files into the repo's

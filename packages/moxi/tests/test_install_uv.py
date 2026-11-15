@@ -49,6 +49,16 @@ def tool(tmp_path, offline_uv_env, wheels):
                           env=offline_uv_env, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
 
+    # The installed core reads a cached catalogue newer than its own, here one with every
+    # module released, so listed names install as they will once released.
+    from conftest import released_catalogue_text
+
+    import moxi.catalogue as catalogue
+
+    cached = catalogue.cached_path(offline_uv_env)
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_text(released_catalogue_text(), encoding="utf-8")
+
     class Tool:
         bin = Path(offline_uv_env["UV_TOOL_BIN_DIR"])
         prefix = Path(offline_uv_env["UV_TOOL_DIR"]) / "moxi"

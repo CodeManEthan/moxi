@@ -29,7 +29,7 @@ def text(version=2, extra=""):
 
 def test_the_shipped_catalogue_lists_every_first_party_module():
     shipped = catalogue.shipped()
-    assert shipped.version == 4 and shipped.source == "shipped"
+    assert shipped.version == 5 and shipped.source == "shipped"
     assert shipped.names() == ["cache", "comms", "connector", "launcher", "loadout", "notes",
                                "projects", "publishing", "repo", "rounds", "secrets",
                                "services", "sessions", "slots", "tunnel", "turns", "ui",
@@ -37,6 +37,23 @@ def test_the_shipped_catalogue_lists_every_first_party_module():
     for entry in shipped.entries:
         assert entry.distribution == f"moxi-{entry.name}"
         assert entry.summary and "\n" not in entry.summary
+
+
+def test_a_module_on_the_not_ready_list_is_marked_unreleased():
+    # A member on the workspace's not-ready list has never passed the release gate, so it
+    # has no released version and `moxi install` must not send a user to the index for it.
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3] / "pyproject.toml"
+    if not root.is_file():
+        pytest.skip("the workspace root isn't here (an installed copy is being tested)")
+    table = tomllib.loads(root.read_text(encoding="utf-8")).get("tool", {}).get(
+        "moxi-publishing", {})
+    not_ready = set(table.get("not-ready", []))
+    unmarked = [entry.distribution for entry in catalogue.shipped().entries
+                if entry.distribution in not_ready and not entry.unreleased]
+    assert unmarked == []
 
 
 def test_the_refresh_reads_the_core_release_tags_the_index_and_the_tagged_file():
@@ -62,7 +79,8 @@ def test_an_entry_is_frozen():
     entry = catalogue.shipped().get("comms")
     with pytest.raises(AttributeError):
         entry.name = "other"
-    assert entry == catalogue.Entry("comms", "moxi-comms", entry.summary)
+    assert entry == catalogue.Entry("comms", "moxi-comms", entry.summary,
+                                    unreleased=entry.unreleased)
 
 
 # -- the checks ----------------------------------------------------------------------
@@ -107,7 +125,7 @@ def test_readers_take_the_higher_version(tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text(text(version=catalogue.shipped().version))
     assert catalogue.load(env).source == "shipped"  # a tie keeps the shipped copy
-    path.write_text(text(version=5))
+    path.write_text(text(version=catalogue.shipped().version + 1))
     assert catalogue.load(env).names() == ["comms"]
     path.write_text("version = 9\n[[module]]\nname = 3\n")
     assert catalogue.load(env).source == "shipped"  # one that doesn't check is ignored
@@ -256,7 +274,7 @@ def test_available_as_json(site, capsys):
     site.module("comms")
     assert cli.main(["modules", "--available", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert data["version"] == 4 and data["source"] == "shipped"
+    assert data["version"] == catalogue.shipped().version and data["source"] == "shipped"
     rows = {row["name"]: row for row in data["modules"]}
     assert rows["comms"]["state"] == "present" and rows["comms"]["version"] == "0.1.0"
     assert rows["turns"] == {"name": "turns", "distribution": "moxi-turns",
@@ -281,10 +299,11 @@ def test_a_failed_refresh_says_so_and_lists_the_catalogue_in_effect(monkeypatch,
 
 
 def test_a_refresh_that_fetches_a_newer_copy_lists_it(monkeypatch, capsys):
-    monkeypatch.setattr(catalogue, "_fetch", released(body=text(version=5).encode()))
+    newer = catalogue.shipped().version + 1
+    monkeypatch.setattr(catalogue, "_fetch", released(body=text(version=newer).encode()))
     assert cli.main(["modules", "--available", "--refresh"]) == 0
     out, err = capsys.readouterr()
-    assert "catalogue version 5 kept in" in err
+    assert f"catalogue version {newer} kept in" in err
     assert out.startswith("comms  moxi-comms")
     assert "cache" not in out
 
