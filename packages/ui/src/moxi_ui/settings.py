@@ -91,7 +91,7 @@ __all__ = [
     "SAVE_SHAPE",
     "SETTINGS_SHAPE",
     "SchemaRead",
-    "WRITE_TIMEOUT",
+    "WRITE_TIMEOUT_S",
     "change",
     "change_argv",
     "descriptor",
@@ -115,7 +115,7 @@ __all__ = [
 CONFIG_TIMEOUT = 10.0
 #: Seconds one `moxi config set` or `unset` may take: past the 10 s the command waits for
 #: the file's lock, so a run waiting on it says busy before it is stopped.
-WRITE_TIMEOUT = 20.0
+WRITE_TIMEOUT_S = 20.0
 #: How many `show` runs one read of the view runs at once.
 READS_AT_ONCE = 2
 BY = "ui"
@@ -693,9 +693,9 @@ def change(module: str, key: str, *, value: str | None = None, add: str | None =
             (value or "").strip().lower())
         raise Refused(f"{module} {key} {_terminal_problem(terminal, wanted)}")
     try:
-        done = run(argv, timeout_s=WRITE_TIMEOUT, cwd=cwd, env=env)
+        done = run(argv, timeout_s=WRITE_TIMEOUT_S, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
-        raise Conflict(f"moxi config ran past {WRITE_TIMEOUT:g} s; the change may not "
+        raise Conflict(f"moxi config ran past {WRITE_TIMEOUT_S:g} s; the change may not "
                        "be written") from None
     except OSError as exc:
         raise Conflict(f"moxi config could not run: {exc}") from None
@@ -802,7 +802,7 @@ def save_one(module: str, key: str, *, value: str, reset: bool, was: str,
                            problem=f"the value sent can't be a {type_}")
         argv = change_argv(module, key, value=spelled, as_json=True)
     try:
-        done = run(argv, timeout_s=WRITE_TIMEOUT, cwd=cwd, env=env)
+        done = run(argv, timeout_s=WRITE_TIMEOUT_S, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
         # Stopped before it ended, so it may or may not have written.
         return _result(key, "failed", mark=mark, finished=False)
@@ -871,14 +871,18 @@ async def read(call: Any) -> dict[str, Any]:
     return {"sections": list(sections), "listed": listed, "error": error}
 
 
-def _change(call: Any, *, unset: bool) -> dict[str, Any]:
+async def _change(call: Any, *, unset: bool) -> dict[str, Any]:
+    from moxi import aio
+
     from .page import current
 
     shell = current()
     body = call.body
-    return change(body["module"], body["key"], value=body.get("value"), add=body.get("add"),
-                  remove=body.get("remove"), unset=unset, locked=_locked_now(),
-                  cwd=str(shell.layout.runtime_dir()), env=shell.starters.child_env())
+    locked = _locked_now()
+    cwd, env = str(shell.layout.runtime_dir()), shell.starters.child_env()
+    return await aio.offload(lambda: change(
+        body["module"], body["key"], value=body.get("value"), add=body.get("add"),
+        remove=body.get("remove"), unset=unset, locked=locked, cwd=cwd, env=env))
 
 
 async def save(call: Any) -> dict[str, Any]:
@@ -916,16 +920,16 @@ async def save(call: Any) -> dict[str, Any]:
     return {"saved_at": time.time(), "results": results}
 
 
-def set_key(call: Any) -> dict[str, Any]:
+async def set_key(call: Any) -> dict[str, Any]:
     """`POST /api/settings/set`: `moxi config set`, with one of `value`, `add` or
-    `remove`. Blocking: the base runs it on a worker thread."""
-    return _change(call, unset=False)
+    `remove`. Its schema read and its write run off the shell's worker threads."""
+    return await _change(call, unset=False)
 
 
-def unset_key(call: Any) -> dict[str, Any]:
-    """`POST /api/settings/unset`: `moxi config unset`, so the key reads its default.
-    Blocking: the base runs it on a worker thread."""
-    return _change(call, unset=True)
+async def unset_key(call: Any) -> dict[str, Any]:
+    """`POST /api/settings/unset`: `moxi config unset`, so the key reads its default. Its
+    schema read and its write run off the shell's worker threads."""
+    return await _change(call, unset=True)
 
 
 #: The settings view's routes, joined to the shell's page. Every one takes the session's

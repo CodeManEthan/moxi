@@ -49,7 +49,7 @@
 - A page handler may raise `BadRequest(key, reason)` from `moxi_ui.loopback.api` for a 400
   about a body its `Field`s can't refuse alone.
 - New in `moxi_ui.settings`: `read_schema`, `find_key`, `save_one`, `is_changed`,
-  `is_drawn`, `file_of`, `SchemaRead`, `SAVE_SHAPE` and `WRITE_TIMEOUT`.
+  `is_drawn`, `file_of`, `SchemaRead`, `SAVE_SHAPE` and `WRITE_TIMEOUT_S`.
 - The contract check (`ui_component_check`) waits up to 5 s for each of `tokens` to
   reach a colour of the placed component, so a part drawn from data that arrives after
   the first render (a pushed topic's first value) counts. Before, it probed once two

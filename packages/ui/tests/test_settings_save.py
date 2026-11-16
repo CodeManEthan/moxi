@@ -180,13 +180,13 @@ def test_a_run_that_does_not_end_is_failed_and_not_finished():
 
 def test_a_write_may_run_past_the_files_lock_wait_and_a_read_may_not():
     _, run = _save_one("count", "5", was=_was("count"))
-    assert run.writes[-1][1]["timeout_s"] == settings.WRITE_TIMEOUT
-    assert settings.WRITE_TIMEOUT > core_config.LOCK_TIMEOUT
+    assert run.writes[-1][1]["timeout_s"] == settings.WRITE_TIMEOUT_S
+    assert settings.WRITE_TIMEOUT_S > core_config.LOCK_TIMEOUT
     assert settings.CONFIG_TIMEOUT == 10.0
     run = Run()
     settings.change("demo", "count", value="5", cwd="/rt", env=None, run=run)
     assert [kwargs["timeout_s"] for _, kwargs in run.calls] == [
-        settings.CONFIG_TIMEOUT, settings.WRITE_TIMEOUT]
+        settings.CONFIG_TIMEOUT, settings.WRITE_TIMEOUT_S]
 
 
 # --- set and unset read the schema first ---------------------------------------------------

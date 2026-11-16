@@ -131,7 +131,8 @@ command may run 20 s, and the handler holds none of the shell's worker threads m
 **`POST /api/settings/set` and `/unset`** keep their shapes. Each reads the module's schema
 first, as a save does, and refuses a key that is not a setting of the module or that is
 changed at the terminal with a 422; a read that fails is a 422 with its text and fix, and
-one that does not end a 409.
+one that does not end a 409. As with a save, the handler holds none of the shell's worker
+threads while the read and the command run.
 
 **`GET /api/gateway/state`** answers `{installed, switch, on, host, port, exposure,
 reads_only, problem}` from the shell's gateway, with no new read of the tunnel: whether the
