@@ -10,6 +10,9 @@
   on turning on either startup-screen answer (the folder-trust one stays marked while on)
   and on adding a name to `relaunch.pass_env` or `relaunch.director_pass_env`. The
   launcher needs moxi 0.1.9 or later.
+- `name.template` and `name.templates` are marked `elsewhere`: the settings page leaves
+  them off, and its Find answers a search for either with the sentence that they are
+  edited in Home's Options.
 - The prompt's menus open inside the page: each one that would pass 16 px from an edge
   is shifted back, after it opens and when the window is resized. On a narrow page the
   plus, the chip and the options word wrap, so no button passes the edge either.

@@ -13687,6 +13687,8 @@ ui	packages/ui/src/moxi_ui/gateway/audit.py	read_rows	name	folder	audit_files_di
 ui	packages/ui/src/moxi_ui/gateway/desk.py	"used": Out("float"), "passkey": Out("bool"), "stale": Out("bool"),	keep	stale	stale
 ui	packages/ui/src/moxi_ui/gateway/desk.py	"used": device.used, "passkey": device.passkey, "stale": device.stale,	keep	stale	stale
 ui	packages/ui/src/moxi_ui/gateway/desk.py	pair	name	err	exc
+ui	packages/ui/src/moxi_ui/gateway/desk.py	address = None if gateway.refused else gateway.address	keep	refused	refused
+ui	packages/ui/src/moxi_ui/gateway/desk.py	"reads_only": not gateway.mount.mounted,	keep	mounted	mounted
 ui	packages/ui/src/moxi_ui/gateway/devices.py	if any(isinstance(t, bool) or not isinstance(t, (int, float))	keep	any	any
 ui	packages/ui/src/moxi_ui/gateway/devices.py	if not any(not d.stale and which(d) for d in self.all()):	keep	any	any
 ui	packages/ui/src/moxi_ui/gateway/devices.py	if not any(not d.stale and which(d) for d in self.all()):	keep	stale	stale
@@ -13999,6 +14001,29 @@ ui	packages/ui/src/moxi_ui/settings.py	return [*head, "set", "--by", BY, f"--rem
 ui	packages/ui/src/moxi_ui/settings.py	return [str(python()), "-P", "-m", "moxi", "config", module, "show", "--json"]	keep	show	show
 ui	packages/ui/src/moxi_ui/settings.py	return any(name == entry or name.startswith(f"{entry}.") or entry.startswith(f"{name}.")	keep	any	any
 ui	packages/ui/src/moxi_ui/settings.py	return set()	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	`changed`: true when the value is not the default (a switch table: when any entry is on).	keep	changed	changed
+ui	packages/ui/src/moxi_ui/settings.py	now read, as JSON text. Each answers one result: `saved`, `unchanged`, `refused` (with the	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	On `set` and `unset`, a write that `moxi config` refuses (exit 2 or 3) is a 422 with the	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	"changed": Out("bool"),	keep	changed	changed
+ui	packages/ui/src/moxi_ui/settings.py	#: One change's result in a save: `outcome` is `saved`, `unchanged`, `refused`, `moved`,	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	return isinstance(entries, list) and any(	keep	any	any
+ui	packages/ui/src/moxi_ui/settings.py	"changed": is_changed(item, env=env),	keep	changed	changed
+ui	packages/ui/src/moxi_ui/settings.py	return [*head, "set", *by, f"--add={add}", "--", module, key]	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	return [*head, "set", *by, f"--remove={remove}", "--", module, key]	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	return [*head, "set", *by, "--", module, key, value]	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	"daemon": any(isinstance(by, str) and by.startswith("daemon:")	keep	any	any
+ui	packages/ui/src/moxi_ui/settings.py	done = run(argv, timeout_s=WRITE_TIMEOUT, cwd=cwd, env=env)	keep	env	env
+ui	packages/ui/src/moxi_ui/settings.py	return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))	keep	strict	strict
+ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "refused", problem=f"is not a setting of {module}")	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "refused", mark=mark,	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "refused", mark=mark, problem="the value sent is not JSON text")	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "refused", mark=mark, problem=_terminal_problem(terminal, wanted))	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "refused", mark=mark, problem="was is not JSON text")	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "saved" if answer.get("changed") is not False else "unchanged",	keep	changed	changed
+ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "refused", problem=problem, fix=fix, mark=mark)	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	results = [_result(key, "refused", problem=f"is not a setting of {module}")	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	for key, value, reset, before in zip(keys, values, resets, was, strict=True):	keep	strict	strict
+ui	packages/ui/src/moxi_ui/settings.py	done = run(argv, timeout_s=WRITE_TIMEOUT_S, cwd=cwd, env=env)	keep	env	env
 ui	packages/ui/src/moxi_ui/snapshot.py	"mounted": export is not None,	keep	mounted	mounted
 ui	packages/ui/src/moxi_ui/snapshot.py	"refused": refused,	keep	refused	refused
 ui	packages/ui/src/moxi_ui/snapshot.py	_mtimes	name	directory	watched_dir
@@ -14142,6 +14167,7 @@ ui	packages/ui/tests/fixture_kit.py	hold	kwonly	on	on
 ui	packages/ui/tests/fixture_kit.py	hold	name	on	enabled
 ui	packages/ui/tests/fixture_kit.py	install	name	out	fh
 ui	packages/ui/tests/fixture_kit.py	site.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/fixture_kit.py	"folder": ['label = "Folder"', 'group = "Server"'],	keep	folder	folder
 ui	packages/ui/tests/gateway_kit.py	Authenticator._flags	kwonly	attested	attested
 ui	packages/ui/tests/gateway_kit.py	Authenticator._flags	kwonly	uv	uv
 ui	packages/ui/tests/gateway_kit.py	await send({"type": "http.response.body", "body": b""})	keep	fail	fail
@@ -14229,12 +14255,40 @@ ui	packages/ui/tests/test_browser_settings.py	refused = {"refused": "fixture lim
 ui	packages/ui/tests/test_browser_settings.py	test_a_typing_slip_is_caught_before_any_request	name	folder	folder_control
 ui	packages/ui/tests/test_browser_settings.py	test_a_typing_slip_is_caught_before_any_request	name	folder_control	path_control
 ui	packages/ui/tests/test_browser_settings.py	timeout=SETTINGS_MS)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	expect(view.locator("[data-part=foot]")).to_be_visible(timeout=SETTINGS_MS)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	assert shell.moxi("config", "set", "fixture", "limit", "12").returncode == 0	keep	set	set
+ui	packages/ui/tests/test_browser_settings.py	expect(view.locator("[data-part=pane][data-module=moxi] [data-part=foot]")).to_be_visible(timeout=SETTINGS_MS)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	expect(view.locator("[data-part=pane][data-module=fixture]")).to_be_visible(timeout=SETTINGS_MS)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	"fixture's settings can't be read: ", timeout=SETTINGS_MS)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	expect(_row(view, "limit").locator("[data-line=copied]")).to_have_count(0, timeout=4000)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	assert answers[3:7] == [[422, {"refused": refused["refused"].replace("limit", "rows")}]] * 4	keep	refused	refused
+ui	packages/ui/tests/test_browser_settings.py	assert answers[7][0] == 200 and [result["outcome"] for result in answers[7][1]["results"]] == ["refused"]	keep	refused	refused
+ui	packages/ui/tests/test_browser_settings.py	expect(changed).to_have_text("1 changed", timeout=30_000)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	assert shell.moxi("config", "set", *args).returncode == 0	keep	set	set
+ui	packages/ui/tests/test_browser_settings.py	expect(changed).to_have_text("3 changed", timeout=30_000)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings.py	assert shell.moxi("config", "set", *args).returncode == 0, args	keep	set	set
+ui	packages/ui/tests/test_browser_settings.py	assert shell.moxi("config", "set", "fixture", "workers", "3").returncode == 0	keep	set	set
+ui	packages/ui/tests/test_browser_settings.py	assert shell.moxi("config", "set", "fixture", "limit", "14").returncode == 0	keep	set	set
+ui	packages/ui/tests/test_browser_settings.py	return any(row["name"] == "fixture" and row.get("version") == "0.2.0" for row in value["modules"])	keep	any	any
+ui	packages/ui/tests/test_browser_settings.py	["set", {"module": "ui", "key": "gateway.enabled", "value": "false"}],	keep	set	set
+ui	packages/ui/tests/test_browser_settings.py	assert all("refused" in body for _, body in answers[:2]), answers	keep	refused	refused
+ui	packages/ui/tests/test_browser_settings.py	assert answers[2][0] == 200 and [r["outcome"] for r in answers[2][1]["results"]] == ["refused"], answers	keep	refused	refused
+ui	packages/ui/tests/test_browser_settings.py	assert shell.moxi("config", "set", "ui", "theme.palette", palette).returncode == 0	keep	set	set
+ui	packages/ui/tests/test_browser_settings.py	assert set(colours["seen"]) <= words, (colours["seen"], tokens)	keep	set	set
+ui	packages/ui/tests/test_browser_settings_timed.py	@pytest.mark.skipif(not {m.name for m in modules.scan()} >= set(FULL),	keep	set	set
+ui	packages/ui/tests/test_browser_settings_timed.py	marks = ui_page.wait_for_function(MARKS, arg="moxi", polling="raf", timeout=WAIT_MS).json_value()	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_settings_timed.py	assert {"moxi", "ui", "launcher", "comms", "sessions", "turns", "usage"} <= set(marks["listed"])	keep	set	set
 ui	packages/ui/tests/test_browser_shell.py	.locator("[data-control=limit]")).to_be_attached(timeout=10_000)	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_shell.py	assert tones and set(tones) <= {"ok", "off", "warn", "fail"}	keep	set	set
 ui	packages/ui/tests/test_browser_shell.py	assert tops == sorted(set(tops)), "one name per line, in order"	keep	set	set
 ui	packages/ui/tests/test_browser_shell.py	expect(rows.first).to_be_visible(timeout=DOCTOR_MS)	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_shell.py	expect(view.locator("section.card[data-module=fixture]")).to_be_visible(timeout=10_000)	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_shell.py	for key in ("greeting", "limit", "ratio", "loud", "colour", "folder", "tags", "extra",	keep	folder	folder
+ui	packages/ui/tests/test_browser_shell.py	expect(view.locator("moxi-ui-settings [data-part=foot]")).to_be_visible(timeout=10_000)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_shell.py	settings.locator("[data-part=list] a[data-list=fixture]").click(timeout=10_000)	keep	timeout	timeout
+ui	packages/ui/tests/test_browser_shell.py	expect(settings.locator("[data-control=limit]")).to_be_attached(timeout=10_000)	keep	timeout	timeout
 ui	packages/ui/tests/test_browser_squat.py	expect(page).to_have_title("planted", timeout=PLANT_MS)	keep	timeout	timeout
 ui	packages/ui/tests/test_checks.py	assert built.find("GET", "/m/ui/api/checks") is not None	keep	find	find
 ui	packages/ui/tests/test_checks.py	assert built.find("POST", "/m/ui/api/checks/run") is None, "the phone starts no run"	keep	find	find
@@ -14366,6 +14420,9 @@ ui	packages/ui/tests/test_gateway_rules.py	assert host.build and host.ends and h
 ui	packages/ui/tests/test_gateway_rules.py	assert moved.build and moved.ends and moved.stale == KEPT	keep	stale	stale
 ui	packages/ui/tests/test_gateway_rules.py	assert port.build and port.ends and port.stale is None	keep	stale	stale
 ui	packages/ui/tests/test_gateway_rules.py	return {"HOME": str(tmp_path / "home"), "XDG_RUNTIME_DIR": str(tmp_path / "run")}	keep	HOME	HOME
+ui	packages/ui/tests/test_gateway_state.py	shell_env = {"HOME": os.path.join(root, "h"), "XDG_RUNTIME_DIR": os.path.join(root, "r"),	keep	HOME	HOME
+ui	packages/ui/tests/test_gateway_state.py	Layout("ui").runtime_dir(shell_env, create=True)	keep	create	create
+ui	packages/ui/tests/test_gateway_state.py	token = page._shell.set(shell)	keep	set	set
 ui	packages/ui/tests/test_listen.py	answer = shell.send("GET", "/m/fixture/api/summary", headers=[cookie, key, *FETCH],	keep	fail	fail
 ui	packages/ui/tests/test_loopback_api.py	assert set(api.__all__) == expected	keep	set	set
 ui	packages/ui/tests/test_loopback_api.py	expected = set().union(*SURFACE.values()) | {"gate_matrix"}	keep	set	set
@@ -14380,6 +14437,7 @@ ui	packages/ui/tests/test_loopback_confirmed.py	("refused", 422, {"refused": "no
 ui	packages/ui/tests/test_loopback_confirmed.py	assert any("returned dict, not Accepted" in r.getMessage() for r in caplog.records)	keep	any	any
 ui	packages/ui/tests/test_loopback_confirmed.py	assert other.json() == {"refused": "this Idempotency-Key was used for another request"}	keep	refused	refused
 ui	packages/ui/tests/test_loopback_confirmed.py	h.STATE["release"].set()	keep	set	set
+ui	packages/ui/tests/test_loopback_confirmed.py	("bad", 400, {"error": "too many: n"}),	keep	bad	bad
 ui	packages/ui/tests/test_loopback_connect.py	Layout("demo").runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_loopback_connect.py	self.done.set()	keep	set	set
 ui	packages/ui/tests/test_loopback_export.py	-	name	test_a_planted_moxi_ui_in_the_working_directory_is_never_imported	test_a_planted_moxi_ui_in_the_working_dir_is_never_imported
@@ -14640,6 +14698,50 @@ ui	packages/ui/tests/test_settings.py	status, data = shell.post("set", key="gate
 ui	packages/ui/tests/test_settings.py	status, data = shell.post("set", key="gateway.port", value="8498")	keep	set	set
 ui	packages/ui/tests/test_settings.py	status, data = shell.post("set", key="port", value="8499")	keep	set	set
 ui	packages/ui/tests/test_settings.py	status, data = shell.post("set", key=key, value=text)	keep	set	set
+ui	packages/ui/tests/test_settings.py	assert {name for name, key in keys.items() if key["changed"]} == {	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not any(settings.descriptor("demo", item)["changed"] for item in same)	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not any(settings.descriptor("demo", item)["changed"] for item in same)	keep	any	any
+ui	packages/ui/tests/test_settings.py	env = {"HOME": "/h"}	keep	HOME	HOME
+ui	packages/ui/tests/test_settings.py	assert not settings.descriptor("demo", _key("dir", "path", "/h/x", "~/x"), env=env)["changed"]	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert settings.descriptor("demo", _key("dir", "path", "/h/y", "~/x"), env=env)["changed"]	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	for n, v in zip("abc", values, strict=False)]))["changed"]	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	for n, v in zip("abc", values, strict=False)]))["changed"]	keep	strict	strict
+ui	packages/ui/tests/test_settings.py	assert changed(on, off) and changed(off, off, on)	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert not changed(off, off) and not changed()	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	env = {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / ".config")}	keep	HOME	HOME
+ui	packages/ui/tests/test_settings.py	elsewhere = {"HOME": str(tmp_path / "h"), "XDG_CONFIG_HOME": str(tmp_path / "conf")}	keep	HOME	HOME
+ui	packages/ui/tests/test_settings.py	near = {"HOME": str(tmp_path / "c"), "XDG_CONFIG_HOME": str(tmp_path / "conf")}	keep	HOME	HOME
+ui	packages/ui/tests/test_settings.py	"""A recorded `moxi config`: a `show` answers `schema` (when it is not None), and	keep	show	show
+ui	packages/ui/tests/test_settings.py	if self.schema is not None and "show" in argv:	keep	show	show
+ui	packages/ui/tests/test_settings.py	return [(argv, kwargs) for argv, kwargs in self.calls if "show" not in argv]	keep	show	show
+ui	packages/ui/tests/test_settings.py	assert keys["idle_s"]["changed"] and keys["idle_s"]["json"] == "1200"	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert keys["port"]["label"] == "Port" and not keys["port"]["changed"]	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert status == 422 and data["refused"].endswith("moxi ui gateway enable")	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	@pytest.mark.parametrize("module", ["nosuch", "Not A Module", "changed"])	keep	changed	changed
+ui	packages/ui/tests/test_settings_save.py	run = run or Run(stdout=json.dumps({"changed": True, "problem": None, "fix": None,	keep	changed	changed
+ui	packages/ui/tests/test_settings_save.py	assert argv[5:] == ["set", "--by", "ui", "--json", "--", "demo", name, spelled]	keep	set	set
+ui	packages/ui/tests/test_settings_save.py	assert result["outcome"] == "refused" and run.writes == []	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	answer = json.dumps({"changed": False, "problem": None, "fix": None, "units": []})	keep	changed	changed
+ui	packages/ui/tests/test_settings_save.py	assert result == {"key": key, "outcome": "refused",	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	assert result["outcome"] == "refused" and "locked" in result["problem"]	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	return json.dumps({"changed": changed, "problem": problem, "fix": fix,	keep	changed	changed
+ui	packages/ui/tests/test_settings_save.py	{"outcome": "refused", "problem": "is 'x', not an int", "fix": "set it to an int"}),	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	{"outcome": "refused", "problem": "demo: no distribution", "fix": "moxi install demo"}),	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	], ids=["saved", "unchanged", "refused", "absent", "busy", "units", "usage", "not-an-object"])	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	Layout("ui").runtime_dir(create=True)	keep	create	create
+ui	packages/ui/tests/test_settings_save.py	assert _outcomes(data) == [("greeting", "saved"), ("limit", "refused"),	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	assert _outcomes(data) == [("limit", "refused"), ("workers", "saved")]	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/test_settings_save.py	status, data = shell.post("set", key="idle_s", value="60")	keep	set	set
+ui	packages/ui/tests/test_settings_save.py	status, data = shell.post("set", key="idle_s", value="60")	keep	value	value
+ui	packages/ui/tests/test_settings_save.py	assert data["results"][0]["outcome"] == "refused"	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	for what, body in (("set", {"value": "true"}), ("set", {"value": "false"}),	keep	set	set
+ui	packages/ui/tests/test_settings_save.py	assert status == 422 and "is changed at the terminal" in data["refused"]	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	status, data = shell.post("set", module="connector", key="enabled", value="true")	keep	set	set
+ui	packages/ui/tests/test_settings_save.py	status, data = shell.post("set", module="connector", key="enabled", value="true")	keep	value	value
+ui	packages/ui/tests/test_settings_save.py	assert status == 422 and data["refused"].endswith("moxi connector enable")	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	assert data["results"] == [{"key": "a", "outcome": "refused",	keep	refused	refused
+ui	packages/ui/tests/test_settings_save.py	lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 ui	packages/ui/tests/test_snapshot.py	Layout("ui").runtime_dir(create=True)	keep	create	create
 ui	packages/ui/tests/test_snapshot.py	assert set(row) == set(_COMPONENT.items)	keep	set	set
 ui	packages/ui/tests/test_snapshot.py	assert set(value) == set(MODULES_SHAPE)	keep	set	set
@@ -14705,6 +14807,7 @@ ui	packages/ui/tests/test_testing.py	for key in ("HOME", "MOXI_HOME", "XDG_STATE
 ui	packages/ui/tests/test_testing.py	shell = ui_shells(site=[fixture_site], env={"GIT_CONFIG_NOSYSTEM": "1"})	keep	env	env
 ui	packages/ui/tests/test_testing.py	test_a_shells_env_reaches_its_page_servers	name	environ	proc_env
 ui	packages/ui/tests/test_testing.py	wait_for(lambda: all(t in last() for t in held) and not any(t in last() for t in without),	keep	any	any
+ui	packages/ui/tests/test_testing.py	expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)	keep	timeout	timeout
 ui	packages/ui/tests/test_web.py	answer = shell.send("GET", "/m/fixture/some/route", headers=[cookie, *NAVIGATE])	keep	fail	fail
 ui	packages/ui/tests/test_web.py	answer = shell.send("GET", "/m/fixture/some/route", headers=list(NAVIGATE))	keep	fail	fail
 ui	packages/ui/tests/test_web.py	assert set(re.findall(r'from"([^"]+)"', text)) == {"/m/ui/client.js"}	keep	set	set

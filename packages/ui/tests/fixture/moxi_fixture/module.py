@@ -4,8 +4,9 @@ It has a page, a block for the modules view, two rows for the shell's Home that 
 only what a test tells them to, an inline component with a required attribute, and one
 component written for a contract the shell doesn't place yet, which the modules view lists
 as refused. Its settings hold every type and a switch table,
-`rows`, whose entry `backup` only the timer below names (no test installs the timer). Its
-doctor check fails while a test says so.
+`rows`, whose entry `backup` only the timer below names (no test installs the timer), and
+its config check refuses more `workers` than `limit`. Its doctor check fails while a test
+says so.
 """
 
 INTERFACES = frozenset({1})
@@ -16,6 +17,7 @@ OPTIONAL = {}
 GATED = {}
 INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
+CONFIG_CHECK = "moxi_fixture.config_check:check"
 SETUP = None
 SEGMENT = None
 TIMERS = {"backup": {"command": "moxi-fixture-backup", "every": "1h", "switch": "rows.backup",

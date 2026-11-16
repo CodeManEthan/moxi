@@ -181,6 +181,15 @@ def _pushed(page, held, without=()):
              WAIT_S, interval=0.05, what=lambda: f"a push stream for {held}, not {without}: {last()}")
 
 
+def _settings_backdrop(page):
+    """Open the Settings page as the backdrop a component is placed beside, and wait until it
+    has read every listed module: a read still out at the placement would count against the
+    component."""
+    page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    view = page.locator("#moxi-panel > moxi-ui-page moxi-ui-settings")
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)
+
+
 @pytest.mark.browser
 def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_adds(
         ui_page, ui_component_check):
@@ -188,7 +197,7 @@ def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_a
     # holds whenever a component subscribes. `elsewhere` stands for another module with a
     # component on the page: its topics are no topic of the fixture's. The settings panel
     # holds no fixture topic, so placing the fixture's block reopens the stream.
-    ui_page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    _settings_backdrop(ui_page)
     ui_page.evaluate("""async () => {
       const {subscribe} = await import("/m/ui/client.js");
       subscribe("elsewhere", "held", () => {});
@@ -217,7 +226,7 @@ def test_the_contract_check_says_when_it_could_not_read_the_held_topics(
         ui_page, ui_component_check, monkeypatch):
     # Without a page's recent requests (Playwright before 1.56), a topic the page held
     # before the placement counts against the component, and the failure says why.
-    ui_page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    _settings_backdrop(ui_page)
     ui_page.evaluate("""async () => {
       const {subscribe} = await import("/m/ui/client.js");
       subscribe("elsewhere", "held", () => {});

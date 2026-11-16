@@ -5,6 +5,9 @@
 - Every setting carries page fields, which `moxi config connector show --json` prints
   and the settings page draws: a plain label, a line where the label can't carry it,
   and the unit of a sign-in's life. The connector needs moxi 0.1.9 or later.
+- `enabled` is marked `terminal`, naming `moxi connector enable` and `disable`: the
+  settings page shows it as a word with that command beside it, and its routes refuse to
+  write it.
 
 ## 0.1.0 (2026-11-08)
 
