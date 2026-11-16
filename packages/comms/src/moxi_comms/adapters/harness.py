@@ -550,7 +550,9 @@ class HarnessAdapter:
         close, and a refused bind's, mark the claim offline while this waits for the
         daemon, and the supervisor, which skips a turn while the lock is held, must not
         register in that gap: its bind would refuse this one as already bound, or, refused
-        itself by the old binding, put the claim in standby under the binding this makes."""
+        itself by the old binding, put the claim in standby under the binding this makes.
+        While the supervisor is between tries of a reconnect it holds the lock through its
+        backoff, so a `reregister` then waits for that try to end before it starts."""
         with self.claims.register_lock:
             with self._lock:
                 old, self._daemon = self._daemon, None
