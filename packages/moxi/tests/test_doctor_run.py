@@ -200,6 +200,8 @@ def test_an_entry_whose_owner_is_absent_warns_or_is_off_when_optional(d):
         demo = moxi_demo.module
         [moxi.turns]
         demo = moxi_demo.module:x
+        [moxi.turns.hooks]
+        demo = moxi_demo.module:u
         [moxi.cache.timers]
         demo = moxi_demo.module:y
         [moxi.doctor]
@@ -211,11 +213,15 @@ def test_an_entry_whose_owner_is_absent_warns_or_is_off_when_optional(d):
         """)
     modules.reset()
     got = {k: r for k, r in d.rows().items() if k[1].startswith("extension")}
-    assert got[("demo", "extension moxi.turns demo")].state == "off"
+    turns = got[("demo", "extension moxi.turns demo")]
+    assert (turns.state, turns.needs) == ("off", "turns")
+    assert turns.fix == "moxi install demo --with turns"
+    hooks = got[("demo", "extension moxi.turns.hooks demo")]
+    assert (hooks.state, hooks.needs) == ("off", "turns")
     cache = got[("demo", "extension moxi.cache.timers demo")]
-    assert (cache.state, cache.fix) == ("warn", "moxi install cache")
+    assert (cache.state, cache.fix, cache.needs) == ("warn", "moxi install cache", None)
     # The core's groups, a group named by no module, and a present owner: no row.
-    assert len(got) == 2
+    assert len(got) == 3
 
 
 # -- 4. units ----------------------------------------------------------------------------------

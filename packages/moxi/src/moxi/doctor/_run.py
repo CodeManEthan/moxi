@@ -11,7 +11,7 @@
      2. settings: each config file against its schema, as `moxi config <m> check` reads
         it, and each key set in a file whose schema says it `needs` an absent module;
      3. extensions: each entry of a group `moxi.<m>` or `moxi.<m>.<part>` whose owner `m`
-        is absent (`off` when the offering module lists `m` in `OPTIONAL`);
+        is absent (`off`, needing `m`, when the offering module lists `m` in `OPTIONAL`);
      4. units: `moxi.units.plan` against what is written, the supervisor's state from one
         `moxi.units.status` call, each timer's switch and newest run line, each active
         daemon's `HEALTH`, a `HEALTH` key that names no daemon, and each wrap the module
@@ -240,7 +240,7 @@ def _check_extensions(ctx: _Context) -> list[Row]:
             if optional:
                 rows.append(Row(ext.module, label, "off",
                                 f"an optional link to {owner}, which is not installed",
-                                f"moxi install {ext.module} --with {owner}"))
+                                f"moxi install {ext.module} --with {owner}", needs=owner))
             else:
                 rows.append(Row(ext.module, label, "warn",
                                 f"its owner {owner} is not installed, so nothing reads it",
