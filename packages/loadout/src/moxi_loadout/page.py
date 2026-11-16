@@ -98,6 +98,23 @@ ROW = lb.Out("table", items={
     "replaceable": lb.Out("bool"),
 })
 
+#: A row as the view gives it: `ROW`, and how loadout places the item (`form`: `link`,
+#: `junction`, `copy`, `generated`, `entry`, or null), whether a `blocked` row's
+#: placement of loadout's was edited where it stands (`edited`), the items the Codex
+#: rules file holds on its row (`covers`), whether the entry was the user's before
+#: loadout's (`prior`), the sections under which `install` applies the row (`applies`:
+#: `section`, `whole`, or null when no run does), and whether install covers a
+#: `would-commit` row with its ignore file (`ignores`).
+VIEW_ROW = lb.Out("table", items={
+    **ROW.items,
+    "form": _MAYBE,
+    "edited": lb.Out("bool"),
+    "covers": lb.Out("list", items=_TEXT, nullable=True),
+    "prior": lb.Out("bool"),
+    "applies": _MAYBE,
+    "ignores": lb.Out("bool"),
+})
+
 #: How many rows are in each state; a state no row is in is left out.
 COUNTS = lb.Out("table", items={state: lb.Out("int") for state in STATES})
 
@@ -167,7 +184,7 @@ GLOBAL = {
 #: Everything the page's items draw, from the one plan `status` builds: `status`'s
 #: `rows`, `lines`, `notes` and `counts`; `note`, the drift block's; the `home` folder,
 #: the loadout `folder` and its `manifest`; `harnesses`, the harness table's names in its
-#: order; the `sections` and `items` as `/api/list` gives them; and `global` as
+#: order; `resolved_all`, whether every section resolved; the `sections` and `items` as `/api/list` gives them; and `global` as
 #: `/api/global` gives it. The paths are null only with `problem` set, and `home` when
 #: nothing places a home folder.
 VIEW = {
@@ -180,9 +197,10 @@ VIEW = {
     "folder": _MAYBE_PATH,
     "manifest": _MAYBE_PATH,
     "harnesses": lb.Out("list", items=_TEXT),
+    "resolved_all": lb.Out("bool"),
     "sections": lb.Out("list", items=SECTION),
     "items": lb.Out("list", items=ITEM),
-    "rows": lb.Out("list", items=ROW),
+    "rows": lb.Out("list", items=VIEW_ROW),
     "global": lb.Out("table", items={k: v for k, v in GLOBAL.items() if k != "problem"}),
 }
 #: `reason` says why there is no list: projects absent, busy or unreadable.
@@ -260,4 +278,4 @@ PAGE = lb.Page(
 
 __all__ = ["BUDGET", "COUNTS", "DRIFT", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE",
            "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS",
-           "VIEW"]
+           "VIEW", "VIEW_ROW"]

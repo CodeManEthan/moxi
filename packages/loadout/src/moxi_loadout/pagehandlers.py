@@ -174,10 +174,12 @@ def _home() -> str | None:
 
 def view(call: Any) -> dict[str, Any]:
     """`GET /api/view`: everything the page's items draw, from the one plan `status`
-    builds: `status`'s outcome (its rows, lines, notes and counts), the note, the home,
+    builds: `status`'s outcome (its rows, with `moxi_loadout.view`'s facts on each, its
+    lines, notes and counts), whether every section resolved, the note, the home,
     loadout and manifest paths, the harness table's names, the sections, the items as
     `/api/list` gives them, and the global file as `/api/global` does."""
     from moxi_loadout import doctor, homes, install
+    from moxi_loadout import view as view_mod
 
     try:
         with homes.as_page():
@@ -195,16 +197,18 @@ def view(call: Any) -> dict[str, Any]:
             "folder": os.fspath(plan.loadout_dir),
             "manifest": os.fspath(found.path),
             "harnesses": list(plan.harnesses),
+            "resolved_all": plan.resolved_all,
             "sections": _sections_of(found),
             "items": _items(found),
-            "rows": outcome["rows"],
+            "rows": [{**r, **facts} for r, facts in zip(outcome["rows"],
+                                                         view_mod.row_facts(done))],
             "global": _global(install.global_preview_of(plan, done.run),
                               chosen=found.mode is not None),
         }
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return {"problem": _problem(exc, "the status"), "lines": [], "notes": [],
                 "counts": {}, "note": None, "home": None, "folder": None, "manifest": None,
-                "harnesses": [], "sections": [], "items": [], "rows": [],
+                "harnesses": [], "resolved_all": False, "sections": [], "items": [], "rows": [],
                 "global": {"mode": "off", "chosen": False, "files": []}}
     return answer
 

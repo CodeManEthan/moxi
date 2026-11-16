@@ -117,6 +117,10 @@ class Status:
     plan: planner.Plan
     run: entries.Run
     outcome: Outcome
+    #: What each of the outcome's rows was read from, in its order: `("want", want)`,
+    #: `("removal", step)`, `("entry", action)` (the action None for an entry row the run
+    #: states without one) or `("ignore", None)`.
+    sources: list[tuple[str, object]] = field(default_factory=list)
 
 
 def status(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.resolve_key,
@@ -142,15 +146,20 @@ def status_plan(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.re
     for level, line in opencode_reads_claude(plan, run, after=False):
         run.global_lines.append((level, line))
         run.lines.append(line)
-    rows = [r for r in planner.rows(plan) + entries.rows(run) + _ignore_rows(plan.ledger)
-            if _shown(scope, r)]
+    sourced = ([(r, ("want" if isinstance(src, planner.Want) else "removal", src))
+                for r, src in planner.sourced_rows(plan)]
+               + [(r, ("entry", a)) for r, a in entries.sourced_rows(run)]
+               + [(r, ("ignore", None)) for r in _ignore_rows(plan.ledger)])
+    sourced = [(r, src) for r, src in sourced if _shown(scope, r)]
+    rows = [r for r, _ in sourced]
     code = 0 if all(r.state in FINE for r in rows) else ERROR
     differ = homes.note()
     if differ is not None:
         notes.append(differ)
     return Status(plan, run, Outcome(rows, list(plan.lines) + run.lines,
                                      list(dict.fromkeys(plan.notes + run.notes + notes)),
-                                     code, orphans(plan, plan.ledger), run.global_lines))
+                                     code, orphans(plan, plan.ledger), run.global_lines),
+                  [src for _, src in sourced])
 
 
 def opencode_reads_claude(plan: planner.Plan, run: entries.Run, *,
@@ -215,6 +224,7 @@ def _check_placed(plan: planner.Plan, git: ignores.Git) -> list[str]:
         elif v.state == "needs" and w.step.action == "keep":
             w.commit = (f"git would commit it; install writes "
                         f"{os.path.join(v.target_dir, ignores.IGNORE)}")
+            w.ignores = True
         elif v.state == "unchecked":
             skipped.append(v.line)
     if not skipped:

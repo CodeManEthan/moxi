@@ -217,7 +217,10 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
              "/api/view items[].disabled[]", "/api/view rows[].kind",
              "/api/view rows[].harness", "/api/view rows[].state",
-             "/api/view rows[].replaceable", "/api/view global.mode",
+             "/api/view rows[].replaceable", "/api/view rows[].form",
+             "/api/view rows[].edited", "/api/view rows[].covers[]",
+             "/api/view rows[].prior", "/api/view rows[].applies",
+             "/api/view rows[].ignores", "/api/view resolved_all", "/api/view global.mode",
              "/api/view global.chosen", "/api/view global.files[].harness",
              "/api/view global.files[].changes", "/api/view global.files[].placed",
              "/api/view global.files[].state"}
@@ -330,8 +333,16 @@ def test_view_answers_from_the_one_plan_status_builds(lo, tmp_path, monkeypatch,
     assert len(built) == 1
     assert body["problem"] is None
     status = read("/api/status")
-    assert {k: body[k] for k in ("rows", "lines", "notes", "counts")} == {
-        k: status[k] for k in ("rows", "lines", "notes", "counts")}
+    facts = ("form", "edited", "covers", "prior", "applies", "ignores")
+    assert [{k: v for k, v in r.items() if k not in facts} for r in body["rows"]] == \
+        status["rows"]
+    assert {k: body[k] for k in ("lines", "notes", "counts")} == {
+        k: status[k] for k in ("lines", "notes", "counts")}
+    by = {(r["kind"], r["name"], r["harness"], r["scope"]): r for r in body["rows"]}
+    assert {k: by[("skill", "review", "claude", "user")][k] for k in facts} == {
+        "form": "link", "edited": False, "covers": None, "prior": False,
+        "applies": "section", "ignores": False}
+    assert body["resolved_all"] is True
     assert any(r["scope"] == str(proj) for r in body["rows"])
     listed = read("/api/list")
     assert body["sections"] == listed["sections"]

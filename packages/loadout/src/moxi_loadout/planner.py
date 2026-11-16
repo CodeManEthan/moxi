@@ -113,6 +113,7 @@ class Want:
     step: object = None
     adoptable: bool = False
     commit: str | None = None   # why git would commit its target, when it would
+    ignores: bool = False   # git would commit it, and install covers it with its ignore file
 
     @property
     def scope(self) -> str:
@@ -750,7 +751,13 @@ def _removal_reason(record: dict) -> str:
 
 def rows(plan: Plan) -> list[Row]:
     """Every want's row, then one per placement no longer wanted."""
-    return [row(w) for w in plan.wants] + [removal_row(plan, s) for s in plan.removals]
+    return [r for r, _ in sourced_rows(plan)]
+
+
+def sourced_rows(plan: Plan) -> list[tuple[Row, Want | object]]:
+    """`rows`, each with what it was read from: its want, or the placer's removal step."""
+    return [(row(w), w) for w in plan.wants] + [(removal_row(plan, s), s)
+                                                for s in plan.removals]
 
 
 def exit_code(codes: Iterable[int]) -> int:
@@ -763,5 +770,6 @@ def exit_code(codes: Iterable[int]) -> int:
 
 
 __all__ = ["OWNER", "STATES", "FINE", "Resolution", "resolve_key", "Want", "Row", "Plan",
-           "Scope", "build", "run", "state_of", "row", "removal_row", "rows", "exit_code",
+           "Scope", "build", "run", "state_of", "row", "removal_row", "rows", "sourced_rows",
+           "exit_code",
            "places", "replaceable", "target_of"]

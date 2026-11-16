@@ -820,7 +820,13 @@ def row(a: Action) -> Row:
 
 
 def rows(run: Run) -> list[Row]:
-    return list(run.rows) + [row(a) for a in run.actions if _shown(a)]
+    return [r for r, _ in sourced_rows(run)]
+
+
+def sourced_rows(run: Run) -> list[tuple[Row, Action | None]]:
+    """`rows`, each with the action it was read from (None for a row the run states
+    without one: an item switched off, or one that can't be built)."""
+    return [(r, None) for r in run.rows] + [(row(a), a) for a in run.actions if _shown(a)]
 
 
 def covers(scope, a: Action) -> bool:
@@ -1074,5 +1080,6 @@ def preview(run: Run) -> dict[str, tuple[bytes, bytes]]:
             for f, (now, d) in out.items()}
 
 
-__all__ = ["Entry", "Action", "Run", "wanted", "plan", "rows", "row", "covers", "apply",
+__all__ = ["Entry", "Action", "Run", "wanted", "plan", "rows", "sourced_rows", "row",
+           "covers", "apply",
            "preview", "CLI_SECONDS"]
