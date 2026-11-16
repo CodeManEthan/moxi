@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -234,6 +235,12 @@ AGO_S = {"atlas-api": 60, "kestrel-web": 60, "orbit-cli": 180, "lumen-docs": 540
          "harbor-infra": 1920, "reviewer-home": 5700}
 #: How long ago the loose folder was last worked in, in seconds.
 LOOSE_AGO_S = 2 * 24 * 3600
+
+
+def noon() -> float:
+    """Today's local noon, in epoch seconds: a `now` for the full report whose projects'
+    times, at most `AGO_S` before it, all fall on its own local day."""
+    return datetime.now().replace(hour=12, minute=0, second=0, microsecond=0).timestamp()
 #: The fixture's `order` in the full report.
 ORDER = 100
 #: The route a section's link opens on the fixture's page, for `key`.
