@@ -479,6 +479,72 @@ def test_back_quotes_its_paths_and_speaks_windows_there(monkeypatch):
     assert displaced.back("moved", r"C:\d\a", r"C:\h\a") == r'move /y "C:\d\a" "C:\h\a"'
 
 
+def _recorded_instructions(lo) -> tuple[Path, str]:
+    """OpenCode's `instructions` entry naming the shared global text, recorded as
+    loadout's, as only an older install wrote it. Returns `opencode.json` and the entry."""
+    opencode_row()
+    write(lo, '[global]\nmode = "managed"\n')
+    assert install.install().code == 0
+    config = harness.settings_file("opencode")
+    config.parent.mkdir(parents=True, exist_ok=True)
+    shared = str(lo / "global.md")
+    config.write_text(json.dumps({"instructions": [shared], "theme": "mine"}, indent=2) + "\n")
+    data = ledger.read()
+    data["entries"].append({"item": "global:global", "harness": "opencode", "file": str(config),
+                            "kind": "instructions", "key": ["instructions", shared],
+                            "written": shared, "prior": False})
+    ledger.write(data)
+    return config, shared
+
+
+@pytest.mark.parametrize("replace", [[], ["global:global@opencode"]])
+def test_an_instructions_entry_edited_by_hand_is_his_and_left_with_no_copy(lo, replace):
+    # The entry is its path: one edited names another path, which is the user's, so no
+    # run writes over it and none keeps a copy of it.
+    config, shared = _recorded_instructions(lo)
+    config.write_text(config.read_text().replace(shared, shared + ".mine"))
+    before = config.read_bytes()
+    out = install.install(replace=replace)
+    assert out.code == 0, out.text()
+    assert config.read_bytes() == before
+    assert out.kept == [] and copies() == []
+    assert not [r for r in ledger.read()["entries"] if r.get("kind") == "instructions"]
+
+
+def test_an_instructions_entry_loadout_wrote_is_taken_out_with_no_copy_as_shown(lo):
+    from moxi_loadout import entries
+
+    config, shared = _recorded_instructions(lo)
+    before = config.read_bytes()
+    plan = install.status_plan(Scope())
+    shown = entries.preview(plan.run, files={str(config)})
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert json.loads(config.read_text()) == {"theme": "mine"}
+    assert out.kept == [] and copies() == []
+    # What the preview showed for the file is what the write made of it.
+    assert shown[str(config)] == (before, config.read_bytes())
+
+
+def test_writing_loadouts_ignore_file_keeps_no_copy(lo, tmp_path):
+    from moxi_loadout import ignores
+    from test_would_commit import work_tree
+
+    app = work_tree(tmp_path / "app")
+    write(lo, f'[project."{app}"]\nskills = ["review"]\n')
+    out = install.install()                        # written
+    assert out.code == 0, out.text()
+    ignore = app / ".claude" / "skills" / ".gitignore"
+    assert ignores.state(ignore) == "ours"
+    assert out.kept == [] and copies() == []
+    kit.skill(lo / "skills", "deploy")
+    write(lo, f'[project."{app}"]\nskills = ["review", "deploy"]\n')
+    out = install.install()                        # written again, for two placements
+    assert out.code == 0, out.text()
+    assert ignores.listed(ignore) == {"review", "deploy"}
+    assert out.kept == [] and copies() == []
+
+
 def test_nothing_loadout_runs_deletes_under_displaced(lo):
     write(lo, '[user]\nskills = ["review"]\nhooks = ["guard-rm"]\n[global]\nmode = "managed"\n'
               + HOOK)
