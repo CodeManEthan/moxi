@@ -120,6 +120,105 @@ export interface Job {
   lines: string[];
 }
 
+/** A row as `/api/view` gives it: `Row`, and what the view adds. */
+export interface ViewRow extends Row {
+  /** How loadout places the item: `link`, `junction`, `copy`, `generated`, `entry`, or
+   * null (loadout's ignore file). */
+  form: string | null;
+  /** A `blocked` row whose placement of loadout's was edited where it stands. */
+  edited: boolean;
+  /** On the Codex rules file's row, the permission items it holds; else null. */
+  covers: string[] | null;
+  /** An entry the user had before loadout, which loadout keeps as his. */
+  prior: boolean;
+  /** The sections under which `install` applies the row: `section`, `whole`, or null when
+   * no run does. */
+  applies: string | null;
+  /** A `would-commit` row that install covers by writing loadout's ignore file. */
+  ignores: boolean;
+}
+
+/** Why a section can't be placed this run. */
+export interface Refusal {
+  /** `no-projects`, `not-found`, `unreadable`, `busy`, `no-root` or `unloadable`. */
+  cause: string;
+  /** The refusal's line, as the verb prints it. */
+  line: string;
+  /** The root loadout's ledger recorded when it last placed the section, when its
+   * records agree on one; else null. */
+  last_root: string | null;
+}
+
+/** A section as `/api/view` gives it. */
+export interface ViewSection extends Section {
+  refused: Refusal | null;
+}
+
+/** What an item writes into a harness file; a key the kind has no value for is null. */
+export interface What {
+  event: string | null;
+  matcher: string | null;
+  command: string | null;
+  url: string | null;
+  allow: string[] | null;
+  ask: string[] | null;
+  deny: string[] | null;
+}
+
+/** An item as `/api/view` gives it. */
+export interface ViewItem extends Item {
+  /** The module a module's skill comes from, else null. */
+  module: string | null;
+  /** What a hook, permissions item or MCP server writes; null for the rest. */
+  what: What | null;
+}
+
+/** A note on one item for one harness: `code` one of `trust`, `unconfirmed`, `no-hooks`,
+ * `writes-nothing`. */
+export interface ItemNote {
+  kind: string;
+  name: string;
+  harness: string;
+  code: string;
+}
+
+/** A global file as `/api/view` gives it. */
+export interface ViewGlobalFile extends GlobalFile {
+  /** What loadout adds there: `line`, `block`, `instructions`, `placed`, or `left` where
+   * the harness's own file is there; null when not known. */
+  form: string | null;
+}
+
+/** The global file as `/api/view` gives it. */
+export interface ViewGlobal {
+  /** The folder's global text, null when the manifest names none. */
+  source: string | null;
+  mode: string;
+  chosen: boolean;
+  files: ViewGlobalFile[];
+}
+
+/** `/api/view`: everything the page's items draw, from one plan. */
+export interface View {
+  problem: string | null;
+  lines: string[];
+  notes: string[];
+  counts: Record<string, number>;
+  /** The harness homes' note; while set, the page's acts are off. */
+  note: string | null;
+  home: string | null;
+  folder: string | null;
+  manifest: string | null;
+  /** The harness table's names, in its order: the item grid's columns. */
+  harnesses: string[];
+  resolved_all: boolean;
+  sections: ViewSection[];
+  items: ViewItem[];
+  rows: ViewRow[];
+  item_notes: ItemNote[];
+  global: ViewGlobal;
+}
+
 /** Every state an item's row can be in. */
 export const STATES = ["ok", "missing", "stale", "modified", "blocked", "would-commit",
                        "bad-source", "off"] as const;
@@ -194,6 +293,63 @@ function isGlobalFile(value: unknown): value is GlobalFile {
 
 function isProject(value: unknown): value is Project {
   return isObj(value) && isStr(value.key) && isStr(value.root);
+}
+
+const isBool = (value: unknown): value is boolean => typeof value === "boolean";
+const isStringsOrNull = (value: unknown): value is string[] | null =>
+  value === null || isStrings(value);
+
+function isViewRow(value: unknown): value is ViewRow {
+  return isRow(value) && isObj(value) && isStrOrNull(value.form) && isBool(value.edited)
+    && isStringsOrNull(value.covers) && isBool(value.prior) && isStrOrNull(value.applies)
+    && isBool(value.ignores);
+}
+
+function isRefusal(value: unknown): value is Refusal {
+  return isObj(value) && isStr(value.cause) && isStr(value.line) && isStrOrNull(value.last_root);
+}
+
+function isViewSection(value: unknown): value is ViewSection {
+  return isSection(value) && isObj(value) && (value.refused === null || isRefusal(value.refused));
+}
+
+function isWhat(value: unknown): value is What {
+  return isObj(value) && isStrOrNull(value.event) && isStrOrNull(value.matcher)
+    && isStrOrNull(value.command) && isStrOrNull(value.url) && isStringsOrNull(value.allow)
+    && isStringsOrNull(value.ask) && isStringsOrNull(value.deny);
+}
+
+function isViewItem(value: unknown): value is ViewItem {
+  return isItem(value) && isObj(value) && isStrOrNull(value.module)
+    && (value.what === null || isWhat(value.what));
+}
+
+function isItemNote(value: unknown): value is ItemNote {
+  return isObj(value) && isStr(value.kind) && isStr(value.name) && isStr(value.harness)
+    && isStr(value.code);
+}
+
+function isViewGlobal(value: unknown): value is ViewGlobal {
+  return isObj(value) && isStrOrNull(value.source) && isStr(value.mode) && isBool(value.chosen)
+    && isListOf(value.files, (file: unknown): file is ViewGlobalFile =>
+      isGlobalFile(file) && isObj(file) && isStrOrNull(file.form));
+}
+
+/** `/api/view`'s value, or null when it isn't one. */
+export function parseView(data: unknown): View | null {
+  if (!isObj(data) || !isStrOrNull(data.problem) || !isStrings(data.lines)
+      || !isStrings(data.notes) || !isCounts(data.counts) || !isStrOrNull(data.note)
+      || !isStrOrNull(data.home) || !isStrOrNull(data.folder) || !isStrOrNull(data.manifest)
+      || !isStrings(data.harnesses) || !isBool(data.resolved_all)
+      || !isListOf(data.sections, isViewSection) || !isListOf(data.items, isViewItem)
+      || !isListOf(data.rows, isViewRow) || !isListOf(data.item_notes, isItemNote)
+      || !isViewGlobal(data.global)) return null;
+  return {
+    problem: data.problem, lines: data.lines, notes: data.notes, counts: data.counts,
+    note: data.note, home: data.home, folder: data.folder, manifest: data.manifest,
+    harnesses: data.harnesses, resolved_all: data.resolved_all, sections: data.sections,
+    items: data.items, rows: data.rows, item_notes: data.item_notes, global: data.global,
+  };
 }
 
 /** `/api/status`'s value, or null when it isn't one. */
