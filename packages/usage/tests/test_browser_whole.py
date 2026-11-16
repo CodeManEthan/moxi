@@ -104,8 +104,15 @@ REACHED = """async () => {
 
 def check_colours_and_headings(page, what: str) -> None:
     """The page as it stands has no heading and takes colour from the allowed tokens
-    alone, and from the text tokens at least."""
+    alone, and from the text tokens at least.
+
+    It is checked once every read of the page has answered: no part says it is still
+    reading, and all six groups under the filter line are drawn (a closed section is
+    absent until its read answers). A read that answers during the sweep draws its part
+    again, and each node that takes away changes every colour the sweep compares."""
     panel = page.locator(PANEL)
+    expect(panel.locator("[data-part=reading], [data-opened=reading]")).to_have_count(0)
+    expect(panel.locator("[data-part=below] > section")).to_have_count(6)
     expect(panel.get_by_role("heading")).to_have_count(0)
     seen = panel.evaluate(f"(el) => ({REACHED})()")
     assert seen["tokens"] > len(ALLOWED), seen
@@ -167,7 +174,10 @@ def open_every_piece(page, shell):
     panel = settled_page(page)
     yield "the page"
     filter_of(panel, "range").locator("button.pick").click()
-    expect(filter_of(panel, "range").get_by_role("menuitemradio", name=re.compile("^All time"))).to_be_visible()
+    # An entry is drawn bare until its figure's read answers, then drawn again with it:
+    # All time's is asked as the menu opens. The menu is checked with the figures of all
+    # five entries that carry one, every entry but `From … to …`.
+    expect(filter_of(panel, "range").locator("[data-menu=range] [data-item] .t")).to_have_count(5)
     yield "the Range menu"
     page.keyboard.press("Escape")
     chart = section(panel, "chart")
