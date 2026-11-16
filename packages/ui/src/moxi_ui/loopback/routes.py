@@ -100,7 +100,7 @@ _SCALARS = ("string", "int", "float", "bool", "enum")
 _QUERY_TYPES = ("string", "int", "bool", "enum")
 _FIELD_TYPES = _SCALARS + ("list", "table")
 _OUT_TYPES = ("string", "int", "float", "bool", "list", "table")
-_MARKS = (None, "path", "redact")
+_MARKS = (None, "path", "redact", "scrub")
 _EMPTY: Mapping[str, Any] = MappingProxyType({})
 
 
@@ -242,9 +242,11 @@ class Out:
     `type` is `string`, `int`, `float`, `bool`, `list` or `table`. `items` says what a
     `list` holds (one `Out`) or a `table` holds (a key map of `Out`s), nested to any
     depth; a list of rows is `Out("list", items=Out("table", items={...}))`. `mark` is
-    `path` (the gateway sends a handle in its place) or `redact` (the gateway cuts it);
-    only the gateway acts on a mark. `nullable` lets the value be JSON `null`; a `null`
-    anywhere else is refused by projection.
+    `path` (the gateway sends a handle in its place), `redact` (the gateway cuts it) or
+    `scrub` (the gateway sends the text with each path that starts a word, or follows `:`
+    or `=`, with `/` or `~` cut to its last folder name); only the gateway acts on a mark,
+    and `path` and `scrub` go on a string. `nullable` lets the value be JSON `null`; a
+    `null` anywhere else is refused by projection.
     """
 
     type: str
@@ -256,9 +258,9 @@ class Out:
         if self.type not in _OUT_TYPES:
             raise PageError(f"an Out type is one of {', '.join(_OUT_TYPES)}, not {self.type!r}")
         if self.mark not in _MARKS:
-            raise PageError(f"an Out mark is 'path' or 'redact', not {self.mark!r}")
-        if self.mark == "path" and self.type != "string":
-            raise PageError("the path mark belongs on a string Out")
+            raise PageError(f"an Out mark is 'path', 'redact' or 'scrub', not {self.mark!r}")
+        if self.mark in ("path", "scrub") and self.type != "string":
+            raise PageError(f"the {self.mark} mark belongs on a string Out")
         if not isinstance(self.nullable, bool):
             raise PageError("an Out's nullable is True or False")
         items = self.items

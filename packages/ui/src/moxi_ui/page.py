@@ -149,12 +149,13 @@ _ROW = Out("table", items={"module": Out("string"), "name": Out("string"),
 DOCTOR_SHAPE = {"rows": Out("list", items=_ROW), "error": _STRING}
 
 _REDACTED = Out("string", nullable=True, mark="redact")
-_KEPT_ROW = Out("table", items={"module": Out("string"), "name": Out("string"),
+_KEPT_ROW = Out("table", items={"module": Out("string"), "name": Out("string", mark="scrub"),
                                 "state": Out("string"), "detail": _REDACTED,
                                 "fix": _REDACTED})
 #: The kept doctor run: `/m/ui/api/checks`, its run act and the topic `ui.checks`. `at` is
 #: when the kept run ended, None while none is kept. A row's `detail` and `fix` and the
-#: run's `error` may hold a path, so the gateway sends each as null.
+#: run's `error` may hold a path, so the gateway sends each as null; a row's `name` may
+#: name one too, so the gateway sends it with each path cut to its last folder name.
 CHECKS_SHAPE = {"at": _STRING, "running": Out("bool"), "rows": Out("list", items=_KEPT_ROW),
                 "error": _REDACTED}
 

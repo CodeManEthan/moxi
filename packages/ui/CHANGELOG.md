@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A check's name reaches the phone with each path that starts a word, or follows `:` or
+  `=`, with `/` or `~` cut to its last folder name. The gateway sends a kept row's `name`
+  (`/m/ui/api/checks` and the topic `ui.checks`) that way, so Home's Health row on the
+  phone reads `repo · hooks proj-b` where a repository's row is named by its root, and
+  `turns · start list: run:ctx` where a skipped entry names a program. A path runs to the
+  next whitespace, and a path in another form is sent as it is. It comes with a new mark
+  a page's `Out` may carry, `scrub`, beside `path` and `redact`.
 - The test kit's waits for what must happen are long, so a busy machine does not fail
   them: `WAIT_MS` is 20000 (it was 5000), every kit context's default timeout, and
   `WAIT_S` is the same bound in seconds for a helper that takes seconds. While the plugin
