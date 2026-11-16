@@ -36,7 +36,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import type { PropertyValues } from "lit";
 import { live } from "lit/directives/live.js";
-import { styleMap } from "lit/directives/style-map.js";
+import { ref } from "lit/directives/ref.js";
 import { api, components, holdLeave, installed, setAddress, setTheme } from "/m/ui/client.js";
 import type { ThemeMode } from "/m/ui/client.js";
 
@@ -1118,8 +1118,10 @@ export class UiSettings extends LitElement {
           const value = parse(i, column)(text);
           this.#edit(module, key, items.map((item, j) => (j === i ? { ...(item as object), [column]: value } : item)));
         };
+        // The columns are set from code: the shell's policy blocks a style attribute.
+        const columns = `repeat(${control.columns.length}, minmax(0, 1fr)) auto`;
         return html`<div class="table" role="table" aria-label=${row.label}
-            style=${styleMap({ "grid-template-columns": `repeat(${control.columns.length}, minmax(0, 1fr)) auto` })}>
+            ${ref((el) => (el as HTMLElement | undefined)?.style.setProperty("grid-template-columns", columns))}>
           ${control.columns.map((column) => html`<span class="h" role="columnheader">${column}</span>`)}<span></span>
           ${control.rows.map((item, i) => html`${control.columns.map((column) => html`<input class="fld" type="text"
               aria-label=${`${column}, row ${i + 1}`} data-cell=${`${i}.${column}`} ?disabled=${locked}

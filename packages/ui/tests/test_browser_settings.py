@@ -169,6 +169,50 @@ def test_the_list_holds_the_core_ui_and_the_rest_and_settings_opens_the_core(ui_
         "href", "/m/ui/modules")
 
 
+# Logs each policy violation as a console error.
+_POLICY = """document.addEventListener("securitypolicyviolation", (event) => {
+  console.error(`policy: ${event.violatedDirective} ${event.blockedURI}`);
+});"""
+
+
+def _side_by_side(row):
+    """The core's harness folders drawn as a table: its column heads on one line, left to right."""
+    heads = row.get_by_role("table").locator("[role=columnheader]")
+    expect(heads).to_have_text(["name", "skills", "agents"])
+    boxes = [head.bounding_box() for head in heads.all()]
+    assert all(abs(box["y"] - boxes[0]["y"]) < 1 for box in boxes), boxes
+    assert boxes[0]["x"] < boxes[1]["x"] < boxes[2]["x"], boxes
+
+
+def test_a_list_of_tables_is_drawn_as_a_table_wherever_it_is_drawn(ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    path = shell.config_file("moxi")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('harnesses = [{name = "claude", skills = "", agents = ""}]\n')
+    page = ui_contexts(shell).pages[0]
+    seen: list[str] = []
+    page.on("console", lambda msg: seen.append(msg.text) if msg.type == "error" else None)
+    page.on("pageerror", lambda err: seen.append(str(err)))
+    page.add_init_script(_POLICY)
+    # Shown by More.
+    view = _settings(page, "settings")
+    view.locator("[data-part=more]").get_by_role("button", name="Show").click()
+    _side_by_side(_row(view, "harnesses"))
+    # Found.
+    _all_read(view)
+    _find(view, "harness folders")
+    _side_by_side(_group(view, "moxi").locator(".set[data-key=harnesses]"))
+    # In the changed view.
+    view = _settings(page, "settings")
+    changed = view.locator("[data-part=list] [data-line=changed]")
+    expect(changed).to_have_text("1 changed", timeout=SETTINGS_MS * 2)
+    changed.click()
+    _side_by_side(_group(view, "moxi").locator(".set[data-key=harnesses]"))
+    # Opened at More's address.
+    _side_by_side(_row(_settings(page, "settings/moxi/more"), "harnesses"))
+    assert seen == []
+
+
 def test_the_page_writes_its_own_address_and_back_leaves_it(ui_shell, ui_page):
     ui_page.locator("#moxi-settings").click()
     view = _view(ui_page)
