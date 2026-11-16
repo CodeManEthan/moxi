@@ -1,6 +1,7 @@
 """The Settings page's time on the full install: opened at its own address, the module it
-shows (the core) draws within 2 s, and every listed module's section is read within 4 s. Both are measured in the browser from the moment the page was opened
-(the navigation's start), checked at each animation frame.
+shows (the core) draws within 2 s, and every listed module's section is read within 4 s.
+Both are measured in the browser from the moment the page was opened (the navigation's
+start), checked at each animation frame.
 
 A `browser` and `slow` test: a plain pytest run leaves it out; `pytest -m slow -s` runs
 it and prints both times with the machine's load. It is also `timed`, so `moxi-dev check`
