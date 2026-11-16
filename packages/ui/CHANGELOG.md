@@ -2,10 +2,25 @@
 
 ## Unreleased
 
-- The contract check (`ui_component_check`) waits up to 5 s for each of `tokens` to
-  reach a colour of the placed component, so a part drawn from data that arrives after
-  the first render (a pushed topic's first value) counts. Before, it probed once two
-  frames after the first render, and a slow push failed the check.
+- A check's name reaches the phone with each path that starts a word, or follows `:` or
+  `=`, with `/` or `~` cut to its last folder name. The gateway sends a kept row's `name`
+  (`/m/ui/api/checks` and the topic `ui.checks`) that way, so Home's Health row on the
+  phone reads `repo · hooks proj-b` where a repository's row is named by its root, and
+  `turns · start list: run:ctx` where a skipped entry names a program. A path runs to the
+  next whitespace, and a path in another form is sent as it is. It comes with a new mark
+  a page's `Out` may carry, `scrub`, beside `path` and `redact`.
+- The test kit's waits for what must happen are long, so a busy machine does not fail
+  them: `WAIT_MS` is 20000 (it was 5000), every kit context's default timeout, and
+  `WAIT_S` is the same bound in seconds for a helper that takes seconds. While the plugin
+  is loaded, Playwright's sync `expect` takes `WAIT_MS` too (its own default is 5 s), in
+  any test that imports `playwright.sync_api`, the kit's fixtures or not. The test
+  shell's request reads (`TestShell.session`, `call`, `wait_server`, `Session`) wait up
+  to `READ_S`, 30 s, by default (they waited 10 s).
+- The contract check (`ui_component_check`) waits up to `WAIT_MS` (20 s) for each of
+  `tokens` to reach a colour of the placed component, or up to `token_ms`, so a part
+  drawn from data that arrives after the first render (a pushed topic's first value)
+  counts. Before, it probed once two frames after the first render, and a slow push
+  failed the check.
 - The shell reads the modules list once more when its first read at load gets no
   answer. On a phone in Firefox, the gateway's worker being replaced dropped that read,
   and the page said `No module named ui` until the push stream sent the list.

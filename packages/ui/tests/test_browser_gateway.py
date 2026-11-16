@@ -22,6 +22,7 @@ from playwright.sync_api import expect
 
 from moxi_ui.checks import CHECKS_FILE
 from moxi_ui.loopback.api import response_headers
+from moxi_ui.testing import WAIT_MS
 from moxi_ui.testing.phone import (HOST, ORIGIN, PhoneBridge, free_port, gateway_shell,
                                    pair_page, set_gateway, wait_hold)
 from moxi_ui.testing.shell import TestShell
@@ -29,7 +30,6 @@ from squatter import Squatter
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
 
-WAIT_MS = 5000
 #: The browser tests that need the socket endpoint, which no system's probe result names.
 SOCKET_TESTS = (
     "the phone's confirmed-act sheet shows the gateway's echo and acts once on a double tap",
@@ -320,6 +320,8 @@ def _engine(ui_browser) -> str:
 
 #: The doctor run the gateway shell kept: one failing check, one warning, one that
 #: passes. Their details and fixes hold what the phone must not get.
+#: The root a kept row's name holds, which the phone shows as its last folder name only.
+PATH_NAMED = "/var/lib/someone/code/proj-b"
 KEPT_ROWS = [
     {"module": "ui", "name": "shell", "state": "ok", "detail": "The shell answers", "fix": None},
     {"module": "projects", "name": "roots", "state": "warn",
@@ -327,6 +329,9 @@ KEPT_ROWS = [
      "fix": "moxi projects set proj-a --root DIR"},
     {"module": "turns", "name": "guard", "state": "fail",
      "detail": "A guard could not check a call", "fix": "moxi config set turns guard.strict false"},
+    # Named by a path, as repo names a row by its repository's root.
+    {"module": "repo", "name": f"hooks {PATH_NAMED}", "state": "warn",
+     "detail": "Its hooks aren't installed", "fix": f"moxi repo git-hooks add {PATH_NAMED}"},
 ]
 
 
@@ -478,7 +483,7 @@ def test_on_the_phone_home_is_the_rows_with_no_spot_and_no_act_under_the_reads_o
     home = page.locator("#moxi-panel > moxi-ui-page moxi-ui-home")
     row = home.get_by_role("button", name=re.compile("Health"))
     # The counts alone: the worst check's sentence can hold a path.
-    expect(row.locator(".fact")).to_have_text("1 check failing, 1 warning")
+    expect(row.locator(".fact")).to_have_text("1 check failing, 2 warnings")
     expect(row.locator(".time")).to_have_text(re.compile(r"^checked \d\d?:\d\d"))
     # No spot and no sentence: the rows start under the shell's line, which says the
     # phone only reads and sits first under the top line.
@@ -495,8 +500,11 @@ def test_on_the_phone_home_is_the_rows_with_no_spot_and_no_act_under_the_reads_o
     row.click()
     health = home.locator("moxi-ui-health")
     checks = health.locator(".check")
+    # Each check's module and name, a path in the name cut to its last folder name.
     expect(checks).to_have_text([re.compile(r"^\s*turns · guard\s*failing\s*$"),
-                                 re.compile(r"^\s*projects · roots\s*warning\s*$")])
+                                 re.compile(r"^\s*projects · roots\s*warning\s*$"),
+                                 re.compile(r"^\s*repo · hooks proj-b\s*warning\s*$")])
+    expect(home).not_to_contain_text("/var/lib/someone")
     for row_ in KEPT_ROWS:
         expect(home).not_to_contain_text(row_["detail"])
         if row_["fix"]:
@@ -525,7 +533,7 @@ def test_on_the_phone_tab_from_the_bands_last_name_closes_it_where_settings_is_h
     page = pair_page(phones(bridge), shell)
     home = page.locator("#moxi-panel > moxi-ui-page moxi-ui-home")
     health = home.get_by_role("button", name=re.compile("Health"))
-    expect(health.locator(".fact")).to_have_text("1 check failing, 1 warning")
+    expect(health.locator(".fact")).to_have_text("1 check failing, 2 warnings")
     button, band = page.locator("#moxi-pages-button"), page.locator("#moxi-pages")
     names = band.locator("a")
     expect(page.locator("#moxi-settings")).to_be_hidden()

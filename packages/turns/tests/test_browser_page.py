@@ -31,8 +31,6 @@ CWD = "/srv/work/sample-project"
 MARKUP = '<img src="x" onerror="window.__hit = 1">look <b>here</b>'
 EMPTY = "No session is reachable. A session shows here while it runs with turns' endpoint."
 SESSIONS = "/m/turns/api/sessions"
-#: How long a new endpoint may take to show: one rescan, its first read, the push.
-APPEAR_MS = 10_000
 
 
 @pytest.fixture(scope="module")
@@ -93,7 +91,7 @@ def test_a_seeded_session_shows_its_facts_agents_and_trouble(shell, make_endpoin
     ep, _ = make_endpoint(fake, session_id=SID)
     panel = open_panel(ui_page)
     found = row(panel, ep.dir.name)
-    expect(found).to_have_count(1, timeout=APPEAR_MS)
+    expect(found).to_have_count(1)
     expect(found.locator(".harness")).to_have_text("fake")
     expect(found.locator("code.id")).to_have_text(SID[:8])
     expect(found.locator("code.id")).to_have_attribute("title", SID)
@@ -122,11 +120,11 @@ def test_a_seeded_session_shows_its_facts_agents_and_trouble(shell, make_endpoin
 def test_a_session_appears_its_turn_moves_and_it_goes_live(shell, make_endpoint, ui_page):
     panel = open_panel(ui_page)
     state = panel.locator("div[data-state]")
-    expect(state).to_have_attribute("data-state", "empty", timeout=APPEAR_MS)
+    expect(state).to_have_attribute("data-state", "empty")
     expect(state).to_have_text(EMPTY)
     ep, fake = make_endpoint(harness(), session_id=SID)
     found = row(panel, ep.dir.name)
-    expect(found).to_have_count(1, timeout=APPEAR_MS)
+    expect(found).to_have_count(1)
     expect(state).to_have_attribute("data-state", "up")
     turn = found.locator(".turn")
     expect(turn).to_have_text("turn 0, idle")
@@ -158,6 +156,6 @@ def test_the_page_fits_a_phone(shell, make_endpoint, ui_page, ui_width_check):
     make_endpoint(harness(), session_id=SID)
     panel = ui_page.locator("#moxi-panel > moxi-turns-page")
     ui_width_check(ui_page, module="turns")
-    expect(rows(panel)).to_have_count(2, timeout=APPEAR_MS)
+    expect(rows(panel)).to_have_count(2)
     expect(row(panel, ep.dir.name).locator(".desc")).to_have_text(long)
     ui_width_check(ui_page)

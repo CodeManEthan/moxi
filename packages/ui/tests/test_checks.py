@@ -143,7 +143,7 @@ def test_the_value_has_the_routes_declared_shape(tmp_path):
     assert set(value) == set(page.CHECKS_SHAPE)
     assert set(value["rows"][0]) == set(page.CHECKS_SHAPE["rows"].items.items)
     marks = {key: out.mark for key, out in page.CHECKS_SHAPE["rows"].items.items.items()}
-    assert marks == {"module": None, "name": None, "state": None, "detail": "redact",
+    assert marks == {"module": None, "name": "scrub", "state": None, "detail": "redact",
                      "fix": "redact"}
     assert page.CHECKS_SHAPE["error"].mark == "redact"
 

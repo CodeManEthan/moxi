@@ -464,7 +464,7 @@ def test_codex_limits_say_their_use_and_an_opened_row_says_why_it_has_no_fill_ti
         # note, once the stream's pull has found no Codex to ask for a newer reading.
         expect(lines.locator("[data-opened=note]")).to_have_text([
             "No fill time: 1 reading of this period in the last 60 minutes; a projection needs 3",
-            re.compile(r"^no newer reading: .+")], timeout=15_000)
+            re.compile(r"^no newer reading: .+")])
         # No Codex session ran since the window opened.
         expect(lines.locator("[data-opened=used] [data-part=used-row]")).to_have_count(0)
         expect(lines.locator("[data-opened=used] [data-part=used-total]")).to_have_text(

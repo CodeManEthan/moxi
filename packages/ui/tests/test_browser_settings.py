@@ -15,8 +15,6 @@ from playwright.sync_api import expect
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
 
-# The settings view reads and writes through `moxi config` in a child process.
-SETTINGS_MS = 15_000
 WRITES = re.compile(r"/m/ui/api/settings/(set|unset)$")
 TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
 
@@ -24,7 +22,7 @@ TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
 def _settings(page, module="fixture"):
     page.goto(f"/m/ui/settings/{module}")
     form = page.locator(f"#moxi-panel > moxi-ui-page section.card[data-module={module}] moxi-ui-form")
-    expect(form.locator("[data-control]").first).to_be_attached(timeout=SETTINGS_MS)
+    expect(form.locator("[data-control]").first).to_be_attached()
     return form
 
 
@@ -76,7 +74,7 @@ def test_an_int_is_saved_to_the_file_and_reset_uses_unset(ui_shell, ui_page):
     box = form.locator("input[data-control=limit]")
     box.fill("12")
     box.press("Tab")
-    expect(_msg(form, "limit")).to_have_text("fixture: limit set (by ui)", timeout=SETTINGS_MS)
+    expect(_msg(form, "limit")).to_have_text("fixture: limit set (by ui)")
     expect(_msg(form, "limit")).to_have_class(re.compile(r"\binfo\b"))
     assert _file(ui_shell)["limit"] == 12
     # The section is read again: the value and where it came from follow the file.
@@ -84,7 +82,7 @@ def test_an_int_is_saved_to_the_file_and_reset_uses_unset(ui_shell, ui_page):
     expect(_field(form, "limit")).to_contain_text("applies now")
     reset = _field(form, "limit").get_by_role("button", name="Reset to default")
     reset.click()
-    expect(_msg(form, "limit")).to_contain_text("limit", timeout=SETTINGS_MS)
+    expect(_msg(form, "limit")).to_contain_text("limit")
     expect(box).to_have_value("10")
     assert "limit" not in _file(ui_shell)
     assert [url.rsplit("/", 1)[1] for url in writes] == ["set", "unset"]
@@ -96,7 +94,7 @@ def test_a_start_key_is_saved_with_its_mark(ui_shell, ui_page):
     box = form.locator("input[data-control=workers]")
     box.fill("3")
     box.press("Tab")
-    expect(_msg(form, "workers")).to_contain_text("workers", timeout=SETTINGS_MS)
+    expect(_msg(form, "workers")).to_contain_text("workers")
     expect(box).to_have_value("3")
     expect(_field(form, "workers")).to_contain_text("applies at next start")
     assert _file(ui_shell)["workers"] == 3
@@ -109,15 +107,14 @@ def test_the_entry_only_the_timer_names_shows_off_and_turning_it_on_writes_it(ui
     entry = form.locator(".toggle", has=ui_page.locator("[data-control='rows.backup']"))
     expect(entry).to_contain_text("not set")
     toggle.check()
-    expect(_msg(form, "rows.backup")).not_to_be_empty(timeout=SETTINGS_MS)
+    expect(_msg(form, "rows.backup")).not_to_be_empty()
     expect(_msg(form, "rows.backup")).not_to_have_class(re.compile(r"\berror\b"))
     assert _file(ui_shell)["rows"] == {"backup": True}
     toggle = form.locator("input[type=checkbox][data-control='rows.backup']")
     expect(toggle).to_be_checked()
     expect(entry).not_to_contain_text("not set")
     form.get_by_role("button", name="Reset rows.backup").click()
-    expect(form.locator("input[type=checkbox][data-control='rows.backup']")).not_to_be_checked(
-        timeout=SETTINGS_MS)
+    expect(form.locator("input[type=checkbox][data-control='rows.backup']")).not_to_be_checked()
     assert _file(ui_shell).get("rows", {}) == {}
 
 
@@ -161,10 +158,10 @@ def test_a_list_takes_an_item_and_gives_it_back(ui_shell, ui_page):
     tags = _field(form, "tags")
     tags.get_by_role("textbox").fill("blue sky")
     tags.get_by_role("button", name="Add").click()
-    expect(tags.locator("li.item")).to_have_text(["blue skyRemove"], timeout=SETTINGS_MS)
+    expect(tags.locator("li.item")).to_have_text(["blue skyRemove"])
     assert _file(ui_shell)["tags"] == ["blue sky"]
     tags.get_by_role("button", name="Remove blue sky").click()
-    expect(tags.locator("li.item")).to_have_count(0, timeout=SETTINGS_MS)
+    expect(tags.locator("li.item")).to_have_count(0)
     assert _file(ui_shell).get("tags", []) == []
 
 
@@ -176,7 +173,7 @@ def test_a_section_whose_file_wont_parse_is_read_only_and_says_why(ui_shell, ui_
     try:
         ui_page.goto("/m/ui/settings/fixture")
         section = ui_page.locator("#moxi-panel > moxi-ui-page section.card[data-module=fixture]")
-        expect(section.locator(".problem")).to_contain_text("is not valid TOML", timeout=SETTINGS_MS)
+        expect(section.locator(".problem")).to_contain_text("is not valid TOML")
         expect(section).to_contain_text("Fix: correct the file's TOML syntax")
         # Nothing in it takes input: `show` gives no keys for a file it can't read.
         expect(section.locator("[data-control]:enabled")).to_have_count(0)
@@ -190,7 +187,7 @@ def test_a_section_whose_file_wont_parse_is_read_only_and_says_why(ui_shell, ui_
 def test_the_core_has_its_own_section(ui_page):
     ui_page.goto("/m/ui/settings")
     core = ui_page.locator("#moxi-panel > moxi-ui-page section.card", has_text="moxi (the core)")
-    expect(core.locator("h2")).to_have_text("moxi (the core)", timeout=SETTINGS_MS)
+    expect(core.locator("h2")).to_have_text("moxi (the core)")
     for module in ("ui", "fixture"):
         expect(ui_page.locator(f"moxi-ui-page section.card[data-module={module}]")).to_be_attached()
 
@@ -213,7 +210,7 @@ def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui
     select = form.locator("select[data-control='theme.mode']")
 
     def shows(colour: str) -> None:
-        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        expect(html).to_have_css("background-color", colour)
         expect(select).to_have_css("background-color", colour)
 
     try:
@@ -226,7 +223,7 @@ def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui
         shows(light)
         # dark fixes the dark set on a light browser, at once and after a reload.
         select.select_option("dark")
-        expect(html).to_have_attribute("data-theme", "dark", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme", "dark")
         shows(dark)
         assert _file(ui_shell, "ui")["theme"] == {"mode": "dark"}
         page.reload()
@@ -237,7 +234,7 @@ def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(ui
         # light fixes the light set on a dark browser, at once and after a reload.
         page.emulate_media(color_scheme="dark")
         select.select_option("light")
-        expect(html).to_have_attribute("data-theme", "light", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme", "light")
         shows(light)
         page.reload()
         expect(html).to_have_attribute("data-theme", "light")
@@ -262,7 +259,7 @@ def test_theme_palette_switches_the_colours_on_the_root_and_inside_a_shadow_root
     expect(name).to_have_value("plain")
 
     def shows(colour: str) -> None:
-        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        expect(html).to_have_css("background-color", colour)
         # The select sits in <moxi-ui-form>'s shadow root, on --moxi-bg.
         expect(name).to_have_css("background-color", colour)
 
@@ -271,7 +268,7 @@ def test_theme_palette_switches_the_colours_on_the_root_and_inside_a_shadow_root
         shows(plain["light"])
         # The other theme shows at once, in the browser's scheme, both ways.
         name.select_option("midnight-neon")
-        expect(html).to_have_attribute("data-theme-name", "midnight-neon", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme-name", "midnight-neon")
         shows(neon["light"])
         page.emulate_media(color_scheme="dark")
         shows(neon["dark"])
@@ -283,12 +280,12 @@ def test_theme_palette_switches_the_colours_on_the_root_and_inside_a_shadow_root
         name = form.locator("select[data-control='theme.palette']")
         shows(neon["dark"])
         form.locator("select[data-control='theme.mode']").select_option("light")
-        expect(html).to_have_attribute("data-theme", "light", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme", "light")
         expect(html).to_have_attribute("data-theme-name", "midnight-neon")
         shows(neon["light"])
         # Back to the default theme, the mode kept.
         name.select_option("plain")
-        expect(html).to_have_attribute("data-theme-name", "plain", timeout=SETTINGS_MS)
+        expect(html).to_have_attribute("data-theme-name", "plain")
         expect(html).to_have_attribute("data-theme", "light")
         shows(plain["light"])
     finally:
@@ -339,7 +336,7 @@ def test_a_locked_key_is_read_only_and_a_post_sent_past_the_view_is_refused(
     spare = form.locator("input[type=checkbox][data-control='rows.spare']")
     expect(spare).to_be_enabled()
     spare.check()
-    expect(_msg(form, "rows.spare")).not_to_be_empty(timeout=SETTINGS_MS)
+    expect(_msg(form, "rows.spare")).not_to_be_empty()
     held = {"limit": 7, "rows": {"spare": True}}
     assert _file(shell) == held
     form = _settings(page)
@@ -348,7 +345,7 @@ def test_a_locked_key_is_read_only_and_a_post_sent_past_the_view_is_refused(
     expect(workers).to_be_editable()
     workers.fill("3")
     workers.press("Tab")
-    expect(_msg(form, "workers")).to_contain_text("workers", timeout=SETTINGS_MS)
+    expect(_msg(form, "workers")).to_contain_text("workers")
     held["workers"] = 3
     assert _file(shell) == held
     assert len(writes) == 2

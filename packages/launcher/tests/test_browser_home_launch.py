@@ -881,8 +881,7 @@ def test_a_launch_that_stays_starting_gives_the_button_back_and_is_followed_unti
     expect(go).to_be_enabled()
     expect(go).to_have_text("Launch in slot 2")
     # The watch goes on, and the start replaces the line.
-    expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 2 · "),
-                                                timeout=15_000)
+    expect(said(piece, "started")).to_have_text(re.compile(r"^Started in slot 2 · "))
     expect(late).to_have_count(0)
     expect(go).to_be_enabled()
 
