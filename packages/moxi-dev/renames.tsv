@@ -1873,7 +1873,7 @@ comms	packages/comms/tests/test_codex_outcomes.py	code, out = rig.send(IDENTITY,
 comms	packages/comms/tests/test_codex_outcomes.py	code, out = rig.send(IDENTITY, text, *flags, sender=SENDER)	keep	interrupt	interrupt
 comms	packages/comms/tests/test_codex_readiness.py	-	name	test_an_environment_with_no_moxi_script_finds_none	test_an_env_with_no_moxi_script_finds_none
 comms	packages/comms/tests/test_codex_turns_host.py	and any(f"msg {message_id}" in (item.get("text") or "")	keep	any	any
-comms	packages/comms/tests/test_codex_turns_host.py	assert wait_until(lambda: any(row["event"] == "app-server-exit"	keep	any	any
+comms	packages/comms/tests/test_codex_turns_host.py	assert any(row["event"] == "app-server-exit" for row in events(records))	keep	any	any
 comms	packages/comms/tests/test_codex_turns_host.py	output = proc.communicate(timeout=STOP_GRACE)[0]	keep	timeout	timeout
 comms	packages/comms/tests/test_codex_wrapper.py	-	name	test_the_hosts_environment_carries_this_identity_alone_and_no_lifeline	test_the_hosts_env_carries_this_identity_alone_and_no_lifeline
 comms	packages/comms/tests/test_codex_wrapper.py	_, err = proc.communicate(timeout=30)	keep	timeout	timeout
