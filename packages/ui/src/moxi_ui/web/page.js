@@ -258,6 +258,7 @@ var pt=globalThis,ht=pt.ShadowRoot&&(pt.ShadyCSS===void 0||pt.ShadyCSS.nativeSha
   .help { max-width: 440px; padding-top: 10px; font-size: 13px; line-height: 18px; }
   .aside { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); border-top: 1px solid var(--moxi-border);
            padding: 10px 2px 0; }
+  .help ~ .aside { max-width: 440px; border-top: 0; padding: 8px 0 0; }
   .hit { color: var(--moxi-text); text-decoration: underline; text-decoration-color: var(--moxi-text-dim);
          text-underline-offset: 3px; }
   @media (max-width: 720px) {
@@ -280,14 +281,14 @@ var pt=globalThis,ht=pt.ShadowRoot&&(pt.ShadyCSS===void 0||pt.ShadyCSS.nativeSha
         .value=${T(t)} @input=${n=>this.#C(n.target.value)}
         @keydown=${n=>{n.key==="Escape"&&t!==""&&(n.preventDefault(),this.#_())}}>
       ${t!==""?u`<button type="button" class="link dim" data-act="clear" @click=${()=>this.#_()}>Clear</button>`:h}
-    </div>`}#J(t){return t!==null?u` · <span data-line="partial">${t}</span>`:h}#ht(t,n){let{sections:i,showAll:r}=this.#t,o=us(t,n,i,this.#A(),r),l=a=>u`<div class="resh" data-part="found-head">
-      <span data-line="count">${a}</span><span data-line="reads">${os}</span></div>`;return o.none!==null?u`${l(o.none)}<div class="cols">
+    </div>`}#J(t){return t!==null?u` · <span data-line="partial">${t}</span>`:h}#ht(t,n){let{sections:i,showAll:r}=this.#t,o=us(t,n,i,this.#A(),r),l=d=>u`<div class="resh" data-part="found-head">
+      <span data-line="count">${d}</span><span data-line="reads">${os}</span></div>`,a=o.elsewhere.map(d=>u`<p class="aside" data-line="elsewhere">${d}</p>`);return o.none!==null?u`${l(o.none)}<div class="cols">
         ${this.#Z(!1)}
         <section class="pane" data-part="help"><p class="note help" data-line="help">${as}</p>
-          ${this.#s!==null?this.#D(null):h}</section>
+          ${a}${this.#s!==null?this.#D(null):h}</section>
       </div>`:u`${l(u`${o.count}${this.#J(o.reading)}`)}
       ${this.#X(o.groups,t,"found")}
-      ${o.elsewhere.map(a=>u`<p class="aside" data-line="elsewhere">${a}</p>`)}
+      ${a}
       ${this.#Q(o.groups)}`}#ft(t,n){let i=cs(t,this.#t.sections,this.#A(),n);return u`<div class="resh" data-part="found-head">
         <span data-line="count">${i.count}${this.#J(i.reading)}</span>
         <a href=${`/m/ui/settings/${n}`} class="back" data-act="back"

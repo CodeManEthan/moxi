@@ -237,6 +237,7 @@ const STYLES = css`
   .help { max-width: 440px; padding-top: 10px; font-size: 13px; line-height: 18px; }
   .aside { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); border-top: 1px solid var(--moxi-border);
            padding: 10px 2px 0; }
+  .help ~ .aside { max-width: 440px; border-top: 0; padding: 8px 0 0; }
   .hit { color: var(--moxi-text); text-decoration: underline; text-decoration-color: var(--moxi-text-dim);
          text-underline-offset: 3px; }
   @media (max-width: 720px) {
@@ -726,16 +727,18 @@ export class UiSettings extends LitElement {
     const found = find(query, listed, sections, this.#phone(), showAll);
     const head = (count: unknown) => html`<div class="resh" data-part="found-head">
       <span data-line="count">${count}</span><span data-line="reads">${FIND_READS}</span></div>`;
+    // A key another page edits answers with its sentence, even when no drawn key matches.
+    const elsewhere = found.elsewhere.map((line) => html`<p class="aside" data-line="elsewhere">${line}</p>`);
     if (found.none !== null) {
       return html`${head(found.none)}<div class="cols">
         ${this.#list(false)}
         <section class="pane" data-part="help"><p class="note help" data-line="help">${FIND_HELP}</p>
-          ${this.#leave !== null ? this.#leaveLine(null) : nothing}</section>
+          ${elsewhere}${this.#leave !== null ? this.#leaveLine(null) : nothing}</section>
       </div>`;
     }
     return html`${head(html`${found.count}${this.#partial(found.reading)}`)}
       ${this.#groups(found.groups, query, "found")}
-      ${found.elsewhere.map((line) => html`<p class="aside" data-line="elsewhere">${line}</p>`)}
+      ${elsewhere}
       ${this.#groupsAsk(found.groups)}`;
   }
 
