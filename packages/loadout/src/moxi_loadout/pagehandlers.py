@@ -4,6 +4,7 @@
 `install.status_plan()` (the view: `status`'s outcome with the plan it came from),
 `listing.entries()` (`list --json`), `install.global_preview()` (`global show --json`),
 `moxi_loadout.sourcedir` (the folder's own files, as git and repo read them),
+`moxi_loadout.preview` (what a Replace would do, on `status`'s plan),
 projects' `list_projects()`, and the job records `moxi_loadout.pagejob` keeps. They run
 here, off the event loop on the base's threads, take neither `install.lock` nor the core
 lock, and give git the time the doctor gives it: each call of the would-commit check
@@ -265,6 +266,35 @@ def source_dir(call: Any) -> dict[str, Any]:
     return answer
 
 
+def replace_preview(call: Any) -> dict[str, Any]:
+    """`GET /api/replace-preview?id=&section=`: what a Replace of the row `id` names in
+    `section` would do, for the confirm (`moxi_loadout.preview`): worked out on the plan
+    `status` builds, under the sections the act runs with, git bounded as for the view.
+    An `id` the verb would refuse is refused (422); a read that fails says so in `problem`
+    with no case."""
+    from moxi_loadout import doctor, homes, install
+    from moxi_loadout import preview as preview_mod
+    from moxi_loadout.manifest import parse_id
+
+    text, section = call.query["id"], call.query.get("section")
+    if not install._is_path(text) and not text.startswith("global:"):
+        try:
+            parse_id(text)
+        except ValueError as exc:
+            raise lb.Refused(f"loadout: {exc}") from None
+    elif install._is_path(text) and not os.path.isabs(text):
+        raise lb.Refused(f"loadout: {text}: name a path absolutely")
+    try:
+        with homes.as_page():
+            answer = preview_mod.replace_preview(text, section or None, git=_git(),
+                                                 git_seconds=doctor.PLACE_GIT_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
+        return {"problem": _problem(exc, "the replace preview"), "case": None,
+                "target": None, "kept_in": None, "tracked": False, "others": 0,
+                "label": "file", "diff": "", "lines": 0, "skipped": []}
+    return {"problem": None, **answer}
+
+
 def projects(call: Any) -> dict[str, Any]:
     """`GET /api/projects`: every project by key, for the project picker; `reason` says
     why there is none (projects absent, busy or unreadable), and `cause` names it
@@ -449,5 +479,6 @@ def global_remove(call: Any) -> Any:
     return _start(["global", "remove"], key=call.key)
 
 
-__all__ = ["status", "view", "listing", "global_preview", "source_dir", "projects", "drift", "job", "add", "remove",
+__all__ = ["status", "view", "listing", "global_preview", "source_dir", "replace_preview",
+           "projects", "drift", "job", "add", "remove",
            "enable", "disable", "global_mode", "install", "replace", "global_remove"]

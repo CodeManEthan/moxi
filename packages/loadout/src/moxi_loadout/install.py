@@ -645,6 +645,11 @@ def _claimed(claims: dict[str, bool], want) -> bool:
     return hit
 
 
+def named_by(text: str, want) -> bool:
+    """Whether `--replace text` names `want`, by its target or its id. Reads only."""
+    return _claimed({text: False}, want)
+
+
 def _moved(step, mine: set[str], old_source) -> bool:
     """Whether a refused occupant is a link loadout made from the folder an earlier
     install read, before the folder moved."""
@@ -905,5 +910,5 @@ def _write_ledger(plan, data, source, done, seeded_done, removes, now) -> None:
 
 
 __all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "Status", "status",
-           "status_plan", "global_preview", "global_preview_of", "install",
+           "status_plan", "global_preview", "global_preview_of", "install", "named_by",
            "generated_in_use", "orphans"]

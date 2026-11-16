@@ -161,7 +161,7 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     routes = {r["path"]: r for r in exported["routes"]}
     assert {p for p, r in routes.items() if r["kind"] == "read"} == {
         "/api/status", "/api/view", "/api/list", "/api/global", "/api/folder", "/api/projects",
-        "/api/drift", "/api/job"}
+        "/api/drift", "/api/job", "/api/replace-preview"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/remove", "/api/enable", "/api/disable", "/api/global-mode",
         "/api/install", "/api/replace", "/api/global-remove"}
@@ -205,7 +205,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
         "/api/view global.source", "/api/view sections[].refused.last_root",
         "/api/folder unlisted[].source", "/api/status kept[].target",
         "/api/status kept[].copy", "/api/job outcome.kept[].target",
-        "/api/job outcome.kept[].copy"}
+        "/api/job outcome.kept[].copy", "/api/replace-preview target",
+        "/api/replace-preview kept_in", "/api/replace-preview skipped[].path"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
                  "/api/list items[].source", "/api/list items[].scope",
@@ -223,7 +224,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
                  "/api/view items[].what.deny[]", "/api/folder detail",
                  "/api/folder uncommitted[]", "/api/folder unlisted[].name",
                  "/api/status kept[].id", "/api/status kept[].back",
-                 "/api/job outcome.kept[].id", "/api/job outcome.kept[].back"):
+                 "/api/job outcome.kept[].id", "/api/job outcome.kept[].back",
+                 "/api/replace-preview problem", "/api/replace-preview diff"):
         assert marks[said] == "redact", said
     plain = {"/api/view harnesses[]", "/api/view counts.ok", "/api/view sections[].where",
              "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
@@ -241,7 +243,10 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/view item_notes[].harness", "/api/view item_notes[].code",
              "/api/projects cause", "/api/folder state", "/api/folder more",
              "/api/folder unlisted[].kind", "/api/folder reinstalls",
-             "/api/status kept[].how", "/api/job outcome.kept[].how"}
+             "/api/status kept[].how", "/api/job outcome.kept[].how",
+             "/api/replace-preview case", "/api/replace-preview tracked",
+             "/api/replace-preview others", "/api/replace-preview label",
+             "/api/replace-preview lines", "/api/replace-preview skipped[].why"}
     assert not plain & set(marks)
 
 
@@ -603,6 +608,49 @@ def test_source_dir_with_settings_that_do_not_read_is_an_error(site, lo, monkeyp
     body = read("/api/folder")
     assert body["state"] == "error" and "bad value" in body["detail"]
     assert (body["uncommitted"], body["unlisted"], body["reinstalls"]) == (None, [], False)
+
+
+# -- the replace preview --------------------------------------------------------------------
+
+def test_replace_preview_answers_what_a_replace_would_do(lo):
+    from moxi_loadout import displaced, preview
+
+    kit.claude().mkdir(parents=True, exist_ok=True)
+    for path in kit.claude().iterdir():
+        path.unlink()
+    kit.skill(kit.claude(), "review", "mine\n")
+    answer = read("/api/replace-preview", "id=skill%3Areview%40claude&section=user")
+    target = kit.claude() / "review"
+    assert answer["problem"] is None
+    assert (answer["case"], answer["target"], answer["kept_in"]) == (
+        "moves", str(target), str(displaced.root()))
+    assert answer == {"problem": None, **preview.replace_preview("skill:review@claude", "user")}
+    assert "-mine" in answer["diff"]
+
+
+def test_replace_preview_of_a_row_not_replaceable_has_no_case(lo):
+    assert install.install().code == 0
+    answer = read("/api/replace-preview", "id=skill%3Areview%40claude")
+    assert (answer["case"], answer["target"], answer["lines"]) == (None, None, 0)
+
+
+@pytest.mark.parametrize("query", ["id=not-an-id", "id=skill%3Areview%40claude%40x",
+                                   "id=.%2Frelative"])
+def test_replace_preview_refuses_what_the_verb_would(lo, query):
+    status, body = get("/api/replace-preview", query)
+    assert status == 422, body
+
+
+def test_replace_preview_that_fails_says_so(lo, monkeypatch):
+    from moxi_loadout import preview
+
+    def boom(*a, **kw):
+        raise RuntimeError("secret /home/path")
+
+    monkeypatch.setattr(preview, "replace_preview", boom)
+    answer = read("/api/replace-preview", "id=skill%3Areview%40claude")
+    assert answer["case"] is None and "RuntimeError" in answer["problem"]
+    assert "/home/path" not in answer["problem"]
 
 
 # -- projects -------------------------------------------------------------------------------

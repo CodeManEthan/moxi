@@ -894,23 +894,7 @@ def apply(run: Run, scope, data: dict, *, keep: int, say=print, keeper=None) -> 
         from moxi_loadout.displaced import Keeper
 
         keeper = Keeper()
-    todo = [a for a in run.actions if covers(scope, a)
-            and a.op in ("add", "update", "remove", "end", "ok")]
-    # An action on an entry another item writes too follows that item's action; when
-    # that item is out of scope, the first such action in scope is applied in its place.
-    leading = {id(a) for a in todo if a.follows is None}
-    stand_in: dict[int, Action] = {}
-    followers: list[tuple[Action, Action]] = []
-    for a in todo:
-        if a.follows is None:
-            continue
-        if id(a.follows) in leading:
-            followers.append((a, a.follows))
-        elif id(a.follows) in stand_in:
-            followers.append((a, stand_in[id(a.follows)]))
-        else:
-            stand_in[id(a.follows)] = a
-    todo = [a for a in todo if a.follows is None or a in stand_in.values()]
+    todo, followers = _todo(run, scope)
     for a in todo:
         if (a.where.kind if a.entry else a.record.get("kind")) == "mcp" \
                 and a.op in ("add", "update", "remove"):
@@ -949,6 +933,28 @@ def apply(run: Run, scope, data: dict, *, keep: int, say=print, keeper=None) -> 
     _record(run, data, scope)
     return [row(a) for a in run.actions if covers(scope, a) and _shown(a)] + [
         r for r in run.rows if _row_covered(scope, r)]
+
+
+def _todo(run: Run, scope) -> tuple[list[Action], list[tuple[Action, Action]]]:
+    """The actions `apply` carries out in `scope`, and each follower with the action it
+    takes its result from."""
+    todo = [a for a in run.actions if covers(scope, a)
+            and a.op in ("add", "update", "remove", "end", "ok")]
+    # An action on an entry another item writes too follows that item's action; when
+    # that item is out of scope, the first such action in scope is applied in its place.
+    leading = {id(a) for a in todo if a.follows is None}
+    stand_in: dict[int, Action] = {}
+    followers: list[tuple[Action, Action]] = []
+    for a in todo:
+        if a.follows is None:
+            continue
+        if id(a.follows) in leading:
+            followers.append((a, a.follows))
+        elif id(a.follows) in stand_in:
+            followers.append((a, stand_in[id(a.follows)]))
+        else:
+            stand_in[id(a.follows)] = a
+    return [a for a in todo if a.follows is None or a in stand_in.values()], followers
 
 
 def _row_covered(scope, r: Row) -> bool:
@@ -1116,29 +1122,69 @@ def _record(run: Run, data: dict, scope) -> None:
     data["entries"] = out
 
 
-# -- the global file, shown ----------------------------------------------------------------
+# -- what a run would write, shown --------------------------------------------------------
 
-def preview(run: Run) -> dict[str, tuple[bytes, bytes]]:
-    """What the next install would make of each global file: `{file: (now, then)}`."""
+#: The kinds of a global file's entries.
+GLOBAL_KINDS = ("global-line", "global-block", "instructions")
+
+
+def preview(run: Run, scope=None, *, files=None) -> dict[str, tuple[bytes, bytes]]:
+    """What applying `run` in `scope` would make of each harness file, `{file: (now,
+    then)}`, worked out as `apply` works it: each action it would carry out there, through
+    `_edit`, on a copy of the planned file. Reads, writes nothing. `then` is `now` for a
+    file nothing changes (`apply` leaves it unwritten) and empty for a text file left
+    empty (`apply` removes it). A file is shown when an action of the run is there: with
+    `files`, each file it names; else each global file. An MCP server its harness's CLI
+    writes is never shown here (`server_entry`). With no `scope`, a whole run's."""
     import copy
 
+    from moxi_loadout.planner import Scope
+
+    todo, _ = _todo(run, Scope() if scope is None else scope)
+    edits = {id(a) for a in todo if a.op in ("add", "update", "remove")}
     out = {}
     for a in run.actions:
         kind = a.entry.kind if a.entry else a.record.get("kind")
-        if kind not in ("global-line", "global-block", "instructions"):
-            continue
         file = a.entry.file if a.entry else a.record.get("file")
+        if kind == "mcp" or (kind not in GLOBAL_KINDS if files is None else file not in files):
+            continue
         doc = run.docs.get(file)
         if doc is None:
             continue
         if file not in out:
             out[file] = (doc.raw or b"", copy.deepcopy(doc))
-        if a.op in ("add", "update", "remove"):
+        if id(a) in edits:
             _edit(out[file][1], a)
-    return {f: (now, d.dumps() if not (d.kind == "text" and d.empty) else b"")
-            for f, (now, d) in out.items()}
+    shown = {}
+    for f, (now, d) in out.items():
+        if not d.changed:
+            shown[f] = (now, now)
+        else:
+            shown[f] = (now, b"" if d.kind == "text" and d.empty else d.dumps())
+    return shown
+
+
+def server_entry(run: Run, a: Action) -> tuple[object, object]:
+    """An MCP server its harness's CLI writes, as `(found, sent)`: its entry as found in
+    the file the plan read (None when absent), and as `a` would send it (None for a
+    removal). Its file's bytes can't be known before the CLI writes."""
+    where = a.where
+    get = (lambda k: getattr(where, k)) if isinstance(where, Entry) else where.get
+    doc = _doc(run, get("file") or "", "mcp")
+    found = _MISSING if doc is None else _get(doc, "mcp", get("key") or [])
+    sent = a.entry.sent if a.entry is not None and a.op != "remove" else None
+    return (None if found is _MISSING else found), sent
+
+
+def named_by(text: str, a: Action) -> bool:
+    """Whether `--replace text` names `a`'s entry. Reads only."""
+    where = a.where
+    item = where.item if isinstance(where, Entry) else str(where.get("item"))
+    harness = where.harness if isinstance(where, Entry) else where.get("harness")
+    kind, _, name = item.partition(":")
+    return _claimed({text: False}, (kind, name), harness)
 
 
 __all__ = ["NOTE_CODES", "Entry", "Action", "Run", "wanted", "plan", "rows", "sourced_rows", "row",
            "covers", "apply",
-           "preview", "CLI_SECONDS"]
+           "preview", "server_entry", "named_by", "GLOBAL_KINDS", "CLI_SECONDS"]

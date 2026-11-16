@@ -11,6 +11,8 @@
     GET  /api/folder      the loadout folder: its files git hasn't committed, the skills
                           and agents in it no section lists, and whether a commit installs
                           it again
+    GET  /api/replace-preview  what a Replace of one row would do: the case, the diff,
+                          where the copy goes, what the diff leaves out
     GET  /api/projects    the projects a project section can name by key
     GET  /api/drift       how many items aren't `ok` or `off`
     GET  /api/job         one page job: running, done (with its outcome) or interrupted
@@ -283,6 +285,28 @@ SOURCE_DIR = {
         "kind": _TEXT, "name": _SAYS, "source": _PATH})),
     "reinstalls": lb.Out("bool"),
 }
+#: What a Replace of one row would do, for the confirm: `case` (`moves`: the placer moves
+#: what is there aside under `displaced/` and places loadout's; `keeps`: loadout keeps a
+#: copy of the file there, then writes it; null when the row isn't replaceable), the
+#: `target`, `kept_in` (the folder the copy goes to), `tracked` (git tracks what is
+#: there), `others` (how many other rows the run changes), the unified `diff` of what is
+#: there (-) against what loadout writes (+) and its `lines`, `label` (`file`, or
+#: `entry` for an MCP server its harness's CLI writes, whose diff is its entry), and
+#: `skipped`, each path the diff leaves out and `why` (`link`, `large`, `binary`,
+#: `many`). `target` and `kept_in` are null only with `problem` set, or `target` with
+#: no case.
+REPLACE_PREVIEW = {
+    "problem": _PROBLEM,
+    "case": _MAYBE,
+    "target": _MAYBE_PATH,
+    "kept_in": _MAYBE_PATH,
+    "tracked": lb.Out("bool"),
+    "others": lb.Out("int"),
+    "label": _TEXT,
+    "diff": _SAYS,
+    "lines": lb.Out("int"),
+    "skipped": lb.Out("list", items=lb.Out("table", items={"path": _PATH, "why": _TEXT})),
+}
 #: `reason` says why there is no list: projects absent, busy or unreadable; `cause` names
 #: it: `absent`, `busy`, `unreadable`, `error`, or null when projects listed.
 PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS,
@@ -338,6 +362,10 @@ PAGE = lb.Page(
         lb.Route("/api/list", "read", _target("listing"), returns=LIST),
         lb.Route("/api/global", "read", _target("global_preview"), returns=GLOBAL),
         lb.Route("/api/folder", "read", _target("source_dir"), returns=SOURCE_DIR),
+        lb.Route("/api/replace-preview", "read", _target("replace_preview"),
+                 query={"id": lb.Field("string", max=PATH_MAX),
+                        "section": lb.Field("string", required=False, max=PATH_MAX)},
+                 returns=REPLACE_PREVIEW),
         lb.Route("/api/projects", "read", _target("projects"), returns=PROJECTS),
         lb.Route("/api/drift", "read", _target("drift"), returns=DRIFT),
         lb.Route(JOB_ROUTE, "read", _target("job"),
@@ -360,5 +388,6 @@ PAGE = lb.Page(
 )
 
 __all__ = ["BUDGET", "COUNTS", "DRIFT", "SOURCE_DIR", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE", "KEPT",
-           "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS",
+           "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "REPLACE_PREVIEW", "ROW", "SECTION",
+           "STATUS",
            "ITEM_NOTE", "VIEW", "VIEW_GLOBAL", "VIEW_ITEM", "VIEW_ROW", "VIEW_SECTION"]
