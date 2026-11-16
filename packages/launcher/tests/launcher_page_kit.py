@@ -227,10 +227,14 @@ _COLOUR = """(node, token) => {
 }"""
 
 
-def assert_colour(locator: Any, token: str, timeout: float = 5.0) -> None:
+def assert_colour(locator: Any, token: str, timeout: float | None = None) -> None:
     """`locator`'s text shows in the theme token `token`'s colour within `timeout`
-    seconds, read again until it does, as a web-first assertion would."""
+    seconds (the ui kit's `WAIT_S` when none is given), read again until it does, as a
+    web-first assertion would."""
     from moxi_dev.testing import wait_for
+    from moxi_ui.testing import WAIT_S
+
+    timeout = WAIT_S if timeout is None else timeout
 
     seen: list[dict] = []
 

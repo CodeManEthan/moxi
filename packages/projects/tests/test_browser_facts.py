@@ -24,8 +24,8 @@ pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
                                  reason="projects' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
 
-#: How long a test waits for the fixture to report, in seconds.
-WAIT_S = 5.0
+#: How long a test waits for the fixture to report, in seconds: the ui kit's bound.
+WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 
 # Places the fixture's component in a hidden host on the shell's document, through the
 # client as the page places it, and keeps every report it sends in `window.__reports`.

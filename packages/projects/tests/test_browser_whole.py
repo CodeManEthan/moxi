@@ -145,7 +145,7 @@ def test_a_part_over_the_texts_length_is_left_out_and_the_rest_drawn(fixture_she
     orbit = panel.locator('moxi-ui-row[data-key="orbit-cli"]')
     expect(orbit).to_have_attribute("tail", "1 active recently · $1.55 today")
     expect(orbit).to_have_attribute("rest", "dep-audit's last run failed at 18:00")
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + pytest.importorskip("moxi_ui.testing").WAIT_S
     while not any("over 200 characters" in text for text in messages) and time.monotonic() < deadline:
         fixture_page.wait_for_timeout(50)
     assert any("fixture's project facts refused in part" in text and "over 200 characters" in text
