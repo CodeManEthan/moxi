@@ -27,13 +27,14 @@ starts an act refuses (422, nothing written):
   names by a relative path goes to the job as its absolute root;
 - a `--replace` path that isn't absolute, for the same reason;
 - `enable` or `disable` naming both the user section and a project section;
-- a job that didn't start (its record is removed), or a confirmed act's key that names a
-  job of other arguments.
+- a `job` that isn't 32 hex characters;
+- a job that didn't start (its record is removed), or a `job` that names a job of other
+  arguments.
 
-A confirmed act (`/api/replace`, `/api/global-remove`) uses its idempotency key as the job's
-id, so a retry after the page server restarted finds the job it started and answers 202
-for it again, without starting a second. It answers `Accepted` or a refusal, never a
-plain answer. Other acts use a fresh id.
+`/api/replace` and `/api/global-remove` run as the job their body's `job` names, the id
+the page mints for each press, so a repeat of the press (two at once, or a retry after
+the page server restarted) finds the job it started and answers 202 for it again,
+without starting a second. Other acts use a fresh id.
 
 Values go to the verb as its own flags (`--project=P`, `--replace=ID`), so no value is
 read as a flag.
@@ -48,7 +49,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from moxi_loadout import pagejob
-from moxi_loadout.page import JOB_ROUTE, lb
+from moxi_loadout.page import JOB_ID_CHARS, JOB_ROUTE, lb
 
 log = logging.getLogger("moxi.loadout.page")
 
@@ -356,8 +357,8 @@ def job(call: Any) -> dict[str, Any]:
 # -- acts -----------------------------------------------------------------------------------
 
 def _start(argv: Sequence[str], *, key: str | None = None) -> Any:
-    """Start the job running `argv`, under `key` for a confirmed act: 202 with its status
-    path, or a refusal."""
+    """Start the job running `argv`, under id `key` when the page named one (a fresh id
+    otherwise): 202 with its status path, or a refusal."""
     try:
         started = pagejob.start(argv, job=key)
     except (pagejob.Clash, ValueError) as exc:
@@ -446,7 +447,7 @@ def disable(call: Any) -> Any:
 
 def global_mode(call: Any) -> Any:
     """`POST /api/global-mode`: `moxi loadout global mode MODE`, as a job. The mode `off`
-    is `/api/global-remove`'s, which is confirmed."""
+    is `/api/global-remove`'s."""
     return _start(["global", "mode", call.body["mode"]])
 
 
@@ -455,28 +456,36 @@ def install(call: Any) -> Any:
     return _start(["install", *_sections(call.body)])
 
 
+def _job(body: Mapping[str, Any]) -> str:
+    """The job id the page minted for this press, or a refusal."""
+    job = body["job"]
+    if len(job) != JOB_ID_CHARS or any(c not in "0123456789abcdef" for c in job):
+        raise lb.Refused(f"loadout: a job id is {JOB_ID_CHARS} hex characters")
+    return job
+
+
 def replace(call: Any) -> Any:
-    """`POST /api/replace`, confirmed: `moxi loadout install --replace ID...` with the
-    sections named, as a job under the act's key."""
+    """`POST /api/replace`: `moxi loadout install --replace ID [--user | --project P]`, as
+    the job the body names."""
     from moxi_loadout.install import _is_path
 
-    values = list(call.body["replace"])
-    if not values:
+    value, body = call.body["replace"], call.body
+    if not value.strip():
         raise lb.Refused("loadout: name what to replace: a path or <kind>:<name>@<harness>")
-    for value in values:
-        if not value.strip():
-            raise lb.Refused("loadout: name what to replace: a path or "
-                             "<kind>:<name>@<harness>")
-        if _is_path(value) and not os.path.isabs(value):
-            raise lb.Refused(f"loadout: --replace {value}: name a path absolutely")
-    flags = [f"--replace={v}" for v in values]
-    return _start(["install", *flags, *_sections(call.body)], key=call.key)
+    if _is_path(value) and not os.path.isabs(value):
+        raise lb.Refused(f"loadout: --replace {value}: name a path absolutely")
+    project = body.get("project")
+    if body.get("user") and project is not None:
+        raise lb.Refused("loadout: name the user section or a project section, not both")
+    flags = ["--user"] if body.get("user") else []
+    if project is not None:
+        flags.append(_section(project))
+    return _start(["install", f"--replace={value}", *flags], key=_job(body))
 
 
 def global_remove(call: Any) -> Any:
-    """`POST /api/global-remove`, confirmed: `moxi loadout global remove`, as a job under the
-    act's key."""
-    return _start(["global", "remove"], key=call.key)
+    """`POST /api/global-remove`: `moxi loadout global remove`, as the job the body names."""
+    return _start(["global", "remove"], key=_job(call.body))
 
 
 __all__ = ["status", "view", "listing", "global_preview", "source_dir", "replace_preview",

@@ -31,8 +31,7 @@ from moxi_loadout import cli, homes, install, ledger, page, pagehandlers, pagejo
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
-KEY = "K" * 43
-OTHER_KEY = "L" * 43
+JOB = "0f" * 16
 
 
 def loopback():
@@ -56,16 +55,14 @@ def served():
     return LB.guard(inner, lambda: profile)
 
 
-async def _send(app, method: str, path: str, *, query: str = "", body: dict | None = None,
-                key: str | None = None) -> tuple[int, dict | None]:
+async def _send(app, method: str, path: str, *, query: str = "",
+                body: dict | None = None) -> tuple[int, dict | None]:
     headers = [(b"host", b"127.0.0.1:%d" % PORT), (b"x-moxi-token", TOKEN.encode())]
     raw = b""
     if method == "POST":
         headers.append((b"content-type", b"application/json"))
         raw = json.dumps(body or {}).encode()
         headers.append((b"content-length", str(len(raw)).encode()))
-    if key is not None:
-        headers.append((b"idempotency-key", key.encode()))
     scope = {
         "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
         "http_version": "1.1", "server": ("127.0.0.1", PORT),
@@ -102,9 +99,8 @@ def read(path: str, query: str = "") -> dict:
     return body
 
 
-def post(path: str, body: dict | None = None, *, key: str | None = None,
-         app=None) -> tuple[int, dict | None]:
-    return asyncio.run(_send(app or served(), "POST", path, body=body, key=key))
+def post(path: str, body: dict | None = None, *, app=None) -> tuple[int, dict | None]:
+    return asyncio.run(_send(app or served(), "POST", path, body=body))
 
 
 def printed(argv: list[str]):
@@ -165,9 +161,7 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/remove", "/api/enable", "/api/disable", "/api/global-mode",
         "/api/install", "/api/replace", "/api/global-remove"}
-    assert {p for p, r in routes.items() if r.get("confirmed")} == {
-        "/api/replace", "/api/global-remove"}
-    assert all(routes[p]["status"] == "/api/job" for p in ("/api/replace", "/api/global-remove"))
+    assert not any(r.get("confirmed") for r in routes.values())
     assert not any(r["gateway"] or r["stream"] for r in routes.values())
 
 
@@ -189,10 +183,7 @@ def _marks(shape: dict, at: str = "") -> dict[str, str]:
 
 
 def test_every_value_that_can_hold_a_path_carries_a_mark():
-    marks: dict[str, str] = {}
-    for route in LB.export(page.PAGE)["routes"]:
-        for key, shape in route["returns"].items():
-            marks.update({f"{route['path']} {k}": v for k, v in _marks(shape, key).items()})
+    marks = _all_marks()
     paths = {k for k, v in marks.items() if v == "path"}
     assert paths == {
         "/api/status rows[].target", "/api/job outcome.rows[].target",
@@ -248,6 +239,43 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/replace-preview others", "/api/replace-preview label",
              "/api/replace-preview lines", "/api/replace-preview skipped[].why"}
     assert not plain & set(marks)
+
+
+#: Every mark the routes gave before this page read `/api/view`, copied from `page.py` as it
+#: was then: no field may carry a weaker one now.
+EARLIER_MARKS = {
+    "/api/drift note": "redact", "/api/drift problem": "redact",
+    "/api/global files[].diff": "redact", "/api/global files[].file": "path",
+    "/api/global files[].parts[]": "path", "/api/global problem": "redact",
+    "/api/job argv[]": "redact", "/api/job lines[]": "redact",
+    "/api/job outcome.lines[]": "redact", "/api/job outcome.notes[]": "redact",
+    "/api/job outcome.rows[].name": "redact", "/api/job outcome.rows[].reason": "redact",
+    "/api/job outcome.rows[].scope": "redact", "/api/job outcome.rows[].target": "path",
+    "/api/list items[].scope": "redact", "/api/list items[].source": "redact",
+    "/api/list manifest": "path", "/api/list problem": "redact",
+    "/api/list sections[].name": "redact", "/api/list sections[].root": "path",
+    "/api/projects projects[].root": "path", "/api/projects reason": "redact",
+    "/api/status lines[]": "redact", "/api/status notes[]": "redact",
+    "/api/status problem": "redact", "/api/status rows[].name": "redact",
+    "/api/status rows[].reason": "redact", "/api/status rows[].scope": "redact",
+    "/api/status rows[].target": "path",
+}
+STRENGTH = {None: 0, "path": 1, "redact": 2}
+
+
+def _all_marks() -> dict[str, str]:
+    marks: dict[str, str] = {}
+    for route in LB.export(page.PAGE)["routes"]:
+        for key, shape in route["returns"].items():
+            marks.update({f"{route['path']} {k}": v for k, v in _marks(shape, key).items()})
+    return marks
+
+
+def test_no_field_carries_a_weaker_mark_than_it_did():
+    marks = _all_marks()
+    weaker = {k: (v, marks.get(k)) for k, v in EARLIER_MARKS.items()
+              if STRENGTH[marks.get(k)] < STRENGTH[v]}
+    assert weaker == {}
 
 
 def test_the_page_names_kinds_modes_and_states_as_loadout_does():
@@ -767,14 +795,18 @@ def test_an_act_starts_its_verb_as_a_job_and_answers_202(lo, spawned, path, body
     ("/api/enable", {"id": "skill:review@claude", "user": True, "project": "alpha"},
      "not both"),
     ("/api/install", {"projects": ["sub/dir"]}, "by an absolute path"),
-    ("/api/replace", {"replace": []}, "name what to replace"),
-    ("/api/replace", {"replace": ["skills/review"]}, "name a path absolutely"),
+    ("/api/replace", {"replace": " ", "job": JOB}, "name what to replace"),
+    ("/api/replace", {"replace": "skills/review", "job": JOB}, "name a path absolutely"),
+    ("/api/replace", {"replace": "skill:review@claude", "user": True, "project": "alpha",
+                      "job": JOB}, "not both"),
+    ("/api/replace", {"replace": "skill:review@claude", "job": "K" * 32}, "32 hex"),
+    ("/api/replace", {"replace": "skill:review@claude", "job": JOB.upper()}, "32 hex"),
+    ("/api/global-remove", {"job": "x"}, "32 hex"),
 ])
 def test_an_act_the_verb_would_misread_is_refused_before_anything_is_written(
         lo, spawned, path, body, says):
     before = (lo / "loadout.toml").read_bytes()
-    key = KEY if path == "/api/replace" else None
-    status, answer = post(path, body, key=key)
+    status, answer = post(path, body)
     assert status == 422, answer
     assert says in answer["refused"]
     assert spawned == []
@@ -790,7 +822,7 @@ def test_a_relative_section_the_manifest_names_exactly_goes_as_its_root(lo, spaw
     assert verb_of(spawned[0]) == ["install", f"--project={root}"]
 
 
-def test_global_mode_off_is_only_the_confirmed_act(lo, spawned):
+def test_global_mode_off_is_only_global_remove(lo, spawned):
     status, answer = post("/api/global-mode", {"mode": "off"})
     assert status == 400 and spawned == []
 
@@ -819,47 +851,69 @@ def test_a_job_whose_pid_cant_be_recorded_is_still_accepted(lo, spawned, monkeyp
     assert read("/api/job", f"job={job_of(answer)}")["state"] == "running"
 
 
-# -- confirmed acts -------------------------------------------------------------------------
+# -- the acts named by the job the page minted ----------------------------------------------
 
 @pytest.mark.parametrize("path, body, verb", [
-    ("/api/replace", {"replace": ["skill:review@claude", "/srv/alpha/.claude/skills/x"],
-                      "projects": ["alpha"]},
-     ["install", "--replace=skill:review@claude", "--replace=/srv/alpha/.claude/skills/x",
-      "--project=alpha"]),
-    # A global file's row: no section, so the job is the whole install that writes it.
-    ("/api/replace", {"replace": ["global:global@claude"]},
+    ("/api/replace", {"replace": "skill:review@claude", "project": "alpha", "job": JOB},
+     ["install", "--replace=skill:review@claude", "--project=alpha"]),
+    ("/api/replace", {"replace": "/srv/alpha/.claude/skills/x", "user": True, "job": JOB},
+     ["install", "--replace=/srv/alpha/.claude/skills/x", "--user"]),
+    # A row a whole run applies (the global file's part): no section.
+    ("/api/replace", {"replace": "global:global@claude", "job": JOB},
      ["install", "--replace=global:global@claude"]),
-    ("/api/global-remove", {}, ["global", "remove"]),
+    ("/api/global-remove", {"job": JOB}, ["global", "remove"]),
 ])
-def test_a_confirmed_act_runs_as_the_job_its_key_names(lo, spawned, path, body, verb):
-    status, answer = post(path, body, key=KEY)
-    assert (status, answer) == (202, {"status": f"/api/job?job={KEY}"})
-    assert spawned == [pagejob.command(KEY, verb)]
+def test_a_named_act_runs_its_verb_and_nothing_else_as_the_job_it_names(
+        lo, spawned, path, body, verb):
+    status, answer = post(path, body)
+    assert (status, answer) == (202, {"status": f"/api/job?job={JOB}"})
+    assert spawned == [pagejob.command(JOB, verb)]
 
 
-def test_a_confirmed_act_needs_its_key(lo, spawned):
-    status, _ = post("/api/global-remove", {})
+@pytest.mark.parametrize("path, body", [
+    ("/api/replace", {"replace": "skill:review@claude", "user": True}),
+    ("/api/global-remove", {}),
+])
+def test_a_named_act_needs_its_job(lo, spawned, path, body):
+    status, _ = post(path, body)
     assert status == 400 and spawned == []
 
 
-def test_a_confirmed_repeat_gets_the_first_answer_and_starts_nothing_more(lo, spawned):
-    app = served()
-    first = post("/api/global-remove", {}, key=KEY, app=app)
-    assert post("/api/global-remove", {}, key=KEY, app=app) == first
+@pytest.mark.parametrize("path, body", [
+    ("/api/replace", {"replace": ["skill:review@claude"], "job": JOB}),
+    ("/api/replace", {"replace": "skill:review@claude", "confirmed": True, "job": JOB}),
+    ("/api/global-remove", {"job": JOB, "status": "/api/job"}),
+])
+def test_a_named_act_takes_no_list_and_no_confirmation(lo, spawned, path, body):
+    status, _ = post(path, body)
+    assert status == 400 and spawned == []
+
+
+def test_a_repeat_finds_the_job_it_started(lo, spawned):
+    body = {"replace": "skill:review@claude", "user": True, "job": JOB}
+    first = post("/api/replace", body)
+    assert first[0] == 202
+    # Each post is a new app, as the page server after a restart.
+    assert post("/api/replace", body) == first
+    assert post("/api/global-remove", {"job": "1" * 32}) != first
+    assert len(spawned) == 2
+
+
+def test_the_same_job_with_another_body_is_refused(lo, spawned):
+    assert post("/api/replace", {"replace": "skill:review@claude", "job": JOB})[0] == 202
+    status, answer = post("/api/replace", {"replace": "skill:review@codex", "job": JOB})
+    assert status == 422 and "other arguments" in answer["refused"]
+    status, answer = post("/api/global-remove", {"job": JOB})
+    assert status == 422 and "other arguments" in answer["refused"]
     assert len(spawned) == 1
 
 
-def test_a_key_sent_with_another_body_is_refused(lo, spawned):
-    app = served()
-    assert post("/api/replace", {"replace": ["skill:review@claude"]}, key=KEY, app=app)[0] == 202
-    status, _ = post("/api/replace", {"replace": ["skill:review@codex"]}, key=KEY, app=app)
-    assert status == 422 and len(spawned) == 1
-
-
-def test_a_repeat_while_the_first_still_runs_is_409(lo, monkeypatch):
+def test_two_presses_at_once_start_one_job(lo, monkeypatch):
     entered, release = threading.Event(), threading.Event()
+    spawned: list[list[str]] = []
 
     def spawn(argv, *, cwd, output):
+        spawned.append(argv)
         entered.set()
         release.wait(30)
         return os.getpid()
@@ -868,28 +922,18 @@ def test_a_repeat_while_the_first_still_runs_is_409(lo, monkeypatch):
 
     async def both():
         app = served()
-        first = asyncio.create_task(_send(app, "POST", "/api/global-remove", body={}, key=KEY))
+        body = {"job": JOB}
+        first = asyncio.create_task(_send(app, "POST", "/api/global-remove", body=body))
         while not entered.is_set():
             await asyncio.sleep(0.01)
         try:
-            second = await _send(app, "POST", "/api/global-remove", body={}, key=KEY)
+            second = await _send(app, "POST", "/api/global-remove", body=body)
         finally:
             release.set()
         return await first, second
 
     first, second = asyncio.run(both())
-    assert first[0] == 202 and second[0] == 409
-
-
-def test_a_retry_after_a_restart_finds_its_job(lo, spawned):
-    body = {"replace": ["skill:review@claude"]}
-    first = post("/api/replace", body, key=KEY)
-    assert first[0] == 202
-    # A new app is the page server after a restart: its key map is empty.
-    assert post("/api/replace", body, key=KEY) == first
-    assert len(spawned) == 1
-    status, answer = post("/api/replace", {"replace": ["skill:review@codex"]}, key=KEY)
-    assert status == 422 and "other arguments" in answer["refused"]
+    assert first == second == (202, {"status": f"/api/job?job={JOB}"})
     assert len(spawned) == 1
 
 
@@ -917,7 +961,8 @@ def test_a_job_names_what_its_run_kept_and_how_to_put_it_back(lo, spawned, termi
     kit.claude().mkdir(parents=True)
     kit.skill(kit.claude(), "review", "mine\n")
     target = kit.claude() / "review"
-    status, answer = post("/api/replace", {"replace": ["skill:review@claude"]}, key=KEY)
+    status, answer = post("/api/replace", {"replace": "skill:review@claude", "user": True,
+                                           "job": JOB})
     assert status == 202
     job = job_of(answer)
     assert pagejob.run(job, verb_of(spawned[0])) == 0

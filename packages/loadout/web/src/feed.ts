@@ -49,12 +49,6 @@ export interface Outcome {
   exit: number;
 }
 
-/** `/api/status`: every item's state for each harness. */
-export interface Status extends Outcome {
-  /** Why there is nothing to show (a manifest, ledger or config that can't be read). */
-  problem: string | null;
-}
-
 /** One item a section lists. */
 export interface Item {
   kind: string;
@@ -77,14 +71,6 @@ export interface Section {
   root: string | null;
 }
 
-/** `/api/list`: the items each section lists, and the sections. */
-export interface Listing {
-  problem: string | null;
-  manifest: string | null;
-  sections: Section[];
-  items: Item[];
-}
-
 /** One global instruction file and what the next install makes of it. */
 export interface GlobalFile {
   file: string;
@@ -97,15 +83,6 @@ export interface GlobalFile {
   diff: string;
   placed: boolean;
   state: string | null;
-}
-
-/** `/api/global`: the global mode in force and each global file. */
-export interface Global {
-  problem: string | null;
-  mode: string;
-  /** False while the manifest sets no mode (it reads `off` then). */
-  chosen: boolean;
-  files: GlobalFile[];
 }
 
 export interface Project {
@@ -381,6 +358,40 @@ export function parseView(data: unknown): View | null {
   };
 }
 
+/** A skill or agent file in the folder that no section lists. */
+export interface Unlisted {
+  kind: string;
+  name: string;
+  source: string;
+}
+
+/** `/api/folder`: the loadout folder's files git hasn't committed, its files no section
+ * lists, and whether a commit installs it again. */
+export interface SourceDir {
+  /** `ok`, or `error` when git failed or didn't answer (`detail` says which). */
+  state: string;
+  detail: string | null;
+  /** At most 20 names relative to the folder; null outside a git work tree. */
+  uncommitted: string[] | null;
+  /** How many uncommitted files past those. */
+  more: number;
+  unlisted: Unlisted[];
+  reinstalls: boolean;
+}
+
+function isUnlisted(value: unknown): value is Unlisted {
+  return isObj(value) && isStr(value.kind) && isStr(value.name) && isStr(value.source);
+}
+
+/** `/api/folder`'s value, or null when it isn't one. */
+export function parseSourceDir(data: unknown): SourceDir | null {
+  if (!isObj(data) || !isStr(data.state) || !isStrOrNull(data.detail)
+      || !(data.uncommitted === null || isStrings(data.uncommitted)) || !isInt(data.more)
+      || !isListOf(data.unlisted, isUnlisted) || !isBool(data.reinstalls)) return null;
+  return { state: data.state, detail: data.detail, uncommitted: data.uncommitted, more: data.more,
+           unlisted: data.unlisted, reinstalls: data.reinstalls };
+}
+
 /** One path a Replace's diff leaves out: `why` one of `link`, `large`, `binary`, `many`. */
 export interface Skipped {
   path: string;
@@ -419,28 +430,6 @@ export function parseReplacePreview(data: unknown): ReplacePreview | null {
   return { problem: data.problem, case: data.case, target: data.target, kept_in: data.kept_in,
            tracked: data.tracked, others: data.others, label: data.label, diff: data.diff,
            lines: data.lines, skipped: data.skipped };
-}
-
-/** `/api/status`'s value, or null when it isn't one. */
-export function parseStatus(data: unknown): Status | null {
-  if (!isObj(data) || !isStrOrNull(data.problem) || !isOutcome(data)) return null;
-  const { problem, rows, kept, lines, notes, counts, exit } = data as unknown as Status;
-  return { problem, rows, kept: kept ?? [], lines, notes, counts, exit };
-}
-
-/** `/api/list`'s value, or null when it isn't one. */
-export function parseListing(data: unknown): Listing | null {
-  if (!isObj(data) || !isStrOrNull(data.problem) || !isStrOrNull(data.manifest)
-      || !isListOf(data.sections, isSection) || !isListOf(data.items, isItem)) return null;
-  return { problem: data.problem, manifest: data.manifest, sections: data.sections,
-           items: data.items };
-}
-
-/** `/api/global`'s value, or null when it isn't one. */
-export function parseGlobal(data: unknown): Global | null {
-  if (!isObj(data) || !isStrOrNull(data.problem) || !isStr(data.mode)
-      || typeof data.chosen !== "boolean" || !isListOf(data.files, isGlobalFile)) return null;
-  return { problem: data.problem, mode: data.mode, chosen: data.chosen, files: data.files };
 }
 
 /** `/api/projects`'s value, or null when it isn't one. */

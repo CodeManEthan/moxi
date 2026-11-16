@@ -1,40 +1,47 @@
-// <moxi-loadout-page route="...">: loadout's panel.
+// <moxi-loadout-page route="...">: loadout's panel. Under the shell's top line, from top to
+// bottom, each group with its label in the left column:
 //
-// - The drift block, placed as any host places it.
-// - The job: the act the page last started, read from its status path while it runs
-//   (running, then done with its outcome, or interrupted).
-// - Install: every section, or one, as `moxi loadout install` does.
-// - The items by section, the folder's own first and then each module's skills, each with
-//   its harnesses: the state and why, a switch that enables or disables it there (it shows
-//   the manifest as last read, so it flips once the job has ended), and
-//   Replace for a blocked or modified placement. Then the rows no listed item has, and
-//   the add form, whose section picker offers projects by key.
-// - The global instruction file: its mode, the buttons that set one, Turn off, and what
-//   the next install makes of each global file, with its diff.
+// - `This page`, only while the harness homes' note is set: the page's acts are off, and
+//   each act shows as the command he would type, with `Copy`.
+// - `Placed`: the verdict, then each problem in three lines (what, where, the fix and its
+//   act), then the counts per harness; with nothing needing him, the counts sit at the
+//   verdict's right.
+// - `Folder`: the loadout folder, its files git hasn't committed, and `Settings › loadout`.
+// - `Your items`, a group per module whose skills it took over, then each project
+//   section: one row per item and a column per harness of the harness table; past twelve
+//   items a section folds by kind. The global file is Your items' last row.
+// - The dim foot lines: the view's notes, and why the folder can't be read.
 //
-// Every act runs as a page job: the page sends it, follows the job's status path, and
-// keeps every act's control off while one runs. It keeps that path in the tab's
-// `sessionStorage` until the job ends, so after a reload, or another panel and back, it
-// follows the job again. Replace and Turn off are confirmed acts:
-// the page's button opens the shell's confirm sheet, which mints a new key at each
-// confirmation and sends the act once. When a job ends the page reads its routes again
-// and sends `CHANGED` on the document, so the drift block reads again too. The page reads
-// its routes when it opens, when its tab is shown again, and on "Read again".
+// It places what the models (`placed-model.ts`, `items-model.ts`, `frame-model.ts`)
+// return; every word comes from there. No accent and no warning colour: a problem rises
+// by its order and weight 600.
+//
+// It reads `/api/view` and `/api/folder` when it opens, when its tab is shown again, every
+// 60 seconds while shown, and after a job ends. An act runs as a page job: the page sends
+// it, follows the job's status path, and keeps every act's control off while one runs. It
+// keeps that path in the tab's `sessionStorage` until the job ends, so after a reload it
+// follows the job again. When a job ends the page reads again and sends `CHANGED` on the
+// document, so every loadout component reads again too.
 
 import { css, html, LitElement, nothing } from "lit";
-import { live } from "lit/directives/live.js";
-import { api, confirm, place } from "/m/ui/client.js";
+import { repeat } from "lit/directives/repeat.js";
+import { api, navigate } from "/m/ui/client.js";
 
+import { CHANGED, Feed, parseJob, parseSourceDir, parseView } from "./feed.ts";
+import type { Job, SourceDir, View } from "./feed.ts";
+import { installAct } from "./acts-model.ts";
+import type { PageAct } from "./acts-model.ts";
 import {
-  CHANGED, Feed, parseGlobal, parseJob, parseListing, parseProjects, parseStatus,
-} from "./feed.ts";
-import type { Global, Job, Listing, Projects, Row, Status } from "./feed.ts";
-import {
-  addChoices, canReplace, cellLine, choiceScope, globalRemoveSheet, globalView, installAct,
-  installChoices, itemAct, itemsView, jobPathOf, jobRefusal, jobView, KINDS, parseKept, readState,
-  replaceAct, startedOf, stateTone,
-} from "./views.ts";
-import type { Act, Cell, ItemView, Kept, SectionView } from "./views.ts";
+  actCommand, COPIED, COPIED_MS, COPY, emptyGlobal, emptyLines, failedLine, fixLine, folderView, footLines, GONE,
+  noteGroup, pageState, READING, READING_AFTER_MS, REFRESH_MS, SETTINGS_LINK, SETTINGS_ROUTE,
+} from "./frame-model.ts";
+import { itemsView } from "./items-model.ts";
+import type { CellView, GlobalRow, GroupView, ItemRow, KindRow, Tone } from "./items-model.ts";
+import { INSTALL_ALL, placedView } from "./placed-model.ts";
+import type { PlacedView, Problem, ProblemAct } from "./placed-model.ts";
+import { harnessWord, kindFolded } from "./words.ts";
+import { jobRefusal, parseKept, startedOf } from "./views.ts";
+import type { Kept } from "./views.ts";
 
 const TAG = "moxi-loadout-page";
 
@@ -65,66 +72,68 @@ function kept(): Kept | null {
   }
 }
 
-const STYLES = css`
-  :host { display: block; min-width: 0; color: var(--moxi-text); font-family: var(--moxi-font-sans); }
-  * { box-sizing: border-box; }
-  h1 { margin: 0 0 var(--moxi-gap); font-size: 1.4em; }
-  h2 { margin: 0; font-size: 1.1em; }
-  h3 { margin: 0; font-size: 1em; }
-  h4 { margin: 0; font-size: var(--moxi-font-size-sm); color: var(--moxi-text-dim); }
-  p { margin: 0; overflow-wrap: anywhere; }
-  code { font-family: var(--moxi-font-mono); font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
-  pre { margin: 0; padding: 6px 8px; border-radius: var(--moxi-radius); background: var(--moxi-bg-sunken);
-        font-family: var(--moxi-font-mono); font-size: var(--moxi-font-size-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .lede { margin-bottom: var(--moxi-gap); padding-left: 8px; border-left: 3px solid var(--moxi-accent); color: var(--moxi-text-dim); }
-  .drift { min-width: 0; margin-bottom: var(--moxi-gap); }
-  .drift:empty { display: none; }
-  .dim { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  .ok { color: var(--moxi-ok); }
-  .warn { color: var(--moxi-warn); }
-  .error { color: var(--moxi-error); }
-  .muted { color: var(--moxi-text-dim); }
-  .problem { padding: 8px 12px; border-radius: var(--moxi-radius); background: var(--moxi-error-soft); color: var(--moxi-error); }
-  .note { padding-left: 8px; border-left: 3px solid var(--moxi-warn); font-size: var(--moxi-font-size-sm); }
-  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); min-width: 0; }
-  section { display: grid; gap: var(--moxi-gap); min-width: 0; margin-top: calc(var(--moxi-gap) * 2); padding: 12px;
-            border: 1px solid var(--moxi-border); border-radius: var(--moxi-radius-lg); background: var(--moxi-bg-raised); }
-  ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
-  .part { display: grid; gap: 6px; min-width: 0; padding-top: var(--moxi-gap); border-top: 1px solid var(--moxi-border); }
-  .item { display: grid; gap: 4px; min-width: 0; padding: 4px 0 4px 8px; border-left: 3px solid var(--moxi-border); }
-  .item.warn { border-left-color: var(--moxi-warn); }
-  .first { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); min-width: 0; }
-  .tag { padding: 0 6px; border-radius: var(--moxi-radius); background: var(--moxi-bg-sunken);
-         font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
-  .cells { display: grid; gap: 4px; min-width: 0; }
-  .cell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--moxi-gap); min-width: 0; }
-  .switch { min-width: 6em; text-align: left; }
-  .switch::before { content: ""; display: inline-block; width: 0.8em; height: 0.8em; margin-right: 6px;
-                    border: 1px solid var(--moxi-border-strong); border-radius: 50%; vertical-align: -0.05em; }
-  .switch.on::before { background: var(--moxi-selected); border-color: var(--moxi-selected); }
-  .cell .why { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; font-size: var(--moxi-font-size-sm); }
-  button, select, input { font: inherit; color: var(--moxi-text); max-width: 100%; }
-  button { padding: 2px 10px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
-           background: var(--moxi-bg-raised); cursor: pointer; }
-  button.go { background: var(--moxi-accent); border-color: var(--moxi-accent); color: var(--moxi-bg); }
-  button:hover:not(:disabled) { background: var(--moxi-bg-hover); }
-  button.go:hover:not(:disabled) { background: var(--moxi-accent); }
-  button:disabled, select:disabled, input:disabled { cursor: not-allowed; opacity: 0.6; }
-  select, input[type=text] { min-width: 0; padding: 2px 6px; border: 1px solid var(--moxi-border-strong);
-                             border-radius: var(--moxi-radius); background: var(--moxi-bg); }
-  input[type=text] { flex: 1 1 10em; }
-  form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); min-width: 0; }
-  :focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
-  details { min-width: 0; }
-  details > summary { cursor: pointer; color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  details[open] > summary { margin-bottom: 4px; }
-`;
+const TONES: Record<Tone, string> = { plain: "", dim: "d", heavy: "h" };
 
-/** The page's one line about an act that didn't start, or a confirmed act's outcome. */
-interface Said {
-  text: string;
-  tone: "warn" | "error";
-}
+// The Sessions page's groups at its width: a dim label at the left, text tokens only.
+const STYLES = css`
+  :host { display: block; min-width: 0; max-width: 680px; margin: 0 auto; padding: 4px 0 16px;
+          color: var(--moxi-text); font-family: var(--moxi-font-sans); font-size: 14px; line-height: 20px; }
+  /* The accent is the focus ring alone, drawn only on a focused piece. */
+  * { box-sizing: border-box; outline-color: var(--moxi-accent); }
+  p { margin: 0; overflow-wrap: anywhere; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer;
+           text-align: left; }
+  button:disabled { cursor: not-allowed; color: var(--moxi-text-dim); }
+  a { color: inherit; text-decoration: none; }
+  :focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
+  code { font: 12px/18px var(--moxi-font-mono); color: var(--moxi-text); overflow-wrap: anywhere; }
+  .d, .dim { color: var(--moxi-text-dim); }
+  .h { font-weight: 600; }
+
+  .waiting { padding: 12px 2px 0; color: var(--moxi-text-dim); }
+  .grps { margin-top: 16px; border-top: 1px solid var(--moxi-border); }
+  .grp { display: grid; grid-template-columns: 96px minmax(0, 1fr); border-bottom: 1px solid var(--moxi-border);
+         padding: 12px 2px; }
+  .grp .gk { color: var(--moxi-text-dim); }
+  .grp .gk .n { display: block; font-size: 13px; line-height: 18px; }
+  .grp .gl { grid-column: 2; min-width: 0; }
+
+  .line { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; min-width: 0; }
+  .line > :first-child { min-width: 0; overflow-wrap: anywhere; }
+  .line > .r { flex: none; text-align: right; }
+  .sm { font-size: 13px; line-height: 18px; }
+  .act { flex: none; font-size: 13px; line-height: 18px; color: var(--moxi-text); }
+  .act.d { color: var(--moxi-text-dim); }
+
+  .prob { padding-top: 14px; }
+  .prob .l1 b { font-weight: 600; }
+  .counts { padding-top: 14px; }
+  .cmd { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding-top: 2px; }
+
+  /* The item grid: a line per item, the name and then a fixed column per harness. */
+  .ir { display: flex; align-items: baseline; gap: 12px; padding: 4px 0; }
+  .ir.hd { color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; padding: 0 0 6px; }
+  .ir .nm { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .ir .nm .k { margin-left: 8px; }
+  .ir .c { flex: 0 0 94px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .two { margin-top: -4px; padding-bottom: 4px; font-size: 13px; line-height: 18px; }
+
+  .quietline { font-size: 22px; line-height: 32px; text-align: center; letter-spacing: -0.005em; padding: 120px 0 14px; }
+  .first { color: var(--moxi-text-dim); line-height: 1.6; text-align: center; }
+  .first p { max-width: 520px; margin: 0 auto; }
+  .first + .grps { margin-top: 40px; }
+  .foot { font-size: 13px; line-height: 18px; padding: 12px 2px 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
+
+  @media (max-width: 720px) {
+    :host { padding-top: 10px; }
+    .grp { display: block; padding: 8px 0 10px; }
+    .grp .gk { padding-bottom: 6px; font-size: 13px; }
+    .grp .gk .n { display: inline; margin-left: 8px; }
+    .ir { gap: 8px; }
+    .ir .c { flex-basis: 72px; font-size: 13px; }
+    .quietline { padding-top: 60px; }
+  }
+`;
 
 export class LoadoutPage extends LitElement {
   static styles = STYLES;
@@ -134,29 +143,26 @@ export class LoadoutPage extends LitElement {
   };
 
   route = "";
-  #placed = false;
-  #missing = false;
 
-  #status: Feed<Status> | null = null;
-  #listing: Feed<Listing> | null = null;
-  #global: Feed<Global> | null = null;
-  #projects: Feed<Projects> | null = null;
+  #view: Feed<View> | null = null;
+  #dir: Feed<SourceDir> | null = null;
+  #openedAt = 0;
 
-  /** The job the page follows, what started it, and whether it has ended. */
+  /** The job the page follows, and whether it has ended. */
   #job: Feed<Job> | null = null;
-  #jobLabel = "";
   #jobEnded = true;
-  #jobLost = false;
   #jobFails = 0;
   #jobTimer: ReturnType<typeof setTimeout> | undefined;
-  /** An act is being sent, or its confirm sheet is open. */
+  /** An act is being sent. */
   #sending = false;
-  #said: Said | null = null;
+  /** Why the last act didn't start. */
+  #said: string | null = null;
 
-  #addKind: string = "skill";
-  #addName = "";
-  #addWhere = "user";
-  #installWhere = "";
+  /** Which copy act reads `Copied`. */
+  #copied: string | null = null;
+  #copyTimer: ReturnType<typeof setTimeout> | undefined;
+  #waitTimer: ReturnType<typeof setTimeout> | undefined;
+  #refreshTimer: ReturnType<typeof setInterval> | undefined;
 
   #shown = (): void => {
     if (document.visibilityState === "visible") this.#readAll();
@@ -164,31 +170,35 @@ export class LoadoutPage extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
+    this.#openedAt = Date.now();
     const changed = (): void => this.requestUpdate();
-    this.#status = new Feed<Status>(() => api("loadout", "api/status"), parseStatus, changed);
-    this.#listing = new Feed<Listing>(() => api("loadout", "api/list"), parseListing, changed);
-    this.#global = new Feed<Global>(() => api("loadout", "api/global"), parseGlobal, changed);
-    this.#projects = new Feed<Projects>(() => api("loadout", "api/projects"), parseProjects, changed);
+    this.#view = new Feed<View>(() => api("loadout", "api/view"), parseView, changed);
+    this.#dir = new Feed<SourceDir>(() => api("loadout", "api/folder"), parseSourceDir, changed);
     this.#readAll();
-    void this.#projects.refresh();
     document.addEventListener("visibilitychange", this.#shown);
+    this.#waitTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
+    this.#refreshTimer = setInterval(() => {
+      if (document.visibilityState === "visible") this.#readAll();
+    }, REFRESH_MS);
     const job = kept();
     if (job !== null) this.#follow(job.path, job.label);
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    for (const feed of [this.#status, this.#listing, this.#global, this.#projects, this.#job]) feed?.close();
-    this.#status = this.#listing = this.#global = this.#projects = null;
+    for (const feed of [this.#view, this.#dir, this.#job]) feed?.close();
+    this.#view = this.#dir = null;
     this.#job = null;
     clearTimeout(this.#jobTimer);
+    clearTimeout(this.#copyTimer);
+    clearTimeout(this.#waitTimer);
+    clearInterval(this.#refreshTimer);
     document.removeEventListener("visibilitychange", this.#shown);
   }
 
   #readAll(): void {
-    void this.#status?.refresh();
-    void this.#listing?.refresh();
-    void this.#global?.refresh();
+    void this.#view?.refresh();
+    void this.#dir?.refresh();
   }
 
   /** Whether an act is on its way or its job runs: every act's control is off then. */
@@ -198,7 +208,7 @@ export class LoadoutPage extends LitElement {
 
   // -- acts ------------------------------------------------------------------------------
 
-  async #act(act: Act, label: string): Promise<void> {
+  async #act(act: PageAct): Promise<void> {
     if (this.#busy) return;
     this.#sending = true;
     this.#said = null;
@@ -206,31 +216,8 @@ export class LoadoutPage extends LitElement {
     try {
       const answer = await api("loadout", act.path, act.body);
       const started = startedOf(answer.status, answer.data);
-      if (started.kind === "job") this.#follow(started.path, label);
-      else this.#said = { text: started.text, tone: "error" };
-    } finally {
-      this.#sending = false;
-      this.requestUpdate();
-    }
-  }
-
-  async #confirmed(act: Act & { sheet: string[] }, label: string): Promise<void> {
-    if (this.#busy) return;
-    this.#sending = true;
-    this.#said = null;
-    this.requestUpdate();
-    try {
-      const outcome = await confirm("loadout", act.path, act.body, act.sheet);
-      if (outcome.outcome === "accepted") {
-        const path = jobPathOf(outcome.status);
-        if (path !== null) this.#follow(path, label);
-        else this.#said = { text: "loadout's page server started a job but gave no path to follow", tone: "error" };
-      } else if (outcome.outcome === "refused") {
-        this.#said = { text: outcome.text, tone: "error" };
-      } else if (outcome.outcome === "unknown") {
-        this.#said = { text: outcome.text, tone: "warn" };
-        this.#ended();
-      }
+      if (started.kind === "job") this.#follow(started.path, act.argv.join(" "));
+      else this.#said = started.text;
     } finally {
       this.#sending = false;
       this.requestUpdate();
@@ -241,9 +228,7 @@ export class LoadoutPage extends LitElement {
   #follow(path: string, label: string): void {
     this.#job?.close();
     clearTimeout(this.#jobTimer);
-    this.#jobLabel = label;
     this.#jobEnded = false;
-    this.#jobLost = false;
     this.#jobFails = 0;
     keep({ path, label });
     const feed: Feed<Job> = new Feed<Job>(() => api("loadout", path), parseJob, () => this.#jobRead(feed));
@@ -261,235 +246,175 @@ export class LoadoutPage extends LitElement {
     if (state === "running" && !lost && !refused) {
       this.#jobTimer = setTimeout(() => { void feed.refresh(); }, JOB_POLL_MS);
     } else {
-      this.#jobLost = state === "running" && !refused;
       this.#jobEnded = true;
       // A job that may still run stays kept, so a reload tries it again.
-      if (!this.#jobLost) keep(null);
-      this.#ended();
+      if (state !== "running" || refused) keep(null);
+      this.#readAll();
+      document.dispatchEvent(new CustomEvent(CHANGED));
     }
     this.requestUpdate();
   }
 
-  /** An act has ended: read everything again, and tell every loadout component. */
-  #ended(): void {
-    this.#readAll();
-    document.dispatchEvent(new CustomEvent(CHANGED));
+  /** Puts `text` on the clipboard; the act named `what` then reads `Copied` for a while. */
+  async #copy(what: string, text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return;
+    }
+    this.#copied = what;
+    clearTimeout(this.#copyTimer);
+    this.#copyTimer = setTimeout(() => {
+      this.#copied = null;
+      this.requestUpdate();
+    }, COPIED_MS);
+    this.requestUpdate();
   }
 
-  // -- rendering -------------------------------------------------------------------------
+  #copyButton(what: string, text: string) {
+    return html`<button type="button" class="act" data-action="copy" data-copy=${what}
+      @click=${() => void this.#copy(what, text)}>${this.#copied === what ? COPIED : COPY}</button>`;
+  }
+
+  // -- drawing -----------------------------------------------------------------------------
 
   render() {
-    const status = this.#status;
-    const listing = this.#listing;
-    if (status === null || listing === null) return nothing;
-    if (status.gone || listing.gone) return html`<p class="problem">loadout is no longer installed.</p>`;
-    const reading = status.reading || listing.reading || (this.#global?.reading ?? false);
-    return html`
-      <h1>Loadout</h1>
-      <p class="lede">Your own skills, agents and settings, placed for each harness: Claude Code, Codex and OpenCode. Each change here runs the same <code>moxi loadout</code> command you would run in a terminal.</p>
-      <div class="drift" data-part="drift"></div>
-      ${this.#missing ? html`<p class="dim" data-line="no-drift">The count can't be shown here. Run <code>moxi loadout status</code> in a terminal.</p>` : nothing}
-      <div class="bar">
-        <button data-action="read" ?disabled=${reading} @click=${() => this.#readAll()}>Read again</button>
-        ${reading && !status.loading ? html`<span class="dim">Reading…</span>` : nothing}
-      </div>
-      ${this.#jobPart()}
-      ${this.#installPart()}
-      ${this.#itemsPart()}
-      ${this.#globalPart()}`;
-  }
-
-  #jobPart() {
-    const said = this.#said;
-    const feed = this.#job;
-    if (feed === null) {
-      return said ? html`<section data-part="job" data-state="refused"><p class=${said.tone} data-line="said">${said.text}</p></section>` : nothing;
-    }
-    const view = jobView(feed, this.#jobLost);
-    return html`<section data-part="job" data-state=${view.state} data-exit=${feed.value?.exit ?? nothing}>
-      <h2>Last change</h2>
-      <p class="dim">${this.#jobLabel}: <code data-line="command">${feed.value ? view.command : "starting"}</code></p>
-      <p class=${view.tone} data-line="job">${view.title}</p>
-      ${view.lines.length ? html`<ul data-part="job-lines">${view.lines.map((line) => html`<li class="dim">${line}</li>`)}</ul>` : nothing}
-      ${view.rows.length ? html`<ul data-part="job-rows">${view.rows.map((row) => html`<li>${this.#rowLine(row)}</li>`)}</ul>` : nothing}
-      ${said ? html`<p class=${said.tone} data-line="said">${said.text}</p>` : nothing}
-    </section>`;
-  }
-
-  #installPart() {
-    const choices = installChoices(this.#listing?.value ?? null);
-    const busy = this.#busy;
-    return html`<section data-part="install">
-      <h2>Install</h2>
-      <p class="dim">Places every item of the sections chosen for each harness, as <code>moxi loadout install</code> does.</p>
-      <form @submit=${(event: Event) => { event.preventDefault(); void this.#act(installAct(this.#installWhere), "Install"); }}>
-        <select aria-label="Sections to install" .value=${live(this.#installWhere)} ?disabled=${busy}
-                @change=${(event: Event) => { this.#installWhere = (event.target as HTMLSelectElement).value; }}>
-          ${choices.map((choice) => html`<option value=${choice.value} ?selected=${choice.value === this.#installWhere}>${choice.label}</option>`)}
-        </select>
-        <button class="go" type="submit" data-action="install" ?disabled=${busy}>Install</button>
-        ${!this.#jobEnded ? html`<span class="dim">A change is running.</span>` : nothing}
-      </form>
-    </section>`;
-  }
-
-  #itemsPart() {
-    const status = this.#status!;
-    const listing = this.#listing!;
-    const listRead = readState(listing);
-    const statusRead = readState(status);
-    let head: unknown = nothing;
-    if (listRead.state === "loading") head = html`<p class="dim">Reading the manifest…</p>`;
-    else if (listRead.state === "problem") head = html`<p class="problem" data-line="problem">${listRead.detail}</p>`;
-    else if (listRead.state === "failed") head = html`<p class="problem" data-line="failed">The items can't be read: ${listRead.detail}.</p>`;
-    else if (statusRead.state === "problem") head = html`<p class="problem" data-line="problem">${statusRead.detail}</p>`;
-    else if (statusRead.state === "failed") head = html`<p class="problem" data-line="failed">The states can't be read: ${statusRead.detail}.</p>`;
-    const view = itemsView(listing.value, status.value);
-    const notes = status.value?.notes ?? [];
-    return html`<section data-part="items" data-state=${listRead.state === "up" ? statusRead.state : listRead.state}>
-      <h2>Items</h2>
-      ${head}
-      ${notes.length ? html`<ul data-part="notes">${notes.map((note) => html`<li class="note">${note}</li>`)}</ul>` : nothing}
-      ${listing.value && listing.value.items.length === 0 && listRead.state === "up"
-        ? html`<p class="dim" data-line="empty">The manifest lists no item yet. Add one below.</p>` : nothing}
-      ${view.sections.map((section) => this.#section(section))}
-      ${view.others.length ? html`<div class="part" data-part="others"><h3>Other rows</h3>
-        <p class="dim">Placements no listed item has, and the global file.</p>
-        <ul>${view.others.map((row) => html`<li class="item ${stateTone(row.state) === "warn" ? "warn" : ""}">${this.#rowLine(row)}${this.#replaceButton(row)}</li>`)}</ul></div>` : nothing}
-      ${this.#addPart()}
-    </section>`;
-  }
-
-  #section(section: SectionView) {
-    if (section.groups.length === 0) {
-      return html`<div class="part" data-section=${section.key}><h3>${section.label}</h3><p class="dim">It lists no item.</p></div>`;
-    }
-    return html`<div class="part" data-section=${section.key}>
-      <h3>${section.label}</h3>
-      ${section.groups.map((group) => html`
-        ${group.module !== null ? html`<h4 data-module=${group.module}>Adopted from module ${group.module}</h4>` : nothing}
-        <ul>${group.items.map((item) => this.#item(item))}</ul>`)}
-    </div>`;
-  }
-
-  #item(item: ItemView) {
-    const busy = this.#busy;
-    const bad = item.cells.some((cell) => stateTone(cell.state) === "warn");
-    return html`<li class="item ${bad ? "warn" : ""}" data-item=${`${item.kind}:${item.name}`}>
-      <div class="first"><span class="tag">${item.kind}</span><strong>${item.name}</strong>
-        <button data-action="remove" ?disabled=${busy}
-                @click=${() => void this.#act(item.remove, `Remove ${item.kind} ${item.name}`)}>Remove</button></div>
-      <p class="dim">From <code>${item.source}</code></p>
-      ${item.allOff ? html`<p class="dim" data-line="all-off">Off for every harness here.
-        <button data-action="enable-all" ?disabled=${busy}
-                @click=${() => void this.#act(item.enableAll!, `Turn on ${item.kind} ${item.name}`)}>Turn on</button></p>` : nothing}
-      <div class="cells">${item.cells.map((cell) => this.#cell(item, cell))}</div>
-    </li>`;
-  }
-
-  #cell(item: ItemView, cell: Cell) {
-    const busy = this.#busy;
-    const tone = stateTone(cell.state);
-    const toggle = cell.toggle;
-    return html`<div class="cell" data-harness=${cell.harness} data-state=${cell.state ?? "none"}>
-      <button class="switch ${cell.on ? "on" : ""}" role="switch" aria-checked=${cell.on ? "true" : "false"}
-        title=${`${cell.on ? "Turn off" : "Turn on"} ${item.kind} ${item.name} for ${cell.harness}`}
-        ?disabled=${busy || toggle === null}
-        @click=${() => { if (toggle) void this.#act(toggle, `${cell.on ? "Turn off" : "Turn on"} ${item.kind} ${item.name} for ${cell.harness}`); }}>${cell.harness}</button>
-      <span class="why ${tone}">${cellLine(cell)}</span>
-      ${cell.row ? this.#replaceButton(cell.row) : nothing}
-    </div>`;
-  }
-
-  #rowLine(row: Row) {
-    const what = row.kind === "global" ? "global file" : [row.kind, row.name].filter(Boolean).join(" ");
-    const where = [row.harness ? `for ${row.harness}` : "", row.scope && row.scope !== "user" ? `in ${row.scope}` : ""]
-      .filter(Boolean).join(" ");
-    return html`<div class="first"><span class=${stateTone(row.state)} data-row-state=${row.state}>${row.state}</span>
-      <span>${what} ${where}${row.reason ? `: ${row.reason}` : ""}</span></div>
-      ${row.target ? html`<code class="dim">${row.target}</code>` : nothing}`;
-  }
-
-  #replaceButton(row: Row) {
-    if (!canReplace(row)) return nothing;
-    const act = replaceAct(row);
-    return html`<button data-action="replace" ?disabled=${this.#busy}
-      @click=${() => void this.#confirmed(act, `Replace ${row.target ?? act.sheet[0]}`)}>Replace…</button>`;
-  }
-
-  #addPart() {
-    const busy = this.#busy;
-    const projects = this.#projects?.value ?? null;
-    const choices = addChoices(this.#listing?.value ?? null, projects);
-    if (!choices.some((choice) => choice.value === this.#addWhere)) this.#addWhere = "user";
-    const reason = projects?.reason ?? (this.#projects?.failure ? `they can't be listed: ${this.#projects.failure.why}` : null);
-    return html`<div class="part" data-part="add">
-      <h3>Add an item</h3>
-      <form @submit=${(event: Event) => { event.preventDefault(); void this.#add(); }}>
-        <select aria-label="Kind" .value=${live(this.#addKind)} ?disabled=${busy}
-                @change=${(event: Event) => { this.#addKind = (event.target as HTMLSelectElement).value; }}>
-          ${KINDS.map((kind) => html`<option value=${kind} ?selected=${kind === this.#addKind}>${kind}</option>`)}
-        </select>
-        <input type="text" aria-label="Name" placeholder="name" .value=${live(this.#addName)} ?disabled=${busy}
-               @input=${(event: Event) => { this.#addName = (event.target as HTMLInputElement).value; this.requestUpdate(); }}>
-        <select aria-label="Section" .value=${live(this.#addWhere)} ?disabled=${busy}
-                @change=${(event: Event) => { this.#addWhere = (event.target as HTMLSelectElement).value; }}>
-          ${choices.map((choice) => html`<option value=${choice.value} ?selected=${choice.value === this.#addWhere}>${choice.label}</option>`)}
-        </select>
-        <button type="submit" data-action="add" ?disabled=${busy || !this.#addName.trim()}>Add</button>
-      </form>
-      ${reason ? html`<p class="dim" data-line="projects">Projects by key: ${reason}</p>` : nothing}
-    </div>`;
-  }
-
-  async #add(): Promise<void> {
-    const name = this.#addName.trim();
-    if (!name) return;
-    const act = itemAct("add", this.#addKind, name, choiceScope(this.#addWhere));
-    await this.#act(act, `Add ${this.#addKind} ${name}`);
-    if (this.#job !== null && !this.#jobEnded) this.#addName = "";
-  }
-
-  #globalPart() {
-    const feed = this.#global;
+    const feed = this.#view;
     if (feed === null) return nothing;
-    const read = readState(feed);
-    const busy = this.#busy;
-    let body: unknown = nothing;
-    if (read.state === "loading") body = html`<p class="dim">Reading the global file…</p>`;
-    else if (read.state === "problem") body = html`<p class="problem" data-line="problem">${read.detail}</p>`;
-    else if (read.state === "failed" && feed.value === null) body = html`<p class="problem" data-line="failed">The global file can't be read: ${read.detail}.</p>`;
-    const value = feed.value;
-    const view = value !== null && value.problem === null ? globalView(value) : null;
-    return html`<section data-part="global" data-mode=${view?.mode ?? nothing} data-chosen=${view ? String(view.chosen) : nothing}>
-      <h2>Global instruction file</h2>
-      ${body}
-      ${view ? html`
-        <p data-line="mode">${view.line}</p>
-        <div class="bar">
-          ${view.modes.map((mode) => html`<button data-action="mode" data-mode=${mode.mode} ?disabled=${busy}
-            @click=${() => void this.#act(mode.act, `Set the global mode to ${mode.mode}`)}>${mode.label}</button>`)}
-          ${view.canTurnOff ? html`<button data-action="global-remove" ?disabled=${busy}
-            @click=${() => void this.#confirmed({ path: "api/global-remove", body: {}, sheet: globalRemoveSheet(value) }, "Turn the global file off")}>Turn off…</button>` : nothing}
-        </div>
-        ${view.files.length ? html`<ul data-part="files">${view.files.map((file) => html`<li class="item" data-file=${file.file}>
-          <code>${file.file}</code>
-          ${file.parts.length ? html`<p data-line="parts">${file.harness} reads ${file.parts.map((part, i) => html`${i ? " and " : ""}<code>${part}</code>`)}${file.parts.length === 1 ? ", no part" : ""}</p>` : nothing}
-          <p class="dim">${file.changes ? "The next install changes it." : "The next install leaves it as it is."}${file.state ? ` State: ${file.state}.` : ""}</p>
-          ${file.diff ? html`<details><summary>${file.placed ? "Why" : "Diff"}</summary><pre>${file.diff}</pre></details>` : nothing}
-        </li>`)}</ul>` : html`<p class="dim">No global file is touched in this mode.</p>`}` : nothing}
-    </section>`;
+    const state = pageState(feed, Date.now() - this.#openedAt);
+    if (state === "gone") return html`<p class="waiting" data-line="gone" role="status">${GONE}</p>`;
+    if (state === "waiting") return nothing;
+    if (state === "reading") return html`<p class="waiting" data-line="reading" role="status">${READING}</p>`;
+    if (state === "failed") {
+      return html`<p class="foot" data-line="failed" role="status">${failedLine(feed.failure?.why ?? "")}</p>`;
+    }
+    const view = feed.value!;
+    const dir = this.#dir?.value ?? null;
+    const typed = view.note !== null;
+    const note = noteGroup(view);
+    const notes = footLines(view, dir);
+    if (feed.failure !== null) notes.push(failedLine(feed.failure.why));
+    if (this.#said !== null) notes.push(this.#said);
+    const groups = html`
+      ${note !== null ? html`<section class="grp" data-group="note"><div class="gk">${note.label}</div><div class="gl">
+        <div class="line"><span class="h" data-line="note-heading">${note.heading}</span><span class="r d sm">${note.aside}</span></div>
+        <p class="d" data-line="note">${note.note}</p>
+        <p class="d" data-line="note-last">${note.last}</p></div></section>` : nothing}
+      ${state === "problem" ? html`<section class="grp" data-group="placed"><div class="gk">Placed</div>
+        <div class="gl"><p data-line="problem">${view.problem}</p></div></section>` : nothing}
+      ${state === "up" ? this.#placed(placedView(view), typed) : nothing}
+      ${this.#folder(view, dir, state === "empty")}
+      ${state === "up" ? this.#items(view) : nothing}
+      ${state === "empty" ? this.#emptyGlobal(view) : nothing}`;
+    const empty = state === "empty" ? emptyLines(view) : null;
+    return html`
+      ${empty !== null ? html`<div class="quietline" data-line="empty">${empty.line}</div>
+        <div class="first"><p data-line="empty-how">${empty.parts.map((part) => (part.code
+          ? html`<code>${part.text}</code>` : part.text))}</p></div>` : nothing}
+      <div class="grps" data-part="groups">${groups}</div>
+      ${notes.map((line) => html`<p class="foot" data-line="foot" role="status">${line}</p>`)}`;
   }
 
-  updated(): void {
-    const host = this.renderRoot.querySelector(".drift");
-    if (host === null || this.#placed) return;
-    this.#placed = true;
-    const missing = (): void => {
-      this.#missing = true;
-      this.requestUpdate();
-    };
-    place(host, "loadout", "drift").then((block) => { if (block === null) missing(); }, missing);
+  /** A problem's act: its button, or with the note set nothing here (the command shows
+   * under the fix). A Replace opens its confirm, which this page doesn't draw yet. */
+  #actButton(act: ProblemAct | null, typed: boolean, { quiet = false } = {}) {
+    if (act === null || typed || act.verb !== "install") return nothing;
+    return html`<button type="button" class="act ${quiet ? "d" : ""}" data-action="install" ?disabled=${this.#busy}
+      @click=${() => void this.#act(installAct(act.scope))}>${act === INSTALL_ALL ? "Install all" : "Install"}</button>`;
+  }
+
+  #command(act: ProblemAct | null, key: string) {
+    if (act === null) return nothing;
+    const command = actCommand(act);
+    return html`<div class="cmd"><code data-line="command">${command}</code>${this.#copyButton(key, command)}</div>`;
+  }
+
+  #placed(placed: PlacedView, typed: boolean) {
+    const fine = placed.problems.length === 0;
+    const allAtVerdict = !fine && placed.installAll === "verdict";
+    return html`<section class="grp" data-group="placed"><div class="gk">Placed</div><div class="gl">
+      <div class="line"><span class=${placed.heavy ? "h" : ""} data-line="verdict">${placed.verdict}</span>${fine
+        ? html`<span class="r d" data-line="counts">${placed.counts}</span>`
+        : allAtVerdict ? this.#actButton(INSTALL_ALL, typed) : nothing}</div>
+      ${allAtVerdict && typed ? this.#command(INSTALL_ALL, "install-all") : nothing}
+      ${repeat(placed.problems, (problem) => problem.key, (problem) => this.#problem(problem, typed))}
+      ${fine ? nothing : html`<div class="line counts sm"><span class="d" data-line="counts">${placed.counts}</span>${
+        allAtVerdict ? nothing : this.#actButton(INSTALL_ALL, typed, { quiet: true })}</div>
+        ${!allAtVerdict && typed ? this.#command(INSTALL_ALL, "install-all") : nothing}`}
+    </div></section>`;
+  }
+
+  #problem(problem: Problem, typed: boolean) {
+    return html`<div class="prob" data-problem=${problem.key} data-word=${problem.word}>
+      <div class="line l1"><span data-line="sentence">${problem.sentence}</span><b class="r" data-line="word">${problem.word}</b></div>
+      <p class="d sm" data-line="where">${problem.where}</p>
+      <div class="line sm"><span class="d" data-line="fix">${fixLine(problem, { typed })}${problem.fixNote !== null
+        ? html` <span class="d" data-line="fix-note">${problem.fixNote}</span>` : nothing}</span>${
+        problem.copy !== null ? this.#copyButton(`copy:${problem.key}`, problem.copy) : this.#actButton(problem.act, typed)}</div>
+      ${typed ? this.#command(problem.act, problem.key) : nothing}
+    </div>`;
+  }
+
+  #folder(view: View, dir: SourceDir | null, empty: boolean) {
+    const folder = folderView(view, dir, { empty });
+    if (folder === null) return nothing;
+    return html`<section class="grp" data-group="folder"><div class="gk">Folder</div><div class="gl">
+      <div class="line"><span><span data-line="folder">${folder.path}</span>${folder.line !== null
+        ? html`<span class="d" data-line="uncommitted">  ${folder.line}</span>` : nothing}</span>
+        <a class="r d sm" href=${`/m/ui/${SETTINGS_ROUTE}`} data-action="settings"
+           @click=${(event: MouseEvent) => {
+             if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+             event.preventDefault();
+             navigate("ui", SETTINGS_ROUTE);
+           }}>${SETTINGS_LINK}</a></div>
+      ${folder.names !== null ? html`<p class="d sm" data-line="names">${folder.names}</p>` : nothing}
+    </div></section>`;
+  }
+
+  #items(view: View) {
+    const items = itemsView(view);
+    return repeat(items.groups, (group) => group.key, (group, at) => this.#group(group, items.harnesses,
+                                                                             { head: at === 0 }));
+  }
+
+  #group(group: GroupView, harnesses: readonly string[], { head }: { head: boolean }) {
+    return html`<section class="grp" data-group=${group.key}><div class="gk"><span data-line="label">${group.label}</span>
+      <span class="n" data-line="count">${group.count}</span></div><div class="gl">
+      ${group.empty !== null ? html`<p class="d" data-line="empty">${group.empty}</p>` : html`<div class="grid">
+        ${head ? html`<div class="ir hd"><span class="nm"></span>${harnesses.map((harness) => html`<span class="c"
+          data-harness=${harness}>${harnessWord(harness)}</span>`)}</div>` : nothing}
+        ${group.kinds !== null ? group.kinds.map((kind) => this.#kind(kind)) : group.rows.map((row) => this.#item(row))}
+        ${group.global !== null ? this.#global(group.global) : nothing}
+      </div>`}</div></section>`;
+  }
+
+  #cell(cell: CellView) {
+    return html`<span class="c ${TONES[cell.tone]}" data-harness=${cell.harness} data-word=${cell.word ?? ""}>${cell.word ?? ""}</span>`;
+  }
+
+  #item(row: ItemRow) {
+    return html`<div class="ir" data-item=${row.key}><span class="nm">${row.name}<span class="k d">${row.kindWord}</span></span>
+      ${row.cells.map((cell) => this.#cell(cell))}</div>
+      ${row.second !== null ? html`<p class="two d" data-line="second">${row.second}</p>` : nothing}`;
+  }
+
+  #kind(kind: KindRow) {
+    return html`<div class="ir" data-kind=${kind.kind}><span class="nm">${kindFolded(kind.kind)}<span class="k d">${
+      kind.rows.length}</span></span>
+      ${kind.cells.map((cell) => html`<span class="c ${TONES[cell.tone]}" data-harness=${cell.harness}>${cell.text ?? ""}</span>`)}</div>`;
+  }
+
+  #global(row: GlobalRow) {
+    return html`<div class="ir" data-item="global"><span class="nm">${row.label}<span class="k d" data-line="mode">${
+      row.mode}</span></span>
+      ${row.cells.map((cell) => this.#cell(cell))}</div>`;
+  }
+
+  #emptyGlobal(view: View) {
+    const global = emptyGlobal(view);
+    return html`<section class="grp" data-group="global"><div class="gk">Global file</div><div class="gl">
+      <p><span data-line="mode">${global.mode}</span>${global.line !== null
+        ? html`<span class="d" data-line="mode-line">  ${global.line}</span>` : nothing}</p></div></section>`;
   }
 }
 

@@ -23,8 +23,9 @@
     POST /api/global-mode `moxi loadout global mode MODE`, managed or if-absent, as a job
                           (202)
     POST /api/install     `moxi loadout install [--user] [--project P]...`, as a job (202)
-    POST /api/replace     `moxi loadout install --replace ID...`, confirmed, as a job (202)
-    POST /api/global-remove  `moxi loadout global remove`, confirmed, as a job (202)
+    POST /api/replace     `moxi loadout install --replace ID [--user | --project P]`, as
+                          the job the page names (202)
+    POST /api/global-remove  `moxi loadout global remove`, as the job the page names (202)
 
 **An act from the page does what the same verb does in the user's terminal, or refuses
 before writing.** Every act starts a page job (`moxi_loadout.pagejob`), which runs the
@@ -33,7 +34,8 @@ job's status path, `/api/job?job=<id>`. The page server's threads never install.
 reads run here, take no lock and bound every git call as the doctor does.
 
 `global mode off` is the same command as `global remove`, so the page reaches it only
-through the confirmed `/api/global-remove`.
+through `/api/global-remove`. That act and `/api/replace` carry a `job`, the id the page
+mints for each press, so a repeat of the press finds the job it started.
 
 Every value that can hold a path carries a mark: a file or a target is `path`, and a
 sentence, a section's name or an item's source that can name a path is `redact`. Only the
@@ -71,8 +73,10 @@ JOB_ROUTE = "/api/job"
 NAME_MAX = 256
 #: The longest path a body takes.
 PATH_MAX = 4096
-#: The most sections, or replace values, one act names.
+#: The most sections one act names.
 LIST_MAX = 64
+#: A job id the page mints: 16 random bytes in hex.
+JOB_ID_CHARS = 32
 
 _TEXT = lb.Out("string")
 _MAYBE = lb.Out("string", nullable=True)
@@ -336,6 +340,8 @@ _SECTIONS = lb.Field("list", required=False, max=LIST_MAX,
 _USER = lb.Field("bool", required=False)
 _ITEM_BODY = {"kind": lb.Field("enum", values=KINDS), "name": _NAME, "project": _SECTION}
 _ID_BODY = {"id": _NAME, "user": _USER, "project": _SECTION}
+#: The id the page mints for one press of an act: 32 hex characters.
+_JOB = lb.Field("string", max=JOB_ID_CHARS)
 
 
 def _target(name: str) -> str:
@@ -377,17 +383,14 @@ PAGE = lb.Page(
         _act("/api/global-mode", "global_mode",
              {"mode": lb.Field("enum", values=tuple(m for m in MODES if m != "off"))}),
         _act("/api/install", "install", {"user": _USER, "projects": _SECTIONS}),
-        lb.Route("/api/replace", "act", _target("replace"), returns={},
-                 body={"replace": lb.Field("list", max=LIST_MAX,
-                                           items=lb.Field("string", max=PATH_MAX)),
-                       "user": _USER, "projects": _SECTIONS},
-                 confirmed=True, status=JOB_ROUTE),
-        lb.Route("/api/global-remove", "act", _target("global_remove"), returns={},
-                 confirmed=True, status=JOB_ROUTE),
+        _act("/api/replace", "replace",
+             {"replace": lb.Field("string", max=PATH_MAX), "user": _USER, "project": _SECTION,
+              "job": _JOB}),
+        _act("/api/global-remove", "global_remove", {"job": _JOB}),
     ),
 )
 
-__all__ = ["BUDGET", "COUNTS", "DRIFT", "SOURCE_DIR", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE", "KEPT",
+__all__ = ["BUDGET", "COUNTS", "DRIFT", "SOURCE_DIR", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ID_CHARS", "JOB_ROUTE", "KEPT",
            "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "REPLACE_PREVIEW", "ROW", "SECTION",
            "STATUS",
            "ITEM_NOTE", "VIEW", "VIEW_GLOBAL", "VIEW_ITEM", "VIEW_ROW", "VIEW_SECTION"]
