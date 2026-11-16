@@ -54,10 +54,40 @@ separated by commas or spaces. An entry locks the key it names and every key und
 `ui.gateway` locks both gateway keys and a module's name alone locks all of its settings.
 A key above a locked one is refused too, since writing a table would replace the entry it
 holds; the other entries of that table can still be changed.
-The settings view shows a locked field read-only with `Locked for this run of the shell.`,
+The Settings page shows a locked field read-only with `Locked for this run of the shell.`,
 and the shell answers a write to one with a 422 before any command runs. Unset or empty,
 it locks nothing. It guards the shell's pages only: `moxi config set` in a terminal and an
 edit of the file still change the key, and the variable holds no value for it.
+
+## The Settings page
+
+Settings, at the right of the top line, opens `/m/ui/settings`: every installed module's
+settings and the core's, one module at a time, read and written only through `moxi
+config`.
+
+- **The list.** The core (`moxi`), ui, then every other module with settings, A to Z. Beside
+  each, how many of its settings are changed from the default; under the list, the total,
+  which opens every changed setting in one view.
+- **A module's settings.** Each setting by its plain label and its dotted key, a control by
+  its type, and a dim line where it needs one. A module's schema can mark a few settings to
+  show first; the rest wait behind `More`. A changed setting says its default, with `Reset`
+  where the file holds it. The foot names the module's config file.
+- **Save.** Nothing is written until Save, which writes the shown module's changes, each
+  as its own `moxi config set` or `unset`, and says what was saved and when each change
+  applies. A change that can hurt is asked about first. A setting changed since the page
+  read it is not overwritten: the page says so, and Save again writes yours. Leaving with
+  changes not saved asks first.
+- **Find**, above the list, searches every module's settings by name, key, description
+  and value, and each result can be changed where it is.
+- **ui's Phone group**, while the gateway extra is installed: whether phones can reach the
+  gateway, its port, the paired phones with `Revoke`, `Pair a phone` and the audit log.
+  Phone access itself is turned on and off at the terminal, with `moxi ui gateway enable`
+  and `disable`; no page changes it.
+
+The page is not on the phone. A module's schema decides how its settings look there with
+page fields (`label`, `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`,
+`terminal`, `elsewhere`; the core's README lists them). [docs/settings.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/settings.md)
+says what each does on the page, what a save does, and the page's routes.
 
 ## A module on Home
 
@@ -133,6 +163,31 @@ if (outcome.outcome === "accepted") {
 - The shell passes `Idempotency-Key` on to the page server with the other headers it
   forwards, and nothing more.
 
+## A page that holds changes
+
+A page that keeps changes until a Save, as Settings does, holds the shell while it has
+some, so nothing moves off it without the page's say. Both calls are in `/m/ui/client.js`:
+
+```js
+import { holdLeave, setAddress } from "/m/ui/client.js";
+
+const release = holdLeave((go) => {
+  // Ask in the page's own words; call go() to leave.
+});
+// ...release() once no change is left, and in disconnectedCallback.
+setAddress("ui", "settings/ui/more");  // the page's own address, in place
+```
+
+- `holdLeave(ask)` gives the function that releases the hold. While held, every move off
+  the page (a link in the shell, `navigate()`, Back and Forward) calls `ask(go)` and does
+  nothing else; `go()` releases the hold and makes the move. The shell's own redraw on a
+  modules or session event waits for the release, and a load of another document gets the
+  browser's prompt. One page holds at a time: a second `holdLeave` replaces the first.
+- `setAddress(module, route)` writes the page's own address in place of the current
+  history entry, so Back leaves the page, and the shell neither draws the page again nor
+  asks it. It throws a `TypeError` when `module`'s panel isn't the one shown, or the route
+  leaves `/m/<module>/`.
+
 ## The gateway: the UI on your phone
 
 The gateway is a second listener of the shell, reached from a phone through the tunnel
@@ -150,7 +205,8 @@ moxi install ui --with gateway,tunnel
 moxi ui gateway enable
 ```
 
-and scan the QR code in the desktop's Gateway section. No domain, no key to type.
+then open Settings, pick `ui`, press `Pair a phone` in its Phone group and scan the QR
+code. No domain, no key to type.
 
 | `moxi ui gateway` | what it does |
 |---|---|
