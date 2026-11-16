@@ -11,9 +11,10 @@ needs no server and no account.
 What is fixed here, and must not drift:
 
   * `STATE/comms/comms.db` (`paths.comms_db()`), one file per box, opened only
-    through `store.open_write`. STATE and not DATA because a live DB is never
-    continuous-file-synced. The record's tables are `rooms`, `messages`,
-    `principals`, `denied` and `meta`; `store/schema.py` makes them.
+    through `store.open_write`, or through `store.open_read` by a read-only record.
+    STATE and not DATA because a live DB is never continuous-file-synced. The
+    record's tables are `rooms`, `messages`, `principals`, `denied` and `meta`;
+    `store/schema.py` makes them.
   * `max_content_length` 16,000 (`record.MAX_CONTENT_LENGTH`), the one cap on one
     message.
   * `retain_days` 90 (config.toml's `[local] retain_days`, whose default this is),
@@ -36,11 +37,18 @@ Fanout is three layers under one lock, and two of them live here:
      lock the in-process push holds.
 
 There is no socket to drop, so `disconnect` / `reconnect` exist for the tests only.
+
+A read-only record (`read_only=True`) is for a process that reads the record for as long
+as it lives and must never write it, migrate it or wait on the writers' gate: each of its
+connections opens through `store.open_read` with the step checked, so it takes no lock,
+moves no file and runs no migration. It refuses every write, never trims, and has no
+subscriptions, so it starts no pump.
 """
 
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import hashlib
 import logging
@@ -53,7 +61,7 @@ from pathlib import Path
 from moxi.store import transaction
 
 from .config import LOCAL_RETAIN_DAYS
-from .machine_line import parse as parse_machine_line
+from .machine_line import SIGIL, parse as parse_machine_line
 from .record import (
     AUTHOR_IDENTITY,
     AUTHOR_OPERATOR,
@@ -64,7 +72,7 @@ from .record import (
     Message,
     Subscription,
 )
-from .store import open_write
+from .store import open_read, open_write
 from .store.schema import ID_BASE, META_NEXT_ID
 
 log = logging.getLogger("comms.record")
@@ -76,6 +84,10 @@ RETAIN_DAYS = LOCAL_RETAIN_DAYS
 BUSY_TIMEOUT_MS = 5_000
 
 META_OPERATOR_TOKEN_HASH = "operator_token_hash"
+
+
+class ReadOnly(RecordError):
+    """A write, a trim or a subscription asked of a read-only record."""
 
 
 def token_hash(token: str) -> str:
@@ -92,10 +104,13 @@ class LocalRecord:
 
     def __init__(self, record=None, *, retain_days: int = RETAIN_DAYS,
                  poll_interval: float = 0.5, clock=time.time,
-                 busy_timeout: float | None = None):
+                 busy_timeout: float | None = None, read_only: bool = False):
         from .paths import comms_db
 
         self.path = Path(record) if record else comms_db()
+        #: Every connection opens through `store.open_read` with its step checked, and
+        #: every write, trim and subscription raises `ReadOnly`.
+        self.read_only = read_only
         self.retain_days = retain_days
         self.poll_interval = poll_interval
         #: How long a statement waits on another writer's lock, in milliseconds: a
@@ -111,17 +126,21 @@ class LocalRecord:
         self._pump: threading.Thread | None = None
         self._wake = threading.Event()
         self._stop = threading.Event()
-        # The first connection opens the store through its gate now, so a store that
-        # can't be opened refuses here and not at the first post.
+        # The first connection opens the store now, so a store that can't be opened
+        # refuses here and not at the first post or read: through the gate for a writer;
+        # for a read-only record, a missing store, comms 0.2's files unmoved, or a store
+        # at another schema step (`store.StepMismatch`).
         self._conn()
 
     # ------------------------------------------------------------------ connections
     def _conn(self) -> sqlite3.Connection:
         """One connection per thread. WAL lets them all read while one writes.
 
-        Opened through `store.open_write`, which opens with the core's store connect: a
-        store it creates is private to its owner (0600) from its first byte and starts
-        in WAL, in a directory left as it was when it was there already (a missing one
+        A read-only record opens it through `store.open_read`: an existing store as it
+        is, its step read once before the first query, every write refused by SQLite
+        too. Otherwise it is opened through `store.open_write`, which opens with the
+        core's store connect: a store it creates is private to its owner (0600) from its
+        first byte and starts in WAL, in a directory left as it was when it was there already (a missing one
         is made 0700); an existing store is opened as it is, its mode and journal mode
         untouched.
         A thread that is done with the record calls `release()`, or its connection stays
@@ -131,8 +150,10 @@ class LocalRecord:
         if conn is None:
             # check_same_thread=False so `close()` may be called from any thread; the
             # connection is still only ever USED by the thread it was opened for.
-            conn = open_write(self.path, timeout=self.busy_timeout_ms / 1000.0,
-                              check_same_thread=False)
+            opener = (functools.partial(open_read, check_step=True) if self.read_only
+                      else open_write)
+            conn = opener(self.path, timeout=self.busy_timeout_ms / 1000.0,
+                          check_same_thread=False)
             self._local.conn = conn
             with self._lock:
                 self._conns.append(conn)
@@ -159,9 +180,16 @@ class LocalRecord:
     def _write(self):
         """`BEGIN IMMEDIATE`, always (`moxi.store.transaction`). A DEFERRED transaction
         that reads the counter before it upgrades computes a stale id and two writers
-        collide."""
+        collide. A read-only record raises `ReadOnly` before it opens one."""
+        self._writable()
         with transaction(self._conn()) as conn:
             yield conn
+
+    def _writable(self) -> None:
+        """Raise `ReadOnly` when this record is read-only; every write, trim and
+        subscription asks first."""
+        if self.read_only:
+            raise ReadOnly(f"{self.path} is open read-only; nothing was written")
 
     def _next_id(self, conn: sqlite3.Connection) -> int:
         conn.execute("UPDATE meta SET value = value + 1 WHERE key = ?", (META_NEXT_ID,))
@@ -247,6 +275,7 @@ class LocalRecord:
         is nothing to compare against and the lane is open, which is the state of a
         record that has not been provisioned for the operator yet.
         """
+        self._writable()
         if len(content) > self.max_content_length:
             raise RecordError(
                 f"content is {len(content)} characters, "
@@ -280,6 +309,7 @@ class LocalRecord:
         return self._post(AUTHOR_RESERVED, str(name), channel_id, content)
 
     def _post(self, kind: str, author: str, channel_id: str, content: str) -> Message:
+        self._writable()
         if len(content) > self.max_content_length:
             raise RecordError(
                 f"content is {len(content)} characters, "
@@ -346,8 +376,9 @@ class LocalRecord:
                        timestamp=row[6], withdrawn_at=row[7])
 
     def history(self, channel_id: str, *, after: str | None = None,
-                limit: int | None = None) -> list[Message]:
-        """Ascending by id. With a limit this takes the TAIL.
+                before: str | None = None, limit: int | None = None) -> list[Message]:
+        """Ascending by id, the ids above `after` and below `before`. With a limit this
+        takes the TAIL, so `before` with `limit` reads the newest `limit` below an id.
 
         The boot rescan is `history(channel, limit=RESCAN_LIMIT)` with no `after`, and a
         literal "first 500 then take the tail" would scan the whole channel every boot.
@@ -358,6 +389,9 @@ class LocalRecord:
         if after is not None:
             sql += " AND id > ?"
             params.append(int(after))
+        if before is not None:
+            sql += " AND id < ?"
+            params.append(int(before))
         if limit is None:
             rows = self._conn().execute(sql + " ORDER BY id", params).fetchall()
         else:
@@ -395,6 +429,32 @@ class LocalRecord:
             "ORDER BY id", (str(channel_id), str(timestamp))).fetchall()
         return [self._message(r) for r in rows]
 
+    def count_before(self, channel_id: str,
+                     timestamp: str) -> tuple[int, str | None, str | None, str | None]:
+        """`(count, first_timestamp, last_timestamp, last_id)` of the messages in
+        `channel_id` before `timestamp` whose line zero starts with the machine line's
+        sigil: how many, the oldest one's time, the newest one's time and id. A room with
+        none answers `(0, None, None, None)`.
+
+        A message without the sigil is prose, which the history reads leave out, so it is
+        not counted. The test is the parser's own leading one, spaces and tabs then the
+        sigil, without case (SQLite's LIKE is case-blind for ASCII); a line that starts
+        with the sigil and goes wrong further on is counted. One statement: the count and
+        the two ends by id over the room, then each end's time by its key, so the newest
+        time and the newest id are one message's.
+        """
+        row = self._conn().execute(
+            "WITH ends AS (SELECT COUNT(*) AS n, MIN(id) AS lo, MAX(id) AS hi "
+            "FROM messages WHERE room_id = ? AND timestamp < ? "
+            "AND ltrim(content, ' ' || char(9)) LIKE ?) "
+            "SELECT n, (SELECT timestamp FROM messages WHERE id = lo), "
+            "(SELECT timestamp FROM messages WHERE id = hi), hi FROM ends",
+            (str(channel_id), str(timestamp), SIGIL + "%")).fetchone()
+        count, first, last, last_id = row
+        if not count:
+            return 0, None, None, None
+        return count, first, last, str(last_id)
+
     def trim(self, retain_days: int | None = None, *, keep=()) -> int:
         """Delete messages older than `retain_days`; `0` disables.
 
@@ -402,8 +462,10 @@ class LocalRecord:
         the table goes away. The daemon calls this at boot and daily.
         `keep` are ids that stay whatever their age: every message with a queue row stays
         in the record until it is handled. A row's message is never trimmed while the
-        row is there, so the trim touches no row.
+        row is there, so the trim touches no row. A read-only record never trims: it
+        raises `ReadOnly`.
         """
+        self._writable()
         days = self.retain_days if retain_days is None else retain_days
         if not days:
             return 0
@@ -423,6 +485,9 @@ class LocalRecord:
 
     # ------------------------------------------------------------------ events
     def subscribe(self, *, from_id: str | None = None) -> Subscription:
+        """A subscription to every post after `from_id`, pushed by the pump. A read-only
+        record has none and starts no pump: it raises `ReadOnly`."""
+        self._writable()
         sub = Subscription(from_id if from_id is not None else (self.max_message_id() or "0"))
         with self._lock:
             self._subs.append(sub)
@@ -508,5 +573,5 @@ class LocalRecord:
         self._local = threading.local()
 
 
-__all__ = ["LocalRecord", "ID_BASE", "MAX_CONTENT_LENGTH", "RETAIN_DAYS",
+__all__ = ["LocalRecord", "ReadOnly", "ID_BASE", "MAX_CONTENT_LENGTH", "RETAIN_DAYS",
            "META_NEXT_ID", "META_OPERATOR_TOKEN_HASH", "token_hash"]

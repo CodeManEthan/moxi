@@ -7,7 +7,7 @@ const settled = () => new Promise((done) => setImmediate(done));
 
 const ROW = { qualified: "core/alpha", name: "alpha", scope: "core", live: true, kind: null, module: null,
               tier: "worker", adapter: "claude", directors: ["core/lead"], session_id: "s1",
-              bound_at: 100, awaiting: [] };
+              bound_at: 100, awaiting: [], cache: null };
 const UP = { now: 1000, state: "up", detail: null, rows: [ROW] };
 
 /** A feed over `answers`, read in order; the clock reads 400. */
@@ -34,6 +34,16 @@ test("the route's three states, and what isn't one", () => {
   assert.equal(value.rows.length, 1);
   assert.deepEqual(value.rows[0].directors, []);
   assert.deepEqual(value.rows[0].awaiting, ["a"]);
+});
+
+test("a row's cache fact is kept when it is one, else null", () => {
+  const rows = (cache) => parseRoster({ state: "up", detail: null, rows: [{ ...ROW, cache }] }).rows[0].cache;
+  assert.deepEqual(rows({ kind: "warm", until: 1200 }), { kind: "warm", until: 1200 });
+  assert.deepEqual(rows({ kind: "cold", until: 900 }), { kind: "cold", until: 900 });
+  for (const bad of [undefined, null, "warm", { kind: "fresh", until: 1 }, { kind: "warm" },
+                     { kind: "warm", until: "1" }, { kind: "warm", until: Infinity }]) {
+    assert.equal(rows(bad), null, JSON.stringify(bad));
+  }
 });
 
 test("a 200 gives the rows and the server clock's offset", async () => {
@@ -89,4 +99,20 @@ test("a 404 means comms went away", async () => {
   const { feed } = feedOf([{ status: 404, data: null }]);
   await feed.refresh();
   assert.equal(feed.gone, true);
+});
+
+test("a feed that isn't clocked takes a body with no now, keeps no offset and takes topic values", async () => {
+  const body = { state: "up", detail: null, rows: [ROW] };
+  const feed = new Feed(async () => ({ status: 200, data: body }), parseRoster, () => {},
+                        { wait: async () => {}, clock: () => 400, clocked: false });
+  await feed.refresh();
+  assert.deepEqual(feed.value, body);
+  assert.equal(feed.offset, null);
+  assert.equal(feed.now(), null);
+  feed.topic({ ...body, rows: [] });
+  assert.deepEqual(feed.value.rows, []);
+  const clocked = new Feed(async () => ({ status: 200, data: body }), parseRoster, () => {}, { clock: () => 400 });
+  await clocked.refresh();
+  assert.equal(clocked.value, null);
+  assert.equal(clocked.failure.status, 200);
 });

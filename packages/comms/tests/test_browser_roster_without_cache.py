@@ -12,6 +12,9 @@ import roster_kit
 from roster_kit import holding, put_clock, wait_for
 from test_reply_enforcement import REVIEWER, R
 
+#: The shell's modules view, which places the roster block.
+MODULES = "/m/ui/modules"
+
 pytestmark = [pytest.mark.browser,
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="comms runs on Linux only")]
@@ -42,8 +45,8 @@ def test_with_cache_left_out_a_live_row_has_no_chip_and_nothing_asks_cache(
                     if "/m/cache/" in request.url else None)
     # With no `allow`, a request under /m/cache/ fails the check.
     ui_component_check(page, "comms", "roster", tokens=("accent", "bg-raised"))
-    page.goto("/m/comms/")
-    roster = page.locator("#moxi-panel > moxi-comms-page moxi-comms-roster div.roster")
+    page.goto(MODULES)
+    roster = page.locator("moxi-comms-roster div.roster")
     live = roster.locator(f'li[data-address="{R}"]')
     expect(live).to_have_attribute("data-live", "true")
     expect(live.locator('[data-field="bound"]')).to_have_count(1)

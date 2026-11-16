@@ -7,6 +7,8 @@ type = "table"
 default = {}
 doc = "Your own flows by name, each a list of steps. One named like a built-in flow replaces it."
 read = "use"
+label = "Your own flows"
+line = "Each a list of steps, by name. One named like a built-in flow replaces it."
 
 [tiers]
 type = "list"
@@ -14,30 +16,39 @@ items = "str"
 default = ["fix", "small", "full"]
 doc = "The flows from lightest to heaviest."
 read = "use"
+label = "Flows, lightest to heaviest"
 
 [models]
 type = "table"
 default = {}
 doc = "Tier names to model names: a table per harness, or one model for every harness. The order the tiers are written in is their order, strongest first. The next step's line prints them."
 read = "use"
+label = "A model for each tier"
+line = "A table per harness, or one model for every harness; tiers written strongest first."
 
 [worktree_dir]
 type = "path"
 default = ""
 doc = "Where build worktrees go, as <repo>/<branch> under it. Empty means worktrees in rounds' data directory."
 read = "use"
+label = "Build worktrees folder"
+line = "Each as <repo>/<branch> under it. Not set: rounds' data directory."
 
 [defaults.flow]
 type = "string"
 default = "full"
 doc = "The flow a round opens with when none is named."
 read = "use"
+label = "A new round's flow"
+line = "When none is named."
 
 [defaults.dir]
 type = "string"
 default = "rounds"
 doc = "A project's rounds folder: absolute, or relative to the project's notes folder. A rounds folder belongs to one project: two projects that reach one folder are refused."
 read = "use"
+label = "Rounds folder"
+line = "Absolute, or relative to the project's notes folder. One project's alone."
 
 [defaults.ratify]
 type = "enum"
@@ -45,12 +56,16 @@ values = ["majors", "majors+minors", "off"]
 default = "majors"
 doc = "Which of a build's recorded decisions wait for the operator: the major ones, the minor ones too, or none."
 read = "use"
+label = "Build decisions that wait for the operator"
+choices = { majors = "the major ones", "majors+minors" = "major and minor", off = "none" }
 
 [defaults.trace]
 type = "bool"
 default = false
 doc = "Run the trace check: a design says where it carries, amends or cuts each ruling in its scope."
 read = "use"
+label = "Run the trace check"
+line = "A design says where it carries, amends or cuts each ruling in its scope."
 
 [defaults.check_on]
 type = "enum"
@@ -58,30 +73,43 @@ values = ["merged", "tip"]
 default = "merged"
 doc = "What a build's check must have passed on before it finishes: its tip merged with the target, or its tip alone."
 read = "use"
+label = "A build finishes once its check passed on"
+choices = { merged = "its tip merged with the target", tip = "its tip alone" }
 
 [defaults.idle_days]
 type = "int"
 default = 14
 doc = "Days without a commit before a build shows as idle."
 read = "use"
+label = "A build shows as idle after"
+line = "Without a commit."
+unit = "days"
 
 [defaults.dormant_days]
 type = "int"
 default = 30
 doc = "Days without an event before a round shows as dormant."
 read = "use"
+label = "A round shows as dormant after"
+line = "Without an event."
+unit = "days"
 
 [defaults.slice_minutes]
 type = "int"
 default = 45
 doc = "The most minutes the sizing check allows one slice of a build."
 read = "use"
+label = "Longest slice the sizing check allows"
+unit = "minutes"
 
 [defaults.sitting_at]
 type = "int"
 default = 10
 doc = "The count of open questions at which a sitting is suggested. 0 never suggests one."
 read = "use"
+label = "Suggest a sitting at"
+line = "0 never suggests one."
+unit = "open questions"
 
 [defaults.disposable]
 type = "list"
@@ -89,27 +117,38 @@ items = "str"
 default = [".venv", "__pycache__", "*.pyc", ".pytest_cache", ".ruff_cache", ".mypy_cache", "node_modules", "*.egg-info"]
 doc = "Name globs for ignored files a build's worktree may lose when rounds removes it. A worktree holding any other ignored file is kept. An entry holds no path separator and can't match every name."
 read = "use"
+label = "Files a worktree may lose"
+line = "Globs of ignored files rounds may remove with a build's worktree. Any other ignored file keeps it."
 
 [sweep.armed]
 type = "bool"
 default = false
 doc = "Lets the sweep of leftover folders remove what it proves may go. Until then every sweep is a dry run: read what it would remove first, with moxi rounds drop --leftovers."
 read = "use"
+label = "Let the sweep remove leftover folders"
+line = "Until it is on, every sweep is a dry run: moxi rounds drop --leftovers shows what it would remove."
 
 [sweep.at_start]
 type = "bool"
 default = false
 doc = "With turns installed and the sweep armed, sweep leftover folders at each session's start."
 read = "use"
+label = "Sweep at each session's start"
+line = "With turns installed and the sweep armed."
 
 [sweep.grace_hours]
 type = "int"
 default = 2
 doc = "How long nothing in a leftover folder must have changed before the sweep takes it. At least 1."
 read = "use"
+label = "A leftover must sit unchanged for"
+line = "At least 1."
+unit = "hours"
 
 [projects]
 type = "table"
 default = {}
 doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, check, ci, finish, shared_paths, keep_branch, lock_ref and brief."
 read = "use"
+label = "Each project's own settings"
+line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, check, finish and more."

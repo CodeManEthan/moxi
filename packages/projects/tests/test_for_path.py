@@ -1,4 +1,6 @@
-"""Path lookup: which project a directory is in.
+"""Path lookup: which project a directory is in, one path at a time and many at once.
+
+Every case asks `for_path` and `for_paths` both and requires the same key from each.
 
 The trees are written by hand in tmp, `.git` and `commondir` files included, so no git is
 needed; one test in the slow tier makes a real worktree.
@@ -29,8 +31,11 @@ def register(*rows) -> None:
 
 
 def key_for(path) -> str | None:
+    """The key `for_path` gives `path`, checked to be the one `for_paths` gives it."""
     found = api.for_path(str(path))
-    return found.key if found else None
+    key = found.key if found else None
+    assert api.for_paths([str(path)]) == {str(path): key}
+    return key
 
 
 def make_main_repo(main: Path) -> Path:
@@ -93,6 +98,8 @@ def test_no_rows_answers_none_without_touching_the_path(store_path, monkeypatch)
     monkeypatch.setattr(os, "stat", lambda p, *a, **k: calls.append(os.fspath(p))
                         or true_stat(p, *a, **k))
     assert api.for_path("/some/where") is None
+    assert api.for_paths(["/some/where", "/some/else"]) == {"/some/where": None,
+                                                           "/some/else": None}
     assert [c for c in calls if c.startswith("/some")] == []
 
 
@@ -102,6 +109,54 @@ def test_a_path_holding_a_nul_is_in_no_project(tmp_path):
     register(("proj", root))
     assert api.for_path(str(root / "src") + "\0x") is None
     assert api.for_path("\0") is None
+    nul = str(root / "src") + "\0x"
+    assert api.for_paths([nul, str(root)]) == {nul: None, str(root): "proj"}
+
+
+# --- many paths at once ------------------------------------------------------------------
+
+def test_many_paths_read_the_store_once_and_each_gets_for_paths_answer(tmp_path,
+                                                                      monkeypatch):
+    outer = tmp_path / "outer"
+    inner = outer / "packages" / "inner"
+    (inner / "src").mkdir(parents=True)
+    main = tmp_path / "repos" / "main"
+    make_main_repo(main)
+    tree = tmp_path / "scratch" / "wt"
+    make_worktree(main, tree, "wt")
+    register(("outer", outer), ("inner", inner), ("main", main))
+    paths = [str(inner / "src"), str(outer / "packages"), str(tree / "src"),
+             str(tmp_path / "elsewhere"), str(main)]
+    opened = []
+    true_open = api._open
+    monkeypatch.setattr(api, "_open", lambda path: opened.append(path) or true_open(path))
+    found = api.for_paths(paths)
+    assert len(opened) == 1
+    assert found == {paths[0]: "inner", paths[1]: "outer", paths[2]: "main",
+                     paths[3]: None, paths[4]: "main"}
+    for path in paths:
+        one = api.for_path(path)
+        assert found[path] == (one.key if one else None)
+
+
+def test_a_path_given_twice_is_one_entry_and_no_paths_is_an_empty_answer(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    register(("proj", root))
+    assert api.for_paths([str(root), str(root)]) == {str(root): "proj"}
+    assert api.for_paths([]) == {}
+
+
+def test_for_paths_takes_path_objects_and_keys_them_as_strings(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    register(("proj", root))
+    assert api.for_paths([root]) == {str(root): "proj"}
+
+
+def test_a_bare_string_is_refused_rather_than_read_letter_by_letter(tmp_path):
+    with pytest.raises(TypeError):
+        api.for_paths(str(tmp_path))
 
 
 # --- symlinks, case and identity -----------------------------------------------------------
