@@ -5592,6 +5592,7 @@ moxi	packages/moxi/src/moxi/config.py	if not isinstance(terminal, dict) or set(t
 moxi	packages/moxi/src/moxi/config.py	raise bad("has a terminal that is not a table of on and off",	keep	bad	bad
 moxi	packages/moxi/src/moxi/config.py	raise bad(f"has terminal.{state} {terminal[state]!r}, which is not one line "	keep	bad	bad
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]	keep	record	record
+moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "is_needs_value", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	can call `record`. The doctor's runner and checks live in `moxi.doctor._run`, which the	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/_run.py	"""Why `record` can't be written in place, or None: the file, when it exists, and the	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/_run.py	10. placements: each placement `moxi.place` holds that is `stale`, `modified` or	keep	stale	stale
@@ -6130,6 +6131,7 @@ moxi	packages/moxi/tests/test_doctor_run.py	monkeypatch.setenv("HOME", str(home)
 moxi	packages/moxi/tests/test_doctor_run.py	moxi.config._change("demo", "relay.enabled", "set", False, by="test")	keep	set	set
 moxi	packages/moxi/tests/test_doctor_run.py	moxi.config._change("demo", "relay.enabled", "set", value=False, by="test")	keep	set	set
 moxi	packages/moxi/tests/test_doctor_run.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi	packages/moxi/tests/test_doctor_run.py	assert not any(name == "check units" for _, name in got)	keep	any	any
 moxi	packages/moxi/tests/test_doctor_terminal.py	-	name	test_a_folder_that_cant_be_written_fails_with_no_step_run	test_a_dir_that_cant_be_written_fails_with_no_step_run
 moxi	packages/moxi/tests/test_doctor_terminal.py	-	name	test_a_record_of_this_environment_is_ok	test_a_record_of_this_env_is_ok
 moxi	packages/moxi/tests/test_doctor_terminal.py	acct	name	folder	account_dir

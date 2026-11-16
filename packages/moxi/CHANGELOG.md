@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.10 (unreleased)
+
+- `moxi.doctor.Row` gains `needs`, given by keyword: on an `off` row given because a
+  module or an extra is not installed, it names that part, a module (`projects`) or
+  `<module>[<extra>]` (`ui[gateway]`). `Row` refuses it on a row that is not `off`, and a
+  value in neither form; `moxi.doctor.is_needs_value` says whether a value is in the form.
+  A module that sets it needs `moxi>=0.1.10`: an older `Row` refuses the keyword.
+- `moxi doctor --json` writes `needs` on a row that carries it and leaves the key out of
+  every other row. The plain report is unchanged.
+- A daemon's `HEALTH` row keeps the `needs` of the row its target returned.
+- An extension's `off` row, an optional link to a module that is not installed, needs that
+  module.
+
 ## 0.1.9 (unreleased)
 
 - A settings key may carry page fields, which say how a settings page shows it: `label`,
