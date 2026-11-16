@@ -229,16 +229,26 @@ def test_a_record_that_doesnt_read_is_replaced(fence, walks, typed, console, dat
 
 
 @posix_only
-def test_a_file_that_cant_be_read_is_replaced_without_waiting(fence, walks, typed, console):
+def test_a_file_that_cant_be_read_is_replaced_without_waiting(
+        fence, walks, typed, console, monkeypatch):
+    """The step tries the unreadable file once and replaces it. It doesn't try again
+    through the replace window `read()` waits out (`files.REPLACE_RETRY`), which would
+    read the file more than once; the count is the proof, not a time."""
     path = terminal.write({"HOME": "/x"})
     path.chmod(0)
     if os.access(path, os.R_OK):
         pytest.skip("this account reads any file")
-    import time
+    real = type(path).read_bytes
+    reads = []
 
-    started = time.monotonic()
+    def counted(self):
+        if self == path:
+            reads.append(1)
+        return real(self)
+
+    monkeypatch.setattr(type(path), "read_bytes", counted)
     console("modules")
-    assert time.monotonic() - started < 0.5
+    assert reads == [1] and terminal.last.kind == terminal.WRITTEN
     assert recorded()["env"] == terminal.of()
 
 
