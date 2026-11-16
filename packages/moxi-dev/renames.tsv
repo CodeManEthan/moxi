@@ -7041,7 +7041,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	done: set[int] = set()	keep	se
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	for path in sorted(set(edits) | used):	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found = found or any(_names(generator.target, name, stored=True)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found: set[Leftover] = set()	keep	set	set
-moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="compare not-here rows with this merged main ref")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="compare not-here and dead rows with this merged main ref")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="show states and leftovers without editing files")	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if canonical == target.callee and any(	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if chained and old and new and not any(	keep	any	any
@@ -7050,6 +7050,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if other is not source and any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	if other.module != source.module and not any(	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	in_getattr = any(scope.endswith("__getattr__") and node in ast.walk(one)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	kept: set[int] = set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	listed = set(_git(root, "ls-files", "-z", "--cached", "--others",	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	own.setdefault(row.path, set()).add(row.old)	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("--table", type=Path, default=default, metavar="PATH")	keep	type	type
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	parser.add_argument("root", nargs="?", type=Path, default=Path.cwd(), metavar="ROOT")	keep	type	type

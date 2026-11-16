@@ -5,8 +5,9 @@
 - `moxi-dev rename` reads a row whose file is not in the tree as dead: it applies nothing,
   its old name is no leftover anywhere (a `name` or `kwonly` row there used to list every
   string, attribute, keyword and cite of that spelling across the repository), and it is
-  listed on a `dead:` line with its table row, file, kind and names. The summary counts
-  dead rows apart from `not here` ones.
+  listed on a `dead:` line with its table row, file, kind and names and why the script
+  reads no file there. The summary counts dead rows apart from `not here` ones, and the
+  comparison with `--main` takes both.
 - `MOXI_TEST_TIMED_SLACK=<factor>`, read once when pytest starts, is how much slower than
   the machine that set the budgets this one may be; `timed_slack()` returns it (1.0 when
   unset), inside a fenced test too. Every upper bound on a wall-clock measurement in a

@@ -793,16 +793,35 @@ def test_a_row_whose_file_is_gone_is_dead_and_its_old_name_no_leftover(tmp_path,
 
 def test_rows_whose_file_is_there_keep_their_meaning(tmp_path, capsys):
     path = "packages/p/src/p/x.py"
-    root = repo(tmp_path, {path: "stray = 1\n" + SPREAD})
+    root = repo(tmp_path, {path: "stray = 1\ndef call(a, b):\n    return a\n" + SPREAD})
     renames = table(tmp_path,
                     row(path, "-", "name", "stray", "page_dir"),
+                    row(path, "call", "kwonly", "b", "b"),
                     row(path, "gone", "name", "f", "fh"),
                     row(path, "x = 1", "use", "x", "y"),
                     row("-", "removed:p.x:gone", "keep", "old", "new"))
     assert rename.run(root, renames, dry_run=True) == 1
     out = capsys.readouterr().out
-    assert "1 to apply, 1 applied, 2 not here, 0 dead" in out
+    assert "2 to apply, 1 applied, 2 not here, 0 dead" in out
     assert "dead:" not in out
-    # A module-level name is still looked for in every file.
-    assert f"{path}:6: unresolved attribute still uses 'stray'" in out
-    assert f"{path}:6: string lookup still names 'stray'" in out
+    # A module-level name is still looked for in every file, and a keyword-only
+    # parameter's keyword at every unresolved call.
+    assert f"{path}:8: unresolved attribute still uses 'stray'" in out
+    assert f"{path}:8: string lookup still names 'stray'" in out
+    assert f"{path}:7: unresolved call still passes keyword 'b'" in out
+
+
+def test_a_dead_row_says_why_the_script_reads_no_file_there(tmp_path, capsys):
+    broken, notes = "packages/p/src/p/broken.py", "packages/p/notes.txt"
+    root = repo(tmp_path, {broken: "def broken(:\n", notes: "stray\n"})
+    renames = table(tmp_path,
+                    row(GONE, "-", "name", "stray", "page_dir"),
+                    row(broken, "-", "name", "stray", "page_dir"),
+                    row(notes, "stray", "keep", "stray", "stray"))
+    assert rename.run(root, renames, dry_run=True) == 0
+    out = capsys.readouterr().out
+    assert "0 to apply, 0 applied, 0 not here, 3 dead" in out
+    assert f"row 2: {GONE} name stray -> page_dir: the file is not in the tree" in out
+    assert f"row 3: {broken} name stray -> page_dir: the file does not read or parse" in out
+    assert (f"row 4: {notes} keep stray -> stray: the script reads only Python files "
+            "under packages/") in out

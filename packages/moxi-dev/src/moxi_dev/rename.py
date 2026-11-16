@@ -471,11 +471,24 @@ def _field(source: Source, scope: str, name: str) -> bool:
 
 def _dead(project: Project, row: Row) -> bool:
     """Whether a row names a file the script does not read: one deleted or renamed, or
-    one that does not parse. Its `name` or `kwonly` row has no definition to rename and
-    its `use` or `keep` row no line to change or cover, so it applies nothing and reads
-    `not here`, and no leftover is looked for under its old name. The removed-scope
-    `keep` form names no file and is not dead."""
+    one `_why_dead` names. Its `name` or `kwonly` row has no definition to rename and
+    its `use` or `keep` row no line to change or cover, so it applies nothing and no
+    leftover is looked for under its old name; `state` finds nothing for it, and the run
+    counts and lists it as dead. The removed-scope `keep` form names no file and is not
+    dead."""
     return row.path not in project.sources and not row.scope.startswith("removed:")
+
+
+def _why_dead(path: str, listed: set[str]) -> str:
+    """Why the script reads no file at a dead row's path, `listed` being every path in
+    the tree."""
+    if path not in listed:
+        return "the file is not in the tree"
+    if path.startswith(VENDORED):
+        return "the file is vendored, and the script does not read it"
+    if (_module(path) or _outside_module(path)) is None:
+        return "the script reads only Python files under packages/"
+    return "the file does not read or parse"
 
 
 def state(project: Project, row: Row) -> str:
@@ -1268,7 +1281,7 @@ def main_leftovers(root: Path, project: Project, rows: Sequence[Row], states: Se
             names = ", ".join(source.path for source in candidates)
             found.append(Leftover(row.path, 0,
                                   f"main's row has ambiguous moved scopes binding {row.old!r}: {names}"))
-    return found, f"compared not-here rows with {ref}"
+    return found, f"compared not-here and dead rows with {ref}"
 
 
 def apply_rows(root: Path, rows: Sequence[Row], texts: dict[str, str] | None = None
@@ -1342,10 +1355,12 @@ def run(root: Path, table: Path, *, dry_run: bool = False, main_ref: str | None 
                                                      "dead")}
     print("moxi-dev rename: " + ", ".join(f"{counts[word]} {word}" for word in counts))
     print(f"moxi-dev rename: {comparison}")
+    listed = set(_git(root, "ls-files", "-z", "--cached", "--others",
+                      "--exclude-standard").stdout.split("\0"))
     for row, status in zip(rows, states):
         if status == "dead":
             print(f"moxi-dev rename: dead: {table.name} row {row.line}: {row.path} "
-                  f"{row.kind} {row.old} -> {row.new}: the file is not in the tree")
+                  f"{row.kind} {row.old} -> {row.new}: {_why_dead(row.path, listed)}")
     for leftover in remaining:
         print(f"moxi-dev rename: leftover: {leftover}")
     print(f"moxi-dev rename: {len(remaining)} leftovers")
@@ -1365,7 +1380,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true",
                         help="show states and leftovers without editing files")
     parser.add_argument("--main", dest="main_ref", metavar="REF",
-                        help="compare not-here rows with this merged main ref")
+                        help="compare not-here and dead rows with this merged main ref")
     parser.add_argument("root", nargs="?", type=Path, default=Path.cwd(), metavar="ROOT")
     return parser
 
