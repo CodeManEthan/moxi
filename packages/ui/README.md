@@ -140,8 +140,8 @@ module's `ui/gateway` target. A phone pairs by scanning a QR code the desktop sh
 registering a passkey, then signs in with the passkey. It reaches only the routes a module
 marks `gateway=True`, with marked fields redacted, and every request is in an audit log.
 A text that may name a path, such as a check's name, reaches the phone with each path
-that starts a word with `/` or `~` cut to its last folder name, up to the next space; a
-path in another form is sent as it is
+that starts a word, or follows `:` or `=`, with `/` or `~` cut to its last folder name, up
+to the next space; a path in another form is sent as it is
 ([docs/loopback.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/loopback.md)
 has the rule).
 

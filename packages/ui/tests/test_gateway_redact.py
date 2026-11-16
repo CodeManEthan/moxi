@@ -187,8 +187,17 @@ def test_a_gateway_read_has_its_marked_values_changed_and_nothing_else(tmp_path:
     ("hooks ~/", "hooks ~"),
     ("hooks /", "hooks /"),
     ("hooks //", "hooks /"),
-    # Only a word that starts with / or ~ is a path.
-    ("hooks root=/home/someone/x", "hooks root=/home/someone/x"),
+    # A path also starts after : or =.
+    ("hooks root=/home/someone/x", "hooks root=x"),
+    ("run:/x", "run:x"),
+    ("key=/x", "key=x"),
+    ("start list: run:/home/someone/bin/ctx", "start list: run:ctx"),
+    ("start list: run:~/bin/ctx", "start list: run:ctx"),
+    ("hooks key=~someone", "hooks key=~"),
+    ("run:/", "run:/"),
+    # Any other word is a path only when it starts with / or ~.
+    ('hooks "/home/someone/x"', 'hooks "/home/someone/x"'),
+    ("hooks (/home/someone/x)", "hooks (/home/someone/x)"),
     ("hooks code/proj-b", "hooks code/proj-b"),
     ("hooks ../proj-b", "hooks ../proj-b"),
     ("hooks $HOME/x", "hooks $HOME/x"),
@@ -281,12 +290,16 @@ KEPT = {"at": "2026-11-15T08:00:00Z", "running": False, "error": "/var/lib/someo
                  {"module": "turns", "name": "guard", "state": "fail",
                   "detail": "A guard could not check a call", "fix": None},
                  {"module": "repo", "name": "spec ~/code/proj-c nightly", "state": "ok",
-                  "detail": "last commit at 08:00", "fix": None}]}
+                  "detail": "last commit at 08:00", "fix": None},
+                 {"module": "turns", "name": "start list: run:/var/lib/someone/bin/ctx",
+                  "state": "warn", "detail": "not a program", "fix": None}]}
 #: What the phone gets of `KEPT`.
 KEPT_ON_THE_PHONE = {**KEPT, "error": None, "rows": [
     {"module": "repo", "name": "hooks proj-b", "state": "warn", "detail": None, "fix": None},
     {"module": "turns", "name": "guard", "state": "fail", "detail": None, "fix": None},
     {"module": "repo", "name": "spec proj-c nightly", "state": "ok", "detail": None,
+     "fix": None},
+    {"module": "turns", "name": "start list: run:ctx", "state": "warn", "detail": None,
      "fix": None}]}
 
 

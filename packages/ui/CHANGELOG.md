@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-- A check's name no longer reaches the phone with a host path in it. The gateway sends a
-  kept row's `name` (`/m/ui/api/checks` and the topic `ui.checks`) with each path in it
-  cut to its last folder name, so Home's Health row on the phone reads `repo · hooks
-  proj-b` where a repository's row is named by its root. A path counts when it starts a
-  word with `/` or `~`, and it runs to the next whitespace. It comes with a new mark a
-  page's `Out` may carry, `scrub`, beside `path` and `redact`.
+- A check's name reaches the phone with each path that starts a word, or follows `:` or
+  `=`, with `/` or `~` cut to its last folder name. The gateway sends a kept row's `name`
+  (`/m/ui/api/checks` and the topic `ui.checks`) that way, so Home's Health row on the
+  phone reads `repo · hooks proj-b` where a repository's row is named by its root, and
+  `turns · start list: run:ctx` where a skipped entry names a program. A path runs to the
+  next whitespace, and a path in another form is sent as it is. It comes with a new mark
+  a page's `Out` may carry, `scrub`, beside `path` and `redact`.
 - The contract check (`ui_component_check`) waits up to 5 s for each of `tokens` to
   reach a colour of the placed component, so a part drawn from data that arrives after
   the first render (a pushed topic's first value) counts. Before, it probed once two

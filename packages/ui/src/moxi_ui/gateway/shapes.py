@@ -46,9 +46,9 @@ __all__ = [
 BODY_LIMIT = 1024 * 1024
 _NAME_BYTES = 255
 _SEGMENTS = re.compile(r"[/\\]")
-#: A host path in a text `scrub` takes: `/` or `~` at the start of a word, to the next
-#: whitespace.
-_HOST_PATH = re.compile(r"(?<!\S)[/~]\S*")
+#: A host path in a text `scrub` takes: `/` or `~` at the start of a word or after `:` or
+#: `=`, to the next whitespace.
+_HOST_PATH = re.compile(r"(?<![^\s:=])[/~]\S*")
 
 
 # --- the export checks ----------------------------------------------------------------
@@ -177,10 +177,11 @@ def handle(path: str, key: bytes) -> str:
 def scrub(text: str) -> str:
     """`text` with each host path in it cut to its last folder name, the rest as it is.
 
-    A path starts with `/` or `~` at the start of the text or after whitespace, and runs to
-    the next whitespace. So a path with a space in it is cut at the space, and the part
-    after the space is sent as it is. A path glued to other text (`root=/srv/x`), a
-    relative path, a variable (`$HOME/x`) and a drive-letter path are sent as they are.
+    A path starts with `/` or `~` at the start of the text, after whitespace, or after `:`
+    or `=` (`run:/srv/x` sends `run:x`), and runs to the next whitespace. So a path with a
+    space in it is cut at the space, and the part after the space is sent as it is. A path
+    glued to other text (`"/srv/x"`, `(/srv/x)`), a relative path, a variable (`$HOME/x`)
+    and a drive-letter path are sent as they are.
     A trailing `/` is dropped first. A leading `~` or `~user` names a home, not a folder,
     so `~user/x` sends `x`, a home alone sends `~`, and the root sends `/`.
     """
