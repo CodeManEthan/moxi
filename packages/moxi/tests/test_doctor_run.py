@@ -804,6 +804,8 @@ def slow():
     time.sleep(2)
 def wrong():
     return ["not a row"]
+def downgraded():
+    return needing()._replace(state="warn")
 """
 
 
@@ -812,6 +814,7 @@ def wrong():
     ("raises", "fail", "moxi_demo.health:raises raised RuntimeError: socket refused"),
     ("slow", "fail", "moxi_demo.health:slow did not finish in 0.2 s"),
     ("wrong", "fail", "returned list, not a moxi.doctor.Row"),
+    ("downgraded", "fail", "raised ValueError: only an off row carries needs, not a warn"),
 ])
 def test_health_runs_one_target_in_a_worker_thread(d, monkeypatch, target, state, words):
     monkeypatch.setattr(_run, "HEALTH_SECONDS", 0.2)
@@ -833,6 +836,16 @@ def test_health_carries_the_row_s_needs(d):
     d.module(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:good'}",
              files_={"health.py": HEALTHS})
     assert doctor.health("demo", "relay").needs is None
+
+
+def test_a_refused_health_row_fails_its_own_row_not_the_units_check(d):
+    d.installed(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:downgraded'}",
+                files_={"health.py": HEALTHS})
+    got = d.rows("demo")
+    health = got[("demo", "daemon relay health")]
+    assert health.state == "fail" and "only an off row carries needs" in health.detail
+    assert ("demo", "daemon relay") in got
+    assert not any(name == "check units" for _, name in got)
 
 
 def test_health_with_no_target_and_an_unknown_daemon(d):

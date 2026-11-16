@@ -94,6 +94,33 @@ def test_a_row_with_needs_copies_and_pickles_whole():
     assert pickle.loads(pickle.dumps(plain)) == plain
 
 
+def test_a_rebuilt_row_keeps_the_refusals():
+    row = doctor.Row("repo", "projects", "off", "d", "moxi install projects", needs="projects")
+    assert row._replace(detail="e") == doctor.Row("repo", "projects", "off", "e",
+                                                  "moxi install projects", needs="projects")
+    assert row._replace(state="warn", needs=None).needs is None
+    assert type(row._replace(detail="e")) is doctor.Row
+    with pytest.raises(ValueError, match="only an off row carries needs, not a warn"):
+        row._replace(state="warn")
+    with pytest.raises(ValueError, match="state is one of"):
+        row._replace(state="info")
+    with pytest.raises(ValueError, match="needs is a module name or <module>"):
+        row._replace(needs="/home/x/proj")
+    with pytest.raises(TypeError, match="unexpected field names"):
+        row._replace(colour="red")
+
+
+def test_a_row_made_from_a_sequence_keeps_the_refusals():
+    assert doctor.Row._make(("ui", "gateway", "off", "d", None, "ui[gateway]")) == doctor.Row(
+        "ui", "gateway", "off", "d", needs="ui[gateway]")
+    with pytest.raises(ValueError, match="only an off row carries needs, not a fail"):
+        doctor.Row._make(("a", "n", "fail", "d", None, "projects"))
+    with pytest.raises(ValueError, match="needs is a module name or <module>"):
+        doctor.Row._make(("a", "n", "off", "d", None, "/home/x/proj"))
+    with pytest.raises(TypeError, match="Expected 6 arguments, got 5"):
+        doctor.Row._make(("a", "n", "ok", "d", None))
+
+
 def test_record_writes_one_entry_per_key(home):
     doctor.record("demo", "the committer failed", key="commit:abc", fix="repo check")
     doctor.record("demo", "another", key="other")

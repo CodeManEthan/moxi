@@ -64,6 +64,24 @@ class Row(namedtuple("Row", ("module", "name", "state", "detail", "fix", "needs"
                                  f"<module>[<extra>], not {needs!r}")
         return super().__new__(cls, module, name, state, detail, fix, needs)
 
+    # The namedtuple's own `_make` and `_replace` build the tuple directly; these go through
+    # `Row(...)` so a rebuilt row keeps the same refusals.
+    @classmethod
+    def _make(cls, iterable):
+        values = tuple(iterable)
+        if len(values) != len(cls._fields):
+            raise TypeError(f"Expected {len(cls._fields)} arguments, got {len(values)}")
+        return cls(*values[:5], needs=values[5])
+
+    def _replace(self, /, **changes):
+        unknown = [name for name in changes if name not in self._fields]
+        if unknown:
+            raise TypeError(f"Got unexpected field names: {unknown!r}")
+        return self._make(changes.get(name, value)
+                          for name, value in zip(self._fields, self))
+
+    __replace__ = _replace
+
     def __getnewargs_ex__(self):
         # `needs` is keyword-only, so a copy or an unpickle passes it by name.
         return tuple(self[:5]), {"needs": self.needs}
