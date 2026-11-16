@@ -98,7 +98,14 @@ For a function removed on a branch, a keep row uses path `-` and a scope of
 script distinguishes removal from a move when common qualified names occur in several
 modules.
 
-Before editing, the script classifies each row as `to apply`, `applied` or `not here`.
+Before editing, the script classifies each row as `to apply`, `applied`, `not here` or
+`dead`. A row is dead when its file is not one the script reads: a file the branch
+deleted or renamed, or one that is vendored, is not a Python file under `packages/`, or
+does not parse. A dead `name` or `kwonly` row has no definition to rename, and its old
+name is no leftover anywhere; a dead `use` or `keep` row has no line to change or cover.
+Every dead row is listed with its table row, file, kind and names and which of those
+reasons holds, so a branch can drop it or point it at the file's new path; it does not
+change the exit code. The removed-scope `keep` form names no file and is never dead.
 A second run changes nothing. It resolves direct names, module aliases, from-imports,
 re-exports through API modules, class constructors and methods, and a local assigned
 from a resolved class constructor. It edits resolved tokens, matching `__all__` and
