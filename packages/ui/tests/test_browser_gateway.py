@@ -531,6 +531,8 @@ def test_on_the_phone_settings_is_hidden_and_its_address_says_where_settings_are
     expect(panel.locator("moxi-ui-settings")).to_have_count(0)
     expect(panel.locator("p")).to_have_count(1)
     expect(page.locator("#moxi-settings")).to_be_hidden()
+    # The top line names the place the line sends the phone to.
+    expect(page.locator("#moxi-pages-button")).to_have_text(re.compile(r"^Home\s*▾$"))
 
 def test_on_the_phone_tab_from_the_bands_last_name_closes_it_where_settings_is_hidden(
         gw, phones):

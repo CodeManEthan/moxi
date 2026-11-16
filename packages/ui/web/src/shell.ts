@@ -103,6 +103,14 @@ export function pageName(at: { module: string; route: string } | null, modules: 
   return modules.find((item) => item.name === at.module)?.page?.title ?? null;
 }
 
+/** The name the top line shows for the page at `at`: `pageName`'s, except on the phone,
+ * where a settings route names Home, the one page its line sends the phone to. */
+export function topName(gateway: boolean, at: { module: string; route: string } | null,
+                        modules: PanelModule[]): string | null {
+  const named = pageName(at, modules);
+  return gateway && at !== null && at.module === "ui" && named === "Settings" ? "Home" : named;
+}
+
 /** Whether the top line shows its right-hand `Settings`: not on the phone, which only the
  * desk reaches, and not on the Settings page itself. */
 export function settingsShown(gateway: boolean, at: { module: string; route: string } | null): boolean {
@@ -251,7 +259,7 @@ export function boot(deps: ShellDeps): void {
     seq += 1;
     const mine = seq;
     panel.replaceChildren();
-    name(pageName(at, deps.modules()));
+    name(topName(deps.gateway, at, deps.modules()));
     const url = item.page.url;
     // A script that did not load may be a start that failed: the proxy answers its 502
     // with the exit and the log, and a second fetch within 10 s gets the same answer
@@ -371,7 +379,7 @@ export function boot(deps: ShellDeps): void {
   });
   // The phone's every page says, first under the top line, that it only reads there.
   reads.hidden = !deps.gateway;
-  name(pageName(where(location.pathname), deps.modules()));
+  name(topName(deps.gateway, where(location.pathname), deps.modules()));
   renderBand();
   void renderPanel();
 }

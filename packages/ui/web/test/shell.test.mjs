@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bandEntries, bandTab, isCurrent, loadPanel, pageName, settingsShown, where } from "../src/shell.ts";
+import { bandEntries, bandTab, isCurrent, loadPanel, pageName, settingsShown, topName, where } from "../src/shell.ts";
 
 test("the URL names the module and the route", () => {
   assert.deepEqual(where("/m/ui/"), { module: "ui", route: "" });
@@ -80,6 +80,17 @@ test("the page's name on every route, and none where the shell shows a message",
   assert.equal(name("/m/nopage/"), null);
   assert.equal(name("/m/missing/"), null);
   assert.equal(name("/elsewhere"), null);
+});
+
+test("on the phone the top line names Home on a settings route, and every other page as the desk does", () => {
+  const mods = [mod("ui", "Modules", "setup", 500), mod("alpha", "Alpha", "daily", 1)];
+  const top = (path, gateway) => topName(gateway, where(path), mods);
+  assert.equal(top("/m/ui/settings", true), "Home");
+  assert.equal(top("/m/ui/settings/alpha", true), "Home");
+  assert.equal(top("/m/ui/settings", false), "Settings");
+  for (const path of ["/m/ui/", "/m/ui/modules", "/m/alpha/", "/m/ui/settingsx", "/elsewhere"]) {
+    assert.equal(top(path, true), pageName(where(path), mods), path);
+  }
 });
 
 test("the top line's Settings is hidden on the Settings page and on the phone, and shown elsewhere", () => {
