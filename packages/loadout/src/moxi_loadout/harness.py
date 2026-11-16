@@ -171,9 +171,12 @@ def _indent(raw: bytes | None) -> int:
     return 2
 
 
-def write(doc: Doc, harness: str, keep: int, *, remove_empty: bool = False) -> str | None:
+def write(doc: Doc, harness: str, keep: int, *, remove_empty: bool = False,
+          keep_copy=None) -> str | None:
     """Write `doc` back once, or remove it when `remove_empty` and nothing is left in it.
-    Returns None when written, else the line saying why not."""
+    With `keep_copy`, `keep_copy(path, now)` is called first with the bytes just read
+    again and checked; when it raises `OSError` nothing is written. Returns None when
+    written, else the line saying why not."""
     from moxi.files import atomic_write
 
     target = Path(os.path.realpath(doc.path))
@@ -185,6 +188,12 @@ def write(doc: Doc, harness: str, keep: int, *, remove_empty: bool = False) -> s
         return f"{doc.path} can't be read again ({exc.strerror or exc})"
     if now != doc.raw:
         return f"{doc.path} changed while planning; run install again"
+    if now is not None and keep_copy is not None:
+        try:
+            keep_copy(doc.path, now)
+        except OSError as exc:
+            return (f"a copy of {doc.path} couldn't be kept ({exc.strerror or exc}), so it "
+                    "was not written")
     if now is not None:
         backup(target, harness, now, keep)
     if remove_empty and doc.empty:

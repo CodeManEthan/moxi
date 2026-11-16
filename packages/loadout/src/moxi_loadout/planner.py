@@ -567,9 +567,11 @@ def _generate(plan: Plan, want: Want, section: Section, root, name, source, fiel
     data = convert.with_header(os.fspath(source), text)
     try:
         now = path.read_bytes()
-    except OSError:
+    except FileNotFoundError:
         now = None
-    current = None if now is None else ("same" if now == data else convert.state(path))
+    except OSError:
+        now = b""   # unreadable: not a file loadout can show it wrote
+    current = None if now is None else ("same" if now == data else convert.state_of(now))
     want.generated = (path, data, current)
     if lost:
         want.notes = (f"{harness} agent {name}: " + "; ".join(lost),)

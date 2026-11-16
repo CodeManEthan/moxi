@@ -203,7 +203,9 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
         "/api/view sections[].root", "/api/view rows[].target",
         "/api/view global.files[].file", "/api/view global.files[].parts[]",
         "/api/view global.source", "/api/view sections[].refused.last_root",
-        "/api/folder unlisted[].source"}
+        "/api/folder unlisted[].source", "/api/status kept[].target",
+        "/api/status kept[].copy", "/api/job outcome.kept[].target",
+        "/api/job outcome.kept[].copy"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
                  "/api/list items[].source", "/api/list items[].scope",
@@ -219,7 +221,9 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
                  "/api/view items[].what.command", "/api/view items[].what.url",
                  "/api/view items[].what.allow[]", "/api/view items[].what.ask[]",
                  "/api/view items[].what.deny[]", "/api/folder detail",
-                 "/api/folder uncommitted[]", "/api/folder unlisted[].name"):
+                 "/api/folder uncommitted[]", "/api/folder unlisted[].name",
+                 "/api/status kept[].id", "/api/status kept[].back",
+                 "/api/job outcome.kept[].id", "/api/job outcome.kept[].back"):
         assert marks[said] == "redact", said
     plain = {"/api/view harnesses[]", "/api/view counts.ok", "/api/view sections[].where",
              "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
@@ -236,7 +240,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/view item_notes[].kind", "/api/view item_notes[].name",
              "/api/view item_notes[].harness", "/api/view item_notes[].code",
              "/api/projects cause", "/api/folder state", "/api/folder more",
-             "/api/folder unlisted[].kind", "/api/folder reinstalls"}
+             "/api/folder unlisted[].kind", "/api/folder reinstalls",
+             "/api/status kept[].how", "/api/job outcome.kept[].how"}
     assert not plain & set(marks)
 
 
@@ -857,6 +862,32 @@ def test_a_job_read_through_to_its_end_does_what_the_verb_does(
     assert body["outcome"]["counts"] == {"ok": 2}     # lint for claude and codex
     assert os.readlink(kit.claude() / "lint") == str(lo / "skills" / "lint")
     assert 'skills = ["review", "lint"]' in (lo / "loadout.toml").read_text()
+
+
+def test_a_job_names_what_its_run_kept_and_how_to_put_it_back(lo, spawned, terminal_record):
+    terminal_record()
+    kit.claude().mkdir(parents=True)
+    kit.skill(kit.claude(), "review", "mine\n")
+    target = kit.claude() / "review"
+    status, answer = post("/api/replace", {"replace": ["skill:review@claude"]}, key=KEY)
+    assert status == 202
+    job = job_of(answer)
+    assert pagejob.run(job, verb_of(spawned[0])) == 0
+    [kept] = read("/api/job", f"job={job}")["outcome"]["kept"]
+    assert (kept["target"], kept["how"], kept["id"]) == (str(target), "replaced",
+                                                         "skill:review@claude")
+    assert kept["back"].endswith(f"mv {kept['copy']} {target}")
+    assert read("/api/status")["kept"] == []
+
+
+def test_a_job_recorded_before_outcomes_named_what_they_kept_reads_none_kept(lo, spawned):
+    status, answer = post("/api/install", {})
+    job = job_of(answer)
+    end = pagejob.end_path(job)
+    os.makedirs(os.path.dirname(end), exist_ok=True)
+    Path(end).write_text(json.dumps({"exit": 0, "lines": [], "outcome": {
+        "rows": [], "lines": [], "notes": [], "counts": {}, "exit": 0}}))
+    assert read("/api/job", f"job={job}")["outcome"]["kept"] == []
 
 
 def test_a_refused_job_reads_done_with_its_line(lo, spawned):

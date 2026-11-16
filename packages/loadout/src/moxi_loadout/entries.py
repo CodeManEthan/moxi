@@ -110,7 +110,11 @@ class Entry:
 @dataclass
 class Action:
     """What a run does with one entry: `op` is `ok`, `add`, `update`, `remove`, `end`
-    (drop the record only), `modified`, `blocked` or `stand` (left as it stands)."""
+    (drop the record only), `modified`, `blocked` or `stand` (left as it stands).
+    `over` marks an `update` or `remove` that goes over an entry that isn't loadout's: one
+    edited since loadout wrote it, one loadout didn't write that `--replace` takes over,
+    or one the user had first (`prior`); the file is kept under `displaced/` before it is
+    written."""
 
     entry: Entry | None
     record: dict | None
@@ -122,6 +126,7 @@ class Action:
     written: object = _MISSING   # an MCP server as its CLI wrote it, read back
     follows: Action | None = None   # another item's action on the same entry
     shared: bool = False   # an `end` whose entry another wanted item keeps
+    over: bool = False
 
     @property
     def where(self) -> Entry | dict:
@@ -744,15 +749,17 @@ def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
         groups = _groups(doc, e.key)
         if rec is not None:
             if rec.get("written") in groups:
-                return Action(e, rec, "ok" if rec["written"] == e.value else "update",
-                              prior=rec.get("prior", False))
+                same = rec["written"] == e.value
+                return Action(e, rec, "ok" if same else "update",
+                              prior=rec.get("prior", False),
+                              over=not same and bool(rec.get("prior")))
             near = _near(groups, e.key[1], None, _other_groups(records, rec))
             if near is not None:
                 if not claimed:
                     return Action(e, rec, "modified", f"edited; found {json.dumps(near)}")
                 held = _near(groups, e.key[1], _command(rec.get("written")))
                 return Action(e, rec, "update", replace=held if held is not None
-                              else _MISSING)
+                              else _MISSING, over=True)
         if e.value in groups:
             return Action(e, rec, "ok", prior=_shared_prior(records, e))
         near = _near(groups, e.key[1], _command(e.value))
@@ -760,16 +767,17 @@ def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
             if not claimed:
                 return Action(e, rec, "blocked", f"a group like it is there: "
                               f"{json.dumps(near)}; --replace takes it over")
-            return Action(e, rec, "update", replace=near)
+            return Action(e, rec, "update", replace=near, over=True)
         return Action(e, rec, "add")
     found = _get(doc, e.kind, e.key)
     if rec is not None and found is not _MISSING:
         if found == rec.get("written"):
             old = rec.get("sent") if e.kind == "mcp" else rec.get("written")
             return Action(e, rec, "ok" if old == value else "update",
-                          prior=rec.get("prior", False))
+                          prior=rec.get("prior", False),
+                          over=old != value and bool(rec.get("prior")))
         if claimed:
-            return Action(e, rec, "update")
+            return Action(e, rec, "update", over=True)
         how = f" permissions:{e.by[0]}@codex" if e.kind == "rules" and e.by else ""
         return Action(e, rec, "modified", f"edited since loadout wrote it; --replace{how} "
                       "rewrites it")
@@ -779,7 +787,7 @@ def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
     if equal:
         return Action(e, rec, "ok", prior=_shared_prior(records, e))
     if claimed:
-        return Action(e, rec, "update")
+        return Action(e, rec, "update", over=True)
     return Action(e, rec, "blocked", "something else is there; --replace takes it over")
 
 
@@ -811,13 +819,13 @@ def _gone(r: dict, doc, records: list, used: set, *, claimed: bool, want=()) -> 
         if not claimed:
             return Action(None, r, "modified", f"edited; found {json.dumps(near)}")
         held = _near(groups, key[1], _command(written))
-        return Action(None, r, "remove", replace=held) if held is not None \
+        return Action(None, r, "remove", replace=held, over=True) if held is not None \
             else Action(None, r, "end")
     found = _get(doc, kind, key)
     if found is _MISSING:
         return Action(None, r, "end")
     if found == written or claimed:
-        return Action(None, r, "remove")
+        return Action(None, r, "remove", over=found != written)
     how = " permissions:NAME@codex, NAME any permissions item," if kind == "rules" else ""
     return Action(None, r, "modified", f"edited since loadout wrote it; --replace{how} "
                   "removes it")
@@ -876,9 +884,16 @@ def covers(scope, a: Action) -> bool:
 
 # -- applying ------------------------------------------------------------------------------
 
-def apply(run: Run, scope, data: dict, *, keep: int, say=print) -> list[Row]:
+def apply(run: Run, scope, data: dict, *, keep: int, say=print, keeper=None) -> list[Row]:
     """Carry the run's actions in `scope` out: CLI-backed MCP servers first, then one
-    write per file. Updates the ledger's `entries` in `data`. Returns the rows in scope."""
+    write per file. A file written for an action marked `over` is first kept under
+    `displaced/` by `keeper` (a `moxi_loadout.displaced.Keeper`, the run's), and a copy
+    that can't be made stops that write. Updates the ledger's `entries` in `data`.
+    Returns the rows in scope."""
+    if keeper is None:
+        from moxi_loadout.displaced import Keeper
+
+        keeper = Keeper()
     todo = [a for a in run.actions if covers(scope, a)
             and a.op in ("add", "update", "remove", "end", "ok")]
     # An action on an entry another item writes too follows that item's action; when
@@ -899,7 +914,7 @@ def apply(run: Run, scope, data: dict, *, keep: int, say=print) -> list[Row]:
     for a in todo:
         if (a.where.kind if a.entry else a.record.get("kind")) == "mcp" \
                 and a.op in ("add", "update", "remove"):
-            _cli(a, run, keep, say)
+            _cli(a, run, keep, say, keeper)
     by_file: dict[str, list[Action]] = {}
     for a in todo:
         kind = a.entry.kind if a.entry else a.record.get("kind")
@@ -917,7 +932,12 @@ def apply(run: Run, scope, data: dict, *, keep: int, say=print) -> list[Row]:
             (a.entry.kind if a.entry else a.record.get("kind")) in ("global-block", "rules",
                                                                     "global-line")
             for a in actions)
-        problem = hz.write(doc, harness, keep, remove_empty=empty) if doc.changed else None
+        copy = None
+        if any(a.over for a in actions):
+            def copy(path, now, harness=harness):
+                keeper.copy(path, harness, now, say=say)
+        problem = hz.write(doc, harness, keep, remove_empty=empty,
+                           keep_copy=copy) if doc.changed else None
         if problem:
             run.lines.append(problem)
             continue
@@ -981,8 +1001,10 @@ def _edit(doc, a: Action) -> None:
         _set(doc, kind, key, e.value)
 
 
-def _cli(a: Action, run: Run, keep: int, say) -> None:
-    """An MCP server through its harness's CLI: remove, then add; read back."""
+def _cli(a: Action, run: Run, keep: int, say, keeper) -> None:
+    """An MCP server through its harness's CLI: remove, then add; read back. An action
+    marked `over` keeps the file under `displaced/` before the CLI runs; a copy that
+    can't be made stops it."""
     from moxi import proc
 
     e, r = a.entry, a.record
@@ -992,7 +1014,15 @@ def _cli(a: Action, run: Run, keep: int, say) -> None:
     exe = shutil.which(harness)
     try:
         if file.exists():
-            hz.backup(file, harness, file.read_bytes(), keep)
+            now = file.read_bytes()
+            if a.over:
+                try:
+                    keeper.copy(file, harness, now, say=say)
+                except OSError as exc:
+                    run.lines.append(f"{harness} mcp {name}: a copy of {file} couldn't be "
+                                     f"kept ({exc.strerror or exc}), so it was not written")
+                    return
+            hz.backup(file, harness, now, keep)
         steps = []
         if a.op in ("update", "remove"):
             steps.append([exe, "mcp", "remove"] + (["--scope", "user"] if harness ==

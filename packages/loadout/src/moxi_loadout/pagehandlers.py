@@ -100,7 +100,7 @@ def status(call: Any) -> dict[str, Any]:
         outcome = _status()
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return {"problem": _problem(exc, "the status"), "rows": [], "lines": [],
-                "notes": [], "counts": {}, "exit": 1}
+                "notes": [], "counts": {}, "exit": 1, "kept": []}
     return {"problem": None, **outcome.as_json()}
 
 
@@ -315,6 +315,9 @@ def job(call: Any) -> dict[str, Any]:
     if found is None:
         raise lb.Refused(f"there is no page job {ident}; a job's record is kept for a day")
     outcome = found["outcome"]
+    if isinstance(outcome, Mapping):
+        # A job's record from before outcomes named what they kept kept nothing.
+        outcome = {"kept": [], **outcome}
     return {**found, "outcome": outcome if isinstance(outcome, Mapping) else None,
             "argv": [str(a) for a in found["argv"]] if isinstance(found["argv"], list)
             else None}

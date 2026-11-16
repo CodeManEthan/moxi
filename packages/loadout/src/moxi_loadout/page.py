@@ -121,14 +121,29 @@ VIEW_ROW = lb.Out("table", items={
 #: How many rows are in each state; a state no row is in is left out.
 COUNTS = lb.Out("table", items={state: lb.Out("int") for state in STATES})
 
+#: One copy a run kept under the core's `displaced/` folder before it wrote over what
+#: wasn't loadout's: the `target` it came from, the `copy`, `how` (`copied`: loadout
+#: copied it, then wrote the target; `replaced`: the placer moved it aside and placed
+#: loadout's there; `moved`: the placer moved it aside on a removal), the row's `id`
+#: (null for a harness file, which can hold several entries; an id can be a path) and
+#: `back`, the command that puts it back, holding both paths.
+KEPT = lb.Out("table", items={
+    "target": _PATH,
+    "copy": _PATH,
+    "how": _TEXT,
+    "id": _MAYBE_SAYS,
+    "back": _SAYS,
+})
+
 #: What a run came to, as `--json` prints it: its rows, the lines said on the way, notes,
-#: the counts and the exit code.
+#: the counts, the exit code, and what it kept (none for `status`).
 OUTCOME = {
     "rows": lb.Out("list", items=ROW),
     "lines": _LINES,
     "notes": _LINES,
     "counts": COUNTS,
     "exit": lb.Out("int"),
+    "kept": lb.Out("list", items=KEPT),
 }
 
 #: One item a section lists: `harnesses` null for every harness; `source` a path, `module
@@ -344,6 +359,6 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["BUDGET", "COUNTS", "DRIFT", "SOURCE_DIR", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE",
+__all__ = ["BUDGET", "COUNTS", "DRIFT", "SOURCE_DIR", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE", "KEPT",
            "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS",
            "ITEM_NOTE", "VIEW", "VIEW_GLOBAL", "VIEW_ITEM", "VIEW_ROW", "VIEW_SECTION"]

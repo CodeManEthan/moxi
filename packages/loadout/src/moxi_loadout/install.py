@@ -58,10 +58,11 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from moxi.exit import ERROR, REFUSED, TEMPFAIL
 
-from moxi_loadout import adoption, entries, homes, ignores, ledger, planner, repo_link
+from moxi_loadout import adoption, displaced, entries, homes, ignores, ledger, planner, repo_link
 from moxi_loadout.manifest import USER, ManifestError, parse_id
 from moxi_loadout.planner import FINE, Row, Scope
 
@@ -77,8 +78,10 @@ SKIPPED = "the would-commit check skipped"
 @dataclass
 class Outcome:
     """What a run came to: its `rows` (every want for `status`, those in scope for
-    `install`), the `lines` said on the way, `notes`, and the exit `code`. `status` also
-    gives the generated agent and global files nothing uses (`orphans`, see `orphans`)."""
+    `install`), the `lines` said on the way, `notes`, the exit `code`, and what it `kept`
+    under the core's `displaced/` folder (`moxi_loadout.displaced`; none for `status`).
+    `status` also gives the generated agent and global files nothing uses (`orphans`, see
+    `orphans`)."""
 
     rows: list[Row] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
@@ -87,13 +90,15 @@ class Outcome:
     orphans: list[tuple[str, str]] = field(default_factory=list)
     #: The global file's notes and warns, `(level, line)`, for the doctor's global row.
     global_lines: list[tuple[str, str]] = field(default_factory=list)
+    #: Each copy the run kept, `{target, copy, how, id, back}` (`displaced.Keeper`).
+    kept: list[dict] = field(default_factory=list)
 
     def as_json(self) -> dict:
         counts: dict[str, int] = {}
         for r in self.rows:
             counts[r.state] = counts.get(r.state, 0) + 1
         return {"rows": [r.as_json() for r in self.rows], "lines": self.lines,
-                "notes": self.notes, "counts": counts, "exit": self.code}
+                "notes": self.notes, "counts": counts, "exit": self.code, "kept": self.kept}
 
     def text(self) -> list[str]:
         out = list(self.lines)
@@ -417,7 +422,8 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
     claims = _claims(replace)
     refused = _global_claims_out_of_scope(claims, scope)
     lines.extend(refused)
-    _replace_generated_global(claims, machine.backups_keep, say)
+    keeper = displaced.Keeper()
+    _replace_generated_global(claims, keeper, say)
     written: list[Row] = []
     notes: list[str] = []
     said: list[tuple[str, str]] = []
@@ -432,7 +438,7 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
         # take it for the user's).
         with adoption.deferred_signals():
             written.extend(entries.apply(run, scope, data, keep=machine.backups_keep,
-                                         say=say))
+                                         say=say, keeper=keeper))
             ledger.write(data)
         lines.extend(run.lines)
         notes.extend(run.notes)
@@ -445,7 +451,7 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
     plan = planner.build(found, machine, data, resolver=resolver)
     in_scope = [w for w in plan.wants if scope.covers(w.scope, w.kind, w.name)]
     for want in in_scope:
-        _write_generated(want, claims, say)
+        _write_generated(want, claims, say, keeper)
     planner.run(plan)
 
     mine = {str(p.path) for p in place.status(planner.OWNER)}
@@ -475,14 +481,15 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
     touched = _cover(in_scope, plain, forced, seeded, place.status(planner.OWNER), data,
                      rows, say)
     removes = [s for s in plan.removals if _remove_in_scope(plan, s, scope)]
-    done = {str(p.path): p for p in place.apply(plain + removes, say=say)}
-    done.update({str(p.path): p for p in place.apply(forced, replace=True, say=say)})
+    moves = _placer_moves(plan, forced, seeded, removes, keeper, say)
+    done = {str(p.path): p for p in place.apply(plain + removes, say=moves)}
+    done.update({str(p.path): p for p in place.apply(forced, replace=True, say=moves)})
     now = {str(p.path) for p in place.status(planner.OWNER)}
 
     seeded_done: dict[str, object] = {}
     for want in seeded:
         result = adoption.place_seeded(want.module, want.item,
-                                       replace=id(want) in replaced, say=say)
+                                       replace=id(want) in replaced, say=moves)
         if result.placed is not None:
             seeded_done[str(result.placed.path)] = result.placed
             say(f"placed skill {want.name} for {want.harness} ({result.placed.path})")
@@ -544,7 +551,7 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
         lines.append(line)
     repo_link.sync(machine.source, enabled=machine.reinstall_on_commit, say=say)
     return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
-                   planner.exit_code(codes), global_lines=said)
+                   planner.exit_code(codes), global_lines=said, kept=keeper.kept)
 
 
 def _cover(in_scope, plain, forced, seeded, placed, data, rows, say) -> set[str]:
@@ -653,23 +660,105 @@ def _moved(step, mine: set[str], old_source) -> bool:
     return target_key(pointed).startswith(old.rstrip(os.sep) + os.sep)
 
 
-def _write_generated(want, claims: dict[str, bool], say) -> None:
-    """Write `want`'s generated agent or global file when it needs writing: missing, out of date
-    with its header intact, or edited by hand and named by `--replace`."""
+def _write_generated(want, claims: dict[str, bool], say, keeper: displaced.Keeper) -> None:
+    """Write `want`'s generated agent or global file when it needs writing: missing, out
+    of date with its header intact, or not loadout's (edited by hand, without loadout's
+    header, or unreadable) and named by `--replace`.
+
+    The file is read once more just before the write. Missing, or loadout's own, it is
+    written with no copy; equal to the new bytes, nothing is done; otherwise it is written
+    only when `--replace` names it, after its bytes are kept under `displaced/`. One the
+    plan read as loadout's and that was edited since is left, and reads `modified`. A
+    copy that can't be made, a file that can't be read, and a link in loadout's store
+    (loadout never makes one there) are left as they are, the row refused with a line."""
     from moxi.files import atomic_write
+
+    from moxi_loadout import convert, globalfile
 
     if want.generated is None or want.state is not None:
         return
     path, data, current = want.generated
     if current == "same" or data is None:
         return
-    if current == "modified" and not _claimed(claims, want):
+    claimed = current == "modified" and _claimed(claims, want)
+    if current == "modified" and not claimed:
         return
+    if os.path.islink(path):
+        _leave(want, f"{path} is a link, which loadout never makes there; it is left as "
+                     "it is: delete it, and install writes the file", say)
+        return
+    try:
+        now = Path(path).read_bytes()
+    except FileNotFoundError:
+        now = None
+    except OSError as exc:
+        _leave(want, f"{path} can't be read ({exc.strerror or exc}), so loadout can't keep "
+                     "a copy of it; it is left as it is", say)
+        return
+    if now == data:
+        want.generated = (path, data, "same")
+        return
+    state_of = globalfile.state_of if globalfile.is_generated(path) else convert.state_of
+    if now is not None and state_of(now) != "ok":
+        if not claimed:
+            want.generated = (path, data, "modified")
+            return
+        try:
+            keeper.copy(path, want.harness, now, ident=_ident(want), say=say)
+        except OSError as exc:
+            _leave(want, f"a copy of {path} couldn't be kept ({exc.strerror or exc}), so it "
+                         "was not written; it is left as it is", say)
+            return
     os.makedirs(os.path.dirname(path), exist_ok=True)
     atomic_write(path, data, mode=0o644)
     want.generated = (path, data, "same")
     if current == "modified":
         say(f"rewrote {path}, which was edited by hand")
+
+
+def _leave(want, line: str, say) -> None:
+    """Refuse `want`'s row, its generated file left as it is, with `line`."""
+    want.state, want.reason, want.code = "modified", line, REFUSED
+    say(line)
+
+
+def _ident(want) -> str:
+    return f"{want.kind}:{want.name}@{want.harness}"
+
+
+def _placer_moves(plan, forced, seeded, removes, keeper: displaced.Keeper, say):
+    """`say` for the core placer's runs, which names in `keeper` each occupant the placer
+    moves aside, by reading the placer's own line for it: `moved <occupant> to <copy>` for
+    a step it places over (`replaced`, also a module skill's), `<target> was modified;
+    moved it to <copy>` for an edited copy it removes (`moved`). Each line names both
+    paths, so two moves of one name for one harness pair with their own targets."""
+    over = {}
+    for want in plan.wants:
+        step = want.step
+        if step is None or step.occupant is None:
+            continue
+        if any(step is s for s in forced) or any(want is w for w in seeded):
+            over[f"moved {step.occupant} to "] = (step.target, want)
+    gone = {}
+    for step in removes:
+        record = plan.record(step) or {}
+        ident = None
+        if record.get("kind") and record.get("item") and record.get("harness"):
+            ident = f"{record['kind']}:{record['item']}@{record['harness']}"
+        gone[f"{step.target} was modified; moved it to "] = (step.target, ident)
+
+    def told(line: str) -> None:
+        say(line)
+        for lead, (target, want) in over.items():
+            if line.startswith(lead):
+                keeper.moved(target, line[len(lead):], how="replaced", ident=_ident(want),
+                             section=want.scope)
+                return
+        for lead, (target, ident) in gone.items():
+            if line.startswith(lead):
+                keeper.moved(target, line[len(lead):], how="moved", ident=ident)
+                return
+    return told
 
 
 def _global_claims_out_of_scope(claims: dict[str, bool], scope: Scope) -> list[str]:
@@ -689,10 +778,12 @@ def _global_claims_out_of_scope(claims: dict[str, bool], scope: Scope) -> list[s
     return out
 
 
-def _replace_generated_global(claims: dict[str, bool], keep: int, say) -> None:
+def _replace_generated_global(claims: dict[str, bool], keeper: displaced.Keeper,
+                              say) -> None:
     """Each generated global file edited by hand that a `--replace global:global@<harness>`
-    names: its bytes backed up under the harness's backups, then deleted, so the run
-    writes it afresh (or places the shared file, when the harness has no part)."""
+    names: its bytes kept under `displaced/`, then the file deleted, so the run writes it
+    afresh (or places the shared file, when the harness has no part). A copy that can't be
+    made leaves the file, and the run reads it `modified`."""
     from moxi_loadout import globalfile
     from moxi_loadout import harness as hz
 
@@ -704,11 +795,15 @@ def _replace_generated_global(claims: dict[str, bool], keep: int, say) -> None:
             path = globalfile.generated_path(h)
             if globalfile.generated_state(path) != "modified":
                 continue
-            kept = hz.backup(path, h, path.read_bytes(), keep)
-            path.unlink()
             claims[text] = True
-            say(f"backed up {path}, which was edited by hand, to {kept}; install writes it "
-                "again")
+            try:
+                keeper.copy(path, h, path.read_bytes(), ident=f"global:global@{h}", say=say)
+            except OSError as exc:
+                say(f"a copy of {path} couldn't be kept ({exc.strerror or exc}), so it was "
+                    "not replaced; it is left as it is")
+                continue
+            path.unlink()
+            say(f"install writes {path} again")
 
 
 def generated_in_use(data: dict, wanted: Iterable = ()) -> set[str]:
