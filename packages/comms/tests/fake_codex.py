@@ -118,10 +118,16 @@ def app_server(socket_path: str) -> int:
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     while not stop.wait(0.1):
         pass
-    server.stop()
+    # The exit waits on no other thread. A graceful `server.stop()` hands off to the
+    # serve thread, closes each open connection with a closing handshake and waits for
+    # every handler thread; on a loaded machine that outlasts the host's grace and the
+    # host kills the process before it writes its exit. Nothing is saved at the stop
+    # (`threads.json` is written at each change), and the kernel closes the sockets.
     with_suppress(os.unlink, socket_path)
     event("app-server-exit")
-    return 0
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 def control(server, path: Path) -> None:
