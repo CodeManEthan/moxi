@@ -23,6 +23,12 @@ register declined after its connect closes the connection it opened. Either conn
 close handler runs on its own reader thread, which can be after a newer connection is
 installed. That close leaves the installed binding online; each test holds the handler
 until the install and then sends mail.
+
+While a reregister waits for the daemon to drop the binding it replaces, the claim is
+offline, and the adapter's supervisor must not register in that gap. Its test holds the
+daemon's drop and gives the supervisor its turn there, once in each order: with the old
+binding dropped (a supervisor that registers would bind the name first) and with it still
+held (a supervisor that registers would be refused and put the claim in standby).
 """
 
 from __future__ import annotations
@@ -34,14 +40,14 @@ import time
 import pytest
 from conftest import LIVE_S, clock_reads_warm, wait_until
 
-from moxi_comms import codex_threads
+from moxi_comms import claimfile, codex_threads
 from moxi_comms import daemon as daemon_mod
 from moxi_comms.adapters import binding, opencode_roster
 from moxi_comms.adapters.codex import CodexAdapter
 from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.adapters.opencode import OpenCodeAdapter
 from moxi_comms.adapters.opencode_roster import OpenCodeAgent
-from moxi_comms.client import DaemonOffline
+from moxi_comms.client import DaemonError, DaemonOffline
 from fake_opencode import FakeOpenCode
 from fake_turns import FakeSession, fake_find
 
@@ -369,3 +375,138 @@ def test_mail_is_delivered_when_a_declined_register_s_close_lands_after_a_bind(
     assert code == 0, out
     assert wait_until(lambda: carried() >= 1, LIVE_S), \
         "mail sent after the late close was delivered"
+
+
+class _LockProbe:
+    """The claim's register lock, telling `on_skip` when a thread other than `caller`
+    tries it without blocking and finds it held: the supervisor skipping its turn."""
+
+    def __init__(self, lock, on_skip):
+        self.lock = lock
+        self.on_skip = on_skip
+        self.caller: threading.Thread | None = None
+
+    def acquire(self, *, blocking=True, timeout=-1):
+        got = self.lock.acquire(blocking=blocking, timeout=timeout)
+        if not got and not blocking and self.caller is not None \
+                and threading.current_thread() is not self.caller:
+            self.on_skip()
+        return got
+
+    def release(self):
+        self.lock.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc_info):
+        self.release()
+
+
+class ReregisterRace:
+    """Gives the adapter's supervisor its turn in the middle of a `reregister`, once armed.
+
+    The daemon drops the replaced binding only when it is let go (the test holds its
+    handling of the old connection's close), so the reregister's first bind is refused
+    while the old close and the refused one's mark the claim offline. Each retry after
+    that waits until the supervisor has had its turn: it registered, or it found the
+    register lock held and skipped. With `supervisor_first` the old binding is dropped
+    as soon as the first bind is refused and the supervisor's register waits for that,
+    so a supervisor that registers binds the name; otherwise its register comes while
+    the old binding is still held and is refused, and the old binding is dropped after.
+    `waited` records, per retry, whether the supervisor's turn came."""
+
+    def __init__(self, rig, adapter, *, supervisor_first: bool):
+        self.supervisor_first = supervisor_first
+        self.qualified = adapter.agent.qualified
+        self.caller: threading.Thread | None = None
+        self.tries = 0
+        self.waited: list = []
+        self.let_go = threading.Event()        # the daemon may drop the old binding
+        self.dropped = threading.Event()       # it did
+        self.turn_over = threading.Event()     # the supervisor registered or skipped
+        self._holding = False
+
+        daemon = rig.daemon
+        on_closed = daemon.host._on_closed     # `Daemon._deregister`, bound at its start
+
+        def held_close(conn):
+            held = any(b.conn is conn and b.qualified == self.qualified
+                       for b in list(daemon.bindings.values()))
+            if held and self._holding:
+                self._holding = False
+                self.let_go.wait(LIVE_S)
+                on_closed(conn)
+                self.dropped.set()
+                return
+            on_closed(conn)
+
+        daemon.host._on_closed = held_close
+
+        self.probe = _LockProbe(adapter.claims.register_lock, self.turn_over.set)
+        adapter.claims.register_lock = self.probe
+        connect = adapter.connect_daemon
+
+        def connect_daemon():
+            if self.caller is None:
+                return connect()
+            if threading.current_thread() is not self.caller:
+                if self.supervisor_first:
+                    self.dropped.wait(LIVE_S)
+                try:
+                    return connect()
+                finally:
+                    self.turn_over.set()
+            self.tries += 1
+            if self.tries > 1:
+                self.waited.append(self.turn_over.wait(LIVE_S))
+                self.let_go.set()
+            try:
+                return connect()
+            except DaemonError:
+                if self.tries == 1 and self.supervisor_first:
+                    self.let_go.set()
+                raise
+
+        adapter.connect_daemon = connect_daemon
+
+    def arm(self) -> None:
+        """From now on the calling thread's registers are the reregister's."""
+        self._holding = True
+        self.caller = self.probe.caller = threading.current_thread()
+
+
+@pytest.mark.parametrize("supervisor_first", [True, False],
+                         ids=["supervisor-binds", "supervisor-refused"])
+def test_a_reregister_keeps_the_name_and_its_mail_when_the_supervisor_tries_meanwhile(
+        rig, port, supervisor_first):
+    """The daemon drops the binding a reregister replaces late, so the claim is offline
+    while the reregister retries its refused bind, and the adapter's supervisor gets its
+    turn in that gap. The reregister holds the register lock, so the supervisor skips:
+    it neither binds first, which would leave the reregister refused as already bound,
+    nor is refused by the old binding, which would put the claim in standby under the
+    reregister's binding and drop its mail. The reregister binds, the claim is held, and
+    mail sent afterwards is delivered."""
+    adapter, carried = port
+    race = ReregisterRace(rig, adapter, supervisor_first=supervisor_first)
+    adapter.start()
+    qualified = adapter.agent.qualified
+    assert wait_until(lambda: not adapter.offline and not adapter.replaying, LIVE_S)
+
+    race.arm()
+    try:
+        adapter.reregister()
+    except DaemonError as exc:
+        pytest.fail(f"the reregister was refused: {exc}")
+    assert race.tries > 1, "the reregister's first bind was refused"
+    assert race.waited and all(race.waited), "the supervisor had its turn meanwhile"
+    assert race.dropped.is_set(), "the daemon dropped the replaced binding"
+    assert adapter.claims.state == claimfile.BOUND and adapter.claims.holds, \
+        f"the claim is held, not {adapter.claims.state} (lost: {adapter.claims.lost})"
+    assert not adapter.offline
+
+    code, out = rig.send(qualified, MARK, sender=dict(name="main", scope="proj-a"))
+    assert code == 0, out
+    assert wait_until(lambda: carried() >= 1, LIVE_S), \
+        "mail sent after the reregister was delivered"

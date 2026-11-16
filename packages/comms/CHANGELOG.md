@@ -23,6 +23,13 @@
   offline, tried to bind the name it already held, was refused, and stopped delivering
   mail to its agent. A close from a connection the adapter has already replaced now
   changes nothing.
+- An OpenCode or Codex adapter that registers again in place (`reregister`) no longer
+  races its own reconnect loop. While it waited for the daemon to drop its old
+  connection, the loop could bind the name first, and the register then failed after
+  five seconds as "already bound" though the adapter was bound. Or the loop was refused
+  by the old connection, and the adapter then counted the name as lost and dropped every
+  message the daemon handed it until it registered again. The reconnect loop now waits
+  until the register is done.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_comms.api.Sender`: `environ` is now `sender_env`.
 - comms' page in the browser UI shell, `/m/comms/`, is rebuilt around the agents: one
