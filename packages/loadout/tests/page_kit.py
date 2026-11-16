@@ -191,6 +191,14 @@ def seed(shell, *, projects: bool) -> Path:
     return loadout_dir
 
 
+def take_back_edit(shell) -> None:
+    """The hand edit to the Codex form of code-reviewer taken back, so an act over Your
+    items leaves no row it refuses."""
+    generated = target_of(shell, "agent", "code-reviewer", "codex")
+    generated.write_text(generated.read_text(encoding="utf-8").replace("# my own change\n", ""),
+                         encoding="utf-8")
+
+
 def open_page(page, route: str = ""):
     """loadout's page at `/m/loadout/<route>`, once its view is drawn."""
     page.goto(f"/m/loadout/{route}")
