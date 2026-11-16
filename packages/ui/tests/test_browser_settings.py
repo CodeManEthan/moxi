@@ -9,9 +9,11 @@ module with a Save line per group, and the changed view; the questions a person 
 needs a module the install lacks); the fixture with page fields: labels, units, a pick list,
 More's words, a sentence for a key another page edits, a change that can hurt confirmed or
 gone back from; a value changed behind the page, and a change held while the shell sends the
-modules again; ui's Phone group on a gateway-mode shell, with its phones, Activity, a revoke
-and the pairing code, and no Gateway section left in the modules view; and `<moxi-ui-form>`
-in submit mode with catalog rows."""
+modules again; ui's Phone group on a gateway-mode shell, with its phones, Activity, a revoke,
+the pairing code a phone redeems, a stale phone, Phone access read-only, and no Gateway
+section left in the modules view; the small install; each width and theme, with no heading
+and colour only on Save and on a change that can hurt; and `<moxi-ui-form>` in submit mode
+with catalog rows."""
 
 from __future__ import annotations
 
@@ -1035,6 +1037,151 @@ FORCED = """async (sent) => {
   }
   return out;
 }"""
+
+
+def test_a_phone_paired_with_the_pages_code_closes_it_and_a_stale_phone_says_to_pair_again(
+        ui_contexts, tmp_path_factory, fixture_site):
+    from urllib.parse import urlsplit
+
+    from moxi_ui.gateway.devices import Devices
+    from moxi_ui.testing.phone import PhoneBridge, PhoneSession
+
+    shell, _ = _phone_shell(tmp_path_factory, fixture_site)
+    try:
+        # A phone paired at an address the gateway has since left.
+        old = Devices.of(shell.state_dir("ui")).add(
+            name="Old phone", credential=None, public_key=None, sign_count=0, host="old.moxi.test",
+            provider="cloudflare", change="r0.1")
+        Devices.of(shell.state_dir("ui")).mark_stale(lambda device: device.id == old.id)
+        page = ui_contexts(shell).pages[0]
+        page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=shell.url)
+        view = _settings(page, "settings/ui")
+        stale = view.locator(f".dev[data-device='{old.id}'] [data-line=device]")
+        expect(stale).to_have_text(re.compile(r" · the address changed; pair it again$"))
+        view.get_by_role("button", name="Pair a phone").click()
+        pairing = view.locator("[data-part=pair]")
+        expect(pairing.locator("svg[aria-label='Pairing code']")).to_be_visible(timeout=SETTINGS_MS)
+        pairing.get_by_role("button", name="Copy the link instead").click()
+        expect(pairing.locator("[data-line=copied]")).to_have_text("Copied")
+        code = urlsplit(page.evaluate("navigator.clipboard.readText()")).fragment.removeprefix("c=")
+        # The phone redeems the page's own code through the tunnel's stand-in.
+        with PhoneBridge(shell.home, shell.gateway_port) as bridge:
+            phone = PhoneSession(bridge)
+            status, _, begun = phone.request("POST", "/api/pair/begin", {"code": code, "name": "New phone"})
+            assert status == 200, begun
+            status, _, done = phone.request("POST", "/api/pair/finish",
+                                            {"pairing": begun["pairing"], "credential": None})
+            assert status == 200, done
+        expect(view.locator("[data-line=pair-note]")).to_have_text("Paired: New phone.", timeout=SETTINGS_MS)
+        expect(pairing).to_have_count(0)
+        expect(page).to_have_url(re.compile(r"/m/ui/settings/ui$"))
+        expect(view.locator(".dev [data-line=name]")).to_contain_text(["New phone"])
+    finally:
+        shell.stop()
+
+
+def test_phone_access_is_read_only_and_a_post_to_it_sent_past_the_page_is_refused(
+        ui_contexts, tmp_path_factory, fixture_site):
+    shell, _ = _phone_shell(tmp_path_factory, fixture_site)
+    try:
+        before = _file(shell, "ui")
+        page = ui_contexts(shell).pages[0]
+        view = _settings(page, "settings/ui")
+        access = _row(view, "gateway.enabled")
+        expect(access.locator("[data-line=word]")).to_have_text("on")
+        expect(access.locator("[role=switch], input, select")).to_have_count(0)
+        # Changed from its default, but turned on and off at the terminal: no Reset.
+        expect(access.locator("[data-line=default]")).to_have_text("default off")
+        answers = page.evaluate(FORCED, [
+            ["set", {"module": "ui", "key": "gateway.enabled", "value": "false"}],
+            ["unset", {"module": "ui", "key": "gateway.enabled"}],
+            ["save", {"module": "ui", "keys": ["gateway.enabled"], "values": ["false"], "resets": [False],
+                      "was": ["true"]}]])
+        assert [status for status, _ in answers[:2]] == [422, 422], answers
+        assert all("refused" in body for _, body in answers[:2]), answers
+        assert answers[2][0] == 200 and [r["outcome"] for r in answers[2][1]["results"]] == ["refused"], answers
+        assert _file(shell, "ui") == before
+    finally:
+        shell.stop()
+
+
+# --- the small install, widths, themes ----------------------------------------------------------
+
+
+def test_the_small_install_lists_the_core_and_ui_and_has_no_phone_group(ui_shells, ui_contexts):
+    others = [found.name for found in modules.scan() if found.name != "ui"]
+    shell = ui_shells(leave_out=others)
+    status, state = shell.session().get("/m/ui/api/gateway/state")
+    assert status == 200 and state["installed"] is False, state
+    page = ui_contexts(shell).pages[0]
+    view = _settings(page, "settings/ui")
+    _all_read(view)
+    expect(_list(view)).to_have_text(["moxi", re.compile(r"^ui")])
+    expect(view.locator(".subh[data-group=phone]")).to_have_count(0)
+    expect(view.locator("moxi-ui-phones")).to_have_count(0)
+    view.locator("[data-part=more]").get_by_role("button", name="Show").click()
+    expect(view.locator(".set[data-key^='gateway.']")).to_have_count(0)
+    # Find never matches a phone key while the group is not shown.
+    for text in ("gateway", "phone port", "8461"):
+        _find(view, text)
+        expect(view.locator("[data-part=found-head] [data-line=count]")).to_be_visible()
+        expect(view.locator(".set[data-key^='gateway.']")).to_have_count(0)
+    expect(view.locator("[data-part=found-head] [data-line=count]")).to_have_text("No setting matches “8461”")
+
+
+# Each colour token as the browser computes it, every colour the page's words show in, and
+# the colours of the pieces that may carry one: a row whose change can hurt, and Save.
+_COLOURS = """() => {
+  const probe = document.createElement("span");
+  document.body.append(probe);
+  const tokens = {};
+  for (const name of ["text", "text-dim", "text-faint", "accent", "on-accent", "warn"]) {
+    probe.style.color = `var(--moxi-${name})`;
+    tokens[name] = getComputedStyle(probe).color;
+  }
+  probe.remove();
+  const root = document.querySelector("#moxi-panel > moxi-ui-page").shadowRoot.querySelector("moxi-ui-settings").shadowRoot;
+  const seen = new Set();
+  for (const el of root.querySelectorAll("*")) {
+    const own = [...el.childNodes].some((node) => node.nodeType === 3 && node.textContent.trim() !== "");
+    if (own && el.getClientRects().length > 0) seen.add(getComputedStyle(el).color);
+  }
+  const colour = (selector, what = "color") => getComputedStyle(root.querySelector(selector))[what];
+  return {tokens, seen: [...seen], harm: colour(".set.dg [data-line=label]"), held: colour(".set.dg [data-line=held] .w"),
+          save: colour("[data-part=save] .btn.acc", "backgroundColor"),
+          headings: root.querySelectorAll("h1, h2, h3, h4").length};
+}"""
+
+
+@pytest.mark.parametrize(("scheme", "palette"), [("light", "plain"), ("dark", "plain"), ("dark", "midnight-neon")])
+def test_at_each_width_and_theme_the_page_fits_has_no_heading_and_colours_only_save_and_harm(
+        scheme, palette, ui_shells, ui_contexts, ui_width_check, paged_site):
+    shell = ui_shells(site=[paged_site])
+    if palette != "plain":
+        assert shell.moxi("config", "set", "ui", "theme.palette", palette).returncode == 0
+    page = ui_contexts(shell, color_scheme=scheme).pages[0]
+    view = _settings(page)
+    # The shell's right-hand Settings is hidden on Settings.
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    view.locator("[role=switch][data-control=loud]").click()
+    view.locator("input[data-control=limit]").fill("12")
+    expect(_save_line(view).locator("[data-line=save]")).to_have_text("2 not saved · Row limit, Loud")
+    for width in (1280, 400):
+        page.set_viewport_size({"width": width, "height": 900})
+        colours = page.evaluate(_COLOURS)
+        tokens = colours["tokens"]
+        assert colours["headings"] == 0
+        # Words only in the text tokens; the warning colour on the change that can hurt; the
+        # accent behind Save alone.
+        words = {tokens[name] for name in ("text", "text-dim", "text-faint", "warn", "on-accent")}
+        assert set(colours["seen"]) <= words, (colours["seen"], tokens)
+        assert colours["harm"] == colours["held"] == tokens["warn"], colours
+        # The plain palette's warning colour is its text colour; midnight neon's is its own.
+        assert (tokens["warn"] == tokens["text"]) == (palette == "plain"), tokens
+        assert colours["save"] == tokens["accent"], colours
+        scroll, client = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
+        assert scroll <= client, (width, scroll, client)
+    ui_width_check(page, module="ui", route="settings/fixture", width=400)
 
 
 def test_a_locked_key_is_read_only_and_a_post_sent_past_the_page_is_refused(
