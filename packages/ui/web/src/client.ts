@@ -8,6 +8,8 @@
 // A component reaches data only through `api` and `subscribe`, for its own module, and
 // links to another module only through `navigate` or `place`, and only while
 // `installed` says that module is there. It runs a confirmed act only through `confirm`.
+// A page writes its own address only through `setAddress`, and while it has changes not
+// saved it takes `holdLeave`, so nothing moves off it without its say.
 // On the phone, through the gateway, `gateway` is true, and a component hides what the
 // phone can't reach.
 //
@@ -22,9 +24,10 @@ import { bandText, endingReach, gatewayConfirm, gatewayInfo, reachOf } from "./g
 import type { Reach } from "./gateway-model.ts";
 import { fetchOpener, TabPush } from "./push.ts";
 import type { Opener } from "./push.ts";
+import { Gate } from "./hold-model.ts";
 import { defineRow } from "./row.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
-import { boot } from "./shell.ts";
+import { boot, where } from "./shell.ts";
 
 /** The component contract version this script speaks. */
 export const CONTRACT: number = 1;
@@ -544,16 +547,48 @@ export async function place(host: Element, module: string, name: string,
 
 let showPanel: ((module: string, route: string) => void) | null = null;
 
+const gate = new Gate(history, () => location.pathname + location.search + location.hash);
+
 /** Shows `module`'s panel at `route` (relative to `/m/<module>/`) in the shell's one
- * document, with a new history entry. */
+ * document, with a new history entry. While a page holds (`holdLeave`), it asks that page
+ * first and moves only when the page says go. */
 export function navigate(module: string, route = ""): void {
   const target = panelTarget(module, route, location.origin);
-  if (showPanel === null) {
-    location.assign(target.url);
-    return;
+  gate.move(() => {
+    if (showPanel === null) {
+      location.assign(target.url);
+      return;
+    }
+    history.pushState(null, "", target.url);
+    showPanel(module, target.route);
+  });
+}
+
+/**
+ * Holds the page shown in place while it has changes not saved. Every move off it (a link
+ * in the shell, `navigate`, Back and Forward) then calls `ask(go)` and does nothing else;
+ * the page asks in its own words and calls `go()` to leave, which releases the hold and
+ * makes the move. The shell's own redraw on a modules or session event waits for the
+ * release, and a load of another document gets the browser's own prompt. One page holds
+ * at a time. Gives the function that releases the hold: call it when no change is left
+ * and in `disconnectedCallback`.
+ */
+export function holdLeave(ask: (go: () => void) => void): () => void {
+  return gate.hold(ask);
+}
+
+/**
+ * Writes the page's own address, `route` relative to `/m/<module>/`, in place of the
+ * current history entry, keeping its state, so Back leaves the page. The shell takes the
+ * page as still the one placed: it neither draws it again nor asks it. Throws a TypeError
+ * for a module whose panel is not the one shown, or a route that leaves `/m/<module>/`.
+ */
+export function setAddress(module: string, route = ""): void {
+  const target = panelTarget(module, route, location.origin);
+  if (where(location.pathname)?.module !== module) {
+    throw new TypeError(`setAddress writes the shown panel's own address, and ${module}'s panel is not shown`);
   }
-  history.pushState(null, "", target.url);
-  showPanel(module, target.route);
+  gate.setAddress(target.url);
 }
 
 /** Sets the shell document's theme mode and, when `name` is given, its theme, until the
@@ -644,5 +679,6 @@ if (document.getElementById("moxi-shell") !== null) {
     onState: (fn) => push.hub.onState(fn),
     state: (module) => push.hub.state(module),
     setNavigator: (fn) => { showPanel = fn; },
+    gate,
   });
 }

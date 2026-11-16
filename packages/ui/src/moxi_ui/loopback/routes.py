@@ -36,6 +36,7 @@ from urllib.parse import parse_qsl
 # Only the names `moxi_ui.loopback.api` re-exports are public; the rest are the
 # package's own.
 __all__ = [
+    "BadRequest",
     "Entry",
     "Field",
     "Out",

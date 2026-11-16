@@ -16,6 +16,54 @@
   any test that imports `playwright.sync_api`, the kit's fixtures or not. The test
   shell's request reads (`TestShell.session`, `call`, `wait_server`, `Session`) wait up
   to `READ_S`, 30 s, by default (they waited 10 s).
+- The Settings page, at `/m/ui/settings`, replaces the settings view: a list of the
+  modules with settings (the core, ui, then A to Z) with each one's count of changed
+  settings, and one module's settings at a time. Each setting shows by its label, with a
+  control by its type, its line, and `default <value> · Reset` when changed; settings the
+  schema marks `common` come first and the rest behind `More`. Nothing is written until
+  Save, which writes the shown module's changes, says what each answer was, asks before a
+  change that can hurt, and keeps a value changed since the page read it. Find searches
+  every module's settings, `N changed` shows every changed one, and leaving with changes
+  not saved asks first. Addresses: `settings`, `settings/<module>`,
+  `settings/<module>/more`, `settings/ui/pair` and `settings/changed`. `docs/settings.md`
+  says how a module's page fields show.
+- The modules view's Gateway section moved to Settings › ui, as its Phone group: Phone
+  access and where phones reach it, Phone port, the paired phones with Revoke, Pair a phone
+  and Activity. The group shows only while the gateway extra is installed.
+- On the Settings page the top line's own `Settings` is hidden, and Tab skips it. On the
+  phone, a Settings address says settings are changed at the desk, with a link to Home.
+- ui's settings carry page fields: `Port`, `Light or dark` and `Look` show first, `Idle
+  shutdown` in seconds, and `Phone access` (`gateway.enabled`) is changed at the terminal,
+  `moxi ui gateway enable` and `disable`. ui needs moxi 0.1.9 or later.
+- New route `POST /m/ui/api/settings/save`: one module's changes, as `keys`, `values` and
+  `was` (JSON text) and `resets`, each change its own `moxi config set --json` or `unset
+  --json` in the order sent. The shell reads the module's schema itself first and decides
+  from that read alone what each key is; a key whose value is not its `was` is `moved` and
+  not written. Each change answers `saved`, `unchanged`, `refused`, `moved`, `busy` or
+  `failed`, with `finished` false for a command stopped before it ended.
+- `GET /m/ui/api/settings` answers `listed`, the modules with settings, from the module
+  listing alone, and a `module` not in it gets no section and runs no command. A section
+  gains `file` (its config file, the home folder written `~`) and `count`; each key gains
+  its page fields, `json` and `default_json` (its value and default as JSON text) and
+  `changed`.
+- `POST /m/ui/api/settings/set` and `/unset` read the module's schema first and refuse,
+  with a 422, a key that is not its setting or that is changed at the terminal, so no page
+  turns the gateway or the connector on or off. Their command may now run 20 s, past the
+  settings file lock's 10 s wait, so a held lock answers as busy.
+- A `table` setting given as a string is passed to `moxi config set` as its TOML text, so
+  a table can be saved from its field.
+- New route `GET /m/ui/api/gateway/state`: whether the gateway extra is installed, its
+  switch, whether it serves, its address and who can reach it, whether phones read only,
+  and why it doesn't serve. `POST /m/ui/api/gateway/pair` also answers `until`, when the
+  code ends.
+- `client.js` gains `holdLeave(ask)`, which holds the shell's moves off a page while it
+  has changes not saved and asks it first, and `setAddress(module, route)`, which writes
+  the page's own address in place. `navigate()` asks a page that holds. The README's "A
+  page that holds changes" has both.
+- A page handler may raise `BadRequest(key, reason)` from `moxi_ui.loopback.api` for a 400
+  about a body its `Field`s can't refuse alone.
+- New in `moxi_ui.settings`: `read_schema`, `find_key`, `save_one`, `is_changed`,
+  `is_drawn`, `file_of`, `SchemaRead`, `SAVE_SHAPE` and `WRITE_TIMEOUT_S`.
 - The contract check (`ui_component_check`) waits up to `WAIT_MS` (20 s) for each of
   `tokens` to reach a colour of the placed component, or up to `token_ms`, so a part
   drawn from data that arrives after the first render (a pushed topic's first value)

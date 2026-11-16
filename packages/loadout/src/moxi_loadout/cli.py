@@ -9,7 +9,10 @@
 
 `install` takes over the module skills you said yes to, plans the whole manifest and
 applies the steps in scope (all of them without a flag). `--replace` takes a path or an id,
-`<kind>:<name>@<harness>`; what it replaces is kept under the core's `displaced/` folder.
+`<kind>:<name>@<harness>`. No write of loadout's destroys bytes it can't show it wrote:
+whatever a write goes over that isn't loadout's (what `--replace` replaces, an edited copy
+a removal takes away) is kept under the core's `displaced/` folder first, until you delete
+it, and the run names each copy with the command that puts it back (`BACK`).
 `status` prints one line per item that is not `ok`, then notes, then a count. `add` and
 `remove` write a section's list, `enable` and `disable` its `disabled` ids, then each
 installs with that item's steps as the scope. `list` prints every item with its kind,
@@ -32,6 +35,18 @@ import sys
 from collections.abc import Sequence
 
 from moxi import exit as codes
+
+#: How a copy a run kept comes back, as `install --help` says it.
+BACK = """\
+What a write goes over that isn't loadout's is kept under the core's displaced/
+folder first, as <stamp>/<harness>/<file name>, until you delete it. The run says
+each copy and the command that puts it back (--json: "kept", each with "back"):
+  a copy loadout wrote, then wrote the target: cp COPY TARGET puts the file back
+    as it was (an agent file then reads changed, and loadout leaves it)
+  moved aside and loadout's placed there: turn the item off there first,
+    moxi loadout disable ID [--user | --project P], then mv COPY TARGET
+  moved aside on a removal: mv COPY TARGET
+On Windows the commands are copy and move."""
 
 #: Each verb's function, by name, so a verb can be added beside these.
 VERBS: dict = {}
@@ -65,10 +80,12 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                help="project section P (a path or a key)")
 
     p = verb("install", "place what the manifest lists")
+    p.epilog = BACK
+    p.formatter_class = argparse.RawDescriptionHelpFormatter
     scopes(p, many=True)
     p.add_argument("--replace", action="append", default=[], metavar="ID",
-                   help="move what is in the way aside and place over it: a path, or "
-                        "<kind>:<name>@<harness>; may repeat")
+                   help="keep what is in the way under displaced/ and place over it: a "
+                        "path, or <kind>:<name>@<harness>; may repeat")
     p.add_argument("--dry-run", action="store_true", help="plan and print, change nothing")
     p = verb("status", "say what has drifted")
     scopes(p, many=True)

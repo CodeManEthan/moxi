@@ -70,12 +70,19 @@ GLOBAL_KIND = "global"
 class Resolution:
     """A project section's root, or why it can't be used this run: `line` and the exit
     code (`code`) the refusal gives. `every` marks a refusal that holds for every key
-    section (projects unreadable or busy), so no other key is asked this run."""
+    section (projects unreadable or busy), so no other key is asked this run. `cause`
+    names the refusal for the page (`CAUSES`), None with a root."""
 
     root: str | None
     line: str = ""
     code: int = REFUSED
     every: bool = False
+    cause: str | None = None
+
+
+#: Why a key section can't be used: projects isn't installed, has no such project,
+#: can't be read, is busy, has no root for it, or can't be loaded.
+CAUSES = ("no-projects", "not-found", "unreadable", "busy", "no-root", "unloadable")
 
 
 def resolve_key(key: str) -> Resolution:
@@ -113,6 +120,7 @@ class Want:
     step: object = None
     adoptable: bool = False
     commit: str | None = None   # why git would commit its target, when it would
+    ignores: bool = False   # git would commit it, and install covers it with its ignore file
 
     @property
     def scope(self) -> str:
@@ -169,6 +177,8 @@ class Plan:
     notes: list[str] = field(default_factory=list)
     #: The targets of loadout's own copied files, read once.
     copies: set[str] | None = None
+    #: The harness table's names, in its order: the harnesses every item is planned for.
+    harnesses: list[str] = field(default_factory=list)
 
     @property
     def resolved_all(self) -> bool:
@@ -217,7 +227,8 @@ def build(manifest: Manifest, machine, data: dict, *,
     from moxi import place
 
     rows, skipped = place.harnesses()
-    plan = Plan(manifest, Path(machine.source), data, lines=list(skipped))
+    plan = Plan(manifest, Path(machine.source), data, lines=list(skipped),
+                harnesses=list(rows))
     plan.lines += [r.line for r in manifest.refused]
     every = list(rows)
     user_skills = set(manifest.user.names("skill"))
@@ -556,9 +567,11 @@ def _generate(plan: Plan, want: Want, section: Section, root, name, source, fiel
     data = convert.with_header(os.fspath(source), text)
     try:
         now = path.read_bytes()
-    except OSError:
+    except FileNotFoundError:
         now = None
-    current = None if now is None else ("same" if now == data else convert.state(path))
+    except OSError:
+        now = b""   # unreadable: not a file loadout can show it wrote
+    current = None if now is None else ("same" if now == data else convert.state_of(now))
     want.generated = (path, data, current)
     if lost:
         want.notes = (f"{harness} agent {name}: " + "; ".join(lost),)
@@ -747,7 +760,13 @@ def _removal_reason(record: dict) -> str:
 
 def rows(plan: Plan) -> list[Row]:
     """Every want's row, then one per placement no longer wanted."""
-    return [row(w) for w in plan.wants] + [removal_row(plan, s) for s in plan.removals]
+    return [r for r, _ in sourced_rows(plan)]
+
+
+def sourced_rows(plan: Plan) -> list[tuple[Row, Want | object]]:
+    """`rows`, each with what it was read from: its want, or the placer's removal step."""
+    return [(row(w), w) for w in plan.wants] + [(removal_row(plan, s), s)
+                                                for s in plan.removals]
 
 
 def exit_code(codes: Iterable[int]) -> int:
@@ -759,6 +778,7 @@ def exit_code(codes: Iterable[int]) -> int:
     return 0
 
 
-__all__ = ["OWNER", "STATES", "FINE", "Resolution", "resolve_key", "Want", "Row", "Plan",
-           "Scope", "build", "run", "state_of", "row", "removal_row", "rows", "exit_code",
+__all__ = ["OWNER", "STATES", "FINE", "CAUSES", "Resolution", "resolve_key", "Want", "Row", "Plan",
+           "Scope", "build", "run", "state_of", "row", "removal_row", "rows", "sourced_rows",
+           "exit_code",
            "places", "replaceable", "target_of"]

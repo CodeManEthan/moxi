@@ -2,10 +2,17 @@
 
     GET  /api/status      every item's state for each harness, as `moxi loadout status
                           --json` prints it
+    GET  /api/view        everything the page's items draw, from the one plan `status`
+                          builds: its rows, the sections, the items and the global file
     GET  /api/list        every item each section lists, and the sections, as `moxi
                           loadout list --json` gives the items
     GET  /api/global      the global mode, and what the next install makes of each global
                           file, as `moxi loadout global show --json` prints it
+    GET  /api/folder      the loadout folder: its files git hasn't committed, the skills
+                          and agents in it no section lists, and whether a commit installs
+                          it again
+    GET  /api/replace-preview  what a Replace of one row would do: the case, the diff,
+                          where the copy goes, what the diff leaves out
     GET  /api/projects    the projects a project section can name by key
     GET  /api/drift       how many items aren't `ok` or `off`
     GET  /api/job         one page job: running, done (with its outcome) or interrupted
@@ -16,8 +23,9 @@
     POST /api/global-mode `moxi loadout global mode MODE`, managed or if-absent, as a job
                           (202)
     POST /api/install     `moxi loadout install [--user] [--project P]...`, as a job (202)
-    POST /api/replace     `moxi loadout install --replace ID...`, confirmed, as a job (202)
-    POST /api/global-remove  `moxi loadout global remove`, confirmed, as a job (202)
+    POST /api/replace     `moxi loadout install --replace ID [--user | --project P]`, as
+                          the job the page names (202)
+    POST /api/global-remove  `moxi loadout global remove`, as the job the page names (202)
 
 **An act from the page does what the same verb does in the user's terminal, or refuses
 before writing.** Every act starts a page job (`moxi_loadout.pagejob`), which runs the
@@ -26,7 +34,8 @@ job's status path, `/api/job?job=<id>`. The page server's threads never install.
 reads run here, take no lock and bound every git call as the doctor does.
 
 `global mode off` is the same command as `global remove`, so the page reaches it only
-through the confirmed `/api/global-remove`.
+through `/api/global-remove`. That act and `/api/replace` carry a `job`, the id the page
+mints for each press, so a repeat of the press finds the job it started.
 
 Every value that can hold a path carries a mark: a file or a target is `path`, and a
 sentence, a section's name or an item's source that can name a path is `redact`. Only the
@@ -64,8 +73,10 @@ JOB_ROUTE = "/api/job"
 NAME_MAX = 256
 #: The longest path a body takes.
 PATH_MAX = 4096
-#: The most sections, or replace values, one act names.
+#: The most sections one act names.
 LIST_MAX = 64
+#: A job id the page mints: 16 random bytes in hex.
+JOB_ID_CHARS = 32
 
 _TEXT = lb.Out("string")
 _MAYBE = lb.Out("string", nullable=True)
@@ -96,17 +107,49 @@ ROW = lb.Out("table", items={
     "replaceable": lb.Out("bool"),
 })
 
+#: A row as the view gives it: `ROW`, and how loadout places the item (`form`: `link`,
+#: `junction`, `copy`, `generated`, `entry`, or null), whether a `blocked` row's
+#: placement of loadout's was edited where it stands (`edited`), the items the Codex
+#: rules file holds on its row (`covers`), whether the entry was the user's before
+#: loadout's (`prior`), the sections under which `install` applies the row (`applies`:
+#: `section`, `whole`, or null when no run does), and whether install covers a
+#: `would-commit` row with its ignore file (`ignores`).
+VIEW_ROW = lb.Out("table", items={
+    **ROW.items,
+    "form": _MAYBE,
+    "edited": lb.Out("bool"),
+    "covers": lb.Out("list", items=_TEXT, nullable=True),
+    "prior": lb.Out("bool"),
+    "applies": _MAYBE,
+    "ignores": lb.Out("bool"),
+})
+
 #: How many rows are in each state; a state no row is in is left out.
 COUNTS = lb.Out("table", items={state: lb.Out("int") for state in STATES})
 
+#: One copy a run kept under the core's `displaced/` folder before it wrote over what
+#: wasn't loadout's: the `target` it came from, the `copy`, `how` (`copied`: loadout
+#: copied it, then wrote the target; `replaced`: the placer moved it aside and placed
+#: loadout's there; `moved`: the placer moved it aside on a removal), the row's `id`
+#: (null for a harness file, which can hold several entries; an id can be a path) and
+#: `back`, the command that puts it back, holding both paths.
+KEPT = lb.Out("table", items={
+    "target": _PATH,
+    "copy": _PATH,
+    "how": _TEXT,
+    "id": _MAYBE_SAYS,
+    "back": _SAYS,
+})
+
 #: What a run came to, as `--json` prints it: its rows, the lines said on the way, notes,
-#: the counts and the exit code.
+#: the counts, the exit code, and what it kept (none for `status`).
 OUTCOME = {
     "rows": lb.Out("list", items=ROW),
     "lines": _LINES,
     "notes": _LINES,
     "counts": COUNTS,
     "exit": lb.Out("int"),
+    "kept": lb.Out("list", items=KEPT),
 }
 
 #: One item a section lists: `harnesses` null for every harness; `source` a path, `module
@@ -162,8 +205,116 @@ GLOBAL = {
     "chosen": lb.Out("bool"),
     "files": lb.Out("list", items=GLOBAL_FILE),
 }
-#: `reason` says why there is no list: projects absent, busy or unreadable.
-PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS}
+#: A section as the view gives it: `SECTION`, and `refused`, why a key section can't
+#: be used this run (null when it resolved): its `cause` (`no-projects`, `not-found`,
+#: `unreadable`, `busy`, `no-root`, `unloadable`), the refusal's `line`, and `last_root`,
+#: the root loadout's ledger recorded when it last placed the section, when its records
+#: agree on one.
+VIEW_SECTION = lb.Out("table", items={
+    **SECTION.items,
+    "refused": lb.Out("table", nullable=True, items={
+        "cause": _TEXT, "line": _SAYS, "last_root": _MAYBE_PATH}),
+})
+
+#: An item as the view gives it: `ITEM`, the `module` of a module's skill (else null),
+#: and `what` it writes (null for a skill or an agent): a hook's `event`, `matcher` and
+#: `command`; a permissions item's `allow`, `ask` and `deny` shell prefixes; an MCP
+#: server's `command` or `url`. A key the kind has no value for is null.
+_MAYBE_TEXTS = lb.Out("list", items=_SAYS, nullable=True)
+VIEW_ITEM = lb.Out("table", items={
+    **ITEM.items,
+    "module": _MAYBE,
+    "what": lb.Out("table", nullable=True, items={
+        "event": _MAYBE_SAYS, "matcher": _MAYBE_SAYS, "command": _MAYBE_SAYS,
+        "url": _MAYBE_SAYS, "allow": _MAYBE_TEXTS, "ask": _MAYBE_TEXTS,
+        "deny": _MAYBE_TEXTS}),
+})
+
+#: A note on one item for one harness: `code` one of `trust` (Codex runs a new hook only
+#: once trusted), `unconfirmed` (no run has confirmed the harness reads it as loadout
+#: writes it), `no-hooks` (OpenCode takes no hooks), `writes-nothing` (loadout writes
+#: nothing for that harness).
+ITEM_NOTE = lb.Out("table", items={"kind": _TEXT, "name": _TEXT, "harness": _TEXT,
+                                   "code": _TEXT})
+
+#: The global file as the view gives it: `/api/global`'s, with `source`, the folder's
+#: global text (null when the manifest names none), and each file's `form`, what loadout
+#: adds there: `line`, `block`, `instructions`, `placed`, or `left` where the harness's
+#: own file is there.
+VIEW_GLOBAL = lb.Out("table", items={
+    "source": _MAYBE_PATH,
+    "mode": _TEXT,
+    "chosen": lb.Out("bool"),
+    "files": lb.Out("list", items=lb.Out("table", items={
+        **GLOBAL_FILE.items, "form": _MAYBE})),
+})
+
+#: Everything the page's items draw, from the one plan `status` builds: `status`'s
+#: `rows`, `lines`, `notes` and `counts`; `note`, the drift block's; the `home` folder,
+#: the loadout `folder` and its `manifest`; `harnesses`, the harness table's names in its
+#: order; `resolved_all`, whether every section resolved; the `sections` and `items` as
+#: `/api/list` gives them, with what the view adds; the notes on each item for each
+#: harness (`item_notes`); and `global` as `/api/global` gives it, with its source and
+#: forms. The paths are null only with `problem` set, and `home` when nothing places a
+#: home folder.
+VIEW = {
+    "problem": _PROBLEM,
+    "lines": _LINES,
+    "notes": _LINES,
+    "counts": COUNTS,
+    "note": _MAYBE_SAYS,
+    "home": _MAYBE_PATH,
+    "folder": _MAYBE_PATH,
+    "manifest": _MAYBE_PATH,
+    "harnesses": lb.Out("list", items=_TEXT),
+    "resolved_all": lb.Out("bool"),
+    "sections": lb.Out("list", items=VIEW_SECTION),
+    "items": lb.Out("list", items=VIEW_ITEM),
+    "rows": lb.Out("list", items=VIEW_ROW),
+    "item_notes": lb.Out("list", items=ITEM_NOTE),
+    "global": VIEW_GLOBAL,
+}
+#: The loadout folder: `uncommitted`, the files under it git hasn't committed, relative
+#: to it (at most 20, `more` counting the rest), null when it is in no
+#: git work tree; `unlisted`, each skill and agent file in it no section lists, with its
+#: path; `reinstalls`, whether a commit installs it again through repo's git hook
+#: pieces. `state` is `ok`, or `error` when git failed or didn't answer in its time, or
+#: the settings can't be read, and `detail` says which (null when `ok`).
+SOURCE_DIR = {
+    "state": _TEXT,
+    "detail": _MAYBE_SAYS,
+    "uncommitted": lb.Out("list", items=_SAYS, nullable=True),
+    "more": lb.Out("int"),
+    "unlisted": lb.Out("list", items=lb.Out("table", items={
+        "kind": _TEXT, "name": _SAYS, "source": _PATH})),
+    "reinstalls": lb.Out("bool"),
+}
+#: What a Replace of one row would do, for the confirm: `case` (`moves`: the placer moves
+#: what is there aside under `displaced/` and places loadout's; `keeps`: loadout keeps a
+#: copy of the file there, then writes it; null when the row isn't replaceable), the
+#: `target`, `kept_in` (the folder the copy goes to), `tracked` (git tracks what is
+#: there), `others` (how many other rows the run changes), the unified `diff` of what is
+#: there (-) against what loadout writes (+) and its `lines`, `label` (`file`, or
+#: `entry` for an MCP server its harness's CLI writes, whose diff is its entry), and
+#: `skipped`, each path the diff leaves out and `why` (`link`, `large`, `binary`,
+#: `many`). `target` and `kept_in` are null only with `problem` set, or `target` with
+#: no case.
+REPLACE_PREVIEW = {
+    "problem": _PROBLEM,
+    "case": _MAYBE,
+    "target": _MAYBE_PATH,
+    "kept_in": _MAYBE_PATH,
+    "tracked": lb.Out("bool"),
+    "others": lb.Out("int"),
+    "label": _TEXT,
+    "diff": _SAYS,
+    "lines": lb.Out("int"),
+    "skipped": lb.Out("list", items=lb.Out("table", items={"path": _PATH, "why": _TEXT})),
+}
+#: `reason` says why there is no list: projects absent, busy or unreadable; `cause` names
+#: it: `absent`, `busy`, `unreadable`, `error`, or null when projects listed.
+PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS,
+            "cause": _MAYBE}
 #: `count` is the items not `ok` or `off`, each once however many of its harnesses
 #: aren't; `note` the line that the page would write elsewhere than the user's last run
 #: in a terminal, or that it can't tell, when so.
@@ -189,6 +340,8 @@ _SECTIONS = lb.Field("list", required=False, max=LIST_MAX,
 _USER = lb.Field("bool", required=False)
 _ITEM_BODY = {"kind": lb.Field("enum", values=KINDS), "name": _NAME, "project": _SECTION}
 _ID_BODY = {"id": _NAME, "user": _USER, "project": _SECTION}
+#: The id the page mints for one press of an act: 32 hex characters.
+_JOB = lb.Field("string", max=JOB_ID_CHARS)
 
 
 def _target(name: str) -> str:
@@ -211,8 +364,14 @@ PAGE = lb.Page(
     budget=BUDGET,
     routes=(
         lb.Route("/api/status", "read", _target("status"), returns=STATUS),
+        lb.Route("/api/view", "read", _target("view"), returns=VIEW),
         lb.Route("/api/list", "read", _target("listing"), returns=LIST),
         lb.Route("/api/global", "read", _target("global_preview"), returns=GLOBAL),
+        lb.Route("/api/folder", "read", _target("source_dir"), returns=SOURCE_DIR),
+        lb.Route("/api/replace-preview", "read", _target("replace_preview"),
+                 query={"id": lb.Field("string", max=PATH_MAX),
+                        "section": lb.Field("string", required=False, max=PATH_MAX)},
+                 returns=REPLACE_PREVIEW),
         lb.Route("/api/projects", "read", _target("projects"), returns=PROJECTS),
         lb.Route("/api/drift", "read", _target("drift"), returns=DRIFT),
         lb.Route(JOB_ROUTE, "read", _target("job"),
@@ -224,15 +383,14 @@ PAGE = lb.Page(
         _act("/api/global-mode", "global_mode",
              {"mode": lb.Field("enum", values=tuple(m for m in MODES if m != "off"))}),
         _act("/api/install", "install", {"user": _USER, "projects": _SECTIONS}),
-        lb.Route("/api/replace", "act", _target("replace"), returns={},
-                 body={"replace": lb.Field("list", max=LIST_MAX,
-                                           items=lb.Field("string", max=PATH_MAX)),
-                       "user": _USER, "projects": _SECTIONS},
-                 confirmed=True, status=JOB_ROUTE),
-        lb.Route("/api/global-remove", "act", _target("global_remove"), returns={},
-                 confirmed=True, status=JOB_ROUTE),
+        _act("/api/replace", "replace",
+             {"replace": lb.Field("string", max=PATH_MAX), "user": _USER, "project": _SECTION,
+              "job": _JOB}),
+        _act("/api/global-remove", "global_remove", {"job": _JOB}),
     ),
 )
 
-__all__ = ["BUDGET", "COUNTS", "DRIFT", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE",
-           "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS"]
+__all__ = ["BUDGET", "COUNTS", "DRIFT", "SOURCE_DIR", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ID_CHARS", "JOB_ROUTE", "KEPT",
+           "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "REPLACE_PREVIEW", "ROW", "SECTION",
+           "STATUS",
+           "ITEM_NOTE", "VIEW", "VIEW_GLOBAL", "VIEW_ITEM", "VIEW_ROW", "VIEW_SECTION"]

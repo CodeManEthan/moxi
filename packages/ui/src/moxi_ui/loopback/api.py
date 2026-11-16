@@ -47,7 +47,8 @@ read a page as data without importing handler code.
   `serve(app, sockets, ...)`, which with `signals=False` leaves the process's signal
   handling alone and with `peer=True` gives each request its connection's peer uid as
   the scope key `"moxi.peer"`. Handlers get a `Call` and may return `Accepted(...)` or
-  raise `Conflict(...)` or `Refused(...)`; `busy(name)` holds the idle exit; `Topics` and
+  raise `Conflict(...)`, `Refused(...)` or `BadRequest(key, reason)` (a 400 for a body
+  its `Field`s can't refuse alone); `busy(name)` holds the idle exit; `Topics` and
   `Snapshot` feed the page's one stream route. A confirmed act (`Route(...,
   confirmed=True, status=...)`) needs an `Idempotency-Key`, runs at most once per key,
   gets the key as `call.key` and returns `Accepted(...)`.
@@ -82,6 +83,7 @@ from .check import (
 )
 from .headers import complete, response_headers
 from .routes import (
+    BadRequest,
     Entry,
     Field,
     Out,
@@ -161,6 +163,7 @@ __all__ = [
     "write_runtime",
     # The base.
     "Accepted",
+    "BadRequest",
     "Call",
     "Conflict",
     "Refused",

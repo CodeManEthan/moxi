@@ -269,8 +269,26 @@ export declare function subscribe(module: string, topic: string, fn: (data: any)
  */
 export declare function place(host: Element, module: string, name: string, attrs?: Record<string, string>): Promise<Element | null>;
 /** Shows `module`'s panel at `route` (relative to `/m/<module>/`) in the shell's one
- * document, with a new history entry. */
+ * document, with a new history entry. While a page holds (`holdLeave`), it asks that page
+ * first and moves only when the page says go. */
 export declare function navigate(module: string, route?: string): void;
+/**
+ * Holds the page shown in place while it has changes not saved. Every move off it (a link
+ * in the shell, `navigate`, Back and Forward) then calls `ask(go)` and does nothing else;
+ * the page asks in its own words and calls `go()` to leave, which releases the hold and
+ * makes the move. The shell's own redraw on a modules or session event waits for the
+ * release, and a load of another document gets the browser's own prompt. One page holds
+ * at a time. Gives the function that releases the hold: call it when no change is left
+ * and in `disconnectedCallback`.
+ */
+export declare function holdLeave(ask: (go: () => void) => void): () => void;
+/**
+ * Writes the page's own address, `route` relative to `/m/<module>/`, in place of the
+ * current history entry, keeping its state, so Back leaves the page. The shell takes the
+ * page as still the one placed: it neither draws it again nor asks it. Throws a TypeError
+ * for a module whose panel is not the one shown, or a route that leaves `/m/<module>/`.
+ */
+export declare function setAddress(module: string, route?: string): void;
 /** Sets the shell document's theme mode and, when `name` is given, its theme, until the
  * document is next loaded, when the shell sets both from the `ui` settings `theme.mode`
  * and `theme.palette`. A name theme.css has no block for shows the default theme. For the

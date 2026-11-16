@@ -221,6 +221,7 @@ type = "string"
 default = "<project>-<model>-<date:mmm-dd hh:mm>"
 doc = "The template a launch's session name is made from, with the pieces <project>, <agent>, <model>, <identity>, <scope>, <instance>, <date[:format]> and <time[:format]>."
 read = "use"
+elsewhere = "The session-name template is edited in Home's Options."
 
 [name.templates]
 type = "table"
@@ -228,6 +229,7 @@ default = {}
 items = "str"
 doc = "A name template of its own for a project, by project key; a project with none takes name.template."
 read = "use"
+elsewhere = "The session-name template is edited in Home's Options."
 
 [records.keep_days]
 type = "int"
