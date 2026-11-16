@@ -79,8 +79,8 @@ class Block:
         """What is printed to the lead after the block."""
         said = []
         if self.unshown:
-            listed = "; ".join(f"{one.holder} {one.ruling.id} {_text(one.ruling)}"
-                               for one in self.unshown)
+            listed = showings.one_line(f"{one.holder} {one.ruling.id} {_text(one.ruling)}"
+                                       for one in self.unshown)
             said.append(f"not yet shown to the operator: {listed}")
             holders: dict[str, list[str]] = {}
             for one in self.unshown:

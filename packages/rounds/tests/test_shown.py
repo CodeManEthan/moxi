@@ -684,6 +684,23 @@ def test_help_says_how_a_read_back_is_recorded(capsys):
         assert word in out
 
 
+# -- the list on one line ----------------------------------------------------------------
+
+@pytest.mark.parametrize("first, line", [
+    ("C1 Times are in UTC.", "C1 Times are in UTC. C2 Logs are kept."),
+    ("C1 Is it UTC?", "C1 Is it UTC? C2 Logs are kept."),
+    ("C1 Keep it!", "C1 Keep it! C2 Logs are kept."),
+    ("C1 Times are in UTC, unless...", "C1 Times are in UTC, unless... C2 Logs are kept."),
+    ("C1 Times are in UTC, unless\u2026",
+     "C1 Times are in UTC, unless\u2026 C2 Logs are kept."),
+    ("C1 Times are in UTC.  \n", "C1 Times are in UTC. C2 Logs are kept."),
+    ("C1 Q3", "C1 Q3; C2 Logs are kept."),
+])
+def test_rulings_not_yet_shown_read_cleanly_on_one_line(first, line):
+    assert shown.one_line([first, "C2 Logs are kept. "]) == line
+    assert shown.one_line([]) == ""
+
+
 # -- the list, from the index ------------------------------------------------------------
 
 def test_the_index_keeps_the_rulings_no_mark_names_and_the_read_backs(rounds):
