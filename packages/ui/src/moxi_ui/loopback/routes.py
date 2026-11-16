@@ -243,9 +243,10 @@ class Out:
     `list` holds (one `Out`) or a `table` holds (a key map of `Out`s), nested to any
     depth; a list of rows is `Out("list", items=Out("table", items={...}))`. `mark` is
     `path` (the gateway sends a handle in its place), `redact` (the gateway cuts it) or
-    `scrub` (the gateway sends the text with each absolute or `~` path in it cut to its last
-    folder name); only the gateway acts on a mark, and `path` and `scrub` go on a string. `nullable` lets the value be JSON `null`; a `null`
-    anywhere else is refused by projection.
+    `scrub` (the gateway sends the text with each path that starts a word, or follows `:`
+    or `=`, with `/` or `~` cut to its last folder name); only the gateway acts on a mark,
+    and `path` and `scrub` go on a string. `nullable` lets the value be JSON `null`; a
+    `null` anywhere else is refused by projection.
     """
 
     type: str
