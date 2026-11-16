@@ -22,6 +22,7 @@ from playwright.sync_api import expect
 
 from moxi_ui.checks import CHECKS_FILE
 from moxi_ui.loopback.api import response_headers
+from moxi_ui.testing import WAIT_MS
 from moxi_ui.testing.phone import (HOST, ORIGIN, PhoneBridge, free_port, gateway_shell,
                                    pair_page, set_gateway, wait_hold)
 from moxi_ui.testing.shell import TestShell
@@ -29,7 +30,6 @@ from squatter import Squatter
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
 
-WAIT_MS = 5000
 #: The browser tests that need the socket endpoint, which no system's probe result names.
 SOCKET_TESTS = (
     "the phone's confirmed-act sheet shows the gateway's echo and acts once on a double tap",

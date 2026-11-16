@@ -223,7 +223,7 @@ def test_a_page_server_that_isnt_answering_keeps_the_last_list_dim_with_no_acts(
     small_page.route("**/m/projects/api/projects", lambda route: route.fulfill(status=503, body=""))
     changed(small_page)
     # A 503 is read again three times, 1 s apart, before the page says so.
-    expect(list_part(small_page)).to_have_attribute("data-state", "down", timeout=15_000)
+    expect(list_part(small_page)).to_have_attribute("data-state", "down")
     first = list_part(small_page).locator('[data-line="failed"]')
     expect(first).to_have_text(NOT_ANSWERING)
     panel = panel_of(small_page)

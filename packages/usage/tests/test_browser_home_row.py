@@ -263,7 +263,7 @@ def test_the_phone_shows_the_usage_row(gw, ui_browser):
     browser = bridge.launch(ui_browser.browser_type)
     try:
         context = browser.new_context(**kit.PhoneBridge.context_args(ui_browser.browser_type.name))
-        context.set_default_timeout(10_000)
+        context.set_default_timeout(pytest.importorskip("moxi_ui.testing").WAIT_MS)
         page = kit.pair_page(context, shell)
         line = _line(page, USAGE)
         expect(line.locator(".label")).to_have_text("Usage")

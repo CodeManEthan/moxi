@@ -127,12 +127,12 @@ def test_the_rows_follow_the_topic_and_a_stopped_watcher_is_said_once(shell, ui_
     # A second session's record shows up as a row with no reload, and as its reading is
     # current, the watcher is no longer said to have stopped.
     put(shell, record(B))
-    expect(rows(panel)).to_have_count(2, timeout=10_000)
+    expect(rows(panel)).to_have_count(2)
     expect(group(panel, "warm").get_by_text("2 warm", exact=True)).to_be_visible()
     expect(watcher).to_have_count(0)
     # Its record removed, its row goes.
     page_kit.record_dir(shell).joinpath(f"{B}.json").unlink()
-    expect(rows(panel)).to_have_count(1, timeout=10_000)
+    expect(rows(panel)).to_have_count(1)
     expect(group(panel, "warm").get_by_text("1 warm", exact=True)).to_be_visible()
 
 

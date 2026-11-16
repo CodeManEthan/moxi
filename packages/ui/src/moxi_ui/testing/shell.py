@@ -54,6 +54,10 @@ from moxi.paths import ANCHOR_HOME_ENV, HOME_ENV
 
 #: Seconds a test shell has to print its ready line.
 START_TIMEOUT = 30.0
+#: The default seconds of a session's sign-in and reads, a token route's call and
+#: `wait_server`. A module's first request starts its page server before it answers,
+#: which a loaded machine slows.
+READ_S = 30.0
 #: Seconds a stopping test shell has before it is killed.
 STOP_TIMEOUT = 15.0
 #: Lines of the shell process's stderr kept for a failure's message.
@@ -377,7 +381,7 @@ class TestShell:
         page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
         return page
 
-    def session(self, *, timeout: float = 10.0) -> Session:
+    def session(self, *, timeout: float = READ_S) -> Session:
         """A signed-in session with no browser: the cookie and the key a sign-in gives,
         sent the way the shell's document sends them."""
         if self.port is None:
@@ -387,7 +391,7 @@ class TestShell:
     # -- the token routes -----------------------------------------------------------------
 
     def call(self, method: str, path: str, body: Any = None, *,
-             timeout: float = 10.0) -> tuple[int, Any]:
+             timeout: float = READ_S) -> tuple[int, Any]:
         """One request to a shell route with the runtime file's token, as `moxi ui status`
         sends it: `(status, data)`."""
         from moxi_ui.loopback.api import call
@@ -408,7 +412,7 @@ class TestShell:
         return next((row for row in self.servers() if row["module"] == module), None)
 
     def wait_server(self, module: str, check: str | Callable[[dict[str, Any]], bool], *,
-                    timeout: float = 10.0) -> dict[str, Any]:
+                    timeout: float = READ_S) -> dict[str, Any]:
         """Wait for `module`'s row to be in state `check` (or for `check(row)` to be
         true), and return it. Raises `AssertionError` after `timeout` seconds."""
         wanted = (lambda row: row["state"] == check) if isinstance(check, str) else check
@@ -440,14 +444,14 @@ class TestShell:
 class Session:
     """A signed-in session with no browser, over plain HTTP to the shell's listener."""
 
-    def __init__(self, port: int, cookie: str, key: str, *, timeout: float = 10.0):
+    def __init__(self, port: int, cookie: str, key: str, *, timeout: float = READ_S):
         self.port = port
         self.cookie = cookie
         self.key = key
         self.timeout = timeout
 
     @classmethod
-    def sign_in(cls, port: int, ticket: str, *, timeout: float = 10.0) -> Session:
+    def sign_in(cls, port: int, ticket: str, *, timeout: float = READ_S) -> Session:
         """Redeem `ticket` at the shell's sign-in route, as the sign-in page does."""
         body = json.dumps({"ticket": ticket}).encode()
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
