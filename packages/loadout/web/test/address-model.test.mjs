@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addressPath, filteredView, goneLine, parseRoute, pathToWrite, projectNamed, routeOf, sectionFor,
+  addressPath, closed, filteredView, goneLine, goneLineOf, itemAddress, NOTHING_OPEN, openKind, opensItem, parseRoute,
+  pathToWrite, projectNamed, routeOf, sameAddress, sectionFor,
 } from "../src/address-model.ts";
 import { itemsView } from "../src/items-model.ts";
 import { placedView, problemsOf } from "../src/placed-model.ts";
@@ -84,4 +85,34 @@ test("the filtered view: its line, its problems, its own items, then Yours too",
   const none = filteredView("kestrel", PROJECTS, view, items, placedView(view, items));
   assert.equal(none.own, null);
   assert.equal(filteredView("nope", PROJECTS, view, items, placedView(view, items)), null);
+});
+
+test("Open and Close: an item, a kind, and an item opened inside its kind", () => {
+  const item = itemAddress("user", "agent", "code-reviewer");
+  assert.equal(routeOf(item), "item/user/agent/code-reviewer");
+  assert.ok(sameAddress(item, parseRoute("item/user/agent/code-reviewer")));
+  assert.ok(!sameAddress(item, itemAddress("atlas-api", "agent", "code-reviewer")));
+  assert.ok(opensItem(item, "user", "agent", "code-reviewer"));
+  assert.ok(!opensItem(item, "user", "skill", "code-reviewer"));
+  assert.ok(!opensItem({ piece: "global" }, "user", "agent", "code-reviewer"));
+  // A folded group shows open the kind the address opens, or the kind of the item it opens.
+  assert.equal(openKind({ piece: "kind", section: "user", kind: "skill" }, "user"), "skill");
+  assert.equal(openKind(item, "user"), "agent");
+  assert.equal(openKind(item, "atlas-api"), null);
+  assert.equal(openKind({ piece: "global" }, "user"), null);
+  // Close on an item inside its kind leaves the kind open; anything else closes to nothing.
+  assert.deepEqual(closed(item, true), { piece: "kind", section: "user", kind: "agent" });
+  assert.deepEqual(closed(item, false), NOTHING_OPEN);
+  assert.deepEqual(closed({ piece: "global" }, false), NOTHING_OPEN);
+});
+
+test("the gone line the page checks from the view: an item or a kind, nothing else", () => {
+  const view = fullView();
+  assert.equal(goneLineOf(itemAddress("user", "agent", "code-reviewer"), view), null);
+  assert.equal(goneLineOf(itemAddress("user", "agent", "gone-one"), view), "Your items no longer lists the agent gone-one.");
+  assert.equal(goneLineOf({ piece: "kind", section: "atlas-api", kind: "mcp" }, view),
+               "atlas-api lists no mcp servers now.");
+  assert.equal(goneLineOf({ piece: "global" }, view), null);
+  assert.equal(goneLineOf({ piece: "replace", section: "user", id: "skill:x@codex" }, view), null);
+  assert.equal(goneLineOf({ piece: "project", key: "nope" }, view), null);
 });

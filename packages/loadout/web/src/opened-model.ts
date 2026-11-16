@@ -7,6 +7,7 @@ import type { View, ViewGlobalFile, ViewItem, ViewRow } from "./feed.ts";
 import { globalModeAct, removeAct, sectionOf, toggleAct } from "./acts-model.ts";
 import type { PageAct } from "./acts-model.ts";
 import { cellsOf, indexRows, refusedNames } from "./items-model.ts";
+import { actScope, scopeFlags } from "./placed-model.ts";
 import { harnessesLine, harnessWord, homeForm, sectionWord, stateWord } from "./words.ts";
 
 /** What a Replace on a harness line opens: the confirm for that row. */
@@ -74,6 +75,14 @@ export function fromLine(item: ViewItem, home: string | null): string {
   return `From ${homeForm(item.source, home)}`;
 }
 
+/** The opened item's first line split as the page draws it: `From` at the left, then
+ * what it comes from, then the rest (a hook's command and when it runs) dim. */
+export function fromParts(from: string): { lead: string; rest: string | null } {
+  const body = from.replace(/^From /, "");
+  const at = body.indexOf(" · ");
+  return at < 0 ? { lead: body, rest: null } : { lead: body.slice(0, at), rest: body.slice(at + 3) };
+}
+
 /** The word, where and why of one row, by the opened item's table. */
 export function rowWords(row: ViewRow, home: string | null, { refused = false } = {}): {
   word: string; where: string | null; why: string | null;
@@ -115,6 +124,13 @@ export function rowWords(row: ViewRow, home: string | null, { refused = false } 
     case "bad-source": return { word: "can't be read", where: null, why: row.reason || null };
     default: return { word: stateWord(row), where: target, why: row.reason || null };
   }
+}
+
+/** The verb's words for a harness line's Replace, as the note shows it: `install
+ * --replace=<id>` with the flags of the row's `applies`. */
+export function replaceArgv(open: ReplaceOpen): string[] {
+  const scope = actScope(open.row.applies, open.section);
+  return ["install", `--replace=${open.id}`, ...(scope === null ? [] : scopeFlags(scope))];
 }
 
 /** The sentence of one note on an item's harness, or null for a code the line doesn't show. */

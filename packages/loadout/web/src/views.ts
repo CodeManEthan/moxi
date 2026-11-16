@@ -88,10 +88,12 @@ export function startedOf(status: number, data: unknown): Started {
 
 // -- a job ----------------------------------------------------------------------------------
 
-/** The job the page follows, as it keeps it for the tab: its status path and its label. */
+/** The job the page follows, as it keeps it for the tab: its status path, its label (the
+ * command it runs), and where on the page its act was (null when that isn't kept). */
 export interface Kept {
   path: string;
   label: string;
+  anchor: string | null;
 }
 
 /** The job kept for the tab in `raw`, or null when there is none or it can't be read. */
@@ -107,7 +109,9 @@ export function parseKept(raw: string | null): Kept | null {
   const path = jobPathOf((data as Obj).path);
   if (path === null) return null;
   const label = (data as Obj).label;
-  return { path, label: typeof label === "string" && label !== "" ? label : "A change" };
+  const anchor = (data as Obj).anchor;
+  return { path, label: typeof label === "string" && label !== "" ? label : "A change",
+           anchor: typeof anchor === "string" && anchor !== "" ? anchor : null };
 }
 
 /**

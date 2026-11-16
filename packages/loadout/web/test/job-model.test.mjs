@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseJob } from "../src/feed.ts";
-import { jobLine, keptLines, showView } from "../src/job-model.ts";
+import { followLine, jobLine, keptLines, showView } from "../src/job-model.ts";
 import { ATLAS, fullView, HOME, USER } from "./fixtures.mjs";
 
 const LINE = "loadout: section atlas-api is named by a project key; install projects, or moxi install projects";
@@ -94,4 +94,19 @@ test("what a job kept: each how, its words, back as the verb wrote it", () => {
     ["~/.codex/skills/old as it was is kept at ~/d/1/codex/old", null, "move /y \"C:\\c5\" \"C:\\t5\"", "puts it back"],
   ]);
   assert.equal(lines[0].copy, `${HOME}/d/1/codex/rev.toml`);
+});
+
+test("the line for the job the page follows: running, ended, refused or lost", () => {
+  const command = "moxi loadout disable skill:tidy-notes@codex --user";
+  assert.equal(followLine(null, command, fullView()).line, `${command}: running`);
+  assert.equal(followLine(job({ state: "running", exit: null, outcome: null }), command, fullView()).line,
+               "moxi loadout install --user: running");
+  assert.equal(followLine(job({}), command, fullView()).line, "moxi loadout install --user: done");
+  // A job that names no argv takes the act's command.
+  assert.equal(followLine(job({ argv: null }), command, fullView()).line, `${command}: done`);
+  assert.equal(followLine(null, command, fullView(), { refused: "no such job" }).line, `${command}: no such job`);
+  assert.equal(followLine(job({ state: "running", exit: null, outcome: null }), command, fullView(), { lost: "no answer" }).line,
+               `${command}: can't be read now (no answer); it may still be running`);
+  // A job read as ended keeps how it ended, whatever stopped the reads after.
+  assert.equal(followLine(job({}), command, fullView(), { lost: "no answer" }).ended, "done");
 });

@@ -64,6 +64,35 @@ export function routeOf(address: Address): string {
   }
 }
 
+/** Whether two addresses name the same thing. */
+export function sameAddress(a: Address, b: Address): boolean {
+  return a.piece === b.piece && routeOf(a) === routeOf(b);
+}
+
+/** The opened item `kind` `name` of section `section` (`user` or a project section's name). */
+export function itemAddress(section: string, kind: string, name: string): Address {
+  return { piece: "item", section, kind, name };
+}
+
+/** Whether `address` opens the item `kind` `name` of section `section`. */
+export function opensItem(address: Address, section: string, kind: string, name: string): boolean {
+  return address.piece === "item" && address.section === section && address.kind === kind && address.name === name;
+}
+
+/** The kind a folded group of section `section` shows open: the kind `address` opens there,
+ * or the kind of the item it opens there, since that item is drawn among its kind's rows. */
+export function openKind(address: Address, section: string): string | null {
+  if ((address.piece === "kind" || address.piece === "item") && address.section === section) return address.kind;
+  return null;
+}
+
+/** What `Close` leaves open: an item opened inside its kind closes to the kind, anything
+ * else to nothing. */
+export function closed(address: Address, folded: boolean): Address {
+  if (address.piece === "item" && folded) return { piece: "kind", section: address.section, kind: address.kind };
+  return NOTHING_OPEN;
+}
+
 /** The path the browser's address bar shows for `address`. */
 export function addressPath(address: Address): string {
   return `/m/loadout/${routeOf(address)}`;
@@ -117,6 +146,12 @@ export function goneLine(address: Address, view: View, problems: readonly Proble
       if (projects === null || projectNamed(projects, address.key) !== null) return null;
       return `No project is named ${address.key}.`;
   }
+}
+
+/** `goneLine` for what the page opens from the view alone: an item or a kind; null for
+ * anything else. */
+export function goneLineOf(address: Address, view: View): string | null {
+  return address.piece === "item" || address.piece === "kind" ? goneLine(address, view, [], null, null) : null;
 }
 
 // -- the filtered view -----------------------------------------------------------------------

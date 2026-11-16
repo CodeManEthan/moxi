@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { commandOf, jobId, problemAct, replaceAct, shellWord } from "../src/acts-model.ts";
-import { fromLine, openedGlobal, openedItem, rowWords, tildeCommand } from "../src/opened-model.ts";
+import {
+  fromLine, fromParts, openedGlobal, openedItem, replaceArgv, rowWords, tildeCommand,
+} from "../src/opened-model.ts";
 import { problemsOf } from "../src/placed-model.ts";
 import { ATLAS, FOLDER, fullView, HOME, item, row, USER, withRow } from "./fixtures.mjs";
 
@@ -157,4 +159,19 @@ test("acts and the commands they become under the note", () => {
   assert.equal(shellWord("it's"), "'it'\\''s'");
   assert.equal(commandOf(["install", "--project=~/x"]), "moxi loadout install --project=~/x");
   assert.ok(!FOLDER.includes(" "));
+});
+
+test("From split as drawn, and a harness line's Replace as its command", () => {
+  assert.deepEqual(fromParts("From ~/my-loadout/agents/code-reviewer.md"),
+                   { lead: "~/my-loadout/agents/code-reviewer.md", rest: null });
+  assert.deepEqual(fromParts("From loadout.toml · runs python3 ~/h.py before each Bash call"),
+                   { lead: "loadout.toml", rest: "runs python3 ~/h.py before each Bash call" });
+  const view = withRow(fullView(), { name: "code-reviewer", harness: "codex" },
+                       { state: "modified", replaceable: true, applies: "section" });
+  const codex = openedItem(view, "user", "agent", "code-reviewer").lines.find((l) => l.harness === "codex");
+  assert.deepEqual(replaceArgv(codex.replace), ["install", "--replace=agent:code-reviewer@codex", "--user"]);
+  const whole = withRow(fullView(), { name: "api-lead", harness: "codex" },
+                        { state: "blocked", replaceable: true, applies: "whole" });
+  const lead = openedItem(whole, "atlas-api", "agent", "api-lead").lines.find((l) => l.harness === "codex");
+  assert.deepEqual(replaceArgv(lead.replace), ["install", "--replace=agent:api-lead@codex"]);
 });

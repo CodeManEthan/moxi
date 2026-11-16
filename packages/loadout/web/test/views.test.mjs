@@ -76,10 +76,10 @@ test("a refused job read ends the job with the refusal's own line, and no other 
 });
 
 test("the job a tab keeps is its status path and label, or nothing", () => {
-  assert.deepEqual(parseKept(JSON.stringify({ path: "api/job?job=a_B-1", label: "Install" })),
-                   { path: "api/job?job=a_B-1", label: "Install" });
-  assert.deepEqual(parseKept(JSON.stringify({ path: "/api/job?job=a1" })),
-                   { path: "api/job?job=a1", label: "A change" });
+  assert.deepEqual(parseKept(JSON.stringify({ path: "api/job?job=a_B-1", label: "Install", anchor: "global" })),
+                   { path: "api/job?job=a_B-1", label: "Install", anchor: "global" });
+  assert.deepEqual(parseKept(JSON.stringify({ path: "/api/job?job=a1", anchor: 3 })),
+                   { path: "api/job?job=a1", label: "A change", anchor: null });
   for (const raw of [null, "", "{", "null", "[]", JSON.stringify({ path: "api/other" }),
                      JSON.stringify({ path: "https://elsewhere/api/job?job=x" })]) {
     assert.equal(parseKept(raw), null, raw);

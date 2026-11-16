@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  actCommand, emptyGlobal, emptyLines, failedLine, fixLine, folderView, footLines, noteGroup, pageState,
-  READING_AFTER_MS,
+  actCommand, emptyGlobal, emptyLines, failedLine, fixLine, folderView, footLines, GLOBAL_PLACE, INSTALL_ALL_PLACE,
+  itemPlace, jobPlace, noteGroup, pageState, PLACED_PLACE, problemPlace, READING_AFTER_MS,
 } from "../src/frame-model.ts";
 import { INSTALL_ALL, placedView } from "../src/placed-model.ts";
 import { fullView, withRow } from "./fixtures.mjs";
@@ -88,4 +88,14 @@ test("the foot: the notes other than the homes' note as one line, and why the fo
                              dir({ state: "error", detail: "git didn't answer in time", uncommitted: null })),
                    ["Git didn't answer in time."]);
   assert.deepEqual(footLines(null, null), []);
+});
+
+test("the line under an act goes at the act, else under Placed, else at the foot", () => {
+  const drawn = new Set([problemPlace("p1"), INSTALL_ALL_PLACE, itemPlace("k"), GLOBAL_PLACE]);
+  for (const place of drawn) assert.equal(jobPlace(place, drawn, { placed: true }), place);
+  // A problem an Install fixed is gone from Placed: its line goes under Placed.
+  assert.equal(jobPlace(problemPlace("p2"), drawn, { placed: true }), PLACED_PLACE);
+  assert.equal(jobPlace(null, drawn, { placed: true }), PLACED_PLACE);
+  // With no Placed drawn (the empty state), at the foot.
+  assert.equal(jobPlace(problemPlace("p2"), drawn, { placed: false }), null);
 });

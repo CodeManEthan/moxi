@@ -59,6 +59,27 @@ export function jobLine(job: Job, view: View | null): JobLine {
   return { command, ended, line: `${command}: ${ended}`, hasMore };
 }
 
+/** How the page stopped following a job before it ended: its read was refused (with the
+ * answer's line), or it can't be read now (with why). */
+export type Unfollowed = { refused: string } | { lost: string } | null;
+
+/**
+ * The line under the act for the job the page follows: `<command>: running` until its
+ * first read, then `jobLine`'s, with `command` (the act's own) when the job names no argv.
+ * A job the page stopped following says why: its read was refused, or it can't be read
+ * now and may still run.
+ */
+export function followLine(job: Job | null, command: string, view: View | null, stopped: Unfollowed = null): JobLine {
+  const ending = (ended: string, hasMore = false): JobLine => ({ command, ended, line: `${command}: ${ended}`, hasMore });
+  if (stopped !== null && (job === null || job.state === "running")) {
+    if ("refused" in stopped) return ending(stopped.refused);
+    return ending(`can't be read now (${stopped.lost}); it may still be running`);
+  }
+  if (job === null) return ending("running");
+  const line = jobLine(job, view);
+  return job.argv === null ? ending(line.ended, line.hasMore) : line;
+}
+
 /** One copy the job kept, as the page shows it under the act. */
 export interface KeptLine {
   /** `<target> as it was is kept at <copy>`. */

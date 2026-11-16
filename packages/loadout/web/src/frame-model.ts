@@ -138,3 +138,21 @@ export function actCommand(act: ProblemAct): string {
 export function fixLine(problem: Problem, { typed }: { typed: boolean }): string {
   return typed && problem.act?.verb === "replace" ? `${problem.fix} with` : problem.fix;
 }
+
+// -- where the line under an act goes ---------------------------------------------------------
+
+/** The place of an act on the page: a problem's fix (`problem:<key>`), `Install all`, an
+ * opened item (`item:<key>`) or the opened global file. */
+export const problemPlace = (key: string): string => `problem:${key}`;
+export const INSTALL_ALL_PLACE = "install-all";
+export const itemPlace = (key: string): string => `item:${key}`;
+export const GLOBAL_PLACE = "global";
+/** Under Placed's counts, for an act whose place the page no longer draws. */
+export const PLACED_PLACE = "placed";
+
+/** Where the line under an act goes: the act's own place when the page draws it, else
+ * under Placed when Placed is drawn, else (null) at the page's foot. */
+export function jobPlace(place: string | null, drawn: ReadonlySet<string>, { placed }: { placed: boolean }): string | null {
+  if (place !== null && drawn.has(place)) return place;
+  return placed ? PLACED_PLACE : null;
+}
