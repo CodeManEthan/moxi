@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Every setting carries page fields, which `moxi config turns show --json` prints and
+  the settings page draws: a plain label, a line where the label can't carry it, the
+  unit of each wait and of the start-context limit, six settings shown first under
+  Guards (the three guards and the other guards that run) and Sessions (the start list
+  and the session commands), the waits under Waits, and a can-hurt mark on turning a
+  guard off and on removing a guard from `guards.run`. The schema now lists the guards
+  first and the start list before the session commands; no key changed. turns needs
+  moxi 0.1.9 or later.
 - The Claude runner plugin is version 0.2.0, for the leg it speaks now. Claude Code runs
   a user-scope plugin from a cache kept per version, so `moxi install turns` now updates
   a plugin installed at another version than the one it ships (`claude plugin update`)

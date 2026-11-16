@@ -93,7 +93,8 @@ def test_interface_2_holds_its_names():
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
-        "session_of", "caller_identity", "roster_rows", "RosterRow", "CODEX_RESUME",
+        "session_of", "caller_identity", "roster_rows", "RosterRow", "CacheFact",
+        "CODEX_RESUME",
         "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
         "COMMAND_ENV", "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV",
         "OPERATOR_ENV", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
@@ -150,7 +151,7 @@ def test_the_reads_and_names_are_pinned():
     for name, params in {"attributed": ["message_id", "timeout_s"],
                          "session": ["identity", "timeout_s"],
                          "roster": ["timeout_s"], "owner": ["session_id", "timeout_s"],
-                         "roster_rows": ["timeout_s"],
+                         "roster_rows": ["timeout_s", "with_roster"],
                          "identity_state": ["name", "scope", "timeout_s"],
                          "record_dir": [], "daemon_socket": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
@@ -169,9 +170,12 @@ def test_the_reads_and_names_are_pinned():
                                                     "directors", "awaiting"]
     assert list(api.RosterRow.__dataclass_fields__) == [
         "qualified", "name", "scope", "live", "kind", "module", "tier", "adapter",
-        "directors", "session_id", "bound_at", "awaiting"]
-    assert inspect.signature(api.roster_rows).parameters["timeout_s"].default == \
-        api.READ_DEADLINE
+        "directors", "session_id", "bound_at", "awaiting", "cache"]
+    assert list(api.CacheFact.__dataclass_fields__) == ["kind", "until"]
+    params = inspect.signature(api.roster_rows).parameters
+    assert params["timeout_s"].default == api.READ_DEADLINE
+    assert params["with_roster"].default is False
+    assert params["with_roster"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_api_tokens_holds_the_store_calls():

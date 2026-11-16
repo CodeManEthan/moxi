@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   actedOf, addBody, addSaid, brokenLines, cardFields, cardPath, cardView, createLine, createShown,
-  emptyForm, emptyLine, kindLabel, MAY_EXIST, MAY_HAVE_ACTED, NOT_SENT, pickedDetail, pickerPath,
+  emptyForm, emptyLine, kindChoices, kindLabel, MAY_EXIST, MAY_HAVE_ACTED, NOT_SENT, pickedDetail, pickerPath,
   pickerView, startKind, warningLine,
 } from "../src/views.ts";
 import { parseAdded, parseWritten } from "../src/feed.ts";
@@ -173,4 +173,13 @@ test("an answer that never came, or that came from the shell, says what is known
   const lost = actedOf(0, null, parseWritten);
   assert.deepEqual(addSaid(lost, true), { tone: "warn", lines: [MAY_HAVE_ACTED, MAY_EXIST] });
   assert.deepEqual(addSaid(lost, false), { tone: "warn", lines: [MAY_HAVE_ACTED] });
+});
+
+test("the Edit panel's kinds keep the project's own kind", () => {
+  assert.deepEqual(kindChoices(KINDS, "project").map((choice) => choice.value), ["agent", "project", "topic", "shelf"]);
+  assert.deepEqual(kindChoices(KINDS, "shelf-gone").map((choice) => choice.value),
+                   ["agent", "project", "topic", "shelf", "shelf-gone"]);
+  assert.equal(kindChoices(KINDS, "shelf-gone").at(-1).label, "shelf-gone (no installed module declares it)");
+  assert.deepEqual(kindChoices(KINDS, "project").map((choice) => choice.label),
+                   ["agent's home", "code project", "topic", "shelf"], "in the page's kind words");
 });

@@ -357,6 +357,29 @@ def test_the_reader_writes_nothing():
         conn.close()
 
 
+def test_the_reader_leaves_a_wal_its_writer_left_unflushed_as_it_is():
+    # A writer that exited without checkpointing, as one stopped or crashed does.
+    writer = store.open_write()
+    target = paths.comms_db()
+    writer.execute("PRAGMA wal_autocheckpoint = 0")
+    with transaction(writer):
+        writer.execute("INSERT INTO meta(key, value) VALUES ('left', 'in the wal')")
+    writer.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE)
+    writer.close()
+    wal = target.with_name(target.name + "-wal")
+    before, wal_before = target.read_bytes(), wal.read_bytes()
+    assert wal_before
+
+    conn = store.open_read()
+    try:
+        found = conn.execute("SELECT value FROM meta WHERE key = 'left'").fetchone()
+    finally:
+        conn.close()
+    assert found == ("in the wal",)
+    assert target.read_bytes() == before
+    assert wal.read_bytes() == wal_before
+
+
 def test_the_reader_of_a_missing_store_gets_sqlites_error():
     with pytest.raises(sqlite3.OperationalError):
         store.open_read()
@@ -376,6 +399,47 @@ def test_the_reader_reads_a_marked_store_beside_0_2_files():
     mark(store.path())
     zero_two("record")
     store.open_read().close()
+
+
+def at_step(step: int) -> None:
+    """Make comms.db by running only the schema's first `step` steps, and set its
+    `user_version` to `step` (past `len(STEPS)` for a store a newer comms wrote)."""
+    import moxi.store as moxi_store
+
+    conn = moxi_store.connect(store.path())
+    try:
+        moxi_store.migrate(conn, schema.STEPS[:step])
+        conn.execute(f"PRAGMA user_version = {step}")
+    finally:
+        conn.close()
+
+
+def user_version() -> int:
+    conn = sqlite3.connect(f"file:{store.path()}?mode=ro", uri=True)
+    try:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_the_reader_reads_a_store_at_any_step_unless_asked_to_check_it():
+    at_step(len(schema.STEPS) - 1)
+    store.open_read().close()
+    with pytest.raises(store.StepMismatch) as older:
+        store.open_read(check_step=True)
+    assert user_version() == len(schema.STEPS) - 1
+    assert older.value.exit_code == 75 and "step 2 of 3" in str(older.value)
+    store.open_write().close()
+    assert user_version() == len(schema.STEPS)
+    store.open_read(check_step=True).close()
+
+
+def test_the_step_check_refuses_a_store_a_newer_comms_wrote():
+    at_step(len(schema.STEPS) + 1)
+    with pytest.raises(store.StepMismatch) as newer:
+        store.open_read(check_step=True)
+    assert newer.value.exit_code == 3 and "newer comms" in str(newer.value)
+    assert user_version() == len(schema.STEPS) + 1
 
 
 # --------------------------------------------------------------------------- the rule

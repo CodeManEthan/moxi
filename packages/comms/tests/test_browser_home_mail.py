@@ -146,7 +146,8 @@ def test_a_click_on_the_comms_row_opens_comms_page(shell, rig, ui_contexts):
     page = home_of(ui_contexts)
     _line(page, COMMS).click()
     expect(page).to_have_url(f"{shell.url}/m/comms/")
-    expect(page.locator("#moxi-panel > moxi-comms-page h1")).to_have_text("Comms")
+    expect(page.locator("#moxi-panel > moxi-comms-page [data-part=foot]")).to_be_visible()
+    expect(page.locator("#moxi-panel > moxi-comms-page h1")).to_have_count(0)
 
 
 @pytest.mark.skipif(not WITH_USAGE, reason="usage isn't installed here")

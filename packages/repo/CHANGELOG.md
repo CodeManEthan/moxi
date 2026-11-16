@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Every setting carries page fields, which `moxi config repo show --json` prints and
+  the settings page draws: a plain label, a line where the label can't carry it, and
+  words for each git hook mode. repo needs moxi 0.1.9 or later.
 - `moxi_repo.commit_rules_problems(root, text)`: the commit-rules piece's rules applied
   to a message after the commit was made, with the piece's settings in the repo at
   `root`; empty where the piece is not registered or is disabled. Every line of the

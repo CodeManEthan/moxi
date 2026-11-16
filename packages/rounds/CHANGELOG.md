@@ -6,6 +6,10 @@ The first version. It keeps the record of a round and takes it from its design t
 its builds, their checks, verification and finish, to the ratification of their
 decisions and the round's close.
 
+- Every setting carries page fields, which `moxi config rounds show --json` prints
+  and the settings page draws: a plain label, a line where the label can't carry it,
+  the unit of each number, and words for each value of `defaults.ratify` and
+  `defaults.check_on`. rounds needs moxi 0.1.9 or later.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_rounds.api`: `round` is now `round_data`.
 - `moxi rounds open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`,

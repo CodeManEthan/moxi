@@ -3,22 +3,23 @@
 // by one adopted stylesheet in its own shadow root.
 //
 // It draws what its attributes carry and knows nothing else: line one is `name`, `where`
-// and, at the right end, `fact`; line two is `lead`, `lead-more`, `time` with `rest`, and
+// and `fact`, then the `acts-one` slot at the right end; line two is `lead`, `lead-more`, `time` with `rest`, and
 // `tail`, a middle dot between each two, then the `acts` slot at the right end; line three
 // is `note`. A piece whose attribute is unset is not drawn, and neither is a line with no
-// piece. The default slot's content shows under the lines while `open` is set.
+// piece and no act. The default slot's content shows under the lines while `open` is set.
 //
 // Only a row with `toggles` can be opened by its lines: it shows a pointer over them and
-// sends `moxi-row-toggle` for a click on them outside `acts`, and for Enter or Space while
-// its tab stop holds the focus. The tab stop is line one, as a button whose
-// `aria-expanded` follows `open`; the acts stay outside the button, so a screen reader
-// still finds them. A row with no line one keeps the lines as the stop, with no role.
+// sends `moxi-row-toggle` for a click on them outside `acts-one` and `acts`, and for Enter
+// or Space while its tab stop holds the focus. The tab stop is line one's pieces, as a
+// button whose `aria-expanded` follows `open`; both act slots stay outside the button, so
+// a screen reader still finds them. A row with no piece on line one keeps the lines as
+// the stop, with no role.
 // Space is taken from the page, so it does not scroll. A click that ends a selection of
 // text does not toggle, so a name can be copied. The row does not open itself; the page
 // sets `open`.
 
-import { isToggleKey, ROW_ATTRIBUTES, rowPlan, TOGGLE_EVENT } from "./row-model.ts";
-import type { Piece } from "./row-model.ts";
+import { ACT_SLOTS, drawnLines, isToggleKey, ROW_ATTRIBUTES, rowPlan, TOGGLE_EVENT } from "./row-model.ts";
+import type { ActSlot, Piece } from "./row-model.ts";
 
 const TAG = "moxi-ui-row";
 
@@ -32,7 +33,9 @@ const CSS = `
 :host([toggles]) .head { cursor: pointer; }
 .head:focus-visible, .l1:focus-visible { outline: 2px solid var(--moxi-accent); outline-offset: 2px; }
 .l1, .l2, .l3 { display: flex; justify-content: space-between; align-items: baseline; white-space: nowrap; }
-.l1 { justify-content: flex-start; line-height: 20px; }
+/* Line one's pieces are the button; the acts-one slot sits beside it, never cut. */
+.one { display: flex; align-items: baseline; line-height: 20px; white-space: nowrap; }
+.l1 { flex: 1 1 auto; min-width: 0; justify-content: flex-start; line-height: 20px; }
 .l2, .l3 { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
 /* Line one is cut at the where, then at the name; the fact is cut only once both are gone. */
 .name, .where, .fact { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -50,13 +53,14 @@ const CSS = `
 .rest.strong { color: var(--moxi-text); }
 .tail { font-variant-numeric: tabular-nums; }
 .dot.last { margin: 0 6px; }
-.acts { display: inline-flex; flex: none; align-items: baseline; gap: 18px; margin-left: auto; }
+.acts, .acts-one { display: inline-flex; flex: none; align-items: baseline; gap: 18px; margin-left: auto; }
+.acts-one { padding-left: 14px; color: var(--moxi-text-dim); }
 :host(:not([open])) slot:not([name]) { display: none; }
 /* After the lines' own display, so a hidden line is not drawn. */
 [hidden] { display: none; }
 @media (max-width: 720px) {
   .l2 { white-space: normal; }
-  .fact { padding-left: 10px; }
+  .fact, .acts-one { padding-left: 10px; }
 }
 `;
 
@@ -80,13 +84,18 @@ export function defineRow(): void {
 
   class MoxiRow extends HTMLElement {
     #head = document.createElement("div");
+    #lineOne = document.createElement("div");
     #one = document.createElement("div");
+    #actsOne = span("acts-one");
     #two = document.createElement("div");
     #said = span("said");
     #acts = span("acts");
-    #actsSlot = document.createElement("slot");
     #three = document.createElement("div");
-    #acted = false;
+    #slots: Record<ActSlot, HTMLSlotElement> = {
+      "acts-one": document.createElement("slot"),
+      acts: document.createElement("slot"),
+    };
+    #filled = new Set<ActSlot>();
 
     static get observedAttributes(): string[] {
       return [...ROW_ATTRIBUTES];
@@ -101,18 +110,25 @@ export function defineRow(): void {
       }
       root.adoptedStyleSheets = [sheet];
       this.#head.className = "head";
+      this.#lineOne.className = "one";
       this.#one.className = "l1";
       this.#two.className = "l2";
       this.#three.className = "l3";
-      this.#actsSlot.name = "acts";
-      this.#acts.append(this.#actsSlot);
+      for (const name of ACT_SLOTS) {
+        const slot = this.#slots[name];
+        slot.name = name;
+        slot.addEventListener("slotchange", () => {
+          if (slot.assignedNodes().length > 0) this.#filled.add(name);
+          else this.#filled.delete(name);
+          this.#render();
+        });
+      }
+      this.#actsOne.append(this.#slots["acts-one"]);
+      this.#acts.append(this.#slots.acts);
+      this.#lineOne.append(this.#one, this.#actsOne);
       this.#two.append(this.#said, this.#acts);
-      this.#head.append(this.#one, this.#two, this.#three);
+      this.#head.append(this.#lineOne, this.#two, this.#three);
       root.append(this.#head, document.createElement("slot"));
-      this.#actsSlot.addEventListener("slotchange", () => {
-        this.#acted = this.#actsSlot.assignedNodes().length > 0;
-        this.#render();
-      });
       this.#head.addEventListener("click", (event) => {
         // A click that ends a drag over text leaves the text selected, not the row toggled.
         if (this.#outsideActs(event) && String(getSelection() ?? "") === "") this.#toggle();
@@ -129,8 +145,10 @@ export function defineRow(): void {
       this.#render();
     }
 
+    /** Whether an event began outside both act slots, so it is the row's. */
     #outsideActs(event: Event): boolean {
-      return !event.composedPath().includes(this.#actsSlot);
+      const path = event.composedPath();
+      return ACT_SLOTS.every((name) => !path.includes(this.#slots[name]));
     }
 
     #toggle(): void {
@@ -140,23 +158,27 @@ export function defineRow(): void {
 
     #render(): void {
       const plan = rowPlan((name) => this.getAttribute(name));
+      const lines = drawnLines(plan, this.#filled);
 
       this.#one.replaceChildren(...plan.one.map((piece) =>
         span(piece.strong ? `${piece.kind} strong` : piece.kind, piece.text)));
       this.#one.hidden = plan.one.length === 0;
+      this.#actsOne.hidden = !this.#filled.has("acts-one");
+      this.#lineOne.hidden = !lines.drawsOne;
 
       this.#said.replaceChildren(...plan.two.map((piece, i) => said(piece, plan.two[i + 1])));
       this.#said.hidden = plan.two.length === 0;
-      this.#acts.hidden = !this.#acted;
-      this.#two.classList.toggle("acted", this.#acted);
-      this.#two.hidden = plan.two.length === 0 && !this.#acted;
+      const acted = this.#filled.has("acts");
+      this.#acts.hidden = !acted;
+      this.#two.classList.toggle("acted", acted);
+      this.#two.hidden = !lines.drawsTwo;
 
       this.#three.replaceChildren(...(plan.note === null ? [] : [span("said", plan.note)]));
       this.#three.hidden = plan.note === null;
-      this.#head.hidden = this.#one.hidden && this.#two.hidden && this.#three.hidden;
+      this.#head.hidden = this.#lineOne.hidden && this.#two.hidden && this.#three.hidden;
 
-      // Only a row that toggles takes the focus: on line one, as a button, or on the
-      // lines as a whole when there is no line one.
+      // Only a row that toggles takes the focus: on line one's pieces, as a button, or on
+      // the lines as a whole when line one has no piece.
       if (plan.stop === "lines") this.#head.tabIndex = 0;
       else this.#head.removeAttribute("tabindex");
       if (plan.stop === "one") {

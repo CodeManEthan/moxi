@@ -30,13 +30,16 @@ import pytest
 
 import moxi.modules
 from moxi import modules, paths
-from moxi_projects import acts, api, cli, page, pagecheck, pagehandlers, rules, store
+from moxi_projects import (acts, api, cli, page, pagecheck, pagehandlers, pagestat, rules,
+                           store)
 
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
 KEY = "K" * 43
-OTHER_KEY = "L" * 43
+#: Jobs as the page mints them, one per press of its remove button.
+JOB = "0123456789abcdef" * 2
+OTHER_JOB = "fedcba9876543210" * 2
 
 posix_only = pytest.mark.skipif(sys.platform == "win32",
                                 reason="the fake git is a POSIX shell script")
@@ -177,11 +180,11 @@ def test_the_gate_matrix_passes():
 def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     routes = {r["path"]: r for r in LB.export(page.PAGE)["routes"]}
     assert {p for p, r in routes.items() if r["kind"] == "read"} == {
-        "/api/projects", "/api/project", "/api/kinds", "/api/where", "/api/remove-status"}
+        "/api/projects", "/api/project", "/api/folder", "/api/kinds", "/api/where",
+        "/api/remove-check", "/api/remove-status"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/set", "/api/agents-add", "/api/agents-remove", "/api/remove"}
-    assert {p for p, r in routes.items() if r.get("confirmed")} == {"/api/remove"}
-    assert routes["/api/remove"]["status"] == "/api/remove-status"
+    assert {p for p, r in routes.items() if r.get("confirmed")} == set()
     assert not any(r["gateway"] or r["stream"] for r in routes.values())
 
 
@@ -209,12 +212,14 @@ def test_every_root_is_marked_path_and_every_sentence_redact():
                               ("/api/agents-remove", "project"))
              for field in ("root", "notes_root")}
     assert {k for k, v in marks.items() if v == "path"} == roots | {
-        "/api/where store", "/api/where git"}
+        "/api/projects home", "/api/folder path", "/api/where store", "/api/where git"}
     assert {k for k, v in marks.items() if v == "redact"} == {
         "/api/kinds broken[].reason", "/api/add notes[]", "/api/add warnings[]",
         "/api/set notes[]", "/api/where note",
+        "/api/remove-check refusals[].sentence", "/api/remove-check refusals[].fix",
         "/api/remove-status reason", "/api/remove-status fix",
-        "/api/remove-status sentences[]"}
+        "/api/remove-status sentences[]", "/api/remove reason", "/api/remove fix",
+        "/api/remove sentences[]"}
 
 
 def test_the_announcement_offers_the_page_and_imports_none_of_it():
@@ -255,7 +260,8 @@ def test_each_component_is_a_built_asset_of_the_page():
 
 def test_projects_lists_every_project_by_key_as_the_read_api_does(golden_copy):
     body = read("/api/projects")
-    assert body == {"projects": [p.as_dict() for p in api.list_projects()]}
+    assert body["projects"] == [{**p.as_dict(), "exists": False}
+                                for p in api.list_projects()]
     assert [p["key"] for p in body["projects"]] == ["alpha", "Beta", "delta.web", "gamma"]
     alpha = body["projects"][0]
     assert alpha["agents"] == ["lead-a", "helper", "scout"]
@@ -264,11 +270,429 @@ def test_projects_lists_every_project_by_key_as_the_read_api_does(golden_copy):
 
 def test_projects_by_kind(golden_copy):
     assert [p["key"] for p in read("/api/projects", "kind=agent")["projects"]] == ["Beta"]
-    assert read("/api/projects", "kind=nothing") == {"projects": []}
+    assert read("/api/projects", "kind=nothing")["projects"] == []
 
 
 def test_no_store_yet_lists_nothing_and_makes_no_file(store_path):
-    assert read("/api/projects") == {"projects": []}
+    assert read("/api/projects")["projects"] == []
+    assert not store_path.exists()
+
+
+# -- the list's home, notes and exists ---------------------------------------------------
+
+@pytest.fixture
+def own_pool(monkeypatch):
+    """A stat pool of the test's own, so no thread or pending stat leaks between tests."""
+    fresh = pagestat.Pool()
+    monkeypatch.setattr(pagestat, "_POOL", fresh)
+    return fresh
+
+
+def _exists(body: dict) -> dict[str, bool | None]:
+    return {p["key"]: p["exists"] for p in body["projects"]}
+
+
+def _register(*rows) -> None:
+    store.write(lambda conn: [store.insert(conn, key=k, root=str(r)) for k, r in rows])
+
+
+def test_exists_says_whether_each_root_is_a_dir_now(tmp_path, own_pool):
+    there = tmp_path / "there"
+    there.mkdir()
+    a_file = tmp_path / "a-file"
+    a_file.write_text("")
+    _register(("there", there), ("gone", tmp_path / "gone"), ("file", a_file),
+              ("under-file", a_file / "sub"))
+    assert _exists(read("/api/projects")) == {"there": True, "gone": False, "file": False,
+                                              "under-file": False}
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                    reason="POSIX permissions, which root ignores")
+def test_exists_is_null_when_the_stat_fails_another_way(tmp_path, own_pool):
+    shut = tmp_path / "shut"
+    (shut / "proj").mkdir(parents=True)
+    _register(("proj", shut / "proj"))
+    shut.chmod(0)
+    try:
+        assert _exists(read("/api/projects")) == {"proj": None}
+    finally:
+        shut.chmod(0o755)
+
+
+def test_a_stat_that_hangs_reads_null_inside_the_bound_and_is_not_asked_again(
+        tmp_path, monkeypatch):
+    quick, slow = tmp_path / "quick", tmp_path / "slow"
+    quick.mkdir()
+    slow.mkdir()
+    _register(("quick", quick), ("slow", slow))
+    let_go = threading.Event()
+    asked: list[str] = []
+
+    def stat(path):
+        asked.append(path)
+        if path == str(slow):
+            let_go.wait(30)
+        return os.stat(path)
+
+    monkeypatch.setattr(pagestat, "_POOL", pagestat.Pool(stat=stat))
+    try:
+        start = time.monotonic()
+        assert _exists(read("/api/projects")) == {"quick": True, "slow": None}
+        assert time.monotonic() - start < 2
+        assert _exists(read("/api/projects")) == {"quick": True, "slow": None}
+        assert asked.count(str(slow)) == 1
+        assert asked.count(str(quick)) == 2
+    finally:
+        let_go.set()
+    deadline = time.monotonic() + 5
+    while not pagestat._POOL._out[str(slow)].ended.is_set():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    assert _exists(read("/api/projects")) == {"quick": True, "slow": True}
+    assert asked.count(str(slow)) == 1
+    assert _exists(read("/api/projects")) == {"quick": True, "slow": True}
+    assert asked.count(str(slow)) == 2
+
+
+def test_a_late_answer_past_its_age_is_dropped_and_the_path_asked_anew(tmp_path):
+    slow = tmp_path / "slow"
+    slow.mkdir()
+    let_go = threading.Event()
+    asked: list[str] = []
+
+    def stat(path):
+        asked.append(path)
+        if len(asked) == 1:
+            let_go.wait(30)
+            raise FileNotFoundError(path)
+        return os.stat(path)
+
+    pool = pagestat.Pool(stat=stat, kept_s=0.05)
+    assert pool.look([str(slow)]) == {str(slow): None}
+    let_go.set()
+    deadline = time.monotonic() + 5
+    while not pool._out[str(slow)].ended.is_set():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    time.sleep(0.1)
+    # The late answer said missing; it is past its age, so the path is asked again.
+    assert pool.look([str(slow)]) == {str(slow): pagestat.DIR}
+    assert len(asked) == 2
+    assert pagestat.KEPT_S == 10.0
+
+
+def test_a_hung_mount_holds_at_most_four_threads(tmp_path):
+    let_go = threading.Event()
+    pool = pagestat.Pool(stat=lambda path: let_go.wait(30) and os.stat(path))
+    before = threading.active_count()
+    try:
+        found = pool.look([str(tmp_path / f"r{n}") for n in range(9)], timeout_s=0.05)
+        assert set(found.values()) == {None}
+        assert pool._threads == pagestat.WORKERS == 4
+        assert threading.active_count() - before == 4
+    finally:
+        let_go.set()
+
+
+def test_home_is_where_moxi_paths_places_it(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "the-home"))
+    assert read("/api/projects")["home"] == str(paths.home())
+    assert read("/api/projects")["home"] == str(tmp_path / "the-home")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="HOME and the user database")
+def test_an_empty_home_reads_as_unset_and_nothing_placing_one_is_null(monkeypatch):
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(paths, "_account_home", lambda: "/from/the/user/database")
+    assert read("/api/projects")["home"] == "/from/the/user/database"
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    assert read("/api/projects")["home"] is None
+
+
+def test_notes_installed_says_whether_notes_is(site):
+    assert read("/api/projects")["notes_installed"] is False
+    site.module("notes")
+    moxi.modules.reset()
+    assert read("/api/projects")["notes_installed"] is True
+
+
+# -- the folder read --------------------------------------------------------------------
+
+def at_path(path) -> dict:
+    from urllib.parse import quote
+
+    return read("/api/folder", f"path={quote(str(path), safe='')}")
+
+
+NOTHING = dict.fromkeys(("path", "exists", "has_git", "project", "how", "key", "taken"))
+
+
+def test_a_git_dir_a_plain_one_and_a_missing_one(tmp_path, own_pool, store_path):
+    repo = tmp_path / "finch-scripts"
+    (repo / ".git").mkdir(parents=True)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert at_path(repo) == {"path": str(repo), "exists": True, "has_git": True,
+                               "project": None, "how": None, "key": "finch-scripts",
+                               "taken": False}
+    assert at_path(plain)["exists"] is True and at_path(plain)["has_git"] is False
+    gone = at_path(tmp_path / "not-yet")
+    assert gone["exists"] is False and gone["has_git"] is None and gone["key"] == "not-yet"
+    assert not store_path.exists()
+
+
+def test_a_worktrees_git_file_counts_as_git(tmp_path, own_pool):
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    (tree / ".git").write_text("gitdir: /somewhere\n")
+    assert at_path(tree)["has_git"] is True
+
+
+def test_a_file_is_not_a_dir(tmp_path, own_pool):
+    a_file = tmp_path / "a-file"
+    a_file.write_text("")
+    assert at_path(a_file)["exists"] is False and at_path(a_file)["has_git"] is None
+
+
+def test_how_the_path_stands_to_the_project_it_is_in(tmp_path, own_pool):
+    root = tmp_path / "proj"
+    (root / "src").mkdir(parents=True)
+    _register(("Proj", root))
+    at_root = at_path(str(root) + os.sep)
+    assert (at_root["path"], at_root["project"], at_root["how"]) == (str(root), "Proj",
+                                                                     "root")
+    assert at_root["key"] == "proj" and at_root["taken"] is True
+    inside = at_path(root / "src")
+    assert (inside["project"], inside["how"], inside["taken"]) == ("Proj", "inside", False)
+    sibling = tmp_path / "proj2"
+    sibling.mkdir()
+    assert at_path(sibling)["project"] is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlinked_spelling_of_a_root_is_that_root(tmp_path, own_pool):
+    root = tmp_path / "real"
+    root.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(root)
+    _register(("real", root))
+    assert at_path(link)["how"] == "root"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlink_into_a_root_is_inside(tmp_path, own_pool):
+    root = tmp_path / "real"
+    (root / "src").mkdir(parents=True)
+    link = tmp_path / "into"
+    link.symlink_to(root / "src")
+    _register(("real", root))
+    assert pagehandlers._how(str(link), str(root)) == "inside"
+    assert pagehandlers._how(str(link / "deeper"), str(root)) == "inside"
+
+
+def test_root_and_inside_go_by_file_identity_on_a_disk_that_ignores_case(tmp_path, monkeypatch):
+    root = tmp_path / "code" / "atlas-api"
+    (root / "src").mkdir(parents=True)
+    (tmp_path / "code" / "other").mkdir()
+    real = os.stat
+    base = str(tmp_path)
+
+    def folded(path, *args, **kwargs):
+        # A disk that ignores case, as macOS's does: every spelling names one file.
+        text = os.fspath(path)
+        if isinstance(text, str) and text.startswith(base):
+            text = base + text[len(base):].lower()
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", folded)
+    typed = os.path.join(base, "Code", "Atlas-API")
+    assert pagehandlers._how(typed, str(root)) == "root"
+    assert pagehandlers._how(os.path.join(typed, "SRC"), str(root)) == "inside"
+    assert pagehandlers._how(os.path.join(typed, "src", "not-yet"), str(root)) == "inside"
+    assert pagehandlers._how(os.path.join(base, "Code", "Other"), str(root)) == "worktree"
+
+
+def test_a_linked_worktree_outside_any_root_is_a_worktree(tmp_path, own_pool):
+    main = tmp_path / "repos" / "main"
+    (main / ".git" / "worktrees" / "wt").mkdir(parents=True)
+    gitdir = main / ".git" / "worktrees" / "wt"
+    (gitdir / "commondir").write_text("../..\n")
+    tree = tmp_path / "scratch" / "wt"
+    tree.mkdir(parents=True)
+    (tree / ".git").write_text(f"gitdir: {gitdir}\n")
+    _register(("main", main))
+    body = at_path(tree)
+    assert (body["project"], body["how"], body["has_git"]) == ("main", "worktree", True)
+
+
+def test_a_tilde_path_is_taken_as_the_home(tmp_path, own_pool, monkeypatch):
+    home = tmp_path / "home"
+    (home / "code" / "finch").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    assert at_path("~/code/finch")["path"] == str(home / "code" / "finch")
+    assert at_path("~/code/finch")["exists"] is True
+    assert at_path("~")["path"] == str(home)
+    assert at_path("~/")["path"] == str(home)
+
+
+@pytest.mark.parametrize("typed", ["code/finch", "", ".", "~someone/code", "~someone"])
+def test_a_relative_path_or_another_users_home_says_nothing(typed, own_pool):
+    assert at_path(typed) == NOTHING
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="HOME and the user database")
+def test_a_tilde_path_with_no_home_says_nothing(monkeypatch, own_pool, tmp_path):
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    assert at_path("~/code") == NOTHING
+    assert at_path(tmp_path)["path"] == str(tmp_path)
+
+
+def test_a_last_segment_that_fails_the_key_rules_gives_no_key(tmp_path, own_pool):
+    for name in ("has space", "con", "ends."):
+        body = at_path(tmp_path / name)
+        assert body["key"] is None and body["taken"] is None, name
+
+
+def test_a_taken_key_is_found_ignoring_case(tmp_path, own_pool):
+    _register(("Finch", tmp_path / "elsewhere"))
+    body = at_path(tmp_path / "finch")
+    assert (body["key"], body["taken"], body["project"]) == ("finch", True, None)
+
+
+def test_a_store_that_cant_be_read_answers_the_rest(tmp_path, own_pool, store_path):
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_bytes(b"not a database at all" * 100)
+    (tmp_path / "x").mkdir()
+    body = at_path(tmp_path / "x")
+    assert body == {"path": str(tmp_path / "x"), "exists": True, "has_git": False,
+                    "project": None, "how": None, "key": "x", "taken": None}
+
+
+def test_a_path_stat_that_hangs_reads_null_inside_the_bound_and_is_not_asked_again(
+        tmp_path, monkeypatch):
+    slow = tmp_path / "slow"
+    slow.mkdir()
+    let_go = threading.Event()
+    asked: list[str] = []
+
+    def stat(path):
+        asked.append(path)
+        if path == str(slow):
+            let_go.wait(30)
+        return os.stat(path)
+
+    monkeypatch.setattr(pagestat, "_POOL", pagestat.Pool(stat=stat))
+    try:
+        start = time.monotonic()
+        body = at_path(slow)
+        assert time.monotonic() - start < 2
+        assert body["exists"] is None and body["has_git"] is False and body["key"] == "slow"
+        assert at_path(slow)["exists"] is None
+        assert asked.count(str(slow)) == 1
+    finally:
+        let_go.set()
+
+
+def test_a_typed_tree_whose_every_stat_hangs_is_never_looked_up(tmp_path, monkeypatch):
+    root = tmp_path / "mount" / "proj"
+    (root / "src").mkdir(parents=True)
+    _register(("proj", root))
+    hung = str(tmp_path / "mount")
+    let_go = threading.Event()
+    touched: list[str] = []
+
+    def hanging(real):
+        def stat(path, *args, **kwargs):
+            text = os.fsdecode(os.fspath(path)) if not isinstance(path, int) else ""
+            if text == hung or text.startswith(hung + os.sep):
+                touched.append(text)
+                let_go.wait(30)
+            return real(path, *args, **kwargs)
+        return stat
+
+    monkeypatch.setattr(pagestat, "_POOL", pagestat.Pool(stat=hanging(os.stat)))
+    try:
+        # Every stat under the mount hangs from here, the pool's and any other's.
+        monkeypatch.setattr(os, "stat", hanging(os.stat))
+        monkeypatch.setattr(os, "lstat", hanging(os.lstat))
+        start = time.monotonic()
+        body = at_path(root / "src")
+        assert time.monotonic() - start < 2
+        assert (body["exists"], body["project"], body["how"]) == (None, None, None)
+        assert (body["key"], body["taken"]) == ("src", False)
+        # Only the pool's two stats reached the mount; nothing else waited on it.
+        assert sorted(touched) == sorted([str(root / "src"), str(root / "src" / ".git")])
+    finally:
+        let_go.set()
+
+
+def test_the_path_read_writes_nothing(golden_copy, store_path, tmp_path, own_pool):
+    before = store_path.read_bytes(), store_path.stat().st_mtime_ns
+    at_path(tmp_path / "new-one")
+    at_path(os.path.join(golden_copy, "alpha"))
+    assert (store_path.read_bytes(), store_path.stat().st_mtime_ns) == before
+    assert not (tmp_path / "new-one").exists()
+
+
+# -- the remove check -------------------------------------------------------------------
+
+def check_of(key: str) -> dict:
+    return read("/api/remove-check", f"key={key}")
+
+
+@pytest.fixture
+def unchanged(golden_copy, store_path):
+    """The store's bytes and mtime, checked unchanged when the test ends."""
+    before = store_path.read_bytes(), store_path.stat().st_mtime_ns
+    yield golden_copy
+    assert (store_path.read_bytes(), store_path.stat().st_mtime_ns) == before
+
+
+def test_nothing_holding_the_project_checks_clean(unchanged):
+    assert check_of("GAMMA") == {"key": "gamma", "refusals": []}
+
+
+def test_associated_agents_are_projects_own_refusal(unchanged):
+    body = check_of("alpha")
+    assert body["refusals"] == [{"module": "projects", "fix": None,
+                                 "sentence": "project 'alpha' still has associated agents: "
+                                             "helper scout"}]
+
+
+def test_each_contributions_sentence_is_a_row_with_no_fix(site, unchanged):
+    site.contribution("svc", holds("services run for it; `moxi services stop` frees it"))
+    site.contribution("links", holds("two watches name it; `moxi links clear` frees it"))
+    rows = check_of("alpha")["refusals"]
+    assert rows[0]["module"] == "projects"
+    assert sorted((r["module"], r["sentence"], r["fix"]) for r in rows[1:]) == [
+        ("links", "two watches name it; `moxi links clear` frees it", None),
+        ("svc", "services run for it; `moxi services stop` frees it", None)]
+
+
+def test_a_broken_contribution_is_a_row_with_its_reason_and_fix_and_the_rest_still_ask(
+        site, unchanged):
+    site.contribution("gone", "raise ImportError('gone')\n")
+    site.contribution("raises", "INTERFACE = 1\n\ndef refuse_remove(project):\n"
+                                "    raise RuntimeError('boom')\n")
+    site.contribution("svc", holds("services run for it"))
+    rows = {r["module"]: r for r in check_of("gamma")["refusals"]}
+    assert set(rows) == {"gone", "raises", "svc"}
+    assert "won't load" in rows["gone"]["sentence"]
+    assert "moxi uninstall gone" in rows["gone"]["fix"]
+    assert "RuntimeError: boom" in rows["raises"]["sentence"]
+    assert "moxi uninstall raises" in rows["raises"]["fix"]
+    assert rows["svc"] == {"module": "svc", "sentence": "services run for it", "fix": None}
+
+
+def test_no_such_key_is_422_as_the_project_read_answers(unchanged):
+    said = refused(get("/api/remove-check", "key=nosuch"))
+    assert said == refused(get("/api/project", "key=nosuch"))
+
+
+def test_the_check_on_no_store_is_422_and_makes_no_file(store_path):
+    refused(get("/api/remove-check", "key=any"))
     assert not store_path.exists()
 
 
@@ -376,9 +800,9 @@ def test_an_add_that_skips_nothing_answers_no_warnings(tmp_path):
     assert done("/api/add", {"key": "web", "root": str(tmp_path / "web")})["warnings"] == []
 
 
-@pytest.mark.parametrize("root", ["relative/web", "~/web", "~"])
-def test_a_root_that_is_relative_or_starts_with_a_tilde_is_refused(root, tmp_path,
-                                                                   monkeypatch, store_path):
+@pytest.mark.parametrize("root", ["relative/web", "~someone/web", "~someone"])
+def test_a_root_that_is_relative_or_another_users_home_is_refused(root, tmp_path,
+                                                                  monkeypatch, store_path):
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
@@ -392,10 +816,84 @@ def test_a_root_that_is_relative_or_starts_with_a_tilde_is_refused(root, tmp_pat
     assert not store_path.exists() and list(cwd.iterdir()) == []
 
 
-def test_a_set_to_a_relative_root_is_refused(golden_copy):
-    said = refused(post("/api/set", {"key": "gamma", "root": "~/elsewhere"}))
+@pytest.mark.parametrize("root", ["elsewhere", "~someone/elsewhere"])
+def test_a_set_to_a_relative_root_is_refused(root, golden_copy):
+    said = refused(post("/api/set", {"key": "gamma", "root": root}))
     assert "is not an absolute path" in said
     assert api.get("gamma").root == os.path.join(golden_copy, "gamma")
+
+
+# -- ~ on add and set -------------------------------------------------------------------
+
+@pytest.fixture
+def home_dir(tmp_path, monkeypatch, terminal_record) -> str:
+    """HOME set to a folder of the test's own, in this process and in the terminal's
+    record alike, so the comparison passes."""
+    home = tmp_path / "the-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    terminal_record()
+    return str(home)
+
+
+def test_an_add_expands_a_tilde_root_by_the_home(home_dir, store_path):
+    body = done("/api/add", {"key": "finch", "root": "~/code/finch"})
+    assert body["project"]["root"] == os.path.join(home_dir, "code", "finch")
+    assert api.get("finch").root == os.path.join(home_dir, "code", "finch")
+    assert done("/api/add", {"key": "home-itself", "root": "~"})["project"]["root"] == \
+        home_dir
+
+
+@posix_only
+def test_an_add_with_create_makes_the_expanded_root(home_dir, monkeypatch, tmp_path):
+    monkeypatch.setenv("PATH", fake_git(tmp_path / "bin", "exit 0"))
+    done("/api/add", {"key": "made", "root": "~/made", "create": True, "kind": "project"})
+    assert os.path.isdir(os.path.join(home_dir, "made"))
+
+
+def test_a_notes_root_is_expanded_too(home_dir, site):
+    site.module("notes")
+    moxi.modules.reset()
+    body = done("/api/add", {"key": "noted", "root": "~/code/noted",
+                             "notes_root": "~/notes/noted"})
+    assert body["project"]["notes_root"] == os.path.join(home_dir, "notes", "noted")
+
+
+def test_a_set_expands_a_tilde_root(home_dir, golden_copy):
+    body = done("/api/set", {"key": "gamma", "root": "~/moved"})
+    assert body["project"]["root"] == os.path.join(home_dir, "moved")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="HOME and the user database")
+def test_a_tilde_root_with_no_home_is_refused(monkeypatch, terminal_record, store_path):
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    terminal_record()
+    said = refused(post("/api/add", {"key": "finch", "root": "~/code/finch"}))
+    assert "is not an absolute path" in said
+    assert not store_path.exists()
+
+
+def test_a_tilde_root_is_refused_by_the_comparison_before_any_expansion(
+        home_dir, terminal_record, monkeypatch, store_path):
+    words = store_moved(terminal_record)
+
+    def never(*args, **kwargs):
+        raise AssertionError("expanded before the comparison passed")
+
+    monkeypatch.setattr(pagehandlers, "expand_tilde", never)
+    for route, sent in (("/api/add", {"key": "finch", "root": "~/code/finch"}),
+                        ("/api/set", {"key": "gamma", "root": "~/moved"})):
+        assert refused(post(route, sent)).startswith(words)
+    assert not store_path.exists()
+
+
+def test_a_home_that_differs_from_the_terminals_refuses_a_tilde_root(
+        home_dir, terminal_record, store_path):
+    terminal_record(terminal(HOME=os.path.join(home_dir, "other")))
+    said = refused(post("/api/add", {"key": "finch", "root": "~/code/finch"}))
+    assert "the home folder" in said
+    assert not store_path.exists()
 
 
 # -- add ------------------------------------------------------------------------------------
@@ -536,72 +1034,69 @@ def test_agents_add_and_remove(golden_copy):
 
 # -- remove ---------------------------------------------------------------------------------
 
-def status_of(key: str = KEY, app=None) -> dict:
-    status, body = get("/api/remove-status", f"job={key}", app=app)
+def status_of(job: str = JOB, app=None) -> dict:
+    status, body = get("/api/remove-status", f"job={job}", app=app)
     assert status == 200, body
     return body
 
 
-def accepted(answer: tuple[int, dict | None], key: str = KEY) -> None:
-    assert answer == (202, {"status": f"/api/remove-status?job={key}"})
+def removing(key: str, job: str = JOB, app=None) -> dict:
+    """A remove of `key` pressed under `job`, answered 200; its outcome."""
+    status, body = post("/api/remove", {"key": key, "job": job}, app=app)
+    assert status == 200, body
+    assert body == status_of(job)
+    return body
 
 
-def test_a_remove_answers_202_and_its_status_says_removed(golden_copy):
-    accepted(post("/api/remove", {"key": "GAMMA"}, key=KEY))
+def test_a_remove_answers_its_outcome_at_once(golden_copy):
+    body = removing("GAMMA")
     with pytest.raises(api.NotFound):
         api.get("gamma")
-    body = status_of()
-    assert body == {"job": KEY, "project": "gamma", "created": body["created"],
+    assert body == {"job": JOB, "project": "gamma", "created": body["created"],
                     "state": "removed", "key": "gamma", "reason": None, "fix": None,
                     "sentences": [], "exit_code": None}
 
 
-def test_a_project_with_agents_is_refused_through_the_status_link(golden_copy):
-    accepted(post("/api/remove", {"key": "alpha"}, key=KEY))
-    body = status_of()
+def test_a_project_with_agents_is_refused_and_the_refusal_kept(golden_copy):
+    body = removing("alpha")
     assert body["state"] == "refused" and body["exit_code"] == 3
     assert "helper scout" in body["sentences"][0] and "agents remove alpha" in body["fix"]
     assert api.get("alpha")
 
 
-def test_every_contribution_sentence_comes_through_the_status_link(site, golden_copy):
+def test_every_contribution_sentence_comes_in_the_answer(site, golden_copy):
     site.contribution("svc", holds("services run for it; `moxi services stop` frees it"))
     site.contribution("links", holds("two watches name it; `moxi links clear` frees it"))
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
-    assert sorted(status_of()["sentences"]) == [
+    assert sorted(removing("gamma")["sentences"]) == [
         "links: two watches name it; `moxi links clear` frees it",
         "svc: services run for it; `moxi services stop` frees it"]
     assert api.get("gamma")
 
 
-def test_a_contribution_that_wont_load_is_refused_through_the_status_link(site,
-                                                                          golden_copy):
+def test_a_contribution_that_wont_load_is_a_kept_refusal(site, golden_copy):
     site.contribution("broken", "raise ImportError('gone')\n")
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
-    body = status_of()
+    body = removing("gamma")
     assert body["state"] == "refused" and body["exit_code"] == 1
     assert "won't load" in body["sentences"][0] and "moxi uninstall broken" in body["fix"]
     assert api.get("gamma")
 
 
-def test_an_unknown_key_in_a_store_that_exists_is_refused_through_the_status_link(
-        golden_copy):
-    accepted(post("/api/remove", {"key": "nosuch"}, key=KEY))
-    body = status_of()
+def test_an_unknown_key_in_a_store_that_exists_is_a_kept_refusal(golden_copy):
+    body = removing("nosuch")
     assert body["state"] == "refused" and "no project is named 'nosuch'" in body["reason"]
 
 
 def test_no_store_file_is_answered_at_once_and_makes_no_file(store_path):
-    said = refused(post("/api/remove", {"key": "nosuch"}, key=KEY))
+    said = refused(post("/api/remove", {"key": "nosuch", "job": JOB}))
     assert "no project is named 'nosuch'" in said
     assert not store_path.exists() and not store_path.parent.exists()
-    assert "no remove request" in refused(get("/api/remove-status", f"job={KEY}"))
+    assert "no remove request" in refused(get("/api/remove-status", f"job={JOB}"))
 
 
 def test_a_newer_store_is_answered_at_once_and_left_as_it_was(golden_copy, store_path):
     _set_user_version(store_path, api._VERSION + 1)
     before = store_path.read_bytes()
-    assert "newer than" in refused(post("/api/remove", {"key": "gamma"}, key=KEY))
+    assert "newer than" in refused(post("/api/remove", {"key": "gamma", "job": JOB}))
     assert store_path.read_bytes() == before
 
 
@@ -609,7 +1104,7 @@ def test_an_unreadable_store_is_answered_at_once_and_left_as_it_was(store_path):
     store_path.parent.mkdir(parents=True)
     store_path.write_bytes(b"this is not a database, not at all, " * 200)
     before = store_path.read_bytes()
-    assert refused(post("/api/remove", {"key": "gamma"}, key=KEY))
+    assert refused(post("/api/remove", {"key": "gamma", "job": JOB}))
     assert store_path.read_bytes() == before
 
 
@@ -619,9 +1114,9 @@ def test_a_store_locked_past_the_wait_is_409_and_keeps_nothing(golden_copy, stor
     holder_conn = sqlite3.connect(store_path, isolation_level=None)
     try:
         holder_conn.execute("BEGIN IMMEDIATE")
-        removed = post("/api/remove", {"key": "gamma"}, key=KEY)
+        removed = post("/api/remove", {"key": "gamma", "job": JOB})
         # A refusal about the project whose own write is locked out is the lock's answer.
-        held = post("/api/remove", {"key": "alpha"}, key=OTHER_KEY)
+        held = post("/api/remove", {"key": "alpha", "job": OTHER_JOB})
     finally:
         holder_conn.execute("ROLLBACK")
         holder_conn.close()
@@ -629,62 +1124,53 @@ def test_a_store_locked_past_the_wait_is_409_and_keeps_nothing(golden_copy, stor
     assert api.get("gamma") and _status_rows(store_path) == []
 
 
-def test_a_repeat_while_the_first_still_runs_is_409(golden_copy, monkeypatch):
-    entered, release = threading.Event(), threading.Event()
+def test_two_presses_sent_at_once_under_one_job_both_answer_the_first_outcome(
+        golden_copy, store_path, monkeypatch):
+    both_in = threading.Barrier(2, timeout=30)
     real = acts.remove
 
-    def slow(key, **named):
-        entered.set()
-        release.wait(30)
+    def together(key, **named):
+        both_in.wait()
         return real(key, **named)
 
-    monkeypatch.setattr(acts, "remove", slow)
+    monkeypatch.setattr(acts, "remove", together)
 
-    async def both():
+    async def at_once():
         app = served()
-        first = asyncio.create_task(_send(app, "POST", "/api/remove", body={"key": "gamma"},
-                                          key=KEY))
-        for _ in range(1000):
-            if entered.is_set():
-                break
-            await asyncio.sleep(0.01)
-        try:
-            second = await _send(app, "POST", "/api/remove", body={"key": "gamma"},
-                                 key=KEY)
-        finally:
-            release.set()
-        return await first, second
+        return await asyncio.gather(*(
+            _send(app, "POST", "/api/remove", body={"key": "gamma", "job": JOB})
+            for _ in range(2)))
 
-    first, second = asyncio.run(both())
-    assert first[0] == 202 and second[0] == 409
+    first, second = asyncio.run(at_once())
+    assert first[0] == second[0] == 200, (first, second)
+    assert first[1] == second[1] and first[1]["state"] == "removed"
+    assert _status_rows(store_path) == [JOB]
+    with pytest.raises(api.NotFound):
+        api.get("gamma")
 
 
-def test_a_key_sent_with_another_project_is_422_within_a_server_and_after_a_restart(
-        golden_copy):
+def test_a_job_sent_with_another_project_is_422(golden_copy):
     app = served()
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY, app=app))
-    assert post("/api/remove", {"key": "Beta"}, key=KEY, app=app)[0] == 422
-    # A fresh app has no key table: the kept row answers.
-    said = refused(post("/api/remove", {"key": "Beta"}, key=KEY))
-    assert said == pagehandlers.KEY_REUSED
+    removing("gamma", app=app)
+    assert refused(post("/api/remove", {"key": "Beta", "job": JOB}, app=app)) == \
+        pagehandlers.KEY_REUSED
+    assert refused(post("/api/remove", {"key": "Beta", "job": JOB})) == \
+        pagehandlers.KEY_REUSED
     assert api.get("Beta")
 
 
-def test_a_repeat_after_a_restart_reads_the_kept_row_and_acts_no_more(golden_copy,
-                                                                      tmp_path):
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
-    first = status_of()
+def test_a_repeat_of_a_job_answers_the_kept_row_and_acts_no_more(golden_copy, tmp_path):
+    first = removing("gamma")
     # gamma is back: a second run of the act would remove it again.
     acts.add("gamma", root=str(tmp_path / "gamma"))
-    accepted(post("/api/remove", {"key": "GAMMA"}, key=KEY))
-    assert api.get("gamma") and status_of() == first
+    assert removing("GAMMA") == first
+    assert api.get("gamma")
     # A refused one, too.
-    accepted(post("/api/remove", {"key": "alpha"}, key=OTHER_KEY), OTHER_KEY)
-    refusal = status_of(OTHER_KEY)
+    refusal = removing("alpha", OTHER_JOB)
     acts.remove_agent("alpha", "helper")
     acts.remove_agent("alpha", "scout")
-    accepted(post("/api/remove", {"key": "alpha"}, key=OTHER_KEY), OTHER_KEY)
-    assert api.get("alpha") and status_of(OTHER_KEY) == refusal
+    assert removing("alpha", OTHER_JOB) == refusal
+    assert api.get("alpha")
 
 
 def test_a_repeat_past_a_day_is_a_new_act(golden_copy, monkeypatch):
@@ -692,32 +1178,44 @@ def test_a_repeat_past_a_day_is_a_new_act(golden_copy, monkeypatch):
                         time.gmtime(time.time() - store.STATUS_KEPT - 60))
     with monkeypatch.context() as patched:
         patched.setattr(store, "now", lambda: old)
-        accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
+        post("/api/remove", {"key": "gamma", "job": JOB})
     # The day's row is ignored, so the act runs again and finds no gamma.
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
-    body = status_of()
+    body = removing("gamma")
     assert body["state"] == "refused" and "no project is named 'gamma'" in body["reason"]
 
 
-def test_a_remove_without_its_key_is_refused_before_the_handler(golden_copy):
+def test_a_remove_without_its_job_is_refused_before_the_handler(golden_copy):
     status, _ = post("/api/remove", {"key": "gamma"})
     assert status == 400
     assert api.get("gamma")
 
 
+@pytest.mark.parametrize("job", ["K" * 43, JOB.upper(), JOB[:-1], JOB + "0", ""])
+def test_a_job_that_is_not_32_hex_characters_is_refused(job, golden_copy, store_path):
+    said = refused(post("/api/remove", {"key": "gamma", "job": job}))
+    assert "32 hexadecimal characters" in said
+    assert api.get("gamma") and _status_rows(store_path) == []
+
+
+def test_the_remove_is_an_ordinary_act_with_no_confirm_or_status_link():
+    routes = {r["path"]: r for r in LB.export(page.PAGE)["routes"]}
+    assert not routes["/api/remove"].get("confirmed")
+    assert not routes["/api/remove"].get("status")
+
+
 @pytest.mark.parametrize("outcome", [{"key": "gamma"}, {"state": "removed"}, {}])
 def test_a_kept_outcome_without_its_state_or_key_is_unreadable(outcome, golden_copy,
                                                                store_path):
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
+    removing("gamma")
     conn = sqlite3.connect(store_path)
     try:
         conn.execute("UPDATE remove_status SET outcome = ? WHERE key = ?",
-                     (json.dumps(outcome), KEY))
+                     (json.dumps(outcome), JOB))
         conn.commit()
     finally:
         conn.close()
-    for answer in (get("/api/remove-status", f"job={KEY}"),
-                   post("/api/remove", {"key": "gamma"}, key=KEY)):
+    for answer in (get("/api/remove-status", f"job={JOB}"),
+                   post("/api/remove", {"key": "gamma", "job": JOB})):
         said = refused(answer)
         assert f"the projects store {store_path} can't be read" in said
         assert "fix: move the file aside" in said
@@ -725,7 +1223,7 @@ def test_a_kept_outcome_without_its_state_or_key_is_unreadable(outcome, golden_c
 
 def test_a_status_read_of_a_version_1_store_answers_no_such_request(v1_copy, store_path):
     before = store_path.read_bytes()
-    assert "no remove request" in refused(get("/api/remove-status", f"job={KEY}"))
+    assert "no remove request" in refused(get("/api/remove-status", f"job={JOB}"))
     assert store_path.read_bytes() == before
 
 
@@ -785,7 +1283,7 @@ def home_moved(terminal_record) -> str:
 
 
 def submit(route: str, body: dict) -> tuple[int, dict | None]:
-    return post(route, body, key=KEY if route == "/api/remove" else None)
+    return post(route, {**body, "job": JOB} if route == "/api/remove" else body)
 
 
 @pytest.mark.parametrize("differs", [store_moved, no_record, home_moved],
@@ -803,7 +1301,7 @@ def test_every_write_route_refuses_with_the_line_and_writes_nothing(
     if "root" in sent:
         assert not os.path.lexists(sent["root"])
     # A remove refused this way keeps no row, and its repeat is answered the same.
-    assert acts.remove_status(KEY) is None
+    assert acts.remove_status(JOB) is None
     assert refused(submit(route, sent)) == said
 
 
@@ -846,11 +1344,11 @@ def test_the_line_names_the_variable_and_the_restart(golden_copy, terminal_recor
 
 
 def test_the_comparison_comes_before_a_removes_kept_row(golden_copy, terminal_record):
-    accepted(post("/api/remove", {"key": "gamma"}, key=KEY))
+    removing("gamma")
     store_moved(terminal_record)
-    # A repeat of the accepted remove, at a fresh page server, is refused now ...
-    assert refused(post("/api/remove", {"key": "gamma"}, key=KEY)) == pagecheck.line()
-    # ... though its status link, a read, still gives the kept outcome.
+    # A repeat of the remove's job is refused now ...
+    assert refused(post("/api/remove", {"key": "gamma", "job": JOB})) == pagecheck.line()
+    # ... though the status read still gives the kept outcome.
     assert status_of()["state"] == "removed"
 
 

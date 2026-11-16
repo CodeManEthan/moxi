@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Every setting carries page fields, which `moxi config notes show --json` prints
+  and the settings page draws: a plain label, a line where the label can't carry it,
+  a unit on the largest file and the snapshot interval, and words for each way a
+  commit handles a secret. notes needs moxi 0.1.9 or later.
 - A notes repo whose git dir isn't a folder named `.git` (made with
   `git init --separate-git-dir`, or backed by a bare `notes.git`) still has no private
   allowlist, but while no private file is there its judges apply the public
