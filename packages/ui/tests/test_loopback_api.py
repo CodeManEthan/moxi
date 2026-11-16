@@ -28,8 +28,8 @@ THREAT_MODEL = (
 
 # Each name of the API and the file that defines it; `api` re-exports the same object.
 SURFACE = {
-    routes: {"Field", "Out", "Page", "PageError", "Route", "Entry", "Table", "build_table",
-             "export"},
+    routes: {"BadRequest", "Field", "Out", "Page", "PageError", "Route", "Entry", "Table",
+             "build_table", "export"},
     check: {"Profile", "Refusal", "RequestView", "browser", "check", "gateway", "proof",
             "token_matches", "upstream"},
     transport: {"BrowserSockets", "NotLoopback", "NotOurServer", "NotPrivate", "bind_browser",

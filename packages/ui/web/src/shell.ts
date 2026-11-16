@@ -3,9 +3,11 @@
 // `<moxi-<module>-page route="<route>">`. Moving between panels is `history.pushState`;
 // the push stream and the top line stay. Everything is built with DOM calls and text
 // nodes, never HTML strings. On the phone it hides Settings, which only the desk
-// reaches, and its signed-out notice links to the gateway's sign-in page.
+// reaches, and its signed-out notice links to the gateway's sign-in page. Every move off
+// the panel runs through the gate (`hold-model.ts`), so a page that holds is asked first.
 
 import type { ComponentInfo } from "./client.ts";
+import type { Gate } from "./hold-model.ts";
 import { freshN } from "./passkey.ts";
 import type { UpstreamState } from "./push.ts";
 import { placeOnceMore, scriptFailure } from "./place-model.ts";
@@ -34,6 +36,8 @@ export interface ShellDeps {
   onState(fn: (state: UpstreamState) => void): void;
   state(module: string): UpstreamState | null;
   setNavigator(fn: (module: string, route: string) => void): void;
+  /** The gate every move off the panel runs through, and a page's hold on it. */
+  gate: Gate;
 }
 
 /** The module and route the URL path names, or null for a path outside `/m/<module>/`. */
@@ -97,6 +101,33 @@ export function pageName(at: { module: string; route: string } | null, modules: 
     return route === "settings" || route.startsWith("settings/") ? "Settings" : null;
   }
   return modules.find((item) => item.name === at.module)?.page?.title ?? null;
+}
+
+/** The name the top line shows for the page at `at`: `pageName`'s, except on the phone,
+ * where a settings route names Home, the one page its line sends the phone to. */
+export function topName(gateway: boolean, at: { module: string; route: string } | null,
+                        modules: PanelModule[]): string | null {
+  const named = pageName(at, modules);
+  return gateway && at !== null && at.module === "ui" && named === "Settings" ? "Home" : named;
+}
+
+/** Whether the top line shows its right-hand `Settings`: not on the phone, which only the
+ * desk reaches, and not on the Settings page itself. */
+export function settingsShown(gateway: boolean, at: { module: string; route: string } | null): boolean {
+  return !gateway && !(at !== null && at.module === "ui" && pageName(at, []) === "Settings");
+}
+
+/**
+ * What the panel at `at` is, for telling whether an event changed it: its module, the
+ * page's name and the module's page facts, not the full path, so an address a page
+ * writes for itself is still the panel placed.
+ */
+export function panelSignature(at: { module: string; route: string } | null, modules: PanelModule[],
+                               installed: boolean, known: boolean): string {
+  if (at === null) return "none";
+  const item = modules.find((mod) => mod.name === at.module);
+  return JSON.stringify([at.module, pageName(at, modules), installed, known, item?.page?.url ?? "",
+                         item?.page?.contract ?? "", item?.page?.title ?? "", item?.refused ?? ""]);
 }
 
 /** Where the focus is when Tab is pressed with the band open: the page-name button,
@@ -164,13 +195,12 @@ export function boot(deps: ShellDeps): void {
   let shown = "";
   let seq = 0;
 
+  const { gate } = deps;
+
   const signature = (): string => {
     const at = where(location.pathname);
-    if (at === null) return "none";
-    const item = deps.modules().find((mod) => mod.name === at.module);
-    return [location.pathname, deps.installed(at.module), deps.known(at.module),
-            item?.page?.url ?? "", item?.page?.contract ?? "", item?.page?.title ?? "",
-            item?.refused ?? ""].join("|");
+    return panelSignature(at, deps.modules(), at !== null && deps.installed(at.module),
+                          at !== null && deps.known(at.module));
   };
 
   const say = (title: string, ...lines: string[]): void => {
@@ -204,6 +234,7 @@ export function boot(deps: ShellDeps): void {
 
   const renderPanel = async (): Promise<void> => {
     shown = signature();
+    gate.markDrawn();
     showStatus();
     const at = where(location.pathname);
     if (at === null) {
@@ -228,7 +259,7 @@ export function boot(deps: ShellDeps): void {
     seq += 1;
     const mine = seq;
     panel.replaceChildren();
-    name(pageName(at, deps.modules()));
+    name(topName(deps.gateway, at, deps.modules()));
     const url = item.page.url;
     // A script that did not load may be a start that failed: the proxy answers its 502
     // with the exit and the log, and a second fetch within 10 s gets the same answer
@@ -257,11 +288,8 @@ export function boot(deps: ShellDeps): void {
         return box;
       });
     band.replaceChildren(...groups);
-    if (at !== null && at.module === "ui" && pageName(at, []) === "Settings") {
-      settings.setAttribute("aria-current", "page");
-    } else {
-      settings.removeAttribute("aria-current");
-    }
+    // On the Settings page the top line's `Settings` is hidden, and Tab skips it.
+    settings.hidden = !settingsShown(deps.gateway, at);
   };
 
   const isOpen = (): boolean => !band.hidden;
@@ -276,15 +304,21 @@ export function boot(deps: ShellDeps): void {
     void renderPanel();
   };
 
+  // A link marked with its module, the shell's own or one a page draws in its shadow
+  // root, moves within the document, through the gate.
   root.addEventListener("click", (event) => {
-    const link = (event.target as Element).closest?.("a[data-module]") as HTMLAnchorElement | null;
+    const link = event.composedPath().find((node): node is HTMLAnchorElement =>
+      node instanceof HTMLAnchorElement && node.matches("a[data-module]")) ?? null;
     if (link === null || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    if (link.pathname !== location.pathname) history.pushState(null, "", link.pathname);
     const picked = band.contains(link);
-    go();
-    // A pick hides the name that held the focus; the button that opened the band takes it.
-    if (picked) button.focus();
+    setOpen(false);
+    gate.move(() => {
+      if (link.pathname !== location.pathname) history.pushState(null, "", link.pathname);
+      go();
+      // A pick hides the name that held the focus; the button that opened the band takes it.
+      if (picked) button.focus();
+    });
   });
   button.addEventListener("click", () => setOpen(!isOpen()));
   // The open band closes on Escape, which hands the focus back to its button, and on a
@@ -317,11 +351,16 @@ export function boot(deps: ShellDeps): void {
     event.preventDefault();
     ({ first: names[0], last: names[names.length - 1], button, settings })[move].focus();
   });
-  addEventListener("popstate", go);
+  const redraw = (): void => { void renderPanel(); };
+  addEventListener("popstate", () => gate.onPopstate(go));
+  // While a page holds, the browser's own prompt covers a load of another document.
+  addEventListener("beforeunload", (event) => {
+    if (gate.held) event.preventDefault();
+  });
   deps.setNavigator(go);
   deps.onModules(() => {
     renderBand();
-    if (signature() !== shown) void renderPanel();
+    gate.refresh(signature() !== shown, redraw);
   });
   deps.onState(showStatus);
   // On the phone the way back in is the gateway's sign-in page, with a new `n` each time
@@ -336,12 +375,11 @@ export function boot(deps: ShellDeps): void {
     if (deps.gateway) signIn.href = `/signin?n=${freshN()}`;
     notice.hidden = signedIn;
     reads.hidden = !deps.gateway || !signedIn;
-    if (signedIn) void renderPanel();
+    if (signedIn) gate.refresh(true, redraw);
   });
-  settings.hidden = deps.gateway;
   // The phone's every page says, first under the top line, that it only reads there.
   reads.hidden = !deps.gateway;
-  name(pageName(where(location.pathname), deps.modules()));
+  name(topName(deps.gateway, where(location.pathname), deps.modules()));
   renderBand();
   void renderPanel();
 }

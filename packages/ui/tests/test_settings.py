@@ -108,23 +108,152 @@ def test_a_switch_table_whose_declarations_are_unavailable_shows_the_file_and_wh
     assert "UNITS_FROM failed: boom" in key["reason"] and "can't be listed" in key["reason"]
 
 
+# --- what the page reads beside each key --------------------------------------------------
+
+
+PAGE_FIELDS = {"label": "Port", "line": "Where it listens.", "common": True, "group": "Waits",
+               "unit": "seconds", "pick": True, "elsewhere": None,
+               "choices": [{"value": "slow", "words": "Slow"}],
+               "hurts": {"when": "off", "says": "turns it off", "confirm": "It goes.",
+                         "stays": False},
+               "terminal": {"on": "moxi demo enable", "off": "moxi demo disable"}}
+
+
+def test_a_key_carries_its_page_fields_and_an_older_core_without_them_reads_as_none():
+    key = settings.descriptor("demo", _key("count", "int", 3, 1, **PAGE_FIELDS))
+    assert {field: key[field] for field in PAGE_FIELDS} == PAGE_FIELDS
+    bare = settings.descriptor("demo", _key("count", "int", 3, 1))
+    assert {field: bare[field] for field in PAGE_FIELDS} == {
+        "label": None, "line": None, "common": False, "group": None, "unit": None,
+        "pick": False, "elsewhere": None, "choices": None, "hurts": None, "terminal": None}
+    # A field of the wrong shape reads as absent, so the answer keeps its declared shape.
+    odd = settings.descriptor("demo", _key("count", "int", 3, 1, label=4, common="yes",
+                                           hurts={"when": "off"}, terminal={"on": "x"},
+                                           choices=[{"value": "a"}, "b"]))
+    assert odd["label"] is None and odd["common"] is False and odd["hurts"] is None
+    assert odd["terminal"] is None and odd["choices"] == []
+    from moxi_ui.loopback.routes import project
+    project(key, settings.KEY_SHAPE, strict=True)
+    project(bare, settings.KEY_SHAPE, strict=True)
+
+
+def test_each_key_carries_its_value_as_json_and_whether_it_is_not_the_default():
+    keys = _by_name(settings.descriptor("demo", item) for item in EIGHT)
+    assert {name: json.loads(key["json"]) for name, key in keys.items()} == {
+        item["name"]: item["value"] for item in EIGHT}
+    assert {name: json.loads(key["default_json"]) for name, key in keys.items()} == {
+        item["name"]: item["default"] for item in EIGHT}
+    assert {name for name, key in keys.items() if key["changed"]} == {
+        "on", "count", "ratio", "name", "dir", "mode", "tags", "extra"}
+    same = [_key("on", "bool", value=False, default=False), _key("count", "int", 1, 1),
+            _key("ratio", "float", 1.0, 1), _key("tags", "list", ["a"], ["a"]),
+            _key("extra", "table", {"a": [1]}, {"a": [1]}),
+            # A path whose default is empty reads none.
+            _key("dir", "path", None, ""),
+            _key("mode", "enum", "slow", "slow", values=["slow", "fast"])]
+    assert not any(settings.descriptor("demo", item)["changed"] for item in same)
+    assert settings.descriptor("demo", _key("dir", "path", "/a", ""))["json"] == '"/a"'
+    assert settings.descriptor("demo", _key("dir", "path", None, ""))["json"] == "null"
+    # A path default under the home folder reads as the value the home gives it.
+    env = {"HOME": "/h"}
+    assert not settings.descriptor("demo", _key("dir", "path", "/h/x", "~/x"), env=env)["changed"]
+    assert settings.descriptor("demo", _key("dir", "path", "/h/y", "~/x"), env=env)["changed"]
+    # A list of tables travels whole, so the page never parses TOML.
+    rows = [{"name": "claude", "skills": ""}, {"name": "codex", "skills": "/s"}]
+    assert json.loads(settings.descriptor("moxi", _key("harnesses", "list", rows, []))["json"]) \
+        == rows
+    assert json.loads(settings.descriptor("moxi", _key("harnesses", "list", [], rows))[
+        "default_json"]) == rows
+    # A value JSON can't hold reads null.
+    assert settings.descriptor("demo", _key("ratio", "float", float("nan"), 1.0))["json"] == "null"
+
+
+def test_a_switch_table_is_changed_when_any_entry_is_on():
+    def changed(*values):
+        return settings.descriptor("demo", _switch_table(entries=[
+            {"name": n, "value": v, "source": "file", "named_by": []}
+            for n, v in zip("abc", values, strict=False)]))["changed"]
+
+    on, off = True, False
+    assert changed(on, off) and changed(off, off, on)
+    assert not changed(off, off) and not changed()
+
+
+def test_a_sections_count_leaves_out_what_the_page_does_not_draw_among_its_rows():
+    items = [_key("a", "bool", value=False, default=False), _key("b", "int", 1, 1),
+             _key("hook", "bool", value=False, default=False, needs="turns"),
+             _key("name.template", "string", "x", "x", elsewhere="Edited in Home."),
+             _key("gateway.port", "int", 1, 1), _key("gateway.enabled", "bool", value=False,
+                                                       default=False)]
+    listing = {"demo": {"state": "present"}, "ui": {"state": "present"}}
+    run = Run(stdout=json.dumps(items).encode(), schema=None)
+    demo = settings.read_section("demo", cwd="/rt", env=None, listing=listing, run=run)
+    # Another module's gateway keys are its own rows.
+    assert demo["count"] == 4 and len(demo["keys"]) == 6
+    ui = settings.read_section("ui", cwd="/rt", env=None, listing=listing, run=run)
+    assert ui["count"] == 2
+    # A key needing a present module is drawn.
+    listing["turns"] = {"state": "present"}
+    assert settings.read_section("demo", cwd="/rt", env=None, listing=listing,
+                                 run=run)["count"] == 5
+    assert not settings.is_drawn("demo", {"name": "a", "needs_absent": True})
+    assert settings.is_drawn("demo", {"name": "a", "needs_absent": False, "elsewhere": None})
+
+
+def test_a_sections_file_writes_the_home_as_a_tilde(tmp_path):
+    env = {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / ".config")}
+    assert settings.file_of("demo", env) == "~/.config/moxi/demo/config.toml"
+    assert settings.file_of("moxi", env) == "~/.config/moxi/moxi/config.toml"
+    elsewhere = {"HOME": str(tmp_path / "h"), "XDG_CONFIG_HOME": str(tmp_path / "conf")}
+    assert settings.file_of("demo", elsewhere) == str(tmp_path / "conf/moxi/demo/config.toml")
+    # A home that is only a prefix of the path's folder is not the home folder.
+    near = {"HOME": str(tmp_path / "c"), "XDG_CONFIG_HOME": str(tmp_path / "conf")}
+    assert not settings.file_of("demo", near).startswith("~")
+    assert settings.file_of("Not A Module", env) is None
+    run = Run(stdout=b"[]", schema=None)
+    assert settings.read_section("demo", cwd="/rt", env=env, run=run)["file"] == \
+        "~/.config/moxi/demo/config.toml"
+
+
 # --- the commands, recorded --------------------------------------------------------------
 
 
+#: The schema read a recorded write is checked against: every key the recorded writes
+#: name, and two switch tables.
+SCHEMA = [*EIGHT, *(_key(name, "int", 1, 1) for name in (
+    "idle_s", "port", "gateway.port", "adopt", "adopted_too", "gateway")),
+    _key("gateway.enabled", "bool", value=False, default=False,
+         terminal={"on": "moxi ui gateway enable", "off": "moxi ui gateway disable"}),
+    _key("jobs", "table", {}, {}, items="bool", switch_table=True, entries=[
+        {"name": "c", "value": False, "source": "default", "named_by": ["daemon:watch"]}]),
+    _key("adopted", "table", {}, {}, items="bool", switch_table=True, entries=[])]
+
+
 class Run:
-    def __init__(self, code=0, stdout=b"", stderr=b"", raises=None):
+    """A recorded `moxi config`: a `show` answers `schema` (when it is not None), and
+    every other run answers `code`, `stdout` and `stderr`, or raises `raises`."""
+
+    def __init__(self, code=0, stdout=b"", stderr=b"", raises=None, schema=SCHEMA):
         self.code, self.stdout, self.stderr, self.raises = code, stdout, stderr, raises
+        self.schema = schema
         self.calls = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append((argv, kwargs))
+        if self.schema is not None and "show" in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.schema).encode(), b"")
         if self.raises is not None:
             raise self.raises
         return subprocess.CompletedProcess(argv, self.code, self.stdout, self.stderr)
 
+    @property
+    def writes(self):
+        """The runs that were not a schema read."""
+        return [(argv, kwargs) for argv, kwargs in self.calls if "show" not in argv]
+
 
 def test_every_command_is_python_dash_p_dash_m_moxi_from_the_runtime_dir():
-    run = Run(stdout=json.dumps(EIGHT).encode())
+    run = Run(stdout=json.dumps(EIGHT).encode(), schema=None)
     section = settings.read_section("demo", cwd="/rt", env={"A": "1"}, run=run)
     assert section["error"] is None and len(section["keys"]) == 8
     argv, kwargs = run.calls[0]
@@ -139,15 +268,17 @@ def test_every_command_is_python_dash_p_dash_m_moxi_from_the_runtime_dir():
 
 
 def test_a_file_that_wont_parse_makes_the_section_read_only_with_its_text():
-    run = Run(code=1, stdout=json.dumps({"error": "bad TOML at line 2", "fix": "fix it"}).encode())
+    run = Run(code=1, stdout=json.dumps({"error": "bad TOML at line 2", "fix": "fix it"}).encode(),
+              schema=None)
     section = settings.read_section("demo", cwd="/rt", env=None, run=run)
     assert section == {"module": "demo", "keys": [], "error": "bad TOML at line 2",
-                       "fix": "fix it", "readonly": True}
-    gone = settings.read_section("demo", cwd="/rt", env=None,
-                                 run=Run(code=2, stderr=b"moxi: demo is not installed\n"))
+                       "fix": "fix it", "readonly": True,
+                       "file": settings.file_of("demo"), "count": 0}
+    gone = settings.read_section("demo", cwd="/rt", env=None, run=Run(
+        code=2, stderr=b"moxi: demo is not installed\n", schema=None))
     assert gone["readonly"] and gone["error"] == "demo is not installed"
-    slow = settings.read_section("demo", cwd="/rt", env=None,
-                                 run=Run(raises=subprocess.TimeoutExpired("x", 10)))
+    slow = settings.read_section("demo", cwd="/rt", env=None, run=Run(
+        raises=subprocess.TimeoutExpired("x", 10), schema=None))
     assert slow["readonly"] and "ran past" in slow["error"]
 
 
@@ -190,6 +321,13 @@ def test_a_write_runs_moxi_config_in_a_child_and_a_refused_value_carries_its_tex
     assert keys["idle_s"]["value"] == "1200" and keys["idle_s"]["source"] == "file"
     assert keys["port"]["mark"] in ("applies after `moxi install ui`",
                                     "applies when the shell next starts")
+    assert keys["idle_s"]["changed"] and keys["idle_s"]["json"] == "1200"
+    assert keys["port"]["label"] == "Port" and not keys["port"]["changed"]
+    assert keys["theme.palette"]["choices"][1] == {"value": "midnight-neon",
+                                                   "words": "Midnight neon"}
+    assert keys["gateway.enabled"]["terminal"]["off"] == "moxi ui gateway disable"
+    # Every key but the two gateway keys is drawn among ui's rows.
+    assert section["count"] == 4 and section["file"] == settings.file_of("ui")
     settings.change("ui", "idle_s", unset=True, cwd=cwd, env=None)
     keys = _by_name(settings.read_section("ui", cwd=cwd, env=None)["keys"])
     assert keys["idle_s"]["source"] == "default"
@@ -236,6 +374,7 @@ def test_the_shell_reads_and_writes_settings_and_a_refused_value_is_a_422(site):
         assert status == 200 and data["error"] is None
         sections = {section["module"]: section for section in data["sections"]}
         assert list(sections)[0] == "moxi" and "ui" in sections
+        assert data["listed"] == list(sections)
         assert {k["name"] for k in sections["ui"]["keys"]} == {
             "port", "idle_s", "theme.mode", "theme.palette", "gateway.enabled", "gateway.port"}
         status, data = _request(port, "POST", "/m/ui/api/settings/set", browser,
@@ -246,6 +385,7 @@ def test_the_shell_reads_and_writes_settings_and_a_refused_value_is_a_422(site):
         assert status == 200 and data["ok"] and data["warning"] is None
         status, data = _request(port, "GET", "/m/ui/api/settings?module=ui", browser)
         assert [s["module"] for s in data["sections"]] == ["ui"]
+        assert data["listed"][0] == "moxi" and "ui" in data["listed"]
         assert _by_name(data["sections"][0]["keys"])["idle_s"]["value"] == "60"
         status, data = _request(port, "POST", "/m/ui/api/settings/unset", browser,
                                 {"module": "ui", "key": "idle_s"})
@@ -345,7 +485,7 @@ def test_each_form_of_write_to_a_key_that_holds_a_locked_entry_is_refused(write)
     for key in ("adopted.yy", "adopt", "adopted_too"):
         assert settings.change("services", key, cwd="/rt", env=None, locked=locked, run=run,
                                **write)["ok"]
-    assert len(run.calls) == 3
+    assert len(run.writes) == 3
 
 
 @pytest.mark.parametrize("locked", [(), settings.locked_entries(""), {"ui.gateway.p"},
@@ -359,14 +499,14 @@ def test_a_key_no_entry_names_is_written_in_each_form(locked):
             assert settings.change("ui", key, cwd="/rt", env=None, locked=locked, run=run,
                                    **write)["ok"]
         assert [[key for key in ("idle_s", "gateway.port") if key in argv]
-                for argv, _ in run.calls] == [["idle_s"], ["gateway.port"]]
+                for argv, _ in run.writes] == [["idle_s"], ["gateway.port"]]
 
 
 def test_the_read_marks_exactly_the_locked_keys_and_entries():
     table = _switch_table(entries=[
         {"name": "a", "value": True, "source": "file", "named_by": []},
         {"name": "b", "value": False, "source": "file", "named_by": []}])
-    run = Run(stdout=json.dumps([*EIGHT, table]).encode())
+    run = Run(stdout=json.dumps([*EIGHT, table]).encode(), schema=None)
 
     def marked(locked):
         keys = settings.read_section("demo", cwd="/rt", env=None, locked=locked,
@@ -484,12 +624,13 @@ def test_both_routes_refuse_a_write_to_a_key_that_holds_a_locked_entry(site, mon
             assert status == 422, (what, body, data)
             assert data == {"refused": LOCKED_TEXT.format("ui", "gateway")}
             assert config.read_bytes() == file and _history() == history
-        # The locked entry keeps its value, and the key beside it saves.
+        # The locked entry keeps its value. The key beside it is not locked, and is
+        # changed at the terminal.
         status, data = shell.post("set", key="gateway.enabled", value="true")
-        assert status == 200 and data["ok"]
+        assert status == 422 and data["refused"].endswith("moxi ui gateway enable")
         keys = shell.keys()
         assert keys["gateway.port"]["value"] == "8498" and keys["gateway.port"]["locked"]
-        assert keys["gateway.enabled"]["value"] == "true"
+        assert keys["gateway.enabled"]["value"] == "false"
         assert not keys["gateway.enabled"]["locked"]
         # A key that only shares letters with the locked one is not locked.
         monkeypatch.setenv(settings.LOCKED_ENV, "ui.idle_sx.x,ui.por.t")
@@ -517,3 +658,45 @@ def test_with_no_entry_in_the_variable_nothing_is_marked_and_every_write_is_save
             status, data = shell.post("unset", key=key)
             assert status == 200 and data["ok"]
             assert shell.keys()[key]["source"] == "default"
+
+
+def test_the_shipped_schema_passes_the_cores_check_and_carries_the_page_fields():
+    from importlib import resources
+
+    from moxi.config import Schema
+
+    text = resources.files("moxi_ui").joinpath("settings.toml").read_text()
+    keys = Schema.parse(text, source="moxi_ui/settings.toml").keys
+    assert {name: key.label for name, key in keys.items()} == {
+        "port": "Port", "idle_s": "Idle shutdown", "theme.mode": "Light or dark",
+        "theme.palette": "Look", "gateway.enabled": "Phone access",
+        "gateway.port": "Phone port"}
+    assert [name for name, key in keys.items() if key.common] == [
+        "theme.palette", "theme.mode", "port"]
+    assert keys["theme.palette"].pick and not keys["theme.mode"].pick
+    assert keys["theme.palette"].choices == {"plain": "Plain", "midnight-neon": "Midnight neon"}
+    assert keys["theme.mode"].choices["system"] == "follow the browser"
+    assert keys["idle_s"].unit == "seconds"
+    assert keys["port"].line == "Where this page is served, on this computer only."
+    assert keys["gateway.enabled"].terminal == {"on": "moxi ui gateway enable",
+                                                "off": "moxi ui gateway disable"}
+
+
+@pytest.mark.parametrize("module", ["nosuch", "Not A Module", "changed"])
+def test_a_module_the_listing_does_not_hold_gets_no_section_and_runs_nothing(
+        site, monkeypatch, module):
+    from urllib.parse import quote
+
+    read = []
+    real = settings.read_section
+    monkeypatch.setattr(settings, "read_section",
+                        lambda name, **kwargs: read.append(name) or real(name, **kwargs))
+    with _Shell(site) as shell:
+        status, data = _request(shell.shell.listeners.port, "GET",
+                                f"/m/ui/api/settings?module={quote(module)}", shell.browser)
+        assert status == 200 and data["sections"] == [] and read == []
+        assert data["listed"][0] == "moxi" and "ui" in data["listed"]
+        assert module not in data["listed"]
+        status, data = _request(shell.shell.listeners.port, "GET",
+                                "/m/ui/api/settings?module=moxi", shell.browser)
+        assert [s["module"] for s in data["sections"]] == ["moxi"] and read == ["moxi"]

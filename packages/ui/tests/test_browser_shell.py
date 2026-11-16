@@ -176,6 +176,79 @@ def test_the_band_opens_the_fixture_panel_in_the_same_document_and_back_returns(
     assert ui_page.evaluate("window.__sameDocument") is True
 
 
+# The fixture's page takes the hold through client.js, as a page with changes not saved
+# does; each ask is counted, and the last one's `go` kept.
+_HOLD = """async () => {
+  const client = await import("/m/ui/client.js");
+  window.__asks = 0;
+  window.__release = client.holdLeave((go) => { window.__asks += 1; window.__go = go; });
+}"""
+
+
+def _mark_panel(page) -> None:
+    page.locator("#moxi-panel > *").first.evaluate("(el) => { el.dataset.held = 'yes'; }")
+
+
+def test_a_page_that_holds_is_asked_before_every_move_off_it(ui_shell, ui_page):
+    ui_page.evaluate("window.__sameDocument = true")
+    _pick(ui_page, "fixture")
+    panel = ui_page.locator("#moxi-panel > moxi-fixture-page")
+    expect(panel).to_be_attached()
+    ui_page.evaluate(_HOLD)
+    _mark_panel(ui_page)
+    held = ui_page.locator("#moxi-panel > moxi-fixture-page[data-held=yes]")
+    # The page writes its own address: the entry is replaced and nothing is drawn again.
+    ui_page.evaluate("""async () => (await import("/m/ui/client.js")).setAddress("fixture", "deep")""")
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/deep")
+    expect(held).to_be_attached()
+    # A band pick asks, and moves only when the page says go.
+    _pick(ui_page, "ui")
+    assert ui_page.evaluate("window.__asks") == 1
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/deep")
+    expect(held).to_be_attached()
+    # Back asks too, with the page's own address put back.
+    ui_page.go_back()
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/deep")
+    assert ui_page.evaluate("window.__asks") == 2
+    expect(held).to_be_attached()
+    # navigate() asks.
+    ui_page.evaluate("""async () => (await import("/m/ui/client.js")).navigate("ui", "modules")""")
+    assert ui_page.evaluate("window.__asks") == 3
+    expect(held).to_be_attached()
+    # Go: the hold is released and the move asked last is made.
+    ui_page.evaluate("window.__go()")
+    expect(ui_page).to_have_url(ui_shell.url + "/m/ui/modules")
+    expect(_modules(ui_page).locator(".card[data-module=fixture]")).to_be_visible()
+    # Back from there finds the fixture's page at its own address, and the hold gone.
+    ui_page.go_back()
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/deep")
+    expect(panel).to_be_attached()
+    expect(held).to_have_count(0)
+    assert ui_page.evaluate("window.__sameDocument") is True
+
+
+def test_a_page_that_holds_gets_the_browser_prompt_on_a_load_of_another_document(ui_page):
+    _pick(ui_page, "fixture")
+    expect(ui_page.locator("#moxi-panel > moxi-fixture-page")).to_be_attached()
+    ui_page.evaluate(_HOLD)
+    seen = []
+    ui_page.on("dialog", lambda dialog: (seen.append(dialog.type), dialog.dismiss()))
+    # The browser asks only after the person has done something on the page.
+    ui_page.locator("#moxi-panel").click()
+    ui_page.close(run_before_unload=True)
+    ui_page.wait_for_timeout(500)
+    assert seen == ["beforeunload"]
+
+
+def test_a_page_released_leaves_with_no_prompt(ui_page):
+    _pick(ui_page, "fixture")
+    ui_page.evaluate(_HOLD)
+    ui_page.evaluate("window.__release()")
+    _pick(ui_page, "ui")
+    expect(_modules(ui_page).locator("moxi-ui-home .rows")).to_be_visible()
+    assert ui_page.evaluate("window.__asks") == 0
+
+
 _IN_PANEL = """() => {
   let at = document.activeElement;
   const inside = document.querySelector("#moxi-panel").contains(at);
@@ -279,17 +352,19 @@ def test_the_top_line_names_the_page_on_every_route(ui_shell, ui_page):
     expect(_modules(ui_page).locator(".card[data-module=fixture]")).to_be_visible()
     _pick(ui_page, "fixture")
     shows("Fixture", "Fixture - Moxi", "Fixture")
-    # On the settings no name in the band is current; the top line's Settings is.
-    expect(settings).not_to_have_attribute("aria-current", "page")
+    # On the settings no name in the band is current, and the top line hides its Settings.
+    expect(settings).to_be_visible()
     settings.click()
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings")
     shows("Settings", "Settings - Moxi", None)
-    expect(settings).to_have_attribute("aria-current", "page")
+    expect(settings).to_be_hidden()
     ui_page.goto("/m/ui/settings/fixture")
     shows("Settings", "Settings - Moxi", None)
+    expect(settings).to_be_hidden()
     # A deeper route of a module's page keeps the page's name.
     ui_page.goto("/m/fixture/deep/route")
     shows("Fixture", "Fixture - Moxi", "Fixture")
+    expect(settings).to_be_visible()
     # Where the panel holds a message and no page, the button reads Pages.
     for path in ("/m/nosuch/", "/m/ui/elsewhere"):
         ui_page.goto(path)
@@ -306,12 +381,12 @@ def test_the_shells_own_views_carry_no_title_of_their_own(ui_page):
     ui_page.goto("/m/ui/modules")
     expect(_modules(ui_page).locator(".card[data-module=ui]")).to_be_visible()
     expect(_modules(ui_page).locator("h1")).to_have_count(0)
-    ui_page.goto("/m/ui/settings")
+    ui_page.goto("/m/ui/settings/ui")
     view = _modules(ui_page)
-    expect(view.locator("section.card[data-module=fixture]")).to_be_visible()
-    expect(view.locator("h1")).to_have_count(0)
-    # The two views still link to each other.
-    view.get_by_role("link", name="Modules").click()
+    expect(view.locator("moxi-ui-settings [data-part=foot]")).to_be_visible()
+    expect(view.locator("h1, h2")).to_have_count(0)
+    # ui's settings link to the modules view, and the modules view to the settings.
+    view.locator("moxi-ui-settings [data-part=foot]").get_by_role("link", name="Modules").click()
     expect(ui_page).to_have_url(re.compile(r"/m/ui/modules$"))
     _modules(ui_page).get_by_role("link", name="Settings").click()
     expect(ui_page).to_have_url(re.compile(r"/m/ui/settings$"))
@@ -400,8 +475,9 @@ def test_the_pages_run_under_the_policy_with_no_violation_or_error(ui_shell, ui_
     _pick(ui_page, "fixture")
     expect(ui_page.locator("moxi-fixture-page moxi-fixture-tag")).to_have_text("on the page")
     ui_page.locator("#moxi-settings").click()
-    expect(ui_page.locator("moxi-ui-page section.card[data-module=fixture] moxi-ui-form")
-           .locator("[data-control=limit]")).to_be_attached()
+    settings = ui_page.locator("moxi-ui-page moxi-ui-settings")
+    settings.locator("[data-part=list] a[data-list=fixture]").click()
+    expect(settings.locator("[data-control=limit]")).to_be_attached()
     assert ui_page.evaluate("document.documentElement.dataset.theme") == "system"
     assert ui_page.evaluate("document.documentElement.dataset.themeName") == "plain"
     assert seen == []
@@ -428,13 +504,12 @@ def test_at_360_px_nothing_scrolls_sideways_and_the_band_is_one_name_per_line(ui
     ui_width_check(ui_page, module="fixture")
     ui_width_check(ui_page, module="ui")
     ui_width_check(ui_page, module="ui", route="modules")
-    ui_width_check(ui_page, module="ui", route="settings")
-    form = ui_page.locator("moxi-ui-page section.card[data-module=fixture] moxi-ui-form")
-    # Every control type of the form is on that page, the TOML box among them.
+    ui_width_check(ui_page, module="ui", route="settings/fixture")
+    settings = ui_page.locator("moxi-ui-page moxi-ui-settings")
+    # Every control type of the fixture is on that page.
     for key in ("greeting", "limit", "ratio", "loud", "colour", "folder", "tags", "extra",
                 "rows.backup"):
-        expect(form.locator(f"[data-control='{key}']")).to_be_attached()
-    expect(form.locator("textarea[data-control=extra]")).to_be_visible()
+        expect(settings.locator(f"[data-control='{key}']")).to_be_visible()
 
 
 def test_twelve_names_wrap_onto_a_second_row_at_900_px_and_no_name_splits(ui_page):
@@ -486,29 +561,3 @@ def test_with_three_pages_the_band_is_one_row_over_the_page_with_its_groups_apar
     expect(page.locator("#moxi-settings")).to_be_visible()
     page.locator(".moxi-brand").click(trial=True)
 
-
-def test_the_gateway_section_shows_the_audit_log_and_each_devices_sign_ins(ui_shell, ui_page):
-    from moxi_ui.gateway.audit import Audit
-    from moxi_ui.gateway.devices import Devices
-
-    state = ui_shell.state_dir("ui")
-    devices = Devices.of(state)
-    device = devices.add(name="Test phone", credential=None, public_key=None, sign_count=0,
-                         host="gw.example.test", provider="tailscale", change="r1.1")
-    writer = Audit(state)
-    writer("signin", {"device": device.id, "session": "a" * 12})
-    writer.request({"id": "r1", "method": "GET", "path": "/m/fixture/api/read", "status": 200,
-                    "device": device.id}, signed_in=True)
-    writer.close()
-    try:
-        ui_page.goto("/m/ui/modules")
-        section = _modules(ui_page).locator("moxi-ui-gateway section[data-section=gateway]")
-        expect(section.locator(f"li[data-device='{device.id}']")).to_contain_text("Sign-ins:")
-        log = section.locator("details.log")
-        log.locator("summary").click()
-        newest = log.locator("li").first
-        expect(newest).to_contain_text("request")
-        expect(newest).to_contain_text("path=/m/fixture/api/read")
-        expect(log.locator("li")).to_have_count(2)
-    finally:
-        devices.revoke(device.id)

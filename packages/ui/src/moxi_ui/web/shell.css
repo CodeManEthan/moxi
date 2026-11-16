@@ -64,7 +64,7 @@ code { font-family: var(--moxi-font-mono); }
   font-size: 14px;
 }
 
-.moxi-settings:hover, .moxi-settings[aria-current="page"] { color: var(--moxi-text); }
+.moxi-settings:hover { color: var(--moxi-text); }
 
 /* The band: a layer over the page from the top edge, its names under the top line.
    Names that do not fit one row wrap onto further rows; none splits. */
