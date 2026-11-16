@@ -31,6 +31,7 @@ import launcher_page_kit as kit
 
 pytest.importorskip("moxi_cache.api", reason="cache is not installed")
 pytest.importorskip("moxi_sessions.api", reason="sessions is not installed")
+WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(sys.platform == "win32",
@@ -136,7 +137,7 @@ def _shown(page) -> list[str]:
 
 
 def _expect_order(page, keys: list[str]) -> None:
-    wait_for(lambda: _shown(page) == keys, 5, interval=0.05,
+    wait_for(lambda: _shown(page) == keys, WAIT_S, interval=0.05,
              what=lambda: f"the rows {keys}; seen {_shown(page)}")
 
 

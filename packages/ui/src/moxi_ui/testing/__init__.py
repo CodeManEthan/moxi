@@ -95,6 +95,8 @@ import pytest
 #: timeout and that of Playwright's sync `expect`. It bounds a wait for what must happen,
 #: so it is long: a passing wait returns as soon as its state holds.
 WAIT_MS = 20000
+#: `WAIT_MS` in seconds, for a wait on the page through a helper that takes seconds.
+WAIT_S = WAIT_MS / 1000
 #: The module whose `expect` takes `WAIT_MS`.
 _SYNC_API = "playwright.sync_api"
 

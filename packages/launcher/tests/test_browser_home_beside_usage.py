@@ -29,6 +29,7 @@ import launcher_page_kit as kit
 pytest.importorskip("moxi_cache.api", reason="cache is not installed")
 pytest.importorskip("moxi_sessions.api", reason="sessions is not installed")
 pytest.importorskip("moxi_usage.api", reason="usage is not installed")
+WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -149,7 +150,7 @@ def _shown(page) -> list[str]:
 
 
 def _expect_order(page, keys: list[str]) -> None:
-    wait_for(lambda: _shown(page) == keys, 5, interval=0.05,
+    wait_for(lambda: _shown(page) == keys, WAIT_S, interval=0.05,
              what=lambda: f"the rows {keys}; seen {_shown(page)}")
 
 
@@ -158,7 +159,7 @@ def _expect_needs(page, want: dict[str, int]) -> None:
     def needs() -> dict:
         return page.evaluate("window.homeNeeds")
 
-    wait_for(lambda: {name: needs().get(name) for name in want} == want, 5, interval=0.05,
+    wait_for(lambda: {name: needs().get(name) for name in want} == want, WAIT_S, interval=0.05,
              what=lambda: f"the needs {want}; seen {needs()}")
 
 

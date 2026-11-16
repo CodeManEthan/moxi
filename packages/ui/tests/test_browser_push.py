@@ -10,6 +10,7 @@ import threading
 import pytest
 from moxi import modules
 from moxi_dev.testing import wait_for
+from moxi_ui.testing import WAIT_S
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -121,7 +122,7 @@ def test_seven_tabs_share_one_stream_and_closing_the_leader_hands_it_on(ui_shell
     rest = [page for page in pages if page is not leader]
     # The sync API hands over the context's request events only inside a call to it.
     wait_for(lambda: rest[0].evaluate("true") and len(pushes) > before
-             and _streams(ui_shell) == 1, 5,
+             and _streams(ui_shell) == 1, WAIT_S,
              what=lambda: f"another tab to open the one stream: {len(pushes) - before} new "
                           f"push requests, {_streams(ui_shell)} streams at the shell")
     successor = pushes[-1].frame.page

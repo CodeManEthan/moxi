@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from moxi_dev.testing import short_dir, wait_for
+from moxi_ui.testing import WAIT_S
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -177,7 +178,7 @@ def _pushed(page, held, without=()):
         urls = [r.url for r in page.requests() if "/m/ui/api/push?" in r.url]
         return urls[-1] if urls else ""
     wait_for(lambda: all(t in last() for t in held) and not any(t in last() for t in without),
-             10, interval=0.05, what=lambda: f"a push stream for {held}, not {without}: {last()}")
+             WAIT_S, interval=0.05, what=lambda: f"a push stream for {held}, not {without}: {last()}")
 
 
 @pytest.mark.browser

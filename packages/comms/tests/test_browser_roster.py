@@ -27,6 +27,8 @@ from moxi_comms.daemon import Daemon
 from roster_kit import STANDING, holding, put_clock, wait_for
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, send
 
+WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
+
 pytestmark = [pytest.mark.browser,
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="comms runs on Linux only")]
@@ -361,7 +363,7 @@ def test_a_404_after_placement_renders_nothing(shell, ui_contexts):
                lambda route: route.fulfill(status=404, json={"error": "no such module"}))
     place_roster(page)
     expect(page.locator("#placed moxi-comms-roster")).to_have_count(1)
-    wait_for(lambda: roster_states(page)[-1] == "none", 5, what="the roster to empty itself")
+    wait_for(lambda: roster_states(page)[-1] == "none", WAIT_S, what="the roster to empty itself")
     expect(page.locator("#placed moxi-comms-roster div.roster")).to_have_count(0)
 
 
