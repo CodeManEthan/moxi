@@ -47,6 +47,53 @@ def test_row_keeps_four_states():
         doctor.Row("demo", "n", "info", "d")
 
 
+def test_a_row_carries_needs_by_keyword_and_none_by_default():
+    assert doctor.Row("demo", "n", "ok", "d").needs is None
+    row = doctor.Row("repo", "projects", "off", "projects is not installed",
+                     "moxi install projects", needs="projects")
+    assert (row.state, row.fix, row.needs) == ("off", "moxi install projects", "projects")
+    assert doctor.Row("ui", "gateway", "off", "d", needs="ui[gateway]").needs == "ui[gateway]"
+    assert doctor.Row("secrets", "personal-data", "off", "d",
+                      needs="secrets[personal-data]").needs == "secrets[personal-data]"
+    assert row._asdict()["needs"] == "projects"
+    with pytest.raises(TypeError):
+        doctor.Row("repo", "projects", "off", "d", None, "projects")
+
+
+@pytest.mark.parametrize("state", ["ok", "warn", "fail"])
+def test_needs_is_refused_on_a_row_that_is_not_off(state):
+    with pytest.raises(ValueError, match=f"only an off row carries needs, not a {state}"):
+        doctor.Row("repo", "projects", state, "d", needs="projects")
+
+
+@pytest.mark.parametrize("value", ["", "Projects", "my-module", "ui[]", "ui[Gateway]",
+                                   "ui[gate_way]", "ui[-gateway]", "ui[gateway",
+                                   "ui[a][b]", "ui[gateway]x", "[gateway]", "/home/x/proj",
+                                   "ui[a b]", 3])
+def test_needs_is_refused_when_it_is_not_a_module_or_a_module_with_an_extra(value):
+    assert not doctor.is_needs_value(value)
+    with pytest.raises(ValueError, match="needs is a module name or <module>"):
+        doctor.Row("demo", "n", "off", "d", needs=value)
+
+
+@pytest.mark.parametrize("value", ["projects", "m2", "ui[gateway]", "secrets[personal-data]",
+                                   "a[b-c-d]", "a[1]"])
+def test_needs_values_in_the_core_s_form(value):
+    assert doctor.is_needs_value(value)
+
+
+def test_a_row_with_needs_copies_and_pickles_whole():
+    import copy
+    import pickle
+
+    row = doctor.Row("ui", "gateway", "off", "d", "moxi install ui --with gateway",
+                     needs="ui[gateway]")
+    plain = doctor.Row("demo", "n", "ok", "d")
+    for got in (copy.copy(row), copy.deepcopy(row), pickle.loads(pickle.dumps(row))):
+        assert got == row and got.needs == "ui[gateway]" and type(got) is doctor.Row
+    assert pickle.loads(pickle.dumps(plain)) == plain
+
+
 def test_record_writes_one_entry_per_key(home):
     doctor.record("demo", "the committer failed", key="commit:abc", fix="repo check")
     doctor.record("demo", "another", key="other")

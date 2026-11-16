@@ -661,7 +661,7 @@ def _health_row(module: str, daemon: str, target: str | None) -> Row:
     outcome, value = _call(check, HEALTH_SECONDS, f"health {module}/{daemon}")
     if outcome != "ok":
         return Row(module, label, "fail", _failure(target, outcome, value, HEALTH_SECONDS))
-    return Row(module, label, value.state, value.detail, value.fix)
+    return Row(module, label, value.state, value.detail, value.fix, needs=value.needs)
 
 
 # -- 5. stores ---------------------------------------------------------------------------------
@@ -1411,11 +1411,19 @@ def main(argv: list[str]) -> int:
             parser.error(f"{name!r} is not a module name")
     rows = run(args.modules or None, costs=args.costs)
     if args.json:
-        print(json.dumps([row._asdict() for row in rows], indent=2))
+        print(json.dumps([as_json(row) for row in rows], indent=2))
     else:
         for row in rows:
             print(line(row))
     return 1 if any(row.state == "fail" for row in rows) else 0
+
+
+def as_json(row: Row) -> dict:
+    """One row as `moxi doctor --json` prints it: `needs` only on a row that carries it."""
+    out = row._asdict()
+    if out["needs"] is None:
+        del out["needs"]
+    return out
 
 
 def line(row: Row) -> str:
@@ -1427,4 +1435,4 @@ def line(row: Row) -> str:
 __all__ = ["DOCTOR_SECONDS", "HEALTH_SECONDS", "Measure", "run", "health", "floor_ms",
            "terminal_row",
            "measure", "cgroup_measure", "process_measure", "idle_rate", "store_rows",
-           "doctor_rows", "main", "line"]
+           "doctor_rows", "main", "as_json", "line"]

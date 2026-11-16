@@ -257,6 +257,25 @@ def test_json_prints_the_rows_as_a_list_of_objects(d, capsys):
     assert all(set(item) == {"module", "name", "state", "detail", "fix"} for item in listed)
 
 
+def test_json_writes_needs_only_on_a_row_that_carries_it(d, capsys, monkeypatch):
+    d.installed(DAEMONS=DAEMON)
+    marked = Row("demo", "projects", "off", "projects is not installed",
+                 "moxi install projects", needs="projects")
+    plain = Row("demo", "switch", "off", "it is switched off")
+    monkeypatch.setattr(_run, "_check_doctors", lambda ctx: [marked, plain])
+    assert cli.main(["doctor", "demo", "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert {**marked._asdict()} in listed
+    assert {"module": "demo", "name": "switch", "state": "off",
+            "detail": "it is switched off", "fix": None} in listed
+    assert [item["name"] for item in listed if "needs" in item] == ["projects"]
+    # The plain report is the same with or without the mark.
+    assert cli.main(["doctor", "demo"]) == 0
+    out = capsys.readouterr().out
+    assert ("off   demo  projects  projects is not installed  fix: moxi install projects\n"
+            in out) and "needs" not in out
+
+
 def test_module_names_restrict_the_rows(d):
     d.installed(DAEMONS=DAEMON)
     d.module("other", settings=None)
@@ -770,6 +789,9 @@ import time
 from moxi.doctor import Row
 def good():
     return Row("demo", "anything", "warn", "slow replies", "restart it")
+def needing():
+    return Row("demo", "anything", "off", "its peer is not installed", "moxi install peer",
+               needs="peer")
 def raises():
     raise RuntimeError("socket refused")
 def slow():
@@ -794,6 +816,17 @@ def test_health_runs_one_target_in_a_worker_thread(d, monkeypatch, target, state
     assert words in row.detail
     if target == "good":
         assert row.fix == "restart it"
+
+
+def test_health_carries_the_row_s_needs(d):
+    d.module(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:needing'}",
+             files_={"health.py": HEALTHS})
+    assert doctor.health("demo", "relay") == Row(
+        "demo", "daemon relay health", "off", "its peer is not installed",
+        "moxi install peer", needs="peer")
+    d.module(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:good'}",
+             files_={"health.py": HEALTHS})
+    assert doctor.health("demo", "relay").needs is None
 
 
 def test_health_with_no_target_and_an_unknown_daemon(d):
