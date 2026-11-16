@@ -46,3 +46,6 @@ The first version.
 - `moxi publishing bump`: the next version, the dated CHANGELOG heading, the README
   links and `uv lock`, left unstaged.
 - `moxi publishing ci notes`: a tag's CHANGELOG section.
+- Every setting carries page fields, which `moxi config publishing show --json` prints
+  and the settings page draws: a plain label, a line, and on `provenance.rules` a
+  can-hurt mark on taking a rule away. publishing needs moxi 0.1.9 or later.

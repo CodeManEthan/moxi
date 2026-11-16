@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -564,3 +565,34 @@ def test_config_set_and_check_pass_a_good_file_under_a_bad_variable(core_state, 
     assert capsys.readouterr().err == ""
     assert config.check_text(path.read_text()) is None
     assert "pager" in path.read_text() and "block" not in path.read_text()
+
+
+# -- page fields: how the settings page shows each key --------------------------------------
+
+#: The unit each key with one carries.
+UNITS = {"local.retain_days": "days", "connector.wait_default_s": "seconds",
+         "connector.wait_max_s": "seconds", "replay.messages": "messages",
+         "replay.hours": "hours"}
+
+
+def show_json(capsys) -> dict:
+    from moxi import cli
+
+    capsys.readouterr()
+    assert cli.main(["config", "comms", "show", "--json"]) == 0
+    return {key["name"]: key for key in json.loads(capsys.readouterr().out)}
+
+
+def test_the_schema_passes_the_cores_check_with_its_page_fields():
+    moxi_config.Schema.from_resource("moxi_comms", "settings.toml")
+
+
+def test_show_json_gives_every_key_a_label_and_none_first(capsys):
+    keys = show_json(capsys)
+    assert all(key["label"] for key in keys.values())
+    assert keys["mcp.port"]["label"] == "Port for agents' tools"
+    assert keys["connector.wait_default_s"]["label"] == "A connector call waits, by default"
+    assert {name: key["unit"] for name, key in keys.items() if key["unit"]} == UNITS
+    for key in keys.values():
+        assert key["common"] is False and key["group"] is None and key["hurts"] is None
+        assert key["choices"] is None and key["terminal"] is None and key["elsewhere"] is None

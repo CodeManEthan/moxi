@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Every setting carries page fields, which `moxi config sessions show --json` prints
+  and the settings page draws: a plain label, a line where the label can't carry it,
+  the transcript folders and the transcript-read guard shown first, and a can-hurt mark
+  on turning the guard off. sessions needs moxi 0.1.9 or later.
 - `moxi_sessions.testing` has `today_at`, which times a record a test means to be today
   so it stays on today's local date in the first minutes after midnight.
 

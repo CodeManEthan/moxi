@@ -7,7 +7,8 @@
 # what the pinned Node toolchain makes from their sources, byte for byte.
 # The browser jobs run the browser tests: every page package's in Chromium and Firefox on
 # Linux on every push, gating; ui's in Chromium on Windows and macOS and WebKit on macOS
-# on pushes to main, gating nothing.
+# on pushes to main, gating nothing. They run in the full workspace, every package with
+# every extra, as `moxi-dev check` installs it: the tests are written against it.
 # Actions are pinned to a release commit, with its version beside it.
 
 name: check
@@ -18,6 +19,11 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # GitHub's runners are slower than the machine the timed tests' budgets were set on:
+  # every upper bound of a timed test is multiplied by this factor.
+  MOXI_TEST_TIMED_SLACK: "2"
 
 jobs:
   linux:
@@ -98,7 +104,9 @@ jobs:
   browser:
     # Each page package's browser tests, in a real browser through Playwright: Chromium
     # and Firefox on Linux, on every push, gating. moxi-dev check runs them only where
-    # Chromium is installed, which the linux job's runner is not.
+    # Chromium is installed, which the linux job's runner is not. Each runs from its
+    # package's directory in the full workspace, every package with every extra, which
+    # is what moxi-dev check syncs.
     strategy:
       fail-fast: false
       matrix:
@@ -112,13 +120,28 @@ jobs:
         with:
           version: "0.12.19"
           python-version: "3.12"
-      - run: uv sync --locked --package moxi-${{ matrix.package }}
+      - run: uv sync --locked --all-packages --all-extras
       - name: install the browser and the system libraries it needs
         working-directory: packages/${{ matrix.package }}
-        run: uv run --locked --package moxi-${{ matrix.package }} playwright install --with-deps ${{ matrix.engine }}
+        run: uv run --locked --all-packages --all-extras playwright install --with-deps ${{ matrix.engine }}
+      # The browser tests run without the theme's first font, Adwaita Sans, in the face the
+      # runner falls back to, DejaVu Sans, so a layout that holds only in Adwaita's widths
+      # fails here. A runner image that gains Adwaita fails the job rather than hide that.
+      - name: the fallback fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fontconfig fonts-dejavu-core
+      - name: the theme's first font is not installed
+        run: |
+          family="$(fc-match -f '%{family}' 'Adwaita Sans')"
+          echo "Adwaita Sans resolves to: ${family:-nothing}"
+          case "$family" in
+            "") echo "fc-match found no font for Adwaita Sans"; exit 1 ;;
+            *Adwaita*) echo "this runner has Adwaita, so the layouts would not meet a fallback face"; exit 1 ;;
+          esac
       - name: the browser tests
         working-directory: packages/${{ matrix.package }}
-        run: uv run --locked --package moxi-${{ matrix.package }} pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
+        run: uv run --locked --all-packages --all-extras pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
       - name: a failed test's Playwright traces
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -128,8 +151,9 @@ jobs:
           if-no-files-found: ignore
 
   browser-other:
-    # The same tests in Chromium on Windows and macOS, and in WebKit on macOS. Like the
-    # other non-Linux runs, on pushes to main, gating nothing.
+    # ui's tests in Chromium on Windows and macOS, and in WebKit on macOS, in the full
+    # workspace like the Linux ones. Like the other non-Linux runs, on pushes to main,
+    # gating nothing.
     if: github.ref == 'refs/heads/main'
     continue-on-error: true
     strategy:
@@ -150,13 +174,13 @@ jobs:
         with:
           version: "0.12.19"
           python-version: "3.12"
-      - run: uv sync --locked --package moxi-ui
+      - run: uv sync --locked --all-packages --all-extras
       - name: install the browser and the system libraries it needs
         working-directory: packages/ui
-        run: uv run --locked --package moxi-ui playwright install --with-deps ${{ matrix.engine }}
+        run: uv run --locked --all-packages --all-extras playwright install --with-deps ${{ matrix.engine }}
       - name: the browser tests
         working-directory: packages/ui
-        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
+        run: uv run --locked --all-packages --all-extras pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
       - name: a failed test's Playwright traces
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2

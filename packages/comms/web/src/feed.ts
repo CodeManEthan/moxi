@@ -23,6 +23,23 @@ export interface RosterRow {
   bound_at: number | null;
   /** Whom the session waits on. */
   awaiting: string[];
+  /** The daemon's read of the session's cache; null for a standing row, any other read
+   * and a box without the cache module. */
+  cache: CacheFact | null;
+}
+
+/** A live name's cache: `warm` or `cold`, and when it goes or went cold, epoch seconds. */
+export interface CacheFact {
+  kind: "warm" | "cold";
+  until: number;
+}
+
+/** The fact in a row, or null when there is none or it is not one. */
+export function parseCacheFact(data: unknown): CacheFact | null {
+  if (typeof data !== "object" || data === null) return null;
+  const { kind, until } = data as Record<string, unknown>;
+  if ((kind !== "warm" && kind !== "cold") || typeof until !== "number" || !Number.isFinite(until)) return null;
+  return { kind, until };
 }
 
 /** The value of `/api/roster` (without `now`) and of the topic `roster`. */
@@ -58,7 +75,7 @@ export function parseRoster(data: unknown): Roster | null {
   const kept = rows
     .filter((row) => typeof row === "object" && row !== null && typeof row.qualified === "string")
     .map((row): RosterRow => ({ ...row, live: row.live === true, directors: strings(row.directors),
-                                awaiting: strings(row.awaiting) }));
+                                awaiting: strings(row.awaiting), cache: parseCacheFact(row.cache) }));
   return { state, detail: null, rows: kept };
 }
 
@@ -76,7 +93,9 @@ const sleep: Wait = (ms) => new Promise((done) => setTimeout(done, ms));
  * The data one component shows, kept current. `refresh()` reads the route; `topic()`
  * takes a topic event. `onChange` is called after every change.
  *
- * - A 200 with a readable body gives the value and the offset of the server's clock.
+ * - A 200 with a readable body gives the value and the offset of the server's clock. A
+ *   feed made with `clocked` false takes a readable body with no `now`, and keeps no
+ *   offset.
  * - A 503 is read again after 1 s, up to three times; then it is a failure.
  * - A 404 means the module went away while the component was open: `gone`.
  * - Every other answer (any other status, a network failure, a body that isn't JSON or
@@ -102,18 +121,21 @@ export class Feed<V> {
   #onChange: () => void;
   #wait: Wait;
   #clock: () => number;
+  #clocked: boolean;
   #running: Promise<void> | null = null;
   #again = false;
   #closed = false;
 
   constructor(read: () => Promise<ApiResult>, parse: (data: unknown) => V | null,
               onChange: () => void,
-              { wait = sleep, clock = () => Date.now() / 1000 }: { wait?: Wait; clock?: () => number } = {}) {
+              { wait = sleep, clock = () => Date.now() / 1000, clocked = true }
+                : { wait?: Wait; clock?: () => number; clocked?: boolean } = {}) {
     this.#read = read;
     this.#parse = parse;
     this.#onChange = onChange;
     this.#wait = wait;
     this.#clock = clock;
+    this.#clocked = clocked;
   }
 
   /** The server's time now, in epoch seconds, or null before the first read. */
@@ -149,7 +171,7 @@ export class Feed<V> {
   topic(data: unknown): void {
     if (this.#closed) return;
     const value = this.#parse(data);
-    if (value === null || this.offset === null || this.failure !== null || this.gone) {
+    if (value === null || (this.#clocked && this.offset === null) || this.failure !== null || this.gone) {
       void this.refresh();
       return;
     }
@@ -170,9 +192,10 @@ export class Feed<V> {
     const data = answer.data as Record<string, unknown> | null;
     const value = answer.status === 200 ? this.#parse(data) : null;
     const now = data?.now;
-    if (value !== null && typeof now === "number" && Number.isFinite(now)) {
+    const timed = typeof now === "number" && Number.isFinite(now);
+    if (value !== null && (timed || !this.#clocked)) {
       this.value = value;
-      this.offset = now - at;
+      if (timed) this.offset = (now as number) - at;
       this.failure = null;
       this.gone = false;
     } else if (answer.status === 404) {

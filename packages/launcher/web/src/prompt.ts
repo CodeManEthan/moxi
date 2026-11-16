@@ -110,6 +110,11 @@
 // it resumes in a slot or copies the resume command. A click resumes it at once through
 // `/api/resume`, with the lines under the box a launch has, in a resume's words; the box
 // keeps its text.
+//
+// Every menu opens inside the page: after a render while one is open, and on a resize, the
+// piece measures it, and shifts it left by what it passes 16 px from the page's right edge,
+// or right to 16 px from the left one. A menu too wide for both keeps its left edge at
+// 16 px. On a narrow page the plus, the chip and the options word wrap onto more lines.
 
 import { css, html, LitElement, nothing } from "lit";
 import type { TemplateResult } from "lit";
@@ -176,6 +181,8 @@ interface Card {
 }
 /** The event projects' picker sends its host on a choice, with `{key}`. */
 const PICKED = "moxi-change";
+/** The least room an open menu leaves between itself and each edge of the page. */
+const MENU_EDGE_PX = 16;
 
 const STYLES = css`
   :host { display: block; position: relative; min-width: 0; color: var(--moxi-text); font-family: var(--moxi-font-sans); }
@@ -392,7 +399,7 @@ const STYLES = css`
     .box { height: auto; min-height: 150px; }
     textarea { min-height: 64px; }
     .boxrow { flex-wrap: wrap; justify-content: flex-end; row-gap: 10px; }
-    .left { flex: 1 0 100%; }
+    .left { flex: 1 0 100%; flex-wrap: wrap; row-gap: 10px; }
     .run .row { grid-template-columns: 20px 96px 1fr; }
     .presets .row { grid-template-columns: 20px 1fr auto; }
     .presets .row .d { grid-row: 2; grid-column: 2 / 4; }
@@ -578,6 +585,17 @@ export class LauncherPrompt extends LitElement {
     this.#readUnread();
   };
 
+  /** Moves the open menu inside the page's edges, by `MENU_EDGE_PX`. */
+  #clampMenu = (): void => {
+    const menu = this.renderRoot.querySelector<HTMLElement>(".anchor.open > .menu");
+    if (menu === null) return;
+    menu.style.transform = "";
+    const box = menu.getBoundingClientRect();
+    let shift = Math.min(0, innerWidth - MENU_EDGE_PX - box.right);
+    if (box.left + shift < MENU_EDGE_PX) shift = MENU_EDGE_PX - box.left;
+    if (shift !== 0) menu.style.transform = `translateX(${shift}px)`;
+  };
+
   #outside = (event: Event): void => {
     const open = this.renderRoot.querySelector(".anchor.open");
     if (open !== null && !event.composedPath().includes(open)) this.menu = "";
@@ -597,6 +615,7 @@ export class LauncherPrompt extends LitElement {
     super.connectedCallback();
     document.addEventListener("pointerdown", this.#outside);
     document.addEventListener("visibilitychange", this.#shown);
+    window.addEventListener("resize", this.#clampMenu);
     // Every launch through the launcher writes the log, and may take or free a slot.
     this.#stops.push(subscribe("launcher", "launches", () => {
       void this.#readTargets();
@@ -616,6 +635,7 @@ export class LauncherPrompt extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener("pointerdown", this.#outside);
     document.removeEventListener("visibilitychange", this.#shown);
+    window.removeEventListener("resize", this.#clampMenu);
     for (const stop of this.#stops.splice(0)) stop();
     this.#opened += 1;
     this.#asked += 1;
@@ -654,6 +674,7 @@ export class LauncherPrompt extends LitElement {
   }
 
   protected updated(changed: Map<string, unknown>): void {
+    if (this.menu !== "") this.#clampMenu();
     if (changed.has("panel") && changed.get("panel") !== undefined) this.#side(this.panel ? PANEL_WIDTH_PX : 0);
     // The modes of a launch under a comms name are not those of one under none.
     if (this.#form !== null && this.fields.length > 0 && this.#identity !== this.#identityAsked) {

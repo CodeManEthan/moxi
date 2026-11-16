@@ -238,11 +238,18 @@ _RETIRED_SLOT_SITES = Counter([
 ])
 
 
+#: The page's built scripts, where `slot` is the DOM's (`slot="acts"` places an element in a
+#: shadow root's slot), not comms' retired word. They are built from `web/src`.
+_BUILT_WEB = ("src", "moxi_comms", "web")
+
+
 def retired_slot_vocabulary(repo=REPO):
     allowed = _RETIRED_SLOT_SITES.copy()
     hits = []
     for path in sorted((repo / "src").rglob("*")):
         if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        if path.relative_to(repo).parts[:3] == _BUILT_WEB:
             continue
         relative = str(path.relative_to(repo))
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

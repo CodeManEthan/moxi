@@ -19,6 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_sessions.find import sources
 from moxi_sessions.read import last_request, records_since
@@ -90,7 +91,7 @@ def test_last_request_on_a_35_mb_transcript_is_under_1_ms(big):
     assert last_request(src).request is not None
     taken = median_ms(lambda: last_request(src), 41)
     print(f"\nlast_request: {taken:.3f} ms median over {big.path.stat().st_size / MB:.1f} MB")
-    assert taken < 1.0
+    assert taken < 1.0 * timed_slack()
 
 
 def test_records_since_with_nothing_new_is_under_1_ms(big):
@@ -100,7 +101,7 @@ def test_records_since_with_nothing_new_is_under_1_ms(big):
     assert batch.records == () and batch.header is None and batch.cursor == cursor
     taken = median_ms(lambda: records_since(src, cursor), 41)
     print(f"\nrecords_since with nothing new: {taken:.3f} ms median")
-    assert taken < 1.0
+    assert taken < 1.0 * timed_slack()
 
 
 def bare_pass(path: Path) -> None:
@@ -158,8 +159,8 @@ def test_opencode_no_change_check_is_under_1_ms_and_a_whole_read_under_50_ms(ope
     taken_check = median_ms(lambda: records_since(src, cursor), 41)
     print(f"\nOpenCode {size / MB:.1f} MB: whole read {taken_whole:.1f} ms, "
           f"no-change check {taken_check:.3f} ms")
-    assert taken_check < 1.0
-    assert taken_whole < 50.0
+    assert taken_check < 1.0 * timed_slack()
+    assert taken_whole < 50.0 * timed_slack()
 
 
 SOURCES = 8_300
@@ -196,7 +197,7 @@ def test_a_usage_pass_with_no_changed_source_is_one_stat_per_source(many, monkey
         assert usage_pass() == 0
         taken = median_ms(usage_pass, 5)
     print(f"\nusage pass over {SOURCES} unchanged sources: {taken:.0f} ms")
-    assert taken < 600
+    assert taken < 600 * timed_slack()
 
 
 def test_importing_the_api_takes_under_15_ms(tmp_path):
@@ -211,4 +212,4 @@ def test_importing_the_api_takes_under_15_ms(tmp_path):
         api.append(run("import moxi_sessions.api"))
     taken = (statistics.median(api) - statistics.median(bare)) * 1000
     print(f"\nimport moxi_sessions.api: {taken:.1f} ms over a bare interpreter")
-    assert taken < 15.0
+    assert taken < 15.0 * timed_slack()

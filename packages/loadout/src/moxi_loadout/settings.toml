@@ -10,6 +10,8 @@ type = "path"
 default = ""
 doc = "The loadout folder on this machine, holding loadout.toml; empty means the folder in loadout's data directory."
 read = "use"
+label = "Loadout folder"
+line = "Holds loadout.toml. Not set: the folder in loadout's data directory."
 
 # With repo installed, register the two git hook pieces in the work tree that holds the
 # loadout folder, so a commit or a merge that changes the folder runs moxi loadout install.
@@ -20,12 +22,16 @@ default = true
 doc = "With repo, a commit or merge that changes the loadout folder reinstalls it, from a git hook."
 read = "use"
 needs = "repo"
+label = "Reinstall on a commit"
+line = "A commit or merge that changes the loadout folder reinstalls it, from a git hook."
 
 [backups.keep]
 type = "int"
 default = 10
 doc = "How many backups loadout keeps of each harness file it rewrites."
 read = "use"
+label = "Keep backups of each harness file"
+unit = "backups"
 
 # Each harness's folders for skills and agent files inside a project, relative to the
 # project's root. A harness or kind the file leaves out keeps its default, so setting
@@ -35,3 +41,5 @@ type = "table"
 default = { claude = { skills = ".claude/skills", agents = ".claude/agents" }, codex = { skills = ".agents/skills", agents = ".codex/agents" }, opencode = { skills = ".opencode/skills", agents = ".opencode/agents" } }
 doc = "Each harness's skills and agents folders inside a project, relative to its root."
 read = "use"
+label = "Project folders"
+line = "Each harness's skills and agents folders inside a project, relative to its root."

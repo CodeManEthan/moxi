@@ -10,7 +10,7 @@ import os
 import time
 
 import pytest
-from conftest import clock_reads_warm, cursor_of, frame_kinds, wait_until
+from conftest import LIVE_S, clock_reads_warm, cursor_of, frame_kinds, wait_until
 
 from moxi_comms import paths
 from moxi_comms.adapters import opencode as oc
@@ -119,7 +119,7 @@ def test_a_first_launch_records_its_session_and_a_relaunch_creates_a_new_one(
     record = oc.read_record(opencode_roster.session_path(IDENTITY))
     assert record["session_id"] == sid and record["launch"]
     first.stop()
-    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
+    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings, LIVE_S)
     second = wrapper()
     assert second.session_id != sid
     assert len(creates(fake)) == 2, "two launches, two sessions"
@@ -187,11 +187,11 @@ def test_a_server_restart_keeps_the_launchs_session(rig, wrapper, fake, monkeypa
     sid = adapter.session_id
     first = adapter.generation
     restart_server(adapter, fake, monkeypatch)
-    assert wait_until(lambda: adapter.generation is not first and adapter.ready, 5.0)
+    assert wait_until(lambda: adapter.generation is not first and adapter.ready, LIVE_S)
     assert adapter.session_id == sid and adapter.generation.thread_id == sid
     assert len(creates(fake)) == 1, "no second session"
     send(rig, "after the restart")
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
 
 
 def test_a_session_gone_after_a_server_restart_closes_the_launchs_posts(
@@ -202,7 +202,7 @@ def test_a_session_gone_after_a_server_restart_closes_the_launchs_posts(
     with fake.lock:
         fake.sessions.pop(sid)
     restart_server(adapter, fake, monkeypatch)
-    assert wait_until(lambda: adapter.fatal, 5.0)
+    assert wait_until(lambda: adapter.fatal, LIVE_S)
     assert "with 404 (this launch's session is gone)" in adapter.fatal
     assert "this launch's session is no longer on the server" in adapter.fatal
     assert any("this launch's session is gone" in s for s in adapter.statuses)
@@ -217,13 +217,13 @@ def test_mail_is_posted_under_comms_id_and_the_cursor_moves_on_the_idle_after_st
         rig, wrapper, fake):
     adapter = wrapper()
     send(rig, "hello coder")
-    assert wait_until(lambda: posts(fake), 5.0)
+    assert wait_until(lambda: posts(fake), LIVE_S)
     path, body = posts(fake)[0]
     assert path == f"/session/{adapter.session_id}/prompt_async"
     assert set(body) == {"messageID", "parts"}, "a post names no model, ever"
     assert body["messageID"].startswith("msg_") and len(body["messageID"]) == 30
     assert "hello coder" in body["parts"][0]["text"]
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
     assert adapter.can_inject()
 
 
@@ -236,12 +236,12 @@ def test_the_post_follows_an_idle_status_read_and_a_busy_session_gets_no_post(
     adapter = wrapper()
     sid = adapter.session_id
     fake.prompt(sid, oc.mint_message_id(), text="his own prompt")     # he is mid-turn
-    assert wait_until(lambda: adapter.busy)
+    assert wait_until(lambda: adapter.busy, LIVE_S)
     send(rig, "while he works")
     time.sleep(0.4)
     assert posts(fake) == []
     fake.finish(sid)
-    assert wait_until(lambda: posts(fake), 5.0)
+    assert wait_until(lambda: posts(fake), LIVE_S)
     reads = [i for i, r in enumerate(fake.requests) if r[1] == "/session/status"]
     post_at = next(i for i, r in enumerate(fake.requests) if r[1].endswith("prompt_async"))
     assert reads and max(i for i in reads if i < post_at) == post_at - 1, \
@@ -254,7 +254,7 @@ def test_anything_but_a_valid_idle_200_is_read_as_not_idle(rig, wrapper, fake, s
     adapter = wrapper()
     fake.status_answers = [(status, raw)]
     send(rig, "one")
-    assert wait_until(lambda: posts(fake), 5.0), "the next read was idle, and it went"
+    assert wait_until(lambda: posts(fake), LIVE_S), "the next read was idle, and it went"
     assert fake.status_answers == []
     statuses = [r for r in fake.requests if r[1] == "/session/status"]
     assert len(statuses) >= 3, "the first read was refused as not idle, then read again"
@@ -266,14 +266,14 @@ def test_one_digest_per_turn_comms_starts(rig, wrapper, fake):
     fake.auto = False
     adapter = wrapper()
     send(rig, "first")
-    assert wait_until(lambda: len(posts(fake)) == 1, 5.0)
+    assert wait_until(lambda: len(posts(fake)) == 1, LIVE_S)
     send(rig, "second")
     send(rig, "third")
     time.sleep(0.4)
     assert len(posts(fake)) == 1
     assert not adapter.can_inject()
     fake.finish(adapter.session_id)
-    assert wait_until(lambda: len(posts(fake)) == 2, 5.0)
+    assert wait_until(lambda: len(posts(fake)) == 2, LIVE_S)
     text = posts(fake)[1][1]["parts"][0]["text"]
     assert "second" in text and "third" in text
 
@@ -285,11 +285,11 @@ def test_his_prompt_into_a_digests_turn_still_completes_the_digest(rig, wrapper,
     fake.auto = False
     adapter = wrapper()
     send(rig, "digest")
-    assert wait_until(lambda: posts(fake), 5.0)
-    assert wait_until(lambda: any(p.seen for p in adapter.pending.values()))
+    assert wait_until(lambda: posts(fake), LIVE_S)
+    assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), LIVE_S)
     fake.prompt(adapter.session_id, oc.mint_message_id(), text="his own")
     fake.finish(adapter.session_id)
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
 
 
 def test_a_turn_that_ends_in_an_error_moves_no_cursor_and_releases_the_session(
@@ -297,9 +297,9 @@ def test_a_turn_that_ends_in_an_error_moves_no_cursor_and_releases_the_session(
     fake.auto = False
     adapter = wrapper()
     send(rig, "doomed")
-    assert wait_until(lambda: posts(fake), 5.0)
+    assert wait_until(lambda: posts(fake), LIVE_S)
     fake.error(adapter.session_id)
-    assert wait_until(lambda: adapter.can_inject(), 5.0)
+    assert wait_until(lambda: adapter.can_inject(), LIVE_S)
     assert cursor_of(IDENTITY) is None
     assert "no cursor advance" in caplog.text
 
@@ -319,8 +319,8 @@ def test_an_idle_before_the_model_saw_the_digest_moves_no_cursor(rig, wrapper, f
 
     fake.prompt = admit_only
     send(rig, "unseen")
-    assert wait_until(lambda: posts(fake), 5.0)
-    assert wait_until(lambda: adapter.can_inject(), 5.0)
+    assert wait_until(lambda: posts(fake), LIVE_S)
+    assert wait_until(lambda: adapter.can_inject(), LIVE_S)
     assert cursor_of(IDENTITY) is None
     fake.prompt = original
     assert sid
@@ -338,20 +338,20 @@ def test_a_digest_posted_before_a_daemon_restart_is_posted_again_and_acked_once(
     fake.auto = False
     adapter = wrapper()
     send(rig, "M2-OC")
-    assert wait_until(lambda: len(posts(fake)) == 1, 5.0)
+    assert wait_until(lambda: len(posts(fake)) == 1, LIVE_S)
 
     rig.daemon.stop()
-    assert wait_until(lambda: adapter.offline, 5.0)
+    assert wait_until(lambda: adapter.offline, LIVE_S)
     rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
-    assert wait_until(lambda: not adapter.offline and not adapter.replaying, 5.0)
+    assert wait_until(lambda: not adapter.offline and not adapter.replaying, LIVE_S)
 
     fake.finish(adapter.session_id)                 # the first post's turn ends
-    assert wait_until(lambda: len(posts(fake)) == 2, 5.0), "handed again after the fence"
+    assert wait_until(lambda: len(posts(fake)) == 2, LIVE_S), "handed again after the fence"
     assert cursor_of(IDENTITY) is None, "the fenced digest's turn acks nothing"
     fake.finish(adapter.session_id)                 # the second post's turn ends well
     high = max(int(m.id) for m in rig.record.history(rig.names_channel))
-    assert wait_until(lambda: cursor_of(IDENTITY) == str(high), 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) == str(high), LIVE_S)
     time.sleep(0.5)
     carried = [b["parts"][0]["text"].count("M2-OC") for _, b in posts(fake)]
     assert carried == [1, 1], f"posted twice, once per binding, not {carried}"
@@ -368,21 +368,21 @@ def test_a_post_lost_with_its_server_replays_at_the_next_registration(
     fake.auto = False
     adapter = wrapper()
     send(rig, "CRASH-OC")
-    assert wait_until(lambda: len(posts(fake)) == 1, 5.0)
-    assert wait_until(lambda: adapter.held_ids, 5.0)
+    assert wait_until(lambda: len(posts(fake)) == 1, LIVE_S)
+    assert wait_until(lambda: adapter.held_ids, LIVE_S)
     with fake.lock:
         fake.sessions[adapter.session_id]["status"] = "idle"   # the process is gone
     first = adapter.generation
     restart_server(adapter, fake, monkeypatch)
-    assert wait_until(lambda: adapter.generation is not first and adapter.ready, 5.0)
-    assert wait_until(lambda: not adapter.pending and not adapter.held_ids, 5.0)
+    assert wait_until(lambda: adapter.generation is not first and adapter.ready, LIVE_S)
+    assert wait_until(lambda: not adapter.pending and not adapter.held_ids, LIVE_S)
     assert cursor_of(IDENTITY) is None
 
     rig.daemon.stop()
-    assert wait_until(lambda: adapter.offline, 5.0)
+    assert wait_until(lambda: adapter.offline, LIVE_S)
     rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
-    assert wait_until(lambda: len(posts(fake)) == 2, 5.0), "the lost message was posted again"
+    assert wait_until(lambda: len(posts(fake)) == 2, LIVE_S), "the lost message was posted again"
     assert "CRASH-OC" in posts(fake)[-1][1]["parts"][0]["text"]
 
 # --------------------------------------------------------------------------- refusals
@@ -397,7 +397,7 @@ def test_a_refusal_a_retry_cannot_fix_closes_the_session_for_the_launch_loudly(
     adapter = wrapper()
     fake.post_answers = [(code, {"name": "Refused", "data": {"message": "nope"}})]
     send(rig, "refused")
-    assert wait_until(lambda: adapter.fatal, 5.0)
+    assert wait_until(lambda: adapter.fatal, LIVE_S)
     assert not adapter.can_inject()
     said = [s for s in adapter.statuses if "refused a post" in s]
     assert len(said) == 1 and f"with {code} ({meaning})" in said[0]
@@ -415,8 +415,8 @@ def test_a_failure_a_retry_can_fix_is_retried_and_a_run_of_them_is_said_once(
     adapter = wrapper()
     fake.post_answers = [(code, {})] * (oc.FAILURE_STREAK + 2)
     send(rig, "persistent")
-    assert wait_until(lambda: len(posts(fake)) == oc.FAILURE_STREAK + 3, 10.0)
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: len(posts(fake)) == oc.FAILURE_STREAK + 3, LIVE_S)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
     said = [s for s in adapter.statuses if "posts in a row" in s]
     assert len(said) == 1 and f"({code})" in said[0]
     assert adapter.fatal is None
@@ -442,7 +442,7 @@ def test_a_post_with_no_answer_is_a_receipt_and_the_messages_decide(rig, wrapper
 
     monkeypatch.setattr(adapter.http, "request", lost_answer)
     send(rig, "answer lost")
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
     assert len(posts(fake)) == 1, "an admitted id is never posted again"
 
 
@@ -461,13 +461,13 @@ def test_a_silent_stream_counts_as_cut_and_is_reconnected_and_reconciled(
 
     adapter._on_stream_close = on_close
     fake.stalled = True
-    assert wait_until(lambda: first.closed.is_set(), 3.0)
+    assert wait_until(lambda: first.closed.is_set(), LIVE_S)
     assert first.reason == "no event for 0.6s"
     assert closed_ready[0][1:] == (False, False), "not ready from the detection on"
     fake.stalled = False
-    assert wait_until(lambda: adapter.ready and adapter.stream is not first, 5.0)
+    assert wait_until(lambda: adapter.ready and adapter.stream is not first, LIVE_S)
     send(rig, "after the stall")
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
 
 
 def test_a_turn_that_ends_while_the_stream_is_cut_is_settled_by_the_reconcile(
@@ -475,12 +475,12 @@ def test_a_turn_that_ends_while_the_stream_is_cut_is_settled_by_the_reconcile(
     fake.auto = False
     adapter = wrapper()
     send(rig, "cut")
-    assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), 5.0)
+    assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), LIVE_S)
     fake.stalled = True                    # nothing reaches the wrapper...
     fake.finish(adapter.session_id)        # ...while the turn ends
     fake.stalled = False
     fake.close_streams()
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
     assert adapter.can_inject()
 
 
@@ -492,7 +492,7 @@ def test_a_request_on_another_model_is_logged_and_shown_and_nothing_more(
     sid = adapter.session_id
     fake.sessions[sid]["model"] = "opencode/big-pickle"          # his pick in the window
     send(rig, "on his model")
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
     said = [s for s in adapter.statuses if "big-pickle" in s]
     assert len(said) == 1, "said once per model and session"
     assert "not on the launch default opencode/minimax-m3.1-flash-free" in said[0]
@@ -500,7 +500,7 @@ def test_a_request_on_another_model_is_logged_and_shown_and_nothing_more(
     assert adapter.fatal is None and adapter.can_inject()
     assert "big-pickle" in oc.status_lines(opencode_roster.session_path(IDENTITY))[-1]["text"]
     send(rig, "again")
-    assert wait_until(lambda: len(posts(fake)) == 2, 5.0)
+    assert wait_until(lambda: len(posts(fake)) == 2, LIVE_S)
     assert len([s for s in adapter.statuses if "big-pickle" in s]) == 1
 
 
@@ -515,7 +515,7 @@ def test_an_answer_with_no_request_line_before_it_is_said(rig, wrapper, fake):
     adapter = wrapper()
     fake.on_log = lambda line: None        # the log shows no request
     send(rig, "unseen request")
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
     said = [s for s in adapter.statuses if "no request line" in s]
     assert len(said) == 1, "one note for one assistant message, though its final " \
                            "update arrives twice"
@@ -627,7 +627,7 @@ def test_every_model_comms_names_is_one_the_server_offers_free(rig, wrapper, fak
     config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
     assert config["model"] in fake.free
     send(rig, "post")
-    assert wait_until(lambda: posts(fake), 5.0)
+    assert wait_until(lambda: posts(fake), LIVE_S)
     assert all("model" not in body for _, body in posts(fake))
 
 
@@ -665,7 +665,7 @@ def test_the_status_lines_survive_a_relaunch_while_the_session_is_replaced(
     first.status_sink("coder@proj-a: said in the first launch")
     sid = first.session_id
     first.stop()
-    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
+    assert wait_until(lambda: IDENTITY not in rig.daemon.bindings, LIVE_S)
     second = wrapper()
     assert oc.read_record(path)["session_id"] == second.session_id != sid
     assert any("said in the first launch" in row["text"] for row in oc.status_lines(path))
@@ -684,7 +684,7 @@ def test_an_operator_turn_sends_activity_at_busy_and_one_turn_at_its_idle(
     adapter = wrapper()
     before = len(frames)
     fake.control("type", {"session": adapter.session_id, "text": "his own"})
-    assert wait_until(lambda: turn_frames(frames[before:]), 5.0)
+    assert wait_until(lambda: turn_frames(frames[before:]), LIVE_S)
     time.sleep(0.3)
     ours = frames[before:]
     assert "kind" not in ours[0], "busy: a no-kind activity first"
@@ -701,7 +701,7 @@ def test_a_digests_turn_is_handled_and_the_daemons_ack_moves_the_cursor(
     the daemon's answer carries the cursor the ack moved."""
     adapter = wrapper()
     send(rig, "handle me")
-    assert wait_until(lambda: (t := turn_frames(frames)) and "answer" in t[-1], 5.0)
+    assert wait_until(lambda: (t := turn_frames(frames)) and "answer" in t[-1], LIVE_S)
     high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     turn = turn_frames(frames)[-1]
     assert turn["handled_ids"] == [str(high)] and turn["unhandled_ids"] == []
@@ -715,14 +715,14 @@ def test_a_digests_turn_that_errs_is_unhandled_and_moves_no_cursor(
     fake.auto = False
     adapter = wrapper()
     send(rig, "doomed")
-    assert wait_until(lambda: posts(fake), 5.0)
+    assert wait_until(lambda: posts(fake), LIVE_S)
     held = set(adapter.held_ids)
     fake.error(adapter.session_id)
-    assert wait_until(lambda: turn_frames(frames), 5.0)
+    assert wait_until(lambda: turn_frames(frames), LIVE_S)
     turn = turn_frames(frames)[-1]
     assert turn["handled_ids"] == [] and set(turn["unhandled_ids"]) == held
     assert cursor_of(IDENTITY) is None
-    assert wait_until(lambda: not adapter.held_ids, 2.0), "let go once the frame is sent"
+    assert wait_until(lambda: not adapter.held_ids, LIVE_S), "let go once the frame is sent"
 
 
 def test_an_aborted_turn_sends_no_turn_and_its_ids_go_unhandled_on_the_next(
@@ -733,18 +733,18 @@ def test_an_aborted_turn_sends_no_turn_and_its_ids_go_unhandled_on_the_next(
     fake.auto = False
     adapter = wrapper()
     send(rig, "abort me")
-    assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), 5.0)
+    assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), LIVE_S)
     held = set(adapter.held_ids)
     fake.abort(adapter.session_id)
-    assert wait_until(lambda: not adapter.pending, 5.0)
+    assert wait_until(lambda: not adapter.pending, LIVE_S)
     time.sleep(0.3)
     assert turn_frames(frames) == []
     assert set(adapter.unhandled_owed) == held and adapter.held_ids == held
     fake.control("type", {"session": adapter.session_id, "text": "next"})
     fake.finish(adapter.session_id)
-    assert wait_until(lambda: turn_frames(frames), 5.0)
+    assert wait_until(lambda: turn_frames(frames), LIVE_S)
     assert set(turn_frames(frames)[0]["unhandled_ids"]) == held
-    assert wait_until(lambda: not adapter.held_ids, 2.0)
+    assert wait_until(lambda: not adapter.held_ids, LIVE_S)
     assert cursor_of(IDENTITY) is None
 
 
@@ -753,10 +753,10 @@ def test_compaction_sends_ready_compact_and_leaves_busy(rig, wrapper, fake, fram
     fake.auto = False
     adapter = wrapper()
     fake.control("type", {"session": adapter.session_id, "text": "long turn"})
-    assert wait_until(lambda: adapter.busy, 5.0)
+    assert wait_until(lambda: adapter.busy, LIVE_S)
     fake.compacted(adapter.session_id)
     assert wait_until(lambda: [f for f in frame_kinds(frames, "ready")
-                               if f.get("source") == "compact"], 5.0)
+                               if f.get("source") == "compact"], LIVE_S)
     assert adapter.busy, "busy untouched"
     assert turn_frames(frames) == [], "a compaction is not a turn end"
 
@@ -772,8 +772,8 @@ def test_ready_startup_once_and_none_on_a_server_restart(
     first = adapter.generation
     n = len(frames)
     restart_server(adapter, fake, monkeypatch)
-    assert wait_until(lambda: adapter.generation is not first and adapter.ready, 5.0)
-    assert wait_until(lambda: len(frames) >= n + 2, 5.0)
+    assert wait_until(lambda: adapter.generation is not first and adapter.ready, LIVE_S)
+    assert wait_until(lambda: len(frames) >= n + 2, LIVE_S)
     assert frame_kinds(frames, "ready") == ready, "no ready on the restart"
 
 
@@ -788,16 +788,16 @@ def test_a_window_new_is_followed_and_a_child_session_is_not(
     time.sleep(0.3)
     assert adapter.session_id == old
     created = fake.control("new-session", {})["session"]
-    assert wait_until(lambda: adapter.session_id == created, 5.0)
+    assert wait_until(lambda: adapter.session_id == created, LIVE_S)
     clear = [f for f in frame_kinds(frames, "ready") if f.get("source") == "clear"]
     assert len(clear) == 1 and clear[0]["session_id"] == created
     record = oc.read_record(opencode_roster.session_path(IDENTITY))
     assert record["session_id"] == created
     assert adapter.generation.thread_id == created
     send(rig, "after the clear")
-    assert wait_until(lambda: posts(fake), 5.0)
+    assert wait_until(lambda: posts(fake), LIVE_S)
     assert posts(fake)[-1][0] == f"/session/{created}/prompt_async"
-    assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None, LIVE_S)
 
 
 def test_a_post_pending_at_the_follow_goes_again_into_the_new_session(
@@ -808,11 +808,11 @@ def test_a_post_pending_at_the_follow_goes_again_into_the_new_session(
     adapter = wrapper()
     old = adapter.session_id
     send(rig, "carry me")
-    assert wait_until(lambda: adapter.pending, 5.0)
+    assert wait_until(lambda: adapter.pending, LIVE_S)
     held = set(adapter.held_ids)
     mid = next(iter(held))
     created = fake.control("new-session", {})["session"]
-    assert wait_until(lambda: len(posts(fake)) == 2, 5.0)
+    assert wait_until(lambda: len(posts(fake)) == 2, LIVE_S)
     assert posts(fake)[0][0] == f"/session/{old}/prompt_async"
     assert posts(fake)[1][0] == f"/session/{created}/prompt_async"
     assert "carry me" in posts(fake)[1][1]["parts"][0]["text"]
@@ -820,7 +820,7 @@ def test_a_post_pending_at_the_follow_goes_again_into_the_new_session(
     adapter._on_push("deliver", {"payload": {"message_id": mid, "text": "again"}})
     assert adapter.queue == [], "a re-push of a held id is dropped"
     fake.finish(adapter.session_id)
-    assert wait_until(lambda: cursor_of(IDENTITY) == max(held, key=int), 5.0)
+    assert wait_until(lambda: cursor_of(IDENTITY) == max(held, key=int), LIVE_S)
     assert set(turn_frames(frames)[-1]["handled_ids"]) == held
 
 
@@ -831,13 +831,13 @@ def test_a_compaction_while_the_daemon_is_away_is_reported_after_the_register(
     from moxi_comms import daemon as daemon_mod
     adapter = wrapper()
     rig.daemon.stop()
-    assert wait_until(lambda: adapter.offline, 5.0)
+    assert wait_until(lambda: adapter.offline, LIVE_S)
     fake.compacted(adapter.session_id)
     time.sleep(0.3)
     assert not [f for f in frame_kinds(frames, "ready") if f.get("source") == "compact"]
     rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
     assert wait_until(lambda: [f for f in frame_kinds(frames, "ready")
-                               if f.get("source") == "compact"], 5.0)
+                               if f.get("source") == "compact"], LIVE_S)
     time.sleep(0.3)
     assert len([f for f in frame_kinds(frames, "ready") if f.get("source") == "compact"]) == 1

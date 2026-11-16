@@ -10,6 +10,13 @@ export const FLAG_ATTRIBUTES = ["fact-heavy", "lead-heavy", "rest-strong", "togg
 /** Every attribute the row reads. */
 export const ROW_ATTRIBUTES: readonly string[] = [...TEXT_ATTRIBUTES, ...FLAG_ATTRIBUTES];
 
+/**
+ * The named slots for a row's acts: `acts-one` at line one's right end, `acts` at line
+ * two's. Content in either is not the row's: a click or key there sends no toggle.
+ */
+export const ACT_SLOTS = ["acts-one", "acts"] as const;
+export type ActSlot = (typeof ACT_SLOTS)[number];
+
 /** The event a row with `toggles` sends for a click, Enter or Space on its lines. */
 export const TOGGLE_EVENT = "moxi-row-toggle";
 /** The middle dot between two phrases of line two. */
@@ -25,7 +32,10 @@ export interface Piece {
   strong?: true;
 }
 
-/** What a row draws for its attributes. An empty line is not drawn. */
+/**
+ * What a row draws for its attributes. An empty line is not drawn; `drawnLines` says
+ * which lines the act slots add.
+ */
 export interface RowPlan {
   /** Line one: the name and where at the left, the fact at the right end. */
   one: Piece[];
@@ -36,8 +46,9 @@ export interface RowPlan {
   toggles: boolean;
   open: boolean;
   /**
-   * What takes the focus: line one, as a button, on a row with `toggles`; the lines as a
-   * whole, with no role, when such a row has no line one; nothing without `toggles`.
+   * What takes the focus: line one's pieces, as a button, on a row with `toggles`; the
+   * lines as a whole, with no role, when such a row has no piece on line one (an act in
+   * `acts-one` is not one); nothing without `toggles`.
    */
   stop: "one" | "lines" | null;
 }
@@ -92,6 +103,25 @@ export function rowPlan(get: (name: string) => string | null): RowPlan {
   const toggles = flag("toggles");
   const stop = !toggles ? null : one.length > 0 ? "one" : "lines";
   return { one, two, note: text("note"), toggles, open: flag("open"), stop };
+}
+
+/** Which of lines one and two a row draws. */
+export interface DrawnLines {
+  drawsOne: boolean;
+  drawsTwo: boolean;
+}
+
+/**
+ * Which of lines one and two a row draws for its plan, given the act slots that hold a
+ * child. Line one is drawn for a piece or for content in `acts-one`; line two for a
+ * phrase or for content in `acts`. So a row whose only act is in `acts-one` is one line.
+ */
+export function drawnLines(plan: RowPlan, filled: Iterable<ActSlot>): DrawnLines {
+  const slots = new Set(filled);
+  return {
+    drawsOne: plan.one.length > 0 || slots.has("acts-one"),
+    drawsTwo: plan.two.length > 0 || slots.has("acts"),
+  };
 }
 
 /** Whether a key pressed on a row's lines toggles it: Enter or Space alone, held with nothing. */

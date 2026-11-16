@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Both settings carry page fields, which `moxi config slots show --json` prints and
+  the settings page draws: a plain label and a line. slots needs moxi 0.1.9 or later.
+
 ## 0.1.0 (2026-11-08)
 
 - Public names renamed for the naming rules (callers passing the old keyword or reading

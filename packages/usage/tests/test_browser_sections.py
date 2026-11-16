@@ -276,6 +276,10 @@ def test_a_long_token_kinds_row_keeps_its_count_where_every_rows_count_ends(full
     expect(kinds.locator("[data-part=closed]")).to_contain_text("at least $")
     count = kinds.locator("[data-part=count]")
     expect(count).to_have_text(re.compile(r" tokens$"))
+    # Each section drawn ahead of Token kinds, as its own read answers, draws kinds' rows
+    # anew; a row measured before then has no box. Measure once all three are drawn.
+    for key in ("sessions", "projects", "models"):
+        expect(section_of(panel, key).locator("[data-part=count]")).to_be_visible()
     row = kinds.locator(".one").bounding_box()
     link = count.bounding_box()
     other = section_of(panel, "models").locator("[data-part=count]").bounding_box()

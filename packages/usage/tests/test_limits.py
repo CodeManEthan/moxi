@@ -8,6 +8,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from moxi_dev.testing import timed_slack
 
 from moxi_sessions.api import testing as builders
 from moxi_usage import api, limits, readings
@@ -582,7 +583,7 @@ def test_limits_with_no_pull_answers_in_under_100_ms(fence):
     put(*found)
     limits.limits(now=NOW, pull=False)
     best = min(_timed(lambda: limits.limits(now=NOW, pull=False)) for _ in range(5))
-    assert best < 0.1
+    assert best < 0.1 * timed_slack()
 
 
 def _timed(fn):

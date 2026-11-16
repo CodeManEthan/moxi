@@ -11,7 +11,7 @@ import json
 import re
 
 import pytest
-from conftest import projects_root, wait_until, warm_session
+from conftest import LIVE_S, projects_root, wait_until, warm_session
 
 from moxi_comms import claimfile, config, sending
 from moxi_comms.client import DaemonClient
@@ -243,6 +243,16 @@ def test_an_open_ask_names_the_reply_tool_and_new_goes_through(rig, planner, rev
                          posture="once")
     assert code == 0, out
     ask = re.search(r"sent (\d+)", out).group(1)
+    # The daemon indexes the ask as it routes it; the tool's single-reply check asks the
+    # daemon its `asks` read, so the test makes the same read until the daemon nominates
+    # the ask for planner.
+    asks = {"sender": PLANNER, "recipients": [reviewer.identity]}
+    client = DaemonClient(daemon_socket()).connect()
+    try:
+        assert wait_until(lambda: ask in map(str, client.call("asks", asks)["asks"]),
+                          LIVE_S), client.call("asks", asks)
+    finally:
+        client.close()
     got = send(tools, ["reviewer"], "something else", interrupt=True)
     assert got.is_error and got.structured_content["refusal"] == "single-reply"
     text = text_of(got)

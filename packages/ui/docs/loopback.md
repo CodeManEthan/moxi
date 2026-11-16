@@ -133,9 +133,8 @@ PAGE = lb.Page(
 
 ### Confirmed acts
 
-An act that changes something the user should confirm twice, such as stopping a service
-or removing a project, is declared as a confirmed act. It runs at most once for each key
-its caller sends:
+An act that changes something the user should confirm twice, such as stopping a service,
+is declared as a confirmed act. It runs at most once for each key its caller sends:
 
 ```python
 Route("/api/status", "read", "moxi_usage.pagehandlers:status",

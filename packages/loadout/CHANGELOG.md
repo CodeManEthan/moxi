@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Every setting carries page fields, which `moxi config loadout show --json` prints
+  and the settings page draws: a plain label, a line where the label can't carry it,
+  and the unit of the backups kept. loadout needs moxi 0.1.9 or later.
 - The global instruction file gains a part per harness. `global.md` is what every agent
   gets; `global.claude.md`, `global.codex.md` and `global.opencode.md`, beside it, are one
   harness's own text, found by name with no manifest key. A part is in use while its
