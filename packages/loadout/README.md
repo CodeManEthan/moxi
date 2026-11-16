@@ -181,7 +181,8 @@ set heavier.
   replaces (see "What a write keeps").
 - **Not listed**: the skills and agents in your folder that no section lists, each with
   Add, which lists it in a section and places it at once. Add something by its name
-  instead takes a kind and a name.
+  instead, always there, takes a kind, a name and a section: a hook, a permission rule,
+  an MCP server, or an item another section lists already.
 - With projects installed, `/m/loadout/project/<key>` shows only what that project's
   sessions load: its own section and your items, with a menu of every project and a link
   to the project's page.
@@ -189,10 +190,11 @@ set heavier.
 Each change runs the same `moxi loadout` command you would run in a terminal, in a
 process of its own, and a line under the act then says the command and how it ended,
 with Show for its lines and rows, and, open, each copy it kept with the command that
-puts it back. The page runs one change at a time: every control is off while one runs.
-Closing or reloading the page doesn't stop a change. The tab keeps the change it follows,
-so after a reload, or another page and back, the page follows it again and keeps every
-control off until it ends; a new tab doesn't, and `moxi loadout status` shows where
+puts it back. The page runs one change at a time: every control that starts a change is
+off while one runs. Replace and Add still open, so you can read what they would do, and
+their own button waits. Closing or reloading the page doesn't stop a change. The tab
+keeps the change it follows, so after a reload, or another page and back, the page
+follows it again and keeps those controls off until it ends; a new tab doesn't, and `moxi loadout status` shows where
 things stand. When the shell runs as a service, a change still running when the service
 stops, by `moxi ui stop` or because nothing has used the shell for a while, stops with
 it; run it again. The page reads again when it is shown, after each change and every

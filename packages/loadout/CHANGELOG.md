@@ -28,6 +28,12 @@
   `back`, the command that puts it back), and `install --help` says how. A generated
   agent file without loadout's header now reads `modified`: install leaves it, and
   uninstall refuses while it is there. A generated file that is a link is refused.
+  `--replace global:global@<harness>` keeps the edited generated global file under
+  `displaced/` and names it in `kept`, where it went to loadout's backups.
+- `moxi loadout global show --json`: each file gains `form`, what loadout adds there
+  (`line`, `block`, `instructions`, `placed`, or `left` for a harness file loadout leaves
+  as its own). `changes` is false for a file the next install leaves as it is: a JSON
+  file whose spacing alone differs from loadout's read true.
 - New reads for the page: `/api/view`, the rows `status` gives with what the page draws
   (how each item is placed and what fixes it, the sections and why one is refused, the
   items' notes, the global file); `/api/folder`, the folder's uncommitted and unlisted
