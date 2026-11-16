@@ -110,6 +110,15 @@ PAGE = lb.Page(
   added but `returns` doesn't declare is dropped and logged. A `null` is sent only for a
   key declared with `nullable=True`. A `null` for any other key, or a value of the wrong
   type, is refused rather than cut, and the request gets a 500.
+- An `Out` may carry a mark, which only the gateway acts on, on the way to the phone:
+  `redact` sends `null`, `path` sends a handle that shows the path's last segment, and
+  `scrub` sends the text with each host path in it cut to its last folder name
+  (`hooks /home/me/code/app` reaches the phone as `hooks app`). `path` and `scrub` go on a
+  string. A path `scrub` finds starts with `/` or `~` at the start of a word and runs to
+  the next whitespace: one with a space in it is cut at the space and the rest of it is
+  sent, and a path glued to other text (`root=/srv/x`), a relative path, a variable and a
+  drive-letter path are sent as they are. Mark a value `redact` when it may hold a path in
+  another form.
 - Handlers are `"package.module:function"` strings, so the shell and tests read the table
   without importing handler code. A handler is `def fn(call) -> dict` or
   `async def fn(call) -> dict`. A plain `def` runs on a worker thread. `call` carries the

@@ -20,7 +20,7 @@ from moxi_ui.gateway.access import OPEN_PATHS, PAGES
 from moxi_ui.gateway.acts import Acts
 from moxi_ui.gateway.mount import Mount
 from moxi_ui.gateway.router import ICONS, GatewayRouter, mark, strip, watch
-from moxi_ui.gateway.shapes import handle
+from moxi_ui.gateway.shapes import handle, redact_value, scrub
 from moxi_ui.proxy import UpstreamError
 from moxi_ui.push import Push
 from moxi_ui.router import fallback, worker_layer
@@ -166,6 +166,48 @@ def test_a_gateway_read_has_its_marked_values_changed_and_nothing_else(tmp_path:
     again = gate.get("/m/fixture/api/rows?x=1").json()
     assert again == got, "a handle is the same on every read"
     assert b"someone" not in answer.body
+
+
+@pytest.mark.parametrize(("text", "sent"), [
+    ("/home/someone/code/proj-b", "proj-b"),
+    ("hooks /home/someone/code/proj-b", "hooks proj-b"),
+    ("hooks ~/code/proj-b", "hooks proj-b"),
+    ("spec /home/someone/a nightly", "spec a nightly"),
+    ("from /srv/a to ~/b/c", "from a to c"),
+    ("a\t/srv/x\n/srv/y", "a\tx\ny"),
+    ("guard", "guard"),
+    ("", ""),
+    ("git push", "git push"),
+    # Cut at the first space: the part after it is sent as it is.
+    ("hooks /home/someone/My Projects/x", "hooks My Projects/x"),
+    ("hooks /home/someone/code/proj-b/", "hooks proj-b"),
+    ("hooks ~someone/code/x", "hooks x"),
+    ("hooks ~someone", "hooks ~"),
+    ("hooks ~", "hooks ~"),
+    ("hooks ~/", "hooks ~"),
+    ("hooks /", "hooks /"),
+    ("hooks //", "hooks /"),
+    # Only a word that starts with / or ~ is a path.
+    ("hooks root=/home/someone/x", "hooks root=/home/someone/x"),
+    ("hooks code/proj-b", "hooks code/proj-b"),
+    ("hooks ../proj-b", "hooks ../proj-b"),
+    ("hooks $HOME/x", "hooks $HOME/x"),
+    ("hooks C:\\Users\\someone\\x", "hooks C:\\Users\\someone\\x"),
+    ("a/b", "a/b"),
+])
+def test_scrub_cuts_each_host_path_to_its_last_component(text: str, sent: str) -> None:
+    assert scrub(text) == sent
+
+
+def test_a_scrubbed_value_is_its_text_scrubbed_and_anything_else_passes_as_it_is() -> None:
+    out = {"type": "string", "mark": "scrub", "nullable": True, "items": None}
+    assert redact_value("hooks /home/someone/x", out, KEY) == "hooks x"
+    for value in (None, 4, True, ["/home/someone/x"], {"a": "/home/someone/x"}):
+        assert redact_value(value, out, KEY) == value
+    rows = {"type": "list", "mark": None, "nullable": False, "items": {
+        "type": "table", "mark": None, "nullable": False, "items": {"name": out}}}
+    assert redact_value([{"name": "/srv/a"}, {"name": "b"}], rows, KEY) == [
+        {"name": "a"}, {"name": "b"}]
 
 
 def test_a_read_that_isnt_json_or_is_too_large_is_a_502_and_errors_pass_as_sent(

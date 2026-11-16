@@ -241,12 +241,23 @@ def test_body_cap_is_one_byte_to_one_mib(cap):
     lambda: Out("list", items={"a": Out("int")}),
     lambda: Out("enum"),
     lambda: Out("int", mark="path"),
+    lambda: Out("int", mark="scrub"),
+    lambda: Out("list", items=Out("string"), mark="scrub"),
     lambda: Out("string", mark="secret"),
     lambda: Out("string", nullable=1),
 ])
 def test_out_declaration_refusals(make):
     with pytest.raises(PageError):
         make()
+
+
+@pytest.mark.parametrize("mark", [None, "path", "redact", "scrub"])
+def test_a_string_out_takes_each_mark_and_the_export_writes_it(mark):
+    item = Out("string", mark=mark, nullable=True)
+    route = Route("/api/x", "read", H, returns={"x": item})
+    data = json.loads(json.dumps(export(Page(routes=(route,)))))
+    assert data["routes"][0]["returns"]["x"] == {
+        "type": "string", "mark": mark, "nullable": True, "items": None}
 
 
 # --- the table ----------------------------------------------------------------------
@@ -710,8 +721,10 @@ def test_a_float_takes_an_integer_and_a_declared_key_left_out_stays_out():
 
 
 def test_projection_keeps_marked_values_for_the_gateway_to_act_on():
-    shape = Out("table", items={"log": Out("string", mark="path"), "key": Out("string", mark="redact")})
-    assert project({"log": "/a", "key": "k"}, shape) == {"log": "/a", "key": "k"}
+    shape = Out("table", items={"log": Out("string", mark="path"), "key": Out("string", mark="redact"),
+                                "name": Out("string", mark="scrub")})
+    assert project({"log": "/a", "key": "k", "name": "hooks /a"}, shape) == {
+        "log": "/a", "key": "k", "name": "hooks /a"}
 
 
 def test_a_non_string_key_is_dropped():
