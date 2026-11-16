@@ -544,25 +544,32 @@ class HarnessAdapter:
         the connection, drop the queue (its rows wait again when the binding ends, and
         the next bind hands them), and register again, so the daemon gates the backlog
         on what is true now. Raises what `connect_daemon` raises once the daemon has had
-        `REREGISTER_WAIT` seconds to drop the old one."""
-        with self._lock:
-            old, self._daemon = self._daemon, None
-            self.offline = True              # the close below says nothing
-        if old is not None:
-            old.close()
-        with self._lock:
-            self.held_ids.difference_update(str(p["message_id"]) for p in self.queue)
-            self.queue = []
-            self.replay_notice = None
-        deadline = time.monotonic() + REREGISTER_WAIT
-        while True:
-            try:
-                self.connect_daemon()
-                return
-            except DaemonError as exc:
-                if "already bound" not in str(exc) or time.monotonic() > deadline:
-                    raise
-                time.sleep(0.05)
+        `REREGISTER_WAIT` seconds to drop the old one.
+
+        It holds `claims.register_lock` throughout, as `start` does. The old connection's
+        close, and a refused bind's, mark the claim offline while this waits for the
+        daemon, and the supervisor, which skips a turn while the lock is held, must not
+        register in that gap: its bind would refuse this one as already bound, or, refused
+        itself by the old binding, put the claim in standby under the binding this makes."""
+        with self.claims.register_lock:
+            with self._lock:
+                old, self._daemon = self._daemon, None
+                self.offline = True              # the close below says nothing
+            if old is not None:
+                old.close()
+            with self._lock:
+                self.held_ids.difference_update(str(p["message_id"]) for p in self.queue)
+                self.queue = []
+                self.replay_notice = None
+            deadline = time.monotonic() + REREGISTER_WAIT
+            while True:
+                try:
+                    self.connect_daemon()
+                    return
+                except DaemonError as exc:
+                    if "already bound" not in str(exc) or time.monotonic() > deadline:
+                        raise
+                    time.sleep(0.05)
 
     def tool_token_registered(self, *, served: bool) -> None:
         """The daemon answered this bind's registration of the tool token: `served`
