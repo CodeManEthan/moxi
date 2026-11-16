@@ -174,7 +174,7 @@ export function hurtsOf(key: Setting, change: Change): Hurt[] {
   return [];
 }
 
-/** Whether `key`'s label and switch stay in the warning colour: its `hurts` says the value
+/** Whether `key`'s label and switch stay in the danger colour: its `hurts` says the value
  * held is the danger, and `value` is that value. */
 export function staysWarned(key: Setting, value: unknown): boolean {
   const hurts = key.hurts;
@@ -217,7 +217,7 @@ export function confirmOf(keys: readonly Setting[], changes: readonly Change[]):
 export interface HeldLine {
   /** `not saved · was <value>`, `not saved · <says>`, or a refused row's `still <value>`. */
   text: string;
-  /** The change can hurt: drawn in the warning colour. */
+  /** The change can hurt: drawn in the danger colour. */
   hurts: boolean;
 }
 

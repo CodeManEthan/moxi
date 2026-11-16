@@ -21,7 +21,7 @@ when it reads the schema, change only how a key looks on the page, never how it 
 | `unit` | the word after a number's field |
 | `choices` | the words shown for each value of an enum |
 | `pick` | an enum is a pick list whatever its number of values |
-| `hurts` | the change it names (`on`, `off`, `add`, `remove`) is drawn in the warning colour and asked about before it is saved; with `stays`, the row stays in that colour while the value held is `when` |
+| `hurts` | the change it names (`on`, `off`, `add`, `remove`) is drawn in the danger colour and asked about before it is saved; with `stays`, the row stays in that colour while the value held is `when` |
 | `terminal` | the value shows as a word, with no control, and the line `Turned off at the terminal: <off>` (or `on`) with `Copy`. The shell refuses to write the key from any page |
 | `elsewhere` | the key is not drawn, counted or shown changed; Find answers with this sentence |
 

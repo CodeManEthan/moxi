@@ -951,6 +951,11 @@ def test_the_phone_group_shows_the_gateway_each_phone_its_activity_and_revokes_o
         phone.get_by_role("button", name="Revoke").click()
         ask = view.locator("[data-part=revoke]")
         expect(ask).to_contain_text("Revoke Test phone? It is signed out within two seconds and must be paired again to come back.")
+        # Its question and its act take the danger colour.
+        danger = page.evaluate(_TOKENS)["danger"]
+        colour = "el => getComputedStyle(el).color"
+        assert ask.locator("b.w").evaluate(colour) == danger
+        assert ask.get_by_role("button", name="Revoke Test phone").evaluate(colour) == danger
         ask.get_by_role("button", name="Keep it").click()
         expect(ask).to_have_count(0)
         phone.get_by_role("button", name="Revoke").click()
@@ -1129,17 +1134,22 @@ def test_the_small_install_lists_the_core_and_ui_and_has_no_phone_group(ui_shell
     expect(view.locator("[data-part=found-head] [data-line=count]")).to_have_text("No setting matches “8461”")
 
 
-# Each colour token as the browser computes it, every colour the page's words show in, and
-# the colours of the pieces that may carry one: a row whose change can hurt, and Save.
-_COLOURS = """() => {
+# Each colour token as the browser computes it.
+_TOKENS = """() => {
   const probe = document.createElement("span");
   document.body.append(probe);
   const tokens = {};
-  for (const name of ["text", "text-dim", "text-faint", "accent", "on-accent", "warn"]) {
+  for (const name of ["text", "text-dim", "text-faint", "accent", "on-accent", "warn", "danger"]) {
     probe.style.color = `var(--moxi-${name})`;
     tokens[name] = getComputedStyle(probe).color;
   }
   probe.remove();
+  return tokens;
+}"""
+
+# Every colour the page's words show in, and the colours of the pieces that may carry one: a
+# row whose change can hurt, Save, and the confirm's question and act while it asks.
+_COLOURS = """() => {
   const root = document.querySelector("#moxi-panel > moxi-ui-page").shadowRoot.querySelector("moxi-ui-settings").shadowRoot;
   const seen = new Set();
   for (const el of root.querySelectorAll("*")) {
@@ -1147,8 +1157,12 @@ _COLOURS = """() => {
     if (own && el.getClientRects().length > 0) seen.add(getComputedStyle(el).color);
   }
   const colour = (selector, what = "color") => getComputedStyle(root.querySelector(selector))[what];
-  return {tokens, seen: [...seen], harm: colour(".set.dg [data-line=label]"), held: colour(".set.dg [data-line=held] .w"),
-          save: colour("[data-part=save] .btn.acc", "backgroundColor"),
+  const shown = (selector, what = "color") => root.querySelector(selector) ? colour(selector, what) : null;
+  return {seen: [...seen], harm: colour(".set.dg [data-line=label]"), held: colour(".set.dg [data-line=held] .w"),
+          switch: colour(".set.dg [role=switch][aria-checked=true]", "backgroundColor"),
+          save: shown("[data-part=save] .btn.acc", "backgroundColor"),
+          ask: shown("[data-part=save] [data-line=ask]"), act: shown("[data-part=save] .btn.wn"),
+          actBorder: shown("[data-part=save] .btn.wn", "borderColor"),
           headings: root.querySelectorAll("h1, h2, h3, h4").length};
 }"""
 
@@ -1169,18 +1183,26 @@ def test_at_each_width_and_theme_the_page_fits_has_no_heading_and_colours_only_s
     for width in (1280, 400):
         page.set_viewport_size({"width": width, "height": 900})
         colours = page.evaluate(_COLOURS)
-        tokens = colours["tokens"]
+        tokens = page.evaluate(_TOKENS)
         assert colours["headings"] == 0
-        # Words only in the text tokens; the warning colour on the change that can hurt; the
+        # Words only in the text tokens; the danger colour on the change that can hurt; the
         # accent behind Save alone.
-        words = {tokens[name] for name in ("text", "text-dim", "text-faint", "warn", "on-accent")}
+        words = {tokens[name] for name in ("text", "text-dim", "text-faint", "danger", "on-accent")}
         assert set(colours["seen"]) <= words, (colours["seen"], tokens)
-        assert colours["harm"] == colours["held"] == tokens["warn"], colours
-        # The plain palette's warning colour is its text colour; midnight neon's is its own.
-        assert (tokens["warn"] == tokens["text"]) == (palette == "plain"), tokens
+        assert colours["harm"] == colours["held"] == colours["switch"] == tokens["danger"], colours
+        # The harm colour is a colour of its own on every Look, plain included.
+        assert tokens["danger"] not in {tokens["text"], tokens["text-dim"]}, tokens
         assert colours["save"] == tokens["accent"], colours
         scroll, client = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
         assert scroll <= client, (width, scroll, client)
+    # The confirm's question and its act take the danger colour too.
+    line = _save_line(view)
+    line.get_by_role("button", name="Save").click()
+    expect(line).to_have_attribute("data-state", "confirm")
+    colours = page.evaluate(_COLOURS)
+    assert colours["ask"] == colours["act"] == colours["actBorder"] == tokens["danger"], colours
+    line.get_by_role("button", name="Go back").click()
+    expect(line).to_have_attribute("data-state", "held")
     ui_width_check(page, module="ui", route="settings/fixture", width=400)
 
 

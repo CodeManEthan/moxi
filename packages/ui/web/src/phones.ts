@@ -63,10 +63,10 @@ export class UiPhones extends LitElement {
     .devc { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 18px;
             font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); padding: 0 0 9px; }
     .devc .msg { flex: 1 1 240px; min-width: 0; }
-    .devc b.w { font-weight: 600; color: var(--moxi-warn); }
+    .devc b.w { font-weight: 600; color: var(--moxi-danger); }
     .devc .btns { display: flex; align-items: center; gap: 18px; flex: none; }
-    .btn { font-weight: 600; font-size: 14px; line-height: 1; border: 1px solid var(--moxi-warn); border-radius: var(--moxi-radius);
-           padding: 8px 16px; background: none; color: var(--moxi-warn); cursor: pointer; }
+    .btn { font-weight: 600; font-size: 14px; line-height: 1; border: 1px solid var(--moxi-danger); border-radius: var(--moxi-radius);
+           padding: 8px 16px; background: none; color: var(--moxi-danger); cursor: pointer; }
     .btn:disabled { opacity: 0.6; cursor: progress; }
     .pair { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 18px; padding: 6px 0 12px; font-size: 13px;
             line-height: 18px; color: var(--moxi-text-dim); }

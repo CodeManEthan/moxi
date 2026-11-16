@@ -57,10 +57,10 @@ var pt=globalThis,ht=pt.ShadowRoot&&(pt.ShadyCSS===void 0||pt.ShadyCSS.nativeSha
     .devc { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 18px;
             font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); padding: 0 0 9px; }
     .devc .msg { flex: 1 1 240px; min-width: 0; }
-    .devc b.w { font-weight: 600; color: var(--moxi-warn); }
+    .devc b.w { font-weight: 600; color: var(--moxi-danger); }
     .devc .btns { display: flex; align-items: center; gap: 18px; flex: none; }
-    .btn { font-weight: 600; font-size: 14px; line-height: 1; border: 1px solid var(--moxi-warn); border-radius: var(--moxi-radius);
-           padding: 8px 16px; background: none; color: var(--moxi-warn); cursor: pointer; }
+    .btn { font-weight: 600; font-size: 14px; line-height: 1; border: 1px solid var(--moxi-danger); border-radius: var(--moxi-radius);
+           padding: 8px 16px; background: none; color: var(--moxi-danger); cursor: pointer; }
     .btn:disabled { opacity: 0.6; cursor: progress; }
     .pair { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 18px; padding: 6px 0 12px; font-size: 13px;
             line-height: 18px; color: var(--moxi-text-dim); }
@@ -204,11 +204,11 @@ var pt=globalThis,ht=pt.ShadowRoot&&(pt.ShadyCSS===void 0||pt.ShadyCSS.nativeSha
   .set.un .lb { font-weight: 600; }
   .set.un .lb .key { font-weight: 400; }
   .set.un .fld { border-color: var(--moxi-border-strong); }
-  .set.dg .lb, .l2 .w { color: var(--moxi-warn); }
+  .set.dg .lb, .l2 .w { color: var(--moxi-danger); }
   .set.dg .lb .key { color: var(--moxi-text-dim); }
-  .set.dg .sw[aria-checked="true"] { background: var(--moxi-warn); border-color: var(--moxi-warn); }
+  .set.dg .sw[aria-checked="true"] { background: var(--moxi-danger); border-color: var(--moxi-danger); }
   .l2 b { font-weight: 600; color: var(--moxi-text); }
-  .l2 .w b { color: var(--moxi-warn); }
+  .l2 .w b { color: var(--moxi-danger); }
   .entry.un > span:first-child { font-weight: 600; }
   .mods a.u { font-weight: 600; color: var(--moxi-text); }
   .tok { display: inline-flex; align-items: center; gap: 4px; }
@@ -225,14 +225,14 @@ var pt=globalThis,ht=pt.ShadowRoot&&(pt.ShadyCSS===void 0||pt.ShadyCSS.nativeSha
   .save.conf { align-items: flex-start; }
   .save .msg { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
   .save .msg b { font-weight: 600; color: var(--moxi-text); }
-  .save .msg b.w { color: var(--moxi-warn); }
+  .save .msg b.w { color: var(--moxi-danger); }
   .save .msg span { display: block; }
   .save .btns { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; flex: none; }
   .btn { font-weight: 600; font-size: 14px; line-height: 1; border: 1px solid var(--moxi-border);
          border-radius: var(--moxi-radius); padding: 8px 16px; background: none; color: var(--moxi-text-dim);
          cursor: pointer; }
   .btn.acc { background: var(--moxi-accent); border-color: var(--moxi-accent); color: var(--moxi-on-accent); }
-  .btn.wn { color: var(--moxi-warn); border-color: var(--moxi-warn); }
+  .btn.wn { color: var(--moxi-danger); border-color: var(--moxi-danger); }
   .btn.stay { color: var(--moxi-text); }
   .missing { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); padding-bottom: 28px; }
   .failed { display: grid; gap: var(--moxi-gap); justify-items: start; padding: 12px 0; }
