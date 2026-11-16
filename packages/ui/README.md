@@ -84,10 +84,11 @@ config`.
   Phone access itself is turned on and off at the terminal, with `moxi ui gateway enable`
   and `disable`; no page changes it.
 
-The page is not on the phone. A module's schema decides how its settings look there with
-page fields (`label`, `line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`,
-`terminal`, `elsewhere`; the core's README lists them). [docs/settings.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/settings.md)
-says what each does on the page, what a save does, and the page's routes.
+A module's schema decides how its settings look on the page with page fields (`label`,
+`line`, `common`, `group`, `unit`, `choices`, `pick`, `hurts`, `terminal`, `elsewhere`;
+the core's README lists them). [docs/settings.md](https://github.com/CodeManEthan/moxi/blob/moxi-ui-v0.2.3/packages/ui/docs/settings.md)
+says what each does on the page, what a save does, and the page's routes. The page is not
+on the phone.
 
 ## A module on Home
 
