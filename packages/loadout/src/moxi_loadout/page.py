@@ -2,6 +2,8 @@
 
     GET  /api/status      every item's state for each harness, as `moxi loadout status
                           --json` prints it
+    GET  /api/view        everything the page's items draw, from the one plan `status`
+                          builds: its rows, the sections, the items and the global file
     GET  /api/list        every item each section lists, and the sections, as `moxi
                           loadout list --json` gives the items
     GET  /api/global      the global mode, and what the next install makes of each global
@@ -162,6 +164,27 @@ GLOBAL = {
     "chosen": lb.Out("bool"),
     "files": lb.Out("list", items=GLOBAL_FILE),
 }
+#: Everything the page's items draw, from the one plan `status` builds: `status`'s
+#: `rows`, `lines`, `notes` and `counts`; `note`, the drift block's; the `home` folder,
+#: the loadout `folder` and its `manifest`; `harnesses`, the harness table's names in its
+#: order; the `sections` and `items` as `/api/list` gives them; and `global` as
+#: `/api/global` gives it. The paths are null only with `problem` set, and `home` when
+#: nothing places a home folder.
+VIEW = {
+    "problem": _PROBLEM,
+    "lines": _LINES,
+    "notes": _LINES,
+    "counts": COUNTS,
+    "note": _MAYBE_SAYS,
+    "home": _MAYBE_PATH,
+    "folder": _MAYBE_PATH,
+    "manifest": _MAYBE_PATH,
+    "harnesses": lb.Out("list", items=_TEXT),
+    "sections": lb.Out("list", items=SECTION),
+    "items": lb.Out("list", items=ITEM),
+    "rows": lb.Out("list", items=ROW),
+    "global": lb.Out("table", items={k: v for k, v in GLOBAL.items() if k != "problem"}),
+}
 #: `reason` says why there is no list: projects absent, busy or unreadable.
 PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS}
 #: `count` is the items not `ok` or `off`, each once however many of its harnesses
@@ -211,6 +234,7 @@ PAGE = lb.Page(
     budget=BUDGET,
     routes=(
         lb.Route("/api/status", "read", _target("status"), returns=STATUS),
+        lb.Route("/api/view", "read", _target("view"), returns=VIEW),
         lb.Route("/api/list", "read", _target("listing"), returns=LIST),
         lb.Route("/api/global", "read", _target("global_preview"), returns=GLOBAL),
         lb.Route("/api/projects", "read", _target("projects"), returns=PROJECTS),
@@ -235,4 +259,5 @@ PAGE = lb.Page(
 )
 
 __all__ = ["BUDGET", "COUNTS", "DRIFT", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE",
-           "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS"]
+           "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS",
+           "VIEW"]

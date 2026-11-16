@@ -109,6 +109,16 @@ class Outcome:
 
 # -- status ---------------------------------------------------------------------------------
 
+@dataclass
+class Status:
+    """A `status` run whole: the `plan` it built, the entries `run` it planned, and the
+    `outcome` it gives. The page's view reads all three, so its rows are `status`'s."""
+
+    plan: planner.Plan
+    run: entries.Run
+    outcome: Outcome
+
+
 def status(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.resolve_key,
            git: ignores.Git | None = None, git_seconds: float | None = None) -> Outcome:
     """Every item's state; the scope filters the rows. Takes no lock, writes nothing.
@@ -118,6 +128,15 @@ def status(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.resolve
     `git` runs the would-commit check's git calls (a fresh `ignores.Git` when None).
     `git_seconds` is how long the core placer's tracked check may give git in all (the
     placer's own 10 seconds a call when None)."""
+    return status_plan(scope, loadout_dir=loadout_dir, resolver=resolver, git=git,
+                       git_seconds=git_seconds).outcome
+
+
+def status_plan(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.resolve_key,
+                git: ignores.Git | None = None,
+                git_seconds: float | None = None) -> Status:
+    """`status` with the plan and the entries run its outcome came from; the arguments
+    are `status`'s."""
     plan, run = _plan(loadout_dir, resolver, git_seconds)
     notes = _check_placed(plan, ignores.Git() if git is None else git)
     for level, line in opencode_reads_claude(plan, run, after=False):
@@ -129,9 +148,9 @@ def status(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.resolve
     differ = homes.note()
     if differ is not None:
         notes.append(differ)
-    return Outcome(rows, list(plan.lines) + run.lines,
-                   list(dict.fromkeys(plan.notes + run.notes + notes)), code,
-                   orphans(plan, plan.ledger), run.global_lines)
+    return Status(plan, run, Outcome(rows, list(plan.lines) + run.lines,
+                                     list(dict.fromkeys(plan.notes + run.notes + notes)),
+                                     code, orphans(plan, plan.ledger), run.global_lines))
 
 
 def opencode_reads_claude(plan: planner.Plan, run: entries.Run, *,
@@ -240,12 +259,16 @@ def global_preview(loadout_dir=None, *, resolver=planner.resolve_key,
     "diff"}`, `diff` then the reason its state isn't `ok`. `parts` are the absolute paths
     the harness reads through loadout: the shared file, then its part while in use (none
     in `off`). Takes no lock, writes nothing; `git_seconds` as for `status`."""
+    return global_preview_of(*_plan(loadout_dir, resolver, git_seconds))
+
+
+def global_preview_of(plan: planner.Plan, run: entries.Run) -> dict:
+    """`global_preview`'s answer, from a plan and entries run already made."""
     import difflib
 
     from moxi_loadout import globalfile
     from moxi_loadout import harness as hz
 
-    plan, run = _plan(loadout_dir, resolver, git_seconds)
     mode, shared = plan.manifest.global_mode, plan.manifest.global_file
 
     def parts(harness: str) -> list[str]:
@@ -761,5 +784,6 @@ def _write_ledger(plan, data, source, done, seeded_done, removes, now) -> None:
     ledger.write(data)
 
 
-__all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "status", "global_preview",
-           "install", "generated_in_use", "orphans"]
+__all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "Status", "status",
+           "status_plan", "global_preview", "global_preview_of", "install",
+           "generated_in_use", "orphans"]

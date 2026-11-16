@@ -160,7 +160,7 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     exported = LB.export(page.PAGE)
     routes = {r["path"]: r for r in exported["routes"]}
     assert {p for p, r in routes.items() if r["kind"] == "read"} == {
-        "/api/status", "/api/list", "/api/global", "/api/projects", "/api/drift", "/api/job"}
+        "/api/status", "/api/view", "/api/list", "/api/global", "/api/projects", "/api/drift", "/api/job"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/remove", "/api/enable", "/api/disable", "/api/global-mode",
         "/api/install", "/api/replace", "/api/global-remove"}
@@ -197,14 +197,31 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
         "/api/status rows[].target", "/api/job outcome.rows[].target",
         "/api/list manifest", "/api/list sections[].root", "/api/global files[].file",
         "/api/global files[].parts[]",
-        "/api/projects projects[].root"}
+        "/api/projects projects[].root",
+        "/api/view home", "/api/view folder", "/api/view manifest",
+        "/api/view sections[].root", "/api/view rows[].target",
+        "/api/view global.files[].file", "/api/view global.files[].parts[]"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
                  "/api/list items[].source", "/api/list items[].scope",
                  "/api/list sections[].name", "/api/global files[].diff",
                  "/api/projects reason", "/api/drift note", "/api/job lines[]",
-                 "/api/job argv[]", "/api/job outcome.lines[]"):
+                 "/api/job argv[]", "/api/job outcome.lines[]",
+                 "/api/view problem", "/api/view lines[]", "/api/view notes[]",
+                 "/api/view note", "/api/view sections[].name", "/api/view items[].scope",
+                 "/api/view items[].source", "/api/view rows[].scope",
+                 "/api/view rows[].name", "/api/view rows[].reason",
+                 "/api/view global.files[].diff"):
         assert marks[said] == "redact", said
+    plain = {"/api/view harnesses[]", "/api/view counts.ok", "/api/view sections[].where",
+             "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
+             "/api/view items[].disabled[]", "/api/view rows[].kind",
+             "/api/view rows[].harness", "/api/view rows[].state",
+             "/api/view rows[].replaceable", "/api/view global.mode",
+             "/api/view global.chosen", "/api/view global.files[].harness",
+             "/api/view global.files[].changes", "/api/view global.files[].placed",
+             "/api/view global.files[].state"}
+    assert not plain & set(marks)
 
 
 def test_the_page_names_kinds_modes_and_states_as_loadout_does():
@@ -290,9 +307,59 @@ def test_drift_counts_the_items_not_ok_and_notes_a_difference_without_counting_i
     assert body["note"] in read("/api/status")["notes"]
 
 
+def test_view_answers_from_the_one_plan_status_builds(lo, tmp_path, monkeypatch,
+                                                     terminal_record):
+    from moxi import paths, place
+
+    terminal_record()
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (lo / "global.md").write_text("Be kind.\n")
+    kit.agent(lo / "agents" / "helper.md", "helper")
+    kit.manifest(lo, '[global]\nmode = "managed"\n[user]\nskills = ["review"]\n'
+                     f'[project."{proj}"]\nagents = ["helper"]\n')
+    built = []
+    real = install._plan
+
+    def counted(*a, **kw):
+        built.append(1)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(install, "_plan", counted)
+    body = read("/api/view")
+    assert len(built) == 1
+    assert body["problem"] is None
+    status = read("/api/status")
+    assert {k: body[k] for k in ("rows", "lines", "notes", "counts")} == {
+        k: status[k] for k in ("rows", "lines", "notes", "counts")}
+    assert any(r["scope"] == str(proj) for r in body["rows"])
+    listed = read("/api/list")
+    assert body["sections"] == listed["sections"]
+    assert body["items"] == listed["items"]
+    assert body["manifest"] == listed["manifest"] == str(lo / "loadout.toml")
+    shown = read("/api/global")
+    assert body["global"] == {k: v for k, v in shown.items() if k != "problem"}
+    assert body["global"]["chosen"] and body["global"]["files"]
+    assert body["note"] == read("/api/drift")["note"] is None
+    assert body["harnesses"] == list(place.harnesses()[0])
+    assert "claude" in body["harnesses"]
+    assert body["home"] == str(paths.home())
+    assert body["folder"] == str(lo)
+
+
+def test_view_notes_a_difference_from_the_terminal_in_the_pages_words(
+        lo, monkeypatch, tmp_path, terminal_record):
+    terminal_record()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "elsewhere"))
+    body = read("/api/view")
+    assert "; or run the command in a terminal." in body["note"]
+    assert body["note"] == read("/api/drift")["note"]
+    assert body["note"] in body["notes"]
+
+
 def test_a_manifest_that_does_not_read_is_each_reads_problem(lo):
     kit.manifest(lo, "[user]\nnonsense = 1\n")
-    for path in ("/api/status", "/api/list", "/api/global", "/api/drift"):
+    for path in ("/api/status", "/api/view", "/api/list", "/api/global", "/api/drift"):
         body = read(path)
         assert "loadout.toml" in body["problem"] and "nonsense" in body["problem"], path
 

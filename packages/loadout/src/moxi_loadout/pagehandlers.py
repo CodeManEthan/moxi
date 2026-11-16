@@ -1,6 +1,7 @@
 """The handlers of loadout's page (`moxi_loadout.page` declares the routes).
 
 **Reads** answer from the calls the verbs print: `install.status()` (`status --json`),
+`install.status_plan()` (the view: `status`'s outcome with the plan it came from),
 `listing.entries()` (`list --json`), `install.global_preview()` (`global show --json`),
 projects' `list_projects()`, and the job records `moxi_loadout.pagejob` keeps. They run
 here, off the event loop on the base's threads, take neither `install.lock` nor the core
@@ -118,8 +119,7 @@ def listing(call: Any) -> dict[str, Any]:
     return {
         "problem": None,
         "manifest": os.fspath(found.path),
-        "sections": [{"name": s.name, "where": s.where, "root": s.root}
-                     for s in found.sections()],
+        "sections": _sections_of(found),
         "items": [{**e, "harnesses": None if e["harnesses"] is None else list(e["harnesses"])}
                   for e in items],
     }
@@ -136,8 +136,12 @@ def global_preview(call: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {"problem": _problem(exc, "the global file"), "mode": "off", "chosen": False,
                 "files": []}
+    return {"problem": None, **_global(preview, chosen=chosen)}
+
+
+def _global(preview: Mapping[str, Any], *, chosen: bool) -> dict[str, Any]:
+    """`/api/global`'s mode, `chosen` and files, from `install.global_preview`'s answer."""
     return {
-        "problem": None,
         "mode": preview["mode"],
         "chosen": chosen,
         "files": [{"file": os.fspath(f["file"]), "harness": f["harness"],
@@ -145,6 +149,64 @@ def global_preview(call: Any) -> dict[str, Any]:
                    "diff": f["diff"], "placed": bool(f.get("placed", False)),
                    "state": f.get("state")} for f in preview["files"]],
     }
+
+
+def _items(found) -> list[dict[str, Any]]:
+    """`/api/list`'s items, from a manifest already read."""
+    from moxi_loadout import listing as listing_mod
+
+    return [{**e, "harnesses": None if e["harnesses"] is None else list(e["harnesses"])}
+            for e in listing_mod.entries_of(found)]
+
+
+def _sections_of(found) -> list[dict[str, Any]]:
+    return [{"name": s.name, "where": s.where, "root": s.root} for s in found.sections()]
+
+
+def _home() -> str | None:
+    from moxi import paths
+
+    try:
+        return os.fspath(paths.home())
+    except LookupError:
+        return None
+
+
+def view(call: Any) -> dict[str, Any]:
+    """`GET /api/view`: everything the page's items draw, from the one plan `status`
+    builds: `status`'s outcome (its rows, lines, notes and counts), the note, the home,
+    loadout and manifest paths, the harness table's names, the sections, the items as
+    `/api/list` gives them, and the global file as `/api/global` does."""
+    from moxi_loadout import doctor, homes, install
+
+    try:
+        with homes.as_page():
+            done = install.status_plan(git=_git(), git_seconds=doctor.PLACE_GIT_SECONDS)
+            note = homes.note()
+        plan, outcome = done.plan, done.outcome.as_json()
+        found = plan.manifest
+        answer = {
+            "problem": None,
+            "lines": outcome["lines"],
+            "notes": outcome["notes"],
+            "counts": outcome["counts"],
+            "note": note,
+            "home": _home(),
+            "folder": os.fspath(plan.loadout_dir),
+            "manifest": os.fspath(found.path),
+            "harnesses": list(plan.harnesses),
+            "sections": _sections_of(found),
+            "items": _items(found),
+            "rows": outcome["rows"],
+            "global": _global(install.global_preview_of(plan, done.run),
+                              chosen=found.mode is not None),
+        }
+    except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
+        return {"problem": _problem(exc, "the status"), "lines": [], "notes": [],
+                "counts": {}, "note": None, "home": None, "folder": None, "manifest": None,
+                "harnesses": [], "sections": [], "items": [], "rows": [],
+                "global": {"mode": "off", "chosen": False, "files": []}}
+    return answer
 
 
 def projects(call: Any) -> dict[str, Any]:
@@ -324,5 +386,5 @@ def global_remove(call: Any) -> Any:
     return _start(["global", "remove"], key=call.key)
 
 
-__all__ = ["status", "listing", "global_preview", "projects", "drift", "job", "add", "remove",
+__all__ = ["status", "view", "listing", "global_preview", "projects", "drift", "job", "add", "remove",
            "enable", "disable", "global_mode", "install", "replace", "global_remove"]

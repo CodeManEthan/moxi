@@ -16,7 +16,11 @@ def entries(loadout_dir=None) -> list[dict]:
     `disabled` (the harnesses switched off there, `*` for all)."""
     from moxi_loadout import manifest as manifest_mod
 
-    found = manifest_mod.load(loadout_dir)
+    return entries_of(manifest_mod.load(loadout_dir))
+
+
+def entries_of(found) -> list[dict]:
+    """`entries` of a manifest already read."""
     out = []
     for section in found.sections():
         scope = USER if section.is_user else section.name
@@ -47,4 +51,4 @@ def _source(found, kind: str, name: str, section) -> str:
     return "held by the project"
 
 
-__all__ = ["entries"]
+__all__ = ["entries", "entries_of"]
