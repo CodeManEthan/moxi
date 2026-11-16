@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  Feed, FINE, parseDrift, parseGlobal, parseJob, parseListing, parseProjects, parseStatus,
+  Feed, FINE, parseDrift, parseJob, parseProjects, parseSourceDir,
   RETRIES, STATES,
 } from "../src/feed.ts";
 
@@ -104,35 +104,35 @@ test("drift reads its count and note, and refuses a count that isn't a whole num
   }
 });
 
-test("status reads an outcome with its problem", () => {
-  assert.deepEqual(parseStatus({ problem: null, ...OUTCOME }), { problem: null, ...OUTCOME });
-  assert.equal(parseStatus({ problem: null, ...OUTCOME, rows: [{ ...ROW, state: 3 }] }), null);
+test("a job's outcome reads its rows, counts and what it kept", () => {
+  const job = (outcome) => ({ job: "j", argv: ["install"], state: "done", exit: 0, outcome, lines: [] });
+  assert.deepEqual(parseJob(job(OUTCOME)).outcome, { ...OUTCOME, kept: [] });
+  const kept = [{ target: "/t", copy: "/c", how: "copied", id: null, back: "cp '/c' '/t'" }];
+  assert.deepEqual(parseJob(job({ ...OUTCOME, kept })).outcome.kept, kept);
+  assert.equal(parseJob(job({ ...OUTCOME, rows: [{ ...ROW, state: 3 }] })), null);
   const { replaceable, ...unflagged } = ROW;
   assert.equal(replaceable, false);
-  assert.equal(parseStatus({ problem: null, ...OUTCOME, rows: [unflagged] }), null);
-  assert.equal(parseStatus({ problem: null, ...OUTCOME, counts: { ok: "1" } }), null);
-  assert.equal(parseStatus(OUTCOME), null);
+  assert.equal(parseJob(job({ ...OUTCOME, rows: [unflagged] })), null);
+  assert.equal(parseJob(job({ ...OUTCOME, counts: { ok: "1" } })), null);
 });
 
-test("the listing, the global preview and the projects read their shapes", () => {
-  const listing = { problem: null, manifest: "/l/loadout.toml",
-                    sections: [{ name: "user", where: "user", root: null }],
-                    items: [{ kind: "skill", name: "tidy-notes", scope: "user", harnesses: null,
-                              source: "/l/tidy-notes", disabled: [] }] };
-  assert.deepEqual(parseListing(listing), listing);
-  assert.equal(parseListing({ ...listing, items: [{ kind: "skill" }] }), null);
-  const global = { problem: null, mode: "managed", chosen: true,
-                   files: [{ file: "/h/.claude/CLAUDE.md", harness: "claude",
-                             parts: ["/l/global.md", "/l/global.claude.md"], changes: true,
-                             diff: "+x", placed: false, state: null }] };
-  assert.deepEqual(parseGlobal(global), global);
-  assert.equal(parseGlobal({ ...global, chosen: "yes" }), null);
-  assert.equal(parseGlobal({ ...global, files: [{ ...global.files[0], parts: "/l/global.md" }] }), null);
-  const projects = { projects: [{ key: "alpha", root: "/w/alpha" }], reason: null };
+test("the projects and the folder read their shapes", () => {
+  const projects = { projects: [{ key: "alpha", root: "/w/alpha" }], reason: null, cause: null };
   assert.deepEqual(parseProjects(projects), projects);
+  assert.deepEqual(parseProjects({ projects: [], reason: "projects is busy; try again", cause: "busy" }),
+                   { projects: [], reason: "projects is busy; try again", cause: "busy" });
   assert.deepEqual(parseProjects({ projects: [], reason: "projects isn't installed" }),
-                   { projects: [], reason: "projects isn't installed" });
+                   { projects: [], reason: "projects isn't installed", cause: null });
+  assert.equal(parseProjects({ projects: [], reason: null, cause: 3 }), null);
   assert.equal(parseProjects({ projects: [{ key: "alpha" }], reason: null }), null);
+  const dir = { state: "ok", detail: null, uncommitted: ["loadout.toml"], more: 0,
+                unlisted: [{ kind: "skill", name: "bump", source: "/l/skills/bump" }], reinstalls: true };
+  assert.deepEqual(parseSourceDir(dir), dir);
+  assert.deepEqual(parseSourceDir({ ...dir, uncommitted: null }).uncommitted, null);
+  for (const bad of [{ ...dir, more: "1" }, { ...dir, unlisted: [{ kind: "skill" }] }, { ...dir, reinstalls: 1 },
+                     { ...dir, uncommitted: "x" }]) {
+    assert.equal(parseSourceDir(bad), null, JSON.stringify(bad));
+  }
 });
 
 test("a job reads in each of its three states", () => {
@@ -140,7 +140,7 @@ test("a job reads in each of its three states", () => {
                     outcome: null, lines: [] };
   assert.deepEqual(parseJob(running), running);
   const done = { ...running, state: "done", exit: 0, outcome: { ...OUTCOME, exit: 0 } };
-  assert.deepEqual(parseJob(done), done);
+  assert.deepEqual(parseJob(done), { ...done, outcome: { ...done.outcome, kept: [] } });
   const gone = { ...running, state: "interrupted", argv: null, lines: ["run it again"] };
   assert.deepEqual(parseJob(gone), gone);
   assert.equal(parseJob({ ...running, state: "queued" }), null);

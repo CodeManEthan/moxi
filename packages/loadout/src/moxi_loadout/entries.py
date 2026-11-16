@@ -110,7 +110,11 @@ class Entry:
 @dataclass
 class Action:
     """What a run does with one entry: `op` is `ok`, `add`, `update`, `remove`, `end`
-    (drop the record only), `modified`, `blocked` or `stand` (left as it stands)."""
+    (drop the record only), `modified`, `blocked` or `stand` (left as it stands).
+    `over` marks an `update` or `remove` that goes over an entry that isn't loadout's: one
+    edited since loadout wrote it, one loadout didn't write that `--replace` takes over,
+    or one the user had first (`prior`); the file is kept under `displaced/` before it is
+    written."""
 
     entry: Entry | None
     record: dict | None
@@ -122,6 +126,7 @@ class Action:
     written: object = _MISSING   # an MCP server as its CLI wrote it, read back
     follows: Action | None = None   # another item's action on the same entry
     shared: bool = False   # an `end` whose entry another wanted item keeps
+    over: bool = False
 
     @property
     def where(self) -> Entry | dict:
@@ -143,6 +148,22 @@ class Run:
     #: Whether Claude's part line is wanted (`managed`), which the warn about OpenCode
     #: reading Claude's file reads (`moxi_loadout.install`).
     claude_part: bool = False
+    #: The notes on one item for one harness, for the page: `{kind, name, harness,
+    #: code}`, `code` one of `NOTE_CODES`. Each stands beside a sentence in `notes`.
+    item_notes: list = field(default_factory=list)
+
+    def note_item(self, item: str, harness: str, code: str) -> None:
+        kind, _, name = item.partition(":")
+        found = {"kind": kind, "name": name, "harness": harness, "code": code}
+        if found not in self.item_notes:
+            self.item_notes.append(found)
+
+
+#: The codes of an item's notes: Codex runs a new hook only once trusted (`trust`),
+#: no run has confirmed the harness reads the entry as loadout writes it
+#: (`unconfirmed`), OpenCode takes no hooks (`no-hooks`), and loadout writes nothing
+#: for that harness (`writes-nothing`).
+NOTE_CODES = ("trust", "unconfirmed", "no-hooks", "writes-nothing")
 
 
 # -- what the manifest wants ---------------------------------------------------------------
@@ -171,6 +192,7 @@ def wanted(manifest, loadout_dir, rows: dict, run: Run, records=()) -> tuple[lis
                     continue
                 if h not in hz.HARNESSES:
                     run.notes.append(f"{kind} {name}: loadout writes nothing for {h}")
+                    run.note_item(item, h, "writes-nothing")
                     continue
                 try:
                     out += _build(kind, name, table, h, loadout_dir, run)
@@ -191,6 +213,16 @@ def wanted(manifest, loadout_dir, rows: dict, run: Run, records=()) -> tuple[lis
     if any(e.harness == "opencode" and e.file == str(hz.settings_file("opencode"))
            for e in out):
         run.notes.append(UNCONFIRMED["opencode"])
+    for e in out:
+        # What each UNCONFIRMED sentence names, per entry: a Codex hook, each item the
+        # Codex rules file holds, and each item with an entry in opencode.json.
+        if e.harness == "codex" and e.kind == "hook":
+            run.note_item(e.item, "codex", "unconfirmed")
+        elif e.harness == "codex" and e.kind == "rules":
+            for name in e.by:
+                run.note_item(f"permissions:{name}", "codex", "unconfirmed")
+        elif e.harness == "opencode" and e.file == str(hz.settings_file("opencode")):
+            run.note_item(e.item, "opencode", "unconfirmed")
     return out, carried
 
 
@@ -203,6 +235,7 @@ def _build(kind, name, table, h, loadout_dir, run) -> list[Entry]:
     if kind == "hook":
         if h == "opencode":
             run.notes.append(f"hook {name}: not for opencode, which extends by plugins")
+            run.note_item(item, h, "no-hooks")
             return []
         matcher = table.get("matcher")
         handler = {"type": "command", "command": expand_command(table["command"], loadout_dir)}
@@ -212,6 +245,7 @@ def _build(kind, name, table, h, loadout_dir, run) -> list[Entry]:
         if h == "codex":
             run.notes.append(f"hook {name}: codex runs a new hook only once you trust it "
                              "in codex")
+            run.note_item(item, h, "trust")
         return [Entry(item, h, str(hz.settings_file(h)), "hook",
                       [table["event"], matcher or "", handler["command"]], group)]
     if kind == "permissions":
@@ -715,15 +749,17 @@ def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
         groups = _groups(doc, e.key)
         if rec is not None:
             if rec.get("written") in groups:
-                return Action(e, rec, "ok" if rec["written"] == e.value else "update",
-                              prior=rec.get("prior", False))
+                same = rec["written"] == e.value
+                return Action(e, rec, "ok" if same else "update",
+                              prior=rec.get("prior", False),
+                              over=not same and bool(rec.get("prior")))
             near = _near(groups, e.key[1], None, _other_groups(records, rec))
             if near is not None:
                 if not claimed:
                     return Action(e, rec, "modified", f"edited; found {json.dumps(near)}")
                 held = _near(groups, e.key[1], _command(rec.get("written")))
                 return Action(e, rec, "update", replace=held if held is not None
-                              else _MISSING)
+                              else _MISSING, over=True)
         if e.value in groups:
             return Action(e, rec, "ok", prior=_shared_prior(records, e))
         near = _near(groups, e.key[1], _command(e.value))
@@ -731,16 +767,17 @@ def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
             if not claimed:
                 return Action(e, rec, "blocked", f"a group like it is there: "
                               f"{json.dumps(near)}; --replace takes it over")
-            return Action(e, rec, "update", replace=near)
+            return Action(e, rec, "update", replace=near, over=True)
         return Action(e, rec, "add")
     found = _get(doc, e.kind, e.key)
     if rec is not None and found is not _MISSING:
         if found == rec.get("written"):
             old = rec.get("sent") if e.kind == "mcp" else rec.get("written")
             return Action(e, rec, "ok" if old == value else "update",
-                          prior=rec.get("prior", False))
+                          prior=rec.get("prior", False),
+                          over=old != value and bool(rec.get("prior")))
         if claimed:
-            return Action(e, rec, "update")
+            return Action(e, rec, "update", over=True)
         how = f" permissions:{e.by[0]}@codex" if e.kind == "rules" and e.by else ""
         return Action(e, rec, "modified", f"edited since loadout wrote it; --replace{how} "
                       "rewrites it")
@@ -750,7 +787,7 @@ def _one(e: Entry, rec, doc, records, *, claimed: bool) -> Action:
     if equal:
         return Action(e, rec, "ok", prior=_shared_prior(records, e))
     if claimed:
-        return Action(e, rec, "update")
+        return Action(e, rec, "update", over=True)
     return Action(e, rec, "blocked", "something else is there; --replace takes it over")
 
 
@@ -782,13 +819,13 @@ def _gone(r: dict, doc, records: list, used: set, *, claimed: bool, want=()) -> 
         if not claimed:
             return Action(None, r, "modified", f"edited; found {json.dumps(near)}")
         held = _near(groups, key[1], _command(written))
-        return Action(None, r, "remove", replace=held) if held is not None \
+        return Action(None, r, "remove", replace=held, over=True) if held is not None \
             else Action(None, r, "end")
     found = _get(doc, kind, key)
     if found is _MISSING:
         return Action(None, r, "end")
     if found == written or claimed:
-        return Action(None, r, "remove")
+        return Action(None, r, "remove", over=found != written)
     how = " permissions:NAME@codex, NAME any permissions item," if kind == "rules" else ""
     return Action(None, r, "modified", f"edited since loadout wrote it; --replace{how} "
                   "removes it")
@@ -820,7 +857,13 @@ def row(a: Action) -> Row:
 
 
 def rows(run: Run) -> list[Row]:
-    return list(run.rows) + [row(a) for a in run.actions if _shown(a)]
+    return [r for r, _ in sourced_rows(run)]
+
+
+def sourced_rows(run: Run) -> list[tuple[Row, Action | None]]:
+    """`rows`, each with the action it was read from (None for a row the run states
+    without one: an item switched off, or one that can't be built)."""
+    return [(r, None) for r in run.rows] + [(row(a), a) for a in run.actions if _shown(a)]
 
 
 def covers(scope, a: Action) -> bool:
@@ -841,30 +884,21 @@ def covers(scope, a: Action) -> bool:
 
 # -- applying ------------------------------------------------------------------------------
 
-def apply(run: Run, scope, data: dict, *, keep: int, say=print) -> list[Row]:
+def apply(run: Run, scope, data: dict, *, keep: int, say=print, keeper=None) -> list[Row]:
     """Carry the run's actions in `scope` out: CLI-backed MCP servers first, then one
-    write per file. Updates the ledger's `entries` in `data`. Returns the rows in scope."""
-    todo = [a for a in run.actions if covers(scope, a)
-            and a.op in ("add", "update", "remove", "end", "ok")]
-    # An action on an entry another item writes too follows that item's action; when
-    # that item is out of scope, the first such action in scope is applied in its place.
-    leading = {id(a) for a in todo if a.follows is None}
-    stand_in: dict[int, Action] = {}
-    followers: list[tuple[Action, Action]] = []
-    for a in todo:
-        if a.follows is None:
-            continue
-        if id(a.follows) in leading:
-            followers.append((a, a.follows))
-        elif id(a.follows) in stand_in:
-            followers.append((a, stand_in[id(a.follows)]))
-        else:
-            stand_in[id(a.follows)] = a
-    todo = [a for a in todo if a.follows is None or a in stand_in.values()]
+    write per file. A file written for an action marked `over` is first kept under
+    `displaced/` by `keeper` (a `moxi_loadout.displaced.Keeper`, the run's), and a copy
+    that can't be made stops that write. Updates the ledger's `entries` in `data`.
+    Returns the rows in scope."""
+    if keeper is None:
+        from moxi_loadout.displaced import Keeper
+
+        keeper = Keeper()
+    todo, followers = _todo(run, scope)
     for a in todo:
         if (a.where.kind if a.entry else a.record.get("kind")) == "mcp" \
                 and a.op in ("add", "update", "remove"):
-            _cli(a, run, keep, say)
+            _cli(a, run, keep, say, keeper)
     by_file: dict[str, list[Action]] = {}
     for a in todo:
         kind = a.entry.kind if a.entry else a.record.get("kind")
@@ -882,7 +916,12 @@ def apply(run: Run, scope, data: dict, *, keep: int, say=print) -> list[Row]:
             (a.entry.kind if a.entry else a.record.get("kind")) in ("global-block", "rules",
                                                                     "global-line")
             for a in actions)
-        problem = hz.write(doc, harness, keep, remove_empty=empty) if doc.changed else None
+        copy = None
+        if any(a.over for a in actions):
+            def copy(path, now, harness=harness):
+                keeper.copy(path, harness, now, say=say)
+        problem = hz.write(doc, harness, keep, remove_empty=empty,
+                           keep_copy=copy) if doc.changed else None
         if problem:
             run.lines.append(problem)
             continue
@@ -894,6 +933,28 @@ def apply(run: Run, scope, data: dict, *, keep: int, say=print) -> list[Row]:
     _record(run, data, scope)
     return [row(a) for a in run.actions if covers(scope, a) and _shown(a)] + [
         r for r in run.rows if _row_covered(scope, r)]
+
+
+def _todo(run: Run, scope) -> tuple[list[Action], list[tuple[Action, Action]]]:
+    """The actions `apply` carries out in `scope`, and each follower with the action it
+    takes its result from."""
+    todo = [a for a in run.actions if covers(scope, a)
+            and a.op in ("add", "update", "remove", "end", "ok")]
+    # An action on an entry another item writes too follows that item's action; when
+    # that item is out of scope, the first such action in scope is applied in its place.
+    leading = {id(a) for a in todo if a.follows is None}
+    stand_in: dict[int, Action] = {}
+    followers: list[tuple[Action, Action]] = []
+    for a in todo:
+        if a.follows is None:
+            continue
+        if id(a.follows) in leading:
+            followers.append((a, a.follows))
+        elif id(a.follows) in stand_in:
+            followers.append((a, stand_in[id(a.follows)]))
+        else:
+            stand_in[id(a.follows)] = a
+    return [a for a in todo if a.follows is None or a in stand_in.values()], followers
 
 
 def _row_covered(scope, r: Row) -> bool:
@@ -946,8 +1007,10 @@ def _edit(doc, a: Action) -> None:
         _set(doc, kind, key, e.value)
 
 
-def _cli(a: Action, run: Run, keep: int, say) -> None:
-    """An MCP server through its harness's CLI: remove, then add; read back."""
+def _cli(a: Action, run: Run, keep: int, say, keeper) -> None:
+    """An MCP server through its harness's CLI: remove, then add; read back. An action
+    marked `over` keeps the file under `displaced/` before the CLI runs; a copy that
+    can't be made stops it."""
     from moxi import proc
 
     e, r = a.entry, a.record
@@ -957,7 +1020,15 @@ def _cli(a: Action, run: Run, keep: int, say) -> None:
     exe = shutil.which(harness)
     try:
         if file.exists():
-            hz.backup(file, harness, file.read_bytes(), keep)
+            now = file.read_bytes()
+            if a.over:
+                try:
+                    keeper.copy(file, harness, now, say=say)
+                except OSError as exc:
+                    run.lines.append(f"{harness} mcp {name}: a copy of {file} couldn't be "
+                                     f"kept ({exc.strerror or exc}), so it was not written")
+                    return
+            hz.backup(file, harness, now, keep)
         steps = []
         if a.op in ("update", "remove"):
             steps.append([exe, "mcp", "remove"] + (["--scope", "user"] if harness ==
@@ -1051,28 +1122,69 @@ def _record(run: Run, data: dict, scope) -> None:
     data["entries"] = out
 
 
-# -- the global file, shown ----------------------------------------------------------------
+# -- what a run would write, shown --------------------------------------------------------
 
-def preview(run: Run) -> dict[str, tuple[bytes, bytes]]:
-    """What the next install would make of each global file: `{file: (now, then)}`."""
+#: The kinds of a global file's entries.
+GLOBAL_KINDS = ("global-line", "global-block", "instructions")
+
+
+def preview(run: Run, scope=None, *, files=None) -> dict[str, tuple[bytes, bytes]]:
+    """What applying `run` in `scope` would make of each harness file, `{file: (now,
+    then)}`, worked out as `apply` works it: each action it would carry out there, through
+    `_edit`, on a copy of the planned file. Reads, writes nothing. `then` is `now` for a
+    file nothing changes (`apply` leaves it unwritten) and empty for a text file left
+    empty (`apply` removes it). A file is shown when an action of the run is there: with
+    `files`, each file it names; else each global file. An MCP server its harness's CLI
+    writes is never shown here (`server_entry`). With no `scope`, a whole run's."""
     import copy
 
+    from moxi_loadout.planner import Scope
+
+    todo, _ = _todo(run, Scope() if scope is None else scope)
+    edits = {id(a) for a in todo if a.op in ("add", "update", "remove")}
     out = {}
     for a in run.actions:
         kind = a.entry.kind if a.entry else a.record.get("kind")
-        if kind not in ("global-line", "global-block", "instructions"):
-            continue
         file = a.entry.file if a.entry else a.record.get("file")
+        if kind == "mcp" or (kind not in GLOBAL_KINDS if files is None else file not in files):
+            continue
         doc = run.docs.get(file)
         if doc is None:
             continue
         if file not in out:
             out[file] = (doc.raw or b"", copy.deepcopy(doc))
-        if a.op in ("add", "update", "remove"):
+        if id(a) in edits:
             _edit(out[file][1], a)
-    return {f: (now, d.dumps() if not (d.kind == "text" and d.empty) else b"")
-            for f, (now, d) in out.items()}
+    shown = {}
+    for f, (now, d) in out.items():
+        if not d.changed:
+            shown[f] = (now, now)
+        else:
+            shown[f] = (now, b"" if d.kind == "text" and d.empty else d.dumps())
+    return shown
 
 
-__all__ = ["Entry", "Action", "Run", "wanted", "plan", "rows", "row", "covers", "apply",
-           "preview", "CLI_SECONDS"]
+def server_entry(run: Run, a: Action) -> tuple[object, object]:
+    """An MCP server its harness's CLI writes, as `(found, sent)`: its entry as found in
+    the file the plan read (None when absent), and as `a` would send it (None for a
+    removal). Its file's bytes can't be known before the CLI writes."""
+    where = a.where
+    get = (lambda k: getattr(where, k)) if isinstance(where, Entry) else where.get
+    doc = _doc(run, get("file") or "", "mcp")
+    found = _MISSING if doc is None else _get(doc, "mcp", get("key") or [])
+    sent = a.entry.sent if a.entry is not None and a.op != "remove" else None
+    return (None if found is _MISSING else found), sent
+
+
+def named_by(text: str, a: Action) -> bool:
+    """Whether `--replace text` names `a`'s entry. Reads only."""
+    where = a.where
+    item = where.item if isinstance(where, Entry) else str(where.get("item"))
+    harness = where.harness if isinstance(where, Entry) else where.get("harness")
+    kind, _, name = item.partition(":")
+    return _claimed({text: False}, (kind, name), harness)
+
+
+__all__ = ["NOTE_CODES", "Entry", "Action", "Run", "wanted", "plan", "rows", "sourced_rows", "row",
+           "covers", "apply",
+           "preview", "server_entry", "named_by", "GLOBAL_KINDS", "CLI_SECONDS"]
