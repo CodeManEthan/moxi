@@ -8,7 +8,9 @@ needs projects, so it is refused and was never placed:
   projects.
 - Its items read not placed in the grid and in the counts.
 - The folder says nothing about a commit placing the folder again, which needs repo.
-- A `project/<key>` address opens the whole page with a line at its foot.
+- A `project/<key>` address, or one whose item is gone, opens the whole page with a line
+  at its foot, which stays when the shell places the page again for the address the page
+  wrote in its place.
 - Add offers no project without a section, and says nothing of projects.
 - Install all ends `done, but the section atlas-api still can't be placed`, and its rows
   say why in the page's words.
@@ -16,6 +18,7 @@ needs projects, so it is refused and was never placed:
 
 from __future__ import annotations
 
+import re
 import sys
 
 import page_kit as kit
@@ -77,11 +80,27 @@ def test_without_repo_no_line_says_a_commit_places_them_again(loadout_dir, ui_pa
         "loadout.toml, skills/tidy-notes/SKILL.md")
 
 
-def test_a_project_address_opens_the_whole_page_with_a_line(loadout_dir, ui_page):
-    panel = kit.open_page(ui_page, "project/atlas-api")
-    expect(panel.locator('[data-line="foot"]', has_text="No project is named atlas-api.")).to_be_visible()
+@pytest.mark.parametrize(("route", "line"), [
+    ("project/atlas-api", "No project is named atlas-api."),
+    ("item/user/skill/no-such", "Your items no longer lists the skill no-such."),
+])
+def test_an_address_whose_thing_is_gone_opens_the_whole_page_with_a_line_that_stays(
+        loadout_dir, ui_page, route, line):
+    panel = kit.open_page(ui_page, route)
+    expect(panel.locator('[data-line="foot"]', has_text=line)).to_be_visible()
     expect(panel.locator('[data-part="filter"]')).to_have_count(0)
     expect(panel.locator('[data-group="folder"]')).to_be_visible()
+    expect(ui_page).to_have_url(re.compile(r"/m/loadout/$"))
+    # The shell places the page again for the address the page wrote, as it does when
+    # the modules it reads change: the new page keeps the line.
+    panel.evaluate("element => { element.dataset.before = 'yes'; }")
+    ui_page.evaluate("dispatchEvent(new PopStateEvent('popstate'))")
+    again = ui_page.locator("#moxi-panel > moxi-loadout-page:not([data-before])")
+    expect(again.locator('[data-group="folder"]')).to_be_visible()
+    expect(again.locator('[data-line="foot"]', has_text=line)).to_be_visible()
+    # Opening something takes it away.
+    kit.item_row(again, "skill", "tidy-notes").locator('[data-action="open"]').click()
+    expect(again.locator('[data-line="foot"]', has_text=line)).to_have_count(0)
 
 
 def test_add_offers_no_project_and_says_nothing_of_projects(loadout_dir, ui_page):

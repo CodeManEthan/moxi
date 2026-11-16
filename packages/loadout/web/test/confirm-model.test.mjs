@@ -46,6 +46,24 @@ test("keeps, generated: the edited file kept; the legend; what stays", () => {
   assert.equal(c.canReplace, true);
 });
 
+test("the target and the diff's file lines in ~ form; a generated file where its harness reads it", () => {
+  const view = withRow(fullView(), { name: "code-reviewer", harness: "codex" },
+                       { state: "modified", replaceable: true, target: `${HOME}/.codex/agents/code-reviewer.toml` });
+  const rows = view.rows.filter((r) => r.name === "code-reviewer" && r.harness === "codex");
+  const store = `${HOME}/.local/state/moxi/loadout/generated/codex/code-reviewer.toml`;
+  const diff = `--- ${store}\n+++ ${store}\n@@ -1,2 +1,1 @@\n x\n--- y\n+++ z\n`;
+  const c = confirmView(rows, preview({ target: store, diff, lines: 6 }), view);
+  assert.equal(c.target, "~/.codex/agents/code-reviewer.toml");
+  // A hunk's own lines that look like file lines stay as they are.
+  assert.deepEqual(c.diff, ["--- ~/.codex/agents/code-reviewer.toml", "+++ ~/.codex/agents/code-reviewer.toml",
+                            "@@ -1,2 +1,1 @@", " x", "--- y", "+++ z"]);
+  const entry = withRow(fullView(), { name: "guard-rm", harness: "claude" }, { state: "modified", replaceable: true });
+  const er = entry.rows.filter((r) => r.name === "guard-rm" && r.harness === "claude");
+  const file = `${HOME}/.claude/settings.json`;
+  const e = confirmView(er, preview({ target: file, diff: `--- ${file}\n+++ ${file}\n@@ -1 +1 @@\n-a\n+b\n` }), entry);
+  assert.deepEqual(e.diff.slice(0, 2), ["--- ~/.claude/settings.json", "+++ ~/.claude/settings.json"]);
+});
+
 test("keeps, entry: a copy of the file", () => {
   const view = withRow(fullView(), { name: "guard-rm", harness: "claude" }, { state: "modified", replaceable: true });
   const rows = view.rows.filter((r) => r.name === "guard-rm" && r.harness === "claude");
@@ -90,11 +108,13 @@ test("each optional line only when its fact is set", () => {
   const rr = rules.rows.filter((r) => r.covers !== null);
   assert.deepEqual(confirmView(rr, preview({ others: 1 }), rules).notes, [
     "The whole file is written again, with every rule in it.",
-    "This runs Install for your items, so 1 other changes waiting there are made too."]);
+    "This runs Install for your items, so 1 other change waiting there is made too."]);
   const global = withRow(fullView(), { kind: "global", harness: "codex" }, { state: "modified", replaceable: true });
   const gr = global.rows.filter((r) => r.kind === "global" && r.harness === "codex");
   assert.deepEqual(confirmView(gr, preview({ others: 3 }), global).notes,
                    ["This runs a whole install, so 3 other changes waiting are made too."]);
+  assert.deepEqual(confirmView(gr, preview({ others: 1 }), global).notes,
+                   ["This runs a whole install, so 1 other change waiting is made too."]);
 });
 
 test("an MCP server its CLI writes: the entry's legend", () => {

@@ -4,9 +4,14 @@
 // The address is the route after `/m/loadout/`: `""` nothing open; `item/<section>/<kind>/<name>`
 // an opened item; `global` the global file opened; `kind/<section>/<kind>` a folded kind
 // opened; `add/<kind>/<name>` Add opened on a file no section lists; `add` Add by name;
-// `replace/<section>/<id>` Replace's confirm; `project/<key>` the filtered view. Each part is
-// URI-encoded. One thing is open at a time, and the page writes its address with
-// `history.replaceState`.
+// `replace/<section>/<id>` Replace's confirm; `project/<key>` the filtered view. One thing is
+// open at a time, and the page writes its address with `history.replaceState`.
+//
+// A part keeps letters, digits, `.`, `_`, `~`, `:`, `@` and `-` as they are and writes every
+// other byte of its UTF-8 as `!` and two hex digits (`~/code/app` is `~!2Fcode!2Fapp`). So no
+// address the page writes holds a `%`, which the shell refuses in a path it is asked to load:
+// each one loads when it is reloaded, pasted or opened from a bookmark. A part read back is
+// percent-decoded first, so a link that URI-encodes its parts opens the same thing.
 
 import type { Project, View } from "./feed.ts";
 import { itemsView } from "./items-model.ts";
@@ -26,13 +31,44 @@ export type Address =
 
 export const NOTHING_OPEN: Address = { piece: "page" };
 
-function decoded(parts: readonly string[]): string[] | null {
+/** The bytes a part keeps as they are; the shell loads a path of these and `/`. */
+const KEPT = /^[A-Za-z0-9._~:@-]$/;
+const UTF8 = new TextEncoder();
+
+/** `part` as the address writes it. */
+export function encodePart(part: string): string {
+  let out = "";
+  for (const ch of part) {
+    if (KEPT.test(ch)) out += ch;
+    else for (const byte of UTF8.encode(ch)) out += `!${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+  }
+  return out;
+}
+
+/** The part an address's `text` writes, or null when it writes none. */
+export function decodePart(text: string): string | null {
+  let plain: string;
   try {
-    const out = parts.map((part) => decodeURIComponent(part));
-    return out.some((part) => part === "") ? null : out;
+    plain = decodeURIComponent(text);
   } catch {
     return null;
   }
+  if (!/^(?:[^!]|![0-9A-Fa-f]{2})*$/.test(plain)) return null;
+  const bytes: number[] = [];
+  for (const piece of plain.split(/(![0-9A-Fa-f]{2})/)) {
+    if (piece.startsWith("!")) bytes.push(parseInt(piece.slice(1), 16));
+    else bytes.push(...UTF8.encode(piece));
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+  } catch {
+    return null;
+  }
+}
+
+function decoded(parts: readonly string[]): string[] | null {
+  const out = parts.map(decodePart);
+  return out.some((part) => part === null || part === "") ? null : out as string[];
 }
 
 /** The address a route names; a route naming nothing the page opens is the page. */
@@ -51,7 +87,7 @@ export function parseRoute(route: string): Address {
   return NOTHING_OPEN;
 }
 
-const enc = (...parts: string[]): string => parts.map(encodeURIComponent).join("/");
+const enc = (...parts: string[]): string => parts.map(encodePart).join("/");
 
 /** The route of `address`. */
 export function routeOf(address: Address): string {

@@ -9,12 +9,12 @@ import { FINE } from "./feed.ts";
 import { commandOf } from "./acts-model.ts";
 import { problemsOf } from "./placed-model.ts";
 import type { Problem } from "./placed-model.ts";
-import { harnessWord, homeForm } from "./words.ts";
+import { harnessWord, homeForm, kindWord, namesLine } from "./words.ts";
 
 export interface JobLine {
   command: string;
-  /** `running`, `done`, `done, but the section <name> still can't be placed`, `refused`
-   * or `failed`. */
+  /** `running`, `done`, `done, but the section <name> still can't be placed`, `done, but
+   * <what> still needs you`, `refused` or `failed`. */
   ended: string;
   line: string;
   /** `Show` is offered: the job has lines, or rows not fine. */
@@ -35,7 +35,44 @@ const notFine = (job: Job): Row[] => (job.outcome?.rows ?? []).filter((row) => !
 /** A row's section, for a row the run states for a whole section (`kind` `section`). */
 const sectionOfRow = (row: Row): string | null => row.kind === "section" ? row.name : row.scope;
 
-/** The dim line under the act once its job is read. */
+/** The item an act names, and its section: the id of `install --replace=<id>`, `enable
+ * <id>` or `disable <id>`, with `--user` or `--project=<section>`; null for an act over
+ * whole sections (an Install). */
+function actTarget(argv: readonly string[]): { id: ParsedId; section: string | null } | null {
+  let id: ParsedId | null = null;
+  let section: string | null = null;
+  for (const [at, word] of argv.entries()) {
+    if (word.startsWith("--replace=")) id = parseId(word.slice("--replace=".length));
+    else if (word === "--user") section = "user";
+    else if (word.startsWith("--project=")) section = word.slice("--project=".length);
+    else if (at === 1 && (argv[0] === "enable" || argv[0] === "disable")) id = parseId(word);
+  }
+  return id === null ? null : { id, section };
+}
+
+/** Whether `row` is one the act `target` names: its item (the Codex rules file by any rule
+ * it holds) for its harness, in its section. */
+function actsOn(row: Row, target: { id: ParsedId; section: string | null }, view: View | null): boolean {
+  const { id, section } = target;
+  if (section !== null && (row.scope ?? "user") !== section) return false;
+  if (id.harness !== "*" && row.harness !== id.harness) return false;
+  if (row.kind !== id.kind) return false;
+  const covers = view?.rows.find((r) => r.scope === row.scope && r.kind === row.kind && r.name === row.name
+                                        && r.harness === row.harness)?.covers ?? null;
+  return row.name === id.name || (covers ?? []).includes(id.name);
+}
+
+/** What still needs him after an act that did its own work: `the agent code-reviewer`, `the
+ * section atlas-api`, past three `and <n> more`, with the verb that agrees. */
+function stillNeeds(rows: readonly Row[]): string {
+  const names = [...new Set(rows.map((row) => (row.kind === "section" ? `the section ${row.name}`
+    : `the ${kindWord(row.kind ?? "")} ${row.name}`)))];
+  return `${namesLine(names)} still ${names.length === 1 ? "needs" : "need"} you`;
+}
+
+/** The dim line under the act once its job is read. An act that names one item (Replace,
+ * Turn off, Turn on) and whose own rows ended fine reads `done`, naming what else in its
+ * run still needs him; it reads `refused` only when its own rows were refused. */
 export function jobLine(job: Job, view: View | null): JobLine {
   const command = commandOf((job.argv ?? []).filter((word) => word !== "--json"));
   const rows = notFine(job);
@@ -49,9 +86,12 @@ export function jobLine(job: Job, view: View | null): JobLine {
     const refused = view === null ? new Map<string, Problem>() : refusedProblems(view);
     const sections = [...new Set(rows.map(sectionOfRow))];
     const only = rows.length > 0 && sections.every((s) => s !== null && refused.has(s));
+    const target = actTarget((job.argv ?? []).filter((word) => word !== "--json"));
     if (only) {
       const names = sections.map((s) => refused.get(s as string)!.refused!.name);
       ended = `done, but the section${names.length === 1 ? "" : "s"} ${names.join(", ")} still can't be placed`;
+    } else if (job.exit === 3 && target !== null && rows.length > 0 && !rows.some((row) => actsOn(row, target, view))) {
+      ended = `done, but ${stillNeeds(rows)}`;
     } else {
       ended = job.exit === 2 || job.exit === 3 || job.exit === 75 ? "refused" : "failed";
     }
@@ -92,7 +132,13 @@ export interface KeptLine {
   after: string;
 }
 
-function parseId(id: string | null): { kind: string; name: string; harness: string } | null {
+interface ParsedId {
+  kind: string;
+  name: string;
+  harness: string;
+}
+
+function parseId(id: string | null): ParsedId | null {
   const match = id === null ? null : /^([a-z]+):([^@]+)@([^@]+)$/.exec(id);
   return match === null ? null : { kind: match[1], name: match[2], harness: match[3] };
 }

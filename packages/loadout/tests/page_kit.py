@@ -303,3 +303,29 @@ PAST_THE_EDGE = """() => {
   walk(panel.shadowRoot);
   return {past, scroll: document.documentElement.scrollWidth - edge};
 }"""
+#: At the viewport's width: each word of an item's name line drawn across two lines, each
+#: harness head cut short, the pitch between the first two item lines of Your items, and
+#: how far the first harness column starts from the grid's right edge.
+GRID = """() => {
+  const root = document.querySelector("#moxi-panel > moxi-loadout-page").shadowRoot;
+  const broken = [];
+  for (const name of root.querySelectorAll(".grid .ir .nm")) {
+    for (const node of [name.firstChild, name.querySelector(".k")?.firstChild]) {
+      if (!node || node.nodeType !== Node.TEXT_NODE) continue;
+      for (const word of node.textContent.matchAll(/\\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        const tops = new Set([...range.getClientRects()].map((box) => Math.round(box.top)));
+        if (tops.size > 1) broken.push(word[0]);
+      }
+    }
+  }
+  const cut = [...root.querySelectorAll(".grid .ir.hd .c")].filter((c) => c.scrollWidth > c.clientWidth)
+    .map((c) => c.textContent);
+  const lines = [...root.querySelectorAll('[data-group="user"] .grid .ir[data-item]')];
+  const pitch = Math.round(lines[1].getBoundingClientRect().top - lines[0].getBoundingClientRect().top);
+  const grid = lines[0].getBoundingClientRect();
+  const first = lines[0].querySelector(".c").getBoundingClientRect();
+  return {broken, cut, pitch, columns: Math.round(grid.right - first.left)};
+}"""

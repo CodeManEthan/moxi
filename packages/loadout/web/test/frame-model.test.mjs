@@ -19,7 +19,15 @@ test("the page's state: nothing at first, then Reading…, gone, failed, a probl
   assert.equal(pageState(read({ failure: { why: "no answer from the shell" } }), 0), "failed");
   assert.equal(failedLine("no answer from the shell"), "The page can't be read: no answer from the shell.");
   assert.equal(pageState(read({ value: fullView({ problem: "loadout: loadout.toml line 3: bad" }) }), 0), "problem");
-  assert.equal(pageState(read({ value: fullView({ items: [] }) }), 0), "empty");
+  assert.equal(pageState(read({ value: fullView({ items: [], rows: [] }) }), 0), "empty");
+  // Nothing listed, but what loadout placed is still there: the page, whose Placed says so.
+  const emptied = fullView({ items: [] });
+  emptied.rows = emptied.rows.map((row) => ({ ...row, state: "stale" }));
+  assert.equal(pageState(read({ value: emptied }), 0), "up");
+  const placed = placedView(emptied);
+  assert.ok(placed.problems.length > 0);
+  assert.ok(placed.problems.some((p) => /^The skill tidy-notes is no longer listed and still placed$/.test(p.sentence)
+                                        && p.act?.verb === "install"));
   // A failure after a read keeps the page drawn from what it read.
   assert.equal(pageState(read({ value: fullView(), failure: { why: "x" } }), 0), "up");
 });
@@ -80,10 +88,21 @@ test("with the note set the page says its changes are off, and each act is its c
                "Make the change in the source instead, or put loadout's version back");
 });
 
-test("the foot: the notes other than the homes' note as one line, and why the folder can't be read", () => {
+test("the foot: the notes no item draws, other than the homes' note, a sentence each; why the folder can't be read", () => {
   const note = "the homes differ";
-  assert.deepEqual(footLines(fullView({ notes: [note, "codex: not yet confirmed", "x"], note }), dir()),
-                   ["codex: not yet confirmed x"]);
+  assert.deepEqual(footLines(fullView({ notes: [note, "codex agent x: drops model", "x."], note }), dir()),
+                   ["Codex agent x: drops model.", "X."]);
+  // The trust note and the unconfirmed sentence stand on guard-rm, which the page lists.
+  const trust = "hook guard-rm: codex runs a new hook only once you trust it in codex";
+  const codex = "not yet confirmed by a run: that codex reads hooks.json and rules/loadout.rules as loadout writes them";
+  const opencode = "not yet confirmed by a run: the opencode.json shapes loadout writes (permission, mcp)";
+  const view = fullView({ notes: [trust, codex, opencode, "hook guard-rm: not for opencode, which extends by plugins"] });
+  view.item_notes.push({ kind: "hook", name: "guard-rm", harness: "codex", code: "unconfirmed" });
+  assert.deepEqual(footLines(view, dir()),
+                   ["Not yet confirmed by a run: the opencode.json shapes loadout writes (permission, mcp)."]);
+  // A note on an item the page doesn't list stays at the foot.
+  view.items = view.items.filter((i) => i.name !== "guard-rm");
+  assert.equal(footLines(view, dir()).length, 4);
   assert.deepEqual(footLines(fullView({ notes: [] }),
                              dir({ state: "error", detail: "git didn't answer in time", uncommitted: null })),
                    ["Git didn't answer in time."]);

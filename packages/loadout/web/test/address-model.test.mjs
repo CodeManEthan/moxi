@@ -11,13 +11,18 @@ import { fullView, HOME, withRow } from "./fixtures.mjs";
 const ADDRESSES = [
   ["", { piece: "page" }],
   ["item/user/skill/tidy-notes", { piece: "item", section: "user", kind: "skill", name: "tidy-notes" }],
-  ["item/%2Fw%2Fmy%20app/skill/demo%2Fmoxi-demo", { piece: "item", section: "/w/my app", kind: "skill",
+  ["item/!2Fw!2Fmy!20app/skill/demo!2Fmoxi-demo", { piece: "item", section: "/w/my app", kind: "skill",
                                                      name: "demo/moxi-demo" }],
+  ["item/~!2Fcode!2Fkestrel/agent/api-lead", { piece: "item", section: "~/code/kestrel", kind: "agent", name: "api-lead" }],
+  ["kind/C:!5Cw!5Capp/mcp", { piece: "kind", section: "C:\\w\\app", kind: "mcp" }],
   ["global", { piece: "global" }],
   ["kind/user/agent", { piece: "kind", section: "user", kind: "agent" }],
   ["add/skill/bump-version", { piece: "add", kind: "skill", name: "bump-version" }],
   ["add", { piece: "add", kind: null, name: null }],
-  ["replace/user/agent%3Acode-reviewer%40codex", { piece: "replace", section: "user", id: "agent:code-reviewer@codex" }],
+  ["replace/user/agent:code-reviewer@codex", { piece: "replace", section: "user", id: "agent:code-reviewer@codex" }],
+  ["replace/~!2Fcode!2Fkestrel/permissions:git-reads@codex", { piece: "replace", section: "~/code/kestrel",
+                                                               id: "permissions:git-reads@codex" }],
+  ["project/caf!C3!A9", { piece: "project", key: "café" }],
   ["project/atlas-api", { piece: "project", key: "atlas-api" }],
 ];
 
@@ -29,8 +34,25 @@ test("every address parses from its route and writes it back", () => {
   assert.equal(addressPath({ piece: "global" }), "/m/loadout/global");
 });
 
+test("no address the page writes holds a byte the shell refuses to load", () => {
+  // The shell loads a navigation whose path holds no `%`; a browser keeps these bytes as
+  // they are in a path, and percent-encodes the rest.
+  for (const [route] of ADDRESSES) assert.match(route, /^[A-Za-z0-9._~:@!/-]*$/, route);
+  const odd = { piece: "item", section: "~/a b/100%!x", kind: "skill", name: "q?#" };
+  assert.match(routeOf(odd), /^[A-Za-z0-9._~:@!/-]*$/);
+  assert.deepEqual(parseRoute(routeOf(odd)), odd);
+});
+
+test("a route whose parts are URI-encoded opens the same thing", () => {
+  assert.deepEqual(parseRoute("replace/user/agent%3Acode-reviewer%40codex"),
+                   { piece: "replace", section: "user", id: "agent:code-reviewer@codex" });
+  assert.deepEqual(parseRoute("item/~%2Fcode%2Fkestrel/skill/review-diff"),
+                   { piece: "item", section: "~/code/kestrel", kind: "skill", name: "review-diff" });
+});
+
 test("a route naming nothing the page opens is the page", () => {
-  for (const route of ["item/user/skill", "nonsense", "item//skill/x", "project/%E0%A4%A", "global/x", "add/skill"]) {
+  for (const route of ["item/user/skill", "nonsense", "item//skill/x", "project/%E0%A4%A", "global/x", "add/skill",
+                       "project/a!2", "project/!ZZ", "project/!C3"]) {
     assert.deepEqual(parseRoute(route), { piece: "page" }, route);
   }
 });
@@ -49,8 +71,8 @@ test("an address whose item is gone opens nothing, with a dim line", () => {
   assert.equal(gone("item/user/skill/gone"), "Your items no longer lists the skill gone.");
   assert.equal(gone("kind/atlas-api/mcp"), "atlas-api lists no mcp servers now.");
   assert.equal(gone("kind/user/skill"), null);
-  assert.equal(gone("replace/user/agent%3Acode-reviewer%40codex"), null);
-  assert.equal(gone("replace/user/agent%3Acode-reviewer%40claude"), "Nothing at agent:code-reviewer@claude needs Replace now.");
+  assert.equal(gone("replace/user/agent:code-reviewer@codex"), null);
+  assert.equal(gone("replace/user/agent:code-reviewer@claude"), "Nothing at agent:code-reviewer@claude needs Replace now.");
   assert.equal(gone("add/skill/bump-version", new Set(["skill/bump-version"])), null);
   assert.equal(gone("add/skill/bump-version", new Set()), "bump-version is no longer a file no section lists.");
   assert.equal(gone("project/nope", null, [{ key: "atlas-api", root: "/r" }]), "No project is named nope.");

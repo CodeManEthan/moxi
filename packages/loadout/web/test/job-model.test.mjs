@@ -50,6 +50,33 @@ test("done, but a section that still can't be placed, when that is all that isn'
   assert.equal(jobLine(more, view).ended, "refused");
 });
 
+test("an act on one item that did its work reads done, naming what else still needs him", () => {
+  const view = fullView();
+  const edited = plain({ kind: "agent", name: "code-reviewer", harness: "codex", state: "modified" });
+  const replace = job({ argv: ["install", "--replace=hook:guard-rm@claude", "--user", "--json"], exit: 3 },
+                      { rows: [plain({ kind: "hook", name: "guard-rm" }), edited] });
+  assert.equal(jobLine(replace, view).line,
+               "moxi loadout install --replace=hook:guard-rm@claude --user: done, but the agent code-reviewer still needs you");
+  assert.equal(jobLine(replace, view).hasMore, true);
+  const off = job({ argv: ["disable", "skill:tidy-notes@codex", "--user"], exit: 3 },
+                  { rows: [plain({ harness: "codex", state: "off" }), edited,
+                           plain({ name: "release-checklist", state: "missing" })] });
+  assert.equal(jobLine(off, view).ended, "done, but the agent code-reviewer and the skill release-checklist still need you");
+  // Its own row refused: refused.
+  const own = job({ argv: ["install", "--replace=agent:code-reviewer@codex", "--user"], exit: 3 }, { rows: [edited] });
+  assert.equal(jobLine(own, view).ended, "refused");
+  const every = job({ argv: ["enable", "agent:code-reviewer@*", "--user"], exit: 3 }, { rows: [edited] });
+  assert.equal(jobLine(every, view).ended, "refused");
+  // The same item in another section is not the act's own.
+  const elsewhere = job({ argv: ["disable", "agent:code-reviewer@codex", "--project=atlas-api"], exit: 3 },
+                        { rows: [edited] });
+  assert.equal(jobLine(elsewhere, view).ended, "done, but the agent code-reviewer still needs you");
+  // An Install names no item: refused as before.
+  assert.equal(jobLine(job({ exit: 3 }, { rows: [edited] }), view).ended, "refused");
+  // A usage refusal is no run's.
+  assert.equal(jobLine(job({ argv: ["disable", "skill:tidy-notes@codex"], exit: 2 }), view).ended, "refused");
+});
+
 test("Show: rows in Placed's words, a section by its cause, never the install hint", () => {
   const view = small();
   const ended = job({ exit: 3, lines: [`refused: ${LINE}`] }, {

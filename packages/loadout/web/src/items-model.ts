@@ -71,7 +71,7 @@ export interface GroupView {
   /** The kinds, when the group lists more than `FOLD_PAST` items; else null. */
   kinds: KindRow[] | null;
   global: GlobalRow | null;
-  /** `It lists no item.` for a group with no item, else null. */
+  /** `It lists no item.` for a group with no item and no global file row, else null. */
   empty: string | null;
 }
 
@@ -213,7 +213,7 @@ function group(key: string, label: string, section: ViewSection, module: string 
   const kinds = rows.length > FOLD_PAST ? foldKinds(rows, harnesses) : null;
   const count = counted(rows.length + (global === null ? 0 : 1), "item");
   return { key, label, count, section, module, rows, kinds, global,
-           empty: rows.length === 0 ? "It lists no item." : null };
+           empty: rows.length === 0 && global === null ? "It lists no item." : null };
 }
 
 /**

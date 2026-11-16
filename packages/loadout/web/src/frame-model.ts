@@ -4,6 +4,7 @@
 // DOM, so the Node tests read it.
 
 import type { SourceDir, View } from "./feed.ts";
+import { FINE } from "./feed.ts";
 import { commandOf } from "./acts-model.ts";
 import { actArgv } from "./placed-model.ts";
 import type { Problem, ProblemAct } from "./placed-model.ts";
@@ -24,8 +25,10 @@ export const COPIED = "Copied";
 export const COPIED_MS = 1500;
 
 /** What the page draws: nothing yet, `Reading…`, `loadout is no longer installed.`, the
- * view's `problem` in the first group's place, the empty state, or the page. A read that
- * failed with nothing read before is `failed`. */
+ * view's `problem` in the first group's place, the empty state (no item listed and no row
+ * to act on), or the page, which with no item listed still shows in Placed what loadout
+ * placed and no section lists now. A read that failed with nothing read before is
+ * `failed`. */
 export type PageState = "waiting" | "reading" | "gone" | "failed" | "problem" | "empty" | "up";
 
 /** The view feed as the page holds it. */
@@ -44,7 +47,7 @@ export function pageState(read: ViewRead, waitedMs: number): PageState {
     return "failed";
   }
   if (view.problem !== null) return "problem";
-  return view.items.length === 0 ? "empty" : "up";
+  return view.items.length === 0 && view.rows.every((row) => FINE.has(row.state)) ? "empty" : "up";
 }
 
 /** The line a view that never read shows. */
@@ -118,13 +121,30 @@ export function noteGroup(view: View): NoteGroup | null {
            note: view.note, last: "Or run each change in a terminal." };
 }
 
-/** The dim lines at the page's foot: the view's notes other than the homes' note, as one
- * line, and the folder read's failure. */
+/** `text` as a sentence: its first letter capital, and a stop at its end. */
+const sentence = (text: string): string => `${text[0].toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
+
+/** The run's sentence that no run has confirmed what loadout writes for a harness begins so. */
+const UNCONFIRMED = "not yet confirmed by a run:";
+
+/** Whether `note`, one of the view's notes, is drawn on an item already: the run's sentence
+ * about one item (`hook guard-rm: …`), or the sentence that no run has confirmed a harness,
+ * when an item the page lists carries the note (`item_notes`) that stands beside it. */
+function onAnItem(note: string, view: View): boolean {
+  return view.item_notes.some((n) => view.items.some((i) => i.scope === "user" && i.kind === n.kind && i.name === n.name)
+    && (n.code === "unconfirmed" ? note.startsWith(UNCONFIRMED) && note.includes(n.harness)
+      : note.startsWith(`${n.kind} ${n.name}: `)));
+}
+
+/** The dim lines at the page's foot: each of the view's notes that the page doesn't draw on
+ * an item, other than the homes' note, a line each as a sentence; and the folder read's
+ * failure. */
 export function footLines(view: View | null, dir: SourceDir | null): string[] {
   const out: string[] = [];
-  const notes = (view?.notes ?? []).filter((note) => note !== view?.note);
-  if (notes.length > 0) out.push(notes.join(" "));
-  if (dir !== null && dir.state !== "ok" && dir.detail) out.push(`${dir.detail[0].toUpperCase()}${dir.detail.slice(1)}.`);
+  for (const note of view?.notes ?? []) {
+    if (note !== "" && note !== view?.note && !onAnItem(note, view!)) out.push(sentence(note));
+  }
+  if (dir !== null && dir.state !== "ok" && dir.detail) out.push(sentence(dir.detail));
   return out;
 }
 

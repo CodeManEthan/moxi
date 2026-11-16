@@ -11,9 +11,9 @@
 //   section: one row per item and a column per harness of the harness table, each row
 //   with `Open`; past twelve items a section folds by kind, and a kind opens in place with
 //   its items. The global file is Your items' last row.
-// - `Not listed`, while the folder has a skill or agent file no section lists: each with
-//   Add, which opens in place with its section picker and `Add and place`, and from there
-//   Add by name.
+// - `Not listed`: each skill or agent file in the folder that no section lists, with Add,
+//   which opens in place with its section picker and `Add and place`; and Add by name,
+//   always, under an opened Add or at the group's foot.
 // - The dim foot lines: the view's notes, why the folder can't be read, and the line for an
 //   address whose item is gone.
 //
@@ -121,6 +121,11 @@ interface Sent {
   after: Address | null;
 }
 
+/** The foot line for an address whose thing is gone, and the address the page wrote in its
+ * place. The shell may place the page again for that address, as a new element; the line
+ * stays on it until he opens something or an act ends. */
+let goneHeld: { at: Address; line: string } | null = null;
+
 /** A fresh job id for one press. */
 const freshJob = (): string => jobId(crypto.getRandomValues(new Uint8Array(16)));
 
@@ -167,15 +172,18 @@ const STYLES = css`
   .counts { padding-top: 14px; }
   .cmd { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding-top: 2px; }
 
-  /* The item grid: a line per item, the name, a fixed column per harness, then Open. */
-  .ir { display: flex; align-items: baseline; gap: 12px; padding: 4px 0; }
-  .ir.hd { color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; padding: 0 0 6px; }
+  /* A line with a name and its act at the right (Not listed). In the item grid, as drawn:
+     the name, a 94 px column per harness (--h of them), then Open in 44 px, a line every
+     34 px. The kind word wraps whole, never inside itself. */
+  .ir { display: flex; align-items: baseline; gap: 12px; padding: 7px 0; }
+  .grid .ir { display: grid; grid-template-columns: minmax(0, 1fr) repeat(var(--h, 3), 94px) 44px; gap: 0; }
+  .ir.hd { color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; padding: 0 0 4px; }
   .ir .nm { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-  .ir .nm .k { margin-left: 8px; }
+  .ir .nm .k { display: inline-block; margin-left: 8px; overflow-wrap: normal; }
   .ir .c { flex: 0 0 94px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ir .c.k { font-variant-numeric: tabular-nums; }
   .ir .o { flex: 0 0 44px; text-align: right; font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
-  .two { margin-top: -4px; padding-bottom: 4px; font-size: 13px; line-height: 18px; }
+  .two { margin-top: -7px; padding-bottom: 7px; font-size: 13px; line-height: 18px; }
   .kopen { border-top: 1px solid var(--moxi-border); border-bottom: 1px solid var(--moxi-border); margin: 3px 0 5px;
            padding: 2px 0 3px; }
 
@@ -207,6 +215,8 @@ const STYLES = css`
   .pick { font: inherit; color: var(--moxi-text); background: none; border: 1px solid var(--moxi-border);
           border-radius: 7px; padding: 3px 9px; max-width: 100%; }
   .ir .o.add { color: var(--moxi-text); }
+  .byname { padding: 4px 0; }
+  .ir + .byname { padding-top: 6px; }
   .cf .q { font-size: 14px; line-height: 20px; font-weight: 600; padding-bottom: 4px; }
   .cf .btns { display: flex; gap: 18px; align-items: center; padding: 10px 0 2px; }
   .btn { font-size: 14px; line-height: 20px; color: var(--moxi-text); border: 1px solid var(--moxi-border);
@@ -254,7 +264,12 @@ const STYLES = css`
     .grp .gk .n { display: inline; margin-left: 8px; }
     .grp .gk .pl { display: inline; margin-left: 8px; }
     .ir { gap: 8px; }
-    .ir .c { flex-basis: 72px; font-size: 13px; }
+    /* Narrow, an item's name takes its own line, so no word of it breaks, and the cells
+       share the line under it; the head row keeps only the harnesses. */
+    .grid .ir { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+    .grid .ir .nm { flex: 1 0 100%; }
+    .grid .ir.hd .nm { display: none; }
+    .grid .ir .c { flex: 1 1 0; font-size: 13px; }
     .det .r { grid-template-columns: 76px minmax(0, 1fr) auto; gap: 0 10px; }
     .det .foot { padding-left: 86px; }
     .cf.in { margin-left: 0; }
@@ -374,9 +389,10 @@ export class LoadoutPage extends LitElement {
 
   protected willUpdate(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("route")) {
-      this.#goneSaid = null;
-      this.#fromRoute = true;
       const address = parseRoute(this.route);
+      // The address the page wrote for a gone one, given back: its line stays.
+      this.#goneSaid = goneHeld !== null && sameAddress(address, goneHeld.at) ? goneHeld.line : null;
+      this.#fromRoute = true;
       this.#filter = address.piece === "project" ? address.key : null;
       this.#menu = false;
       if (this.#filter !== null) this.#readProjects();
@@ -389,9 +405,9 @@ export class LoadoutPage extends LitElement {
     if (this.#filter !== null && listed !== null && read !== null) {
       const gone = goneLine({ piece: "project", key: this.#filter }, read, [], null, listed);
       if (gone !== null) {
-        this.#goneSaid = gone;
         this.#filter = null;
         this.#setAt(this.#at.piece === "project" ? NOTHING_OPEN : this.#at);
+        this.#sayGone(gone);
       }
     }
     // An address whose item is gone opens the page with nothing open, and says so; an
@@ -404,11 +420,18 @@ export class LoadoutPage extends LitElement {
       const unlisted = dir === null ? null : new Set(notListed(dir, view).map((row) => row.key));
       const gone = goneLineOf(this.#at, view, problemsOf(view), unlisted);
       if (gone !== null) {
-        if (this.#fromRoute) this.#goneSaid = gone;
         this.#setAt(NOTHING_OPEN);
+        if (this.#fromRoute) this.#sayGone(gone);
       }
       this.#fromRoute = false;
     }
+  }
+
+  /** Shows `line` at the foot for the address just left, gone, and holds it for the
+   * address written in its place. */
+  #sayGone(line: string): void {
+    this.#goneSaid = line;
+    goneHeld = { at: this.#at, line };
   }
 
   #readAll(): void {
@@ -450,6 +473,7 @@ export class LoadoutPage extends LitElement {
     address = this.#rest(address);
     if (sameAddress(address, this.#at)) return;
     this.#goneSaid = null;
+    goneHeld = null;
     this.#fromRoute = false;
     this.#setAt(address);
     this.requestUpdate();
@@ -550,6 +574,8 @@ export class LoadoutPage extends LitElement {
       this.#jobTimer = setTimeout(() => { void feed.refresh(); }, JOB_POLL_MS);
     } else {
       this.#jobEnded = true;
+      this.#goneSaid = null;
+      goneHeld = null;
       // A job that may still run stays kept, so a reload tries it again.
       if (state !== "running" || refusal !== null) keep(null);
       if (running !== null) {
@@ -844,7 +870,8 @@ export class LoadoutPage extends LitElement {
     const openKindHere = group.kinds === null ? null : openKind(ctx.openAt ?? this.#at, scope);
     return html`<section class="grp" data-group=${group.key}><div class="gk"><span data-line="label">${label}</span>
       <span class="n" data-line="count">${count}</span>${link}</div><div class="gl">
-      ${group.empty !== null ? html`<p class="d" data-line="empty">${group.empty}</p>` : html`<div class="grid">
+      ${group.empty !== null ? html`<p class="d" data-line="empty">${group.empty}</p>` : html`<div class="grid"
+        style=${`--h: ${harnesses.length}`}>
         ${head ? html`<div class="ir hd"><span class="nm"></span>${harnesses.map((harness) => html`<span class="c"
           data-harness=${harness}>${harnessWord(harness)}</span>`)}<span class="o"></span></div>` : nothing}
         ${group.kinds !== null
@@ -1005,11 +1032,15 @@ export class LoadoutPage extends LitElement {
 
   // -- Not listed and Add ------------------------------------------------------------------------
 
+  /** Not listed: each file no section lists, with Add, and Add by name, which is always
+   * there: it lists what no file in the folder shows (a hook, a permission rule, an MCP
+   * server, or an item another section lists). Its line sits under an opened Add, else
+   * at the group's foot. */
   #notListed(ctx: Ctx, dir: SourceDir | null) {
     const rows = notListed(dir, ctx.view);
     const at = this.#at;
     const byName = at.piece === "add" && at.kind === null;
-    if (rows.length === 0 && !byName) return nothing;
+    const addOpen = at.piece === "add" && rows.some((row) => at.kind === row.kind && at.name === row.name);
     const picker = pickerOf(ctx.view, this.#projects?.value ?? null);
     return html`<section class="grp" data-group="unlisted"><div class="gk">Not listed</div><div class="gl">
       ${rows.map((row) => {
@@ -1020,7 +1051,7 @@ export class LoadoutPage extends LitElement {
             open ? "Close" : "Add"}</button></div>
           ${open ? this.#addOpen(row, picker, ctx) : nothing}`;
       })}
-      ${byName ? this.#addByName(picker, ctx) : nothing}
+      ${byName ? this.#addByName(picker, ctx) : addOpen ? nothing : html`<div class="line byname">${this.#byNameButton()}</div>`}
     </div></section>`;
   }
 
@@ -1055,9 +1086,13 @@ export class LoadoutPage extends LitElement {
       <div class="r"><span class="k">Add to</span><span class="f">${this.#picker(picker)}</span><span></span></div>
       <div class="r"><span class="k">From</span><span class="f" data-line="from">${row.from.replace(/^From /, "")}</span><span></span></div>
       ${this.#addButtons(act, ctx)}
-      <div class="foot"><button type="button" class="act d" data-action="by-name"
-        @click=${() => this.#open({ piece: "add", kind: null, name: null })}>${BY_NAME}</button></div>
+      <div class="foot">${this.#byNameButton()}</div>
     </div>`;
+  }
+
+  #byNameButton() {
+    return html`<button type="button" class="act d" data-action="by-name"
+      @click=${() => this.#open({ piece: "add", kind: null, name: null })}>${BY_NAME}</button>`;
   }
 
   #addByName(picker: Picker, ctx: Ctx) {

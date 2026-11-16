@@ -111,6 +111,20 @@ function staysOf(rows: readonly ViewRow[], form: Form, view: View, target: strin
   return target === null ? null : `Stays everything else in ${target}`;
 }
 
+/** `lines`, a unified diff, with the paths of each file's `---` and `+++` lines (those
+ * just before a hunk) as `name` gives them. */
+function headersNamed(lines: string[], name: (path: string) => string): string[] {
+  return lines.map((line, at) => {
+    if (line.startsWith("--- ") && lines[at + 1]?.startsWith("+++ ") && lines[at + 2]?.startsWith("@@")) {
+      return `--- ${name(line.slice(4))}`;
+    }
+    if (line.startsWith("+++ ") && lines[at - 1]?.startsWith("--- ") && lines[at + 1]?.startsWith("@@")) {
+      return `+++ ${name(line.slice(4))}`;
+    }
+    return line;
+  });
+}
+
 /**
  * The confirm for a Replace of `rows` (the rows its id names, in one section), with the
  * preview's answer. Before the preview answers, `preview` is null: the question shows and
@@ -126,7 +140,11 @@ export function confirmView(rows: readonly ViewRow[], preview: ReplacePreview | 
     return { question, ...empty, scope, canReplace: false };
   }
   const keptIn = homeForm(preview.kept_in ?? "", view.home);
-  const target = preview.target === null ? null : homeForm(preview.target, view.home);
+  // A generated file is named where its harness reads it, as the opened item names it,
+  // not where loadout's store holds it.
+  const named = (path: string): string => homeForm(form === "generated" && path === preview.target && row.target !== null
+    ? row.target : path, view.home);
+  const target = preview.target === null ? null : named(preview.target);
   const until = `${keptIn}, where it stays until you delete it.`;
   let what: string;
   if (preview.case === "moves") what = `Moves ${movesWhat(row)} to ${until}`;
@@ -138,9 +156,11 @@ export function confirmView(rows: readonly ViewRow[], preview: ReplacePreview | 
   }
   if (form === "rules") notes.push("The whole file is written again, with every rule in it.");
   if (preview.others > 0) {
+    const others = preview.others === 1 ? "1 other change waiting" : `${preview.others} other changes waiting`;
+    const made = preview.others === 1 ? "is made too" : "are made too";
     notes.push(scope !== null && "whole" in scope
-      ? `This runs a whole install, so ${preview.others} other changes waiting are made too.`
-      : `This runs Install for ${sectionInLine(row.scope ?? "user", view)}, so ${preview.others} other changes waiting there are made too.`);
+      ? `This runs a whole install, so ${others} ${made}.`
+      : `This runs Install for ${sectionInLine(row.scope ?? "user", view)}, so ${others} there ${made}.`);
   }
   for (const skipped of preview.skipped) {
     notes.push(`Not shown here: ${homeForm(skipped.path, view.home)} (${SKIPPED_WORDS[skipped.why] ?? skipped.why})`);
@@ -150,7 +170,7 @@ export function confirmView(rows: readonly ViewRow[], preview: ReplacePreview | 
     : preview.case === "moves" && row.form === "copy"
       ? "lines with − are in the copy now, lines with + are your folder's"
       : "lines with − are in the file now, lines with + are what loadout writes";
-  const all = preview.diff === "" ? [] : preview.diff.replace(/\n$/, "").split("\n");
+  const all = headersNamed(preview.diff === "" ? [] : preview.diff.replace(/\n$/, "").split("\n"), named);
   return { question, what, notes, target, legend, diff: all.slice(0, DIFF_SHOWN), more: all.slice(DIFF_SHOWN),
            showAll: all.length > DIFF_SHOWN ? `Show all ${preview.lines} lines` : null,
            stays: staysOf(rows, form, view, target), scope, canReplace: true };

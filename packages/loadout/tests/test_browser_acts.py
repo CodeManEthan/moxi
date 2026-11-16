@@ -7,12 +7,16 @@ real page server, whose acts run as real page jobs, each test on a fresh seeded 
   and an entry edited in a harness's file (the whole file kept). Each copy lies under
   the home's `displaced/`, byte-equal to what was there, and is named under the act with
   the command that puts it back, which, run as given, does.
-- Add from Not listed; Turn off and on for one harness; Turn on for every harness.
+- Add from Not listed, and Add by name with nothing unlisted; Turn off and on for one
+  harness; Turn on for every harness.
+- Every address the page writes (an item in a section named by its path, Replace's
+  confirm, Add, the global file, the filtered view) loads by navigation.
 - The global mode, and Turn off through its confirm, where Cancel sends nothing.
 - Every control off while a job runs and after a reload; an interrupted job; a job whose
   read is refused.
-- At 1280 and 400 px, in light and dark: nothing past the edge, no heading, and no colour
-  but the text tokens (no accent, no warning colour).
+- At 1280 and 400 px, in light and dark: nothing past the edge, no heading, no colour but
+  the text tokens (no accent, no warning colour), no word of an item's line broken, and at
+  1280 the grid's drawn pitch and columns.
 
 After each act, every harness file loadout names lies under the shell's home.
 """
@@ -20,8 +24,10 @@ After each act, every harness file loadout names lies under the shell's home.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -149,7 +155,6 @@ def test_replace_of_an_edited_entry_keeps_the_whole_harness_file(world):
     group["hooks"][0]["timeout"] = 5
     settings.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
     edited = settings.read_bytes()
-    kit.take_back_edit(world.shell)
     panel = kit.open_page(world.page)
     changed = problem(panel, "The hook guard-rm was changed by hand")
     changed.locator('[data-action="replace"]').click()
@@ -157,7 +162,10 @@ def test_replace_of_an_edited_entry_keeps_the_whole_harness_file(world):
     expect(confirm.locator('[data-line="what"]')).to_contain_text(
         f"a copy of ~/{settings.relative_to(world.home).as_posix()} as it is now in")
     confirm.locator('[data-action="confirm-replace"]').click()
-    kit.job_line(panel, "moxi loadout install --replace=hook:guard-rm@claude --user: done")
+    # The run over Your items leaves the edited agent file, which still needs him; the
+    # Replace itself did its work.
+    kit.job_line(panel, "moxi loadout install --replace=hook:guard-rm@claude --user: done, but "
+                        "the agent code-reviewer still needs you")
     [copy] = kit.displaced(world.home, settings.name)
     assert copy.read_bytes() == edited
     assert "timeout" not in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["PreToolUse"][0]["hooks"][0]
@@ -176,9 +184,89 @@ def test_add_from_not_listed_lists_the_skill_and_places_it(world):
     kit.job_line(panel, "moxi loadout add skill bump-version: done")
     for harness in ("claude", "codex", "opencode"):
         expect(kit.cell(panel, "skill", "bump-version", harness)).to_have_text("placed")
-    expect(unlisted).to_have_count(0)
+    expect(unlisted.locator(".ir")).to_have_count(0)
     assert '"bump-version"' in (world.dir / "loadout.toml").read_text(encoding="utf-8")
     written_under_home(world.shell)
+
+
+def test_add_by_name_is_there_with_nothing_unlisted_and_lists_an_item_in_another_section(world):
+    shutil.rmtree(world.dir / "skills" / "bump-version")
+    panel = kit.open_page(world.page)
+    unlisted = panel.locator('[data-group="unlisted"]')
+    expect(unlisted.locator('[data-action="by-name"]')).to_have_text(
+        "Add something by its name instead")
+    expect(unlisted.locator(".ir")).to_have_count(0)
+    unlisted.locator('[data-action="by-name"]').click()
+    add = panel.locator('[data-part="add"]')
+    add.get_by_label("Kind").select_option("skill")
+    add.get_by_label("Name").fill("tidy-notes")
+    add.get_by_label("Add to").select_option("atlas-api")
+    add.locator('[data-action="confirm-add"]').click()
+    kit.job_line(panel, "moxi loadout add skill tidy-notes --project=atlas-api: done")
+    for harness in ("claude", "codex", "opencode"):
+        expect(kit.cell(panel, "skill", "tidy-notes", harness, "atlas-api")).to_have_text("placed")
+    # Add closed; its line is there again.
+    expect(unlisted.locator('[data-action="by-name"]')).to_be_visible()
+    toml = tomllib.loads((world.dir / "loadout.toml").read_text(encoding="utf-8"))
+    assert toml["project"]["atlas-api"]["skills"] == ["release-checklist", "tidy-notes"], toml
+    written_under_home(world.shell)
+
+
+def reloaded(page, path: str):
+    """loadout's page loaded at `path` by navigation, as a reload, a pasted address or a
+    bookmark loads it."""
+    assert "%" not in path, path
+    answer = page.goto(path)
+    assert answer is not None and answer.status == 200, (path, answer and answer.status)
+    panel = page.locator("#moxi-panel > moxi-loadout-page")
+    expect(panel.locator('[data-part="groups"]')).to_be_visible()
+    return panel
+
+
+def test_every_address_the_page_writes_loads_by_navigation(world):
+    # A section named by its path, beside the key section.
+    (world.home / "code" / "kestrel").mkdir(parents=True)
+    with (world.dir / "loadout.toml").open("a", encoding="utf-8") as fh:
+        fh.write('\n[project."~/code/kestrel"]\nskills = ["review-diff"]\n')
+    page = world.page
+    path = "~/code/kestrel"
+    panel = kit.open_page(page)
+
+    def written() -> str:
+        return page.evaluate("location.pathname")
+
+    # An item in the path section.
+    kit.item_row(panel, "skill", "review-diff", path).locator('[data-action="open"]').click()
+    expect(panel.locator('[data-part="opened"]')).to_be_visible()
+    panel = reloaded(page, written())
+    expect(panel.locator(f"[data-part='opened'][data-item='{kit.item_key('skill', 'review-diff', path)}']")
+           ).to_be_visible()
+    # Replace's confirm.
+    problem(panel, "The agent code-reviewer was changed by hand").locator(
+        '[data-action="replace"]').click()
+    expect(panel.locator('[data-part="confirm"]')).to_be_visible()
+    assert written() == "/m/loadout/replace/user/agent:code-reviewer@codex"
+    panel = reloaded(page, written())
+    expect(panel.locator('[data-part="confirm"] [data-line="question"]')).to_have_text(
+        "Put loadout's version of code-reviewer back for Codex?")
+    # Add on a file, and Add by name.
+    panel.locator('[data-group="unlisted"] [data-action="add"]').click()
+    expect(panel.locator('[data-part="add"] [data-line="from"]')).to_be_visible()
+    panel = reloaded(page, written())
+    expect(panel.locator('[data-part="add"] [data-line="from"]')).to_have_text(
+        "~/my-loadout/skills/bump-version")
+    panel.locator('[data-action="by-name"]').click()
+    expect(panel.locator('[data-part="add"]').get_by_label("Name")).to_be_visible()
+    panel = reloaded(page, written())
+    expect(panel.locator('[data-part="add"]').get_by_label("Name")).to_be_visible()
+    # The global file, an item of Your items, and the filtered view.
+    for route, shown in (("global", '[data-part="opened"][data-item="global"]'),
+                         ("item/user/hook/guard-rm",
+                          f"[data-part='opened'][data-item='{kit.item_key('hook', 'guard-rm')}']"),
+                         ("project/atlas-api", '[data-part="filter"]')):
+        panel = reloaded(page, f"/m/loadout/{route}")
+        expect(panel.locator(shown)).to_be_visible()
+        assert written() == f"/m/loadout/{route}"
 
 
 def test_turn_off_and_on_for_one_harness(world):
@@ -321,5 +409,11 @@ def test_both_widths_in_both_themes_draw_only_text_colours_and_no_heading(world,
         for width in (1280, 400):
             page.set_viewport_size({"width": width, "height": 900})
             assert page.evaluate(kit.PAST_THE_EDGE) == {"past": [], "scroll": 0}, (scheme, width)
+            grid = page.evaluate(f"({kit.GRID})()")
+            # No word of a name or kind breaks, and each harness head reads whole.
+            assert grid["broken"] == [] and grid["cut"] == [], (scheme, width, grid)
+            if width == 1280:
+                # As drawn: a line every 34 px, three 94 px columns and Open's 44 px.
+                assert grid["pitch"] == 34 and grid["columns"] == 3 * 94 + 44, grid
     assert len(texts) == 2, f"the text colour is the same in both themes: {texts}"
     ui_width_check(page, module="loadout")
