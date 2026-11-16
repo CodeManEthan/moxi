@@ -619,7 +619,7 @@ def test_both_links_land(on_both, moment):
         panel = open_page(page, moment)
         panel.get_by_role("link", name="Cache settings").click()
         expect(page).to_have_url(re.compile(r"/m/ui/settings/cache$"))
-        expect(page.locator("#moxi-panel > moxi-ui-page section.card[data-module=cache]")).to_be_visible()
+        expect(page.locator("#moxi-panel > moxi-ui-page moxi-ui-settings [data-part=pane][data-module=cache]")).to_be_visible()
         return steps
 
     on_both(walk)

@@ -1,42 +1,28 @@
 // <moxi-ui-page>: the shell's own panel. With `route` "" it is Home, drawn by
 // <moxi-ui-home>. With `route` "modules" it is the modules view: every module's block
 // that asks for home and has no seat on Home, then every installed module with its state,
-// its page and its components, and a Check that shows the doctor's rows for it, then the
-// Gateway section that pairs a phone. With `route` "settings"
-// (or "settings/<module>" for one module) it is the settings view: a section per module
-// drawn by <moxi-ui-form>, each change written through `moxi config` by the shell.
+// its page and its components, and a Check that shows the doctor's rows for it. With
+// `route` "settings" or under it, it is the Settings page, drawn by <moxi-ui-settings>,
+// where ui's Phone group pairs a phone.
 //
-// On the phone it leaves out what only the desk reaches: Check, the Gateway section and
-// the settings, whose routes the gateway doesn't serve. The views carry no title of their
-// own: the shell's top line names the page.
+// On the phone it leaves out what only the desk reaches: Check and the Settings page,
+// whose routes the gateway doesn't serve. The views carry no title of
+// their own: the shell's top line names the page.
 //
 // It reads only the shell's own routes and topics, through client.js. The shell places a
 // new element for each navigation, so `route` is read once.
 
 import { css, html, LitElement, nothing } from "lit";
 import type { PropertyValues } from "lit";
-import { api, components, gateway, installed, navigate, place, setTheme, subscribe } from "/m/ui/client.js";
-import type { FieldDescriptor, FormChange, FormElement, ThemeMode } from "/m/ui/client.js";
+import { api, components, gateway, installed, navigate, place, subscribe } from "/m/ui/client.js";
 
-import "./gateway-desk.ts";
 import "./home.ts";
+import "./settings.ts";
 import { placeOnceMore, scriptFailure } from "./place-model.ts";
 import { doctorRows, homeBlocks, moduleLines, moduleOrder, moduleState } from "./views.ts";
 import type { DoctorRow, ModuleView } from "./views.ts";
 
 const TAG = "moxi-ui-page";
-const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const CORE = "moxi";
-const MODES: readonly string[] = ["system", "light", "dark"];
-
-interface Section {
-  module: string;
-  keys: FieldDescriptor[];
-  error: string | null;
-  fix: string | null;
-  readonly: boolean;
-}
-
 interface Check {
   busy: boolean;
   rows: DoctorRow[];
@@ -94,7 +80,6 @@ const STYLES = css`
   ul.rows li.fail { border-left-color: var(--moxi-error); }
   ul.rows li > * { color: var(--moxi-text); }
   .problem { padding: 8px 12px; border-radius: var(--moxi-radius); background: var(--moxi-error-soft); color: var(--moxi-error); }
-  .settings { display: grid; gap: calc(var(--moxi-gap) * 3); }
 `;
 
 export class UiPage extends LitElement {
@@ -104,17 +89,13 @@ export class UiPage extends LitElement {
     route: { type: String },
     modules: { state: true },
     checks: { state: true },
-    sections: { state: true },
-    settingsError: { state: true },
   };
 
   route = "";
   modules: { error: string | null; modules: ModuleView[] } | null = null;
   checks = new Map<string, Check>();
-  sections: Section[] | null = null;
-  settingsError: string | null = null;
   #view: "home" | "modules" | "settings" | "none" = "none";
-  #only: string | null = null;
+  #route = "";
   #stop: (() => void) | null = null;
   #placed = "";
   #placing = 0;
@@ -129,9 +110,7 @@ export class UiPage extends LitElement {
       this.#stop = subscribe("ui", "modules", (data) => { this.modules = data; });
     } else if (route === "settings" || route.startsWith("settings/")) {
       this.#view = "settings";
-      const only = route.slice("settings/".length);
-      this.#only = NAME.test(only) ? only : null;
-      if (!gateway()) void this.#readSettings();
+      this.#route = route;
     } else {
       this.#view = "none";
     }
@@ -176,8 +155,7 @@ export class UiPage extends LitElement {
       <h2>Installed</h2>
       ${value === null ? html`<p class="dim">Reading the modules…</p>` : nothing}
       ${value !== null && mods.length === 0 ? html`<p class="dim">No module is listed.</p>` : nothing}
-      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>
-      ${gateway() ? nothing : html`<moxi-ui-gateway></moxi-ui-gateway>`}`;
+      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>`;
   }
 
   #moduleCard(mod: ModuleView) {
@@ -262,93 +240,14 @@ export class UiPage extends LitElement {
     }
   }
 
-  // --- the settings view ----------------------------------------------------------------
+  // --- the settings page ----------------------------------------------------------------
 
   #settingsView() {
     if (gateway()) {
-      return html`<div class="bar">${this.#link("ui", "modules", "Modules")}</div>
-        <p class="dim">Settings are changed at the desk, on the computer's Moxi page.</p>`;
+      return html`<p class="dim" data-line="desk">Settings are changed at the desk, on the computer's Moxi page.</p>
+        <div class="bar">${this.#link("ui", "", "Home")}</div>`;
     }
-    return html`
-      <div class="bar">
-        ${this.#only ? this.#link("ui", "settings", "Every module's settings") : nothing}
-        ${this.#link("ui", "modules", "Modules")}</div>
-      ${this.settingsError ? html`<p class="problem">${this.settingsError}</p>` : nothing}
-      ${this.sections === null && !this.settingsError ? html`<p class="dim">Reading the settings…</p>` : nothing}
-      <div class="settings">${(this.sections ?? []).map((section) => this.#section(section))}</div>`;
-  }
-
-  #section(section: Section) {
-    const name = section.module === CORE ? "moxi (the core)" : section.module;
-    return html`<section class="card" data-module=${section.module}>
-      <h2>${name}</h2>
-      ${section.error ? html`<p class="problem">${section.error}</p>` : nothing}
-      ${section.error && section.fix ? html`<p class="small dim">Fix: <code>${section.fix}</code></p>` : nothing}
-      ${section.readonly && !section.error ? html`<p class="small warn">These settings can't be changed here now.</p>` : nothing}
-      ${section.keys.length === 0 && !section.error ? html`<p class="dim">No settings.</p>` : nothing}
-      ${section.keys.length ? html`<moxi-ui-form mode="each" .fields=${section.keys} ?disabled=${section.readonly}
-          @moxi-change=${(event: CustomEvent<FormChange>) => this.#write(section.module, event)}></moxi-ui-form>` : nothing}
-    </section>`;
-  }
-
-  async #readSettings(module?: string): Promise<void> {
-    const target = module ?? this.#only;
-    const path = target ? `api/settings?module=${encodeURIComponent(target)}` : "api/settings";
-    const answer = await api("ui", path);
-    if (answer.status !== 200 || !Array.isArray(answer.data?.sections)) {
-      this.settingsError = failed(answer.status, answer.data, "the settings");
-      return;
-    }
-    const got: Section[] = answer.data.sections;
-    if (module === undefined) {
-      this.sections = got;
-      this.settingsError = answer.data.error ?? null;
-      return;
-    }
-    const fresh = got.find((section) => section.module === module);
-    if (fresh === undefined) return;
-    this.sections = (this.sections ?? []).map((section) => (section.module === module ? fresh : section));
-  }
-
-  /** One change from a section's form: written by `moxi config set` or `unset` through the
-   * shell, its answer shown under the key, and the section read again for the value and
-   * source the file now gives. */
-  async #write(module: string, event: CustomEvent<FormChange>): Promise<void> {
-    const form = event.currentTarget as FormElement;
-    const change = event.detail;
-    const body: Record<string, string> = { module, key: change.name };
-    if (!change.reset) {
-      for (const field of ["value", "add", "remove"] as const) {
-        if (typeof change[field] === "string") body[field] = change[field] as string;
-      }
-    }
-    const answer = await api("ui", change.reset ? "api/settings/unset" : "api/settings/set", body);
-    const data = answer.data;
-    if (answer.status === 200 && data?.ok) {
-      const lines: string[] = Array.isArray(data.lines) ? data.lines : [];
-      if (data.warning) {
-        form.setMessage(change.name, [data.warning, ...lines, ...(data.fix ? [`Fix: ${data.fix}`] : [])], "warn");
-      } else {
-        form.setMessage(change.name, lines.length ? lines : [change.reset ? "Reset to the default." : "Saved."], "info");
-      }
-    } else if (answer.status === 0) {
-      form.setError(change.name, "No answer from the shell; the change may not be written.");
-    } else {
-      form.setError(change.name, failed(answer.status, data, "the change"));
-    }
-    await this.#readSettings(module);
-    if (module === "ui" && (change.name === "theme.mode" || change.name === "theme.palette")) {
-      const keys = this.sections?.find((section) => section.module === "ui")?.keys;
-      const now = (name: string): unknown => {
-        const key = keys?.find((item) => item.name === name);
-        return typeof key?.value === "string" ? key.value : key?.default;
-      };
-      const mode = now("theme.mode");
-      const theme = now("theme.palette");
-      if (typeof mode === "string" && MODES.includes(mode)) {
-        setTheme(mode as ThemeMode, typeof theme === "string" ? theme : undefined);
-      }
-    }
+    return html`<moxi-ui-settings route=${this.#route}></moxi-ui-settings>`;
   }
 }
 

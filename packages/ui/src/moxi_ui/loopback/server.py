@@ -873,6 +873,8 @@ class PageApp:
             return _json(409, {"conflict": exc.text})
         except Refused as exc:
             return _json(422, {"refused": exc.text})
+        except BadRequest as exc:
+            return _bad_request(exc)
         if route.stream:
             return self._stream(route, result, names)
         if isinstance(result, Accepted):
@@ -924,6 +926,8 @@ class PageApp:
             return 409, _json_bytes({"conflict": exc.text}), _JSON
         except Refused as exc:
             return 422, _json_bytes({"refused": exc.text}), _JSON
+        except BadRequest as exc:
+            return 400, _json_bytes({"error": str(exc)}), _JSON
         except asyncio.CancelledError:
             raise
         except Exception:

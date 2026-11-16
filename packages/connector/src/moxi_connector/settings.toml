@@ -7,6 +7,7 @@ default = false
 doc = "The daemon's switch: on, the public MCP door runs and its socket unit holds the port."
 label = "The public door"
 read = "use"
+terminal = { on = "moxi connector enable", off = "moxi connector disable" }
 
 [port]
 type = "int"

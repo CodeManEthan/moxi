@@ -527,6 +527,21 @@ def test_on_the_phone_home_is_the_rows_with_no_spot_and_no_act_under_the_reads_o
     assert reads.bounding_box() == line
 
 
+def test_on_the_phone_settings_is_hidden_and_its_address_says_where_settings_are_changed(gw, phones):
+    shell, bridge = gw
+    page = pair_page(phones(bridge), shell)
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    page.goto(ORIGIN + "/m/ui/settings/ui")
+    panel = page.locator("#moxi-panel > moxi-ui-page")
+    expect(panel.locator("[data-line=desk]")).to_have_text(
+        "Settings are changed at the desk, on the computer's Moxi page.")
+    # The one line and the way Home: no list, no rows, nothing that changes a setting.
+    expect(panel.locator("moxi-ui-settings")).to_have_count(0)
+    expect(panel.locator("p")).to_have_count(1)
+    expect(page.locator("#moxi-settings")).to_be_hidden()
+    # The top line names the place the line sends the phone to.
+    expect(page.locator("#moxi-pages-button")).to_have_text(re.compile(r"^Home\s*▾$"))
+
 def test_on_the_phone_tab_from_the_bands_last_name_closes_it_where_settings_is_hidden(
         gw, phones):
     shell, bridge = gw
