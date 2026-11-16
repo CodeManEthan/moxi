@@ -143,7 +143,7 @@ def test_a_rewritten_record_turns_a_cold_chip_warm_by_push(shell, ui_page):
     expect(span).to_have_text("cold 10m ago")
     put(shell, record("push", age=60))
     # The poller looks every 2 s, and the topic carries the new record to the chip.
-    expect(span).to_have_attribute("data-shows", "warm", timeout=10_000)
+    expect(span).to_have_attribute("data-shows", "warm")
     expect(span).to_have_text(re.compile(r"^warm 5[89]m left$"))
     assert len(reads) == 1, reads
     assert page_kit.chip_states(ui_page, "push") == ["loading", "up"]
@@ -204,7 +204,7 @@ def test_four_503s_in_a_row_show_the_failure_row(shell, ui_page):
     place_chips(ui_page, "s1")
     span = chip(ui_page, "s1")
     # Three reads again, 1 s apart, stay loading; the fourth 503 is the failure.
-    expect(span).to_have_attribute("data-state", "failed", timeout=10_000)
+    expect(span).to_have_attribute("data-state", "failed")
     assert time.monotonic() - began >= 2.9
     expect(span).to_have_attribute("title", "cache's page server answered 503")
     expect(span).to_have_text("cache ?")
@@ -258,7 +258,7 @@ def test_a_failed_chip_reads_again_on_a_topic_event_and_when_its_tab_is_shown(sh
     expect(span).to_have_attribute("data-state", "failed")
     # A changed record is the next topic event, which reads the route again.
     put(shell, record("s1", age=4230))
-    expect(span).to_have_attribute("data-shows", "cold", timeout=10_000)
+    expect(span).to_have_attribute("data-shows", "cold")
     ui_page.route("**" + page_kit.CLOCKS, fail)
     page_kit.show_tab(ui_page)
     expect(span).to_have_attribute("data-state", "failed")

@@ -308,7 +308,7 @@ def test_the_shells_own_views_carry_no_title_of_their_own(ui_page):
     expect(_modules(ui_page).locator("h1")).to_have_count(0)
     ui_page.goto("/m/ui/settings")
     view = _modules(ui_page)
-    expect(view.locator("section.card[data-module=fixture]")).to_be_visible(timeout=10_000)
+    expect(view.locator("section.card[data-module=fixture]")).to_be_visible()
     expect(view.locator("h1")).to_have_count(0)
     # The two views still link to each other.
     view.get_by_role("link", name="Modules").click()
@@ -401,7 +401,7 @@ def test_the_pages_run_under_the_policy_with_no_violation_or_error(ui_shell, ui_
     expect(ui_page.locator("moxi-fixture-page moxi-fixture-tag")).to_have_text("on the page")
     ui_page.locator("#moxi-settings").click()
     expect(ui_page.locator("moxi-ui-page section.card[data-module=fixture] moxi-ui-form")
-           .locator("[data-control=limit]")).to_be_attached(timeout=10_000)
+           .locator("[data-control=limit]")).to_be_attached()
     assert ui_page.evaluate("document.documentElement.dataset.theme") == "system"
     assert ui_page.evaluate("document.documentElement.dataset.themeName") == "plain"
     assert seen == []
