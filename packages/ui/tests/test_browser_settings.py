@@ -31,8 +31,6 @@ import fixture_kit
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
 
-# The page reads and writes through `moxi config` in a child process.
-SETTINGS_MS = 15_000
 LOCKED = "Locked for this run of the shell."
 TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
 # A clock time as the Save line words it, in the browser's own form.
@@ -46,7 +44,7 @@ def _view(page):
 def _settings(page, route="settings/fixture"):
     page.goto(f"/m/ui/{route}")
     view = _view(page)
-    expect(view.locator("[data-part=foot]")).to_be_visible(timeout=SETTINGS_MS)
+    expect(view.locator("[data-part=foot]")).to_be_visible()
     return view
 
 
@@ -86,7 +84,7 @@ def _saves(page) -> list:
 def _save(view, words):
     """Saves the module shown and waits for the Save line to say `words` (a pattern)."""
     _save_line(view).get_by_role("button", name="Save", exact=True).click()
-    expect(_save_line(view).locator("[data-line=save]")).to_have_text(re.compile(words), timeout=SETTINGS_MS)
+    expect(_save_line(view).locator("[data-line=save]")).to_have_text(re.compile(words))
 
 
 def test_each_type_is_drawn_with_its_own_control(ui_page):
@@ -205,7 +203,7 @@ def test_a_list_of_tables_is_drawn_as_a_table_wherever_it_is_drawn(ui_shells, ui
     # In the changed view.
     view = _settings(page, "settings")
     changed = view.locator("[data-part=list] [data-line=changed]")
-    expect(changed).to_have_text("1 changed", timeout=SETTINGS_MS * 2)
+    expect(changed).to_have_text("1 changed", timeout=30_000)
     changed.click()
     _side_by_side(_group(view, "moxi").locator(".set[data-key=harnesses]"))
     # Opened at More's address.
@@ -216,12 +214,11 @@ def test_a_list_of_tables_is_drawn_as_a_table_wherever_it_is_drawn(ui_shells, ui
 def test_the_page_writes_its_own_address_and_back_leaves_it(ui_shell, ui_page):
     ui_page.locator("#moxi-settings").click()
     view = _view(ui_page)
-    expect(view.locator("[data-part=pane][data-module=moxi] [data-part=foot]")).to_be_visible(timeout=SETTINGS_MS)
+    expect(view.locator("[data-part=pane][data-module=moxi] [data-part=foot]")).to_be_visible()
     ui_page.evaluate("document.querySelector('#moxi-panel > moxi-ui-page').dataset.placed = 'first'")
     _list(view).and_(ui_page.locator("[data-list=fixture]")).click()
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings/fixture")
-    expect(view.locator("[data-part=pane][data-module=fixture] [data-part=foot]")).to_be_visible(
-        timeout=SETTINGS_MS)
+    expect(view.locator("[data-part=pane][data-module=fixture] [data-part=foot]")).to_be_visible()
     # The shell did not place the page again for the address the page wrote.
     expect(ui_page.locator("#moxi-panel > moxi-ui-page[data-placed=first]")).to_be_attached()
     # The foot's link to the module's page moves through the shell.
@@ -230,7 +227,7 @@ def test_the_page_writes_its_own_address_and_back_leaves_it(ui_shell, ui_page):
     expect(ui_page.locator("#moxi-panel > moxi-fixture-page")).to_be_attached()
     ui_page.go_back()
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings/fixture")
-    expect(view.locator("[data-part=pane][data-module=fixture]")).to_be_visible(timeout=SETTINGS_MS)
+    expect(view.locator("[data-part=pane][data-module=fixture]")).to_be_visible()
     # Back from the page leaves it: the address it wrote replaced its entry.
     ui_page.go_back()
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/")
@@ -252,8 +249,7 @@ def test_a_section_whose_file_wont_parse_says_why_in_the_pane(ui_shell, ui_page)
         ui_page.goto("/m/ui/settings/fixture")
         view = _view(ui_page)
         said = view.locator("[data-part=unreadable]")
-        expect(said.locator("[data-line=unreadable]")).to_contain_text(
-            "fixture's settings can't be read: ", timeout=SETTINGS_MS)
+        expect(said.locator("[data-line=unreadable]")).to_contain_text("fixture's settings can't be read: ")
         expect(said.locator("[data-line=unreadable]")).to_contain_text("is not valid TOML")
         expect(said.locator("[data-line=fix]")).to_contain_text("Fix: correct the file's TOML syntax")
         expect(said.get_by_role("button", name="Copy")).to_be_visible()
@@ -408,7 +404,7 @@ def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(
     inside = _save_line(view)
 
     def shows(colour: str) -> None:
-        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        expect(html).to_have_css("background-color", colour)
         expect(inside).to_have_css("background-color", colour)
 
     def pick(mode: str) -> None:
@@ -461,7 +457,7 @@ def test_theme_palette_switches_the_colours_on_the_root_and_inside_a_shadow_root
     expect(name).to_have_value("plain")
 
     def shows(colour: str) -> None:
-        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        expect(html).to_have_css("background-color", colour)
         # The Save line sits in the page's shadow root, on --moxi-bg.
         expect(_save_line(view)).to_have_css("background-color", colour)
 
@@ -533,7 +529,7 @@ def test_changes_are_kept_across_modules_and_leaving_asks_in_the_save_line(ui_sh
     # Changes in two modules: each named, and no save offered.
     page.go_back()
     view = _view(page)
-    expect(view.locator("[data-part=pane][data-module=fixture] [data-part=foot]")).to_be_visible(timeout=SETTINGS_MS)
+    expect(view.locator("[data-part=pane][data-module=fixture] [data-part=foot]")).to_be_visible()
     view.locator("input[data-control=workers]").fill("5")
     _list(view).and_(page.locator("[data-list=ui]")).click()
     view.locator("[data-control='theme.mode'] [role=radio][data-value=dark]").click()
@@ -569,7 +565,7 @@ def test_find_groups_its_matches_by_module_and_a_change_there_has_its_own_save_l
     page.locator("#moxi-settings").click()
     view = _view(page)
     _list(view).and_(page.locator("[data-list=fixture]")).click()
-    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)
     _find(view, "each use")
     head = view.locator("[data-part=found-head]")
     expect(head.locator("[data-line=count]")).to_have_text("2 settings in 1 module")
@@ -597,7 +593,7 @@ def test_find_groups_its_matches_by_module_and_a_change_there_has_its_own_save_l
     ask.get_by_role("button", name="Stay").click()
     expect(line).to_have_text("1 not saved in fixture · limit")
     group.locator("[data-part=save]").get_by_role("button", name="Save").click()
-    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · limit applies now$"), timeout=SETTINGS_MS)
+    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · limit applies now$"))
     assert _file(shell)["limit"] == 13
     expect(_row(view, "limit").locator("[data-line=default]")).to_have_text(re.compile(r"^default 10\s*·\s*Reset$"))
     # Four rows a module, then the rest behind `Show them`.
@@ -626,7 +622,7 @@ def test_find_groups_its_matches_by_module_and_a_change_there_has_its_own_save_l
 
 def test_a_search_that_matches_nothing_says_so_beside_the_list(ui_shell, ui_page):
     view = _settings(ui_page)
-    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)
     _find(view, "zzqx")
     expect(view.locator("[data-part=found-head] [data-line=count]")).to_have_text("No setting matches “zzqx”")
     expect(view.locator("[data-line=help]")).to_have_text(
@@ -648,7 +644,7 @@ def test_the_changed_view_lists_each_changed_setting_by_module_and_resets_one_th
     view = _view(page)
     _list(view).and_(page.locator("[data-list=fixture]")).click()
     changed = view.locator("[data-part=list] [data-line=changed]")
-    expect(changed).to_have_text("3 changed", timeout=SETTINGS_MS * 2)
+    expect(changed).to_have_text("3 changed", timeout=30_000)
     changed.click()
     expect(page).to_have_url(shell.url + "/m/ui/settings/changed")
     head = view.locator("[data-part=found-head]")
@@ -666,7 +662,7 @@ def test_the_changed_view_lists_each_changed_setting_by_module_and_resets_one_th
     line = group.locator("[data-part=save] [data-line=save]")
     expect(line).to_have_text("1 not saved in fixture · limit")
     group.locator("[data-part=save]").get_by_role("button", name="Save").click()
-    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · limit applies now$"), timeout=SETTINGS_MS)
+    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · limit applies now$"))
     assert "limit" not in _file(shell)
     expect(group.locator(".set")).to_have_count(1)
     expect(count).to_have_text("2 settings changed from the default, in 2 modules")
@@ -675,7 +671,7 @@ def test_the_changed_view_lists_each_changed_setting_by_module_and_resets_one_th
     expect(view.locator("[data-part=pane][data-module=fixture]")).to_be_visible()
     # Opened at its address, it goes back to the core.
     page.goto("/m/ui/settings/changed")
-    expect(view.locator("[data-part=found-head] a")).to_have_text("Back to moxi", timeout=SETTINGS_MS)
+    expect(view.locator("[data-part=found-head] a")).to_have_text("Back to moxi")
 
 
 def _installed(*names: str) -> bool:
@@ -686,7 +682,7 @@ def _installed(*names: str) -> bool:
 
 def _all_read(view):
     """Waits until every listed module's section has arrived."""
-    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)
 
 
 # --- the questions a person brings ------------------------------------------------------------
@@ -710,7 +706,7 @@ def test_switching_the_pages_to_light_is_found_under_ui_and_applies_now(ui_shell
     line = _group(view, "ui").locator("[data-part=save] [data-line=save]")
     expect(line).to_have_text("1 not saved in ui · Light or dark")
     _group(view, "ui").locator("[data-part=save]").get_by_role("button", name="Save").click()
-    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · Light or dark applies now$"), timeout=SETTINGS_MS)
+    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · Light or dark applies now$"))
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
     assert _file(shell, "ui")["theme"] == {"mode": "light"}
 
@@ -723,7 +719,7 @@ def test_the_settings_changed_from_the_defaults_are_counted_by_module_and_listed
     page = ui_contexts(shell).pages[0]
     view = _settings(page, "settings")
     changed = view.locator("[data-part=list] [data-line=changed]")
-    expect(changed).to_have_text("3 changed", timeout=SETTINGS_MS * 2)
+    expect(changed).to_have_text("3 changed", timeout=30_000)
     for module in ("moxi", "ui", "fixture"):
         expect(_list(view).and_(page.locator(f"[data-list={module}]"))).to_have_text(re.compile(rf"^{module}\s*1$"))
     changed.click()
@@ -856,7 +852,7 @@ def test_a_change_that_can_hurt_asks_before_it_is_saved_and_go_back_keeps_it(
         "Remove sky from Tags? From its next read, the page no longer marks a row with this tag. "
         "Nothing else in this save can hurt.")
     line.get_by_role("button", name="Save anyway").click()
-    expect(line.locator("[data-line=save]")).to_have_text(re.compile(rf"^Saved {CLOCK} · "), timeout=SETTINGS_MS)
+    expect(line.locator("[data-line=save]")).to_have_text(re.compile(rf"^Saved {CLOCK} · "))
     assert _file(shell) == {"loud": True, "tags": []}
     expect(_held(view, "loud")).to_have_count(0)
 
@@ -912,7 +908,7 @@ def test_a_change_held_when_the_shell_sends_the_modules_again_stays_and_the_page
         return any(row["name"] == "fixture" and row.get("version") == "0.2.0" for row in value["modules"])
 
     wait_for(seen_new, 10, interval=0.2, what="the snapshot to see version 0.2.0")
-    expect(html).to_have_attribute("data-fixture-version", "0.2.0", timeout=SETTINGS_MS)
+    expect(html).to_have_attribute("data-fixture-version", "0.2.0")
     expect(page.locator("#moxi-panel > moxi-ui-page[data-placed=first]")).to_be_attached()
     expect(box).to_have_value("12")
     expect(_held(view, "limit")).to_have_text(re.compile(r"^not saved · was 10\s*·\s*Undo$"))
@@ -958,7 +954,7 @@ def test_the_phone_group_shows_the_gateway_each_phone_its_activity_and_revokes_o
         page = ui_contexts(shell).pages[0]
         # The modules view holds no Gateway section: pairing is on Settings › ui.
         page.goto("/m/ui/modules")
-        expect(page.locator("#moxi-panel moxi-ui-page .card[data-module=ui]")).to_be_visible(timeout=SETTINGS_MS)
+        expect(page.locator("#moxi-panel moxi-ui-page .card[data-module=ui]")).to_be_visible()
         expect(page.locator("moxi-ui-gateway")).to_have_count(0)
         view = _settings(page, "settings/ui")
         pane = view.locator("[data-part=pane][data-module=ui]")
@@ -1020,7 +1016,7 @@ def test_the_phone_group_shows_the_gateway_each_phone_its_activity_and_revokes_o
         # Pair a phone opens the code in place, at its own address, and Close closes it.
         view.get_by_role("button", name="Pair a phone").click()
         pairing = view.locator("[data-part=pair]")
-        expect(pairing.locator("svg[aria-label='Pairing code']")).to_be_visible(timeout=SETTINGS_MS)
+        expect(pairing.locator("svg[aria-label='Pairing code']")).to_be_visible()
         expect(page).to_have_url(re.compile(r"/m/ui/settings/ui/pair$"))
         expect(pairing.locator("[data-line=scan]")).to_have_text(
             re.compile(rf"^Scan this with the phone's camera\. It works once, until {CLOCK}\.$"))
@@ -1038,7 +1034,7 @@ def test_the_phone_group_shows_the_gateway_each_phone_its_activity_and_revokes_o
 def test_more_stays_open_when_the_shell_draws_the_page_again(ui_shell, ui_page):
     view = _settings(ui_page, "settings/ui")
     # Every section in, so no read is on its way while the sign-in drops.
-    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)
     view.locator("[data-part=more]").get_by_role("button", name="Show").click()
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings/ui/more")
     ui_page.evaluate("document.querySelector('#moxi-panel > moxi-ui-page').dataset.placed = 'first'")
@@ -1061,7 +1057,7 @@ def test_the_saved_line_and_more_stay_when_the_shell_draws_the_page_after_a_save
     shell = ui_shells(site=[fixture_site])
     page = ui_contexts(shell).pages[0]
     view = _settings(page, "settings/ui")
-    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=30_000)
     view.locator("[data-part=more]").get_by_role("button", name="Show").click()
     view.locator("input[data-control=idle_s]").fill("1200")
     page.evaluate("document.querySelector('#moxi-panel > moxi-ui-page').dataset.placed = 'first'")
@@ -1121,7 +1117,7 @@ def test_a_phone_paired_with_the_pages_code_closes_it_and_a_stale_phone_says_to_
         assert _same_line(device.locator("[data-line=name]"), device.get_by_role("button", name="Revoke"))
         view.get_by_role("button", name="Pair a phone").click()
         pairing = view.locator("[data-part=pair]")
-        expect(pairing.locator("svg[aria-label='Pairing code']")).to_be_visible(timeout=SETTINGS_MS)
+        expect(pairing.locator("svg[aria-label='Pairing code']")).to_be_visible()
         pairing.get_by_role("button", name="Copy the link instead").click()
         expect(pairing.locator("[data-line=copied]")).to_have_text("Copied")
         code = urlsplit(page.evaluate("navigator.clipboard.readText()")).fragment.removeprefix("c=")
@@ -1133,7 +1129,7 @@ def test_a_phone_paired_with_the_pages_code_closes_it_and_a_stale_phone_says_to_
             status, _, done = phone.request("POST", "/api/pair/finish",
                                             {"pairing": begun["pairing"], "credential": None})
             assert status == 200, done
-        expect(view.locator("[data-line=pair-note]")).to_have_text("Paired: New phone.", timeout=SETTINGS_MS)
+        expect(view.locator("[data-line=pair-note]")).to_have_text("Paired: New phone.")
         expect(pairing).to_have_count(0)
         expect(page).to_have_url(re.compile(r"/m/ui/settings/ui$"))
         expect(view.locator(".dev [data-line=name]")).to_contain_text(["New phone"])

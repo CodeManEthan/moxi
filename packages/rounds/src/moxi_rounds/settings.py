@@ -316,10 +316,17 @@ def has_notes_dir(project: str) -> bool | None:
     return True
 
 
-def _check_string(file, where, value) -> None:
-    if not isinstance(value, str) or not value:
-        raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a name",
-                          "give it as a string, or leave the key out")
+def _check_string(file, where, value, what: str = "a name", *,
+                  needed: bool = False) -> None:
+    """A key that holds a name: `what` says which, and `needed` that the key can't be
+    left out."""
+    fix = f"give {what}" if needed else f"give {what}, or leave the key out"
+    if value is None:
+        raise ConfigError(file, where, "is missing", fix)
+    if not isinstance(value, str):
+        raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a name", fix)
+    if not value:
+        raise ConfigError(file, where, "is empty", fix)
 
 
 def _check_bool(file, where, value) -> None:
@@ -407,7 +414,7 @@ def _check_ci(file, where, value) -> None:
                               'local = "none"')
         _check_check(file, f"{where}.local", local)
     if "remote" in value:
-        _check_string(file, f"{where}.remote", value["remote"])
+        _check_string(file, f"{where}.remote", value["remote"], "a remote's name")
     for key in ("status", "ids"):
         if key in value:
             flows.check_argv(file, f"{where}.{key}", value[key])
@@ -442,9 +449,10 @@ def _check_finish(file, where, value) -> None:
                 "under its id",
                 'name the action: id = "deploy"')
         if "id" in action:
-            _check_string(file, f"{here}.id", action["id"])
+            _check_string(file, f"{here}.id", action["id"], "an id", needed=do == COMMAND)
         if do == PUSH:
-            _check_string(file, f"{here}.remote", action.get("remote"))
+            _check_string(file, f"{here}.remote", action.get("remote"), "a remote's name",
+                          needed=True)
         if do == COMMAND:
             flows.check_argv(file, f"{here}.argv", action.get("argv"))
             flows.check_timeout(file, f"{here}.timeout_s", action.get("timeout_s"))
@@ -463,10 +471,12 @@ def _check_finish(file, where, value) -> None:
 _ACTION_KEYS = {MERGE: ("do", "id"), PUSH: ("do", "id", "remote"),
                 COMMAND: ("do", "id", "argv", "timeout_s", "repeat")}
 
-_PROJECT_CHECKS = {"into": _check_string, "check": _check_check, "ci": _check_ci,
-                   "finish": _check_finish,
-                   "shared_paths": _check_strings, "keep_branch": _check_bool,
-                   "lock_ref": _check_string, "brief": _check_strings}
+_PROJECT_CHECKS = {
+    "into": lambda file, where, value: _check_string(file, where, value, "a branch's name"),
+    "check": _check_check, "ci": _check_ci, "finish": _check_finish,
+    "shared_paths": _check_strings, "keep_branch": _check_bool,
+    "lock_ref": lambda file, where, value: _check_string(file, where, value, "a git ref"),
+    "brief": _check_strings}
 
 _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The test kit's waits for what must happen are long, so a busy machine does not fail
+  them: `WAIT_MS` is 20000 (it was 5000), every kit context's default timeout, and
+  `WAIT_S` is the same bound in seconds for a helper that takes seconds. While the plugin
+  is loaded, Playwright's sync `expect` takes `WAIT_MS` too (its own default is 5 s), in
+  any test that imports `playwright.sync_api`, the kit's fixtures or not. The test
+  shell's request reads (`TestShell.session`, `call`, `wait_server`, `Session`) wait up
+  to `READ_S`, 30 s, by default (they waited 10 s).
 - The Settings page, at `/m/ui/settings`, replaces the settings view: a list of the
   modules with settings (the core, ui, then A to Z) with each one's count of changed
   settings, and one module's settings at a time. Each setting shows by its label, with a
@@ -50,10 +57,11 @@
   about a body its `Field`s can't refuse alone.
 - New in `moxi_ui.settings`: `read_schema`, `find_key`, `save_one`, `is_changed`,
   `is_drawn`, `file_of`, `SchemaRead`, `SAVE_SHAPE` and `WRITE_TIMEOUT_S`.
-- The contract check (`ui_component_check`) waits up to 5 s for each of `tokens` to
-  reach a colour of the placed component, so a part drawn from data that arrives after
-  the first render (a pushed topic's first value) counts. Before, it probed once two
-  frames after the first render, and a slow push failed the check.
+- The contract check (`ui_component_check`) waits up to `WAIT_MS` (20 s) for each of
+  `tokens` to reach a colour of the placed component, or up to `token_ms`, so a part
+  drawn from data that arrives after the first render (a pushed topic's first value)
+  counts. Before, it probed once two frames after the first render, and a slow push
+  failed the check.
 - The shell reads the modules list once more when its first read at load gets no
   answer. On a phone in Firefox, the gateway's worker being replaced dropped that read,
   and the page said `No module named ui` until the push stream sent the list.
