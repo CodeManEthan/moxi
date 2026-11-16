@@ -2,6 +2,9 @@
 
 ## 0.1.6 (unreleased)
 
+- Every setting carries page fields, which `moxi config cache show --json` prints and
+  the settings page draws: a plain label, a line where the label can't carry it, and
+  the unit of each time in seconds. cache needs moxi 0.1.9 or later.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_cache.api.asking`: `environ` is now `env`.
 - Each clock record carries `asks`: the names of the timer's subscriptions the watcher

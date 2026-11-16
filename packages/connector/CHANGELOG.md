@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Every setting carries page fields, which `moxi config connector show --json` prints
+  and the settings page draws: a plain label, a line where the label can't carry it,
+  and the unit of a sign-in's life. The connector needs moxi 0.1.9 or later.
+
 ## 0.1.0 (2026-11-08)
 
 - `moxi connector on` and `off` are now `moxi connector enable` and `disable`, with no

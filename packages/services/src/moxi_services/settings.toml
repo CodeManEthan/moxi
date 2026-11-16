@@ -7,3 +7,5 @@ items = "bool"
 default = {}
 doc = "On or off for each adopted Linux timer, by its row's name: the timer's runs go on only while its entry is true (a missing entry is off). `moxi services enable` and `disable` set it."
 read = "use"
+label = "Adopted timers"
+line = "An adopted Linux timer runs only while its switch is on. moxi services enable and disable set it."

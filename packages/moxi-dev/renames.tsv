@@ -432,6 +432,7 @@ cache	packages/cache/tests/test_segment.py	directory.mkdir(parents=True, exist_o
 cache	packages/cache/tests/test_segment.py	put	name	directory	records_dir
 cache	packages/cache/tests/test_segment.py	records_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 cache	packages/cache/tests/test_segment.py	test_segment_is_none_for_a_record_naming_another_session	name	directory	records_dir
+cache	packages/cache/tests/test_settings.py	assert cli.main(["config", "cache", "show", "--json"]) == 0	keep	show	show
 cache	packages/cache/tests/test_table.py	assert (after.kind, after.ttl_seconds, after.key) == ("warm", 600, "codex openai/gpt-5.5")	use	after.ttl_seconds	after.ttl_s
 cache	packages/cache/tests/test_table.py	r.request(token_usage(input=100, cached=90))	use	input=	input_tokens=
 cache	packages/cache/tests/test_timer.py	"""A scripts directory, and `find` resolving names in it as `moxi.paths.script` does."""	keep	find	find
@@ -2720,6 +2721,7 @@ comms	packages/comms/tests/test_settings.py	-	name	test_the_text_entry_reads_no_
 comms	packages/comms/tests/test_settings.py	assert (cfg.local.record, cfg.local.retain_days) == ("", 90)	keep	record	record
 comms	packages/comms/tests/test_settings.py	assert cfg.local.record == os.path.expanduser("~/rec.db")	keep	record	record
 comms	packages/comms/tests/test_settings.py	assert cfg.local.record == str(tmp_path / "r.db")	keep	record	record
+comms	packages/comms/tests/test_settings.py	assert cli.main(["config", "comms", "show", "--json"]) == 0	keep	show	show
 comms	packages/comms/tests/test_settings.py	assert cli.main(["config", "set", "comms", "block", "false"]) == 0	keep	set	set
 comms	packages/comms/tests/test_settings.py	assert cli.main(["config", "set", "comms", "credentials.roles", "--add", "pager"]) == 0	keep	set	set
 comms	packages/comms/tests/test_settings.py	assert cli.main(["config", "set", "comms", *argv]) == 2	keep	set	set
@@ -3063,6 +3065,7 @@ connector	packages/connector/tests/test_seam.py	started.set()	keep	set	set
 connector	packages/connector/tests/test_seam.py	test_ctx_log_with_a_field_the_connector_writes_raises_and_keeps_its_own.clashing	name	e	exc
 connector	packages/connector/tests/test_seam.py	test_ctx_log_with_a_refused_field_raises_and_writes_nothing.leaky	name	e	exc
 connector	packages/connector/tests/test_seam.py	token = CALL.set(scope_[CALL_KEY])	keep	set	set
+connector	packages/connector/tests/test_settings.py	assert cli.main(["config", "connector", "show", "--json"]) == 0	keep	show	show
 connector	packages/connector/tests/test_signin.py	assert grant["replacement_used"] is False and grant["used"] is not None	keep	used	used
 connector	packages/connector/tests/test_signin.py	assert len(writes) == 3 and d.oauth.store.grant(gid)["used"] == clock()	keep	used	used
 connector	packages/connector/tests/test_signin.py	assert under.check(good).resource == ORIGIN.resource	keep	ok	ok
@@ -4671,6 +4674,9 @@ launcher	packages/launcher/tests/test_running.py	path.parent.mkdir(parents=True,
 launcher	packages/launcher/tests/test_running.py	store.insert(conn, request_id="r-spawning", actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_running.py	store.insert(conn, request_id=request_id, actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_running.py	test_a_log_held_past_the_wait_raises_busy_and_writes_nothing	name	raw	raw_conn
+launcher	packages/launcher/tests/test_settings.py	assert cli.main(["config", "launcher", "show", "--json"]) == 0	keep	show	show
+launcher	packages/launcher/tests/test_settings.py	assert len(runs) == len(set(runs)), runs	keep	set	set
+launcher	packages/launcher/tests/test_settings.py	assert set(hurts) == {"startup.trust_dialog", "startup.dev_channels_dialog",	keep	set	set
 launcher	packages/launcher/tests/test_settings.py	assert set(settings.schema().keys) == set(DEFAULTS) | set(TEXTS)	keep	set	set
 launcher	packages/launcher/tests/test_settings.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_skill.py	-	name	test_the_skill_ships_in_the_skills_folder_with_its_name_and_description	test_the_skill_ships_in_the_skills_dir_with_its_name_and_description
@@ -5362,6 +5368,8 @@ loadout	packages/loadout/tests/test_repo_piece.py	test_the_setting_off_removes_e
 loadout	packages/loadout/tests/test_repo_piece.py	test_the_setting_off_skips_before_any_git	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_repo_piece.py	test_without_repo_nothing_is_registered_and_install_goes_on	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_repo_piece.py	tree	name	folder	loadout_dir
+loadout	packages/loadout/tests/test_settings.py	"project_folders": "Project folders"}	keep	project_folders	project_folders
+loadout	packages/loadout/tests/test_settings.py	assert cli.main(["config", "loadout", "show", "--json"]) == 0	keep	show	show
 loadout	packages/loadout/tests/test_settings_and_stores.py	-	name	test_a_configured_folder_is_read_with_its_home_expanded	test_a_configured_loadout_dir_is_read_with_its_home_expanded
 loadout	packages/loadout/tests/test_settings_and_stores.py	-	name	test_each_lock_path_makes_its_private_folder_first	test_each_lock_path_makes_its_private_dir_first
 loadout	packages/loadout/tests/test_settings_and_stores.py	-	name	test_project_folders_change_only_what_the_file_names	test_project_dirs_change_only_what_the_file_names
@@ -7451,6 +7459,7 @@ notes	packages/notes/tests/test_resolve.py	store.parent.mkdir(parents=True, exis
 notes	packages/notes/tests/test_resolve.py	test_an_answer_under_topics_or_inbox_is_refused	name	folder	reserved_dir
 notes	packages/notes/tests/test_scan.py	assert "[REDACTED:github-pat]" in sh(root, "show", "HEAD:plan.md").stdout	keep	show	show
 notes	packages/notes/tests/test_scan.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+notes	packages/notes/tests/test_settings.py	assert cli.main(["config", "notes", "show", "--json"]) == 0	keep	show	show
 notes	packages/notes/tests/test_settle.py	-	name	test_a_holder_goes_round_again_when_the_runtime_folder_is_cleared_under_it	test_a_holder_goes_round_again_when_the_runtime_dir_is_cleared_under_it
 notes	packages/notes/tests/test_settle.py	first = w.settler("one", at=30)	keep	at	at
 notes	packages/notes/tests/test_settle.py	holder = w.settler("gone", at=120)	keep	at	at
@@ -7888,6 +7897,7 @@ publishing	packages/publishing/tests/test_rules.py	return set().union(*(_starts(
 publishing	packages/publishing/tests/test_scan.py	assert any(f"message line 3, session-pointer: see {POINTER}" in line for line in lines)	keep	any	any
 publishing	packages/publishing/tests/test_scan.py	assert any(line.endswith("author header: private-names/private-name") for line in lines)	keep	any	any
 publishing	packages/publishing/tests/test_scan.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+publishing	packages/publishing/tests/test_settings.py	assert cli.main(["config", "publishing", "show", "--json"]) == 0	keep	show	show
 publishing	packages/publishing/tests/test_tag.py	assert any("check 4 (ready): refused" in line for line in made.lines)	keep	any	any
 publishing	packages/publishing/tests/test_tag.py	assert any(line.startswith("check 3 (main and green): refused") for line in result.lines)	keep	any	any
 publishing	packages/publishing/tests/test_tags.py	assert any("extra more" in note for note in verdict.notes)	keep	any	any
@@ -8237,6 +8247,7 @@ repo	packages/repo/tests/test_records.py	demo.act(lint="raise", watch="record")	
 repo	packages/repo/tests/test_records.py	demo.act(watch="record")	keep	record	record
 repo	packages/repo/tests/test_records.py	out = set()	keep	set	set
 repo	packages/repo/tests/test_records.py	out.add("record")	keep	record	record
+repo	packages/repo/tests/test_settings.py	assert cli.main(["config", "repo", "show", "--json"]) == 0	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/api.py	"own_commits", "hand_merge", "idle", "shares", "problem"}`. `state` is `gone`,	use	"own_commits"	"has_own_commits"
 rounds	packages/rounds/src/moxi_rounds/api.py	-	name	round	round_data
 rounds	packages/rounds/src/moxi_rounds/api.py	_CLOSED = "closed"	keep	closed	closed
@@ -10966,6 +10977,7 @@ secrets	packages/secrets/tests/test_scan.py	assert {"private-names", "personal-d
 secrets	packages/secrets/tests/test_scan.py	loaded = set(out.stdout.split())	keep	set	set
 secrets	packages/secrets/tests/test_scan.py	return {(h.set, h.rule) for h in hits}	keep	set	set
 secrets	packages/secrets/tests/test_scan.py	value = make(r)	keep	start	start
+secrets	packages/secrets/tests/test_settings.py	assert cli.main(["config", "secrets", "show", "--json"]) == 0	keep	show	show
 secrets	packages/secrets/tests/test_tools.py	"added": ["c"], "removed": ["a"], "changed": ["b"]}	keep	changed	changed
 secrets	packages/secrets/tests/test_tools.py	assert any(s.startswith("PyPy ") for s in found["unsafe"])	keep	any	any
 secrets	packages/secrets/tests/test_tools.py	assert set(c.failures["some-rule"]) == {"fallback allow plain"}	keep	set	set
@@ -11244,6 +11256,7 @@ services	packages/services/tests/test_page_table.py	assert set(module.COMPONENTS
 services	packages/services/tests/test_projects_link.py	assert moxi_cmd("projects", "show", "portfolio")[0] == 0	keep	show	show
 services	packages/services/tests/test_projects_link.py	test_a_read_that_fails_raises	name	holder	conn
 services	packages/services/tests/test_rows.py	site.module("bad", "DAEMONS = 3\n")	keep	bad	bad
+services	packages/services/tests/test_settings.py	assert cli.main(["config", "services", "show", "--json"]) == 0	keep	show	show
 services	packages/services/tests/test_store.py	assert row.created == row.changed and row.changed_by == "moxi services"	keep	changed	changed
 services	packages/services/tests/test_store.py	test_a_store_held_locked_past_the_wait_is_busy	name	holder	conn
 services	packages/services/tests/test_verdict.py	assert len(found) == 12 and set(found.values()) == {("ok", "fine")}	keep	set	set
@@ -12188,6 +12201,7 @@ sessions	packages/sessions/tests/test_session_facts.py	{key: row[key] for key in
 sessions	packages/sessions/tests/test_sessions_read.py	(home / ".codex" / "sessions").mkdir(parents=True)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_sessions_read.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
 sessions	packages/sessions/tests/test_sessions_read.py	r = CodexRollout(home / ".codex" / "sessions")	keep	sessions	sessions
+sessions	packages/sessions/tests/test_settings.py	assert cli.main(["config", "sessions", "show", "--json"]) == 0	keep	show	show
 sessions	packages/sessions/tests/test_shape.py	@pytest.mark.parametrize("record", [	keep	record	record
 sessions	packages/sessions/tests/test_shape.py	assert set(KINDS) == {"request", "message", "tool_call", "tool_result", "marker",	keep	set	set
 sessions	packages/sessions/tests/test_shape.py	assert set(MARKERS["compaction"]) == {"trigger", "pre_tokens"}	keep	set	set
@@ -12345,6 +12359,7 @@ slots	packages/slots/tests/test_server.py	env = {"HOME": str(home), "XDG_CONFIG_
 slots	packages/slots/tests/test_server.py	test_the_sweep_removes_launch_files_older_than_the_bound	name	directory	launch_dir
 slots	packages/slots/tests/test_server.py	text = server.config_text("/conf/it's mine.conf", {"HOME": "/nowhere"})	keep	HOME	HOME
 slots	packages/slots/tests/test_server.py	text = server.config_text(None, {"HOME": str(home)})	keep	HOME	HOME
+slots	packages/slots/tests/test_settings.py	assert cli.main(["config", "slots", "show", "--json"]) == 0	keep	show	show
 slots	packages/slots/tests/test_tmux.py	-	name	test_the_client_environment_drops_the_tmux_variables	test_the_client_env_drops_the_tmux_variables
 slots	packages/slots/tests/test_trampoline.py	"TERM_PROGRAM": "tmux", "SERVER_SECRET": "from-the-server", "HOME": "/home/x"}	keep	HOME	HOME
 slots	packages/slots/tests/test_trampoline.py	_, err = proc.communicate(timeout=10)	keep	timeout	timeout
@@ -12483,6 +12498,8 @@ tunnel	packages/tunnel/tests/test_replace.py	or any(c["parts"] == parts for c in
 tunnel	packages/tunnel/tests/test_replace.py	release.set()	keep	set	set
 tunnel	packages/tunnel/tests/test_replace.py	return any(c["parts"] == parts and not c["pending"] for c in copies())	keep	any	any
 tunnel	packages/tunnel/tests/test_replace.py	started.set()	keep	set	set
+tunnel	packages/tunnel/tests/test_settings.py	assert cli.main(["config", "tunnel", "show", "--json"]) == 0	keep	show	show
+tunnel	packages/tunnel/tests/test_settings.py	assert not any(key["elsewhere"] for key in keys.values())	keep	any	any
 tunnel	packages/tunnel/tests/test_tailscale.py	assert set(t.live()) == {8461}	keep	set	set
 tunnel	packages/tunnel/tests/test_tailscale.py	assert ts.live_state(serve_of(target=1), entry(), HOST) == "changed"	keep	changed	changed
 tunnel	packages/tunnel/tests/test_uninstall.py	assert set(entries()) == {"alpha/gateway", "alpha/connector"}	keep	set	set
@@ -13495,6 +13512,9 @@ turns	packages/turns/tests/test_page.py	self.dir.mkdir(parents=True, exist_ok=Tr
 turns	packages/turns/tests/test_page.py	self.held.set()	keep	set	set
 turns	packages/turns/tests/test_page.py	super().set()	keep	set	set
 turns	packages/turns/tests/test_page.py	self.dirty.set()	keep	set	set
+turns	packages/turns/tests/test_settings.py	assert cli.main(["config", "turns", "show", "--json"]) == 0	keep	show	show
+turns	packages/turns/tests/test_settings.py	assert len(runs) == len(set(runs)), runs	keep	set	set
+turns	packages/turns/tests/test_settings.py	assert not any(hurt["stays"] for hurt in hurts.values())	keep	any	any
 turns	packages/turns/tests/test_shipped_guards.py	@pytest.mark.parametrize(("cwd", "refused"), [	keep	refused	refused
 turns	packages/turns/tests/test_shipped_guards.py	None, {"HOME": rc.HOME})	keep	HOME	HOME
 turns	packages/turns/tests/test_shipped_guards.py	assert REMOVAL.calls == {"claude": ("Bash",)} and REMOVAL.who == "any"	keep	any	any
@@ -15577,6 +15597,7 @@ usage	packages/usage/tests/test_reports.py	source(conn, db, [request("o1", t, ha
 usage	packages/usage/tests/test_reports.py	source(conn, db, [request("o2", t + 99, harness="opencode", input=9)],	use	input=	input_tokens=
 usage	packages/usage/tests/test_reports.py	touched: set[int] = set()	keep	set	set
 usage	packages/usage/tests/test_settings.py	("[limits]\ncodex_pull_after_s = -1\n", "limits.codex_pull_after_s", "stale"),	keep	stale	stale
+usage	packages/usage/tests/test_settings.py	assert cli.main(["config", "usage", "show", "--json"]) == 0	keep	show	show
 usage	packages/usage/tests/test_settings.py	assert keys == set(DEFAULTS) | {"ceiling.warning_text", "ceiling.deny_text"}	keep	set	set
 usage	packages/usage/tests/test_settings.py	keys = set(current)	keep	set	set
 usage	packages/usage/tests/test_store.py	input=10, cache_read=0, cache_write=0, cache_write_1h=0, output=5,	keep	input	input

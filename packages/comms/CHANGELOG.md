@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Every setting carries page fields, which `moxi config comms show --json` prints and
+  the settings page draws: a plain label, a line where the label can't carry it, and
+  the unit of each wait, age and replay limit. No setting is shown first and none is
+  grouped, so the page lists them all. comms needs moxi 0.1.9 or later.
 - `moxi_comms.api.send`, `check`, `send_as` and `delete` close the record they opened
   before they return; before, its connection stayed open until the garbage collector
   found it.

@@ -143,6 +143,22 @@ def test_the_three_open_tables_declare_no_item_type():
     assert keys["tiers"].items == "str"
 
 
+def test_moxi_config_shows_each_key_with_a_label_and_the_words_of_each_enum_value():
+    rows = shown()
+    assert all(row["label"] for row in rows.values())
+    assert {name: row["unit"] for name, row in rows.items() if row["unit"]} == {
+        "defaults.idle_days": "days", "defaults.dormant_days": "days",
+        "defaults.slice_minutes": "minutes", "defaults.sitting_at": "open questions",
+        "sweep.grace_hours": "hours"}
+    assert [(choice["value"], choice["words"]) for choice in
+            rows["defaults.ratify"]["choices"]] == [
+        ("majors", "the major ones"), ("majors+minors", "major and minor"), ("off", "none")]
+    assert [choice["value"] for choice in rows["defaults.check_on"]["choices"]] == [
+        "merged", "tip"]
+    for row in rows.values():
+        assert row["common"] is False and row["group"] is None and row["hurts"] is None
+        assert row["elsewhere"] is None
+
 # -- what the file may hold --------------------------------------------------------------
 
 def test_the_file_sets_the_plain_keys(write_config, tmp_path):
