@@ -211,7 +211,9 @@ def test_main_comparison_reports_a_move_and_a_row_at_the_new_place_clears_it(tmp
     original = row(path, "-", "name", "old", "new")
     renames = table(tmp_path, original)
     assert rename.run(root, renames, dry_run=True, main_ref=main_ref) == 1
-    assert "moved here" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # The row's file is gone: the row is dead, and the comparison finds where it went.
+    assert "moved here" in out and f"dead: renames.tsv row 2: {path} name" in out
     clearing = row("packages/p/src/p/moved.py", "-", "name", "old", "new")
     renames = table(tmp_path, original, clearing)
     assert rename.run(root, renames, dry_run=True, main_ref=main_ref) == 0
@@ -756,3 +758,51 @@ class Clock:
     def has_age(self):
         return any(self.age_s for _ in ())
 '''
+
+
+# Code that uses `stray` and a keyword `b` where a name used everywhere is listed: an
+# unresolved attribute and call keyword, a string lookup and a comment cite.
+SPREAD = '''
+def use(holder):
+    """Reads `stray`."""
+    holder.call(1, b=2)
+    return holder.stray, getattr(holder, "stray")
+'''
+GONE = "packages/p/tests/test_gone.py"
+
+
+@pytest.mark.parametrize("dead_row", [
+    row(GONE, "test_one", "name", "stray", "page_dir"),
+    row(GONE, "call", "kwonly", "b", "b"),
+    row(GONE, "x = holder.stray", "use", "stray", "page_dir"),
+    row(GONE, "x = holder.stray", "keep", "stray", "stray"),
+], ids=["name", "kwonly", "use", "keep"])
+def test_a_row_whose_file_is_gone_is_dead_and_its_old_name_no_leftover(tmp_path, capsys,
+                                                                       dead_row):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: SPREAD})
+    renames = table(tmp_path, dead_row)
+    assert rename.run(root, renames) == 0
+    out = capsys.readouterr().out
+    assert "0 to apply, 0 applied, 0 not here, 1 dead" in out
+    _package, gone, _scope, kind, old, new = dead_row
+    assert f"dead: renames.tsv row 2: {gone} {kind} {old} -> {new}" in out
+    assert "0 leftovers" in out
+    assert (root / path).read_text() == SPREAD
+
+
+def test_rows_whose_file_is_there_keep_their_meaning(tmp_path, capsys):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: "stray = 1\n" + SPREAD})
+    renames = table(tmp_path,
+                    row(path, "-", "name", "stray", "page_dir"),
+                    row(path, "gone", "name", "f", "fh"),
+                    row(path, "x = 1", "use", "x", "y"),
+                    row("-", "removed:p.x:gone", "keep", "old", "new"))
+    assert rename.run(root, renames, dry_run=True) == 1
+    out = capsys.readouterr().out
+    assert "1 to apply, 1 applied, 2 not here, 0 dead" in out
+    assert "dead:" not in out
+    # A module-level name is still looked for in every file.
+    assert f"{path}:6: unresolved attribute still uses 'stray'" in out
+    assert f"{path}:6: string lookup still names 'stray'" in out
