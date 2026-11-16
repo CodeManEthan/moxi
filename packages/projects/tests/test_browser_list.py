@@ -179,7 +179,10 @@ def test_the_page_places_the_fixtures_facts_hidden_with_every_project_and_the_op
 
 
 def test_the_fixtures_times_order_the_list_with_bad_news_first(fixture_shell, fixture_page):
-    now = time.time()
+    # The page's clock stands at noon and the report's times are at most hours before it,
+    # so each is worded as a time on the page's own day whatever the hour of the run.
+    now = kit.noon()
+    fixture_page.clock.set_fixed_time(now)
     report = kit.full_report(fixture_shell, now)
     kit.say(fixture_shell, report)
     panel = open_list(fixture_page)
