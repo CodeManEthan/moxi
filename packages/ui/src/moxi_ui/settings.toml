@@ -1,6 +1,27 @@
 # The ui module's config schema. The file it governs is CONFIG/ui/config.toml;
 # `moxi config ui` shows every key and `moxi config ui init` writes the file.
 
+[theme.palette]
+type = "enum"
+values = ["plain", "midnight-neon"]
+default = "plain"
+doc = "The pages' colours: plain is near-monochrome with one blue accent; midnight-neon is a warm paper grey in light mode and a near-black violet with neon marks in dark. Each page the shell opens reads it."
+read = "use"
+label = "Look"
+choices = { plain = "Plain", midnight-neon = "Midnight neon" }
+pick = true
+common = true
+
+[theme.mode]
+type = "enum"
+values = ["system", "light", "dark"]
+default = "system"
+doc = "Light or dark: system follows the browser's light or dark scheme; light and dark fix the theme's light or dark colours. Each page the shell opens reads it."
+read = "use"
+label = "Light or dark"
+choices = { system = "follow the browser", light = "light", dark = "dark" }
+common = true
+
 [port]
 type = "int"
 default = 8460
@@ -17,27 +38,6 @@ doc = "Seconds a shell that a socket unit started stays up with no open request,
 read = "start"
 label = "Idle shutdown"
 unit = "seconds"
-
-[theme.mode]
-type = "enum"
-values = ["system", "light", "dark"]
-default = "system"
-doc = "Light or dark: system follows the browser's light or dark scheme; light and dark fix the theme's light or dark colours. Each page the shell opens reads it."
-read = "use"
-label = "Light or dark"
-choices = { system = "follow the browser", light = "light", dark = "dark" }
-common = true
-
-[theme.palette]
-type = "enum"
-values = ["plain", "midnight-neon"]
-default = "plain"
-doc = "The pages' colours: plain is near-monochrome with one blue accent; midnight-neon is a warm paper grey in light mode and a near-black violet with neon marks in dark. Each page the shell opens reads it."
-read = "use"
-label = "Look"
-choices = { plain = "Plain", midnight-neon = "Midnight neon" }
-pick = true
-common = true
 
 [gateway.enabled]
 type = "bool"

@@ -672,7 +672,7 @@ def test_the_shipped_schema_passes_the_cores_check_and_carries_the_page_fields()
         "theme.palette": "Look", "gateway.enabled": "Phone access",
         "gateway.port": "Phone port"}
     assert [name for name, key in keys.items() if key.common] == [
-        "port", "theme.mode", "theme.palette"]
+        "theme.palette", "theme.mode", "port"]
     assert keys["theme.palette"].pick and not keys["theme.mode"].pick
     assert keys["theme.palette"].choices == {"plain": "Plain", "midnight-neon": "Midnight neon"}
     assert keys["theme.mode"].choices["system"] == "follow the browser"
