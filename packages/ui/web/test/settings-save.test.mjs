@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   BUSY, NOT_FINISHED, NOTHING_ELSE, Pending, allSaved, answerWords, confirmOf, heldWords, hurtsOf, leaveAsk,
-  numberValue, outcomeNote, same, staysWarned, transportWords,
+  numberValue, outcomeNote, same, shownKey, staysWarned, transportWords,
 } from "../src/save-model.ts";
 
 function key(name, type, value, fallback, extra = {}) {
@@ -66,6 +66,25 @@ test("a switch table's entry is held under its own key with its entry's value", 
   assert.deepEqual(p.changeOf("demo", "rows.sync"), { name: "rows.sync", value: true, reset: false, was: "false" });
   p.editEntry("demo", TABLE, "sync", false);
   assert.equal(p.count("demo"), 0);
+});
+
+test("a key is shown with the value held for it: a value, a switch table's entries, a table's TOML", () => {
+  const p = new Pending();
+  assert.equal(shownKey(p, "ui", PORT), PORT);
+  p.edit("ui", PORT, 8460);
+  assert.equal(shownKey(p, "ui", PORT).json, "8460");
+  assert.equal(PORT.json, "18460");
+  p.edit("ui", PORT, "8460a");
+  assert.equal(shownKey(p, "ui", PORT).json, '"8460a"');
+  p.editEntry("demo", TABLE, "sync", true);
+  assert.deepEqual(shownKey(p, "demo", TABLE).entries.map((entry) => entry.value),
+                   TABLE.entries.map((entry) => entry.name === "sync" ? true : entry.value));
+  const toml = key("extra", "table", { a: 1 }, {}, { value: "{a = 1}", default: "{}" });
+  p.edit("demo", toml, "{a = 2}");
+  assert.equal(shownKey(p, "demo", toml).value, "{a = 2}");
+  p.reset("demo", toml);
+  assert.equal(shownKey(p, "demo", toml).value, "{}");
+  assert.equal(shownKey(p, "demo", toml).json, "{}");
 });
 
 test("the save's body holds the module's changes in schema order, values as JSON, a reset's as empty", () => {

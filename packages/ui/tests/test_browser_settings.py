@@ -1,22 +1,29 @@
-"""The Settings page in a browser, as it reads: the list of modules and one module's
-settings at a time, each type's control, a changed key's default and Reset, More, the
-foot, the addresses the page writes for itself, a section that can't be read, a key the
-shell was started with locked, copying a key, the page kept across the shell's redraw;
-and `<moxi-ui-form>` in submit mode with catalog rows."""
+"""The Settings page in a browser: the list of modules and one module's settings at a
+time, each type's control, a changed key's default and Reset, More, the foot, the
+addresses the page writes for itself, a section that can't be read, a key the shell was
+started with locked, copying a key, the page kept across the shell's redraw; changes held
+until Save, each type's edit saved to the file, a refusal beside its row, ui's theme keys
+applied at once, the asks when the page is left with changes held; and `<moxi-ui-form>`
+in submit mode with catalog rows."""
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
 
-# The page reads through `moxi config` in a child process.
+# The page reads and writes through `moxi config` in a child process.
 SETTINGS_MS = 15_000
 LOCKED = "Locked for this run of the shell."
+TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
+# A clock time as the Save line words it, in the browser's own form.
+CLOCK = r"\d{1,2}:\d{2}(?:\s?[AP]M)?"
 
 
 def _view(page):
@@ -40,6 +47,33 @@ def _field(form, name):
 
 def _list(view):
     return view.locator("[data-part=list] a[data-list]")
+
+
+def _save_line(view):
+    return view.locator("[data-part=save]")
+
+
+def _held(view, name):
+    return _row(view, name).locator("[data-line=held]")
+
+
+def _file(shell, module="fixture") -> dict:
+    path = shell.config_file(module)
+    return tomllib.loads(path.read_text()) if path.exists() else {}
+
+
+def _saves(page) -> list:
+    """The bodies the page posts to `api/settings/save`, as they go."""
+    sent: list = []
+    page.on("request", lambda request: sent.append(request.post_data_json)
+            if request.url.endswith("/m/ui/api/settings/save") else None)
+    return sent
+
+
+def _save(view, words):
+    """Saves the module shown and waits for the Save line to say `words` (a pattern)."""
+    _save_line(view).get_by_role("button", name="Save", exact=True).click()
+    expect(_save_line(view).locator("[data-line=save]")).to_have_text(re.compile(words), timeout=SETTINGS_MS)
 
 
 def test_each_type_is_drawn_with_its_own_control(ui_page):
@@ -187,6 +221,276 @@ def test_a_click_on_a_key_copies_it(ui_shell, ui_page):
     expect(_row(view, "limit").locator("[data-line=copied]")).to_have_count(0, timeout=4000)
 
 
+def test_a_change_is_held_until_save_and_reset_holds_the_default(ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    page = ui_contexts(shell).pages[0]
+    sent = _saves(page)
+    view = _settings(page)
+    box = view.locator("input[data-control=limit]")
+    line = _save_line(view).locator("[data-line=save]")
+    expect(line).to_have_text("Nothing to save")
+    expect(_save_line(view).get_by_role("button", name="Save")).to_be_disabled()
+    box.fill("12")
+    expect(_held(view, "limit")).to_have_text(re.compile(r"^not saved · was 10\s*·\s*Undo$"))
+    expect(_row(view, "limit")).to_have_attribute("data-held", "")
+    expect(line).to_have_text("1 not saved · limit")
+    expect(view.locator("[data-part=list] [data-line=unsaved]")).to_have_text("1 not saved")
+    # Nothing is written until Save.
+    assert "limit" not in _file(shell)
+    # Undo gives the row back; Discard drops every change of the module.
+    _held(view, "limit").get_by_role("button", name="Undo").click()
+    expect(box).to_have_value("10")
+    expect(line).to_have_text("Nothing to save")
+    box.fill("13")
+    view.locator("input[data-control=workers]").fill("4")
+    expect(line).to_have_text("2 not saved · limit, workers")
+    _save_line(view).get_by_role("button", name="Discard").click()
+    expect(line).to_have_text("Nothing to save")
+    expect(box).to_have_value("10")
+    expect(view.locator("[data-part=list] [data-line=unsaved]")).to_have_count(0)
+    # Saved: the file holds it, the row reads it back with its default.
+    box.fill("12")
+    _save(view, rf"^Saved {CLOCK} · limit applies now$")
+    assert _file(shell)["limit"] == 12
+    expect(box).to_have_value("12")
+    expect(_row(view, "limit").locator("[data-line=default]")).to_have_text(re.compile(r"^default 10\s*·\s*Reset$"))
+    # Reset holds the default like any change, and Save unsets the key.
+    _row(view, "limit").get_by_role("button", name="Reset").click()
+    expect(box).to_have_value("10")
+    expect(_held(view, "limit")).to_have_text(re.compile(r"^not saved · was 12\s*·\s*Undo$"))
+    _save(view, rf"^Saved {CLOCK} · limit applies now$")
+    assert "limit" not in _file(shell)
+    expect(_row(view, "limit").locator("[data-line=default]")).to_have_count(0)
+    assert [(body["keys"], body["values"], body["resets"], body["was"]) for body in sent] == [
+        (["limit"], ["12"], [False], ["10"]), (["limit"], [""], [True], ["12"])]
+
+
+def test_a_start_key_is_saved_with_its_mark(ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    view = _settings(ui_contexts(shell).pages[0])
+    view.locator("input[data-control=workers]").fill("3")
+    _save(view, rf"^Saved {CLOCK} · workers applies at the next start$")
+    assert _file(shell)["workers"] == 3
+
+
+def test_the_entry_only_the_timer_names_is_off_and_turning_it_on_saves_it(ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    view = _settings(ui_contexts(shell).pages[0])
+    switch = view.locator("[role=switch][data-control='rows.backup']")
+    entry = view.locator(".entry[data-entry='rows.backup']")
+    expect(switch).to_have_attribute("aria-checked", "false")
+    switch.click()
+    expect(switch).to_have_attribute("aria-checked", "true")
+    expect(entry.locator("[data-line=held]")).to_have_text(re.compile(r"^not saved · was off\s*·\s*Undo$"))
+    _save(view, rf"^Saved {CLOCK} · rows backup applies now$")
+    assert _file(shell)["rows"] == {"backup": True}
+    expect(switch).to_have_attribute("aria-checked", "true")
+    expect(entry.locator("[data-line=held]")).to_have_count(0)
+    switch.click()
+    _save(view, rf"^Saved {CLOCK}")
+    assert _file(shell)["rows"] == {"backup": False}
+
+
+def test_a_value_the_server_refuses_says_why_beside_its_row_and_the_rest_is_saved(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    view = _settings(ui_contexts(shell).pages[0])
+    extra = _row(view, "extra")
+    extra.get_by_role("button", name="Edit").click()
+    extra.locator("textarea").fill("not = [valid")
+    view.locator("input[data-control=workers]").fill("3")
+    _save(view, rf"^1 of 2 saved at {CLOCK} · extra was refused: it says why beside the field$")
+    note = extra.locator("[data-line=note]")
+    expect(note).to_have_text(re.compile(r"^Not saved\. .+"))
+    # The refused row keeps what was typed, and says what the file still holds.
+    expect(extra.locator("textarea")).to_have_value("not = [valid")
+    expect(_held(view, "extra")).to_have_text(re.compile(r"^still none\s*·\s*Undo$"))
+    expect(_held(view, "workers")).to_have_count(0)
+    assert _file(shell) == {"workers": 3}
+    expect(view.locator("[data-part=list] [data-line=unsaved]")).to_have_text("1 not saved")
+    # A table's TOML as one value is saved.
+    extra.locator("textarea").fill("{colour = \"red\"}")
+    _save(view, rf"^Saved {CLOCK} · extra applies now$")
+    assert _file(shell)["extra"] == {"colour": "red"}
+
+
+def test_a_list_takes_an_item_and_gives_it_back(ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    view = _settings(ui_contexts(shell).pages[0])
+    tags = _row(view, "tags")
+    tags.get_by_role("button", name="Add").click()
+    tags.get_by_role("textbox", name="Add to tags").fill("sky")
+    tags.get_by_role("textbox", name="Add to tags").press("Enter")
+    expect(tags.locator("[data-item]")).to_have_text(["sky×"])
+    expect(_held(view, "tags")).to_have_text(re.compile(r"^not saved · was none\s*·\s*Undo$"))
+    _save(view, rf"^Saved {CLOCK} · tags applies now$")
+    assert _file(shell)["tags"] == ["sky"]
+    tags.get_by_role("button", name="Remove sky").click()
+    expect(tags.locator("[data-line=none]")).to_have_text("none")
+    _save(view, rf"^Saved {CLOCK} · tags applies now$")
+    assert _file(shell).get("tags", []) == []
+
+
+def _set_background(mode: str, theme: str = "plain") -> str:
+    """The `bg` token of the colour set `theme` shows in `mode`, as the browser computes it."""
+    tokens = json.loads(TOKENS.read_text())
+    name = tokens["$themes"][theme][mode]
+    value = tokens["bg"]["$extensions"]["moxi"]["sets"][name]
+    return "rgb({}, {}, {})".format(*(int(value[i:i + 2], 16) for i in (1, 3, 5)))
+
+
+def test_theme_mode_picks_the_colour_set_on_the_root_and_inside_a_shadow_root(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    light, dark = _set_background("light"), _set_background("dark")
+    assert (light, dark) == ("rgb(250, 250, 248)", "rgb(21, 21, 21)")
+    page = ui_contexts(shell, color_scheme="light").pages[0]
+    html = page.locator("html")
+    view = _settings(page, "settings/ui")
+    # The Save line sits in the page's shadow root, on --moxi-bg.
+    inside = _save_line(view)
+
+    def shows(colour: str) -> None:
+        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        expect(inside).to_have_css("background-color", colour)
+
+    def pick(mode: str) -> None:
+        view.locator(f"[data-control='theme.mode'] [role=radio][data-value={mode}]").click()
+
+    # system follows the browser's scheme, both ways.
+    expect(html).to_have_attribute("data-theme", "system")
+    shows(light)
+    page.emulate_media(color_scheme="dark")
+    shows(dark)
+    page.emulate_media(color_scheme="light")
+    shows(light)
+    # dark fixes the dark set on a light browser once saved, and after a reload; held, it
+    # changes nothing.
+    pick("dark")
+    expect(html).to_have_attribute("data-theme", "system")
+    _save(view, rf"^Saved {CLOCK} · Light or dark applies now$")
+    expect(html).to_have_attribute("data-theme", "dark")
+    shows(dark)
+    assert _file(shell, "ui")["theme"] == {"mode": "dark"}
+    page.reload()
+    expect(html).to_have_attribute("data-theme", "dark")
+    view = _settings(page, "settings/ui")
+    inside = _save_line(view)
+    shows(dark)
+    # light fixes the light set on a dark browser, at once and after a reload.
+    page.emulate_media(color_scheme="dark")
+    pick("light")
+    _save(view, rf"^Saved {CLOCK}")
+    expect(html).to_have_attribute("data-theme", "light")
+    shows(light)
+    page.reload()
+    expect(html).to_have_attribute("data-theme", "light")
+    view = _settings(page, "settings/ui")
+    inside = _save_line(view)
+    shows(light)
+
+
+def test_theme_palette_switches_the_colours_on_the_root_and_inside_a_shadow_root(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    plain = {mode: _set_background(mode) for mode in ("light", "dark")}
+    neon = {mode: _set_background(mode, "midnight-neon") for mode in ("light", "dark")}
+    assert neon == {"light": "rgb(246, 244, 241)", "dark": "rgb(10, 9, 24)"}
+    page = ui_contexts(shell, color_scheme="light").pages[0]
+    html = page.locator("html")
+    view = _settings(page, "settings/ui")
+    name = view.locator("select[data-control='theme.palette']")
+    expect(name.locator("option")).to_have_text(["Plain", "Midnight neon"])
+    expect(name).to_have_value("plain")
+
+    def shows(colour: str) -> None:
+        expect(html).to_have_css("background-color", colour, timeout=SETTINGS_MS)
+        # The Save line sits in the page's shadow root, on --moxi-bg.
+        expect(_save_line(view)).to_have_css("background-color", colour)
+
+    expect(html).to_have_attribute("data-theme-name", "plain")
+    shows(plain["light"])
+    # The other theme shows once saved, in the browser's scheme, both ways.
+    name.select_option("midnight-neon")
+    _save(view, rf"^Saved {CLOCK} · Look applies now$")
+    expect(html).to_have_attribute("data-theme-name", "midnight-neon")
+    shows(neon["light"])
+    page.emulate_media(color_scheme="dark")
+    shows(neon["dark"])
+    assert _file(shell, "ui")["theme"] == {"palette": "midnight-neon"}
+    # It stays after a reload, and under a fixed mode.
+    page.reload()
+    expect(html).to_have_attribute("data-theme-name", "midnight-neon")
+    view = _settings(page, "settings/ui")
+    name = view.locator("select[data-control='theme.palette']")
+    shows(neon["dark"])
+    view.locator("[data-control='theme.mode'] [role=radio][data-value=light]").click()
+    _save(view, rf"^Saved {CLOCK}")
+    expect(html).to_have_attribute("data-theme", "light")
+    expect(html).to_have_attribute("data-theme-name", "midnight-neon")
+    shows(neon["light"])
+    # Back to the default theme, the mode kept.
+    name.select_option("plain")
+    _save(view, rf"^Saved {CLOCK}")
+    expect(html).to_have_attribute("data-theme-name", "plain")
+    expect(html).to_have_attribute("data-theme", "light")
+    shows(plain["light"])
+
+
+def test_changes_are_kept_across_modules_and_leaving_asks_in_the_save_line(ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    page = ui_contexts(shell).pages[0]
+    # Opened from Home inside the one document, so Back stays in it.
+    page.locator("#moxi-settings").click()
+    view = _view(page)
+    _list(view).and_(page.locator("[data-list=fixture]")).click()
+    box = view.locator("input[data-control=limit]")
+    box.fill("12")
+    # Moving between modules keeps the change and does not ask.
+    _list(view).and_(page.locator("[data-list=ui]")).click()
+    expect(page).to_have_url(shell.url + "/m/ui/settings/ui")
+    expect(view.locator("[data-part=list] a.u")).to_have_text("fixture")
+    _list(view).and_(page.locator("[data-list=fixture]")).click()
+    expect(box).to_have_value("12")
+    # A link off the page asks in the Save line's place; Stay keeps everything.
+    foot = view.locator("[data-part=foot]")
+    foot.get_by_role("link", name="Fixture").click()
+    ask = _save_line(view)
+    expect(ask).to_have_attribute("data-state", "leave")
+    expect(ask.locator("[data-line=save]")).to_have_text(
+        re.compile(r"^Leave Settings with 1 change in fixture not saved\? limit\.\s*$"))
+    expect(ask.get_by_role("button")).to_have_text(["Stay", "Leave without saving", "Save and leave"])
+    ask.get_by_role("button", name="Stay").click()
+    expect(page).to_have_url(shell.url + "/m/ui/settings/fixture")
+    expect(box).to_have_value("12")
+    # Back asks too, the page's address put back; Save and leave writes the change, then leaves.
+    page.go_back()
+    expect(ask).to_have_attribute("data-state", "leave")
+    expect(page).to_have_url(shell.url + "/m/ui/settings/fixture")
+    ask.get_by_role("button", name="Stay").click()
+    expect(page).to_have_url(shell.url + "/m/ui/settings/fixture")
+    foot.get_by_role("link", name="Fixture").click()
+    ask.get_by_role("button", name="Save and leave").click()
+    expect(page).to_have_url(shell.url + "/m/fixture/")
+    assert _file(shell)["limit"] == 12
+    # Changes in two modules: each named, and no save offered.
+    page.go_back()
+    view = _view(page)
+    expect(view.locator("[data-part=pane][data-module=fixture] [data-part=foot]")).to_be_visible(timeout=SETTINGS_MS)
+    view.locator("input[data-control=workers]").fill("5")
+    _list(view).and_(page.locator("[data-list=ui]")).click()
+    view.locator("[data-control='theme.mode'] [role=radio][data-value=dark]").click()
+    view.locator("[data-part=foot]").get_by_role("link", name="Modules").click()
+    ask = _save_line(view)
+    expect(ask.locator("[data-line=save]")).to_contain_text("Leave Settings with 2 changes not saved?")
+    expect(ask.locator("[data-line=leave]")).to_have_text(
+        ["1 in fixture: workers.", "1 in ui: Light or dark.", "Save writes one module at a time."])
+    expect(ask.get_by_role("button")).to_have_text(["Leave without saving", "Stay"])
+    ask.get_by_role("button", name="Leave without saving").click()
+    expect(page).to_have_url(shell.url + "/m/ui/modules")
+    assert _file(shell) == {"limit": 12} and _file(shell, "ui") == {}
+
+
 _SIGN_OUT = """async () => {
   const good = localStorage.getItem("moxi-ui-key");
   localStorage.setItem("moxi-ui-key", "A".repeat(43));
@@ -214,6 +518,33 @@ def test_more_stays_open_when_the_shell_draws_the_page_again(ui_shell, ui_page):
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings/ui/more")
     expect(view.locator("[data-part=more]").get_by_role("button", name="Hide")).to_be_visible()
     expect(_row(view, "idle_s").locator("[data-line=label]")).to_have_text("Idle shutdown")
+
+
+def test_the_saved_line_and_more_stay_when_the_shell_draws_the_page_after_a_save(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    page = ui_contexts(shell).pages[0]
+    view = _settings(page, "settings/ui")
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+    view.locator("[data-part=more]").get_by_role("button", name="Show").click()
+    view.locator("input[data-control=idle_s]").fill("1200")
+    page.evaluate("document.querySelector('#moxi-panel > moxi-ui-page').dataset.placed = 'first'")
+    # The sign-in drops and comes back while the change is held: the shell waits.
+    key = page.evaluate(_SIGN_OUT)
+    expect(page.locator("#moxi-notice")).to_be_visible()
+    other = page.context.new_page()
+    other.goto(shell.url + "/m/ui/modules")
+    other.evaluate("(key) => localStorage.setItem('moxi-ui-key', key)", key)
+    expect(page.locator("#moxi-notice")).to_be_hidden()
+    expect(page.locator("#moxi-panel > moxi-ui-page[data-placed=first]")).to_be_attached()
+    # Saved, the page lets go: the shell draws it again, and the new one says what was saved.
+    _save(view, rf"^Saved {CLOCK} · Idle shutdown ")
+    expect(page.locator("#moxi-panel > moxi-ui-page[data-placed=first]")).to_have_count(0)
+    expect(_save_line(view).locator("[data-line=save]")).to_have_text(re.compile(rf"^Saved {CLOCK} · Idle shutdown "))
+    expect(page).to_have_url(shell.url + "/m/ui/settings/ui/more")
+    expect(view.locator("[data-part=more]").get_by_role("button", name="Hide")).to_be_visible()
+    expect(view.locator("input[data-control=idle_s]")).to_have_value("1200")
+    assert _file(shell, "ui")["idle_s"] == 1200
 
 
 FORCED = """async (sent) => {

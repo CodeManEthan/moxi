@@ -374,6 +374,30 @@ export class Pending {
   }
 }
 
+/**
+ * `key` as the page shows it while `pending` holds a change to it: the value held in
+ * place of the one read; a switch table's entries with the ones held; a table's TOML text
+ * as typed (or, for a reset, its default's).
+ */
+export function shownKey(pending: Pending, module: string, key: Setting): Setting {
+  if (key.switch_table === true) {
+    const entries = Array.isArray(key.entries) ? key.entries : [];
+    if (!entries.some((entry) => pending.changeOf(module, entry?.key) !== undefined)) return key;
+    return { ...key, entries: entries.map((entry) => {
+      const change = pending.changeOf(module, entry?.key);
+      return change === undefined ? entry : { ...entry, value: change.value === true };
+    }) };
+  }
+  const change = pending.changeOf(module, key.name);
+  if (change === undefined) return key;
+  const shown: Setting = { ...key, json: JSON.stringify(change.value ?? null) };
+  if (key.type === "table") {
+    if (change.reset) shown.value = key.default ?? "";
+    else if (typeof change.value === "string") shown.value = change.value;
+  }
+  return shown;
+}
+
 // --- an answer's words ------------------------------------------------------------------------------
 
 /** A result whose value the file holds: saved, unchanged, or written with its daemons

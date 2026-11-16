@@ -342,7 +342,9 @@ export function controlOf(key: Setting): Control {
       return enumControl(key, value);
     case "int":
     case "float":
-      return { kind: "number", text: typeof value === "number" ? String(value) : "", unit: words(key.unit),
+      // A text held for a number that doesn't read as one shows as typed.
+      return { kind: "number", text: typeof value === "number" || typeof value === "string" ? String(value) : "",
+               unit: words(key.unit),
                whole: key.type === "int" };
     case "list":
       return listControl(key, value);

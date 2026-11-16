@@ -91,6 +91,8 @@ test("each type gets its control", () => {
   assert.deepEqual(controlOf(key("n", "int", 8460, 8460, { unit: "seconds" })),
                    { kind: "number", text: "8460", unit: "seconds", whole: true });
   assert.deepEqual(controlOf(key("r", "float", 0.5, 1)), { kind: "number", text: "0.5", unit: null, whole: false });
+  // A text held for a number that doesn't read as one shows as typed.
+  assert.deepEqual(controlOf(key("n", "int", "8460a", 8460)), { kind: "number", text: "8460a", unit: null, whole: true });
   assert.deepEqual(controlOf(key("s", "string", "hi", "")), { kind: "text", text: "hi", path: false });
   assert.deepEqual(controlOf(key("p", "path", null, "")), { kind: "text", text: "", path: true });
   assert.deepEqual(controlOf(key("t", "table", { a: 1 }, {}, { value: "{a = 1}" })), { kind: "toml", text: "{a = 1}" });
