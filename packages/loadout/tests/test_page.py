@@ -160,7 +160,8 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     exported = LB.export(page.PAGE)
     routes = {r["path"]: r for r in exported["routes"]}
     assert {p for p, r in routes.items() if r["kind"] == "read"} == {
-        "/api/status", "/api/view", "/api/list", "/api/global", "/api/projects", "/api/drift", "/api/job"}
+        "/api/status", "/api/view", "/api/list", "/api/global", "/api/folder", "/api/projects",
+        "/api/drift", "/api/job"}
     assert {p for p, r in routes.items() if r["kind"] == "act"} == {
         "/api/add", "/api/remove", "/api/enable", "/api/disable", "/api/global-mode",
         "/api/install", "/api/replace", "/api/global-remove"}
@@ -201,7 +202,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
         "/api/view home", "/api/view folder", "/api/view manifest",
         "/api/view sections[].root", "/api/view rows[].target",
         "/api/view global.files[].file", "/api/view global.files[].parts[]",
-        "/api/view global.source", "/api/view sections[].refused.last_root"}
+        "/api/view global.source", "/api/view sections[].refused.last_root",
+        "/api/folder unlisted[].source"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
                  "/api/list items[].source", "/api/list items[].scope",
@@ -216,7 +218,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
                  "/api/view items[].what.event", "/api/view items[].what.matcher",
                  "/api/view items[].what.command", "/api/view items[].what.url",
                  "/api/view items[].what.allow[]", "/api/view items[].what.ask[]",
-                 "/api/view items[].what.deny[]"):
+                 "/api/view items[].what.deny[]", "/api/folder detail",
+                 "/api/folder uncommitted[]", "/api/folder unlisted[].name"):
         assert marks[said] == "redact", said
     plain = {"/api/view harnesses[]", "/api/view counts.ok", "/api/view sections[].where",
              "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
@@ -232,7 +235,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/view sections[].refused.cause", "/api/view items[].module",
              "/api/view item_notes[].kind", "/api/view item_notes[].name",
              "/api/view item_notes[].harness", "/api/view item_notes[].code",
-             "/api/projects cause"}
+             "/api/projects cause", "/api/folder state", "/api/folder more",
+             "/api/folder unlisted[].kind", "/api/folder reinstalls"}
     assert not plain & set(marks)
 
 
@@ -433,6 +437,167 @@ def test_a_read_returns_while_git_stalls(lo, monkeypatch, tmp_path):
     body = read("/api/status")
     assert time.monotonic() - start < 15 * timed_slack()
     assert body["problem"] is None
+
+
+# -- the folder ---------------------------------------------------------------------------
+
+def git(cwd, *args) -> str:
+    done = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                           "-c", "init.defaultBranch=main", "-C", str(cwd), *args],
+                          capture_output=True, text=True, check=True, timeout=30)
+    return done.stdout
+
+
+@pytest.fixture
+def tree(tmp_path):
+    """A loadout folder two levels inside a git work tree, its one skill committed."""
+    root = tmp_path / "work"
+    root.mkdir()
+    git(root, "init", "-q")
+    loadout_dir = kit.configure(root / "dots" / "loadout")
+    kit.skill(loadout_dir / "skills", "review")
+    kit.manifest(loadout_dir, '[user]\nskills = ["review"]\n')
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "start")
+    return loadout_dir
+
+
+def test_source_dir_outside_a_work_tree_names_no_uncommitted_files(site, lo):
+    assert read("/api/folder") == {"state": "ok", "detail": None, "uncommitted": None,
+                                   "more": 0, "unlisted": [], "reinstalls": False}
+
+
+def test_source_dir_in_a_clean_work_tree_has_nothing_uncommitted(site, tree):
+    body = read("/api/folder")
+    assert (body["state"], body["uncommitted"], body["more"]) == ("ok", [], 0)
+
+
+def test_source_dir_names_each_uncommitted_file_relative_to_it(site, tree):
+    (tree / "skills" / "review" / "SKILL.md").write_text("changed\n")
+    kit.skill(tree / "skills", "fresh")
+    (tree / "skills" / "fresh" / "notes").mkdir()
+    (tree / "skills" / "fresh" / "notes" / "a.md").write_text("a\n")
+    (tree.parent.parent / "elsewhere.md").write_text("not the folder's\n")
+    body = read("/api/folder")
+    assert body["state"] == "ok" and body["more"] == 0
+    assert sorted(body["uncommitted"]) == ["skills/fresh/SKILL.md", "skills/fresh/notes/a.md",
+                                           "skills/review/SKILL.md"]
+
+
+def test_source_dir_names_a_renamed_file_by_its_new_path(site, tree):
+    git(tree, "mv", "loadout.toml", "renamed.toml")
+    assert read("/api/folder")["uncommitted"] == ["renamed.toml"]
+
+
+def test_source_dir_names_twenty_files_and_counts_the_rest(site, tree):
+    for n in range(23):
+        (tree / f"note-{n:02}.md").write_text(f"{n}\n")
+    body = read("/api/folder")
+    assert body["uncommitted"] == [f"note-{n:02}.md" for n in range(20)]
+    assert body["more"] == 3
+
+
+def test_source_dir_read_writes_nothing_to_the_index(site, tree):
+    index = tree.parent.parent / ".git" / "index"
+    before = index.read_bytes()
+    os.utime(tree / "loadout.toml", (1_000_000_000, 1_000_000_000))  # git would refresh it
+    read("/api/folder")
+    assert index.read_bytes() == before
+
+
+@pytest.mark.timed
+@pytest.mark.skipif(os.name != "posix", reason="the stalled git is a shell script")
+def test_source_dir_whose_git_stalls_says_so_and_names_no_files(site, tree, monkeypatch, tmp_path):
+    stalled = tmp_path / "stalled-bin"
+    stalled.mkdir()
+    (stalled / "git").write_text("#!/bin/sh\nexec sleep 60\n")
+    (stalled / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stalled}{os.pathsep}{os.environ['PATH']}")
+    start = time.monotonic()
+    body = read("/api/folder")
+    assert time.monotonic() - start < 15 * timed_slack()
+    assert body["state"] == "error" and body["detail"] == pagehandlers.GIT_SLOW
+    assert (body["uncommitted"], body["more"]) == (None, 0)
+
+
+def test_source_dir_whose_git_fails_says_so_in_a_line_with_no_path(site, lo, monkeypatch):
+    (lo / ".git").mkdir()  # a work tree git can't read
+    body = read("/api/folder")
+    assert body["state"] == "error" and body["detail"] == pagehandlers.GIT_FAILED
+    assert str(lo) not in body["detail"]
+    assert body["uncommitted"] is None
+
+
+def test_source_dir_names_the_skills_and_agents_no_section_lists(site, lo, tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    kit.skill(lo / "skills", "spare")
+    kit.skill(lo / "skills", "held")
+    (lo / "skills" / "empty").mkdir()
+    kit.skill(lo / "skills", ".hidden")
+    kit.skill(lo / "skills", "bad name")
+    kit.agent(lo / "agents" / "helper.md", "helper")
+    kit.agent(lo / "agents" / "loose.md", "loose")
+    (lo / "agents" / "readme.txt").write_text("not an agent\n")
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{proj}"]\n'
+                     'skills = ["held"]\nagents = ["helper"]\n')
+    assert read("/api/folder")["unlisted"] == [
+        {"kind": "skill", "name": "spare", "source": str(lo / "skills" / "spare")},
+        {"kind": "agent", "name": "loose", "source": str(lo / "agents" / "loose.md")}]
+
+
+def test_source_dir_lists_nothing_unlisted_when_the_manifest_does_not_read(site, lo):
+    kit.skill(lo / "skills", "spare")
+    kit.manifest(lo, "[user]\nnonsense = 1\n")
+    body = read("/api/folder")
+    assert (body["state"], body["unlisted"]) == ("ok", [])
+
+
+REPO_API = '''
+import os
+
+
+class Failure(Exception):
+    def __init__(self, text, *, lines=None):
+        super().__init__(text)
+        self.text, self.lines = text, list(lines or [])
+
+
+def status(path=None):
+    pieces = [p for p in os.environ.get("FAKE_REPO_PIECES", "").split(",") if p]
+    return [{"root": path, "pieces": [{"id": p, "enabled": True} for p in pieces]}]
+'''
+
+
+@pytest.mark.parametrize("pieces, setting, reinstalls", [
+    ("loadout/reinstall-commit,loadout/reinstall-merge", "true", True),
+    ("loadout/reinstall-commit,loadout/reinstall-merge", "false", False),
+    ("loadout/reinstall-commit", "true", False),
+])
+def test_source_dir_reinstalls_only_with_repo_the_setting_and_both_pieces(
+        site, tree, monkeypatch, pieces, setting, reinstalls):
+    from moxi import config
+
+    assert read("/api/folder")["reinstalls"] is False  # no repo
+    site.module("repo", API="'moxi_repo.api'", files={"api.py": REPO_API})
+    modules.reset()
+    monkeypatch.setenv("FAKE_REPO_PIECES", pieces)
+    config.set_value("loadout", "reinstall_on_commit", setting, by="test")
+    assert read("/api/folder")["reinstalls"] is reinstalls
+
+
+def test_source_dir_with_settings_that_do_not_read_is_an_error(site, lo, monkeypatch):
+    from moxi.config import ConfigError
+
+    from moxi_loadout import settings
+
+    def broken():
+        raise ConfigError("loadout.toml", "source", "bad value", "set it again")
+
+    monkeypatch.setattr(settings, "read", broken)
+    body = read("/api/folder")
+    assert body["state"] == "error" and "bad value" in body["detail"]
+    assert (body["uncommitted"], body["unlisted"], body["reinstalls"]) == (None, [], False)
 
 
 # -- projects -------------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 **Reads** answer from the calls the verbs print: `install.status()` (`status --json`),
 `install.status_plan()` (the view: `status`'s outcome with the plan it came from),
 `listing.entries()` (`list --json`), `install.global_preview()` (`global show --json`),
+`moxi_loadout.sourcedir` (the folder's own files, as git and repo read them),
 projects' `list_projects()`, and the job records `moxi_loadout.pagejob` keeps. They run
 here, off the event loop on the base's threads, take neither `install.lock` nor the core
 lock, and give git the time the doctor gives it: each call of the would-commit check
@@ -225,6 +226,45 @@ def view(call: Any) -> dict[str, Any]:
     return answer
 
 
+#: What `/api/folder` says when git fails or doesn't answer in its time; the line names
+#: no path, so the folder's line shows only the path.
+GIT_FAILED = "git couldn't read the loadout folder's work tree"
+GIT_SLOW = "git didn't answer in time for the loadout folder's work tree"
+
+
+def source_dir(call: Any) -> dict[str, Any]:
+    """`GET /api/folder`: the loadout folder's files git hasn't committed (git bounded as
+    the doctor bounds it), the skills and agents in it no section lists, and whether a
+    commit installs it again (`moxi_loadout.sourcedir`). A manifest that can't be read
+    lists nothing as unlisted; its problem is the view's."""
+    from moxi_loadout import doctor, manifest, settings, sourcedir
+    from moxi_loadout.ignores import Git, GitError
+
+    answer: dict[str, Any] = {"state": "ok", "detail": None, "uncommitted": None,
+                              "more": 0, "unlisted": [], "reinstalls": False}
+    try:
+        machine = settings.read()
+    except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
+        return {**answer, "state": "error", "detail": _problem(exc, "the settings")}
+    loadout_dir = machine.source
+    try:
+        found = sourcedir.uncommitted(
+            loadout_dir, Git(timeout=doctor.GIT_SECONDS, budget=doctor.GIT_BUDGET))
+    except GitError as exc:
+        answer.update(state="error", detail=GIT_SLOW if exc.timed_out else GIT_FAILED)
+    else:
+        if found is not None:
+            answer.update(uncommitted=found[:sourcedir.UNCOMMITTED_MAX],
+                          more=max(0, len(found) - sourcedir.UNCOMMITTED_MAX))
+    try:
+        answer["unlisted"] = sourcedir.unlisted(manifest.load(loadout_dir))
+    except Exception as exc:  # noqa: BLE001 - the view's problem says why
+        _problem(exc, "the manifest")  # logs a failure of another kind, once
+    answer["reinstalls"] = sourcedir.reinstalls(
+        loadout_dir, enabled=machine.reinstall_on_commit, seconds=doctor.STATUS_SECONDS)
+    return answer
+
+
 def projects(call: Any) -> dict[str, Any]:
     """`GET /api/projects`: every project by key, for the project picker; `reason` says
     why there is none (projects absent, busy or unreadable), and `cause` names it
@@ -406,5 +446,5 @@ def global_remove(call: Any) -> Any:
     return _start(["global", "remove"], key=call.key)
 
 
-__all__ = ["status", "view", "listing", "global_preview", "projects", "drift", "job", "add", "remove",
+__all__ = ["status", "view", "listing", "global_preview", "source_dir", "projects", "drift", "job", "add", "remove",
            "enable", "disable", "global_mode", "install", "replace", "global_remove"]

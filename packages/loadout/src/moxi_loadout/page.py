@@ -8,6 +8,9 @@
                           loadout list --json` gives the items
     GET  /api/global      the global mode, and what the next install makes of each global
                           file, as `moxi loadout global show --json` prints it
+    GET  /api/folder      the loadout folder: its files git hasn't committed, the skills
+                          and agents in it no section lists, and whether a commit installs
+                          it again
     GET  /api/projects    the projects a project section can name by key
     GET  /api/drift       how many items aren't `ok` or `off`
     GET  /api/job         one page job: running, done (with its outcome) or interrupted
@@ -250,6 +253,21 @@ VIEW = {
     "item_notes": lb.Out("list", items=ITEM_NOTE),
     "global": VIEW_GLOBAL,
 }
+#: The loadout folder: `uncommitted`, the files under it git hasn't committed, relative
+#: to it (at most 20, `more` counting the rest), null when it is in no
+#: git work tree; `unlisted`, each skill and agent file in it no section lists, with its
+#: path; `reinstalls`, whether a commit installs it again through repo's git hook
+#: pieces. `state` is `ok`, or `error` when git failed or didn't answer in its time, or
+#: the settings can't be read, and `detail` says which (null when `ok`).
+SOURCE_DIR = {
+    "state": _TEXT,
+    "detail": _MAYBE_SAYS,
+    "uncommitted": lb.Out("list", items=_SAYS, nullable=True),
+    "more": lb.Out("int"),
+    "unlisted": lb.Out("list", items=lb.Out("table", items={
+        "kind": _TEXT, "name": _SAYS, "source": _PATH})),
+    "reinstalls": lb.Out("bool"),
+}
 #: `reason` says why there is no list: projects absent, busy or unreadable; `cause` names
 #: it: `absent`, `busy`, `unreadable`, `error`, or null when projects listed.
 PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS,
@@ -304,6 +322,7 @@ PAGE = lb.Page(
         lb.Route("/api/view", "read", _target("view"), returns=VIEW),
         lb.Route("/api/list", "read", _target("listing"), returns=LIST),
         lb.Route("/api/global", "read", _target("global_preview"), returns=GLOBAL),
+        lb.Route("/api/folder", "read", _target("source_dir"), returns=SOURCE_DIR),
         lb.Route("/api/projects", "read", _target("projects"), returns=PROJECTS),
         lb.Route("/api/drift", "read", _target("drift"), returns=DRIFT),
         lb.Route(JOB_ROUTE, "read", _target("job"),
@@ -325,6 +344,6 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["BUDGET", "COUNTS", "DRIFT", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE",
+__all__ = ["BUDGET", "COUNTS", "DRIFT", "SOURCE_DIR", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE",
            "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS",
            "ITEM_NOTE", "VIEW", "VIEW_GLOBAL", "VIEW_ITEM", "VIEW_ROW", "VIEW_SECTION"]
