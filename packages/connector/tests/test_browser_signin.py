@@ -159,6 +159,7 @@ def launch(pw, engine: str):
 def test_a_real_browser_signs_in_through_the_page(make_host, fake, tmp_path, monkeypatch,
                                                   request):
     from moxi_connector import checks
+    from moxi_ui.testing import WAIT_MS
     from playwright.sync_api import expect, sync_playwright
 
     engine = request.config.getoption("--ui-browser", default="chromium")
@@ -196,7 +197,7 @@ def test_a_real_browser_signs_in_through_the_page(make_host, fake, tmp_path, mon
                 try:
                     context = browser.new_context(ignore_https_errors=True)
                     page = context.new_page()
-                    page.set_default_timeout(5_000)
+                    page.set_default_timeout(WAIT_MS)
                     blocked = []
                     # A CSP report of the page's own loads. Firefox's favicon loader
                     # asks for an icon the page never names, which the page's
