@@ -29,6 +29,7 @@ from moxi_launcher import cachetimers, keepwarm, store
 
 pytest.importorskip("moxi_cache.api", reason="cache is not installed")
 pytest.importorskip("moxi_sessions.api", reason="sessions is not installed")
+WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(sys.platform == "win32",
@@ -176,11 +177,11 @@ def test_only_a_session_a_press_would_cover_offers_keep_warm_and_a_press_turns_i
     ui_page.goto("/m/ui/")
     expect(_line(ui_page).locator(".fact .heavy")).to_have_text(
         re.compile(f"^reviewer goes cold at {HOUR}$"))
-    wait_for(lambda: _shown(ui_page) == [ROW, PEER, HEALTH], 5, interval=0.05,
+    wait_for(lambda: _shown(ui_page) == [ROW, PEER, HEALTH], WAIT_S, interval=0.05,
              what=lambda: f"the Sessions row first; seen {_shown(ui_page)}")
 
     component = _opened(ui_page)
-    wait_for(lambda: _listed(ui_page)[:1] == [late], 5, interval=0.05,
+    wait_for(lambda: _listed(ui_page)[:1] == [late], WAIT_S, interval=0.05,
              what=lambda: f"the soonest cold first; seen {_listed(ui_page)}")
     # All three are loud; only the first has `Keep warm`, before its `Open`, with the cost.
     for request_id in (coverable, late, unasked):
@@ -205,7 +206,7 @@ def test_only_a_session_a_press_would_cover_offers_keep_warm_and_a_press_turns_i
     # The pressed button has left: the focus is on the same session's `Open`.
     expect(row.get_by_role("link", name="Open")).to_be_focused()
     # It leaves the top for its place by activity, below the two still loud.
-    wait_for(lambda: _listed(ui_page) == [late, unasked, coverable], 5, interval=0.05,
+    wait_for(lambda: _listed(ui_page) == [late, unasked, coverable], WAIT_S, interval=0.05,
              what=lambda: f"the quiet session last; seen {_listed(ui_page)}")
     assert _covers(ui_shell, coverable) == ["on"]
     assert not [c for c in launcher_fake_turns.calls(turns.dir) if c.get("call") == "deliver"]
@@ -215,7 +216,7 @@ def test_only_a_session_a_press_would_cover_offers_keep_warm_and_a_press_turns_i
     expect(_line(ui_page)).to_have_attribute("aria-expanded", "false")
     expect(_line(ui_page).locator(".fact .heavy")).to_have_text(
         re.compile(f"^reviewer goes cold at {HOUR}$"))
-    wait_for(lambda: _shown(ui_page) == [ROW, PEER, HEALTH], 5, interval=0.05,
+    wait_for(lambda: _shown(ui_page) == [ROW, PEER, HEALTH], WAIT_S, interval=0.05,
              what=lambda: f"the Sessions row first; seen {_shown(ui_page)}")
 
 

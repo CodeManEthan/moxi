@@ -141,6 +141,18 @@ def test_the_config_check_refuses_a_ci_it_can_t_read(table, key, said):
     assert key in str(caught.value) and said in str(caught.value)
 
 
+@pytest.mark.parametrize("remote, problem", [('""', "is empty"),
+                                             ("3", "is an int, not a name")])
+def test_a_ci_remote_that_is_not_a_name_is_refused_in_words_that_agree(remote, problem):
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                            f'local = "none", remote = {remote} }}\n')
+
+    assert caught.value.key == "projects.proj-a.ci.remote"
+    assert caught.value.problem == problem
+    assert caught.value.fix == "give a remote's name, or leave the key out"
+
+
 def test_a_ci_with_the_defaults_is_read_with_gh():
     settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["{FLOW}"], '
                         'local = "none" }\n')

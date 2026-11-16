@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -238,6 +239,12 @@ LOOSE_AGO_S = 2 * 24 * 3600
 ORDER = 100
 #: The route a section's link opens on the fixture's page, for `key`.
 LINK_ROUTE = "project/{key}"
+
+
+def noon() -> float:
+    """Today's local noon, in epoch seconds: a `now` for the full report whose projects'
+    times, at most `AGO_S` before it, all fall on its own local day."""
+    return datetime.now().replace(hour=12, minute=0, second=0, microsecond=0).timestamp()
 
 
 def _running(*sessions: str) -> dict[str, Any]:

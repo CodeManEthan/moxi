@@ -224,7 +224,7 @@ def test_the_phone_shows_the_comms_row(gw, phone_rig, ui_browser):
     browser = bridge.launch(ui_browser.browser_type)
     try:
         context = browser.new_context(**kit.PhoneBridge.context_args(ui_browser.browser_type.name))
-        context.set_default_timeout(10_000)
+        context.set_default_timeout(pytest.importorskip("moxi_ui.testing").WAIT_MS)
         page = kit.pair_page(context, shell)
         _expect_mail_line(page)
         # Home draws it as the desk does, a link to comms' page.

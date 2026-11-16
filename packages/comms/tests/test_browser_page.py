@@ -358,6 +358,12 @@ def test_keep_warm_presses_launcher_and_a_refusal_leads_line_three(page_shell, r
     # can come late, and on its timer. Any value after the answer takes the note, so no
     # read is answered until the note has been seen.
     stub.hold()
+    # The press also comes back on its own once it has waited `PRESS_WAIT_MS` (20 s), inside
+    # a wait below, so the page's clock stops before the press: from here only a value of
+    # `running` brings the act back. It runs a minute behind until it stops at the real time.
+    held_at = time.time()
+    page.clock.install(time=held_at - 60)
+    page.clock.pause_at(held_at)
     press.click()
     expect(row).to_have_attribute("note", re.compile(r"^Not kept warm: the launch has ended"))
     expect(press).to_be_disabled()
@@ -460,8 +466,7 @@ def test_with_the_daemon_stopped_the_page_says_so_and_the_messages_still_read(
     expect(agent(root, P).locator('[data-action="message"]')).to_have_count(1)
     rig.daemon.stop()
     down = root.locator('[data-part="down"]')
-    expect(down.locator('[data-line="down"]')).to_have_text("The comms daemon isn't answering",
-                                                            timeout=15_000)
+    expect(down.locator('[data-line="down"]')).to_have_text("The comms daemon isn't answering")
     expect(down).to_contain_text("moxi doctor comms")
     expect(down.locator('[data-action="copy-doctor"]')).to_have_count(1)
     expect(root.locator('[data-line="last-read"]')).to_have_text(

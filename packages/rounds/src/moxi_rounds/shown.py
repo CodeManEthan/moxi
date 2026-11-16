@@ -163,6 +163,22 @@ def _logs(home: folders.Home):
     return project_state, logs, tuple(unreadable)
 
 
+#: What ends a sentence: a text that ends in one takes no `;` after it. `...` ends in `.`.
+_SENTENCE_ENDS = (".", "?", "!", "\u2026")
+
+
+def one_line(items: Iterable[str]) -> str:
+    """Rulings not yet shown, each `<holder> <id> <text>`, on one line. Each text is
+    printed as it was recorded, less trailing blanks; one that ends a sentence is followed
+    by a space, any other by `; `, so no `.;` or `?;` is printed."""
+    line = ""
+    for item in items:
+        if line:
+            line += " " if line.endswith(_SENTENCE_ENDS) else "; "
+        line += item.rstrip()
+    return line
+
+
 # -- the read-back -----------------------------------------------------------------------
 
 def ends_a_list(time: str, *, name: str, at: str) -> write.Gate:
@@ -351,4 +367,4 @@ _SHOWINGS = ("comms:<digits> for a message, <8 or more hex digits>@<UTC time> "
 
 
 __all__ = ["READBACK", "TIME", "Row", "ReadBack", "Marked", "read_back", "through",
-           "is_shown", "unshown", "ends_a_list", "parse_ids", "mark"]
+           "is_shown", "unshown", "one_line", "ends_a_list", "parse_ids", "mark"]

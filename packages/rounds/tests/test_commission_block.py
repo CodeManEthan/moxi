@@ -180,7 +180,7 @@ def test_the_lead_is_told_each_unshown_ruling_and_the_build_is_commissioned_anyw
 
     said = commission(capsys)
 
-    assert (f"not yet shown to the operator: {ROUND} {first} {SAID}; "
+    assert (f"not yet shown to the operator: {ROUND} {first} {SAID} "
             f"proj-a {standing} Logs are kept a year.\n") in said
     assert f"  then: moxi rounds mark {ROUND} {first} --shown --record PTR\n" in said
     assert f"  then: moxi rounds mark proj-a {standing} --shown --record PTR\n" in said

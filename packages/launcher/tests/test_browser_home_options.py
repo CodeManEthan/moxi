@@ -22,6 +22,8 @@ from playwright.sync_api import expect
 import launcher_page_kit as kit
 from moxi_launcher import presets
 
+WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
+
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
               pytest.mark.skipif(sys.platform == "win32",
                                  reason="the fake harness is a script run by its #! line")]
@@ -91,7 +93,7 @@ def expect_box_at(piece, left: int) -> None:
         seen.append(piece.locator(".box").bounding_box()["x"])
         return round(seen[-1]) == left
 
-    wait_for(there, 5, interval=0.05, what=lambda: f"the box's left edge at {left}; last seen {seen[-1:]}")
+    wait_for(there, WAIT_S, interval=0.05, what=lambda: f"the box's left edge at {left}; last seen {seen[-1:]}")
 
 
 def group(panel, key: str):

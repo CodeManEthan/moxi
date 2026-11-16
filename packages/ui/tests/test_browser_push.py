@@ -10,6 +10,7 @@ import threading
 import pytest
 from moxi import modules
 from moxi_dev.testing import wait_for
+from moxi_ui.testing import WAIT_S
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -121,7 +122,7 @@ def test_seven_tabs_share_one_stream_and_closing_the_leader_hands_it_on(ui_shell
     rest = [page for page in pages if page is not leader]
     # The sync API hands over the context's request events only inside a call to it.
     wait_for(lambda: rest[0].evaluate("true") and len(pushes) > before
-             and _streams(ui_shell) == 1, 5,
+             and _streams(ui_shell) == 1, WAIT_S,
              what=lambda: f"another tab to open the one stream: {len(pushes) - before} new "
                           f"push requests, {_streams(ui_shell)} streams at the shell")
     successor = pushes[-1].frame.page
@@ -220,7 +221,7 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
     shell.kill("fixture")
     # One failed start is no warning of its own: the row says not running, why, and when
     # it tries again. Its tone is the warning of the crash a moment before.
-    expect(row).to_contain_text("The last start failed", timeout=10_000)
+    expect(row).to_contain_text("The last start failed")
     expect(row.locator(".state")).to_have_text("not running")
     expect(row).to_have_class("warn")
     expect(row).to_contain_text("The next request after 10 s tries again.")
@@ -284,7 +285,7 @@ def test_three_failed_starts_in_a_row_turn_the_servers_row_to_fail(ui_shells, fi
             return shell.server("fixture")["failed_in_row"] >= n
 
         wait_for(failed_again, 5, interval=0.1, what=f"failed start {n}")
-    expect(row).to_contain_text("the last 3 starts failed", timeout=5_000)
+    expect(row).to_contain_text("the last 3 starts failed")
     expect(row).to_have_class("fail")
     expect(row).to_contain_text("log: ")
 

@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 from playwright.sync_api import expect
 
+from moxi_ui.testing import WAIT_MS
 from squatter import Squatter
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(120)]
@@ -32,9 +33,6 @@ JAR = "/cookies?k=180&s=4096"
 #: A worker planted from a long URL takes a while to register.
 PLANT_MS = 30_000
 
-# The engine sends the update check a moment after the navigation the worker took, not
-# during it, so the test waits in the page for the registration to go.
-GONE_MS = 10_000
 WORKERS = "async () => (await navigator.serviceWorker.getRegistrations()).length"
 #: Waits in the page until no worker is registered, polling every 0.1 s; false after
 #: the given milliseconds.
@@ -85,9 +83,11 @@ def test_a_planted_worker_takes_one_navigation_and_is_gone_by_the_second(
         assert page.evaluate(WORKERS) == 1, kind
         page.goto("/m/ui/")
         expect(page, f"the {kind} worker's navigation").to_have_title("squatter")
-    # The three update checks run side by side; each page waits for its own.
+    # The three update checks run side by side; each page waits for its own. The engine
+    # sends one a moment after the navigation the worker took, not during it, so the test
+    # waits in the page for the registration to go.
     for kind, page in planted.items():
-        assert page.evaluate(NO_WORKERS, GONE_MS), f"the {kind} worker did not unregister"
+        assert page.evaluate(NO_WORKERS, WAIT_MS), f"the {kind} worker did not unregister"
     for kind, page in planted.items():
         page.goto("/m/ui/")
         expect(page, f"after the {kind} worker").to_have_title("Moxi: signed out")
