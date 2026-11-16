@@ -156,4 +156,5 @@ topic `ui.checks`) and says `All checks pass`, how many checks warn, or how many
 failing check gives it `needs: 30`. Opened, it lists only the checks that fail or warn,
 each with its fix to copy, the way to the full list on the modules view, and `Check
 again`. On the phone it shows the counts and each check's module and name, and no text
-of the check's own.
+of the check's own. Each path in the name that starts a word, or follows `:` or `=`, with
+`/` or `~` is cut to its last folder name; a path in another form is sent as it is.
