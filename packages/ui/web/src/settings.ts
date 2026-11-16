@@ -7,6 +7,12 @@
 // first and the rest behind `More`, under their sub-heads, and its foot. The rows,
 // counts and words come from `settings-model.ts`; the addresses from `find-model.ts`.
 //
+// Above both, the find field. Typed in, Find's results take the columns' place: every
+// drawn key of every listed module that matches, grouped by module with `<matches> of
+// <count>`, four rows a module until `Show them`, the matched words underlined, each row
+// editable there. `N changed` under the list opens the changed view, laid out the same way
+// with every changed key. A group holding a change has its own Save line for its module.
+//
 // Nothing is written until Save. A change is held per module (`save-model.ts`): its row
 // is heavier and says what it was, with Undo; `Reset` holds the default the same way.
 // The Save line at the pane's foot sends the shown module's changes and nothing else
@@ -28,8 +34,8 @@ import { styleMap } from "lit/directives/style-map.js";
 import { api, components, holdLeave, installed, setAddress, setTheme } from "/m/ui/client.js";
 import type { ThemeMode } from "/m/ui/client.js";
 
-import { addressOf, parseAddress } from "./find-model.ts";
-import type { Address } from "./find-model.ts";
+import { addressOf, changedView, find, FIND_HELP, FIND_READS, hits, parseAddress } from "./find-model.ts";
+import type { Address, Group } from "./find-model.ts";
 import {
   allSaved, answerWords, changeLabel, clockOf, confirmOf, heldWords, leaveAsk, numberValue, Pending, same, saved,
   shownKey, staysWarned, transportWords,
@@ -63,10 +69,15 @@ interface Held {
   pending: Pending;
   /** The Save line's words after a save's answer, per module, until the module's next change. */
   said: Map<string, string>;
+  /** What is typed in the find field; Find's results show while it holds more than spaces. */
+  query: string;
+  /** The modules whose every match Find shows (`Show them` pressed). */
+  showAll: Set<string>;
 }
 
 function fresh(): Held {
-  return { listed: null, sections: new Map(), error: null, address: null, pending: new Pending(), said: new Map() };
+  return { listed: null, sections: new Map(), error: null, address: null, pending: new Pending(), said: new Map(),
+           query: "", showAll: new Set() };
 }
 
 /** What the page held when the shell took it out with the address unchanged: the shell is
@@ -192,8 +203,32 @@ const STYLES = css`
   .failed { display: grid; gap: var(--moxi-gap); justify-items: start; padding: 12px 0; }
   .failed button { padding: 2px 10px; border: 1px solid var(--moxi-border-strong); border-radius: var(--moxi-radius);
                    background: none; cursor: pointer; }
+  .find { display: flex; align-items: center; gap: 12px; border: 1px solid var(--moxi-border);
+          border-radius: var(--moxi-radius-lg); padding: 10px 14px; margin-bottom: 16px; font-size: 15px; line-height: 22px; }
+  .find:focus-within { border-color: var(--moxi-border-strong); }
+  .find input { flex: 1 1 auto; min-width: 0; border: 0; padding: 0; background: none; font: inherit; color: var(--moxi-text); }
+  .find input::placeholder { color: var(--moxi-text-dim); }
+  .find input:focus-visible { outline: none; }
+  .find .link { font-size: 14px; }
+  .resh { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 18px; margin-top: -6px;
+          padding: 0 2px 10px; font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  .resh a { color: var(--moxi-text); text-decoration: none; }
+  .cols.res .mods { position: static; padding-top: 12px; line-height: 20px; color: var(--moxi-text-dim); }
+  .cols.res .mods a { display: block; line-height: 20px; color: var(--moxi-text-dim); }
+  .cols.res .mods small { display: block; font-size: 12px; line-height: 16px; }
+  .cols.res .pane { padding-bottom: 5px; }
+  .cols.res .ln { border-top: 1px solid var(--moxi-border); }
+  .cols.res .save { margin-bottom: 6px; }
+  .morein { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); padding: 4px 0 8px; }
+  .help { max-width: 440px; padding-top: 10px; font-size: 13px; line-height: 18px; }
+  .aside { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); border-top: 1px solid var(--moxi-border);
+           padding: 10px 2px 0; }
+  .hit { color: var(--moxi-text); text-decoration: underline; text-decoration-color: var(--moxi-text-dim);
+         text-underline-offset: 3px; }
   @media (max-width: 720px) {
     .cols { grid-template-columns: minmax(0, 1fr); }
+    .cols.res .mods { display: flex; column-gap: 10px; align-items: baseline; border-bottom: 0; padding: 10px 0 0; }
+    .cols.res .ln + .pane { border-top: 0; }
     .mods { position: static; display: flex; flex-wrap: wrap; column-gap: 14px; padding: 8px 0;
             border-bottom: 1px solid var(--moxi-border); }
     .mods a { line-height: 24px; }
@@ -257,7 +292,10 @@ export class UiSettings extends LitElement {
     const taken = carried !== null && carried.path === location.pathname ? carried.held : null;
     carried = null;
     if (taken !== null && taken.listed !== null) {
-      this.#held = { ...taken, address: parseAddress(route, taken.listed) };
+      // The address the old element showed, unless the route names another (the changed
+      // view keeps the module it goes back to).
+      const kept = taken.address !== null && addressOf(taken.address) === route ? taken.address : null;
+      this.#held = { ...taken, address: kept ?? parseAddress(route, taken.listed) };
       this.#syncHold();
       void this.#readAll();
     } else {
@@ -356,9 +394,11 @@ export class UiSettings extends LitElement {
 
   // --- moving within the page ---------------------------------------------------------------
 
-  /** Shows `address`, writing the page's own address for it. */
+  /** Shows `address`, writing the page's own address for it. Opening anything ends a search. */
   #open(address: Address): void {
     this.#held.address = address;
+    this.#held.query = "";
+    this.#held.showAll.clear();
     this.#confirm = null;
     try {
       setAddress("ui", addressOf(address));
@@ -373,6 +413,27 @@ export class UiSettings extends LitElement {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     this.#open({ view: "module", module, more: false, pair: false, missing: null });
+  }
+
+  /** `N changed`: the changed view, which goes back to the module shown. */
+  #openChanged(event: MouseEvent): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    this.#open({ view: "changed", module: this.#held.address?.module ?? CORE, more: false, pair: false, missing: null });
+  }
+
+  #search(text: string): void {
+    this.#held.query = text;
+    this.#confirm = null;
+    this.requestUpdate();
+  }
+
+  /** `Clear`, or Escape in the field: the search ends and what it covered shows again. */
+  #clear(): void {
+    this.#held.query = "";
+    this.#held.showAll.clear();
+    this.requestUpdate();
+    void this.updateComplete.then(() => (this.renderRoot.querySelector("[data-part=find] input") as HTMLInputElement | null)?.focus());
   }
 
   #toggleMore(): void {
@@ -588,29 +649,132 @@ export class UiSettings extends LitElement {
         <button type="button" @click=${() => this.#retry()}>Try again</button></div>`;
     }
     const at = this.#held.address;
-    return html`<div class="cols">
-      ${this.#list()}
-      <section class="pane" data-part="pane" data-module=${at?.module ?? nothing}>${this.#pane()}</section>
+    const query = this.#held.query.trim();
+    const listed = this.#held.listed;
+    let body;
+    if (listed !== null && query !== "") body = this.#found(query, listed);
+    else if (listed !== null && at?.view === "changed") body = this.#changedView(listed, at.module);
+    else {
+      body = html`<div class="cols">
+        ${this.#list(true)}
+        <section class="pane" data-part="pane" data-module=${at?.module ?? nothing}>${this.#pane()}</section>
+      </div>`;
+    }
+    return html`${this.#findField()}${body}`;
+  }
+
+  #findField() {
+    const text = this.#held.query;
+    return html`<div class="find" data-part="find">
+      <input type="text" aria-label="Find a setting" placeholder="Find a setting" autocomplete="off" spellcheck="false"
+        .value=${live(text)} @input=${(event: Event) => this.#search((event.target as HTMLInputElement).value)}
+        @keydown=${(event: KeyboardEvent) => { if (event.key === "Escape" && text !== "") { event.preventDefault(); this.#clear(); } }}>
+      ${text !== "" ? html`<button type="button" class="link dim" data-act="clear" @click=${() => this.#clear()}>Clear</button>`
+        : nothing}
     </div>`;
   }
 
-  #list() {
+  /** `still reading <k> modules` after a count, while sections are out. */
+  #partial(reading: string | null) {
+    return reading !== null ? html` · <span data-line="partial">${reading}</span>` : nothing;
+  }
+
+  /** Find's results for `query`: the count and what it reads, then each module's group; or,
+   * matching nothing once every section is in, the list beside the help. */
+  #found(query: string, listed: string[]) {
+    const { sections, showAll } = this.#held;
+    const found = find(query, listed, sections, false, showAll);
+    const head = (count: unknown) => html`<div class="resh" data-part="found-head">
+      <span data-line="count">${count}</span><span data-line="reads">${FIND_READS}</span></div>`;
+    if (found.none !== null) {
+      return html`${head(found.none)}<div class="cols">
+        ${this.#list(false)}
+        <section class="pane" data-part="help"><p class="note help" data-line="help">${FIND_HELP}</p>
+          ${this.#leave !== null ? this.#leaveLine(null) : nothing}</section>
+      </div>`;
+    }
+    return html`${head(html`${found.count}${this.#partial(found.reading)}`)}
+      ${this.#groups(found.groups, query, "found")}
+      ${found.elsewhere.map((line) => html`<p class="aside" data-line="elsewhere">${line}</p>`)}
+      ${this.#groupsAsk(found.groups)}`;
+  }
+
+  /** The changed view: every drawn key changed from its default, by module, and the way back. */
+  #changedView(listed: string[], back: string) {
+    const view = changedView(listed, this.#held.sections, false, back);
+    return html`<div class="resh" data-part="found-head">
+        <span data-line="count">${view.count}${this.#partial(view.reading)}</span>
+        <a href=${`/m/ui/settings/${back}`} class="back" data-act="back"
+          @click=${(event: MouseEvent) => this.#openModule(event, back)}>${view.back}</a></div>
+      ${this.#groups(view.groups, "", "changed")}
+      ${this.#groupsAsk(view.groups)}`;
+  }
+
+  /** Each module's group: its name, which opens it, and its tally at the left; its rows,
+   * `Show them`, and its own Save line while it holds a change, at the right. */
+  #groups(groups: Group[], query: string, kind: "found" | "changed") {
+    if (groups.length === 0) return nothing;
+    return html`<div class="cols res" data-part=${kind}>${groups.map((group, i) => {
+      const section = this.#held.sections.get(group.module) as Section;
+      const off = section.readonly || this.#saving === group.module;
+      const ruled = i > 0 ? "ln" : "";
+      return html`<div class=${`mods ${ruled}`} data-group-of=${group.module}>
+          <a href=${`/m/ui/settings/${group.module}`} data-open=${group.module}
+            @click=${(event: MouseEvent) => this.#openModule(event, group.module)}>${group.module}</a>
+          <small data-line="tally">${group.tally}</small></div>
+        <section class=${`pane ${ruled}`} data-part="group" data-module=${group.module}>
+          ${group.keys.map((key) => this.#row(section, key, off, query))}
+          ${group.more !== null ? html`<p class="morein" data-line="more-in">${group.more.replace(/ · Show them$/, "")} · <button
+              type="button" class="link" data-act="show-all" @click=${() => this.#showAll(group.module)}>Show them</button></p>`
+            : nothing}
+          ${this.#groupSave(section)}
+        </section>`;
+    })}</div>`;
+  }
+
+  #showAll(module: string): void {
+    this.#held.showAll.add(module);
+    this.requestUpdate();
+  }
+
+  /** A group's Save line: while its module holds a change, saves, confirms, or says how its
+   * last save went. The leave ask shows once, after the groups, in its place. */
+  #groupSave(section: Section) {
+    const module = section.module;
+    if (this.#leave !== null) return nothing;
+    const busy = this.#held.pending.count(module) > 0 || this.#saving === module || this.#confirm === module
+      || this.#held.said.has(module);
+    return busy ? this.#saveLine(section, true) : nothing;
+  }
+
+  /** The leave ask under the groups; `Save and leave` is offered when the one module holding
+   * changes has its group drawn. */
+  #groupsAsk(groups: Group[]) {
+    if (this.#leave === null) return nothing;
+    const held = this.#held.pending.modules();
+    const shown = held.length === 1 && groups.some((group) => group.module === held[0]) ? held[0] : null;
+    return this.#leaveLine(shown);
+  }
+
+  /** The list of modules; `current` marks the one shown (none while Find shows its help). */
+  #list(current: boolean) {
     const { listed, sections, error, address, pending } = this.#held;
     if (listed === null) return html`<nav class="mods" data-part="list" aria-label="Modules" data-reading></nav>`;
     const total = totalChanged(listed, sections, false);
     // While a listed module's section is out, the list says so to whoever reads its marks.
     return html`<nav class="mods" data-part="list" aria-label="Modules" ?data-reading=${total === null}>
       ${listEntries(listed, sections, false).map((entry) => {
-        const current = address?.view === "module" && address.module === entry.module;
+        const shown = current && address?.view === "module" && address.module === entry.module;
         const held = pending.count(entry.module);
         return html`<a href=${`/m/ui/settings/${entry.module}`} data-list=${entry.module} class=${held > 0 ? "u" : ""}
-            aria-current=${current ? "page" : nothing} @click=${(event: MouseEvent) => this.#openModule(event, entry.module)}
+            aria-current=${shown ? "page" : nothing} @click=${(event: MouseEvent) => this.#openModule(event, entry.module)}
           >${entry.module}${entry.changed !== null
             ? html`<i title=${`${entry.changed} changed from the default`}>${entry.changed}</i>` : nothing}</a>
           ${held > 0 ? html`<span class="under" data-line="unsaved">${held} not saved</span>` : nothing}
           ${entry.unreadable ? html`<span class="under" data-line="unreadable">can't be read</span>` : nothing}`;
       })}
-      ${total !== null && total > 0 ? html`<span class="total" data-line="changed">${total} changed</span>` : nothing}
+      ${total !== null && total > 0 ? html`<a class="total" href="/m/ui/settings/changed" data-line="changed"
+          @click=${(event: MouseEvent) => this.#openChanged(event)}>${total} changed</a>` : nothing}
       ${error !== null ? html`<p class="error" data-line="error">${error}</p>` : nothing}
     </nav>`;
   }
@@ -661,7 +825,8 @@ export class UiSettings extends LitElement {
       ${block.keys.map((key) => this.#row(section, key, off))}`);
   }
 
-  #row(section: Section, key: Setting, off: boolean) {
+  /** One row; `query`, when given, is underlined where the row's words match it. */
+  #row(section: Section, key: Setting, off: boolean, query = "") {
     const module = section.module;
     const pending = this.#held.pending;
     const shown = shownKey(pending, module, key);
@@ -674,18 +839,18 @@ export class UiSettings extends LitElement {
     const name = html`<code class=${row.labelled ? "key" : "key own"} title="Copy the key" role="button" tabindex="0"
         data-line="key" @click=${() => this.#copy(row.name)}
         @keydown=${(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.#copy(row.name); } }}
-      >${row.name}</code>`;
+      >${this.#marked(row.name, query)}</code>`;
     const said = note !== undefined || row.lines.length > 0 || row.defaults !== null || held !== null;
     const classes = ["set", held !== null ? "un" : "", warned ? "dg" : ""].filter(Boolean).join(" ");
     return html`<div class=${classes} data-key=${row.name} ?data-locked=${locked} ?data-held=${held !== null}>
       <div class="l1">
-        <span class="lb">${row.labelled ? html`<span data-line="label">${row.label}</span>${name}` : name}${copied}</span>
+        <span class="lb">${row.labelled ? html`<span data-line="label">${this.#marked(row.label, query)}</span>${name}` : name}${copied}</span>
         <span class="ctl">${this.#control(module, key, row, locked)}</span>
       </div>
       ${row.control.kind === "switches" ? nothing : this.#under(module, key, row, locked)}
       ${said ? html`<div class="l2">
         <span class="said">${note !== undefined ? this.#note(note.text, note.copy)
-          : row.lines.map((line, i) => html`${i > 0 ? " " : ""}<span data-line="line">${line}</span>`)}</span>
+          : row.lines.map((line, i) => html`${i > 0 ? " " : ""}<span data-line="line">${this.#marked(line, query)}</span>`)}</span>
         ${held !== null ? this.#heldLine(module, row.name, held.text, held.hurts)
           : row.defaults !== null ? html`<span class="nt" data-line="default">default ${row.defaults.words}${row.defaults.reset
           ? html` · <button type="button" class="link" data-act="reset" ?disabled=${locked}
@@ -695,6 +860,12 @@ export class UiSettings extends LitElement {
         ${this.#copyButton(row.terminal.command)}</div>` : nothing}
       ${row.control.kind === "switches" ? this.#under(module, key, row, locked) : nothing}
     </div>`;
+  }
+
+  /** `text` with each part that matches `query` underlined. */
+  #marked(text: string, query: string) {
+    if (query === "") return text;
+    return hits(text, query).map((part) => (part.hit ? html`<span class="hit">${part.text}</span>` : part.text));
   }
 
   /** The words a save or a read left beside a row, `Not saved.` set off. */
@@ -905,8 +1076,9 @@ export class UiSettings extends LitElement {
 
   /** The Save line at the pane's foot: what is held, or what the last save answered, with
    * Discard and Save; the confirm in its place when a change can hurt, and the leave ask
-   * when the shell asks to move. */
-  #saveLine(section: Section) {
+   * when the shell asks to move. `named`, a group's line in Find or the changed view, says
+   * which module its count is in. */
+  #saveLine(section: Section, named = false) {
     const module = section.module;
     if (this.#leave !== null) return this.#leaveLine(module);
     const keys = section.keys;
@@ -928,8 +1100,9 @@ export class UiSettings extends LitElement {
     const text = saving || said === undefined ? heldWords(keys, changes, saving) : said;
     const [head, ...rest] = text.split(" · ");
     const bold = /^\d+ (not saved|of \d+ saved)/.exec(head);
+    const where = named && bold?.[1] === "not saved" ? ` in ${module}` : "";
     const words = bold !== null
-      ? html`<b>${bold[0]}</b>${head.slice(bold[0].length)}${rest.length > 0 ? ` · ${rest.join(" · ")}` : ""}` : text;
+      ? html`<b>${bold[0]}</b>${where}${head.slice(bold[0].length)}${rest.length > 0 ? ` · ${rest.join(" · ")}` : ""}` : text;
     const open = changes.length > 0 && !saving;
     return html`<div class="save" data-part="save" data-state=${saving ? "saving" : open ? "held" : "rest"}>
       <p class="msg" data-line="save">${words}</p>
@@ -940,8 +1113,9 @@ export class UiSettings extends LitElement {
     </div>`;
   }
 
-  /** The ask when the shell would move off the page with changes held. */
-  #leaveLine(shown: string) {
+  /** The ask when the shell would move off the page with changes held; `shown` is the module
+   * whose changes `Save and leave` would save, when only it holds any. */
+  #leaveLine(shown: string | null) {
     const pending = this.#held.pending;
     const labels = (module: string): string[] => {
       const keys = this.#held.sections.get(module)?.keys ?? [];
@@ -958,7 +1132,7 @@ export class UiSettings extends LitElement {
       <span class="btns">${one
         ? html`<button type="button" class="link" @click=${() => this.#stay()}>Stay</button>
           <button type="button" class="link" @click=${() => this.#leaveWithout()}>Leave without saving</button>
-          <button type="button" class="btn acc" @click=${() => void this.#saveAndLeave(shown)}>Save and leave</button>`
+          <button type="button" class="btn acc" @click=${() => void this.#saveAndLeave(shown as string)}>Save and leave</button>`
         : html`<button type="button" class="link" @click=${() => this.#leaveWithout()}>Leave without saving</button>
           <button type="button" class="btn stay" @click=${() => this.#stay()}>Stay</button>`}</span>
     </div>`;

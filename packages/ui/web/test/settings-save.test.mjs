@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BUSY, NOT_FINISHED, NOTHING_ELSE, Pending, allSaved, answerWords, confirmOf, heldWords, hurtsOf, leaveAsk,
+  BUSY, NOT_FINISHED, NOTHING_ELSE, Pending, allSaved, answerWords, clockOf, confirmOf, heldWords, hurtsOf, leaveAsk,
   numberValue, outcomeNote, same, shownKey, staysWarned, transportWords,
 } from "../src/save-model.ts";
+import { clock } from "../src/health-model.ts";
 
 function key(name, type, value, fallback, extra = {}) {
   return { name, type, json: JSON.stringify(value), default_json: JSON.stringify(fallback), source: "file",
@@ -308,4 +309,10 @@ test("leaving with changes in several modules, or one not shown, names each and 
   one.edit("ui", PORT, 1);
   assert.deepEqual(leaveAsk(one, "moxi", () => ["Port"]).lines,
                    ["Leave Settings with 1 change not saved?", "1 in ui: Port.", "Save writes one module at a time."]);
+});
+
+test("a save's time is written as Home writes a clock time", () => {
+  const at = Date.UTC(2026, 10, 15, 19, 12, 30) / 1000;
+  assert.equal(clockOf(at), clock(new Date(at * 1000).toISOString()));
+  assert.match(clockOf(at), /^\d{1,2}:\d{2}/);
 });

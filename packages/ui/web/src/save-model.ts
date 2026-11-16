@@ -9,6 +9,7 @@
 // `POST /api/settings/save`; each result's outcome decides whether its change is dropped
 // (it is written) or kept with words beside the row.
 
+import { clock } from "./health-model.ts";
 import { defaultOf, joined, labelOf, valueOf, valueWords } from "./settings-model.ts";
 import type { Setting } from "./settings-model.ts";
 
@@ -466,9 +467,9 @@ function markPhrase(mark: string | null): [string, string] {
   return [plain, plural];
 }
 
-/** The time a save was answered, as ui writes a clock time. */
+/** The time a save was answered, as ui writes a clock time (Home's `clock`). */
 export function clockOf(epochSeconds: number): string {
-  return new Date(epochSeconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return clock(new Date(epochSeconds * 1000).toISOString());
 }
 
 /**

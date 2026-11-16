@@ -3,8 +3,9 @@ time, each type's control, a changed key's default and Reset, More, the foot, th
 addresses the page writes for itself, a section that can't be read, a key the shell was
 started with locked, copying a key, the page kept across the shell's redraw; changes held
 until Save, each type's edit saved to the file, a refusal beside its row, ui's theme keys
-applied at once, the asks when the page is left with changes held; and `<moxi-ui-form>`
-in submit mode with catalog rows."""
+applied at once, the asks when the page is left with changes held; Find, its results by
+module with a Save line per group, and the changed view; and `<moxi-ui-form>` in submit
+mode with catalog rows."""
 
 from __future__ import annotations
 
@@ -489,6 +490,136 @@ def test_changes_are_kept_across_modules_and_leaving_asks_in_the_save_line(ui_sh
     ask.get_by_role("button", name="Leave without saving").click()
     expect(page).to_have_url(shell.url + "/m/ui/modules")
     assert _file(shell) == {"limit": 12} and _file(shell, "ui") == {}
+
+
+def _find(view, text):
+    """Types `text` in the find field."""
+    view.locator("[data-part=find] input").fill(text)
+
+
+def _group(view, module):
+    """A module's rows in Find's results or the changed view."""
+    return view.locator(f"[data-part=group][data-module={module}]")
+
+
+def _keys(rows) -> list:
+    return rows.evaluate_all("(rows) => rows.map((row) => row.dataset.key)")
+
+
+def test_find_groups_its_matches_by_module_and_a_change_there_has_its_own_save_line(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    page = ui_contexts(shell).pages[0]
+    page.locator("#moxi-settings").click()
+    view = _view(page)
+    _list(view).and_(page.locator("[data-list=fixture]")).click()
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+    _find(view, "each use")
+    head = view.locator("[data-part=found-head]")
+    expect(head.locator("[data-line=count]")).to_have_text("2 settings in 1 module")
+    expect(head.locator("[data-line=reads]")).to_have_text("names, keys, descriptions and values")
+    # The results take the columns' place: the module and its tally at the left, its rows
+    # at the right with the words that matched underlined, and no Save line at rest.
+    expect(view.locator("[data-part=pane]")).to_have_count(0)
+    group = _group(view, "fixture")
+    expect(group.locator(".set")).to_have_count(2)
+    assert _keys(group.locator(".set")) == ["greeting", "limit"]
+    expect(view.locator("[data-group-of=fixture] [data-line=tally]")).to_have_text(re.compile(r"^2 of \d+$"))
+    expect(_row(view, "limit").locator(".hit")).to_have_text(["each use"])
+    expect(group.locator("[data-part=save]")).to_have_count(0)
+    # A row is edited in place; its group gets a Save line for its module.
+    view.locator("input[data-control=limit]").fill("13")
+    line = group.locator("[data-part=save] [data-line=save]")
+    expect(line).to_have_text("1 not saved in fixture · limit")
+    # Leaving asks once, under the results.
+    page.locator("a.moxi-brand").click()
+    ask = view.locator("[data-part=save]")
+    expect(ask).to_have_count(1)
+    expect(ask).to_have_attribute("data-state", "leave")
+    expect(ask.locator("[data-line=save]")).to_have_text(
+        re.compile(r"^Leave Settings with 1 change in fixture not saved\? limit\.\s*$"))
+    ask.get_by_role("button", name="Stay").click()
+    expect(line).to_have_text("1 not saved in fixture · limit")
+    group.locator("[data-part=save]").get_by_role("button", name="Save").click()
+    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · limit applies now$"), timeout=SETTINGS_MS)
+    assert _file(shell)["limit"] == 13
+    expect(_row(view, "limit").locator("[data-line=default]")).to_have_text(re.compile(r"^default 10\s*·\s*Reset$"))
+    # Four rows a module, then the rest behind `Show them`.
+    _find(view, "a")
+    more = group.locator("[data-line=more-in]")
+    expect(more).to_have_text(re.compile(r"^\d+ more in fixture · Show them$"))
+    expect(group.locator(".set")).to_have_count(4)
+    left = int(more.inner_text().split()[0])
+    more.get_by_role("button", name="Show them").click()
+    expect(group.locator(".set")).to_have_count(4 + left)
+    expect(more).to_have_count(0)
+    # Clear, or Escape, ends the search; the module's name opens it.
+    view.locator("[data-part=find]").get_by_role("button", name="Clear").click()
+    expect(view.locator("[data-part=pane][data-module=fixture]")).to_be_visible()
+    expect(view.locator("[data-part=find] input")).to_have_value("")
+    _find(view, "port")
+    expect(_group(view, "ui")).to_be_visible()
+    view.locator("[data-part=find] input").press("Escape")
+    expect(view.locator("[data-part=pane][data-module=fixture]")).to_be_visible()
+    _find(view, "port")
+    view.locator("[data-group-of=ui] a").click()
+    expect(page).to_have_url(shell.url + "/m/ui/settings/ui")
+    expect(view.locator("[data-part=pane][data-module=ui]")).to_be_visible()
+    expect(view.locator("[data-part=find] input")).to_have_value("")
+
+
+def test_a_search_that_matches_nothing_says_so_beside_the_list(ui_shell, ui_page):
+    view = _settings(ui_page)
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+    _find(view, "zzqx")
+    expect(view.locator("[data-part=found-head] [data-line=count]")).to_have_text("No setting matches “zzqx”")
+    expect(view.locator("[data-line=help]")).to_have_text(
+        "Search reads every installed module's settings. Pick a module at the left to see all of its settings.")
+    expect(view.locator("[data-part=list] a[aria-current]")).to_have_count(0)
+    _list(view).and_(ui_page.locator("[data-list=ui]")).click()
+    expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings/ui")
+    expect(view.locator("[data-part=pane][data-module=ui]")).to_be_visible()
+    expect(view.locator("[data-part=find] input")).to_have_value("")
+
+
+def test_the_changed_view_lists_each_changed_setting_by_module_and_resets_one_there(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    for args in (("fixture", "limit", "12"), ("fixture", "workers", "3"), ("ui", "idle_s", "1200")):
+        assert shell.moxi("config", "set", *args).returncode == 0
+    page = ui_contexts(shell).pages[0]
+    page.locator("#moxi-settings").click()
+    view = _view(page)
+    _list(view).and_(page.locator("[data-list=fixture]")).click()
+    changed = view.locator("[data-part=list] [data-line=changed]")
+    expect(changed).to_have_text("3 changed", timeout=SETTINGS_MS * 2)
+    changed.click()
+    expect(page).to_have_url(shell.url + "/m/ui/settings/changed")
+    head = view.locator("[data-part=found-head]")
+    count = head.locator("[data-line=count]")
+    expect(count).to_have_text("3 settings changed from the default, in 2 modules")
+    expect(head.get_by_role("link")).to_have_text("Back to fixture")
+    expect(view.locator("[data-part=changed] [data-group-of] a")).to_have_text(["ui", "fixture"])
+    expect(view.locator("[data-group-of=fixture] [data-line=tally]")).to_have_text(re.compile(r"^2 of \d+$"))
+    group = _group(view, "fixture")
+    expect(group.locator(".set")).to_have_count(2)
+    assert _keys(group.locator(".set")) == ["limit", "workers"]
+    expect(_row(view, "limit").locator("[data-line=default]")).to_have_text(re.compile(r"^default 10\s*·\s*Reset$"))
+    # Reset holds the default; the group's own Save line writes it.
+    _row(view, "limit").get_by_role("button", name="Reset").click()
+    line = group.locator("[data-part=save] [data-line=save]")
+    expect(line).to_have_text("1 not saved in fixture · limit")
+    group.locator("[data-part=save]").get_by_role("button", name="Save").click()
+    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · limit applies now$"), timeout=SETTINGS_MS)
+    assert "limit" not in _file(shell)
+    expect(group.locator(".set")).to_have_count(1)
+    expect(count).to_have_text("2 settings changed from the default, in 2 modules")
+    head.get_by_role("link", name="Back to fixture").click()
+    expect(page).to_have_url(shell.url + "/m/ui/settings/fixture")
+    expect(view.locator("[data-part=pane][data-module=fixture]")).to_be_visible()
+    # Opened at its address, it goes back to the core.
+    page.goto("/m/ui/settings/changed")
+    expect(view.locator("[data-part=found-head] a")).to_have_text("Back to moxi", timeout=SETTINGS_MS)
 
 
 _SIGN_OUT = """async () => {
