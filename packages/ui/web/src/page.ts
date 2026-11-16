@@ -1,12 +1,12 @@
 // <moxi-ui-page>: the shell's own panel. With `route` "" it is Home, drawn by
 // <moxi-ui-home>. With `route` "modules" it is the modules view: every module's block
 // that asks for home and has no seat on Home, then every installed module with its state,
-// its page and its components, and a Check that shows the doctor's rows for it, then the
-// Gateway section that pairs a phone. With `route` "settings" or under it, it is the
-// Settings page, drawn by <moxi-ui-settings>.
+// its page and its components, and a Check that shows the doctor's rows for it. With
+// `route` "settings" or under it, it is the Settings page, drawn by <moxi-ui-settings>,
+// where ui's Phone group pairs a phone.
 //
-// On the phone it leaves out what only the desk reaches: Check, the Gateway section and
-// the Settings page, whose routes the gateway doesn't serve. The views carry no title of
+// On the phone it leaves out what only the desk reaches: Check and the Settings page,
+// whose routes the gateway doesn't serve. The views carry no title of
 // their own: the shell's top line names the page.
 //
 // It reads only the shell's own routes and topics, through client.js. The shell places a
@@ -16,7 +16,6 @@ import { css, html, LitElement, nothing } from "lit";
 import type { PropertyValues } from "lit";
 import { api, components, gateway, installed, navigate, place, subscribe } from "/m/ui/client.js";
 
-import "./gateway-desk.ts";
 import "./home.ts";
 import "./settings.ts";
 import { placeOnceMore, scriptFailure } from "./place-model.ts";
@@ -156,8 +155,7 @@ export class UiPage extends LitElement {
       <h2>Installed</h2>
       ${value === null ? html`<p class="dim">Reading the modules…</p>` : nothing}
       ${value !== null && mods.length === 0 ? html`<p class="dim">No module is listed.</p>` : nothing}
-      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>
-      ${gateway() ? nothing : html`<moxi-ui-gateway></moxi-ui-gateway>`}`;
+      <div class="list">${mods.map((mod) => this.#moduleCard(mod))}</div>`;
   }
 
   #moduleCard(mod: ModuleView) {

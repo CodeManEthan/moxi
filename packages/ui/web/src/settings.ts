@@ -7,6 +7,12 @@
 // first and the rest behind `More`, under their sub-heads, and its foot. The rows,
 // counts and words come from `settings-model.ts`; the addresses from `find-model.ts`.
 //
+// ui's pane ends, after its More, with the Phone group while the gateway is installed
+// (`GET /api/gateway/state`, read with ui's section and every 30 s while ui is shown):
+// `Phone access` as a word with where phones reach it, `Phone port`, then the phones
+// (`<moxi-ui-phones>`). Its `gateway.*` keys count, match in Find and show in the changed
+// view only while the group shows.
+//
 // Above both, the find field. Typed in, Find's results take the columns' place: every
 // drawn key of every listed module that matches, grouped by module with `<matches> of
 // <count>`, four rows a module until `Show them`, the matched words underlined, each row
@@ -34,6 +40,9 @@ import { styleMap } from "lit/directives/style-map.js";
 import { api, components, holdLeave, installed, setAddress, setTheme } from "/m/ui/client.js";
 import type { ThemeMode } from "/m/ui/client.js";
 
+import { accessLine, PHONE_HEAD, REREAD_MS, stateFailed, stateOf } from "./phone-model.ts";
+import type { GatewayState } from "./phone-model.ts";
+import "./phones.ts";
 import { addressOf, changedView, find, FIND_HELP, FIND_READS, hits, parseAddress } from "./find-model.ts";
 import type { Address, Group } from "./find-model.ts";
 import {
@@ -42,8 +51,9 @@ import {
 } from "./save-model.ts";
 import type { SaveResult } from "./save-model.ts";
 import {
-  blocksOf, CORE, defaultOf, listEntries, LOCKED, moduleOrder, moreWords, NOTHING_HERE, paneKeys, paneState, PATH_HINT,
-  READING, READING_AFTER_MS, readFailed, rowOf, splitMore, totalChanged, unreadableWords, valueOf,
+  blocksOf, CORE, defaultOf, drawnKeys, isPhoneKey, listEntries, LOCKED, moduleOrder, moreWords, NOTHING_HERE, paneKeys,
+  paneState, PATH_HINT, PHONE_MODULE, READING, READING_AFTER_MS, readFailed, rowOf, splitMore, totalChanged,
+  unreadableWords, valueOf,
 } from "./settings-model.ts";
 import type { Control, Row, Section, Setting, Toggle } from "./settings-model.ts";
 
@@ -73,11 +83,15 @@ interface Held {
   query: string;
   /** The modules whose every match Find shows (`Show them` pressed). */
   showAll: Set<string>;
+  /** The gateway's state, read with ui's section; null until read, or when the read failed. */
+  gateway: GatewayState | null;
+  /** Why the gateway's state can't be read, when its last read failed. */
+  gatewayError: string | null;
 }
 
 function fresh(): Held {
   return { listed: null, sections: new Map(), error: null, address: null, pending: new Pending(), said: new Map(),
-           query: "", showAll: new Set() };
+           query: "", showAll: new Set(), gateway: null, gatewayError: null };
 }
 
 /** What the page held when the shell took it out with the address unchanged: the shell is
@@ -279,6 +293,8 @@ export class UiSettings extends LitElement {
   #typed = new Map<string, string>();
   /** Releases the page's hold on the shell; null while it holds none. */
   #release: (() => void) | null = null;
+  /** Reads the gateway's state every 30 s while ui's settings are shown. */
+  #stateTimer: ReturnType<typeof setInterval> | null = null;
   readonly #onVisible = (): void => {
     if (document.visibilityState === "visible" && this.#held.listed !== null) void this.#readAll();
   };
@@ -289,6 +305,10 @@ export class UiSettings extends LitElement {
     this.route = route;
     this.#path = location.pathname;
     document.addEventListener("visibilitychange", this.#onVisible);
+    this.#stateTimer = setInterval(() => {
+      const at = this.#held.address;
+      if (at?.view === "module" && at.module === PHONE_MODULE && this.#held.query.trim() === "") void this.#readState();
+    }, REREAD_MS);
     const taken = carried !== null && carried.path === location.pathname ? carried.held : null;
     carried = null;
     if (taken !== null && taken.listed !== null) {
@@ -307,6 +327,8 @@ export class UiSettings extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener("visibilitychange", this.#onVisible);
     for (const timer of [this.#slowTimer, this.#copiedTimer]) if (timer !== null) clearTimeout(timer);
+    if (this.#stateTimer !== null) clearInterval(this.#stateTimer);
+    this.#stateTimer = null;
     const release = this.#release;
     this.#release = null;
     release?.();
@@ -346,11 +368,15 @@ export class UiSettings extends LitElement {
     await Promise.all(Array.from({ length: READS_AT_ONCE }, worker));
   }
 
-  /** Reads one module's section; false when the read failed as a whole. A change held for
-   * a key the read finds moved says so at once (`Pending.refresh`). */
+  /** Reads one module's section, and with ui's the gateway's state; false when the read
+   * failed as a whole. A change held for a key the read finds moved says so at once
+   * (`Pending.refresh`). */
   async #read(module: string): Promise<boolean> {
     this.#reads += 1;
-    const answer = await api("ui", `api/settings?module=${encodeURIComponent(module)}`);
+    const [answer] = await Promise.all([
+      api("ui", `api/settings?module=${encodeURIComponent(module)}`),
+      module === PHONE_MODULE ? this.#readState() : null,
+    ]);
     this.#reads -= 1;
     const data = answer.data;
     if (answer.status !== 200 || !Array.isArray(data?.sections) || !Array.isArray(data?.listed)) {
@@ -373,6 +399,20 @@ export class UiSettings extends LitElement {
     this.#syncHold();
     this.requestUpdate();
     return true;
+  }
+
+  /** The gateway's state. A read that fails leaves the Phone group out and says why. */
+  async #readState(): Promise<void> {
+    const answer = await api("ui", "api/gateway/state");
+    const state = answer.status === 200 ? stateOf(answer.data) : null;
+    this.#held.gateway = state;
+    this.#held.gatewayError = state === null ? stateFailed(answer.status, answer.data) : null;
+    this.requestUpdate();
+  }
+
+  /** Whether the Phone group shows: the gateway is installed, as its state was last read. */
+  #phone(): boolean {
+    return this.#held.gateway?.installed === true;
   }
 
   #startSlow(): void {
@@ -683,7 +723,7 @@ export class UiSettings extends LitElement {
    * matching nothing once every section is in, the list beside the help. */
   #found(query: string, listed: string[]) {
     const { sections, showAll } = this.#held;
-    const found = find(query, listed, sections, false, showAll);
+    const found = find(query, listed, sections, this.#phone(), showAll);
     const head = (count: unknown) => html`<div class="resh" data-part="found-head">
       <span data-line="count">${count}</span><span data-line="reads">${FIND_READS}</span></div>`;
     if (found.none !== null) {
@@ -701,7 +741,7 @@ export class UiSettings extends LitElement {
 
   /** The changed view: every drawn key changed from its default, by module, and the way back. */
   #changedView(listed: string[], back: string) {
-    const view = changedView(listed, this.#held.sections, false, back);
+    const view = changedView(listed, this.#held.sections, this.#phone(), back);
     return html`<div class="resh" data-part="found-head">
         <span data-line="count">${view.count}${this.#partial(view.reading)}</span>
         <a href=${`/m/ui/settings/${back}`} class="back" data-act="back"
@@ -760,10 +800,10 @@ export class UiSettings extends LitElement {
   #list(current: boolean) {
     const { listed, sections, error, address, pending } = this.#held;
     if (listed === null) return html`<nav class="mods" data-part="list" aria-label="Modules" data-reading></nav>`;
-    const total = totalChanged(listed, sections, false);
+    const total = totalChanged(listed, sections, this.#phone());
     // While a listed module's section is out, the list says so to whoever reads its marks.
     return html`<nav class="mods" data-part="list" aria-label="Modules" ?data-reading=${total === null}>
-      ${listEntries(listed, sections, false).map((entry) => {
+      ${listEntries(listed, sections, this.#phone()).map((entry) => {
         const shown = current && address?.view === "module" && address.module === entry.module;
         const held = pending.count(entry.module);
         return html`<a href=${`/m/ui/settings/${entry.module}`} data-list=${entry.module} class=${held > 0 ? "u" : ""}
@@ -808,7 +848,8 @@ export class UiSettings extends LitElement {
     const keys = paneKeys(section.module, section.keys);
     const { first, more } = splitMore(keys);
     const off = section.readonly || this.#saving === section.module;
-    if (more === null) return this.#blocks(section, first, off);
+    const phone = section.module === PHONE_MODULE ? this.#phoneGroup(section, at, off) : nothing;
+    if (more === null) return html`${this.#blocks(section, first, off)}${phone}`;
     const words = moreWords(more);
     return html`${this.#blocks(section, first, off)}
       <div class="more" data-part="more" ?data-open=${at.more}>
@@ -816,7 +857,37 @@ export class UiSettings extends LitElement {
         <button type="button" class="link" aria-expanded=${String(at.more)} @click=${() => this.#toggleMore()}
           >${at.more ? "Hide" : "Show"}</button>
       </div>
-      ${at.more ? this.#blocks(section, more, off) : nothing}`;
+      ${at.more ? this.#blocks(section, more, off) : nothing}${phone}`;
+  }
+
+  /** ui's Phone group, after its More, while the gateway is installed: `Phone access` and
+   * its other keys as rows, then the phones. A state that can't be read says so instead. */
+  #phoneGroup(section: Section, at: Address, off: boolean) {
+    const { gateway, gatewayError } = this.#held;
+    if (gateway === null && gatewayError !== null) {
+      return html`<div class="subh" data-group="phone">${PHONE_HEAD}</div>
+        <p class="note" data-line="phone-failed">${gatewayError}</p>`;
+    }
+    if (gateway?.installed !== true) return nothing;
+    const keys = drawnKeys(section.module, section.keys, true).filter((key) => isPhoneKey(section.module, key));
+    return html`<div class="subh" data-group="phone">${PHONE_HEAD}</div>
+      ${keys.map((key) => this.#row(section, key, off))}
+      <moxi-ui-phones .state=${gateway} ?pairing=${at.pair}
+        @phone-pair=${(event: CustomEvent<{ open: boolean }>) => this.#pairing(event.detail.open)}></moxi-ui-phones>`;
+  }
+
+  /** `Pair a phone` opened or closed: the page writes its address for it. */
+  #pairing(open: boolean): void {
+    const at = this.#held.address;
+    if (at === null || at.view !== "module" || at.module !== PHONE_MODULE || at.pair === open) return;
+    this.#held.address = { ...at, pair: open, missing: null };
+    try {
+      setAddress("ui", addressOf(this.#held.address));
+      this.#path = location.pathname;
+    } catch {
+      // The panel shown is not ui's (the page placed by hand): the address stays.
+    }
+    this.requestUpdate();
   }
 
   #blocks(section: Section, keys: Setting[], off: boolean) {
@@ -856,10 +927,20 @@ export class UiSettings extends LitElement {
           ? html` · <button type="button" class="link" data-act="reset" ?disabled=${locked}
               @click=${() => { pending.reset(module, key); this.#changed(module); }}>Reset</button>` : nothing}</span>` : nothing}
       </div>` : nothing}
+      ${this.#access(module, key)}
       ${row.terminal !== null ? html`<div class="l2"><span class="said" data-line="terminal">${row.terminal.text}</span>
         ${this.#copyButton(row.terminal.command)}</div>` : nothing}
       ${row.control.kind === "switches" ? this.#under(module, key, row, locked) : nothing}
     </div>`;
+  }
+
+  /** Under `Phone access`, while the gateway's state is read: where phones reach it, or why
+   * they can't. */
+  #access(module: string, key: Setting) {
+    const gateway = this.#held.gateway;
+    if (gateway === null || !isPhoneKey(module, key) || key.name !== "gateway.enabled") return nothing;
+    const line = accessLine(gateway);
+    return line !== null ? html`<div class="l2"><span class="said" data-line="access">${line}</span></div>` : nothing;
   }
 
   /** `text` with each part that matches `query` underlined. */

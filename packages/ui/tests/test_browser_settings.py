@@ -4,8 +4,9 @@ addresses the page writes for itself, a section that can't be read, a key the sh
 started with locked, copying a key, the page kept across the shell's redraw; changes held
 until Save, each type's edit saved to the file, a refusal beside its row, ui's theme keys
 applied at once, the asks when the page is left with changes held; Find, its results by
-module with a Save line per group, and the changed view; and `<moxi-ui-form>` in submit
-mode with catalog rows."""
+module with a Save line per group, and the changed view; ui's Phone group on a gateway-mode
+shell, with its phones, Activity, a revoke and the pairing code, and no Gateway section left
+in the modules view; and `<moxi-ui-form>` in submit mode with catalog rows."""
 
 from __future__ import annotations
 
@@ -628,6 +629,99 @@ _SIGN_OUT = """async () => {
   await (await import("/m/ui/client.js")).api("ui", "api/modules");
   return good;
 }"""
+
+
+def _phone_shell(tmp_path_factory, fixture_site):
+    """A gateway-mode shell with its gateway on at the bridge's address, and one phone
+    paired with no passkey that signed in and read a page, as the audit log says."""
+    from moxi_ui.gateway.audit import Audit
+    from moxi_ui.gateway.devices import Devices
+    from moxi_ui.testing.phone import gateway_shell
+
+    shell = gateway_shell(tmp_path_factory.mktemp("gw"), [fixture_site])
+    state = shell.state_dir("ui")
+    device = Devices.of(state).add(name="Test phone", credential=None, public_key=None, sign_count=0,
+                                   host="gw.moxi.test", provider="cloudflare", change="r1.1")
+    writer = Audit(state)
+    writer("signin", {"device": device.id, "session": "a" * 12})
+    writer.request({"id": "r1", "method": "GET", "path": "/m/fixture/api/read", "status": 200,
+                    "device": device.id}, signed_in=True)
+    writer.close()
+    return shell, device
+
+
+def test_the_phone_group_shows_the_gateway_each_phone_its_activity_and_revokes_one(
+        ui_contexts, tmp_path_factory, fixture_site):
+    shell, device = _phone_shell(tmp_path_factory, fixture_site)
+    try:
+        status, state = shell.session().get("/m/ui/api/gateway/state")
+        assert status == 200 and state["installed"] and state["switch"] and state["on"], state
+        assert state["exposure"] == "internet", state
+        page = ui_contexts(shell).pages[0]
+        # The modules view holds no Gateway section: pairing is on Settings › ui.
+        page.goto("/m/ui/modules")
+        expect(page.locator("#moxi-panel moxi-ui-page .card[data-module=ui]")).to_be_visible(timeout=SETTINGS_MS)
+        expect(page.locator("moxi-ui-gateway")).to_have_count(0)
+        view = _settings(page, "settings/ui")
+        pane = view.locator("[data-part=pane][data-module=ui]")
+        expect(pane.locator(".subh[data-group=phone]")).to_have_text("Phone")
+        # Phone access: a word and no control, where phones reach it, the command to copy.
+        access = _row(view, "gateway.enabled")
+        expect(access.locator("[data-line=label]")).to_have_text("Phone access")
+        expect(access.locator("[data-line=word]")).to_have_text("on")
+        expect(access.locator("button[role=switch]")).to_have_count(0)
+        expect(access.locator("[data-line=access]")).to_have_text(
+            f"At {state['host']}:{state['port']}." + (" Phones read only." if state["reads_only"] else ""))
+        expect(access.locator("[data-line=terminal]")).to_have_text("Turned off at the terminal: moxi ui gateway disable")
+        expect(access.get_by_role("button", name="Copy")).to_be_visible()
+        # Phone port, as any key, with its mark; then the phone, after it.
+        port = _row(view, "gateway.port")
+        expect(port.locator("[data-line=label]")).to_have_text("Phone port")
+        expect(view.locator("input[data-control='gateway.port']")).to_have_value(str(shell.gateway_port))
+        expect(port.locator("[data-line=line]")).to_have_text(["Applies at the next start."])
+        phone = view.locator(f".dev[data-device='{device.id}']")
+        expect(phone.locator("[data-line=name]")).to_have_text("Test phone")
+        expect(phone.locator("[data-line=device]")).to_have_text(
+            re.compile(rf"^paired (today|yesterday) · last sign-in \1 {CLOCK} · no passkey$"))
+        # ui's count holds its phone keys while the group shows.
+        expect(_list(view).and_(page.locator("[data-list=ui]"))).to_have_text(re.compile(r"^ui\s*2$"))
+        # Activity, tucked: the audit rows and the phone's sign-ins.
+        activity = view.locator("[data-part=activity]")
+        expect(activity).to_contain_text("Activity")
+        activity.get_by_role("button", name="Show").click()
+        log = view.locator("[data-part=log]")
+        expect(log.locator("[data-line=signins]")).to_have_text(re.compile(r"^Test phone signed in .+\.$"))
+        expect(log.locator("[data-line=row]").first).to_contain_text("path=/m/fixture/api/read")
+        expect(log.locator("[data-line=row]").filter(has_text="signin")).to_have_count(1)
+        # Revoke asks in place under the phone; Keep it leaves it paired.
+        phone.get_by_role("button", name="Revoke").click()
+        ask = view.locator("[data-part=revoke]")
+        expect(ask).to_contain_text("Revoke Test phone? It is signed out within two seconds and must be paired again to come back.")
+        ask.get_by_role("button", name="Keep it").click()
+        expect(ask).to_have_count(0)
+        phone.get_by_role("button", name="Revoke").click()
+        ask.get_by_role("button", name="Revoke Test phone").click()
+        expect(view.locator("[data-line=revoked]")).to_have_text("Revoked Test phone.")
+        expect(view.locator("[data-line=no-phone]")).to_have_text("No phone is paired.")
+        expect(phone).to_have_count(0)
+        # Revoke waits for no Save.
+        expect(_save_line(view).locator("[data-line=save]")).to_have_text("Nothing to save")
+        # Pair a phone opens the code in place, at its own address, and Close closes it.
+        view.get_by_role("button", name="Pair a phone").click()
+        pairing = view.locator("[data-part=pair]")
+        expect(pairing.locator("svg[aria-label='Pairing code']")).to_be_visible(timeout=SETTINGS_MS)
+        expect(page).to_have_url(re.compile(r"/m/ui/settings/ui/pair$"))
+        expect(pairing.locator("[data-line=scan]")).to_have_text(
+            re.compile(rf"^Scan this with the phone's camera\. It works once, until {CLOCK}\.$"))
+        expect(pairing.locator("[data-line=then]")).to_have_text(
+            "The phone then asks for a name and a passkey. It will read Moxi's pages; it cannot launch, "
+            "send or change a setting.")
+        expect(pairing.get_by_role("button", name="Copy the link instead")).to_be_visible()
+        view.get_by_role("button", name="Close").click()
+        expect(pairing).to_have_count(0)
+        expect(page).to_have_url(re.compile(r"/m/ui/settings/ui$"))
+    finally:
+        shell.stop()
 
 
 def test_more_stays_open_when_the_shell_draws_the_page_again(ui_shell, ui_page):
