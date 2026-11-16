@@ -263,10 +263,12 @@ def global_preview(loadout_dir=None, *, resolver=planner.resolve_key,
                    git_seconds: float | None = None) -> dict:
     """What the next install makes of each global file, for `global show`:
     `{"mode": <the manifest's mode>, "files": [...]}`. Each file the managed part edits is
-    `{"file", "harness", "parts", "changes", "diff"}`, `diff` a unified diff from the file
-    as it is to the file after install (empty when unchanged). Each global file
-    `if-absent` places is `{"file", "harness", "parts", "changes", "placed": True, "state",
-    "diff"}`, `diff` then the reason its state isn't `ok`. `parts` are the absolute paths
+    `{"file", "harness", "parts", "changes", "diff", "form"}`, `diff` a unified diff from
+    the file as it is to the file after install (empty when unchanged), `form` what
+    loadout adds there (`line`, `block` or `instructions`). Each global file `if-absent`
+    places is `{"file", "harness", "parts", "changes", "placed": True, "state", "diff",
+    "form"}`, `diff` then the reason its state isn't `ok`, `form` `placed`, or `left`
+    where the harness has its own file there. `parts` are the absolute paths
     the harness reads through loadout: the shared file, then its part while in use (none
     in `off`). Takes no lock, writes nothing; `git_seconds` as for `status`."""
     return global_preview_of(*_plan(loadout_dir, resolver, git_seconds))
@@ -287,11 +289,14 @@ def global_preview_of(plan: planner.Plan, run: entries.Run) -> dict:
         return [str(p) for p in globalfile.reads(shared, harness)]
 
     shown = entries.preview(run)
-    owner = {}
+    owner, forms = {}, {}
     for a in run.actions:
         where = a.where
-        owner[where.file if a.entry else where.get("file")] = (
-            where.harness if a.entry else where.get("harness", ""))
+        file = where.file if a.entry else where.get("file")
+        owner[file] = where.harness if a.entry else where.get("harness", "")
+        kind = where.kind if a.entry else where.get("kind")
+        if kind in _GLOBAL_FORMS:
+            forms.setdefault(file, _GLOBAL_FORMS[kind])
     out = []
     for path, (now, then) in sorted(shown.items()):
         a, b = now.decode("utf-8", "replace"), then.decode("utf-8", "replace")
@@ -300,15 +305,25 @@ def global_preview_of(plan: planner.Plan, run: entries.Run) -> dict:
                                             path, f"{path} after install"))
         h = owner.get(path, "")
         out.append({"file": path, "harness": h, "parts": parts(h), "changes": a != b,
-                    "diff": diff})
+                    "diff": diff, "form": forms.get(path)})
     for w in plan.wants:
         if w.kind == planner.GLOBAL_KIND:
             state, reason, _ = planner.state_of(w)
+            step = w.step
+            left = step is not None and step.action == "refuse" \
+                and step.cause in ("occupant", "tracked")
             out.append({"file": str(w.item.dest if w.item else w.harness),
                         "harness": w.harness, "parts": parts(w.harness),
                         "changes": state != "ok", "placed": True, "state": state,
-                        "diff": reason})
+                        "diff": reason, "form": "left" if left else "placed"})
     return {"mode": mode, "files": out}
+
+
+#: What loadout adds to a harness's global file, by the kind of its entry there: one
+#: line naming the global text, a marked block, or one `instructions` entry. A file
+#: `if-absent` mode places reads `placed`, or `left` where the harness has its own.
+_GLOBAL_FORMS = {"global-line": "line", "global-block": "block",
+                 "instructions": "instructions"}
 
 
 # -- install --------------------------------------------------------------------------------

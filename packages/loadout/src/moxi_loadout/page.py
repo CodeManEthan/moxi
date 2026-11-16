@@ -181,12 +181,58 @@ GLOBAL = {
     "chosen": lb.Out("bool"),
     "files": lb.Out("list", items=GLOBAL_FILE),
 }
+#: A section as the view gives it: `SECTION`, and `refused`, why a key section can't
+#: be used this run (null when it resolved): its `cause` (`no-projects`, `not-found`,
+#: `unreadable`, `busy`, `no-root`, `unloadable`), the refusal's `line`, and `last_root`,
+#: the root loadout's ledger recorded when it last placed the section, when its records
+#: agree on one.
+VIEW_SECTION = lb.Out("table", items={
+    **SECTION.items,
+    "refused": lb.Out("table", nullable=True, items={
+        "cause": _TEXT, "line": _SAYS, "last_root": _MAYBE_PATH}),
+})
+
+#: An item as the view gives it: `ITEM`, the `module` of a module's skill (else null),
+#: and `what` it writes (null for a skill or an agent): a hook's `event`, `matcher` and
+#: `command`; a permissions item's `allow`, `ask` and `deny` shell prefixes; an MCP
+#: server's `command` or `url`. A key the kind has no value for is null.
+_MAYBE_TEXTS = lb.Out("list", items=_SAYS, nullable=True)
+VIEW_ITEM = lb.Out("table", items={
+    **ITEM.items,
+    "module": _MAYBE,
+    "what": lb.Out("table", nullable=True, items={
+        "event": _MAYBE_SAYS, "matcher": _MAYBE_SAYS, "command": _MAYBE_SAYS,
+        "url": _MAYBE_SAYS, "allow": _MAYBE_TEXTS, "ask": _MAYBE_TEXTS,
+        "deny": _MAYBE_TEXTS}),
+})
+
+#: A note on one item for one harness: `code` one of `trust` (Codex runs a new hook only
+#: once trusted), `unconfirmed` (no run has confirmed the harness reads it as loadout
+#: writes it), `no-hooks` (OpenCode takes no hooks), `writes-nothing` (loadout writes
+#: nothing for that harness).
+ITEM_NOTE = lb.Out("table", items={"kind": _TEXT, "name": _TEXT, "harness": _TEXT,
+                                   "code": _TEXT})
+
+#: The global file as the view gives it: `/api/global`'s, with `source`, the folder's
+#: global text (null when the manifest names none), and each file's `form`, what loadout
+#: adds there: `line`, `block`, `instructions`, `placed`, or `left` where the harness's
+#: own file is there.
+VIEW_GLOBAL = lb.Out("table", items={
+    "source": _MAYBE_PATH,
+    "mode": _TEXT,
+    "chosen": lb.Out("bool"),
+    "files": lb.Out("list", items=lb.Out("table", items={
+        **GLOBAL_FILE.items, "form": _MAYBE})),
+})
+
 #: Everything the page's items draw, from the one plan `status` builds: `status`'s
 #: `rows`, `lines`, `notes` and `counts`; `note`, the drift block's; the `home` folder,
 #: the loadout `folder` and its `manifest`; `harnesses`, the harness table's names in its
-#: order; `resolved_all`, whether every section resolved; the `sections` and `items` as `/api/list` gives them; and `global` as
-#: `/api/global` gives it. The paths are null only with `problem` set, and `home` when
-#: nothing places a home folder.
+#: order; `resolved_all`, whether every section resolved; the `sections` and `items` as
+#: `/api/list` gives them, with what the view adds; the notes on each item for each
+#: harness (`item_notes`); and `global` as `/api/global` gives it, with its source and
+#: forms. The paths are null only with `problem` set, and `home` when nothing places a
+#: home folder.
 VIEW = {
     "problem": _PROBLEM,
     "lines": _LINES,
@@ -198,13 +244,16 @@ VIEW = {
     "manifest": _MAYBE_PATH,
     "harnesses": lb.Out("list", items=_TEXT),
     "resolved_all": lb.Out("bool"),
-    "sections": lb.Out("list", items=SECTION),
-    "items": lb.Out("list", items=ITEM),
+    "sections": lb.Out("list", items=VIEW_SECTION),
+    "items": lb.Out("list", items=VIEW_ITEM),
     "rows": lb.Out("list", items=VIEW_ROW),
-    "global": lb.Out("table", items={k: v for k, v in GLOBAL.items() if k != "problem"}),
+    "item_notes": lb.Out("list", items=ITEM_NOTE),
+    "global": VIEW_GLOBAL,
 }
-#: `reason` says why there is no list: projects absent, busy or unreadable.
-PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS}
+#: `reason` says why there is no list: projects absent, busy or unreadable; `cause` names
+#: it: `absent`, `busy`, `unreadable`, `error`, or null when projects listed.
+PROJECTS = {"projects": lb.Out("list", items=PROJECT), "reason": _MAYBE_SAYS,
+            "cause": _MAYBE}
 #: `count` is the items not `ok` or `off`, each once however many of its harnesses
 #: aren't; `note` the line that the page would write elsewhere than the user's last run
 #: in a terminal, or that it can't tell, when so.
@@ -278,4 +327,4 @@ PAGE = lb.Page(
 
 __all__ = ["BUDGET", "COUNTS", "DRIFT", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE",
            "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS",
-           "VIEW", "VIEW_ROW"]
+           "ITEM_NOTE", "VIEW", "VIEW_GLOBAL", "VIEW_ITEM", "VIEW_ROW", "VIEW_SECTION"]

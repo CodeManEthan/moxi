@@ -151,6 +151,16 @@ def _global(preview: Mapping[str, Any], *, chosen: bool) -> dict[str, Any]:
     }
 
 
+def _view_global(preview: Mapping[str, Any], found) -> dict[str, Any]:
+    """The view's global file: `/api/global`'s, with the global text's path and each
+    file's form."""
+    shown = _global(preview, chosen=found.mode is not None)
+    for file, given in zip(shown["files"], preview["files"]):
+        file["form"] = given.get("form")
+    source = found.global_file
+    return {"source": None if source is None else os.fspath(source), **shown}
+
+
 def _items(found) -> list[dict[str, Any]]:
     """`/api/list`'s items, from a manifest already read."""
     from moxi_loadout import listing as listing_mod
@@ -198,40 +208,46 @@ def view(call: Any) -> dict[str, Any]:
             "manifest": os.fspath(found.path),
             "harnesses": list(plan.harnesses),
             "resolved_all": plan.resolved_all,
-            "sections": _sections_of(found),
-            "items": _items(found),
+            "sections": view_mod.sections(plan),
+            "items": [{**e, **view_mod.item_facts(plan, e["kind"], e["name"])}
+                      for e in _items(found)],
             "rows": [{**r, **facts} for r, facts in zip(outcome["rows"],
                                                          view_mod.row_facts(done))],
-            "global": _global(install.global_preview_of(plan, done.run),
-                              chosen=found.mode is not None),
+            "item_notes": list(done.run.item_notes),
+            "global": _view_global(install.global_preview_of(plan, done.run), found),
         }
     except Exception as exc:  # noqa: BLE001 - a read says what failed, it never raises
         return {"problem": _problem(exc, "the status"), "lines": [], "notes": [],
                 "counts": {}, "note": None, "home": None, "folder": None, "manifest": None,
                 "harnesses": [], "resolved_all": False, "sections": [], "items": [], "rows": [],
-                "global": {"mode": "off", "chosen": False, "files": []}}
+                "item_notes": [],
+                "global": {"source": None, "mode": "off", "chosen": False, "files": []}}
     return answer
 
 
 def projects(call: Any) -> dict[str, Any]:
     """`GET /api/projects`: every project by key, for the project picker; `reason` says
-    why there is none (projects absent, busy or unreadable)."""
+    why there is none (projects absent, busy or unreadable), and `cause` names it
+    (`absent`, `busy`, `unreadable`, `error`)."""
     from moxi_loadout import projects_link
 
     link, why = projects_link.api()
     if link is None:
-        return {"projects": [], "reason": why}
+        return {"projects": [], "reason": why,
+                "cause": "absent" if why == projects_link.ABSENT else "error"}
     try:
         found = link.list_projects()
     except link.Busy:
-        return {"projects": [], "reason": "projects is busy; try again"}
+        return {"projects": [], "reason": "projects is busy; try again", "cause": "busy"}
     except link.Unreadable as exc:
-        return {"projects": [], "reason": f"projects can't be read: {exc}"}
+        return {"projects": [], "reason": f"projects can't be read: {exc}",
+                "cause": "unreadable"}
     except Exception as exc:  # noqa: BLE001 - the picker says why, it never fails
         _log_once(exc, "loadout's page couldn't list the projects")
-        return {"projects": [], "reason": f"projects couldn't be listed ({type(exc).__name__})"}
+        return {"projects": [], "reason": f"projects couldn't be listed ({type(exc).__name__})",
+                "cause": "error"}
     return {"projects": [{"key": str(p.key), "root": os.fspath(p.root)} for p in found],
-            "reason": None}
+            "reason": None, "cause": None}
 
 
 def drift(call: Any) -> dict[str, Any]:

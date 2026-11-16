@@ -70,12 +70,19 @@ GLOBAL_KIND = "global"
 class Resolution:
     """A project section's root, or why it can't be used this run: `line` and the exit
     code (`code`) the refusal gives. `every` marks a refusal that holds for every key
-    section (projects unreadable or busy), so no other key is asked this run."""
+    section (projects unreadable or busy), so no other key is asked this run. `cause`
+    names the refusal for the page (`CAUSES`), None with a root."""
 
     root: str | None
     line: str = ""
     code: int = REFUSED
     every: bool = False
+    cause: str | None = None
+
+
+#: Why a key section can't be used: projects isn't installed, has no such project,
+#: can't be read, is busy, has no root for it, or can't be loaded.
+CAUSES = ("no-projects", "not-found", "unreadable", "busy", "no-root", "unloadable")
 
 
 def resolve_key(key: str) -> Resolution:
@@ -769,7 +776,7 @@ def exit_code(codes: Iterable[int]) -> int:
     return 0
 
 
-__all__ = ["OWNER", "STATES", "FINE", "Resolution", "resolve_key", "Want", "Row", "Plan",
+__all__ = ["OWNER", "STATES", "FINE", "CAUSES", "Resolution", "resolve_key", "Want", "Row", "Plan",
            "Scope", "build", "run", "state_of", "row", "removal_row", "rows", "sourced_rows",
            "exit_code",
            "places", "replaceable", "target_of"]

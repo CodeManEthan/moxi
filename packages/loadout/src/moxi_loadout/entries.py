@@ -143,6 +143,22 @@ class Run:
     #: Whether Claude's part line is wanted (`managed`), which the warn about OpenCode
     #: reading Claude's file reads (`moxi_loadout.install`).
     claude_part: bool = False
+    #: The notes on one item for one harness, for the page: `{kind, name, harness,
+    #: code}`, `code` one of `NOTE_CODES`. Each stands beside a sentence in `notes`.
+    item_notes: list = field(default_factory=list)
+
+    def note_item(self, item: str, harness: str, code: str) -> None:
+        kind, _, name = item.partition(":")
+        found = {"kind": kind, "name": name, "harness": harness, "code": code}
+        if found not in self.item_notes:
+            self.item_notes.append(found)
+
+
+#: The codes of an item's notes: Codex runs a new hook only once trusted (`trust`),
+#: no run has confirmed the harness reads the entry as loadout writes it
+#: (`unconfirmed`), OpenCode takes no hooks (`no-hooks`), and loadout writes nothing
+#: for that harness (`writes-nothing`).
+NOTE_CODES = ("trust", "unconfirmed", "no-hooks", "writes-nothing")
 
 
 # -- what the manifest wants ---------------------------------------------------------------
@@ -171,6 +187,7 @@ def wanted(manifest, loadout_dir, rows: dict, run: Run, records=()) -> tuple[lis
                     continue
                 if h not in hz.HARNESSES:
                     run.notes.append(f"{kind} {name}: loadout writes nothing for {h}")
+                    run.note_item(item, h, "writes-nothing")
                     continue
                 try:
                     out += _build(kind, name, table, h, loadout_dir, run)
@@ -191,6 +208,16 @@ def wanted(manifest, loadout_dir, rows: dict, run: Run, records=()) -> tuple[lis
     if any(e.harness == "opencode" and e.file == str(hz.settings_file("opencode"))
            for e in out):
         run.notes.append(UNCONFIRMED["opencode"])
+    for e in out:
+        # What each UNCONFIRMED sentence names, per entry: a Codex hook, each item the
+        # Codex rules file holds, and each item with an entry in opencode.json.
+        if e.harness == "codex" and e.kind == "hook":
+            run.note_item(e.item, "codex", "unconfirmed")
+        elif e.harness == "codex" and e.kind == "rules":
+            for name in e.by:
+                run.note_item(f"permissions:{name}", "codex", "unconfirmed")
+        elif e.harness == "opencode" and e.file == str(hz.settings_file("opencode")):
+            run.note_item(e.item, "opencode", "unconfirmed")
     return out, carried
 
 
@@ -203,6 +230,7 @@ def _build(kind, name, table, h, loadout_dir, run) -> list[Entry]:
     if kind == "hook":
         if h == "opencode":
             run.notes.append(f"hook {name}: not for opencode, which extends by plugins")
+            run.note_item(item, h, "no-hooks")
             return []
         matcher = table.get("matcher")
         handler = {"type": "command", "command": expand_command(table["command"], loadout_dir)}
@@ -212,6 +240,7 @@ def _build(kind, name, table, h, loadout_dir, run) -> list[Entry]:
         if h == "codex":
             run.notes.append(f"hook {name}: codex runs a new hook only once you trust it "
                              "in codex")
+            run.note_item(item, h, "trust")
         return [Entry(item, h, str(hz.settings_file(h)), "hook",
                       [table["event"], matcher or "", handler["command"]], group)]
     if kind == "permissions":
@@ -1080,6 +1109,6 @@ def preview(run: Run) -> dict[str, tuple[bytes, bytes]]:
             for f, (now, d) in out.items()}
 
 
-__all__ = ["Entry", "Action", "Run", "wanted", "plan", "rows", "sourced_rows", "row",
+__all__ = ["NOTE_CODES", "Entry", "Action", "Run", "wanted", "plan", "rows", "sourced_rows", "row",
            "covers", "apply",
            "preview", "CLI_SECONDS"]

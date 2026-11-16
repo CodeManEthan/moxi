@@ -18,6 +18,13 @@ Each fact is read from what the row came from (`install.Status.sources`), on the
   record while a section is refused, an ignore file);
 - `ignores`: a `would-commit` row that install covers by writing loadout's ignore file.
 
+And of the plan beside the rows:
+
+- each section's refusal (`sections`): its `cause` (`planner.CAUSES`), the refusal's
+  `line`, and `last_root`, the root loadout's ledger recorded for the section when every
+  record of it that carries one names the same root (a held item's), else None;
+- each item's `module` (a module skill's module) and `what` it writes (`item_what`).
+
 Reads only; writes nothing.
 """
 
@@ -141,4 +148,69 @@ def _applies(covered, section: str | None) -> str | None:
     return "whole" if covered(planner.Scope()) else None
 
 
-__all__ = ["FORMS", "APPLIES", "row_facts"]
+def sections(plan) -> list[dict]:
+    """Each section of the manifest, `{name, where, root, refused}`, `refused` None for a
+    section that resolved."""
+    out = []
+    for section in plan.manifest.sections():
+        res = None if section.is_user else plan.refused.get(section.name)
+        refused = None if res is None else {
+            "cause": res.cause, "line": res.line, "last_root": last_root(plan, section.name)}
+        out.append({"name": section.name, "where": section.where, "root": section.root,
+                    "refused": refused})
+    return out
+
+
+def last_root(plan, section: str) -> str | None:
+    """The root loadout last placed `section` under, by its ledger: the one root every
+    record of the section that carries one names (a held item's), else None. Records
+    with no root count neither way."""
+    roots = {(record.get("place") or {}).get("root")
+             for record in plan.ledger.get("placed", {}).values()
+             if isinstance(record, dict) and record.get("section") == section}
+    roots.discard(None)
+    return roots.pop() if len(roots) == 1 else None
+
+
+def item_facts(plan, kind: str, name: str) -> dict:
+    """`{module, what}` for an item: the module a module skill comes from, else None;
+    what it writes, as `item_what` gives it."""
+    from moxi_loadout.manifest import is_module_skill
+
+    module = name.partition("/")[0] if kind == "skill" and is_module_skill(name) else None
+    return {"module": module, "what": item_what(plan.manifest, kind, name,
+                                                 loadout_dir=plan.loadout_dir)}
+
+
+#: The keys of `item_what`'s answer, each None where the kind has none.
+WHAT_KEYS = ("event", "matcher", "command", "url", "allow", "ask", "deny")
+
+
+def item_what(found, kind: str, name: str, *, loadout_dir=None) -> dict | None:
+    """What an item writes, for the opened item: a hook's `event`, `matcher` and
+    `command` (expanded as the harness file gets it); a permissions item's `allow`, `ask`
+    and `deny`, each its shell prefixes as text; an MCP server's `command` or `url`.
+    None for a skill or an agent. Every key of `WHAT_KEYS` is there, None where unset.
+    `{source}` expands to `loadout_dir`, the manifest's folder when None."""
+    from moxi_loadout.manifest import expand_command
+
+    table = found.item(kind, name)
+    out = dict.fromkeys(WHAT_KEYS)
+    if kind == "hook":
+        command = table.get("command")
+        out.update(event=table.get("event"), matcher=table.get("matcher") or None,
+                   command=None if command is None
+                   else expand_command(command, loadout_dir or found.loadout_dir))
+    elif kind == "permissions":
+        for decision in ("allow", "ask", "deny"):
+            out[decision] = [" ".join(rule["shell"]) for rule in table.get(decision, ())
+                             if isinstance(rule, dict) and "shell" in rule]
+    elif kind == "mcp":
+        out.update(command=table.get("command"), url=table.get("url"))
+    else:
+        return None
+    return out
+
+
+__all__ = ["FORMS", "APPLIES", "WHAT_KEYS", "row_facts", "sections", "last_root",
+           "item_facts", "item_what"]

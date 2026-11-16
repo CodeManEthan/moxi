@@ -200,7 +200,8 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
         "/api/projects projects[].root",
         "/api/view home", "/api/view folder", "/api/view manifest",
         "/api/view sections[].root", "/api/view rows[].target",
-        "/api/view global.files[].file", "/api/view global.files[].parts[]"}
+        "/api/view global.files[].file", "/api/view global.files[].parts[]",
+        "/api/view global.source", "/api/view sections[].refused.last_root"}
     for said in ("/api/status problem", "/api/status rows[].reason", "/api/status rows[].name",
                  "/api/status rows[].scope", "/api/status lines[]", "/api/status notes[]",
                  "/api/list items[].source", "/api/list items[].scope",
@@ -211,7 +212,11 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
                  "/api/view note", "/api/view sections[].name", "/api/view items[].scope",
                  "/api/view items[].source", "/api/view rows[].scope",
                  "/api/view rows[].name", "/api/view rows[].reason",
-                 "/api/view global.files[].diff"):
+                 "/api/view global.files[].diff", "/api/view sections[].refused.line",
+                 "/api/view items[].what.event", "/api/view items[].what.matcher",
+                 "/api/view items[].what.command", "/api/view items[].what.url",
+                 "/api/view items[].what.allow[]", "/api/view items[].what.ask[]",
+                 "/api/view items[].what.deny[]"):
         assert marks[said] == "redact", said
     plain = {"/api/view harnesses[]", "/api/view counts.ok", "/api/view sections[].where",
              "/api/view items[].kind", "/api/view items[].name", "/api/view items[].harnesses[]",
@@ -223,7 +228,11 @@ def test_every_value_that_can_hold_a_path_carries_a_mark():
              "/api/view rows[].ignores", "/api/view resolved_all", "/api/view global.mode",
              "/api/view global.chosen", "/api/view global.files[].harness",
              "/api/view global.files[].changes", "/api/view global.files[].placed",
-             "/api/view global.files[].state"}
+             "/api/view global.files[].state", "/api/view global.files[].form",
+             "/api/view sections[].refused.cause", "/api/view items[].module",
+             "/api/view item_notes[].kind", "/api/view item_notes[].name",
+             "/api/view item_notes[].harness", "/api/view item_notes[].code",
+             "/api/projects cause"}
     assert not plain & set(marks)
 
 
@@ -345,12 +354,22 @@ def test_view_answers_from_the_one_plan_status_builds(lo, tmp_path, monkeypatch,
     assert body["resolved_all"] is True
     assert any(r["scope"] == str(proj) for r in body["rows"])
     listed = read("/api/list")
-    assert body["sections"] == listed["sections"]
-    assert body["items"] == listed["items"]
+    assert [{k: v for k, v in s.items() if k != "refused"} for s in body["sections"]] == \
+        listed["sections"]
+    assert [s["refused"] for s in body["sections"]] == [None, None]
+    assert [{k: v for k, v in i.items() if k not in ("module", "what")}
+            for i in body["items"]] == listed["items"]
+    assert [(i["module"], i["what"]) for i in body["items"]] == [(None, None)] * 2
     assert body["manifest"] == listed["manifest"] == str(lo / "loadout.toml")
     shown = read("/api/global")
-    assert body["global"] == {k: v for k, v in shown.items() if k != "problem"}
+    assert body["global"]["source"] == str(lo / "global.md")
+    assert {k: v for k, v in body["global"].items() if k not in ("source", "files")} == {
+        k: v for k, v in shown.items() if k not in ("problem", "files")}
+    assert [{k: v for k, v in f.items() if k != "form"} for f in body["global"]["files"]] \
+        == shown["files"]
+    assert {f["form"] for f in body["global"]["files"]} <= {"line", "block", "instructions"}
     assert body["global"]["chosen"] and body["global"]["files"]
+    assert body["item_notes"] == []
     assert body["note"] == read("/api/drift")["note"] is None
     assert body["harnesses"] == list(place.harnesses()[0])
     assert "claude" in body["harnesses"]
@@ -453,6 +472,8 @@ def list_projects(kind=None):
         raise Busy("the projects store stayed locked")
     if error == "unreadable":
         raise Unreadable("the projects store can't be read; move it aside")
+    if error == "other":
+        raise OSError("a secret detail")
     return [Project("alpha", "/srv/alpha"), Project("beta", "/srv/beta")]
 '''
 
@@ -460,20 +481,29 @@ def list_projects(kind=None):
 def test_projects_absent_is_the_pickers_reason(site):
     from moxi_loadout import projects_link
 
-    assert read("/api/projects") == {"projects": [], "reason": projects_link.ABSENT}
+    assert read("/api/projects") == {"projects": [], "reason": projects_link.ABSENT,
+                                     "cause": "absent"}
 
 
-@pytest.mark.parametrize("error, reason", [
-    (None, None),
-    ("busy", "projects is busy; try again"),
-    ("unreadable", "projects can't be read: the projects store can't be read; move it aside"),
+def test_projects_that_wont_load_is_an_error(site):
+    site.module("projects", API="'moxi_projects.missing'")
+    body = read("/api/projects")
+    assert body["cause"] == "error" and "can't be loaded" in body["reason"]
+
+
+@pytest.mark.parametrize("error, reason, cause", [
+    (None, None, None),
+    ("busy", "projects is busy; try again", "busy"),
+    ("unreadable", "projects can't be read: the projects store can't be read; move it aside",
+     "unreadable"),
+    ("other", "projects couldn't be listed (OSError)", "error"),
 ])
-def test_projects_lists_by_key_or_says_why_not(site, monkeypatch, error, reason):
+def test_projects_lists_by_key_or_says_why_not(site, monkeypatch, error, reason, cause):
     site.module("projects", API="'moxi_projects.api'", files={"api.py": PROJECTS_API})
     if error:
         monkeypatch.setenv("FAKE_PROJECTS_ERROR", error)
     body = read("/api/projects")
-    assert body["reason"] == reason
+    assert (body["reason"], body["cause"]) == (reason, cause)
     assert body["projects"] == ([] if error else [{"key": "alpha", "root": "/srv/alpha"},
                                                   {"key": "beta", "root": "/srv/beta"}])
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from types import SimpleNamespace
 
 import loadout_kit as kit
 import pytest
@@ -266,3 +267,121 @@ def test_a_would_commit_row_install_covers_reads_ignores(lo, tmp_path):
     row = rows()[("skill", "review", "claude", str(root))]
     assert (row["state"], row["ignores"]) == ("would-commit", True)
     assert not any(r["ignores"] for r in rows().values() if r["state"] != "would-commit")
+
+
+# -- sections -------------------------------------------------------------------------------
+
+def test_a_refused_section_names_its_cause_and_the_root_loadout_last_placed(lo, tmp_path,
+                                                                           site):
+    root = project(tmp_path)
+    kit.skill(root / ".claude" / "skills", "own")
+    kit.manifest(lo, '[user]\nskills = ["review"]\n[project.app]\nskills = ["review", "own"]\n')
+    assert install.install(resolver=lambda key: Resolution(str(root))).code == 0
+    # Without projects the key section is refused; its held item's record names the root.
+    found = view.sections(install.status_plan().plan)
+    assert found[0] == {"name": "user", "where": "user", "root": None, "refused": None}
+    refused = found[1]["refused"]
+    assert (found[1]["name"], refused["cause"]) == ("app", "no-projects")
+    assert refused["last_root"] == str(root)
+    assert "moxi install projects" in refused["line"]
+
+
+def test_last_root_is_the_one_root_the_sections_records_agree_on():
+    def plan(*roots):
+        placed = {f"/t/{i}": {"section": "app", "place": {"root": r}}
+                  for i, r in enumerate(roots)}
+        placed["/t/other"] = {"section": "web", "place": {"root": "/elsewhere"}}
+        return SimpleNamespace(ledger={"placed": placed})
+
+    assert view.last_root(plan("/srv/app", None), "app") == "/srv/app"
+    assert view.last_root(plan("/srv/app", "/srv/moved"), "app") is None
+    assert view.last_root(plan(None, None), "app") is None
+    assert view.last_root(plan(), "app") is None
+
+
+# -- items ----------------------------------------------------------------------------------
+
+def opencode_row() -> None:
+    from moxi import config
+
+    config.add_item("moxi", "harnesses", {"name": "opencode",
+                                          "skills": "~/.config/opencode/skills",
+                                          "agents": "~/.config/opencode/agents"}, by="test")
+
+
+MCP = '''
+[mcp.docs]
+command = "docs-mcp"
+[mcp.remote]
+url = "https://example.invalid/mcp"
+'''
+
+
+def test_item_notes_name_each_entry_the_sentences_name(lo):
+    opencode_row()
+    kit.manifest(lo, '[user]\nhooks = ["guard-rm"]\npermissions = ["git-reads", "ls-reads"]\n'
+                     'mcp = ["docs"]\nagents = ["helper"]\n' + HOOK + PERMS + MCP)
+    notes = {(n["kind"], n["name"], n["harness"], n["code"])
+             for n in install.status_plan().run.item_notes}
+    assert notes == {
+        ("hook", "guard-rm", "codex", "trust"),
+        ("hook", "guard-rm", "codex", "unconfirmed"),
+        ("hook", "guard-rm", "opencode", "no-hooks"),
+        ("permissions", "git-reads", "codex", "unconfirmed"),
+        ("permissions", "ls-reads", "codex", "unconfirmed"),
+        ("permissions", "git-reads", "opencode", "unconfirmed"),
+        ("permissions", "ls-reads", "opencode", "unconfirmed"),
+        ("mcp", "docs", "opencode", "unconfirmed"),
+    }
+    # The sentences stay for the terminal.
+    assert any("trust it" in n for n in install.status().notes)
+
+
+def test_a_harness_loadout_writes_nothing_for_is_noted_on_the_item(lo):
+    from moxi import config
+
+    config.add_item("moxi", "harnesses", {"name": "other", "skills": "~/.other/skills",
+                                          "agents": "~/.other/agents"}, by="test")
+    kit.manifest(lo, '[user]\nmcp = ["docs"]\n' + MCP)
+    notes = install.status_plan().run.item_notes
+    assert {"kind": "mcp", "name": "docs", "harness": "other",
+            "code": "writes-nothing"} in notes
+
+
+def test_what_each_item_writes(lo):
+    kit.manifest(lo, '[user]\nhooks = ["guard-rm"]\npermissions = ["git-reads"]\n'
+                     'mcp = ["docs", "remote"]\nskills = ["review"]\n' + HOOK + MCP
+                     + '[permissions.git-reads]\nallow = [{ shell = ["git", "status"] }]\n'
+                       'deny = [{ shell = ["rm", "-rf"] }]\n')
+    plan = install.status_plan().plan
+    none = dict.fromkeys(view.WHAT_KEYS)
+    hook = view.item_facts(plan, "hook", "guard-rm")
+    assert hook["module"] is None
+    assert hook["what"] == {**none, "event": "PreToolUse", "matcher": "Bash",
+                            "command": f"python3 {lo}/hooks/guard_rm.py"}
+    assert view.item_facts(plan, "permissions", "git-reads")["what"] == {
+        **none, "allow": ["git status"], "ask": [], "deny": ["rm -rf"]}
+    assert view.item_facts(plan, "mcp", "docs")["what"] == {**none, "command": "docs-mcp"}
+    assert view.item_facts(plan, "mcp", "remote")["what"] == {
+        **none, "url": "https://example.invalid/mcp"}
+    assert view.item_facts(plan, "skill", "review") == {"module": None, "what": None}
+    assert view.item_facts(plan, "skill", "ui/tour")["module"] == "ui"
+
+
+# -- the global file ------------------------------------------------------------------------
+
+def test_each_global_file_says_what_loadout_adds_there(lo):
+    (lo / "global.md").write_text("Be brief.\n")
+    kit.manifest(lo, '[global]\nmode = "managed"\n')
+    done = install.status_plan()
+    forms = {f["harness"]: f["form"]
+             for f in install.global_preview_of(done.plan, done.run)["files"]}
+    assert forms == {"claude": "line", "codex": "block"}
+    codex = harness.global_file("codex")
+    codex.parent.mkdir(parents=True, exist_ok=True)
+    codex.write_text("theirs\n")
+    kit.manifest(lo, '[global]\nmode = "if-absent"\n')
+    done = install.status_plan()
+    forms = {f["harness"]: f["form"]
+             for f in install.global_preview_of(done.plan, done.run)["files"]}
+    assert forms == {"claude": "placed", "codex": "left"}

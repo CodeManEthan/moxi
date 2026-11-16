@@ -167,3 +167,30 @@ def test_a_projects_module_that_wont_load_refuses_every_key_section(lo, site):
     out = install.install()
     assert out.code == 3
     assert any("projects can't be loaded" in line for line in out.text())
+
+
+def test_each_refusal_names_its_cause(lo, projects, tmp_path, site):
+    from moxi_loadout import projects_link
+
+    app = root(tmp_path, "app")
+    projects.roots(app=app, bare="")
+    assert projects_link.resolve("app").cause is None
+    assert projects_link.resolve("nope").cause == "not-found"
+    assert projects_link.resolve("bare").cause == "no-root"
+    for error, cause in (("unreadable", "unreadable"), ("too-new", "unreadable"),
+                         ("busy", "busy")):
+        projects.fail(error)
+        assert projects_link.resolve("app").cause == cause
+
+
+def test_without_projects_the_cause_is_no_projects(site):
+    from moxi_loadout import projects_link
+
+    assert projects_link.resolve("app").cause == "no-projects"
+
+
+def test_a_projects_module_that_wont_load_is_unloadable(site):
+    from moxi_loadout import projects_link
+
+    site.module("projects", API="'moxi_projects.missing'")
+    assert projects_link.resolve("app").cause == "unloadable"
