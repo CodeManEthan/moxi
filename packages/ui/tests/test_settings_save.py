@@ -60,7 +60,7 @@ def test_the_shells_read_decides_the_type_and_the_spelling():
 def test_text_typed_for_a_number_or_a_switch_is_spelled_as_typed():
     for type_ in ("int", "float", "bool"):
         assert settings.spell("84x60", type_) == "84x60"
-    assert settings.spell(84, "int") == "84" and settings.spell(True, "bool") == "true"
+    assert settings.spell(84, "int") == "84" and settings.spell(value=True, type_="bool") == "true"
     # A string in a list is still one TOML string.
     assert settings.spell(["84x60"], "list") == '["84x60"]'
 
