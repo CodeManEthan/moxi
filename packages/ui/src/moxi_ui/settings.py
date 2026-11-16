@@ -258,11 +258,12 @@ def _toml(value: Any) -> str:
 def spell(value: Any, type_: str) -> str | None:
     """`value` as `moxi config set` takes it for a key of type `type_`: `true` or `false`,
     a number, a `string`, `path` or `enum` as it is, a `table` given as a string as that
-    TOML text (the page's TOML field, which `moxi config` parses and judges), and one TOML
-    value for anything else. None stays None."""
+    TOML text (the page's TOML field, which `moxi config` parses and judges), a string
+    given for a `bool`, `int` or `float` as the text typed (which `moxi config` judges, so
+    a refusal quotes it once), and one TOML value for anything else. None stays None."""
     if value is None:
         return None
-    if type_ in ("string", "path", "enum", "table") and isinstance(value, str):
+    if type_ in ("string", "path", "enum", "table", "bool", "int", "float") and isinstance(value, str):
         return value
     return _toml(value)
 

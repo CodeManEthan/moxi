@@ -50,11 +50,19 @@ def test_the_shells_read_decides_the_type_and_the_spelling():
         argv = run.writes[-1][0]
         assert argv[5:] == ["set", "--by", "ui", "--json", "--", "demo", name, spelled]
     # A string sent for a table is the TOML text the page's field holds, passed as it is;
-    # a string sent for an int is spelled as one TOML string. moxi config judges both.
-    result, run = _save_one("count", '"5"', was=_was("count"))
-    assert run.writes[-1][0][-1] == '"5"'
+    # so is a string sent for an int, the text typed. moxi config judges both.
+    result, run = _save_one("count", '"84x60"', was=_was("count"))
+    assert run.writes[-1][0][-1] == "84x60"
     result, run = _save_one("name", "not json", was=_was("name"))
     assert result["outcome"] == "refused" and run.writes == []
+
+
+def test_text_typed_for_a_number_or_a_switch_is_spelled_as_typed():
+    for type_ in ("int", "float", "bool"):
+        assert settings.spell("84x60", type_) == "84x60"
+    assert settings.spell(84, "int") == "84" and settings.spell(True, "bool") == "true"
+    # A string in a list is still one TOML string.
+    assert settings.spell(["84x60"], "list") == '["84x60"]'
 
 
 def test_a_reset_unsets_the_key_and_an_unset_of_a_key_the_file_does_not_hold_is_unchanged():
