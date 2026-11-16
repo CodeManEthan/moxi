@@ -131,14 +131,19 @@ const STYLES = css`
         line-height: 18px; color: var(--moxi-text-dim); margin-top: -1px; }
   .l2 .said { max-width: 440px; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
   .l2 .nt { margin-left: auto; }
-  .l2 code { color: var(--moxi-text); font-size: 12px; overflow-wrap: anywhere; }
+  .l2 code { font-family: var(--moxi-font-mono); color: var(--moxi-text); font-size: 12px; overflow-wrap: anywhere; }
   .ctl { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
   .fld { border: 1px solid var(--moxi-border); border-radius: var(--moxi-radius); padding: 3px 9px; font: inherit;
          font-size: 14px; line-height: 20px; background: none; color: var(--moxi-text); }
   .fld.num { width: 88px; text-align: right; font-variant-numeric: tabular-nums; }
-  .fld.txt { width: min(190px, 100%); }
+  .fld.txt { width: 190px; max-width: 100%; }
   .fld:disabled, button:disabled { opacity: 0.6; cursor: not-allowed; }
   select.fld { text-align: left; }
+  .pick { position: relative; display: inline-flex; align-items: center; }
+  .pick select.fld { appearance: none; border-color: transparent; padding: 3px 18px 3px 9px; text-align: right;
+                     text-align-last: right; cursor: pointer; }
+  .pick .caret { position: absolute; right: 2px; font-size: 12px; line-height: 1; color: var(--moxi-text-dim);
+                 pointer-events: none; }
   .unit { color: var(--moxi-text-dim); font-size: 13px; }
   .tri { display: inline-flex; flex-wrap: wrap; font-size: 13px; line-height: 1; }
   .tri button { padding: 5px 7px; border: 1px solid transparent; border-radius: var(--moxi-radius); background: none;
@@ -168,6 +173,8 @@ const STYLES = css`
   .more { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 14px;
           border-top: 1px solid var(--moxi-border); margin-top: 6px; padding: 11px 0 10px; font-size: 14px;
           line-height: 20px; color: var(--moxi-text-dim); }
+  .more { align-items: baseline; }
+  .more > span { flex: 1 1 0; min-width: 0; }
   .more b { font-weight: 400; color: var(--moxi-text); margin-right: 10px; }
   .more[data-open] + .subh { border-top: 0; margin-top: 0; padding-top: 0; }
   .note { font-size: 14px; line-height: 20px; color: var(--moxi-text-dim); padding: 12px 0; }
@@ -931,8 +938,8 @@ export class UiSettings extends LitElement {
               @click=${() => { pending.reset(module, key); this.#changed(module); }}>Reset</button>` : nothing}</span>` : nothing}
       </div>` : nothing}
       ${this.#access(module, key)}
-      ${row.terminal !== null ? html`<div class="l2"><span class="said" data-line="terminal">${row.terminal.text}</span>
-        ${this.#copyButton(row.terminal.command)}</div>` : nothing}
+      ${row.terminal !== null ? html`<div class="l2"><span class="said"><span data-line="terminal">${row.terminal.lead} <code>${
+          row.terminal.command}</code></span> ${this.#copyButton(row.terminal.command)}</span></div>` : nothing}
       ${row.control.kind === "switches" ? this.#under(module, key, row, locked) : nothing}
     </div>`;
   }
@@ -989,10 +996,11 @@ export class UiSettings extends LitElement {
             aria-checked=${String(option.value === control.selected)} ?disabled=${locked}
             @click=${() => this.#edit(module, key, option.value)}>${option.words}</button>`)}</span>`;
       case "pick":
-        return html`<select class="fld" aria-label=${row.label} data-control=${name} ?disabled=${locked}
+        return html`<span class="pick"><select class="fld" aria-label=${row.label} data-control=${name} ?disabled=${locked}
           .value=${live(control.selected)} @change=${(event: Event) => this.#edit(module, key,
             (event.target as HTMLSelectElement).value)}>${control.options.map((option) => html`<option
-            value=${option.value} ?selected=${option.value === control.selected}>${option.words}</option>`)}</select>`;
+            value=${option.value} ?selected=${option.value === control.selected}>${option.words}</option>`)}</select><span
+            class="caret" aria-hidden="true">▾</span></span>`;
       case "number":
         return html`<input class="fld num" type="text" inputmode=${control.whole ? "numeric" : "decimal"}
           aria-label=${row.label} data-control=${name} ?disabled=${locked}

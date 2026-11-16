@@ -162,11 +162,11 @@ test("a switch table the read marks locked keeps its other entries open, with no
 test("a terminal key is its value as a word, no control, and the command for the other state", () => {
   const on = UI.find((k) => k.name === "gateway.enabled");
   assert.deepEqual(controlOf(on), { kind: "word", text: "on" });
-  assert.deepEqual(terminalLine(on), { text: "Turned off at the terminal: moxi ui gateway disable",
+  assert.deepEqual(terminalLine(on), { lead: "Turned off at the terminal:",
                                        command: "moxi ui gateway disable" });
   const off = { ...on, json: "false", changed: false };
   assert.deepEqual(controlOf(off), { kind: "word", text: "off" });
-  assert.deepEqual(terminalLine(off), { text: "Turned on at the terminal: moxi ui gateway enable",
+  assert.deepEqual(terminalLine(off), { lead: "Turned on at the terminal:",
                                         command: "moxi ui gateway enable" });
   assert.equal(terminalLine(UI[0]), null);
 });

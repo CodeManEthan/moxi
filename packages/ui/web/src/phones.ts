@@ -58,7 +58,9 @@ export class UiPhones extends LitElement {
     .dev { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 18px;
            font-size: 14px; line-height: 20px; padding: 7px 0; }
     .dev .d { color: var(--moxi-text-dim); margin-left: 10px; }
+    .dev > span:first-child { flex: 1 1 0; min-width: 0; }
     .dev > button { margin-left: auto; }
+    .dev > button:first-child { margin-left: 0; }
     .dim { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); padding: 0 0 9px; }
     .devc { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 18px;
             font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); padding: 0 0 9px; }

@@ -262,8 +262,8 @@ export interface Row {
   control: Control;
   /** The dim lines under it, in order. */
   lines: string[];
-  /** A terminal key's line, with the command its Copy copies. */
-  terminal: { text: string; command: string } | null;
+  /** A terminal key's line: its words, then the command its Copy copies. */
+  terminal: { lead: string; command: string } | null;
   /** `default <words>`, and whether `· Reset` follows; null on a key not changed. */
   defaults: { words: string; reset: boolean } | null;
   /** The shell refuses a write to the key for this run: its control is off. */
@@ -390,12 +390,13 @@ export function defaultsOf(key: Setting): { words: string; reset: boolean } | nu
            reset: key.source === "file" && key.locked !== true && terminalOf(key) === null };
 }
 
-/** A terminal key's line: the command for the state it is not in, which Copy copies. */
-export function terminalLine(key: Setting): { text: string; command: string } | null {
+/** A terminal key's line: its words, and the command for the state it is not in, which
+ * the line shows after them and Copy copies. */
+export function terminalLine(key: Setting): { lead: string; command: string } | null {
   const terminal = terminalOf(key);
   if (!terminal) return null;
-  return valueOf(key) === true ? { text: `Turned off at the terminal: ${terminal.off}`, command: terminal.off }
-                               : { text: `Turned on at the terminal: ${terminal.on}`, command: terminal.on };
+  return valueOf(key) === true ? { lead: "Turned off at the terminal:", command: terminal.off }
+                               : { lead: "Turned on at the terminal:", command: terminal.on };
 }
 
 /** The row for one drawn key. */

@@ -972,6 +972,12 @@ def test_the_phone_group_shows_the_gateway_each_phone_its_activity_and_revokes_o
             f"At {state['host']}:{state['port']}." + (" Phones read only." if state["reads_only"] else ""))
         expect(access.locator("[data-line=terminal]")).to_have_text("Turned off at the terminal: moxi ui gateway disable")
         expect(access.get_by_role("button", name="Copy")).to_be_visible()
+        # The command in the mono face, and Copy after it on its line.
+        command = access.locator("[data-line=terminal] code")
+        expect(command).to_have_text("moxi ui gateway disable")
+        face = "el => getComputedStyle(el).fontFamily"
+        assert command.evaluate(face) != access.locator("[data-line=terminal]").evaluate(face)
+        assert _same_line(command, access.get_by_role("button", name="Copy"))
         # Phone port, as any key, with its mark; then the phone, after it.
         port = _row(view, "gateway.port")
         expect(port.locator("[data-line=label]")).to_have_text("Phone port")
@@ -1009,6 +1015,8 @@ def test_the_phone_group_shows_the_gateway_each_phone_its_activity_and_revokes_o
         expect(phone).to_have_count(0)
         # Revoke waits for no Save.
         expect(_save_line(view).locator("[data-line=save]")).to_have_text("Nothing to save")
+        # Pair a phone sits at the left, under the phones.
+        assert _box(view.get_by_role("button", name="Pair a phone"))["x"] == pytest.approx(_box(pane)["x"], abs=1)
         # Pair a phone opens the code in place, at its own address, and Close closes it.
         view.get_by_role("button", name="Pair a phone").click()
         pairing = view.locator("[data-part=pair]")
@@ -1107,6 +1115,10 @@ def test_a_phone_paired_with_the_pages_code_closes_it_and_a_stale_phone_says_to_
         view = _settings(page, "settings/ui")
         stale = view.locator(f".dev[data-device='{old.id}'] [data-line=device]")
         expect(stale).to_have_text(re.compile(r" · the address changed; pair it again$"))
+        # Its words wrap beside Revoke, which stays on the name's line.
+        page.set_viewport_size({"width": 1280, "height": 900})
+        device = view.locator(f".dev[data-device='{old.id}']")
+        assert _same_line(device.locator("[data-line=name]"), device.get_by_role("button", name="Revoke"))
         view.get_by_role("button", name="Pair a phone").click()
         pairing = view.locator("[data-part=pair]")
         expect(pairing.locator("svg[aria-label='Pairing code']")).to_be_visible(timeout=SETTINGS_MS)
@@ -1155,6 +1167,50 @@ def test_phone_access_is_read_only_and_a_post_to_it_sent_past_the_page_is_refuse
 
 
 # --- the small install, widths, themes ----------------------------------------------------------
+
+
+def _box(locator) -> dict:
+    box = locator.bounding_box()
+    assert box is not None, locator
+    return box
+
+
+def _same_line(one, two) -> bool:
+    """Whether two pieces sit on one line: their vertical middles within 4 px."""
+    a, b = _box(one), _box(two)
+    return abs((a["y"] + a["height"] / 2) - (b["y"] + b["height"] / 2)) < 4
+
+
+def _right(locator) -> float:
+    box = _box(locator)
+    return box["x"] + box["width"]
+
+
+@pytest.mark.skipif(not _installed("launcher", "turns"), reason="the full install's panes")
+def test_a_control_sits_at_the_right_of_its_label_and_more_keeps_show_on_its_first_line(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    page = ui_contexts(shell).pages[0]
+    page.set_viewport_size({"width": 1280, "height": 900})
+    # A text field sits on its label's line, out to the row's edge.
+    view = _settings(page, "settings/launcher")
+    fallback = _row(view, "relaunch.fallback")
+    field = fallback.locator("input[data-control='relaunch.fallback']")
+    assert _same_line(field, fallback.locator("[data-line=label]"))
+    assert _right(field) == pytest.approx(_right(fallback), abs=1)
+    # More's words wrap beside Show, which stays at the right of their first line.
+    view = _settings(page, "settings/turns")
+    more = view.locator("[data-part=more]")
+    show = more.get_by_role("button", name="Show")
+    assert _same_line(show, more.locator("b"))
+    assert _right(show) == pytest.approx(_right(more), abs=1)
+    # Look is its pick and a caret at the row's right, not a boxed list.
+    view = _settings(page, "settings/ui")
+    look = _row(view, "theme.palette")
+    pick = look.locator("select[data-control='theme.palette']")
+    assert pick.evaluate("el => getComputedStyle(el).appearance") == "none"
+    expect(look.locator(".caret")).to_have_text("▾")
+    assert _right(look.locator(".caret")) == pytest.approx(_right(look), abs=3)
 
 
 def test_the_small_install_lists_the_core_and_ui_and_has_no_phone_group(ui_shells, ui_contexts):
