@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A check's name no longer reaches the phone with a host path in it. The gateway sends a
+  kept row's `name` (`/m/ui/api/checks` and the topic `ui.checks`) with each path in it
+  cut to its last folder name, so Home's Health row on the phone reads `repo · hooks
+  proj-b` where a repository's row is named by its root. A path counts when it starts a
+  word with `/` or `~`, and it runs to the next whitespace. It comes with a new mark a
+  page's `Out` may carry, `scrub`, beside `path` and `redact`.
 - The contract check (`ui_component_check`) waits up to 5 s for each of `tokens` to
   reach a colour of the placed component, so a part drawn from data that arrives after
   the first render (a pushed topic's first value) counts. Before, it probed once two

@@ -273,6 +273,49 @@ def test_the_shells_own_read_is_redacted_and_its_desk_routes_are_unreached(
     assert gate.reads.sent == []
 
 
+#: A kept doctor run whose rows name paths: repo names a row by its repository's root.
+KEPT = {"at": "2026-11-15T08:00:00Z", "running": False, "error": "/var/lib/someone/doctor.log",
+        "rows": [{"module": "repo", "name": "hooks /var/lib/someone/code/proj-b",
+                  "state": "warn", "detail": "/var/lib/someone/code/proj-b has no hooks",
+                  "fix": "moxi repo git-hooks add /var/lib/someone/code/proj-b"},
+                 {"module": "turns", "name": "guard", "state": "fail",
+                  "detail": "A guard could not check a call", "fix": None},
+                 {"module": "repo", "name": "spec ~/code/proj-c nightly", "state": "ok",
+                  "detail": "last commit at 08:00", "fix": None}]}
+#: What the phone gets of `KEPT`.
+KEPT_ON_THE_PHONE = {**KEPT, "error": None, "rows": [
+    {"module": "repo", "name": "hooks proj-b", "state": "warn", "detail": None, "fix": None},
+    {"module": "turns", "name": "guard", "state": "fail", "detail": None, "fix": None},
+    {"module": "repo", "name": "spec proj-c nightly", "state": "ok", "detail": None,
+     "fix": None}]}
+
+
+def test_the_phones_checks_send_each_name_scrubbed_and_no_text_of_the_checks_own(
+        tmp_path: Path) -> None:
+    gate = Gate(tmp_path).paired()
+    gate.page_answer = (200, JSON, json.dumps(KEPT).encode())
+    answer = gate.get("/m/ui/api/checks")
+    assert answer.status == 200
+    assert answer.json() == KEPT_ON_THE_PHONE
+    assert b"someone" not in answer.body
+
+
+def test_the_phones_ui_checks_topic_sends_each_name_scrubbed() -> None:
+    async def body():
+        push = Push(FakeStarters([]), mounts=MOUNTS, client=FakeClient())
+        push.publish("checks", KEPT)
+        desk = Reader(push, ask("ui.checks")).start()
+        phone = Reader(push.gateway_app(lambda: KEY), ask("ui.checks")).start()
+        assert (await _seen(desk, "ui.checks"))["ui.checks"] == KEPT
+        assert (await _seen(phone, "ui.checks"))["ui.checks"] == KEPT_ON_THE_PHONE
+        for reader in (desk, phone):
+            reader.leave()
+            await reader.task
+        await push.aclose()
+
+    asyncio.run(asyncio.wait_for(body(), 30))
+
+
 def test_every_answer_the_router_builds_carries_the_gateway_policy(tmp_path: Path) -> None:
     gate = Gate(tmp_path).paired()
     document = gate.get("/", navigate=True)
