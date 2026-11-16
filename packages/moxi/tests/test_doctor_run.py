@@ -200,6 +200,8 @@ def test_an_entry_whose_owner_is_absent_warns_or_is_off_when_optional(d):
         demo = moxi_demo.module
         [moxi.turns]
         demo = moxi_demo.module:x
+        [moxi.turns.hooks]
+        demo = moxi_demo.module:u
         [moxi.cache.timers]
         demo = moxi_demo.module:y
         [moxi.doctor]
@@ -211,11 +213,15 @@ def test_an_entry_whose_owner_is_absent_warns_or_is_off_when_optional(d):
         """)
     modules.reset()
     got = {k: r for k, r in d.rows().items() if k[1].startswith("extension")}
-    assert got[("demo", "extension moxi.turns demo")].state == "off"
+    turns = got[("demo", "extension moxi.turns demo")]
+    assert (turns.state, turns.needs) == ("off", "turns")
+    assert turns.fix == "moxi install demo --with turns"
+    hooks = got[("demo", "extension moxi.turns.hooks demo")]
+    assert (hooks.state, hooks.needs) == ("off", "turns")
     cache = got[("demo", "extension moxi.cache.timers demo")]
-    assert (cache.state, cache.fix) == ("warn", "moxi install cache")
+    assert (cache.state, cache.fix, cache.needs) == ("warn", "moxi install cache", None)
     # The core's groups, a group named by no module, and a present owner: no row.
-    assert len(got) == 2
+    assert len(got) == 3
 
 
 # -- 4. units ----------------------------------------------------------------------------------
@@ -255,6 +261,25 @@ def test_json_prints_the_rows_as_a_list_of_objects(d, capsys):
     assert {"module": "demo", "name": "module", "state": "ok",
             "detail": "present: moxi-demo 0.1.0", "fix": None} in listed
     assert all(set(item) == {"module", "name", "state", "detail", "fix"} for item in listed)
+
+
+def test_json_writes_needs_only_on_a_row_that_carries_it(d, capsys, monkeypatch):
+    d.installed(DAEMONS=DAEMON)
+    marked = Row("demo", "projects", "off", "projects is not installed",
+                 "moxi install projects", needs="projects")
+    plain = Row("demo", "switch", "off", "it is switched off")
+    monkeypatch.setattr(_run, "_check_doctors", lambda ctx: [marked, plain])
+    assert cli.main(["doctor", "demo", "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert {**marked._asdict()} in listed
+    assert {"module": "demo", "name": "switch", "state": "off",
+            "detail": "it is switched off", "fix": None} in listed
+    assert [item["name"] for item in listed if "needs" in item] == ["projects"]
+    # The plain report is the same with or without the mark.
+    assert cli.main(["doctor", "demo"]) == 0
+    out = capsys.readouterr().out
+    assert ("off   demo  projects  projects is not installed  fix: moxi install projects\n"
+            in out) and "needs" not in out
 
 
 def test_module_names_restrict_the_rows(d):
@@ -770,12 +795,17 @@ import time
 from moxi.doctor import Row
 def good():
     return Row("demo", "anything", "warn", "slow replies", "restart it")
+def needing():
+    return Row("demo", "anything", "off", "its peer is not installed", "moxi install peer",
+               needs="peer")
 def raises():
     raise RuntimeError("socket refused")
 def slow():
     time.sleep(2)
 def wrong():
     return ["not a row"]
+def downgraded():
+    return needing()._replace(state="warn")
 """
 
 
@@ -784,6 +814,7 @@ def wrong():
     ("raises", "fail", "moxi_demo.health:raises raised RuntimeError: socket refused"),
     ("slow", "fail", "moxi_demo.health:slow did not finish in 0.2 s"),
     ("wrong", "fail", "returned list, not a moxi.doctor.Row"),
+    ("downgraded", "fail", "raised ValueError: only an off row carries needs, not a warn"),
 ])
 def test_health_runs_one_target_in_a_worker_thread(d, monkeypatch, target, state, words):
     monkeypatch.setattr(_run, "HEALTH_SECONDS", 0.2)
@@ -794,6 +825,27 @@ def test_health_runs_one_target_in_a_worker_thread(d, monkeypatch, target, state
     assert words in row.detail
     if target == "good":
         assert row.fix == "restart it"
+
+
+def test_health_carries_the_row_s_needs(d):
+    d.module(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:needing'}",
+             files_={"health.py": HEALTHS})
+    assert doctor.health("demo", "relay") == Row(
+        "demo", "daemon relay health", "off", "its peer is not installed",
+        "moxi install peer", needs="peer")
+    d.module(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:good'}",
+             files_={"health.py": HEALTHS})
+    assert doctor.health("demo", "relay").needs is None
+
+
+def test_a_refused_health_row_fails_its_own_row_not_the_units_check(d):
+    d.installed(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:downgraded'}",
+                files_={"health.py": HEALTHS})
+    got = d.rows("demo")
+    health = got[("demo", "daemon relay health")]
+    assert health.state == "fail" and "only an off row carries needs" in health.detail
+    assert ("demo", "daemon relay") in got
+    assert not any(name == "check units" for _, name in got)
 
 
 def test_health_with_no_target_and_an_unknown_daemon(d):
