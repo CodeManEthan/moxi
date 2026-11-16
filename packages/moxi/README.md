@@ -73,9 +73,11 @@ commands:
 - `moxi paths <module>` prints where a module keeps its files: its data, state, cache,
   config and runtime directories, its config file and each store it declares.
 - `moxi doctor [<module>...]` checks the modules, their settings, daemons, timers and
-  stores, and exits 1 when a row fails. `--json` prints the rows as JSON, and `--costs`
-  also measures each module's daemons. `moxi doctor --clear <module> <key>` removes a
-  record a program left for the doctor.
+  stores, and exits 1 when a row fails. `--json` prints the rows as JSON, each with its
+  `module`, `name`, `state`, `detail` and `fix`; an `off` row about a part that is not
+  installed adds `needs`, naming it: a module (`projects`) or `<module>[<extra>]`
+  (`ui[gateway]`). `--costs` also measures each module's daemons. `moxi doctor --clear
+  <module> <key>` removes a record a program left for the doctor.
 - `moxi help [<command>|<module>]` prints the command list, or one command's or module's
   help.
 - `moxi version` prints the versions of `moxi` and the modules it sees.
@@ -152,4 +154,4 @@ shortcut file, or reinstall.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-v0.1.9/packages/moxi/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-v0.1.10/packages/moxi/LICENSE).

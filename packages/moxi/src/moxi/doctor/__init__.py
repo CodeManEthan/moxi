@@ -5,6 +5,11 @@
 A row is in one of four states. Information that needs no action is an `ok` row whose
 detail says it.
 
+An `off` row given because a module or an extra is not installed carries `needs`, naming
+that part: the module (`needs="projects"`), or `<module>[<extra>]` for an extra that is
+not a module of its own (`needs="ui[gateway]"`). No other row carries it, so a reader
+can tell an offer to install something from a problem without reading the row's words.
+
 `record(module, text, key=...)` leaves a finding for the next `moxi doctor` run, from
 code that can't print to a person when it finds it (a git hook, a timer). Each record
 shows as a `fail` row until `clear(module, key)` or `moxi doctor --clear` removes it. A
@@ -28,19 +33,75 @@ from collections import namedtuple
 STATES = ("ok", "warn", "fail", "off")
 #: The file, in a module's state directory, that holds its records.
 RECORDS_FILE = "doctor.json"
+#: An extra's name as `moxi modules` prints it, normalized (PEP 685).
+_EXTRA = r"[a-z0-9]+(-[a-z0-9]+)*"
 
 
-class Row(namedtuple("Row", ("module", "name", "state", "detail", "fix"), defaults=(None,))):
-    """One line of the doctor's report: `state` is one of `STATES`; `fix` is what to run."""
+class Row(namedtuple("Row", ("module", "name", "state", "detail", "fix", "needs"),
+                    defaults=(None, None))):
+    """One line of the doctor's report: `state` is one of `STATES`; `fix` is what to run.
+
+    `needs`, given by keyword, names the part the row is about when that part is not
+    installed here: a module name, or `<module>[<extra>]` (`is_needs_value`). Only an
+    `off` row carries it, and every `off` row given because a module or an extra is
+    absent does. A `warn` or `fail` row is a problem to fix, never an offer, so it carries
+    none.
+    """
 
     __slots__ = ()
 
     def __new__(cls, module: str, name: str, state: str, detail: str,
-                fix: str | None = None):
+                fix: str | None = None, *, needs: str | None = None):
         if state not in STATES:
             raise ValueError(f"a doctor row's state is one of {', '.join(STATES)}, "
                              f"not {state!r}")
-        return super().__new__(cls, module, name, state, detail, fix)
+        if needs is not None:
+            if state != "off":
+                raise ValueError(f"only an off row carries needs, not a {state} row "
+                                 f"(needs={needs!r})")
+            if not is_needs_value(needs):
+                raise ValueError("a doctor row's needs is a module name or "
+                                 f"<module>[<extra>], not {needs!r}")
+        return super().__new__(cls, module, name, state, detail, fix, needs)
+
+    # The namedtuple's own `_make` and `_replace` build the tuple directly; these go through
+    # `Row(...)` so a rebuilt row keeps the same refusals.
+    @classmethod
+    def _make(cls, iterable):
+        values = tuple(iterable)
+        if len(values) != len(cls._fields):
+            raise TypeError(f"Expected {len(cls._fields)} arguments, got {len(values)}")
+        return cls(*values[:5], needs=values[5])
+
+    def _replace(self, /, **changes):
+        unknown = [name for name in changes if name not in self._fields]
+        if unknown:
+            raise TypeError(f"Got unexpected field names: {unknown!r}")
+        return self._make(changes.get(name, value)
+                          for name, value in zip(self._fields, self))
+
+    __replace__ = _replace
+
+    def __getnewargs_ex__(self):
+        # `needs` is keyword-only, so a copy or an unpickle passes it by name.
+        return tuple(self[:5]), {"needs": self.needs}
+
+
+def is_needs_value(value: object) -> bool:
+    """True when `value` is spelled as a row's `needs`: a module name (`projects`), or a
+    module name with one extra in brackets, the extra in its normalized spelling
+    (`ui[gateway]`, `secrets[personal-data]`)."""
+    import re
+
+    from .. import names
+
+    if not isinstance(value, str):
+        return False
+    module, bracket, extra = value.partition("[")
+    if not bracket:
+        return names.is_module_name(module)
+    return (names.is_module_name(module) and extra.endswith("]")
+            and re.fullmatch(_EXTRA, extra[:-1]) is not None)
 
 
 def record(module: str, text: str, *, key: str, fix: str | None = None) -> None:
@@ -135,4 +196,4 @@ def _change(module: str, fn) -> None:
     files.update(_path(module), edit)
 
 
-__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]
+__all__ = ["STATES", "RECORDS_FILE", "Row", "is_needs_value", "record", "clear", "health", "floor_ms"]
