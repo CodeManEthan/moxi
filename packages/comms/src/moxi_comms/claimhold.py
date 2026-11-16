@@ -137,7 +137,7 @@ class ClaimHolder:
         #: The live binding's posting credential. It is deliberately outside `claim`
         #: and `record()`, so neither the claim file nor a state answer can carry it.
         self.token: str | None = None
-        #: One register in flight: the adapter's supervisor's.
+        #: One register in flight: the supervisor's, or a `reregister`'s.
         self.register_lock = threading.Lock()
         self._host: wire.Host | None = None
         self._stop = threading.Event()
