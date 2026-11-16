@@ -113,6 +113,10 @@ test("the gone line the page checks from the view: an item or a kind, nothing el
   assert.equal(goneLineOf({ piece: "kind", section: "atlas-api", kind: "mcp" }, view),
                "atlas-api lists no mcp servers now.");
   assert.equal(goneLineOf({ piece: "global" }, view), null);
-  assert.equal(goneLineOf({ piece: "replace", section: "user", id: "skill:x@codex" }, view), null);
+  assert.equal(goneLineOf({ piece: "replace", section: "user", id: "skill:x@codex" }, view),
+               "Nothing at skill:x@codex needs Replace now.");
+  assert.equal(goneLineOf({ piece: "add", kind: "skill", name: "x" }, view), null);
+  assert.equal(goneLineOf({ piece: "add", kind: "skill", name: "x" }, view, [], new Set(["skill/y"])),
+               "x is no longer a file no section lists.");
   assert.equal(goneLineOf({ piece: "project", key: "nope" }, view), null);
 });

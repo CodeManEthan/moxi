@@ -4,7 +4,7 @@
 
 import type { ReplacePreview, View, ViewRow } from "./feed.ts";
 import { actScope } from "./placed-model.ts";
-import type { ActScope } from "./placed-model.ts";
+import type { ActScope, Problem } from "./placed-model.ts";
 import { sectionInLine } from "./opened-model.ts";
 import { harnessesLine, homeForm, joinAnd } from "./words.ts";
 
@@ -47,6 +47,20 @@ function formOf(row: ViewRow): Form {
   if (row.form === "generated") return "generated";
   if (row.form === "entry") return "entry";
   return "placement";
+}
+
+/** The rows a Replace of `id` (`<kind>:<name>@<harness>`, `@*` for every harness) in
+ * `section` names: the rows of the problem whose act names it, else the view's replaceable
+ * rows it names (the Codex rules file by any permission item it holds). */
+export function replaceRows(view: View, problems: readonly Problem[], section: string, id: string): ViewRow[] {
+  const problem = problems.find((p) => p.act?.verb === "replace" && p.act.id === id && p.act.section === section);
+  if (problem !== undefined) return problem.rows;
+  const match = /^([a-z]+):([^@]+)@([^@]+)$/.exec(id);
+  if (match === null) return [];
+  const [, kind, name, harness] = match;
+  return view.rows.filter((r) => r.replaceable && (r.scope ?? "user") === section && r.kind === kind
+                                 && (r.name === name || (r.covers ?? []).includes(name))
+                                 && (harness === "*" || r.harness === harness));
 }
 
 /** The confirm's question for `rows`, the rows the Replace names. */

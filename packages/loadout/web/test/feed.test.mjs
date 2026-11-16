@@ -117,10 +117,13 @@ test("a job's outcome reads its rows, counts and what it kept", () => {
 });
 
 test("the projects and the folder read their shapes", () => {
-  const projects = { projects: [{ key: "alpha", root: "/w/alpha" }], reason: null };
+  const projects = { projects: [{ key: "alpha", root: "/w/alpha" }], reason: null, cause: null };
   assert.deepEqual(parseProjects(projects), projects);
+  assert.deepEqual(parseProjects({ projects: [], reason: "projects is busy; try again", cause: "busy" }),
+                   { projects: [], reason: "projects is busy; try again", cause: "busy" });
   assert.deepEqual(parseProjects({ projects: [], reason: "projects isn't installed" }),
-                   { projects: [], reason: "projects isn't installed" });
+                   { projects: [], reason: "projects isn't installed", cause: null });
+  assert.equal(parseProjects({ projects: [], reason: null, cause: 3 }), null);
   assert.equal(parseProjects({ projects: [{ key: "alpha" }], reason: null }), null);
   const dir = { state: "ok", detail: null, uncommitted: ["loadout.toml"], more: 0,
                 unlisted: [{ kind: "skill", name: "bump", source: "/l/skills/bump" }], reinstalls: true };

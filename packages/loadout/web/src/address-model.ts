@@ -148,10 +148,12 @@ export function goneLine(address: Address, view: View, problems: readonly Proble
   }
 }
 
-/** `goneLine` for what the page opens from the view alone: an item or a kind; null for
- * anything else. */
-export function goneLineOf(address: Address, view: View): string | null {
-  return address.piece === "item" || address.piece === "kind" ? goneLine(address, view, [], null, null) : null;
+/** `goneLine` for what the page judges from the view and the folder read: a filtered
+ * view's project is judged with it, so here it is never gone; Add on a file is judged
+ * only once the folder is read (`unlisted` not null). */
+export function goneLineOf(address: Address, view: View, problems: readonly Problem[] = [],
+                           unlisted: ReadonlySet<string> | null = null): string | null {
+  return goneLine(address, view, problems, unlisted, null);
 }
 
 // -- the filtered view -----------------------------------------------------------------------

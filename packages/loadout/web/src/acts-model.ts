@@ -55,6 +55,13 @@ export function removeAct(kind: string, name: string, section: Section): PageAct
            argv: ["remove", kind, name, ..."project" in section ? [`--project=${section.project}`] : []] };
 }
 
+/** `add <kind> <name>` to one section: Your items with `section` null, else that project
+ * section (or a project's key, which gives it a section). */
+export function addAct(kind: string, name: string, section: string | null): PageAct {
+  return { path: "api/add", body: { kind, name, ...(section === null ? {} : { project: section }) },
+           argv: ["add", kind, name, ...(section === null ? [] : [`--project=${section}`])] };
+}
+
 /** `global mode <mode>` for `managed` or `if-absent`. */
 export function globalModeAct(mode: "managed" | "if-absent"): PageAct {
   return { path: "api/global-mode", body: { mode }, argv: ["global", "mode", mode] };

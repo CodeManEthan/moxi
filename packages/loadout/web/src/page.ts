@@ -11,12 +11,17 @@
 //   section: one row per item and a column per harness of the harness table, each row
 //   with `Open`; past twelve items a section folds by kind, and a kind opens in place with
 //   its items. The global file is Your items' last row.
+// - `Not listed`, while the folder has a skill or agent file no section lists: each with
+//   Add, which opens in place with its section picker and `Add and place`, and from there
+//   Add by name.
 // - The dim foot lines: the view's notes, why the folder can't be read, and the line for an
 //   address whose item is gone.
 //
 // One thing is open at a time: an item (its From line, a line per harness with its act,
-// Remove), a kind, or the global file (its mode, its files, Turn off and its confirm). The
-// page writes what is open into its address with `history.replaceState`.
+// Remove), a kind, the global file (its mode, its files, Turn off and its confirm), Add, or
+// Replace's confirm, in place under its problem or harness line, which reads
+// `/api/replace-preview` as it opens and closes once its job ends. The page writes what is
+// open into its address with `history.replaceState`.
 //
 // It places what the models (`placed-model.ts`, `items-model.ts`, `opened-model.ts`,
 // `job-model.ts`, `frame-model.ts`) return; every word comes from there. No accent and no
@@ -35,9 +40,12 @@ import { css, html, LitElement, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { api, navigate } from "/m/ui/client.js";
 
-import { CHANGED, Feed, parseJob, parseSourceDir, parseView } from "./feed.ts";
-import type { Job, SourceDir, View } from "./feed.ts";
-import { commandOf, globalOffAct, installAct, jobId } from "./acts-model.ts";
+import { CHANGED, Feed, parseJob, parseProjects, parseReplacePreview, parseSourceDir, parseView } from "./feed.ts";
+import type { Job, Projects, ReplacePreview, SourceDir, View, ViewRow } from "./feed.ts";
+import { addAct, commandOf, globalOffAct, installAct, jobId, replaceAct } from "./acts-model.ts";
+import { ADD_KINDS, ADD_NOTE, BY_NAME, notListed, pickerOf } from "./add-model.ts";
+import type { NotListedRow, Picker } from "./add-model.ts";
+import { confirmView, replaceRows } from "./confirm-model.ts";
 import type { PageAct } from "./acts-model.ts";
 import {
   closed, goneLineOf, itemAddress, NOTHING_OPEN, openKind, opensItem, parseRoute, pathToWrite, sameAddress,
@@ -54,9 +62,9 @@ import { followLine, keptLines, showView } from "./job-model.ts";
 import type { Unfollowed } from "./job-model.ts";
 import { fromParts, openedGlobal, openedItem, replaceArgv } from "./opened-model.ts";
 import type { HarnessLine, OpenedGlobal, OpenedItem } from "./opened-model.ts";
-import { INSTALL_ALL, placedView } from "./placed-model.ts";
+import { INSTALL_ALL, placedView, problemsOf } from "./placed-model.ts";
 import type { PlacedView, Problem, ProblemAct } from "./placed-model.ts";
-import { harnessWord, kindFolded } from "./words.ts";
+import { harnessWord, kindFolded, kindWord } from "./words.ts";
 import { jobRefusal, parseKept, startedOf } from "./views.ts";
 import type { Kept } from "./views.ts";
 
@@ -98,7 +106,17 @@ interface Sent {
   stopped: Unfollowed;
   /** Why the act didn't start; null once it did. */
   said: string | null;
+  /** What the page opens once the job ends, if what was open when it was sent (`from`)
+   * is open still: Replace's confirm and Add close. */
+  from: Address;
+  after: Address | null;
 }
+
+/** A fresh job id for one press. */
+const freshJob = (): string => jobId(crypto.getRandomValues(new Uint8Array(16)));
+
+/** The place of Add's line under its act, while Add is open. */
+const ADD_PLACE = "add";
 
 const TONES: Record<Tone, string> = { plain: "", dim: "d", heavy: "h" };
 
@@ -170,7 +188,16 @@ const STYLES = css`
   .tri > * { padding: 5px 7px; border: 1px solid transparent; border-radius: 6px; color: var(--moxi-text-dim);
              white-space: nowrap; }
   .tri > .s { color: var(--moxi-text); border-color: var(--moxi-border); }
-  .cf { margin: 10px 0 2px 106px; border-top: 1px solid var(--moxi-border); padding-top: 10px; }
+  .cf { margin: 9px 0 4px; border-top: 1px solid var(--moxi-border); padding-top: 10px; font-size: 14px; line-height: 20px; }
+  .cf.in { margin: 10px 0 2px 106px; }
+  .cf.plain { border-top: 0; padding-top: 4px; }
+  .cf .cr { display: grid; grid-template-columns: 76px minmax(0, 1fr); font-size: 13px; line-height: 18px; padding: 3px 0; }
+  .cf .cr .k { color: var(--moxi-text-dim); }
+  .cf .cr > span { min-width: 0; overflow-wrap: anywhere; }
+  .cf .cap { display: block; margin-top: 2px; }
+  .pick { font: inherit; color: var(--moxi-text); background: none; border: 1px solid var(--moxi-border);
+          border-radius: 7px; padding: 3px 9px; max-width: 100%; }
+  .ir .o.add { color: var(--moxi-text); }
   .cf .q { font-size: 14px; line-height: 20px; font-weight: 600; padding-bottom: 4px; }
   .cf .btns { display: flex; gap: 18px; align-items: center; padding: 10px 0 2px; }
   .btn { font-size: 14px; line-height: 20px; color: var(--moxi-text); border: 1px solid var(--moxi-border);
@@ -201,7 +228,7 @@ const STYLES = css`
     .ir .c { flex-basis: 72px; font-size: 13px; }
     .det .r { grid-template-columns: 76px minmax(0, 1fr) auto; gap: 0 10px; }
     .det .foot { padding-left: 86px; }
-    .cf { margin-left: 0; }
+    .cf.in { margin-left: 0; }
     .quietline { padding-top: 60px; }
   }
 `;
@@ -228,6 +255,19 @@ export class LoadoutPage extends LitElement {
   #confirmOff = false;
   /** The opened global file's files whose diff `Show` opened, by harness. */
   #diffs = new Set<string>();
+  /** The item Replace's confirm was opened from, drawn open around it; null when it was
+   * opened from Placed or its address. */
+  #replaceItem: Address | null = null;
+  /** The preview the open confirm reads, by its address's route. */
+  #preview: { route: string; feed: Feed<ReplacePreview> } | null = null;
+  /** The confirm draws its whole diff. */
+  #wholeDiff = false;
+  /** `/api/projects`, read each time Add opens. */
+  #projects: Feed<Projects> | null = null;
+  /** Add's choices: the section (the picker's value), and by name its kind and name. */
+  #addTo = "";
+  #addKind: string = ADD_KINDS[0];
+  #addName = "";
 
   /** The job the page follows, and whether it has ended. */
   #job: Feed<Job> | null = null;
@@ -266,14 +306,17 @@ export class LoadoutPage extends LitElement {
     }, REFRESH_MS);
     const job = kept();
     if (job !== null) {
-      this.#running = { command: job.label, place: job.anchor, job: null, stopped: null, said: null };
+      this.#running = { command: job.label, place: job.anchor, job: null, stopped: null, said: null,
+                        from: NOTHING_OPEN, after: null };
       this.#follow(job.path);
     }
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    for (const feed of [this.#view, this.#dir, this.#job]) feed?.close();
+    for (const feed of [this.#view, this.#dir, this.#job, this.#projects, this.#preview?.feed]) feed?.close();
+    this.#preview = null;
+    this.#projects = null;
     this.#view = this.#dir = null;
     this.#job = null;
     clearTimeout(this.#jobTimer);
@@ -288,12 +331,17 @@ export class LoadoutPage extends LitElement {
       this.#goneSaid = null;
       this.#fromRoute = true;
       this.#setAt(parseRoute(this.route));
+      this.#replaceItem = null;
     }
     // An address whose item is gone opens the page with nothing open, and says so; an
     // item that goes while it is open (a Remove) just closes.
     const view = this.#view?.value ?? null;
-    if (view !== null && view.problem === null) {
-      const gone = goneLineOf(this.#at, view);
+    const dir = this.#dir?.value ?? null;
+    // Add on a file is judged once the folder is read.
+    const waits = this.#at.piece === "add" && this.#at.kind !== null && dir === null;
+    if (view !== null && view.problem === null && !waits) {
+      const unlisted = dir === null ? null : new Set(notListed(dir, view).map((row) => row.key));
+      const gone = goneLineOf(this.#at, view, problemsOf(view), unlisted);
       if (gone !== null) {
         if (this.#fromRoute) this.#goneSaid = gone;
         this.#setAt(NOTHING_OPEN);
@@ -327,15 +375,51 @@ export class LoadoutPage extends LitElement {
     if (!sameAddress(address, this.#at)) {
       this.#confirmOff = false;
       this.#diffs = new Set();
+      this.#wholeDiff = false;
+      this.#preview?.feed.close();
+      this.#preview = null;
+      this.#addTo = "";
+      this.#addName = "";
+      this.#addKind = ADD_KINDS[0];
+      if (address.piece !== "replace") this.#replaceItem = null;
+      if (address.piece === "add") this.#readProjects();
     }
     this.#at = address;
     const path = pathToWrite(address, location.pathname);
     if (path !== null) history.replaceState(history.state, "", path);
   }
 
+  /** Opens Replace's confirm for `id` in `section`, from the opened item `item` or (null)
+   * from Placed. */
+  #openReplace(section: string, id: string, item: Address | null): void {
+    this.#open({ piece: "replace", section, id });
+    this.#replaceItem = item;
+    this.requestUpdate();
+  }
+
+  /** The preview the confirm at `address` reads, read once as it opens. */
+  #previewOf(section: string, id: string): Feed<ReplacePreview> {
+    const route = `${section}\n${id}`;
+    if (this.#preview === null || this.#preview.route !== route) {
+      this.#preview?.feed.close();
+      const path = `api/replace-preview?id=${encodeURIComponent(id)}&section=${encodeURIComponent(section)}`;
+      const feed = new Feed<ReplacePreview>(() => api("loadout", path), parseReplacePreview, () => this.requestUpdate());
+      this.#preview = { route, feed };
+      void feed.refresh();
+    }
+    return this.#preview.feed;
+  }
+
+  #readProjects(): void {
+    if (this.#projects === null) {
+      this.#projects = new Feed<Projects>(() => api("loadout", "api/projects"), parseProjects, () => this.requestUpdate());
+    }
+    void this.#projects.refresh();
+  }
+
   // -- acts ------------------------------------------------------------------------------
 
-  async #act(act: PageAct, place: string | null): Promise<void> {
+  async #act(act: PageAct, place: string | null, after: Address | null = null): Promise<void> {
     if (this.#busy) return;
     this.#sending = true;
     const command = commandOf(act.argv);
@@ -344,11 +428,11 @@ export class LoadoutPage extends LitElement {
       const answer = await api("loadout", act.path, act.body);
       const started = startedOf(answer.status, answer.data);
       if (started.kind === "job") {
-        this.#running = { command, place, job: null, stopped: null, said: null };
+        this.#running = { command, place, job: null, stopped: null, said: null, from: this.#at, after };
         keep({ path: started.path, label: command, anchor: place });
         this.#follow(started.path);
       } else {
-        this.#last = { command, place, job: null, stopped: null, said: started.text };
+        this.#last = { command, place, job: null, stopped: null, said: started.text, from: this.#at, after: null };
         this.#showing = false;
       }
     } finally {
@@ -391,6 +475,7 @@ export class LoadoutPage extends LitElement {
         this.#last = running;
         this.#running = null;
         this.#showing = false;
+        if (running.after !== null && sameAddress(this.#at, running.from)) this.#open(running.after);
       }
       this.#readAll();
       document.dispatchEvent(new CustomEvent(CHANGED));
@@ -445,19 +530,24 @@ export class LoadoutPage extends LitElement {
     if (feed.failure !== null) notes.push(failedLine(feed.failure.why));
     if (this.#goneSaid !== null) notes.push(this.#goneSaid);
     const placed = state === "up" ? placedView(view) : null;
-    const opened = this.#at.piece === "item" ? openedItem(view, this.#at.section, this.#at.kind, this.#at.name) : null;
+    const problems = placed?.problems ?? [];
+    const confirm = this.#at.piece === "replace" ? this.#confirmAt(view, problems, this.#at.section, this.#at.id) : null;
+    const openAt = this.#at.piece === "item" ? this.#at : confirm?.item ?? null;
+    const opened = openAt !== null && openAt.piece === "item"
+      ? openedItem(view, openAt.section, openAt.kind, openAt.name) : null;
     const drawn = new Set<string>();
     for (const problem of placed?.problems ?? []) drawn.add(problemPlace(problem.key));
     if (placed !== null && placed.problems.length > 0) drawn.add(INSTALL_ALL_PLACE);
     if (opened !== null) drawn.add(itemPlace(JSON.stringify([opened.item.scope, opened.item.kind, opened.item.name])));
     if (state === "up" && this.#at.piece === "global") drawn.add(GLOBAL_PLACE);
+    if (this.#at.piece === "add") drawn.add(ADD_PLACE);
     // The last act's line stays until the next act ends; the running act's line takes its
     // place where both go to the same place.
     const places = new Map<string | null, Sent>();
     for (const sent of [this.#last, this.#running]) {
       if (sent !== null) places.set(jobPlace(sent.place, drawn, { placed: placed !== null }), sent);
     }
-    const ctx: Ctx = { view, typed, opened, places };
+    const ctx: Ctx = { view, typed, opened, openAt, confirm, places };
     const groups = html`
       ${note !== null ? html`<section class="grp" data-group="note"><div class="gk">${note.label}</div><div class="gl">
         <div class="line"><span class="h" data-line="note-heading">${note.heading}</span><span class="r d sm">${note.aside}</span></div>
@@ -468,7 +558,8 @@ export class LoadoutPage extends LitElement {
       ${placed !== null ? this.#placed(placed, ctx) : nothing}
       ${this.#folder(view, dir, state === "empty")}
       ${state === "up" ? this.#items(ctx) : nothing}
-      ${state === "empty" ? this.#emptyGlobal(view) : nothing}`;
+      ${state === "empty" ? this.#emptyGlobal(view) : nothing}
+      ${state === "up" || state === "empty" ? this.#notListed(ctx, dir) : nothing}`;
     const empty = state === "empty" ? emptyLines(view) : null;
     return html`
       ${empty !== null ? html`<div class="quietline" data-line="empty">${empty.line}</div>
@@ -516,9 +607,15 @@ export class LoadoutPage extends LitElement {
   // -- Placed --------------------------------------------------------------------------------
 
   /** A problem's act: its button, or with the note set nothing here (the command shows
-   * under the fix). A Replace opens its confirm, which this page doesn't draw yet. */
+   * under the fix). Replace opens its confirm under the problem. */
   #actButton(act: ProblemAct | null, typed: boolean, place: string, { quiet = false } = {}) {
-    if (act === null || typed || act.verb !== "install") return nothing;
+    if (act === null || typed) return nothing;
+    if (act.verb === "replace") {
+      const open = this.#at.piece === "replace" && this.#at.id === act.id && this.#at.section === act.section
+        && this.#replaceItem === null;
+      return html`<button type="button" class="act" data-action="replace" aria-expanded=${open ? "true" : "false"}
+        @click=${() => (open ? this.#open(NOTHING_OPEN) : this.#openReplace(act.section ?? "user", act.id ?? "", null))}>Replace</button>`;
+    }
     return html`<button type="button" class="act ${quiet ? "d" : ""}" data-action="install" ?disabled=${this.#busy}
       @click=${() => void this.#act(installAct(act.scope), place)}>${act === INSTALL_ALL ? "Install all" : "Install"}</button>`;
   }
@@ -558,6 +655,7 @@ export class LoadoutPage extends LitElement {
         ? html` <span class="d" data-line="fix-note">${problem.fixNote}</span>` : nothing}</span>${
         problem.copy !== null ? this.#copyButton(`copy:${problem.key}`, problem.copy) : this.#actButton(problem.act, typed, place)}</div>
       ${typed ? this.#command(problem.act, problem.key) : nothing}
+      ${ctx.confirm !== null && ctx.confirm.problem === problem.key ? this.#confirm(ctx.confirm, ctx, place, NOTHING_OPEN) : nothing}
       ${this.#jobsAt(place, ctx)}
     </div>`;
   }
@@ -590,7 +688,7 @@ export class LoadoutPage extends LitElement {
 
   #group(group: GroupView, harnesses: readonly string[], ctx: Ctx, { head }: { head: boolean }) {
     const scope = scopeOf(group.section);
-    const openKindHere = group.kinds === null ? null : openKind(this.#at, scope);
+    const openKindHere = group.kinds === null ? null : openKind(ctx.openAt ?? this.#at, scope);
     return html`<section class="grp" data-group=${group.key}><div class="gk"><span data-line="label">${group.label}</span>
       <span class="n" data-line="count">${group.count}</span></div><div class="gl">
       ${group.empty !== null ? html`<p class="d" data-line="empty">${group.empty}</p>` : html`<div class="grid">
@@ -616,7 +714,7 @@ export class LoadoutPage extends LitElement {
 
   #item(row: ItemRow, ctx: Ctx, { folded }: { folded: boolean }) {
     const scope = row.item.scope;
-    const open = opensItem(this.#at, scope, row.kind, row.name) && ctx.opened !== null;
+    const open = ctx.openAt !== null && opensItem(ctx.openAt, scope, row.kind, row.name) && ctx.opened !== null;
     return html`<div class="ir" data-item=${row.key}><span class="nm">${row.name}<span class="k d">${
       folded ? "" : row.kindWord}</span></span>
       ${row.cells.map((cell) => this.#cell(cell))}${this.#openButton(open, itemAddress(scope, row.kind, row.name),
@@ -651,7 +749,12 @@ export class LoadoutPage extends LitElement {
     return html`<div class="det" data-part="opened" data-item=${key}>
       <div class="r"><span class="k">From</span><span class="f" data-line="from">${from.lead}${from.rest !== null
         ? html` <span class="d">· ${from.rest}</span>` : nothing}</span><span></span></div>
-      ${opened.lines.map((line) => this.#harnessLine(line, typed))}
+      ${opened.lines.map((line) => html`${this.#harnessLine(line, typed, opened)}${ctx.confirm !== null
+        && ctx.confirm.item !== null && line.replace?.id === ctx.confirm.id ? this.#confirm(ctx.confirm, ctx, place,
+                                                                                          ctx.confirm.item, { inItem: true })
+        : nothing}`)}
+      ${ctx.confirm !== null && ctx.confirm.item !== null && !opened.lines.some((line) => line.replace?.id === ctx.confirm!.id)
+        ? this.#confirm(ctx.confirm, ctx, place, ctx.confirm.item, { inItem: true }) : nothing}
       ${opened.enableAll !== null ? html`<div class="foot">${typed ? nothing
         : html`<button type="button" class="act" data-action="enable-all" ?disabled=${this.#busy}
             @click=${() => void this.#act(opened.enableAll!.act, place)}>${opened.enableAll.label}</button>`}
@@ -666,18 +769,26 @@ export class LoadoutPage extends LitElement {
     </div>`;
   }
 
-  #harnessLine(line: HarnessLine, typed: boolean) {
+  #harnessLine(line: HarnessLine, typed: boolean, opened: OpenedItem) {
     const heavy = line.word !== null && line.word !== "placed" && line.word !== "off";
     const sub = [line.why, ...line.notes].filter((text): text is string => text !== null && text !== "");
-    // A line that can be replaced offers Replace (its confirm comes later); else its toggle.
-    const toggle = line.replace === null ? line.toggle : null;
+    // A line that can be replaced offers Replace, which opens its confirm under the line;
+    // else its toggle.
+    const replace = line.replace;
+    const toggle = replace === null ? line.toggle : null;
     const argv = line.replace !== null ? replaceArgv(line.replace) : toggle?.act.argv ?? null;
     return html`<div class="r" data-harness=${line.harness}><span class="k">${line.label}</span><span class="f">${
       line.word !== null ? html`<span class=${heavy ? "h" : ""} data-line="word">${line.word}</span>` : nothing}${
       line.where !== null ? html` <span class="d" data-line="where">· ${line.where}</span>` : nothing}${
       sub.length > 0 ? html`<span class="sub" data-line="why">${sub.join(" ")}</span>` : nothing}${
       typed && argv !== null ? this.#typed(argv, `${line.harness}:act`) : nothing}</span>${
-      toggle !== null && !typed ? html`<button type="button" class="x" data-action=${toggle.label === "Turn on" ? "turn-on" : "turn-off"}
+      replace !== null && !typed ? html`<button type="button" class="x act" data-action="replace" @click=${() => {
+        const item = itemAddress(opened.item.scope, opened.item.kind, opened.item.name);
+        const open = this.#at.piece === "replace" && this.#at.id === replace.id;
+        if (open) this.#open(item);
+        else this.#openReplace(replace.section, replace.id, item);
+      }}>Replace</button>`
+      : toggle !== null && !typed ? html`<button type="button" class="x" data-action=${toggle.label === "Turn on" ? "turn-on" : "turn-off"}
         ?disabled=${this.#busy} @click=${() => void this.#act(toggle.act, this.#openedPlace())}>${toggle.label}</button>`
         : html`<span></span>`}</div>`;
   }
@@ -686,6 +797,131 @@ export class LoadoutPage extends LitElement {
   #openedPlace(): string | null {
     const at = this.#at;
     return at.piece === "item" ? itemPlace(JSON.stringify([at.section, at.kind, at.name])) : null;
+  }
+
+  // -- Replace's confirm ------------------------------------------------------------------------
+
+  /** Where the confirm for `id` in `section` goes, or null when nothing there can be
+   * replaced now. */
+  #confirmAt(view: View, problems: readonly Problem[], section: string, id: string): ConfirmAt | null {
+    const rows = replaceRows(view, problems, section, id);
+    if (rows.length === 0) return null;
+    if (this.#replaceItem === null) {
+      const problem = problems.find((p) => p.act?.verb === "replace" && p.act.id === id && p.act.section === section);
+      if (problem !== undefined) return { section, id, rows, problem: problem.key, item: null };
+    }
+    const named = /^([a-z]+):([^@]+)@/.exec(id);
+    const item = this.#replaceItem ?? (named === null ? null : itemAddress(section, named[1], named[2]));
+    return { section, id, rows, problem: null, item };
+  }
+
+  /** The confirm in place: the question, what moves or is kept and where, the lines whose
+   * fact is set, the target with the diff's legend, the diff, what stays, and `Replace`
+   * and `Cancel`. `back` is what Cancel and the job's end open. */
+  #confirm(at: ConfirmAt, ctx: Ctx, place: string, back: Address, { inItem = false } = {}) {
+    const feed = this.#previewOf(at.section, at.id);
+    const conf = confirmView(at.rows, feed.value, ctx.view);
+    const said = feed.value?.problem ?? (feed.value === null ? feed.failure?.why ?? null : null);
+    const head = (text: string): [string, string] => {
+      const cut = text.indexOf(" ");
+      return cut < 0 ? [text, ""] : [text.slice(0, cut), text.slice(cut + 1)];
+    };
+    const scope = conf.scope;
+    const diff = [...conf.diff, ...(this.#wholeDiff ? conf.more : [])];
+    const legend = [conf.target, conf.legend].filter((part) => part !== null && part !== "").join(" · ");
+    return html`<div class="cf ${inItem ? "in" : ""}" data-part="confirm" role="group" aria-label="Replace">
+      <p class="q" data-line="question">${conf.question}</p>
+      ${feed.value === null && feed.failure === null ? html`<p class="d sm" data-line="reading">${READING}</p>` : nothing}
+      ${said !== null ? html`<p class="d sm" data-line="preview-problem">${said}</p>` : nothing}
+      ${conf.what !== null ? html`<div class="cr"><span class="k">${head(conf.what)[0]}</span><span data-line="what">${
+        head(conf.what)[1]}</span></div>` : nothing}
+      ${conf.notes.map((note) => html`<div class="cr"><span class="k"></span><span class="d" data-line="note">${note}</span></div>`)}
+      ${conf.what !== null ? html`<div class="cr"><span class="k"></span><span><span class="cap d" data-line="legend">${legend}</span>${
+        diff.length > 0 ? html`<pre data-line="diff">${diff.join("\n")}</pre>` : nothing}${
+        conf.showAll !== null && !this.#wholeDiff ? html`<button type="button" class="act d" data-action="show-all"
+          @click=${() => { this.#wholeDiff = true; this.requestUpdate(); }}>${conf.showAll}</button>` : nothing}</span></div>` : nothing}
+      ${conf.stays !== null ? html`<div class="cr"><span class="k">${head(conf.stays)[0]}</span><span data-line="stays">${
+        head(conf.stays)[1]}</span></div>` : nothing}
+      ${ctx.typed && scope !== null && conf.canReplace ? this.#typed(replaceAct(at.id, scope, "").argv, "confirm-replace") : nothing}
+      <div class="btns">${ctx.typed ? nothing : html`<button type="button" class="btn" data-action="confirm-replace"
+          ?disabled=${!conf.canReplace || scope === null || this.#busy}
+          @click=${() => { if (scope !== null) void this.#act(replaceAct(at.id, scope, freshJob()), place, back); }}>Replace</button>`}
+        <button type="button" class="lnk" data-action="cancel" @click=${() => this.#open(back)}>Cancel</button></div>
+    </div>`;
+  }
+
+  // -- Not listed and Add ------------------------------------------------------------------------
+
+  #notListed(ctx: Ctx, dir: SourceDir | null) {
+    const rows = notListed(dir, ctx.view);
+    const at = this.#at;
+    const byName = at.piece === "add" && at.kind === null;
+    if (rows.length === 0 && !byName) return nothing;
+    const picker = pickerOf(ctx.view, this.#projects?.value ?? null);
+    return html`<section class="grp" data-group="unlisted"><div class="gk">Not listed</div><div class="gl">
+      ${rows.map((row) => {
+        const open = at.piece === "add" && at.kind === row.kind && at.name === row.name;
+        return html`<div class="ir" data-unlisted=${row.key}><span class="nm">${row.name}<span class="k d">${row.line}</span></span>
+          <button type="button" class="o add" data-action=${open ? "close" : "add"} aria-expanded=${open ? "true" : "false"}
+            @click=${() => this.#open(open ? NOTHING_OPEN : { piece: "add", kind: row.kind, name: row.name })}>${
+            open ? "Close" : "Add"}</button></div>
+          ${open ? this.#addOpen(row, picker, ctx) : nothing}`;
+      })}
+      ${byName ? this.#addByName(picker, ctx) : nothing}
+    </div></section>`;
+  }
+
+  #picker(picker: Picker) {
+    return html`<select class="pick" data-line="add-to" aria-label="Add to" @change=${(event: Event) => {
+      this.#addTo = (event.target as HTMLSelectElement).value;
+      this.requestUpdate();
+    }}>${picker.options.map((option) => html`<option value=${option.value} ?selected=${option.value === this.#addTo}>${
+      option.label}</option>`)}</select>${picker.line !== null
+      ? html`<span class="sub" data-line="picker">${picker.line}</span>` : nothing}`;
+  }
+
+  /** The section Add names: the picker's choice, Your items when it is gone. */
+  #addSection(picker: Picker): string | null {
+    return picker.options.find((option) => option.value === this.#addTo)?.section ?? null;
+  }
+
+  #addButtons(act: PageAct | null, ctx: Ctx) {
+    return html`<div class="cf in plain">
+      ${ctx.typed && act !== null ? this.#typed(act.argv, "add") : nothing}
+      <div class="btns">${ctx.typed ? nothing : html`<button type="button" class="btn" data-action="confirm-add"
+          ?disabled=${act === null || this.#busy}
+          @click=${() => { if (act !== null) void this.#act(act, ADD_PLACE, NOTHING_OPEN); }}>Add and place</button>`}
+        <button type="button" class="lnk" data-action="cancel" @click=${() => this.#open(NOTHING_OPEN)}>Cancel</button></div>
+      <p class="d sm" data-line="add-note">${ADD_NOTE}</p>
+      ${this.#jobsAt(ADD_PLACE, ctx)}</div>`;
+  }
+
+  #addOpen(row: NotListedRow, picker: Picker, ctx: Ctx) {
+    const act = addAct(row.kind, row.name, this.#addSection(picker));
+    return html`<div class="det" data-part="add">
+      <div class="r"><span class="k">Add to</span><span class="f">${this.#picker(picker)}</span><span></span></div>
+      <div class="r"><span class="k">From</span><span class="f" data-line="from">${row.from.replace(/^From /, "")}</span><span></span></div>
+      ${this.#addButtons(act, ctx)}
+      <div class="foot"><button type="button" class="act d" data-action="by-name"
+        @click=${() => this.#open({ piece: "add", kind: null, name: null })}>${BY_NAME}</button></div>
+    </div>`;
+  }
+
+  #addByName(picker: Picker, ctx: Ctx) {
+    const name = this.#addName.trim();
+    const act = name === "" ? null : addAct(this.#addKind, name, this.#addSection(picker));
+    return html`<div class="det" data-part="add">
+      <div class="r"><span class="k">Kind</span><span class="f"><select class="pick" data-line="kind" aria-label="Kind"
+        @change=${(event: Event) => { this.#addKind = (event.target as HTMLSelectElement).value; this.requestUpdate(); }}>${
+        ADD_KINDS.map((kind) => html`<option value=${kind} ?selected=${kind === this.#addKind}>${kindWord(kind)}</option>`)}</select></span><span></span></div>
+      <div class="r"><span class="k">Name</span><span class="f"><input class="pick" data-line="name" aria-label="Name"
+        .value=${this.#addName} @input=${(event: Event) => {
+          this.#addName = (event.target as HTMLInputElement).value;
+          this.requestUpdate();
+        }}></span><span></span></div>
+      <div class="r"><span class="k">Add to</span><span class="f">${this.#picker(picker)}</span><span></span></div>
+      ${this.#addButtons(act, ctx)}
+    </div>`;
   }
 
   // -- the opened global file ------------------------------------------------------------------
@@ -745,6 +981,16 @@ export class LoadoutPage extends LitElement {
   }
 }
 
+/** Where Replace's confirm is drawn: under its problem (`problem` its key), or in the opened
+ * item `item` under the harness line whose Replace names `id`. */
+interface ConfirmAt {
+  section: string;
+  id: string;
+  rows: ViewRow[];
+  problem: string | null;
+  item: Address | null;
+}
+
 /** What one drawing of the page shares between its parts. */
 interface Ctx {
   view: View;
@@ -752,6 +998,10 @@ interface Ctx {
   typed: boolean;
   /** The item open now, or null. */
   opened: OpenedItem | null;
+  /** The item's address, open by its own address or around Replace's confirm. */
+  openAt: Address | null;
+  /** Replace's confirm, when one is open. */
+  confirm: ConfirmAt | null;
   /** The line under an act, by the place it goes (null: the foot). */
   places: Map<string | null, Sent>;
 }

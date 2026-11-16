@@ -127,3 +127,18 @@ test("no warning colour and no Lost case in any confirm", () => {
   const text = JSON.stringify(confirmView([r], preview({}), fullView()));
   assert.ok(!/warn|danger|Lost|lose/.test(text));
 });
+
+test("the rows a Replace names: a problem's, else the view's by id, the rules file by an item it holds", async () => {
+  const { replaceRows } = await import("../src/confirm-model.ts");
+  const { problemsOf } = await import("../src/placed-model.ts");
+  const { fullView: full, withRow: wr } = await import("./fixtures.mjs");
+  let view = wr(full(), { name: "code-reviewer", harness: "codex" }, { state: "modified", replaceable: true, applies: "section" });
+  view = wr(view, { name: "*", harness: "codex" }, { state: "modified", replaceable: true, applies: "section" });
+  const problems = problemsOf(view);
+  const agent = replaceRows(view, problems, "user", "agent:code-reviewer@codex");
+  assert.deepEqual(agent.map((r) => [r.name, r.harness]), [["code-reviewer", "codex"]]);
+  assert.deepEqual(replaceRows(view, [], "user", "permissions:git-reads@codex").map((r) => r.target),
+                   [view.rows.find((r) => r.covers !== null).target]);
+  assert.deepEqual(replaceRows(view, [], "atlas-api", "agent:code-reviewer@codex"), []);
+  assert.deepEqual(replaceRows(view, [], "user", "nonsense"), []);
+});

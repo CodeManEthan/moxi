@@ -94,6 +94,9 @@ export interface Project {
 export interface Projects {
   projects: Project[];
   reason: string | null;
+  /** Why there are none: `absent`, `busy`, `unreadable`, `error`; null when it listed (or an
+   * answer that names no cause). */
+  cause: string | null;
 }
 
 /** `/api/drift`: how many items aren't ok, and the harness homes' note. */
@@ -435,7 +438,9 @@ export function parseReplacePreview(data: unknown): ReplacePreview | null {
 /** `/api/projects`'s value, or null when it isn't one. */
 export function parseProjects(data: unknown): Projects | null {
   if (!isObj(data) || !isListOf(data.projects, isProject) || !isStrOrNull(data.reason)) return null;
-  return { projects: data.projects, reason: data.reason };
+  const cause = data.cause === undefined ? null : data.cause;
+  if (!isStrOrNull(cause)) return null;
+  return { projects: data.projects, reason: data.reason, cause };
 }
 
 /** `/api/drift`'s value, or null when it isn't one. */
