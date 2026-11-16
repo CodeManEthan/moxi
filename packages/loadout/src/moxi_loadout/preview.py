@@ -10,7 +10,9 @@ row `text` names in `section`, under the sections that row's act runs with (its
   loadout's own copy edited, a file saved over loadout's link); `keeps` when loadout keeps
   a copy of the file under `displaced/` and then writes it (a generated agent or global
   file that isn't loadout's, a harness file whose entry the Replace writes over); None
-  when no row `text` names there is replaceable, or no run applies it.
+  when no row `text` names there is replaceable, no run applies it, or its generated file
+  is one the act refuses since it can't read it to keep it (a link, a folder, a file it
+  can't open).
 - `diff`: a unified diff of what is there now (`-`) against what loadout writes (`+`),
   from the code the write uses. A generated file: its bytes against the bytes loadout
   made for it. A move: each file at or under the target against the file loadout places
@@ -20,7 +22,8 @@ row `text` names in `section`, under the sections that row's act runs with (its
   (`label` `entry`); its file's bytes can't be known before the CLI writes. `label` is
   `file` everywhere else.
 - Bounds: no link at or under a path is followed (`lstat`); at most `FILE_MAX_BYTES` of a
-  file, `TREE_MAX_FILES` files of a folder and `TOTAL_MAX_BYTES` in all are read. A file
+  file, `TREE_MAX_FILES` files of a folder and `TOTAL_MAX_BYTES` in all are read; the
+  global text a generated global file is made from is not read past `FILE_MAX_BYTES`. A file
   past a bound, a link, or one that isn't UTF-8 text gives no lines and is named in
   `skipped`, `{path, why}`, `why` one of `WHYS`. The act keeps all of it whatever the diff
   leaves out.
@@ -114,10 +117,13 @@ def _want(plan, want, reader: _Reader):
     generated = want.generated
     if generated is not None and generated[2] == "modified":
         path, data = generated[0], generated[1]
+        if not _readable(path):
+            # The act refuses a file it can't read to keep: no case.
+            return None
         if data is None:
-            data = _global_bytes(plan, want.harness)
+            data = _global_bytes(plan, want.harness, reader)
         now = reader.file(path)
-        then = reader.data(path, data)
+        then = None if data is _SKIPPED else reader.data(path, data)
         return "keeps", path, _diff({"": now}, {"": then}, path, path), "file"
     step = want.step
     if step is None or step.action != "refuse" or step.cause not in ("occupant", "tracked"):
@@ -132,15 +138,48 @@ def _want(plan, want, reader: _Reader):
         "file"
 
 
-def _global_bytes(plan, harness: str) -> bytes | None:
+def _readable(path) -> bool:
+    """Whether the act can read the generated file at `path` to keep a copy of it: missing,
+    or a file it opens and reads. It refuses a link there, and a file it can't read."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if not stat.S_ISREG(st.st_mode):
+        return False
+    try:
+        with open(path, "rb") as fh:
+            fh.read(1)
+    except OSError:
+        return False
+    return True
+
+
+#: `_global_bytes`'s answer for a source past `FILE_MAX_BYTES`, which it doesn't read.
+_SKIPPED = object()
+
+
+def _global_bytes(plan, harness: str, reader: _Reader):
     """What a Replace writes for `harness`'s global file once its edited generated file
-    is gone: the shared file with the harness's part, or the shared file alone."""
+    is gone: the shared file with the harness's part, or the shared file alone. A source
+    past `FILE_MAX_BYTES` is not read: it is named `large` in `reader`, and the answer is
+    `_SKIPPED`."""
     from moxi_loadout import globalfile
 
     shared = plan.manifest.global_file
     if shared is None:
         return None
     part = globalfile.parts(shared).get(harness)
+    for source in (shared, part):
+        try:
+            large = source is not None and os.stat(source).st_size > FILE_MAX_BYTES
+        except OSError:
+            return None
+        if large:
+            reader.skip(source, "large")
+            return _SKIPPED
     try:
         if part is None:
             return Path(shared).read_bytes()
@@ -209,7 +248,7 @@ class _Reader:
         self.total = 0
         self.skipped: list[dict] = []
 
-    def _skip(self, path, why: str) -> None:
+    def skip(self, path, why: str) -> None:
         found = {"path": os.fspath(path), "why": why}
         if found not in self.skipped:
             self.skipped.append(found)
@@ -219,13 +258,13 @@ class _Reader:
         if raw is None:
             return ""
         if len(raw) > FILE_MAX_BYTES or self.total + len(raw) > TOTAL_MAX_BYTES:
-            self._skip(path, "large")
+            self.skip(path, "large")
             return None
         self.total += len(raw)
         try:
             return raw.decode("utf-8")
         except UnicodeDecodeError:
-            self._skip(path, "binary")
+            self.skip(path, "binary")
             return None
 
     def file(self, path) -> str | None:
@@ -242,11 +281,11 @@ class _Reader:
         except FileNotFoundError:
             return out
         except OSError:
-            self._skip(path, "binary")
+            self.skip(path, "binary")
             out[""] = None
             return out
         if stat.S_ISLNK(st.st_mode) or _junction(path):
-            self._skip(path, "link")
+            self.skip(path, "link")
             out[""] = None
         elif stat.S_ISDIR(st.st_mode):
             self._walk(Path(path), Path(path), out, [0])
@@ -259,12 +298,12 @@ class _Reader:
         try:
             found = sorted(os.scandir(at), key=lambda e: e.name)
         except OSError:
-            self._skip(at, "binary")
+            self.skip(at, "binary")
             return True
         for entry in found:
             rel = os.path.relpath(entry.path, top)
             if entry.is_symlink() or _junction(entry.path):
-                self._skip(entry.path, "link")
+                self.skip(entry.path, "link")
                 out[rel] = None
             elif entry.is_dir(follow_symlinks=False):
                 if not self._walk(top, Path(entry.path), out, count):
@@ -272,28 +311,28 @@ class _Reader:
             else:
                 count[0] += 1
                 if count[0] > TREE_MAX_FILES:
-                    self._skip(top, "many")
+                    self.skip(top, "many")
                     return False
                 out[rel] = self._read(entry.path, entry.stat(follow_symlinks=False))
         return True
 
     def _read(self, path, st) -> str | None:
         if not stat.S_ISREG(st.st_mode):
-            self._skip(path, "binary")
+            self.skip(path, "binary")
             return None
         if st.st_size > FILE_MAX_BYTES or self.total + st.st_size > TOTAL_MAX_BYTES:
-            self._skip(path, "large")
+            self.skip(path, "large")
             return None
         try:
             with open(path, "rb") as fh:
                 opened = os.fstat(fh.fileno())
                 if (opened.st_dev, opened.st_ino) != (st.st_dev, st.st_ino):
                     # Swapped for something else since the lstat: a link, not followed.
-                    self._skip(path, "link")
+                    self.skip(path, "link")
                     return None
                 raw = fh.read(FILE_MAX_BYTES + 1)
         except OSError:
-            self._skip(path, "binary")
+            self.skip(path, "binary")
             return None
         return self.data(path, raw)
 

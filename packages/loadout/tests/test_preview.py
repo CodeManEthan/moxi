@@ -75,6 +75,58 @@ def test_a_generated_file_not_loadouts_keeps_and_its_diff_is_what_replace_writes
     assert shown["lines"] == len(shown["diff"].splitlines()) > 0
 
 
+@pytest.mark.parametrize("how", ["a folder", "unreadable", "a link"])
+def test_a_generated_file_the_act_cant_read_has_no_case(lo, tmp_path, how):
+    write(lo, '[user]\nagents = ["helper"]\n')
+    assert install.install().code == 0
+    path = generated()
+    path.unlink()
+    if how == "a folder":
+        path.mkdir()
+    elif how == "unreadable":
+        if os.geteuid() == 0:
+            pytest.skip("root reads a file whatever its mode")
+        path.write_text("name = 'mine'\n")
+        path.chmod(0)
+    else:
+        mine = tmp_path / "mine.toml"
+        mine.write_text("name = 'mine'\n")
+        path.symlink_to(mine)
+    try:
+        shown = preview.replace_preview("agent:helper@codex", "user")
+        assert (shown["case"], shown["diff"]) == (None, "")
+        # The act then refuses it, keeping nothing.
+        out = install.install(Scope(user=True), replace=["agent:helper@codex"])
+        assert out.code == 3 and out.kept == []
+    finally:
+        if how == "unreadable":
+            path.chmod(0o600)
+
+
+def test_a_global_text_past_the_bound_is_named_large_and_not_read(lo, monkeypatch):
+    from moxi_loadout import globalfile
+
+    (lo / "global.claude.md").write_text("Claude only.\n")
+    write(lo, '[global]\nmode = "if-absent"\n')
+    assert install.install().code == 0
+    with open(harness.global_file("claude"), "a") as fh:
+        fh.write("My own line.\n")
+    shared = lo / "global.md"
+    shared.write_text("x" * (preview.FILE_MAX_BYTES + 1))
+    reads = []
+    real = globalfile.read
+    monkeypatch.setattr(globalfile, "read", lambda path, *a, **kw: reads.append(str(path))
+                        or real(path, *a, **kw))
+    install.status_plan()
+    planned = reads.count(str(shared))
+    reads.clear()
+    shown = preview.replace_preview("global:global@claude")
+    assert shown["case"] == "keeps"
+    assert {"path": str(shared), "why": "large"} in shown["skipped"]
+    # The preview reads it no more than the plan it builds on does.
+    assert reads.count(str(shared)) == planned
+
+
 # -- keeps: an entry -----------------------------------------------------------------------
 
 @pytest.mark.parametrize("kind", list(EDITS))
