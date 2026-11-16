@@ -43,13 +43,14 @@ def test_the_shells_read_decides_the_type_and_the_spelling():
                                  ("tags", '["a", "b c"]', '["a", "b c"]'),
                                  ("mode", '"slow"', "slow"), ("dir", '"/x"', "/x"),
                                  ("dir", "null", ""),
-                                 ("extra", '{"a": 1}', "{a = 1}")):
+                                 ("extra", '{"a": 1}', "{a = 1}"),
+                                 ("extra", '"{a = 2}"', "{a = 2}")):
         result, run = _save_one(name, value, was=_was(name))
         assert result["outcome"] == "saved", (name, result)
         argv = run.writes[-1][0]
         assert argv[5:] == ["set", "--by", "ui", "--json", "--", "demo", name, spelled]
-    # A value the read's type can't spell is refused before any command: a string sent
-    # for a table is spelled as one TOML string, and moxi config judges it.
+    # A string sent for a table is the TOML text the page's field holds, passed as it is;
+    # a string sent for an int is spelled as one TOML string. moxi config judges both.
     result, run = _save_one("count", '"5"', was=_was("count"))
     assert run.writes[-1][0][-1] == '"5"'
     result, run = _save_one("name", "not json", was=_was("name"))
