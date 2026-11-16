@@ -9,9 +9,11 @@
 // `history.replaceState`.
 
 import type { Project, View } from "./feed.ts";
-import type { GroupView, ItemsView } from "./items-model.ts";
+import { itemsView } from "./items-model.ts";
+import type { GroupView } from "./items-model.ts";
+import { placedView } from "./placed-model.ts";
 import type { PlacedView, Problem } from "./placed-model.ts";
-import { kindFolded, kindWord, sectionWord } from "./words.ts";
+import { homeForm, kindFolded, kindWord, sectionWord } from "./words.ts";
 
 export type Address =
   | { piece: "page" }
@@ -176,37 +178,75 @@ export function sectionFor(project: Project, view: View): string | null {
   return rooted === undefined ? null : rooted.name;
 }
 
+/** The filter line's fixed words. */
+export const PROJECT_LABEL = "Project";
+export const ALL_OF_LOADOUT = "All of loadout";
+/** The link under the project's own group, to the project on the Projects page. */
+export const PROJECT_LINK = "Project";
+
+/** `view` cut to what sessions in a project load: Your items (the global file and the
+ * skills modules took over among them) and the project's section `section`. Verdict, problems
+ * and counts read from it count only those. */
+export function narrowed(view: View, section: string | null): View {
+  const keep = (scope: string | null): boolean => scope === "user" || (section !== null && scope === section);
+  return {
+    ...view,
+    sections: view.sections.filter((s) => s.where === "user" || s.name === section),
+    items: view.items.filter((item) => keep(item.scope)),
+    rows: view.rows.filter((row) => keep(row.scope)),
+  };
+}
+
 export interface FilteredView {
   project: Project;
-  /** `Project <key> ▾ · what sessions in <root> load`. */
-  line: string;
-  /** The problems of the project's section and Your items. */
-  problems: Problem[];
+  /** The project's key, set in the filter line's picker. */
+  key: string;
+  /** `what sessions in <root> load`, the root in `~` form. */
+  where: string;
+  /** Placed over the project's section and Your items only. */
+  placed: PlacedView;
   /** The project's section as `<key>  <n> of its own`, or null when it has none. */
   own: { label: string; count: string; group: GroupView } | null;
   /** `Yours too`: Your items, the global file among them. */
   yours: { label: string; count: string; group: GroupView };
+  /** The skills modules took over, which the project's sessions load too. */
+  modules: GroupView[];
 }
 
 /** The filtered view of project `key`, or null when no project has that key. Folder and
  * Not listed are hidden there. */
-export function filteredView(key: string, projects: readonly Project[], view: View, items: ItemsView,
-                             placed: PlacedView): FilteredView | null {
+export function filteredView(key: string, projects: readonly Project[], view: View): FilteredView | null {
   const project = projectNamed(projects, key);
   if (project === null) return null;
   const section = sectionFor(project, view);
-  const keep = new Set(["user", ...(section === null ? [] : [section])]);
-  const problems = placed.problems.filter((p) => p.section !== null && keep.has(p.section));
+  const cut = narrowed(view, section);
+  const items = itemsView(cut);
   const mine = items.groups.find((g) => g.key === "user") as GroupView;
   const group = section === null ? undefined : items.groups.find((g) => g.module === null && g.key === section);
-  const own = group === undefined ? null
-    : { label: project.key, count: `${group.rows.length} of its own`, group };
+  const own = group === undefined ? null : { label: project.key, count: `${group.rows.length} of its own`, group };
   return {
-    project, line: `Project ${project.key} ▾ · what sessions in ${homeFormOf(project.root, view)} load`, problems,
-    own, yours: { label: "Yours too", count: mine.count, group: mine },
+    project, key: project.key, where: `what sessions in ${homeForm(project.root, view.home)} load`,
+    placed: placedView(cut, items), own, yours: { label: "Yours too", count: mine.count, group: mine },
+    modules: items.groups.filter((g) => g.module !== null),
   };
 }
 
-function homeFormOf(path: string, view: View): string {
-  return sectionWord({ name: path, where: "path", root: path }, view.home);
+/** One project in the filter line's picker. */
+export interface ProjectChoice {
+  key: string;
+  /** Its root in `~` form, dim. */
+  root: string;
+  picked: boolean;
+}
+
+/** The filter line's picker: each project, the one shown picked. */
+export function projectChoices(projects: readonly Project[], shown: Project, view: View): ProjectChoice[] {
+  return projects.map((p) => ({ key: p.key, root: homeForm(p.root, view.home), picked: p.key === shown.key }));
+}
+
+/** The words for a filtered view's address while `/api/projects` can't say which projects
+ * there are (`cause` busy, unreadable or error): the page shows all of loadout. */
+export function unfilteredLine(key: string, cause: string): string {
+  return cause === "busy" ? `Projects is busy, so this shows all of loadout, not only what ${key} loads.`
+    : `Projects can't be read, so this shows all of loadout, not only what ${key} loads.`;
 }

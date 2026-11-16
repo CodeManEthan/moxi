@@ -3,10 +3,9 @@ import test from "node:test";
 
 import {
   addressPath, closed, filteredView, goneLine, goneLineOf, itemAddress, NOTHING_OPEN, openKind, opensItem, parseRoute,
-  pathToWrite, projectNamed, routeOf, sameAddress, sectionFor,
+  pathToWrite, projectChoices, projectNamed, routeOf, sameAddress, sectionFor, unfilteredLine,
 } from "../src/address-model.ts";
-import { itemsView } from "../src/items-model.ts";
-import { placedView, problemsOf } from "../src/placed-model.ts";
+import { problemsOf } from "../src/placed-model.ts";
 import { fullView, HOME, withRow } from "./fixtures.mjs";
 
 const ADDRESSES = [
@@ -69,22 +68,45 @@ test("the filtered join: the key section ignoring case, or the path section by i
   assert.equal(sectionFor({ key: "other", root: `${HOME}/code/kestrel/` }, view), null);
 });
 
-test("the filtered view: its line, its problems, its own items, then Yours too", () => {
+test("the filtered view: its line, Placed over its section and Your items, its own items, then Yours too", () => {
   let view = withRow(fullView(), { name: "api-lead", harness: "codex" }, { state: "modified", form: "generated" });
   view = withRow(view, { name: "tidy-notes", harness: "claude" }, { state: "missing" });
   view.sections.push({ name: "other", where: "key", root: null, refused: null });
   view.items.push({ ...view.items[0], scope: "other" });
   view.rows.push({ ...view.rows[0], scope: "other", state: "missing" });
-  const items = itemsView(view);
-  const filtered = filteredView("atlas-api", PROJECTS, view, items, placedView(view, items));
-  assert.equal(filtered.line, "Project Atlas-API ▾ · what sessions in ~/code/atlas-api load");
-  assert.deepEqual(filtered.problems.map((p) => [p.section, p.name]), [["atlas-api", "api-lead"], ["user", "tidy-notes"]]);
+  view.rows.push({ ...view.rows[0], scope: null, state: "stale", name: "dropped" });
+  view.items.push({ ...view.items[0], name: "moxi-help", module: "launcher" });
+  view.rows.push({ ...view.rows[0], name: "moxi-help", state: "ok" });
+  const filtered = filteredView("atlas-api", PROJECTS, view);
+  assert.deepEqual([filtered.key, filtered.where], ["Atlas-API", "what sessions in ~/code/atlas-api load"]);
+  // Placed counts only the project's section and Your items: not `other`, not a removal
+  // whose record names no section.
+  assert.deepEqual(filtered.placed.problems.map((p) => [p.section, p.name]),
+                   [["atlas-api", "api-lead"], ["user", "tidy-notes"]]);
+  assert.equal(filtered.placed.verdict, "2 items need you");
+  assert.equal(filtered.placed.counts, "Claude Code 10 of 11 placed · Codex 8 of 9 · OpenCode 8 of 8");
   assert.deepEqual([filtered.own.label, filtered.own.count], ["Atlas-API", "2 of its own"]);
+  assert.deepEqual(filtered.own.group.rows.map((r) => r.name), ["release-checklist", "api-lead"]);
   assert.deepEqual([filtered.yours.label, filtered.yours.count], ["Yours too", "8 items"]);
   assert.equal(filtered.yours.group.global.label, "Global file");
-  const none = filteredView("kestrel", PROJECTS, view, items, placedView(view, items));
+  assert.deepEqual(filtered.modules.map((g) => g.label), ["launcher"]);
+  // A project with no section shows Placed over Your items and Yours too.
+  const none = filteredView("kestrel", PROJECTS, view);
   assert.equal(none.own, null);
-  assert.equal(filteredView("nope", PROJECTS, view, items, placedView(view, items)), null);
+  assert.deepEqual(none.placed.problems.map((p) => p.name), ["tidy-notes"]);
+  assert.equal(filteredView("nope", PROJECTS, view), null);
+});
+
+test("the filter line's picker, and the line when projects can't be read", () => {
+  const view = fullView();
+  assert.deepEqual(projectChoices(PROJECTS, PROJECTS[1], view), [
+    { key: "Atlas-API", root: "~/code/atlas-api", picked: false },
+    { key: "kestrel", root: "~/code/kestrel", picked: true },
+  ]);
+  assert.equal(unfilteredLine("atlas-api", "busy"),
+               "Projects is busy, so this shows all of loadout, not only what atlas-api loads.");
+  assert.equal(unfilteredLine("atlas-api", "unreadable"),
+               "Projects can't be read, so this shows all of loadout, not only what atlas-api loads.");
 });
 
 test("Open and Close: an item, a kind, and an item opened inside its kind", () => {

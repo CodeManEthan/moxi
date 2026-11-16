@@ -17,6 +17,14 @@
 // - The dim foot lines: the view's notes, why the folder can't be read, and the line for an
 //   address whose item is gone.
 //
+// At `project/<key>` the page is filtered to what sessions in that project load: under a
+// line naming the project (a menu of every project) with `All of loadout` at its right,
+// Placed counts only the project's section and Your items, then the project's section
+// (`<n> of its own`, with a link to the project on the Projects page), `Yours too` (Your
+// items) and the skills modules took over. Folder and Not listed are hidden. The page reads
+// `/api/projects` for it, and shows all of loadout with a dim line while projects can't say
+// which projects there are.
+//
 // One thing is open at a time: an item (its From line, a line per harness with its act,
 // Remove), a kind, the global file (its mode, its files, Turn off and its confirm), Add, or
 // Replace's confirm, in place under its problem or harness line, which reads
@@ -48,9 +56,10 @@ import type { NotListedRow, Picker } from "./add-model.ts";
 import { confirmView, replaceRows } from "./confirm-model.ts";
 import type { PageAct } from "./acts-model.ts";
 import {
-  closed, goneLineOf, itemAddress, NOTHING_OPEN, openKind, opensItem, parseRoute, pathToWrite, sameAddress,
+  ALL_OF_LOADOUT, closed, filteredView, goneLine, goneLineOf, itemAddress, NOTHING_OPEN, openKind, opensItem, parseRoute,
+  pathToWrite, PROJECT_LABEL, PROJECT_LINK, projectChoices, sameAddress, unfilteredLine,
 } from "./address-model.ts";
-import type { Address } from "./address-model.ts";
+import type { Address, FilteredView } from "./address-model.ts";
 import {
   actCommand, COPIED, COPIED_MS, COPY, emptyGlobal, emptyLines, failedLine, fixLine, folderView, footLines,
   GLOBAL_PLACE, GONE, INSTALL_ALL_PLACE, itemPlace, jobPlace, noteGroup, pageState, PLACED_PLACE, problemPlace,
@@ -219,11 +228,31 @@ const STYLES = css`
   .first + .grps { margin-top: 40px; }
   .foot { font-size: 13px; line-height: 18px; padding: 12px 2px 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
 
+  /* The filtered view's line: the project, its menu, and All of loadout at the right. */
+  .filt { position: relative; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 14px;
+          margin-top: 12px; padding: 0 2px; font-size: 14px; line-height: 20px; color: var(--moxi-text-dim); }
+  .filt .fl { display: flex; flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+  .filt .k { margin-right: 8px; }
+  .filt .sep { margin: 0 12px; }
+  .filt button.set { color: var(--moxi-text); white-space: nowrap; }
+  .filt .v { position: relative; top: 1px; margin-left: 6px; font-size: 15px; line-height: 0; color: var(--moxi-text-dim); }
+  .filt + .grps { margin-top: 16px; }
+  .anchor { position: relative; display: inline-block; }
+  .menu { position: absolute; z-index: 2; left: 0; top: calc(100% + 8px); width: max-content; min-width: 240px;
+          max-width: min(400px, calc(100vw - 32px)); padding: 6px 0; border: 1px solid var(--moxi-border-strong);
+          border-radius: 10px; background: var(--moxi-bg); color: var(--moxi-text); white-space: normal; }
+  .menu button.it { display: grid; grid-template-columns: 20px 1fr auto; align-items: baseline; width: 100%;
+                    padding: 7px 14px; overflow-wrap: anywhere; }
+  .menu button.it:hover { background: var(--moxi-bg-hover); }
+  .menu .t { padding-left: 16px; color: var(--moxi-text-dim); }
+  .grp .gk .pl { display: block; font-size: 13px; line-height: 18px; }
+
   @media (max-width: 720px) {
     :host { padding-top: 10px; }
     .grp { display: block; padding: 8px 0 10px; }
     .grp .gk { padding-bottom: 6px; font-size: 13px; }
     .grp .gk .n { display: inline; margin-left: 8px; }
+    .grp .gk .pl { display: inline; margin-left: 8px; }
     .ir { gap: 8px; }
     .ir .c { flex-basis: 72px; font-size: 13px; }
     .det .r { grid-template-columns: 76px minmax(0, 1fr) auto; gap: 0 10px; }
@@ -248,6 +277,11 @@ export class LoadoutPage extends LitElement {
 
   /** What is open, and the dim foot line for an address whose item is gone. */
   #at: Address = NOTHING_OPEN;
+  /** The project the page is filtered to, from a `project/<key>` address; while set, the
+   * page's address with nothing else open is that one. */
+  #filter: string | null = null;
+  /** The filter line's project menu is open. */
+  #menu = false;
   #goneSaid: string | null = null;
   /** The address came from the route and the view hasn't been read against it yet. */
   #fromRoute = false;
@@ -292,6 +326,16 @@ export class LoadoutPage extends LitElement {
     if (document.visibilityState === "visible") this.#readAll();
   };
 
+  /** A press outside the open project menu closes it. */
+  #outside = (event: Event): void => {
+    if (!this.#menu) return;
+    const inside = event.composedPath().some((node) => node instanceof Element && node.classList.contains("anchor"));
+    if (!inside) {
+      this.#menu = false;
+      this.requestUpdate();
+    }
+  };
+
   connectedCallback(): void {
     super.connectedCallback();
     this.#openedAt = Date.now();
@@ -300,6 +344,7 @@ export class LoadoutPage extends LitElement {
     this.#dir = new Feed<SourceDir>(() => api("loadout", "api/folder"), parseSourceDir, changed);
     this.#readAll();
     document.addEventListener("visibilitychange", this.#shown);
+    document.addEventListener("click", this.#outside);
     this.#waitTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#refreshTimer = setInterval(() => {
       if (document.visibilityState === "visible") this.#readAll();
@@ -324,14 +369,30 @@ export class LoadoutPage extends LitElement {
     clearTimeout(this.#waitTimer);
     clearInterval(this.#refreshTimer);
     document.removeEventListener("visibilitychange", this.#shown);
+    document.removeEventListener("click", this.#outside);
   }
 
   protected willUpdate(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("route")) {
       this.#goneSaid = null;
       this.#fromRoute = true;
-      this.#setAt(parseRoute(this.route));
+      const address = parseRoute(this.route);
+      this.#filter = address.piece === "project" ? address.key : null;
+      this.#menu = false;
+      if (this.#filter !== null) this.#readProjects();
+      this.#setAt(address);
       this.#replaceItem = null;
+    }
+    // A filtered view's project is judged once projects is read and says which there are.
+    const listed = this.#listedProjects();
+    const read = this.#view?.value ?? null;
+    if (this.#filter !== null && listed !== null && read !== null) {
+      const gone = goneLine({ piece: "project", key: this.#filter }, read, [], null, listed);
+      if (gone !== null) {
+        this.#goneSaid = gone;
+        this.#filter = null;
+        this.#setAt(this.#at.piece === "project" ? NOTHING_OPEN : this.#at);
+      }
     }
     // An address whose item is gone opens the page with nothing open, and says so; an
     // item that goes while it is open (a Remove) just closes.
@@ -353,6 +414,23 @@ export class LoadoutPage extends LitElement {
   #readAll(): void {
     void this.#view?.refresh();
     void this.#dir?.refresh();
+    if (this.#filter !== null) void this.#projects?.refresh();
+  }
+
+  /** The projects `/api/projects` lists, once it has said which there are (none when
+   * projects isn't installed); null while it isn't read, or can't say (busy, unreadable). */
+  #listedProjects(): Projects["projects"] | null {
+    const projects = this.#projects?.value ?? null;
+    if (projects === null) return null;
+    return projects.cause === null || projects.cause === "absent" ? projects.projects : null;
+  }
+
+  /** Why the filtered view can't be drawn now: the page then shows all of loadout. */
+  #unfilteredWhy(): string | null {
+    const feed = this.#projects;
+    if (this.#filter === null || feed === null || this.#listedProjects() !== null) return null;
+    const cause = feed.value?.cause ?? (feed.failure !== null ? "unreadable" : null);
+    return cause === null ? null : unfilteredLine(this.#filter, cause);
   }
 
   /** Whether an act is on its way or its job runs: every act's control is off then. */
@@ -362,8 +440,14 @@ export class LoadoutPage extends LitElement {
 
   // -- what is open ----------------------------------------------------------------------
 
+  /** With the page filtered, nothing open is the filtered view's address. */
+  #rest(address: Address): Address {
+    return address.piece === "page" && this.#filter !== null ? { piece: "project", key: this.#filter } : address;
+  }
+
   /** Opens `address`, closing what was open, and writes it as the browser's address. */
   #open(address: Address): void {
+    address = this.#rest(address);
     if (sameAddress(address, this.#at)) return;
     this.#goneSaid = null;
     this.#fromRoute = false;
@@ -372,6 +456,7 @@ export class LoadoutPage extends LitElement {
   }
 
   #setAt(address: Address): void {
+    address = this.#rest(address);
     if (!sameAddress(address, this.#at)) {
       this.#confirmOff = false;
       this.#diffs = new Set();
@@ -515,7 +600,14 @@ export class LoadoutPage extends LitElement {
   render() {
     const feed = this.#view;
     if (feed === null) return nothing;
-    const state = pageState(feed, Date.now() - this.#openedAt);
+    let state = pageState(feed, Date.now() - this.#openedAt);
+    // A filtered view waits for projects to say which there are, as the page waits for
+    // its view.
+    const projects = this.#projects;
+    if ((state === "up" || state === "empty" || state === "problem") && this.#filter !== null && projects !== null
+        && projects.value === null && projects.failure === null) {
+      state = Date.now() - this.#openedAt >= READING_AFTER_MS ? "reading" : "waiting";
+    }
     if (state === "gone") return html`<p class="waiting" data-line="gone" role="status">${GONE}</p>`;
     if (state === "waiting") return nothing;
     if (state === "reading") return html`<p class="waiting" data-line="reading" role="status">${READING}</p>`;
@@ -529,7 +621,11 @@ export class LoadoutPage extends LitElement {
     const notes = footLines(view, dir);
     if (feed.failure !== null) notes.push(failedLine(feed.failure.why));
     if (this.#goneSaid !== null) notes.push(this.#goneSaid);
-    const placed = state === "up" ? placedView(view) : null;
+    const unfiltered = this.#unfilteredWhy();
+    if (unfiltered !== null) notes.push(unfiltered);
+    const listed = this.#listedProjects();
+    const filtered = this.#filter !== null && listed !== null ? filteredView(this.#filter, listed, view) : null;
+    const placed = state !== "up" ? null : filtered !== null ? filtered.placed : placedView(view);
     const problems = placed?.problems ?? [];
     const confirm = this.#at.piece === "replace" ? this.#confirmAt(view, problems, this.#at.section, this.#at.id) : null;
     const openAt = this.#at.piece === "item" ? this.#at : confirm?.item ?? null;
@@ -540,7 +636,7 @@ export class LoadoutPage extends LitElement {
     if (placed !== null && placed.problems.length > 0) drawn.add(INSTALL_ALL_PLACE);
     if (opened !== null) drawn.add(itemPlace(JSON.stringify([opened.item.scope, opened.item.kind, opened.item.name])));
     if (state === "up" && this.#at.piece === "global") drawn.add(GLOBAL_PLACE);
-    if (this.#at.piece === "add") drawn.add(ADD_PLACE);
+    if (this.#at.piece === "add" && filtered === null) drawn.add(ADD_PLACE);
     // The last act's line stays until the next act ends; the running act's line takes its
     // place where both go to the same place.
     const places = new Map<string | null, Sent>();
@@ -548,6 +644,8 @@ export class LoadoutPage extends LitElement {
       if (sent !== null) places.set(jobPlace(sent.place, drawn, { placed: placed !== null }), sent);
     }
     const ctx: Ctx = { view, typed, opened, openAt, confirm, places };
+    // The filtered view hides Folder and Not listed.
+    const whole = filtered === null;
     const groups = html`
       ${note !== null ? html`<section class="grp" data-group="note"><div class="gk">${note.label}</div><div class="gl">
         <div class="line"><span class="h" data-line="note-heading">${note.heading}</span><span class="r d sm">${note.aside}</span></div>
@@ -556,18 +654,72 @@ export class LoadoutPage extends LitElement {
       ${state === "problem" ? html`<section class="grp" data-group="placed"><div class="gk">Placed</div>
         <div class="gl"><p data-line="problem">${view.problem}</p></div></section>` : nothing}
       ${placed !== null ? this.#placed(placed, ctx) : nothing}
-      ${this.#folder(view, dir, state === "empty")}
-      ${state === "up" ? this.#items(ctx) : nothing}
+      ${whole ? this.#folder(view, dir, state === "empty") : nothing}
+      ${state === "up" ? (filtered !== null ? this.#filteredItems(filtered, ctx) : this.#items(ctx)) : nothing}
       ${state === "empty" ? this.#emptyGlobal(view) : nothing}
-      ${state === "up" || state === "empty" ? this.#notListed(ctx, dir) : nothing}`;
+      ${whole && (state === "up" || state === "empty") ? this.#notListed(ctx, dir) : nothing}`;
     const empty = state === "empty" ? emptyLines(view) : null;
     return html`
+      ${filtered !== null ? this.#filterLine(filtered, listed ?? [], view) : nothing}
       ${empty !== null ? html`<div class="quietline" data-line="empty">${empty.line}</div>
         <div class="first"><p data-line="empty-how">${empty.parts.map((part) => (part.code
           ? html`<code>${part.text}</code>` : part.text))}</p></div>` : nothing}
       <div class="grps" data-part="groups">${groups}</div>
       ${this.#jobsAt(null, ctx)}
       ${notes.map((line) => html`<p class="foot" data-line="foot" role="status">${line}</p>`)}`;
+  }
+
+  // -- the filtered view -----------------------------------------------------------------
+
+  /** `Project <key> ▾ · what sessions in <root> load`, the key a menu of every project, and
+   * `All of loadout` at the right. */
+  #filterLine(filtered: FilteredView, projects: Projects["projects"], view: View) {
+    const choices = projectChoices(projects, filtered.project, view);
+    return html`<div class="filt" data-part="filter" @keydown=${(event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !this.#menu) return;
+      this.#menu = false;
+      this.requestUpdate();
+      void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(".filt button.set")?.focus());
+    }}>
+      <span class="fl"><span class="k">${PROJECT_LABEL}</span><span class="anchor"><button type="button" class="set"
+        data-action="project" aria-haspopup="menu" aria-expanded=${this.#menu ? "true" : "false"}
+        @click=${() => { this.#menu = !this.#menu; this.requestUpdate(); }}>${filtered.key}<span class="v"
+        aria-hidden="true">▾</span></button>${this.#menu ? html`<div class="menu" role="menu" aria-label=${PROJECT_LABEL}>
+          ${choices.map((choice) => html`<button type="button" class="it" role="menuitemradio"
+            aria-checked=${choice.picked ? "true" : "false"} data-project=${choice.key} @click=${() => {
+              this.#menu = false;
+              this.#filter = choice.key;
+              this.#open({ piece: "project", key: choice.key });
+              this.requestUpdate();
+            }}><span aria-hidden="true">${choice.picked ? "✓" : nothing}</span><span>${choice.key}</span><span
+            class="t">${choice.root}</span></button>`)}</div>` : nothing}</span><span class="sep">·</span><span
+        data-line="filter-where">${filtered.where}</span></span>
+      <a href="/m/loadout/" data-action="all" @click=${(event: MouseEvent) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        this.#menu = false;
+        this.#filter = null;
+        this.#open(NOTHING_OPEN);
+      }}>${ALL_OF_LOADOUT}</a>
+    </div>`;
+  }
+
+  /** The project's own section, `Yours too`, then the skills modules took over. */
+  #filteredItems(filtered: FilteredView, ctx: Ctx) {
+    const harnesses = ctx.view.harnesses;
+    const own = filtered.own;
+    const key = filtered.key;
+    const link = html`<a class="pl" href=${`/m/projects/open/${encodeURIComponent(key)}`} data-action="project-page"
+      @click=${(event: MouseEvent) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigate("projects", `open/${encodeURIComponent(key)}`);
+      }}>${PROJECT_LINK}</a>`;
+    return html`
+      ${own !== null ? this.#group(own.group, harnesses, ctx, { head: true, label: own.label, count: own.count, link }) : nothing}
+      ${this.#group(filtered.yours.group, harnesses, ctx,
+                    { head: own === null, label: filtered.yours.label, count: filtered.yours.count })}
+      ${filtered.modules.map((group) => this.#group(group, harnesses, ctx, { head: false }))}`;
   }
 
   // -- the line under an act -------------------------------------------------------------
@@ -686,11 +838,12 @@ export class LoadoutPage extends LitElement {
                                                                              { head: at === 0 }));
   }
 
-  #group(group: GroupView, harnesses: readonly string[], ctx: Ctx, { head }: { head: boolean }) {
+  #group(group: GroupView, harnesses: readonly string[], ctx: Ctx,
+         { head, label = group.label, count = group.count, link = nothing }: GroupLabel) {
     const scope = scopeOf(group.section);
     const openKindHere = group.kinds === null ? null : openKind(ctx.openAt ?? this.#at, scope);
-    return html`<section class="grp" data-group=${group.key}><div class="gk"><span data-line="label">${group.label}</span>
-      <span class="n" data-line="count">${group.count}</span></div><div class="gl">
+    return html`<section class="grp" data-group=${group.key}><div class="gk"><span data-line="label">${label}</span>
+      <span class="n" data-line="count">${count}</span>${link}</div><div class="gl">
       ${group.empty !== null ? html`<p class="d" data-line="empty">${group.empty}</p>` : html`<div class="grid">
         ${head ? html`<div class="ir hd"><span class="nm"></span>${harnesses.map((harness) => html`<span class="c"
           data-harness=${harness}>${harnessWord(harness)}</span>`)}<span class="o"></span></div>` : nothing}
@@ -989,6 +1142,15 @@ interface ConfirmAt {
   rows: ViewRow[];
   problem: string | null;
   item: Address | null;
+}
+
+/** How a group is labelled: drawn with the harnesses' head row or not, and in the filtered
+ * view under its own label and count, with a link under them. */
+interface GroupLabel {
+  head: boolean;
+  label?: string;
+  count?: string;
+  link?: unknown;
 }
 
 /** What one drawing of the page shares between its parts. */
