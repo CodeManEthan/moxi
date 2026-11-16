@@ -105,7 +105,9 @@ test("drift reads its count and note, and refuses a count that isn't a whole num
 });
 
 test("status reads an outcome with its problem", () => {
-  assert.deepEqual(parseStatus({ problem: null, ...OUTCOME }), { problem: null, ...OUTCOME });
+  assert.deepEqual(parseStatus({ problem: null, ...OUTCOME }), { problem: null, ...OUTCOME, kept: [] });
+  const kept = [{ target: "/t", copy: "/c", how: "copied", id: null, back: "cp '/c' '/t'" }];
+  assert.deepEqual(parseStatus({ problem: null, ...OUTCOME, kept }).kept, kept);
   assert.equal(parseStatus({ problem: null, ...OUTCOME, rows: [{ ...ROW, state: 3 }] }), null);
   const { replaceable, ...unflagged } = ROW;
   assert.equal(replaceable, false);
@@ -140,7 +142,7 @@ test("a job reads in each of its three states", () => {
                     outcome: null, lines: [] };
   assert.deepEqual(parseJob(running), running);
   const done = { ...running, state: "done", exit: 0, outcome: { ...OUTCOME, exit: 0 } };
-  assert.deepEqual(parseJob(done), done);
+  assert.deepEqual(parseJob(done), { ...done, outcome: { ...done.outcome, kept: [] } });
   const gone = { ...running, state: "interrupted", argv: null, lines: ["run it again"] };
   assert.deepEqual(parseJob(gone), gone);
   assert.equal(parseJob({ ...running, state: "queued" }), null);

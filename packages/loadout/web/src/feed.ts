@@ -20,9 +20,27 @@ export interface Row {
   replaceable: boolean;
 }
 
+/** One copy a run kept under the core's `displaced/` folder before it wrote over what
+ * wasn't loadout's. */
+export interface KeptCopy {
+  target: string;
+  copy: string;
+  /** `copied` (loadout copied it, then wrote the target), `replaced` (the placer moved it
+   * aside and placed loadout's there) or `moved` (moved aside on a removal). */
+  how: string;
+  /** The row's `<kind>:<name>@<harness>`; null for a harness file, which can hold several
+   * entries. */
+  id: string | null;
+  /** The command that puts it back, as the verb wrote it for its platform. */
+  back: string;
+}
+
 /** What a run came to, as `--json` prints it. */
 export interface Outcome {
   rows: Row[];
+  /** Each copy the run kept; empty for a run that kept none, and for an outcome recorded
+   * before runs named them. */
+  kept: KeptCopy[];
   /** The lines said on the way, the core lock's waiting line among them. */
   lines: string[];
   notes: string[];
@@ -270,9 +288,20 @@ function isCounts(value: unknown): value is Record<string, number> {
   return isObj(value) && Object.values(value).every(isInt);
 }
 
+function isKeptCopy(value: unknown): value is KeptCopy {
+  return isObj(value) && isStr(value.target) && isStr(value.copy) && isStr(value.how)
+    && isStrOrNull(value.id) && isStr(value.back);
+}
+
 function isOutcome(value: unknown): value is Outcome {
   return isObj(value) && isListOf(value.rows, isRow) && isStrings(value.lines)
-    && isStrings(value.notes) && isCounts(value.counts) && isInt(value.exit);
+    && isStrings(value.notes) && isCounts(value.counts) && isInt(value.exit)
+    && (value.kept === undefined || isListOf(value.kept, isKeptCopy));
+}
+
+/** `outcome` with `kept` as a list: empty when the answer has none. */
+function withKept<O extends Outcome>(outcome: O): O {
+  return { ...outcome, kept: outcome.kept ?? [] };
 }
 
 function isItem(value: unknown): value is Item {
@@ -352,11 +381,51 @@ export function parseView(data: unknown): View | null {
   };
 }
 
+/** One path a Replace's diff leaves out: `why` one of `link`, `large`, `binary`, `many`. */
+export interface Skipped {
+  path: string;
+  why: string;
+}
+
+/** `/api/replace-preview`: what a Replace of one row would do, for its confirm. */
+export interface ReplacePreview {
+  problem: string | null;
+  /** `moves` (what is there moves aside under `displaced/`), `keeps` (a copy of the file
+   * is kept there, then it is written), or null when the row isn't replaceable. */
+  case: string | null;
+  target: string | null;
+  /** The folder the copy goes to. */
+  kept_in: string | null;
+  /** git tracks what is there. */
+  tracked: boolean;
+  /** How many other rows the run changes. */
+  others: number;
+  /** `file`, or `entry` for an MCP server its harness's CLI writes. */
+  label: string;
+  /** A unified diff of what is there (-) against what loadout writes (+). */
+  diff: string;
+  lines: number;
+  skipped: Skipped[];
+}
+
+/** `/api/replace-preview`'s value, or null when it isn't one. */
+export function parseReplacePreview(data: unknown): ReplacePreview | null {
+  if (!isObj(data) || !isStrOrNull(data.problem) || !isStrOrNull(data.case) || !isStrOrNull(data.target)
+      || !isStrOrNull(data.kept_in) || !isBool(data.tracked) || !isInt(data.others) || !isStr(data.label)
+      || !isStr(data.diff) || !isInt(data.lines)
+      || !isListOf(data.skipped, (s: unknown): s is Skipped => isObj(s) && isStr(s.path) && isStr(s.why))) {
+    return null;
+  }
+  return { problem: data.problem, case: data.case, target: data.target, kept_in: data.kept_in,
+           tracked: data.tracked, others: data.others, label: data.label, diff: data.diff,
+           lines: data.lines, skipped: data.skipped };
+}
+
 /** `/api/status`'s value, or null when it isn't one. */
 export function parseStatus(data: unknown): Status | null {
   if (!isObj(data) || !isStrOrNull(data.problem) || !isOutcome(data)) return null;
-  const { problem, rows, lines, notes, counts, exit } = data as unknown as Status;
-  return { problem, rows, lines, notes, counts, exit };
+  const { problem, rows, kept, lines, notes, counts, exit } = data as unknown as Status;
+  return { problem, rows, kept: kept ?? [], lines, notes, counts, exit };
 }
 
 /** `/api/list`'s value, or null when it isn't one. */
@@ -395,7 +464,8 @@ export function parseJob(data: unknown): Job | null {
   if (exit !== null && !isInt(exit)) return null;
   if (outcome !== null && !isOutcome(outcome)) return null;
   if (argv !== null && !isStrings(argv)) return null;
-  return { job: data.job, argv, state, exit, outcome, lines: data.lines };
+  return { job: data.job, argv, state, exit, outcome: outcome === null ? null : withKept(outcome),
+           lines: data.lines };
 }
 
 /** The text an answer gives: its `refused`, `conflict` or `error`. */
