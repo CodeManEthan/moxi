@@ -24,9 +24,32 @@ COMPONENTS["main"] = {"script": "main.js", "title": "Fixture main", "doc": "Home
 '''
 
 
-def install(site: Path, version: str = "0.1.0", *, main: bool = False) -> Path:
+#: What a copy of the fixture's schema gains with `install(..., fields=True)`: the page
+#: fields the Settings page reads, as lines under each key's table. `ratio` is edited on
+#: another page, so the page leaves it out and Find answers with its sentence.
+FIELDS = {
+    "greeting": ['label = "Greeting"', 'line = "The word the page greets with."', "common = true"],
+    "limit": ['label = "Row limit"', 'unit = "rows"', "common = true"],
+    "loud": ['label = "Loud"', "common = true",
+             'hurts = { when = "on", says = "makes every read shout", '
+             'confirm = "From its next read, the page shouts every line." }'],
+    "colour": ['label = "Colour"', "pick = true", "common = true",
+               'choices = { red = "warm red", green = "leaf green", blue = "sky blue" }'],
+    "tags": ['label = "Tags"', "common = true",
+             'hurts = { when = "remove", says = "stops marking rows with this tag", '
+             'confirm = "From its next read, the page no longer marks a row with this tag." }'],
+    "workers": ['label = "Workers"', 'group = "Server"'],
+    "ratio": ['label = "Fixture ratio"', 'elsewhere = "The ratio is set on the Fixture page."'],
+    "folder": ['label = "Folder"', 'group = "Server"'],
+    "extra": ['label = "Extra table"'],
+    "rows": ['label = "Rows"', 'group = "Switches"'],
+}
+
+
+def install(site: Path, version: str = "0.1.0", *, main: bool = False, fields: bool = False) -> Path:
     """Copy the fixture's package into `site` and write its `.dist-info` beside it. With
-    `main` the copy also announces a piece for Home's main spot."""
+    `main` the copy also announces a piece for Home's main spot; with `fields` its schema
+    carries `FIELDS`."""
     site.mkdir(parents=True, exist_ok=True)
     target = site / "moxi_fixture"
     if not target.exists():
@@ -34,8 +57,20 @@ def install(site: Path, version: str = "0.1.0", *, main: bool = False) -> Path:
         if main:
             with (target / "module.py").open("a") as fh:
                 fh.write(MAIN)
+        if fields:
+            add_fields(target / "settings.toml")
     set_version(site, version)
     return site
+
+
+def add_fields(schema: Path) -> None:
+    """Write `FIELDS` into the fixture's schema at `schema`, each under its key's header."""
+    lines = []
+    for line in schema.read_text().splitlines():
+        lines.append(line)
+        if line.startswith("[") and line.endswith("]"):
+            lines.extend(FIELDS.get(line[1:-1], []))
+    schema.write_text("\n".join(lines) + "\n")
 
 
 def set_version(site: Path, version: str) -> None:

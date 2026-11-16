@@ -4,9 +4,14 @@ addresses the page writes for itself, a section that can't be read, a key the sh
 started with locked, copying a key, the page kept across the shell's redraw; changes held
 until Save, each type's edit saved to the file, a refusal beside its row, ui's theme keys
 applied at once, the asks when the page is left with changes held; Find, its results by
-module with a Save line per group, and the changed view; ui's Phone group on a gateway-mode
-shell, with its phones, Activity, a revoke and the pairing code, and no Gateway section left
-in the modules view; and `<moxi-ui-form>` in submit mode with catalog rows."""
+module with a Save line per group, and the changed view; the questions a person brings
+(light or dark, what they changed, when a cache is near, where transcripts are read, what
+needs a module the install lacks); the fixture with page fields: labels, units, a pick list,
+More's words, a sentence for a key another page edits, a change that can hurt confirmed or
+gone back from; a value changed behind the page, and a change held while the shell sends the
+modules again; ui's Phone group on a gateway-mode shell, with its phones, Activity, a revoke
+and the pairing code, and no Gateway section left in the modules view; and `<moxi-ui-form>`
+in submit mode with catalog rows."""
 
 from __future__ import annotations
 
@@ -16,7 +21,11 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from moxi import modules
+from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
+
+import fixture_kit
 
 pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
 
@@ -621,6 +630,249 @@ def test_the_changed_view_lists_each_changed_setting_by_module_and_resets_one_th
     # Opened at its address, it goes back to the core.
     page.goto("/m/ui/settings/changed")
     expect(view.locator("[data-part=found-head] a")).to_have_text("Back to moxi", timeout=SETTINGS_MS)
+
+
+def _installed(*names: str) -> bool:
+    """Whether this environment installs every module `names` names, as the full install does."""
+    found = {module.name for module in modules.scan()}
+    return all(name in found for name in names)
+
+
+def _all_read(view):
+    """Waits until every listed module's section has arrived."""
+    expect(view.locator("[data-part=list]:not([data-reading])")).to_be_attached(timeout=SETTINGS_MS * 2)
+
+
+# --- the questions a person brings ------------------------------------------------------------
+
+
+def test_switching_the_pages_to_light_is_found_under_ui_and_applies_now(ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    page = ui_contexts(shell, color_scheme="dark").pages[0]
+    view = _settings(page)
+    _all_read(view)
+    _find(view, "light")
+    mode = _group(view, "ui").locator(".set[data-key='theme.mode']")
+    expect(mode.locator("[data-line=label]")).to_have_text("Light or dark")
+    choices = mode.locator("[role=radio]")
+    expect(choices).to_have_text(["follow the browser", "light", "dark"])
+    # Unset, it reads the default, and says nothing of one; it applies now, so no mark.
+    expect(choices.and_(page.locator("[aria-checked=true]"))).to_have_text("follow the browser")
+    expect(mode.locator("[data-line=default]")).to_have_count(0)
+    expect(mode.locator("[data-line=line]")).to_have_count(0)
+    choices.and_(page.locator("[data-value=light]")).click()
+    line = _group(view, "ui").locator("[data-part=save] [data-line=save]")
+    expect(line).to_have_text("1 not saved in ui · Light or dark")
+    _group(view, "ui").locator("[data-part=save]").get_by_role("button", name="Save").click()
+    expect(line).to_have_text(re.compile(rf"^Saved {CLOCK} · Light or dark applies now$"), timeout=SETTINGS_MS)
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+    assert _file(shell, "ui")["theme"] == {"mode": "light"}
+
+
+def test_the_settings_changed_from_the_defaults_are_counted_by_module_and_listed_together(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    for args in (("moxi", "skills.form", "copy"), ("ui", "idle_s", "1200"), ("fixture", "limit", "12")):
+        assert shell.moxi("config", "set", *args).returncode == 0, args
+    page = ui_contexts(shell).pages[0]
+    view = _settings(page, "settings")
+    changed = view.locator("[data-part=list] [data-line=changed]")
+    expect(changed).to_have_text("3 changed", timeout=SETTINGS_MS * 2)
+    for module in ("moxi", "ui", "fixture"):
+        expect(_list(view).and_(page.locator(f"[data-list={module}]"))).to_have_text(re.compile(rf"^{module}\s*1$"))
+    changed.click()
+    expect(view.locator("[data-part=found-head] [data-line=count]")).to_have_text(
+        "3 settings changed from the default, in 3 modules")
+    expect(view.locator("[data-part=changed] [data-group-of] a")).to_have_text(["moxi", "ui", "fixture"])
+    expect(_row(view, "skills.form").locator("[data-line=default]")).to_have_text(
+        re.compile(r"^default auto\s*·\s*Reset$"))
+    expect(_row(view, "idle_s").locator("[data-line=default]")).to_have_text(re.compile(r"^default .+\s*·\s*Reset$"))
+    expect(_row(view, "limit").locator("[data-line=default]")).to_have_text(re.compile(r"^default 10\s*·\s*Reset$"))
+
+
+@pytest.mark.skipif(not _installed("cache"), reason="the full install's question: cache is not installed")
+def test_when_a_cache_counts_as_near_is_found_with_its_value_and_unit(ui_page):
+    view = _settings(ui_page)
+    _all_read(view)
+    _find(view, "near")
+    row = _group(view, "cache").locator(".set[data-key='segment.warn_before_s']")
+    expect(row.locator("[data-line=label]")).to_have_text("The status line shows near for the last")
+    expect(row.locator("input[data-control='segment.warn_before_s']")).to_have_value("900")
+    expect(row.locator(".unit")).to_have_text("seconds")
+    expect(row.locator("[data-line=line]")).to_have_text(["Of a cache's life, when the segment turns from warm to near."])
+
+
+@pytest.mark.skipif(not _installed("sessions"), reason="sessions is not installed")
+def test_where_claude_code_transcripts_are_read_from_is_found_and_says_its_default(ui_page):
+    view = _settings(ui_page)
+    _all_read(view)
+    _find(view, "transcripts")
+    row = _group(view, "sessions").locator(".set[data-key='claude.projects']")
+    expect(row.locator("[data-line=label]")).to_have_text("Claude Code transcripts")
+    expect(row.locator("input[data-control='claude.projects']")).to_have_value("")
+    expect(row.locator("[data-line=line]")).to_have_text(["Not set: the folder Claude Code itself uses."])
+
+
+@pytest.mark.skipif(not _installed("launcher", "slots", "comms"),
+                    reason="the full install's question: launcher, slots or comms is not installed")
+def test_on_the_full_install_every_key_that_needs_another_module_is_drawn(ui_page):
+    from moxi.config import Schema
+
+    schema = Schema.from_resource("moxi_launcher", "settings.toml")
+    needing = [name for name, key in schema.keys.items() if key.needs and not key.retired and not key.elsewhere]
+    assert len(needing) >= 7, needing
+    view = _settings(ui_page, "settings/launcher/more")
+    expect(view.locator("[data-part=pane][data-module=launcher]")).to_be_visible()
+    for name in needing:
+        expect(_row(view, name)).to_be_visible()
+    # The one key whose module no install holds is the fixture's, and it is not drawn.
+    view = _settings(ui_page)
+    expect(_row(view, "peer")).to_have_count(0)
+
+
+# --- the fixture with page fields -------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def paged_site(tmp_path_factory):
+    """A site holding the fixture whose schema's copy carries page fields."""
+    return fixture_kit.install(tmp_path_factory.mktemp("paged-site"), fields=True)
+
+
+def test_page_fields_name_each_row_and_more_names_the_rest(ui_shells, ui_contexts, paged_site):
+    shell = ui_shells(site=[paged_site])
+    assert shell.moxi("config", "set", "fixture", "workers", "3").returncode == 0
+    page = ui_contexts(shell).pages[0]
+    view = _settings(page)
+    # The common keys first, in the schema's order; then More.
+    assert _keys(view.locator("[data-part=pane] .set")) == ["greeting", "limit", "loud", "colour", "tags"]
+    greeting = _row(view, "greeting")
+    expect(greeting.locator("[data-line=label]")).to_have_text("Greeting")
+    expect(greeting.locator("[data-line=key]")).to_have_text("greeting")
+    expect(greeting.locator("[data-line=line]")).to_have_text(["The word the page greets with."])
+    limit = _row(view, "limit")
+    expect(limit.locator("[data-line=label]")).to_have_text("Row limit")
+    expect(limit.locator(".unit")).to_have_text("rows")
+    # A pick list, its options in the choices' words.
+    colour = view.locator("select[data-control=colour]")
+    expect(colour.locator("option")).to_have_text(["warm red", "leaf green", "sky blue"])
+    expect(colour).to_have_value("green")
+    # A key another page edits, and one whose module is absent, are not drawn.
+    expect(_row(view, "ratio")).to_have_count(0)
+    expect(_row(view, "peer")).to_have_count(0)
+    more = view.locator("[data-part=more]")
+    expect(more.locator("[data-line=more]")).to_have_text("4 settings: server, switches, extra table · 1 changed")
+    expect(_list(view).and_(page.locator("[data-list=fixture]"))).to_have_text(re.compile(r"^fixture\s*1$"))
+    more.get_by_role("button", name="Show").click()
+    expect(view.locator("[data-part=pane] .subh")).to_have_text(["Server", "Switches"])
+    expect(_row(view, "workers").locator("[data-line=default]")).to_have_text(re.compile(r"^default 2\s*·\s*Reset$"))
+    expect(view.locator("[role=switch][data-control='rows.backup']")).to_be_visible()
+    # Find answers a search for the key another page edits with its sentence.
+    _all_read(view)
+    _find(view, "fixture ratio")
+    expect(view.locator("[data-part=found-head] [data-line=count]")).to_have_text("No setting matches “fixture ratio”")
+    expect(view.locator("[data-line=elsewhere]")).to_have_text(["The ratio is set on the Fixture page."])
+    _find(view, "row limit")
+    expect(_group(view, "fixture").locator(".set")).to_have_count(1)
+    expect(view.locator("[data-line=elsewhere]")).to_have_count(0)
+
+
+def test_a_change_that_can_hurt_asks_before_it_is_saved_and_go_back_keeps_it(
+        ui_shells, ui_contexts, paged_site):
+    shell = ui_shells(site=[paged_site])
+    path = shell.config_file("fixture")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('tags = ["sky"]\n')
+    view = _settings(ui_contexts(shell).pages[0])
+    line = _save_line(view)
+    loud = _row(view, "loud")
+    view.locator("[role=switch][data-control=loud]").click()
+    expect(loud).to_have_class(re.compile(r"\bdg\b"))
+    expect(_held(view, "loud")).to_have_text(re.compile(r"^not saved · makes every read shout\s*·\s*Undo$"))
+    # Save asks in the Save line's place; Go back writes nothing and keeps the change.
+    line.get_by_role("button", name="Save").click()
+    expect(line).to_have_attribute("data-state", "confirm")
+    expect(line.locator("[data-line=save]")).to_have_text(
+        "Turn on Loud? From its next read, the page shouts every line. Nothing else in this save can hurt.")
+    expect(line.locator("[data-line=ask]")).to_have_text(["Turn on Loud?"])
+    expect(line.get_by_role("button")).to_have_text(["Go back", "Turn on and save"])
+    line.get_by_role("button", name="Go back").click()
+    expect(line).to_have_attribute("data-state", "held")
+    expect(line.locator("[data-line=save]")).to_have_text("1 not saved · Loud")
+    assert _file(shell) == {"tags": ["sky"]}
+    # A list's item removed, where removing can hurt: each act asked, one button for both.
+    tags = _row(view, "tags")
+    tags.get_by_role("button", name="Remove sky").click()
+    expect(_held(view, "tags")).to_have_text(re.compile(r"^not saved · stops marking rows with this tag\s*·\s*Undo$"))
+    line.get_by_role("button", name="Save").click()
+    expect(line.locator("[data-line=ask]")).to_have_text(["Turn on Loud?", "Remove sky from Tags?"])
+    expect(line.locator("[data-line=save]")).to_contain_text(
+        "Remove sky from Tags? From its next read, the page no longer marks a row with this tag. "
+        "Nothing else in this save can hurt.")
+    line.get_by_role("button", name="Save anyway").click()
+    expect(line.locator("[data-line=save]")).to_have_text(re.compile(rf"^Saved {CLOCK} · "), timeout=SETTINGS_MS)
+    assert _file(shell) == {"loud": True, "tags": []}
+    expect(_held(view, "loud")).to_have_count(0)
+
+
+def test_a_value_changed_in_the_file_behind_the_page_is_not_overwritten_until_saved_again(
+        ui_shells, ui_contexts, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    view = _settings(ui_contexts(shell).pages[0])
+    box = view.locator("input[data-control=limit]")
+    box.fill("12")
+    expect(_held(view, "limit")).to_have_text(re.compile(r"^not saved · was 10\s*·\s*Undo$"))
+    assert shell.moxi("config", "set", "fixture", "limit", "14").returncode == 0
+    _save(view, rf"^0 of 1 saved at {CLOCK} · limit was not saved: it says why beside the field$")
+    expect(_row(view, "limit").locator("[data-line=note]")).to_have_text(
+        "Not saved: it changed since this page read it, to 14. Save again to write yours.")
+    # The row keeps what was typed; its `was` follows the file.
+    expect(box).to_have_value("12")
+    expect(_held(view, "limit")).to_have_text(re.compile(r"^not saved · was 14\s*·\s*Undo$"))
+    assert _file(shell)["limit"] == 14
+    _save(view, rf"^Saved {CLOCK} · limit applies now$")
+    assert _file(shell)["limit"] == 12
+
+
+# Marks the document with the fixture's version each time `ui.modules` arrives.
+_MODULES_SEEN = """async () => {
+  (await import("/m/ui/client.js")).subscribe("ui", "modules", (value) => {
+    const row = (value?.modules ?? []).find((item) => item.name === "fixture");
+    document.documentElement.dataset.fixtureVersion = row?.version ?? "";
+  });
+}"""
+
+
+def test_a_change_held_when_the_shell_sends_the_modules_again_stays_and_the_page_is_kept(
+        ui_shells, ui_contexts, tmp_path_factory):
+    site = fixture_kit.install(tmp_path_factory.mktemp("modules-site"))
+    shell = ui_shells(site=[site])
+    page = ui_contexts(shell).pages[0]
+    view = _settings(page)
+    _all_read(view)
+    box = view.locator("input[data-control=limit]")
+    box.fill("12")
+    expect(_save_line(view).locator("[data-line=save]")).to_have_text("1 not saved · limit")
+    page.evaluate("document.querySelector('#moxi-panel > moxi-ui-page').dataset.placed = 'first'")
+    page.evaluate(_MODULES_SEEN)
+    html = page.locator("html")
+    expect(html).to_have_attribute("data-fixture-version", "0.1.0")
+    # A new version of the fixture: the shell's next snapshot sees it and sends `ui.modules`
+    # again, to the page too.
+    fixture_kit.set_version(site, "0.2.0")
+
+    def seen_new() -> bool:
+        status, value = shell.session().get("/m/ui/api/modules")
+        return any(row["name"] == "fixture" and row.get("version") == "0.2.0" for row in value["modules"])
+
+    wait_for(seen_new, 10, interval=0.2, what="the snapshot to see version 0.2.0")
+    expect(html).to_have_attribute("data-fixture-version", "0.2.0", timeout=SETTINGS_MS)
+    expect(page.locator("#moxi-panel > moxi-ui-page[data-placed=first]")).to_be_attached()
+    expect(box).to_have_value("12")
+    expect(_held(view, "limit")).to_have_text(re.compile(r"^not saved · was 10\s*·\s*Undo$"))
+    expect(_save_line(view).locator("[data-line=save]")).to_have_text("1 not saved · limit")
+    _save(view, rf"^Saved {CLOCK} · limit applies now$")
+    assert _file(shell)["limit"] == 12
 
 
 _SIGN_OUT = """async () => {
