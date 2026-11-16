@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import loadout_kit as kit
 import pytest
 
-from moxi_loadout import cli, harness, install
+from moxi_loadout import cli, displaced, harness, install
 from moxi_loadout.planner import Scope
 
 TEXT = "Be brief.\n"
@@ -498,8 +499,6 @@ def test_an_empty_assembled_text_is_the_marker_line_alone(lo):
 
 
 def test_a_hand_edit_to_the_generated_file_is_kept_until_replace(lo):
-    from moxi_loadout import stores
-
     (lo / "global.claude.md").write_text("Claude only.\n")
     mode(lo, "if-absent")
     assert install.install().code == 0
@@ -517,13 +516,16 @@ def test_a_hand_edit_to_the_generated_file_is_kept_until_replace(lo):
     assert install.install().code == 3
     assert os.path.realpath(claude) == str(_gen("claude"))
     assert _gen("claude").read_bytes() == edited
-    # --replace backs the edit up and places afresh.
+    # --replace keeps the edit under displaced/ and places afresh.
     (lo / "global.claude.md").write_text("Claude only.\n")
     out = install.install(replace=["global:global@claude"])
     assert out.code == 0, out.text()
     assert "My own line." not in _gen("claude").read_text()
-    backups = list((stores.backups_dir() / "claude").iterdir())
-    assert any(b.read_bytes() == edited for b in backups)
+    [kept] = out.kept
+    assert (kept["target"], kept["how"], kept["id"]) == (
+        str(_gen("claude")), "copied", "global:global@claude")
+    assert Path(kept["copy"]).read_bytes() == edited
+    assert f"kept a copy of {_gen('claude')} at {kept['copy']}" in out.lines
 
 
 def _edited_generated_claude(lo, more: str = "") -> bytes:
@@ -555,12 +557,11 @@ def test_a_scoped_replace_of_the_generated_file_is_refused_and_keeps_the_edit(
     assert os.path.realpath(claude) == str(_gen("claude"))
     assert claude.read_bytes() == edited
     assert not (stores.backups_dir() / "claude").exists()
+    assert not displaced.root().exists()
     assert _rows(install.status(), "modified") == {"claude"}
 
 
 def test_the_pages_replace_of_the_generated_file_writes_it_again(lo, capsys):
-    from moxi_loadout import stores
-
     edited = _edited_generated_claude(lo)
     claude = harness.global_file("claude")
     # The verb the page's job runs for this row (test_page holds the act to argv).
@@ -568,8 +569,8 @@ def test_the_pages_replace_of_the_generated_file_writes_it_again(lo, capsys):
     capsys.readouterr()
     assert os.path.realpath(claude) == str(_gen("claude"))
     assert "My own line." not in claude.read_text() and "Claude only." in claude.read_text()
-    backups = list((stores.backups_dir() / "claude").iterdir())
-    assert any(b.read_bytes() == edited for b in backups)
+    kept = list(displaced.root().glob("*/claude/claude.md"))
+    assert [k.read_bytes() for k in kept] == [edited]
     assert "claude" not in _rows(install.status(), "modified")
 
 

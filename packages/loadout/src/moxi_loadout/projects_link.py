@@ -51,21 +51,25 @@ def resolve(key: str):
     link, why = api()
     if link is None:
         return Resolution(None, f"project {key}: {why}", REFUSED,
-                          every=why != ABSENT)
+                          every=why != ABSENT,
+                          cause="no-projects" if why == ABSENT else "unloadable")
     try:
         project = link.get(key)
     except link.Busy:
-        return Resolution(None, "projects is busy; run again", TEMPFAIL, every=True)
+        return Resolution(None, "projects is busy; run again", TEMPFAIL, every=True,
+                          cause="busy")
     except link.TooNew as exc:
-        return Resolution(None, f"projects can't be read: {exc}", REFUSED, every=True)
+        return Resolution(None, f"projects can't be read: {exc}", REFUSED, every=True,
+                          cause="unreadable")
     except link.Unreadable as exc:
-        return Resolution(None, f"projects can't be read: {exc}", REFUSED, every=True)
+        return Resolution(None, f"projects can't be read: {exc}", REFUSED, every=True,
+                          cause="unreadable")
     except link.NotFound as exc:
-        return Resolution(None, f"project {key}: {exc}", REFUSED)
+        return Resolution(None, f"project {key}: {exc}", REFUSED, cause="not-found")
     root = getattr(project, "root", None)
     if not root:
         return Resolution(None, f"project {key} has no root; moxi projects shows it",
-                          REFUSED)
+                          REFUSED, cause="no-root")
     return Resolution(os.path.abspath(os.path.expanduser(str(root))))
 
 

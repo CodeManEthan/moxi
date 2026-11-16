@@ -107,8 +107,8 @@ def jobs_dir(*, create: bool = False) -> Path:
 
 
 def valid(job: object) -> bool:
-    """Whether `job` can name a job: 1 to 64 letters, digits, `-` and `_`. An
-    idempotency key (43 base64url characters) is one."""
+    """Whether `job` can name a job: 1 to 64 letters, digits, `-` and `_`. The id the
+    page mints for a press (32 hex characters) is one."""
     return isinstance(job, str) and _ID.fullmatch(job) is not None
 
 
@@ -158,8 +158,8 @@ def start(argv: Sequence[str], *, job: str | None = None) -> Started:
     """Start a job running verb `argv` (no `--json`; the runner adds it), under id `job`
     (a fresh one when None). The record is created exclusively before the spawn and
     gets the job's pid and start time right after it. A record of `job` with the same
-    arguments is found, not started again (`Started.new` False), so a confirmed act's
-    retry after a restart of the page server reaches the job it started; one with other
+    arguments is found, not started again (`Started.new` False), so a repeat of a press
+    the page named by its id reaches the job it started; one with other
     arguments raises `Clash`. A spawn that fails removes the record and raises. Once the
     spawn returns the job is running, so a pid that can't be recorded is logged, never
     raised: the job then reads `interrupted` from the grace period until its end lands."""

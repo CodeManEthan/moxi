@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- The page is redrawn around what needs you. Placed comes first: each problem is an
+  item and one word (`changed`, `in the way`, `not placed`, `out of date`, `would be
+  committed`, `can't be read`), with its section, harnesses and why, and the fix with
+  Install or Replace; Install all runs a whole install, and the counts say what each
+  harness gets. Then the folder, with the files git hasn't committed, and the items in a
+  grid with a column per harness, a section past twelve items folded by kind. An item,
+  a kind or the global file opens in place, at an address of its own, with Turn off and
+  Turn on, Turn on for every harness, Remove, and the global mode. Not listed shows the
+  skills and agents in the folder that no section lists, each with Add. With projects,
+  `/m/loadout/project/<key>` shows only what a project's sessions load. While the shell's
+  environment differs from the terminal's, every act shows as its command, with Copy.
+  The page reads again when shown, after each change and every minute; `Read again`, the
+  `Other rows` list and the notes above the items are gone.
+- Replace opens in place, not on the shell's sheet: it reads what the Replace would do
+  (`/api/replace-preview`: what is moved aside or kept and where, the diff, what else the
+  run changes, what the diff leaves out) and runs only once you press Replace. A line
+  under each act says how it ended, Show opens its lines and rows, and each copy the run
+  kept is named with the command that puts it back.
+- No write of loadout's destroys bytes it can't show it wrote. What a write goes over
+  that isn't loadout's (an edited or header-less generated agent file under `--replace`,
+  an entry you edited or loadout didn't write, Codex's rules file, an occupant, an edited
+  copy on a removal) is kept under the core's `displaced/` folder first, until you delete
+  it. The run names each copy (`kept a copy of <target> at <copy>`; `--json` `kept`, with
+  `back`, the command that puts it back), and `install --help` says how. A generated
+  agent file without loadout's header now reads `modified`: install leaves it, and
+  uninstall refuses while it is there. A generated file that is a link is refused.
+  `--replace global:global@<harness>` keeps the edited generated global file under
+  `displaced/` and names it in `kept`, where it went to loadout's backups.
+- `moxi loadout global show --json`: each file gains `form`, what loadout adds there
+  (`line`, `block`, `instructions`, `placed`, or `left` for a harness file loadout leaves
+  as its own). `changes` is false for a file the next install leaves as it is: a JSON
+  file whose spacing alone differs from loadout's read true.
+- New reads for the page: `/api/view`, the rows `status` gives with what the page draws
+  (how each item is placed and what fixes it, the sections and why one is refused, the
+  items' notes, the global file); `/api/folder`, the folder's uncommitted and unlisted
+  files and whether a commit installs it again; `/api/projects` gains `cause`.
+  `/api/replace` and `/api/global-remove` are plain acts that take a `job` id from the
+  page, in place of the shell's confirmation; `/api/status` and `/api/job` gain `kept`.
+  No route is the gateway's.
 - Every setting carries page fields, which `moxi config loadout show --json` prints
   and the settings page draws: a plain label, a line where the label can't carry it,
   and the unit of the backups kept. loadout needs moxi 0.1.9 or later.

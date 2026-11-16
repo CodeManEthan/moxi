@@ -1,9 +1,8 @@
 """loadout's drift block and page in a browser, through a real shell that starts loadout's
 real page server: the contract check on both, the count of items that aren't ok and the
 note that there is no record of the user's terminal, both gone once the user installs in
-a terminal, a manifest that
-can't be read, the block's link to the page from the modules view, and the 360 px width
-check.
+a terminal, a manifest that can't be read, the block's link to the page from the modules
+view, and the 360 px width check.
 
 The loadout folder, its manifest and every `moxi` command here use the shell's own
 environment, so loadout's config, ledger and every harness file are under the shell's
@@ -108,13 +107,13 @@ def test_the_drift_block_keeps_the_contract(loadout_dir, ui_page, ui_component_c
     expect(check.locator.locator(".drift")).to_have_attribute("data-state", "up")
 
 
-def test_the_page_keeps_the_contract_and_holds_the_drift_block(loadout_dir, ui_page,
-                                                                  ui_component_check):
+def test_the_page_keeps_the_contract_and_draws_no_heading_of_its_own(loadout_dir, ui_page,
+                                                                         ui_component_check):
     check = ui_component_check(ui_page, "loadout", "page", keep=True)
     assert check.element == "moxi-loadout-page"
-    expect(check.locator.locator("h1")).to_have_text("Loadout")
-    expect(check.locator.locator('[data-part="drift"] moxi-loadout-drift .drift')
-           ).to_have_attribute("data-state", "up")
+    expect(check.locator.locator('[data-group="placed"] [data-line="verdict"]')).to_be_visible()
+    expect(check.locator.locator("h1")).to_have_count(0)
+    expect(check.locator.locator("moxi-loadout-drift")).to_have_count(0)
 
 
 def test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs(loadout_dir, ui_shell,
@@ -168,22 +167,19 @@ def test_a_manifest_that_cant_be_read_shows_its_line_and_no_count(loadout_dir, u
         manifest.write_text(kept, encoding="utf-8")
 
 
-def test_the_blocks_link_on_the_modules_view_opens_the_page_which_it_then_marks(
-        loadout_dir, ui_page):
+def test_the_blocks_link_on_the_modules_view_opens_the_page(loadout_dir, ui_page):
     ui_page.goto("/m/ui/modules")
     link = ui_page.locator("#moxi-panel > moxi-ui-page #home moxi-loadout-drift h2 a")
     expect(link).to_have_text("Loadout")
     expect(link).not_to_have_attribute("aria-current", "page")
     link.click()
     panel = ui_page.locator("#moxi-panel > moxi-loadout-page")
-    expect(panel.locator("h1")).to_have_text("Loadout")
+    expect(panel.locator('[data-group="placed"] [data-line="verdict"]')).to_be_visible()
     assert ui_page.evaluate("location.pathname") == "/m/loadout/"
-    expect(panel.locator("moxi-loadout-drift h2 a")).to_have_attribute("aria-current", "page")
 
 
 def test_the_block_and_the_page_fit_a_phone(loadout_dir, ui_page, ui_width_check):
     ui_width_check(ui_page, module="loadout")
-    expect(ui_page.locator("#moxi-panel > moxi-loadout-page moxi-loadout-drift .drift")
-           ).to_be_visible()
+    expect(ui_page.locator('#moxi-panel > moxi-loadout-page [data-group="placed"]')).to_be_visible()
     ui_width_check(ui_page)
     ui_width_check(ui_page, module="loadout", name="drift")

@@ -118,6 +118,11 @@ def generated_state(path: str | os.PathLike) -> str | None:
         data = Path(path).read_bytes()
     except OSError:
         return None
+    return state_of(data)
+
+
+def state_of(data: bytes) -> str:
+    """`generated_state` of a generated global file's bytes, `data`: `ok` or `modified`."""
     first, _, rest = data.partition(b"\n")
     match = _GENERATED_RE.fullmatch(first.decode("utf-8", "replace"))
     if match is None or hashlib.sha256(rest).hexdigest() != match.group(2):
@@ -292,6 +297,6 @@ def _plain_json(text: str) -> str:
 
 
 __all__ = ["MARKER", "GENERATED_MARKER", "END", "part_path", "parts", "reads", "read", "assemble",
-           "named", "block", "generated_path", "generated_bytes", "generated_state",
+           "named", "block", "generated_path", "generated_bytes", "generated_state", "state_of",
            "is_generated", "mistyped", "Crossing", "crossed", "OPENCODE_CONFIGS",
            "instructions"]
