@@ -232,9 +232,9 @@ def assert_colour(locator: Any, token: str, timeout: float | None = None) -> Non
     seconds (the ui kit's `WAIT_S` when none is given), read again until it does, as a
     web-first assertion would."""
     from moxi_dev.testing import wait_for
-    from moxi_ui.testing import WAIT_S
 
-    timeout = WAIT_S if timeout is None else timeout
+    if timeout is None:
+        timeout = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 
     seen: list[dict] = []
 
