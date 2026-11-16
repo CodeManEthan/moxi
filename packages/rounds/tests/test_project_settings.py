@@ -239,8 +239,8 @@ def test_two_finish_actions_with_one_id_are_refused(actions, key):
      "is not a key of a merge action"),
     ('[ { do = "push", remote = "origin", repeat = true } ]', "finish[0].repeat",
      "is not a key of a push action"),
-    ('[ { do = "push" } ]', "finish[0].remote", "not a name"),
-    ('[ { do = "merge", id = "" } ]', "finish[0].id", "not a name"),
+    ('[ { do = "push" } ]', "finish[0].remote", "is missing"),
+    ('[ { do = "merge", id = "" } ]', "finish[0].id", "is empty"),
     ('[ { do = "command", id = "pr" } ]', "finish[0].argv", "is missing"),
     ('[ { do = "command", id = "pr", argv = [] } ]', "finish[0].argv",
      "is not a command"),
@@ -252,6 +252,24 @@ def test_two_finish_actions_with_one_id_are_refused(actions, key):
 def test_a_malformed_finish_action_is_refused(value, key, words):
     error = refusal(project(f"finish = {value}"))
     assert error.key == f"projects.proj-a.{key}" and words in error.problem
+
+
+@pytest.mark.parametrize("body, key, problem, fix", [
+    ('finish = [ { do = "push" } ]', "finish[0].remote", "is missing",
+     "give a remote's name"),
+    ('finish = [ { do = "push", remote = "" } ]', "finish[0].remote", "is empty",
+     "give a remote's name"),
+    ('finish = [ { do = "merge", id = "" } ]', "finish[0].id", "is empty",
+     "give an id, or leave the key out"),
+    ('finish = [ { do = "command", id = "", argv = ["a"] } ]', "finish[0].id",
+     "is empty", "give an id"),
+    ('into = ""', "into", "is empty", "give a branch's name, or leave the key out"),
+    ('lock_ref = ""', "lock_ref", "is empty", "give a git ref, or leave the key out"),
+])
+def test_a_name_left_empty_or_missing_is_refused_with_the_name_it_wants(
+        body, key, problem, fix):
+    error = refusal(project(body))
+    assert (error.key, error.problem, error.fix) == (f"projects.proj-a.{key}", problem, fix)
 
 
 # -- each project table the check refuses ------------------------------------------------

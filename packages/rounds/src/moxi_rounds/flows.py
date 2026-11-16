@@ -192,10 +192,14 @@ def _check_entry(file, key, entry) -> str:
                     f"remove it; {name!r} takes {_listed(allowed)}")
     else:
         _check_user_step(file, key, name, entry)
-    for text in ("by", "model", "recheck_model"):
-        if text in entry and (not isinstance(entry[text], str) or not entry[text]):
-            raise ConfigError(file, f"{key}.{text}", "is not a name",
-                              "give it as a string, or leave the key out")
+    for text, what in (("by", "the name of who does it"), ("model", "a tier's name"),
+                       ("recheck_model", "a tier's name")):
+        value = entry.get(text)
+        if text in entry and (not isinstance(value, str) or not value):
+            raise ConfigError(
+                file, f"{key}.{text}",
+                "is empty" if value == "" else f"is {kind_of(value)}, not a name",
+                f"give {what}, or leave the key out")
     if "reads" in entry and not _strings(entry["reads"]):
         raise ConfigError(file, f"{key}.reads", "is not a list of strings",
                           "give each line to read as a string")
