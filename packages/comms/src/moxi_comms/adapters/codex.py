@@ -650,6 +650,8 @@ class CodexAdapter(HarnessAdapter):
         self.log.info("%s", headless_mod.end_line(headless_mod.HOST_ENDED, waiting))
 
     def stop_before_unbind(self) -> None:
+        # The exit watch's thread waits on this between ticks: it sees the stop now.
+        self._headless_wake.set()
         stops, self._stops = self._stops, None
         watch, self._watch_handle = self._watch_handle, None
         for thing in (stops, watch):

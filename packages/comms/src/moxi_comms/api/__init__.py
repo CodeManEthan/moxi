@@ -39,6 +39,14 @@ outside comms.
   harnesses whose comms wrapper ends the launch with exit 75 (`moxi.exit.TEMPFAIL`) when
   its bind isn't answered in the wrapper's wait, and never starts the harness without
   the name. A comms without it has wrappers that start the harness anyway.
+* `HEADLESS`: a frozenset of harness names, `{"codex"}`: the harnesses whose comms
+  wrapper takes `--headless`, `--exit WHEN` and `--brief`/`--brief-file`, a session with
+  no window that holds its name and ends by its exit rule. A comms without it has no
+  headless launch.
+* `parse_exit(values, *, harness)`: the one parser of a headless launch's exit rule (the
+  `--exit` values, in order); raises `ValueError` with the wrapper's words for a value
+  the wrapper would refuse. Its `cold_gap` says whether the rule warns that mail sent
+  once the cache is cold waits for the name's next holder.
 * `BIND_WAIT`: the longest a wrapper the launcher starts (Claude's or Codex's) waits for
   its bind, in seconds, read from the wrappers' own waits.
 * `DaemonError`, `DaemonOffline`: what a read raises when the daemon refuses or is down.
@@ -65,6 +73,7 @@ from .. import sending as _sending
 from .. import wire as _wire
 from ..adapters import codex_wrapper as _codex_wrapper
 from ..adapters import session as _claude_wrapper
+from ..adapters.headless import parse_exit
 from ..claimhold import ClaimServer
 from ..client import DaemonError, DaemonOffline
 from ..constants import (BACKEND_ENV, CLAIM_SOCKET_ENV, COMMAND_ENV, DIRECTORS_ENV,
@@ -84,6 +93,9 @@ CODEX_RESUME = True
 #: The harnesses whose comms wrapper ends the launch, exit 75, when its bind isn't
 #: answered in its wait: neither starts its harness under a name it doesn't hold.
 ENDS_ON_BIND_TIMEOUT = frozenset({"claude", "codex"})
+
+#: The harnesses whose comms wrapper takes --headless, --exit and --brief.
+HEADLESS = frozenset({"codex"})
 
 #: The longest the Claude and Codex wrappers wait for their bind, in seconds.
 BIND_WAIT = max(_claude_wrapper.READY_WAIT, _codex_wrapper.READY_WAIT)
@@ -645,7 +657,7 @@ def daemon_socket() -> Path:
 __all__ = [
     "INTERFACE", "send", "send_as", "check", "delete", "DeleteResult", "Sender", "SendResult",
     "Recipient", "Refusal", "CODEX_RESUME", "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT",
-    "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
+    "HEADLESS", "parse_exit", "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
     "Standing", "Waiting", "Owner", "roster_rows", "RosterRow", "CacheFact",
     "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",

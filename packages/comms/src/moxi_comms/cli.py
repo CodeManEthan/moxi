@@ -18,6 +18,7 @@
     moxi comms cache [<name> | <session-id>] ...   (the policy's cache callers only)
     moxi comms doctor
     moxi comms migrate [--dry-run]
+    moxi comms exit-session <name> [--scope S | --global] [--wait-s 30]
 
 The fence the verbs keep: nothing agent-facing reaches the provisioner credential, and
 the verbs that ACT stay four (`send`, `reply`, `agents`, `history`).
@@ -48,6 +49,11 @@ comms' five directories under Moxi's roots (`moxi.paths`), the config file, the 
 and where it came from, the secrets chain, the adapter binaries
 on PATH and whether the daemon answers. It writes nothing, posts nothing, and exits 0
 unless the daemon is configured (a config file or `MOXI_COMMS_BACKEND`) and down.
+
+`exit-session` ends a headless session (`moxi comms codex --headless`) by its name: it
+finds the live claim file that holds the name and asks that adapter's claim socket to
+`end` the session, then waits for the name to be released. It refuses a name nobody
+holds and a session with a person in it. It posts nothing and reaches no credential.
 
 Send boundary, enforced here:
   * an unbound EPHEMERAL name is an honest error at the verb -- a retired agent-N is
@@ -1150,6 +1156,18 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
 
     wh = sub.add_parser("whoami", help="what comms identity this session holds")
     wh.set_defaults(func=cmd_whoami)
+
+    ex = sub.add_parser("exit-session", help="end a headless session by its name")
+    ex.add_argument("name", help="the session's comms name, bare; the scope goes in "
+                                 "--scope or --global (the global identity by default)")
+    where = ex.add_mutually_exclusive_group()
+    where.add_argument("--scope", metavar="S", help="the name's scope")
+    where.add_argument("--global", dest="global_", action="store_true",
+                       help="the global identity (the default)")
+    ex.add_argument("--wait-s", dest="wait_s", type=float, default=30.0, metavar="S",
+                    help="how long to wait for the name to be released, in seconds "
+                         "(default 30)")
+    ex.set_defaults(func=cmd_exit_session)
     sub.metavar = ("{" + ",".join(verb for verb in sub.choices if verb not in UNLISTED_VERBS)
                    + "}")
     return ap
@@ -1159,6 +1177,68 @@ def cmd_whoami(args, ctx: Context) -> int:
     """What comms identity this session holds, read from its claim, or why it holds
     none. Reads the claim socket and nothing else."""
     return claimhold.whoami(ctx.env, say=ctx.say)
+
+
+#: How often `exit-session` reads the claim files while it waits for the name to go.
+EXIT_SESSION_POLL_S = 0.2
+
+
+def _holding(qualified: str, env) -> dict | None:
+    """The live claim record that holds `qualified`, or None."""
+    for _key, record in claimfile.all_records(env):
+        if claimfile.held_identity(record) == qualified and claimfile.is_live(record):
+            return record
+    return None
+
+
+def cmd_exit_session(args, ctx: Context) -> int:
+    """End a headless session by its name: ask its adapter's claim socket to `end` it,
+    then wait up to `--wait-s` for the name to leave the claim files.
+
+    Refused, exit `REFUSED`, when no live claim holds the name, or when the claim that
+    holds it is not a headless session's (a session with a person is exited where it
+    runs). Exit `OK` once the name has gone, `ERROR` when the socket did not answer or
+    the wait ran out. It posts nothing and reaches no credential."""
+    from .scoping import GLOBAL, NAME_RE, qualify
+
+    if "@" in args.name:
+        ctx.say(f"{args.name}: give the bare name; the scope goes in --scope or --global")
+        return moxi_exit.USAGE
+    if not NAME_RE.match(args.name) or (args.scope is not None
+                                        and not NAME_RE.match(args.scope)):
+        ctx.say(f"{args.name}{'@' + args.scope if args.scope else ''} is not a comms name")
+        return moxi_exit.USAGE
+    if args.wait_s < 0:
+        ctx.say("--wait-s is a number of seconds, 0 or more")
+        return moxi_exit.USAGE
+    who = qualify(args.name, args.scope or GLOBAL)
+    record = _holding(who, ctx.env)
+    if record is None:
+        ctx.say(f"{who} is not held")
+        return moxi_exit.REFUSED
+    if (record.get("claim") or {}).get("headless") is not True:
+        ctx.say(f"{who} is not a headless session; exit it where it runs")
+        return moxi_exit.REFUSED
+    try:
+        answer = claimhold.call(record.get("socket") or "", "end")
+    except (claimhold.ClaimUnreachable, claimhold.AdapterMismatch) as exc:
+        ctx.say(f"{who}: its adapter did not answer: {exc}")
+        return moxi_exit.ERROR
+    if not answer.get("ok"):
+        if answer.get("not_headless"):
+            ctx.say(f"{who} is not a headless session; exit it where it runs")
+            return moxi_exit.REFUSED
+        ctx.say(f"{who}: its adapter refused to end it: {answer.get('error') or answer}")
+        return moxi_exit.ERROR
+    deadline = time.monotonic() + args.wait_s
+    while _holding(who, ctx.env) is not None:
+        if time.monotonic() >= deadline:
+            ctx.say(f"{who} is ending but still held after {args.wait_s:g}s; its adapter's "
+                    "log says why")
+            return moxi_exit.ERROR
+        time.sleep(EXIT_SESSION_POLL_S)
+    ctx.say(f"{who} has ended")
+    return moxi_exit.OK
 
 
 #: Verbs that parse and run but no help list names: `moxi comms --help` leaves them out of
