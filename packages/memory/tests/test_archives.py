@@ -378,8 +378,56 @@ def test_an_empty_archive_answers_only_when_memory_read_nothing_from_it(arch):
     shutil.rmtree(t.path.parent)                               # the mount point, left empty
     report = run("rebuild")
     rec = recorded()[str(arch / "claude")]
-    assert rec.why == roots.EMPTY and "lists nothing" in rec.reason
+    assert rec.why == roots.EMPTY
+    assert rec.reason.startswith("lists nothing, though memory read 1 source from it and "
+                                 "it held entries at ")
     assert report.kept == 1 and "on the disk" in texts()
+
+
+def test_an_archive_whose_copies_were_all_shadowed_keeps_them_once_left_empty(arch):
+    live = claude(ONE)
+    live.user("read from the live root")
+    live.write()
+    t = in_archive(arch, ONE, "the archive's copy")
+    run()
+    assert "read from the live root" in texts() and "the archive's copy" not in texts()
+    os.remove(live.path)                             # the harness's cleanup
+    shutil.rmtree(t.path.parent)                     # the mount point, left empty
+    report = run("rebuild")
+    assert report.dropped == 0 and "read from the live root" in texts()
+    assert table.row(state.connect(), "claude", ONE) is not None
+    rec = recorded()[str(arch / "claude")]
+    assert rec.why == roots.EMPTY and rec.held_entries_at is not None
+    assert rec.reason.startswith("lists nothing, though it held entries at ")
+    row = {r.name: r for r in doctor.rows()}["folders"]
+    assert "though it held entries at" in row.detail and doctor.EMPTIED_FIX in row.fix
+    report = run("rebuild")                          # and the next rebuild still keeps it
+    assert report.dropped == 0 and "read from the live root" in texts()
+    assert recorded()[str(arch / "claude")].why == roots.EMPTY
+
+
+def test_an_archive_seen_holding_entries_in_a_run_it_failed_is_not_answered_once_empty(
+        arch):
+    live = claude(ONE)
+    live.user("read from the live root")
+    live.write()
+    t = in_archive(arch, ONE, "the archive's copy")
+    locked = arch / "claude" / "locked"
+    locked.mkdir()
+    os.chmod(locked, 0)
+    try:
+        run()
+    finally:
+        os.chmod(locked, 0o755)
+    rec = recorded()[str(arch / "claude")]
+    assert rec.why == roots.FAILED and rec.held_entries_at is not None
+    assert rec.held_entries_at == rec.last_walk_at   # its own field, set by that run
+    os.remove(live.path)
+    shutil.rmtree(t.path.parent)
+    locked.rmdir()
+    report = run("rebuild")
+    assert report.dropped == 0 and "read from the live root" in texts()
+    assert recorded()[str(arch / "claude")].why == roots.EMPTY
 
 
 def test_the_test_before_the_decision_sees_a_mount_point_left_empty(arch, monkeypatch):

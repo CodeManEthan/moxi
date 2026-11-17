@@ -9,9 +9,19 @@ child) records, for each folder it lists, one `Root` under the meta key
 in the run succeeded, and it still answered when tested again just before the run's
 decision.** What a folder that didn't answer records is why: `offline` (it didn't answer
 the test, or its live root couldn't be listed), `failed` (an error at any depth during the
-run, with the first error's path and the count), or `empty` (it lists nothing, though
-memory read sources from under it: a disk that isn't mounted can leave its mount point an
-empty directory). `since_at` is when it stopped answering.
+run, with the first error's path and the count), or `empty`. `since_at` is when it
+stopped answering.
+
+**Empty, once seen holding anything, doesn't answer.** A folder whose top level lists
+nothing, or a live root that isn't there, didn't answer when memory read sources from
+under it ("lists nothing, though memory read N sources from it") or when a listing once
+showed its top level holding an entry ("lists nothing, though it held entries at <time>"),
+since a disk that isn't mounted can leave its mount point an empty directory. An archive's
+copies are mostly shadowed, copied out before the harness's cleanup and read from the live
+root, so the second fact is what guards it. `held_entries_at` records it: the start of the
+last run whose listing showed the top level holding an entry, shadowed sources included,
+whether or not that run answered. Its time is its own; the last walk never moves for it.
+A user who empties an archive on purpose takes it off sessions' config.
 
 **The last walk.** A walk lists a folder from its `last_walk_at`, or whole when it has
 never been listed whole. A folder that answered moves its last walk to the walk's start.
@@ -23,7 +33,9 @@ anything. A folder that was offline or empty keeps its last walk.
 `missed_rebuild_at` is the start of the last rebuild the folder didn't answer: that
 rebuild's tier rules, sizes, sets and labels haven't reached the sessions it kept, and only
 a rebuild that reads them does. `in_config` is false for a folder a walk found no longer
-in sessions' config; its record stays until the next rebuild, which leaves it out.
+in sessions' config; its record stays until the next rebuild, which leaves it out. A run
+that sees no entry at the top level keeps `held_entries_at` as it was; a rebuild carries it
+from the generation it replaces.
 
 Nothing here reads a transcript or asks sessions anything.
 """
@@ -60,6 +72,7 @@ class Root:
     listed_whole: bool = False
     retry: tuple[str, ...] = field(default_factory=tuple)
     missed_rebuild_at: float | None = None
+    held_entries_at: float | None = None
 
     def to_json(self) -> dict[str, Any]:
         out = asdict(self)

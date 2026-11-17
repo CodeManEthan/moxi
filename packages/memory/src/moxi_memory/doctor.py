@@ -13,8 +13,8 @@
   `record ingest`, not this one.
 - folders: each folder of each harness as the last run found it, from the index's
   `meta`, testing none itself. `warn` for one that didn't answer (since when and why:
-  offline, failed during the run with its first error's path, or lists nothing), for an
-  archive folder never listed whole, and for each folder walked before that sessions'
+  offline, failed during the run with its first error's path, or lists nothing with which
+  fact holds), for an archive folder never listed whole, and for each folder walked before that sessions'
   config no longer names.
 - sets: memory's redaction sets load in secrets. `fail` when one can't run: every child
   stops on it.
@@ -178,6 +178,9 @@ def _ingest(harnesses) -> Row:
 #: The fix for a folder that didn't answer, or was never listed whole.
 ANSWER_FIX = ("make it answer, or take it off sessions' config; its sessions then leave at "
               "the next `moxi memory reindex`")
+#: The fix for an archive folder that lists nothing, though seen holding something.
+EMPTIED_FIX = ("an archive folder emptied on purpose: take it off sessions' config, and its "
+               "sessions leave at the next `moxi memory reindex`")
 #: The fix for a folder walked before that sessions' config no longer names.
 REMOVED_FIX = "put it back in sessions' config, or let them go"
 
@@ -204,6 +207,9 @@ def _roots_row(harnesses) -> Row:
            if not r.answered or (r.is_archive and not r.listed_whole)
            or r.missed_rebuild_at is not None):
         fixes.append(ANSWER_FIX)
+    if any(r.in_config and r.is_archive and not r.answered and r.why == roots.EMPTY
+           for recs in records.values() for r in recs):
+        fixes.append(EMPTIED_FIX)
     if any(not r.in_config for recs in records.values() for r in recs):
         fixes.append(f"for a folder no longer named: {REMOVED_FIX}")
     return Row(MODULE, "folders", "warn", "; ".join(lines), "; ".join(fixes) or None)

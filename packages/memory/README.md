@@ -250,11 +250,17 @@ A folder can be offline (an unplugged disk, a network mount that doesn't answer)
 offline is not gone. A folder **answered** a walk or a rebuild only when it was listed at
 the start, nothing in it failed at any depth (a directory that can't be listed, a file
 that can't be read, a file listed and then gone), and it still answered when sessions
-tested it again just before the run's decision. A folder whose top level lists nothing,
-while memory has read sessions from it, didn't answer: an unmounted disk can leave its
-mount point an empty directory. A root that doesn't exist answers when memory never read
-from it. Each folder's answer, why it didn't answer, since when and its first error are
-kept in the index, and `status`, `reindex` and the doctor's `folders` row show them.
+tested it again just before the run's decision. A folder whose top level lists nothing
+didn't answer while memory has read sessions from it ("lists nothing, though memory read
+N sources from it"), or once any listing showed it holding an entry, a session another
+folder shadows included ("lists nothing, though it held entries at <time>"): an unmounted
+disk can leave its mount point an empty directory, and an archive's copies are mostly
+shadowed, since they were copied out before the harness's cleanup and memory read them
+from the live root. A folder never seen holding anything answers, and so does a root that
+doesn't exist, was never read from and was never seen holding an entry. If you empty an
+archive folder on purpose, take it off sessions' config. Each folder's answer, why it
+didn't answer, since when and its first error are kept in the index, and `status`,
+`reindex` and the doctor's `folders` row show them.
 
 A folder that answered moves its last walk to the walk's start. One that failed during a
 walk moves it too and keeps the paths that failed, which the next walk reads again by
@@ -470,7 +476,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 |---|---|---|
 | `index` | the generation, schema, tokenizer and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped or kept sessions | `warn` with no index yet, or when a rebuild was killed before it finished and none has finished since; `fail` when it can't be read (fix for each: `moxi memory reindex`) |
 | `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read; a request waiting behind a running rebuild, or for less than ten minutes | `warn` with no index yet (fix: `moxi memory reindex`), for a harness root that has no walk yet, for compressed Codex sessions not read, or for a request waiting ten minutes or more with no rebuild running (fix: `moxi memory ingest`, whose child starts it when it ends) |
-| `folders` | each folder of each harness as the last run found it, from the index; it tests none itself | `off` with no index; `warn` for a folder that didn't answer the last run (since when and why: offline, failed during the run with its first error's path, or lists nothing), an archive folder never listed whole, or one the last rebuild didn't read (fix: make it answer, or take it off sessions' config; its sessions then leave at the next `moxi memory reindex`), and for a folder walked before that sessions' config no longer names, whose sessions leave at the next rebuild unless another folder holds them (fix: put it back in sessions' config, or let them go) |
+| `folders` | each folder of each harness as the last run found it, from the index; it tests none itself | `off` with no index; `warn` for a folder that didn't answer the last run (since when and why: offline, failed during the run with its first error's path, or lists nothing, with which of the two facts holds: the sources memory read from it, or when a listing last showed it holding an entry), an archive folder never listed whole, or one the last rebuild didn't read (fix: make it answer, or take it off sessions' config; its sessions then leave at the next `moxi memory reindex`; for an archive folder that lists nothing, take it off sessions' config if you emptied it on purpose), and for a folder walked before that sessions' config no longer names, whose sessions leave at the next rebuild unless another folder holds them (fix: put it back in sessions' config, or let them go) |
 | `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have (fix: the `moxi config` line that removes it) or can't run, which stops every ingest; `off` when memory's config can't be read |
 | `start` | memory is on turns' start list for each harness it reads, and its listener rows import | `warn` when it is off the list; `fail` when a row doesn't import |
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |

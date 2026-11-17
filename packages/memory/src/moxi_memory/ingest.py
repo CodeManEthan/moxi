@@ -50,8 +50,9 @@ reuse keys changed. A folder answered the run only when the run listed it, nothi
 failed at any depth (a listing's `unreadable`, a read that raised, a `find` probe that
 couldn't read it), and it still answered when tested again just before the run's decision
 (`archive_answers(..., fresh=True)` for an archive folder, the top level listed again for
-a live root). A folder whose top level lists nothing while memory read sources from under
-it didn't answer. Each folder's answer goes into the index's `meta` (`moxi_memory.roots`).
+a live root). A folder whose top level lists nothing didn't answer while memory read
+sources from under it, or once a listing showed it holding an entry, in any run, answered
+or not. Each folder's answer goes into the index's `meta` (`moxi_memory.roots`).
 A climb from a subagent to its main session asks only the folders that answered the run's
 start, so it waits on no archive folder. A turn's or `gone`'s read of one session asks
 the live root only. The first full read finishes once every live root has been listed
@@ -160,6 +161,8 @@ class Seen:
     offline: str | None = None
     empty: str | None = None
     errors: dict[str, str] = field(default_factory=dict)
+    #: A listing in this run showed its top level holding an entry.
+    held_entries: bool = False
 
     @property
     def answered(self) -> bool:
@@ -574,6 +577,7 @@ class Ingest:
         api = _api()
         records = roots.read(self.prior, harness) if self.prior is not None else []
         self.records[harness] = records
+        held_at = {r.path: r.held_entries_at for r in records}
         retry = {r.path: r.retry for r in records}
         began = time.time()
         self.began[harness] = began
@@ -601,19 +605,19 @@ class Ingest:
                                             and not os.path.lexists(listing.root))
                 if absent and not listing.is_archive:
                     seen.absent = True
-                    n = roots.held(self.prior, harness, listing.root)
-                    if n:
-                        seen.empty = _lists_nothing(n)
-                    else:
+                    seen.empty = _lists_nothing(roots.held(self.prior, harness, listing.root),
+                                                held_at.get(listing.root))
+                    if seen.empty is None:
                         seen.listed = True  # no live root: it holds nothing
                 else:
                     seen.offline = listing.reason or "it can't be listed"
                 continue
             seen.listed = True
             if listing.empty:
-                n = roots.held(self.prior, harness, listing.root)
-                if n:
-                    seen.empty = _lists_nothing(n)
+                seen.empty = _lists_nothing(roots.held(self.prior, harness, listing.root),
+                                            held_at.get(listing.root))
+            else:
+                seen.held_entries = True
             for rel, why in listing.unreadable:
                 seen.errors.setdefault(os.path.join(listing.root, rel), why)
             for entry in listing:
@@ -695,7 +699,8 @@ class Ingest:
         """The test just before the run's decision: every archive folder that has answered
         so far is tested again by sessions, taking no kept answer (all at once, one wait),
         and each live root's top level is listed again. A folder that fails then, or that
-        lists nothing though memory read from it, didn't answer the run."""
+        lists nothing though memory read from it or a listing once showed it holding an
+        entry (this run's included), didn't answer the run."""
         api = _api()
         archive_dirs = [s.path for run in self.run.values() for s in run.values()
                         if s.is_archive and s.answered]
@@ -723,9 +728,13 @@ class Ingest:
                         s.offline = f"couldn't be listed at the test before the decision: {reason}"
                         continue
                 if top in ("absent", "empty"):
-                    n = roots.held(self.prior, harness, s.path)
-                    if n:
-                        s.empty = _lists_nothing(n)
+                    prev = next((r.held_entries_at for r in self.records.get(harness, [])
+                                 if r.path == s.path), None)
+                    s.empty = _lists_nothing(
+                        roots.held(self.prior, harness, s.path),
+                        self.began[harness] if s.held_entries else prev)
+                else:
+                    s.held_entries = True
 
     def harness_answered(self, harness: str) -> bool:
         """Whether every folder of `harness` answered this run."""
@@ -757,6 +766,8 @@ class Ingest:
             for path, s in self.run.get(harness, {}).items():
                 prev = old.pop(path, None)
                 rec = self._carried(path, prev, is_archive=s.is_archive)
+                if s.held_entries:          # answered or not; the last walk is apart
+                    rec.held_entries_at = self.began[harness]
                 failed = bool(s.errors) and s.offline is None and s.empty is None
                 if (s.answered or failed) and not s.absent:
                     # a live root that isn't there keeps no last walk, so it is listed
@@ -800,14 +811,15 @@ class Ingest:
                  is_archive: bool | None = None) -> roots.Root:
         """A new record of `path` for this run, not answered, carrying from `prev` what
         a run that didn't read the folder keeps: its last walk, whether it was listed
-        whole (a rebuild starts a live root's afresh), since when it hasn't answered, and
-        the last rebuild it missed."""
+        whole (a rebuild starts a live root's afresh), since when it hasn't answered, the
+        last rebuild it missed, and when a listing last showed it holding an entry."""
         archive = prev.is_archive if is_archive is None and prev else bool(is_archive)
         rec = roots.Root(path, is_archive=archive, run_at=self.started)
         if prev is not None:
             rec.last_walk_at = prev.last_walk_at
             rec.listed_whole = prev.listed_whole and (archive or not self.rebuilding)
             rec.missed_rebuild_at = prev.missed_rebuild_at
+            rec.held_entries_at = prev.held_entries_at
             if not prev.answered and prev.since_at:
                 rec.since_at = prev.since_at
         if rec.since_at is None:
@@ -912,8 +924,18 @@ class Ingest:
         return bool(rows_out or tails_out or srcs)
 
 
-def _lists_nothing(n: int) -> str:
-    return f"lists nothing, though memory read {n} source{'' if n == 1 else 's'} from it"
+def _lists_nothing(n: int, held_at: float | None) -> str | None:
+    """Why a folder that lists nothing didn't answer, naming each fact that holds: `n`
+    sources memory read from under it, and when a listing last showed it holding an entry.
+    None when neither holds: a folder never seen holding anything answers."""
+    from .clock import show
+
+    said = []
+    if n:
+        said.append(f"memory read {n} source{'' if n == 1 else 's'} from it")
+    if held_at is not None:
+        said.append(f"it held entries at {show(held_at)}")
+    return f"lists nothing, though {' and '.join(said)}" if said else None
 
 
 def _top_now(path: str) -> tuple[str, str | None]:
