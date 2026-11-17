@@ -16309,3 +16309,33 @@ usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--date", 
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--out", type=Path, default=DATA / "models.json")	keep	type	type
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("--url", default=URL, help="where the copy was fetched from")	keep	help	help
 usage	packages/usage/tools/models_from_litellm.py	parser.add_argument("litellm", type=Path, help="a copy of LiteLLM's price file")	keep	type	type
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	except ImportError:                     # Windows: `show` reads the numbers below there	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	if any(part in ("", ".", "..") for part in parts):	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	target.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	make(part)	keep	auto	auto
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	make(part)	keep	start	start
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	if rel not in dirs and not any(where.iterdir()):	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	tree.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	code = proc.wait(timeout=RUN_BOUND_S)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	reader.join(timeout=5)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	proc.wait(timeout=KILL_GRACE_S)	keep	timeout	timeout
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	ticks.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	help="write the source's stamp when it doesn't name main's commit, "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	help="a hand tick: lock, tree and a run that isn't --scheduled; "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	parser.add_argument("--slack", type=float, metavar="F",	keep	type	type
+moxi-dev	packages/moxi-dev/src/moxi_dev/tick.py	help="the hand tick's slack factor (default: the machine's)")	keep	help	help
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	run_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	(source / ".moxi-dev").mkdir(exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	if not kept and any(part in tick.KEPT_NAMES for part in rel.parts):	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	assert set(tracked(tree)) == {".gitignore", "old", "keep"}	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	assert set(tracked(tree)) == {".gitignore", "keep", "late"}	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	where.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	bin_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	self.lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run={"exit": code})	keep	run	run
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run=plan)	keep	run	run
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run={"exit": 1})	keep	run	run
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	clone_run.uv.plan(run={"exit": 0}, take={"exit": 2})	keep	run	run
+moxi-dev	packages/moxi-dev/tests/test_timed_tick.py	assert names and names <= set(sys.stdlib_module_names) | {"__future__"}	keep	set	set
