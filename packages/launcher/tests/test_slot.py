@@ -535,11 +535,11 @@ def test_without_turns_the_brief_is_on_the_slots_argv(work, harness, rig):
     assert got.outcome is None and got.state == "started"
 
 
-def test_a_codex_slot_launch_answers_no_screen_and_says_what_may_be_waiting(work, rig,
-                                                                          monkeypatch):
-    """No Codex screen is declared yet: a Codex slot launch reads no screen, even with the
-    startup settings on, and one whose session never got ready says Codex's trust prompt
-    may be waiting for a person."""
+def test_a_codex_slot_launch_answers_no_screen_and_names_the_slot_when_not_ready(
+        work, rig, monkeypatch):
+    """No Codex screen is declared: a Codex slot launch reads no screen, even with the
+    startup settings on, and one whose session never got ready names its slot. Its folder's
+    trust is settled on its argv, so the line no longer points at Codex's trust prompt."""
     screens_on()
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_DIR"}])
     conn = store.connect()
@@ -566,7 +566,7 @@ def test_a_codex_slot_launch_answers_no_screen_and_says_what_may_be_waiting(work
     assert rig.calls("read_screen") == [] and rig.calls("answer_screen") == []
     assert sent == [4343]  # the pane's pid finds Codex's host
     assert started.exit_code == exits.ERROR
-    assert "folder-trust prompt" in started.line and "slot 1" in started.line
+    assert "folder-trust prompt" not in started.line and "slot 1" in started.line
     assert startup.listed("codex", fake, {"startup.trust_dialog": True,
                                           "startup.dev_channels_dialog": True,
                                           "startup.bypass_warning": True}) == []
@@ -1111,7 +1111,7 @@ def test_the_keys_slots_sent_are_recorded(conn):
     assert event.detail["keys"] == ["Down", "Enter"]
 
 
-def settings_of(trust=False, dev=False, bypass=False) -> dict:
+def settings_of(*, trust=False, dev=False, bypass=False) -> dict:
     return {"startup.trust_dialog": trust, "startup.dev_channels_dialog": dev,
             "startup.bypass_warning": bypass}
 

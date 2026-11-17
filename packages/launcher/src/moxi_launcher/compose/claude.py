@@ -28,6 +28,14 @@ A resume (`Context.resume`) passes `--resume <U>` where `--session-id` goes and 
 `--session-id` to claude, so the session keeps the id it resumes. With comms the wrapper
 still names that same id with its own `--session-id`, which it takes from `--resume`.
 
+**The bypass warning's skip key.** A slot launch in `bypassPermissions` (the mode its
+argv passes) carries `skipDangerousModePermissionPrompt: true` for that launch only, in a
+run file of its own, `<runs>/<request id>.settings.json`, passed as `--settings <file>`
+after the rows. When the launch passes a `--settings` of its own among its extra flags, the
+run file holds those settings with the key added (the user's file is read, never changed),
+and the run file's `--settings` takes the place of the user's, so the argv holds one. A
+terminal or headless launch, or one in another mode, carries no key.
+
 **No positional word follows a flag.** The opening prompt comes right after the command
 (and `-p`), before every flag, and begins with its header line, so no flag placed later
 can take it as a value. `--remote-control`, whose value is optional, goes out as
@@ -126,6 +134,11 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     additions = ctx.additions if (turns and not identity) else None
     extra = [str(token) for token in values.get(catalog.EXTRA) or ()]
     catalog.refuse_passthrough(HARNESS, extra, mode_)
+    settings_file = None
+    if mode_ == "interactive" and common.skip_key_owed(HARNESS, values):
+        settings_file = common.settings_file(ctx.runs_dir, ctx.request_id,
+                                             ctx.user_settings)
+        extra = common.without_settings(extra)
 
     rows = catalog.load(HARNESS).rows
     flags: list[str] = []
@@ -134,6 +147,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
             flags += list(additions.argv) if additions is not None else []
         elif name in fit.applied and not (identity and name in WRAPPER_ROWS):
             flags += rows[name].tokens(mode_, fit.applied[name], cwd=cwd)
+    if settings_file is not None:
+        flags += [catalog.SETTINGS_FLAG, settings_file.path]
     tail = ([prompt] if prompt is not None else []) + flags + extra
 
     if identity:
@@ -163,7 +178,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                        target=str(values.get("target") or "terminal"), argv=tuple(argv),
                        env=env, values=recorded, prompt=prompt, first=first,
                        brief=ctx.brief, prompt_file=prompt_file,
-                       not_applied=fit.not_applied,
+                       settings_file=settings_file, not_applied=fit.not_applied,
                        warnings=tuple(warnings))
 
 

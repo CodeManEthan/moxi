@@ -64,7 +64,7 @@ def test_the_seed_writes_exactly_the_one_key_for_the_git_root(tmp_path, env):
     repo = git_repo(tmp_path / "repo")
     path = write_config(config_of(env))
     got = seed.seed(repo, env)
-    assert (got.outcome, got.folder, got.file) == (seed.SEEDED, str(repo), str(path))
+    assert (got.outcome, got.root_dir, got.file) == (seed.SEEDED, str(repo), str(path))
     after = json.loads(path.read_text())
     want = json.loads(json.dumps(CONFIG))
     want["projects"][str(repo)] = {"hasTrustDialogAccepted": True}
@@ -77,21 +77,21 @@ def test_a_subfolder_is_keyed_by_its_git_root_never_a_parent(tmp_path, env):
     sub.mkdir(parents=True)
     write_config(config_of(env))
     got = seed.seed(sub, env)
-    assert got.folder == str(repo)
+    assert got.root_dir == str(repo)
     keys = set(json.loads(config_of(env).read_text())["projects"])
     assert keys == {"/elsewhere", str(repo)}
 
 
-def test_outside_a_repo_the_folder_itself_is_the_key(tmp_path, env):
+def test_outside_a_repo_the_launch_dir_itself_is_the_key(tmp_path, env):
     plain = tmp_path / "plain" / "inner"
     plain.mkdir(parents=True)
     write_config(config_of(env))
     got = seed.seed(plain, env)
-    assert got.folder == str(plain.resolve())
+    assert got.root_dir == str(plain.resolve())
     assert str(tmp_path / "plain") not in json.loads(config_of(env).read_text())["projects"]
 
 
-def test_a_folder_already_trusted_is_left_as_it_is(tmp_path, env):
+def test_a_root_already_trusted_is_left_as_it_is(tmp_path, env):
     repo = git_repo(tmp_path / "repo")
     doc = {**CONFIG, "projects": {str(repo): {"hasTrustDialogAccepted": True, "x": 1}}}
     path = write_config(config_of(env), doc)
@@ -252,7 +252,7 @@ def launch_config() -> Path:
     return write_config(Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json")
 
 
-def trust_setting(on: bool) -> None:
+def trust_setting(*, on: bool) -> None:
     path = Layout("launcher").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"[startup]\nwait_s = 3\ntrust_dialog = {str(on).lower()}\n",
@@ -363,3 +363,47 @@ def test_a_refused_launch_writes_nothing(tmp_path, harness, rig, launch_config):
     with pytest.raises(Exception):
         api.launch(request(repo, slot="3"))
     assert launch_config.read_bytes() == before
+
+
+# -- what a launch changes in harness config ------------------------------------------------
+
+
+def digest(path: Path) -> tuple[bytes, int]:
+    return path.read_bytes(), path.stat().st_mtime_ns
+
+
+@pytest.mark.parametrize("harness_name", ["claude", "codex"])
+@pytest.mark.parametrize("target", ["terminal", "headless", "slot"])
+def test_a_launch_changes_only_the_trust_key_and_only_in_a_claude_slot_launch(
+        tmp_path, harness, rig, launch_config, monkeypatch, target, harness_name):
+    monkeypatch.setattr(targets, "_execve", lambda *a: None)
+    monkeypatch.setattr(targets, "_spawn", lambda *a, **kw: 99)
+    repo = git_repo(tmp_path / "repo")
+    path = Layout("launcher").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[startup]\nwait_s = 3\ntrust_dialog = true\nbypass_warning = true\n",
+                    encoding="utf-8")
+    claude_settings = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
+    claude_settings.write_text('{"theme": "dark"}\n')
+    codex_config = Path(os.environ["CODEX_HOME"]) / "config.toml"
+    codex_config.parent.mkdir(parents=True, exist_ok=True)
+    codex_config.write_text('model = "gpt-5"\n')
+    kept = {p: digest(p) for p in (claude_settings, codex_config)}
+    before = json.loads(launch_config.read_text())
+    # The fake slots shows the bypass warning and presses through it, writing nothing.
+    rig.plan(frames=[{"screen": "CLAUDE_BYPASS_WARNING"}, {"screen": None}],
+             answers=[{"outcome": "gone"}])
+    typed = {"target": target, "harness": harness_name,
+             **({"brief": "go"} if target == "headless" else {}),
+             **({"permission_mode": "bypassPermissions"} if harness_name == "claude"
+                else {})}
+    api.launch(LaunchRequest(typed=typed, cwd=str(repo), request_id="r1", actor="ann",
+                             session_id=SID if harness_name == "claude" else None,
+                             off_posture=True))
+    assert {p: digest(p) for p in kept} == kept
+    after = json.loads(launch_config.read_text())
+    if harness_name == "claude" and target == "slot":
+        assert after.pop("projects")[str(repo)] == {"hasTrustDialogAccepted": True}
+        assert after == {k: v for k, v in before.items() if k != "projects"}
+    else:
+        assert after == before

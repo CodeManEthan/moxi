@@ -34,6 +34,13 @@ host reads the key as TOML does, so the quoted directory stays one part, dots an
 and its quotes come off. Plain `codex -c` splits a key at every dot and keeps the quotes,
 which is why the other modes trust the directory with an inline table instead.
 
+**The folder's trust** is settled on the argv in every mode (`codex_trust`, read into
+`Context.codex_trust`): `trusted` for the launch folder with `trust_cwd` on, and with it
+off when the user's Codex config gives the folder no level; nothing when it gives one.
+The level goes with the `trust_cwd` row's spelling, and the case and the value passed are
+recorded as the launch's `trust` value, which the preview shows. The launcher
+never writes Codex's config.
+
 comms' wrapper takes its own grammar and nothing past it, so a launch with an identity
 passes no extra flags on: it is refused when it has any (`catalog.WrapperFlags`). The
 wrapper builds the host's `--cwd` from its own directory, so it gets none and is started
@@ -69,6 +76,10 @@ HARNESS = "codex"
 ORDER = ("update_check", "cwd", "model", "sandbox", "approval", "skip_git_check",
          "profile", "search", "add_dir", "config", "trust_cwd")
 HOST_ORDER = ("cwd", "model", "sandbox", "update_check", "add_dir", "config", "trust_cwd")
+#: The row whose spelling passes the folder's trust level.
+TRUST_ROW = "trust_cwd"
+#: The value a Codex launch records its folder's trust under: the case and the level.
+TRUST = "trust"
 
 
 def comms_identity(values: Mapping[str, object], ctx: Context) -> str | None:
@@ -154,11 +165,19 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     not_applied = fit.not_applied
     catalog.refuse_posture_keys(HARNESS, fit.applied.get("config") or (), mode_)
 
+    applied = dict(fit.applied)
+    trust = ctx.codex_trust
+    if trust is not None:
+        if trust.level is not None:
+            applied[TRUST_ROW] = True
+        else:
+            applied.pop(TRUST_ROW, None)
+
     rows = catalog.load(HARNESS).rows
     flags: list[str] = []
     for name in HOST_ORDER if host else ORDER:
-        if name in fit.applied and not (identity and name == "cwd"):
-            flags += rows[name].tokens(mode_, fit.applied[name], cwd=cwd)
+        if name in applied and not (identity and name == "cwd"):
+            flags += rows[name].tokens(mode_, applied[name], cwd=cwd)
     if ctx.resume:
         flags += ["--resume", str(ctx.session_id)]
 
@@ -181,6 +200,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                         granted=common.commands(values),
                         options=ctx.options(values))
     recorded = common.recorded(HARNESS, values, mode_, not_applied)
+    if trust is not None:
+        recorded[TRUST] = trust.recorded()
     common.check_sizes(argv, values=recorded, brief=ctx.brief, env=env, prompt=prompt,
                        is_windows=ctx.windows)
     return Composition(harness=HARNESS, mode=mode_,
@@ -206,4 +227,5 @@ def _resumable(mode_: str, identity: str | None, ctx: Context) -> None:
                      "install moxi-turns with its codex extra, or use codex resume")
 
 
-__all__ = ["HARNESS", "HOST_ORDER", "ORDER", "comms_identity", "compose", "mode"]
+__all__ = ["HARNESS", "HOST_ORDER", "ORDER", "TRUST", "TRUST_ROW", "comms_identity",
+           "compose", "mode"]

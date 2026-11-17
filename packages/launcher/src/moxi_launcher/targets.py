@@ -66,9 +66,10 @@ relaunch held on a screen sends no first turn. Neither a failure nor a flag stop
 session: it stays in its slot for a person to attach to. A session that died during the
 watch fails every kind of launch (`exited`).
 
-**The sweep.** A launch's run files (its run log and its system prompt file) are kept for
-`runs.keep_days` and then removed, and a run log past `LOG_CAP` is cut from the front to
-fit, by the sweep each launch runs before it starts its session. A file whose launch is
+**The sweep.** A launch's run files (its run log, its system prompt file and its
+settings run file) are kept for `runs.keep_days` and then removed, and a run log past
+`LOG_CAP` is cut from the front to fit, by the sweep each launch runs before it starts its
+session. A file whose launch is
 still running is left for a later sweep, since its process is still writing to it.
 """
 
@@ -93,6 +94,7 @@ from moxi.paths import Layout
 
 from . import catalog, first, identity, seed, slots, startup, store
 from .compose import Composition
+from .compose.common import SETTINGS_SUFFIX
 
 log = logging.getLogger("moxi.launcher.targets")
 
@@ -107,7 +109,7 @@ CUT_LINE = "[the launcher cut {size} bytes from the front of this log]\n"
 #: for, which the launch job reads, and deletes when it ends.
 REQUEST_FILE = ".request.json"
 #: The suffixes of a launch's run files, after its request id.
-RUN_FILES = (".log", ".prompt.md", REQUEST_FILE)
+RUN_FILES = (".log", ".prompt.md", SETTINGS_SUFFIX, REQUEST_FILE)
 #: Reasons a row ends `failed` with when a start fails outright (exit 1).
 SPAWN_FAILED = "spawn-failed"
 NO_DELIVERER = "no-deliverer"
@@ -562,9 +564,6 @@ class Slot(Target):
         elif not is_ready and not _came_ready(ready, _number(current, "ready.wait_s")):
             why = ("not ready: a screen or dialog the launcher does not know may be "
                    f"waiting; attach to slot {slot}")
-            if launch.composition.harness == "codex":
-                why += (". Codex may be waiting on its folder-trust prompt: answer it "
-                        "there, or launch with trust_cwd on")
             rows = _rows(api, slot, screens)
             if relaunch:
                 return _flag(conn, rid, first.NO_READY, why,
@@ -579,9 +578,6 @@ class Slot(Target):
                            slot=str(slot), line=here)
         outcome = first.send(conn, rid, pid=pid, turns=turns)
         line = f"{here}; {outcome.line()}"
-        if outcome.outcome == "no-ready" and launch.composition.harness == "codex":
-            line += (f". Codex may be waiting on its folder-trust prompt: attach to slot "
-                     f"{slot} to answer it, or launch with trust_cwd on")
         now = store.get(conn, rid)
         return Started(now.state if now else "started", outcome.exit_code,
                        now.reason if now else outcome.reason, pid, pane_id, str(slot),
@@ -976,7 +972,7 @@ def _seed(conn: sqlite3.Connection, request_id: str, launch: Launch,
         return notes
     seeded = seed.seed(launch.cwd, launch.env)
     store.add_event(conn, seed.EVENT, seeded.detail(), request_id=request_id)
-    trust = {"folder": seeded.folder, "file": seeded.file, "seed": seeded.outcome}
+    trust = {"folder": seeded.root_dir, "file": seeded.file, "seed": seeded.outcome}
     if seeded.written:
         trust["seed_missed"] = True
     notes["CLAUDE_TRUST_DIR"] = trust

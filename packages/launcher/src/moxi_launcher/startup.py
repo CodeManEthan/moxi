@@ -53,10 +53,8 @@ the one word the loop reads in it. Any slots error from a read or an answer (its
 not answering, tmux failing, the slot gone from its registry) stops the watch, and the
 ready wait decides.
 
-No Codex screen is declared yet, so a Codex slot launch watches none: a folder Codex has
-not trusted may show Codex's own trust prompt, which waits for a person who attaches, and a
-launch whose session is not ready in time then ends `no-ready`. The `trust_cwd` row trusts
-the launch's folder for that launch only.
+No Codex screen is declared, so a Codex slot launch watches none. Its folder's trust is
+settled on its own argv (`codex_trust`), so Codex's trust screen does not show.
 
 `setup` is the launcher's `SETUP`, which `moxi install launcher` runs: when slots is
 installed it asks the three `startup.*` questions, each once (a key set in the launcher's

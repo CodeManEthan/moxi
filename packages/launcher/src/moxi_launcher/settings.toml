@@ -84,10 +84,10 @@ unit = "seconds"
 [runs.keep_days]
 type = "int"
 default = 30
-doc = "How many days a launch's run files (its prompt file and headless log) are kept."
+doc = "How many days a launch's run files (its prompt file, settings file and headless log) are kept."
 read = "use"
 label = "Keep run files for"
-line = "A launch's prompt file and headless log."
+line = "A launch's prompt file, settings file and headless log."
 common = true
 unit = "days"
 

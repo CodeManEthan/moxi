@@ -683,7 +683,8 @@ def _actor(request, caller: Mapping[str, str]) -> str:
 
 def _make_files(composition: Composition, env: Mapping[str, str] | None = None,
                 handoff_key: str | None = None) -> None:
-    """What a launch makes before its start: Claude's system prompt file, a scratch
+    """What a launch makes before its start: Claude's system prompt file and settings run
+    file, a scratch
     launch's directory (0700, never removed by the launcher), and the handoff folder its
     identity block names when it has a handoff key. The scratch folder's parent is made
     private first, which refuses one that is a link or another user's, in case one turned
@@ -699,6 +700,8 @@ def _make_files(composition: Composition, env: Mapping[str, str] | None = None,
                         env=env)
     if composition.prompt_file is not None:
         common.write_prompt(composition.prompt_file)
+    if composition.settings_file is not None:
+        common.write_settings(composition.settings_file)
 
 
 def open_hold(request_id: str, name: str, *,

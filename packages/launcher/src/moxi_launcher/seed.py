@@ -58,10 +58,10 @@ GIT_WAIT_S = 5.0
 
 @dataclass(frozen=True)
 class Seeded:
-    """What one seed did: the folder it keyed (`folder`), the file (`file`) and the
+    """What one seed did: the folder it keyed (`root_dir`), the file (`file`) and the
     outcome."""
 
-    folder: str
+    root_dir: str
     file: str
     outcome: str
 
@@ -70,7 +70,7 @@ class Seeded:
         return self.outcome == SEEDED
 
     def detail(self) -> dict:
-        return {"folder": self.folder, "file": self.file, "outcome": self.outcome}
+        return {"folder": self.root_dir, "file": self.file, "outcome": self.outcome}
 
 
 class _Changed(Exception):
@@ -111,10 +111,10 @@ def settings_file(env: Mapping[str, str]) -> Path:
     return base / "settings.json"
 
 
-def trust_root(folder: str | os.PathLike) -> Path:
-    """The folder Claude Code keys `folder`'s trust by: its git root, else itself,
+def trust_root(cwd: str | os.PathLike) -> Path:
+    """The folder Claude Code keys `cwd`'s trust by: its git root, else itself,
     resolved."""
-    here = Path(folder).resolve()
+    here = Path(cwd).resolve()
     try:
         found = subprocess.run(["git", "-C", str(here), "rev-parse", "--show-toplevel"],
                                capture_output=True, text=True, timeout=GIT_WAIT_S,
@@ -127,12 +127,13 @@ def trust_root(folder: str | os.PathLike) -> Path:
     return Path(top).resolve()
 
 
-def seed(folder: str | os.PathLike, env: Mapping[str, str], *,
+def seed(cwd: str | os.PathLike, env: Mapping[str, str], *,
          between: Callable[[Path], None] | None = None) -> Seeded:
-    """Mark `folder`'s trust root trusted in Claude Code's config file for a session with
+    """Mark `cwd`'s trust root trusted in Claude Code's config file for a session with
     environment `env`; see the module's text for the rule. `between` is called with the
-    file's path just before the second look at it: a test's stand-in for a session writing the file meanwhile."""
-    root = trust_root(folder)
+    file's path just before the second look at it: a test's stand-in for a session
+    writing the file meanwhile."""
+    root = trust_root(cwd)
     path = config_file(env)
     done = _done(root, path)
     try:

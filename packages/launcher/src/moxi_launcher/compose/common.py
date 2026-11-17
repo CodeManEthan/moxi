@@ -27,7 +27,7 @@ import re
 import stat
 import subprocess
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -35,6 +35,7 @@ from types import MappingProxyType
 from moxi import files, modules, names, paths
 
 from .. import catalog, store
+from ..codex_trust import Trust
 from ..listeners import RELAUNCH_ENV, REQUEST_ENV
 
 #: The first line of the identity block.
@@ -247,8 +248,12 @@ class Context:
     texts the launch read: the brief (inline or from its file), the handoff file's text and
     the seat's instructions (inline or from their file). `handoff_dir` is the folder the
     identity block names, None without a handoff key; `role_found` is False when the
-    `agent` role was asked for and did not resolve. `runs_dir` holds the system prompt
-    file. `moxi` is the command comms' wrappers run under; `host` turns' Codex host, None
+    `agent` role was asked for and did not resolve. `user_settings` are the settings the
+    launch's own `--settings` gives, read only for a launch that carries the bypass
+    warning's skip key (`skip_key_owed`). `codex_trust` is how a Codex launch settles its
+    folder's trust (`codex_trust.Trust`), None to pass only what the `trust_cwd` row
+    gives. `runs_dir` holds the system prompt file and the
+    settings run file. `moxi` is the command comms' wrappers run under; `host` turns' Codex host, None
     when it is not installed. `comms_codex` and `comms_headless` say whether comms takes
     its Codex wrapper's per-launch settings and its headless flags, and
     `comms_codex_resume` whether that wrapper resumes a thread it is told to (read only
@@ -277,6 +282,8 @@ class Context:
     handoff_dir: str | None = None
     role_found: bool | None = None
     additions: Additions | None = None
+    user_settings: Mapping[str, object] | None = None
+    codex_trust: Trust | None = None
     runs_dir: str = ""
     moxi: str = "moxi"
     host: str | None = None
@@ -309,6 +316,15 @@ class PromptFile:
 
 
 @dataclass(frozen=True)
+class SettingsFile:
+    """The settings file a Claude launch passes with `--settings`: where it goes and what it
+    holds."""
+
+    path: str
+    text: str
+
+
+@dataclass(frozen=True)
 class Composition:
     """One composed launch.
 
@@ -319,8 +335,9 @@ class Composition:
     `brief` is the brief's text as the launch read it (inline or from its file), which the
     launch log keeps for the sender. `values` are the launch's values as the launch
     records them (`values_json`): the resolved values with the `mode` and the rows
-    `not_applied`. `prompt_file` is Claude's system prompt file, written before the
-    start. `warnings` are one line each.
+    `not_applied`. `prompt_file` is Claude's system prompt file, and `settings_file` the
+    settings file a bypass slot launch passes, each written before the start. `warnings`
+    are one line each.
     """
 
     harness: str
@@ -333,6 +350,7 @@ class Composition:
     first: str | None = None
     brief: str | None = None
     prompt_file: PromptFile | None = None
+    settings_file: SettingsFile | None = None
     not_applied: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -409,6 +427,94 @@ def write_prompt(prompt_file: PromptFile) -> None:
     """Write a launch's system prompt file, readable by its owner only, its folder 0700."""
     files.private_dir(Path(prompt_file.path).parent)
     files.atomic_write(prompt_file.path, prompt_file.text, mode=0o600)
+
+
+# -- the bypass warning's skip key ------------------------------------------------------
+
+#: The suffix of a Claude launch's settings run file, after its request id.
+SETTINGS_SUFFIX = ".settings.json"
+#: The Claude Code setting that skips its bypass-permissions warning.
+SKIP_BYPASS_WARNING = "skipDangerousModePermissionPrompt"
+#: The permission mode whose slot launches carry it.
+BYPASS = "bypassPermissions"
+
+
+def settings_path(runs_dir: str | os.PathLike, request_id: str) -> str:
+    """Where a launch's settings run file goes: `<runs>/<request id>.settings.json`."""
+    return str(Path(runs_dir) / f"{request_id}{SETTINGS_SUFFIX}")
+
+
+def skip_key_owed(harness: str, values: Mapping[str, object]) -> bool:
+    """Whether a launch carries the bypass warning's skip key: a Claude launch into a slot
+    whose permission mode, the one its argv passes, is `bypassPermissions`. A terminal
+    launch shows the warning to the person who typed it, and a headless one shows none."""
+    return (harness == "claude" and values.get("target") == "slot"
+            and values.get("permission_mode") == BYPASS)
+
+
+def settings_value(extra: Iterable[object]) -> str | None:
+    """The value of the `--settings` the launch's extra flags pass, or None."""
+    tokens = [str(token) for token in extra]
+    for i, token in enumerate(tokens):
+        if token.startswith(catalog.SETTINGS_FLAG + "="):
+            return token.split("=", 1)[1]
+        if token == catalog.SETTINGS_FLAG and i + 1 < len(tokens):
+            return tokens[i + 1]
+    return None
+
+
+def without_settings(extra: Sequence[str]) -> list[str]:
+    """`extra` with its `--settings` and that flag's value taken out."""
+    kept: list[str] = []
+    skip = False
+    for token in extra:
+        if skip:
+            skip = False
+        elif token == catalog.SETTINGS_FLAG:
+            skip = True
+        elif not token.startswith(catalog.SETTINGS_FLAG + "="):
+            kept.append(token)
+    return kept
+
+
+def read_settings(value: str, cwd: str) -> dict[str, object]:
+    """The settings a `--settings` value gives: the JSON object it spells (a value starting
+    with `{`), or the one in the file it names (relative to `cwd`), which is read and never
+    changed. `Unreadable` when the string or the file is not a JSON object."""
+    if value.lstrip().startswith("{"):
+        try:
+            given = json.loads(value)
+        except ValueError as exc:
+            raise Unreadable(catalog.EXTRA, f"--settings {value} is not JSON: {exc}",
+                             "pass a JSON object or a settings file") from exc
+        return given
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = Path(cwd) / path
+    try:
+        given = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise Unreadable(catalog.EXTRA, f"the --settings file {path} can't be read as "
+                         f"JSON: {exc}", "fix the file, or leave --settings out") from exc
+    if not isinstance(given, dict):
+        raise Unreadable(catalog.EXTRA, f"the --settings file {path} is not a JSON object",
+                         "fix the file, or leave --settings out")
+    return given
+
+
+def settings_file(runs_dir: str, request_id: str,
+                  user_settings: Mapping[str, object] | None) -> SettingsFile:
+    """The settings run file of a launch that carries the skip key: the user's own
+    settings, when the launch passes some, with the key added."""
+    merged = {**dict(user_settings or {}), SKIP_BYPASS_WARNING: True}
+    return SettingsFile(settings_path(runs_dir, request_id),
+                        json.dumps(merged, indent=2, sort_keys=True) + "\n")
+
+
+def write_settings(settings: SettingsFile) -> None:
+    """Write a launch's settings run file, readable by its owner only, its folder 0700."""
+    files.private_dir(Path(settings.path).parent)
+    files.atomic_write(settings.path, settings.text, mode=0o600)
 
 
 # -- the opening prompt -----------------------------------------------------------------
@@ -722,9 +828,11 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "RELAUNCH_ENV", "RELAUNCHED", "REQUEST_ENV", "SCRUB_NAMES", "SCRUB_PREFIXES",
            "TERMINAL_NAMES",
            "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD", "Additions", "Composition",
-           "Context", "NoBrief", "NotYet", "PromptFile", "TooLong", "TurnsAdditions",
+           "BYPASS", "Context", "NoBrief", "NotYet", "PromptFile", "SETTINGS_SUFFIX",
+           "SKIP_BYPASS_WARNING", "SettingsFile", "TooLong", "TurnsAdditions",
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
            "env_class", "child_env", "first_turn", "identity_block", "locator",
-           "no_credentials", "option_stamps", "prompt_path", "replay_env", "scratch_dir",
-           "scratch_root", "scratch_root_problem", "scrub", "seat_text", "short_env",
-           "stamps", "write_prompt"]
+           "no_credentials", "option_stamps", "prompt_path", "read_settings", "replay_env", "scratch_dir",
+           "scratch_root", "scratch_root_problem", "scrub", "seat_text", "settings_file",
+           "settings_path", "settings_value", "short_env", "skip_key_owed", "stamps",
+           "without_settings", "write_prompt", "write_settings"]
