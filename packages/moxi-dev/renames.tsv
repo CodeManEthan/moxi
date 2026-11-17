@@ -5523,6 +5523,15 @@ memory	packages/memory/src/moxi_memory/clock.py	__all__ = ["show"]	keep	show	sho
 memory	packages/memory/src/moxi_memory/doctor.py	yield check(*args)	keep	ok	ok
 memory	packages/memory/src/moxi_memory/doctor.py	if not any(e.name == MODULE for e in plan.entries):	keep	any	any
 memory	packages/memory/src/moxi_memory/doctor.py	warn = any(item.warn for item in items)	keep	any	any
+memory	packages/memory/src/moxi_memory/doctor.py	("folders", _roots_row, (harnesses,)), ("sets", _sets, (config,)),	keep	folders	folders
+memory	packages/memory/src/moxi_memory/doctor.py	return Row(MODULE, "folders", "off", "no index yet, so no folder has been walked")	keep	folders	folders
+memory	packages/memory/src/moxi_memory/doctor.py	return Row(MODULE, "folders", "ok",	keep	folders	folders
+memory	packages/memory/src/moxi_memory/doctor.py	f"{_plural(count, 'folder')} answered the last run" if count	keep	folder	folder
+memory	packages/memory/src/moxi_memory/doctor.py	if any(r.is_archive for r in stuck):	keep	any	any
+memory	packages/memory/src/moxi_memory/doctor.py	if any(not r.is_archive for r in stuck):	keep	any	any
+memory	packages/memory/src/moxi_memory/doctor.py	if any(r.in_config and r.is_archive and not r.answered and r.why == roots.EMPTY	keep	any	any
+memory	packages/memory/src/moxi_memory/doctor.py	if any(not r.in_config for recs in records.values() for r in recs):	keep	any	any
+memory	packages/memory/src/moxi_memory/doctor.py	return Row(MODULE, "folders", "warn", "; ".join(lines), "; ".join(fixes) or None)	keep	folders	folders
 memory	packages/memory/src/moxi_memory/index.py	found = set()	keep	set	set
 memory	packages/memory/src/moxi_memory/ingest.py	self.seen: set[tuple[str, str]] = set()	keep	set	set
 memory	packages/memory/src/moxi_memory/ingest.py	self.unlisted: set[str] = set()	keep	set	set
@@ -5534,6 +5543,17 @@ memory	packages/memory/src/moxi_memory/ingest.py	listing = api.sources(harness, 
 memory	packages/memory/src/moxi_memory/ingest.py	seen = set(job.seen)	keep	set	set
 memory	packages/memory/src/moxi_memory/ingest.py	group = parser.add_mutually_exclusive_group(required=True)	keep	required	required
 memory	packages/memory/src/moxi_memory/ingest.py	help="with --walk: someone asked for it, so a held lock "	keep	help	help
+memory	packages/memory/src/moxi_memory/ingest.py	failed at any depth (a listing's `unreadable`, a read that raised, a `find` probe that	keep	find	find
+memory	packages/memory/src/moxi_memory/ingest.py	#: How a probe of sessions' `find` that couldn't read its root begins.	keep	find	find
+memory	packages/memory/src/moxi_memory/ingest.py	self.begun: set[tuple[str, str]] = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	self.broken: set[tuple[str, str]] = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	self.compressed: set[tuple[str, str]] = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	"""The hits of `find` for a session: in `asked` when given, else in the folders	keep	find	find
+memory	packages/memory/src/moxi_memory/ingest.py	found = (api.find(harness, session_id, root=asked) if asked	keep	find	find
+memory	packages/memory/src/moxi_memory/ingest.py	else api.find(harness, session_id))	keep	find	find
+memory	packages/memory/src/moxi_memory/ingest.py	listings = api.corpus(harness, since=since, heads=True)	keep	heads	heads
+memory	packages/memory/src/moxi_memory/ingest.py	listings = api.corpus(harness, since=since, heads=True)	keep	since	since
+memory	packages/memory/src/moxi_memory/ingest.py	read_paths: set[str] = set()	keep	set	set
 memory	packages/memory/src/moxi_memory/listener.py	self.done.set()	keep	set	set
 memory	packages/memory/src/moxi_memory/rows.py	that sessions doesn't mark `injected`, that the harness doesn't flag as meta, and that	keep	injected	injected
 memory	packages/memory/src/moxi_memory/rows.py	is not a compaction summary. A message sessions marks `injected` as unknown is kept;	keep	injected	injected
@@ -5545,11 +5565,25 @@ memory	packages/memory/src/moxi_memory/settings.py	if not sets or any(not s.stri
 memory	packages/memory/src/moxi_memory/start.py	turns_dir = paths.Layout(MODULE).runtime_dir(create=True) / TURNS	keep	create	create
 memory	packages/memory/src/moxi_memory/start.py	turns_dir.mkdir(mode=0o700, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/src/moxi_memory/status.py	listing = api.sources(harness, modified_since=last, heads=False)	keep	heads	heads
+memory	packages/memory/tests/test_archives.py	target.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_archives.py	assert any("2 transcript folders not read yet" in line for line in cli.incomplete(result))	keep	any	any
+memory	packages/memory/tests/test_archives.py	assert any(r["path"] == str(arch / "claude") and not r["answered"]	keep	any	any
+memory	packages/memory/tests/test_archives.py	row = {r.name: r for r in doctor.rows()}["folders"]	keep	folders	folders
+memory	packages/memory/tests/test_archives.py	assert any(str(arch / "claude") in line and "offline" in line for line in said), said	keep	any	any
+memory	packages/memory/tests/test_archives.py	assert {r.name: r for r in doctor.rows()}["folders"].state == "ok"	keep	folders	folders
+memory	packages/memory/tests/test_archives.py	assert any(TOKEN in x for x in texts())	keep	any	any
+memory	packages/memory/tests/test_archives.py	assert not any(TOKEN in x for x in got)	keep	any	any
+memory	packages/memory/tests/test_archives.py	assert any("run `moxi memory reindex` again once it answers" in line	keep	any	any
+memory	packages/memory/tests/test_archives.py	assert any("no longer names it" in line and str(arch / "claude") in line	keep	any	any
+memory	packages/memory/tests/test_archives.py	assert any(x.startswith("new words") for x in got) and report.kept == 1	keep	any	any
+memory	packages/memory/tests/test_archives.py	assert "old words" in got and not any(x.startswith("new words") for x in got)	keep	any	any
+memory	packages/memory/tests/test_archives.py	assert any(x.startswith("later words") for x in texts())	keep	any	any
 memory	packages/memory/tests/test_cli.py	session_id=f"0190b000-0000-7000-8000-{n:012d}", start=START, **kw)	keep	start	start
 memory	packages/memory/tests/test_cli.py	assert any(line.startswith(start_) for line in out.splitlines()), start_	keep	any	any
 memory	packages/memory/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_doctor.py	assert set(module.OPTIONAL) == {"comms", "launcher"}	keep	set	set
 memory	packages/memory/tests/test_doctor.py	assert not any("moxi memory" in a for a in codex.argv)	keep	any	any
+memory	packages/memory/tests/test_doctor.py	NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention"]	keep	folders	folders
 memory	packages/memory/tests/test_index.py	return self.proc.wait(timeout=30)	keep	timeout	timeout
 memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=0.1):	keep	wait	wait
 memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=1.0) as started:	keep	wait	wait
@@ -11489,6 +11523,9 @@ sessions	packages/sessions/src/moxi_sessions/api.py	**dict.fromkeys(("find", "so
 sessions	packages/sessions/src/moxi_sessions/api.py	`sessions_folders`, `session_opened`); interface 5 is interface 4 plus `session_facts`.	use	sessions_folders	session_dirs
 sessions	packages/sessions/src/moxi_sessions/api.py	folder=None, find=None)`: the main sessions of the harnesses on the machine as plain	use	folder=None	work_dir=None
 sessions	packages/sessions/src/moxi_sessions/api.py	return sorted(set(globals()) | set(__all__))	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/api.py	interface 6 is interface 5 plus the archive folders: `corpus`, `find`'s	keep	find	find
+sessions	packages/sessions/src/moxi_sessions/api.py	**dict.fromkeys(("find", "sources", "corpus", "subagents", "Found", "Probe", "Hit", "Listing",	keep	find	find
+sessions	packages/sessions/src/moxi_sessions/archives.py	code = proc.wait(timeout=max(0.0, deadline - time.monotonic()))	keep	timeout	timeout
 sessions	packages/sessions/src/moxi_sessions/catalog.py	* From the head of the file (`Head`; an OpenCode session's come from its row): `folder`,	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/catalog.py	* `folder`, `started`, `by_program`: the head's (`Head`).	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/catalog.py	* `folder`, `started`: the head's (`Head`).	keep	folder	folder
@@ -11593,6 +11630,11 @@ sessions	packages/sessions/src/moxi_sessions/cli.py	harness's root for the sessi
 sessions	packages/sessions/src/moxi_sessions/cli.py	help="whose session it is (default: the harness whose root holds "	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	"""The source to read of what `find` found: the first that isn't compressed, else the	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/cli.py	in turn with `find`, which looks at names and, for OpenCode, one row, never a whole	keep	find	find
+sessions	packages/sessions/src/moxi_sessions/cli.py	harness's live root for the session, the way `find` does, and reads the one that holds it;	keep	find	find
+sessions	packages/sessions/src/moxi_sessions/cli.py	Without it, every harness's live root is asked in turn with `find`, which looks at	keep	find	find
+sessions	packages/sessions/src/moxi_sessions/cli.py	offline = _offline([found], set(archive_dirs(harness)))	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/cli.py	offline = _offline([found for found in asked if not found.found], set(asked_dirs))	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/cli.py	offline = _offline(asked, set(asked_dirs))	keep	set	set
 sessions	packages/sessions/src/moxi_sessions/codex.py	"compacted", "event_msg", "response_item",	keep	compacted	compacted
 sessions	packages/sessions/src/moxi_sessions/codex.py	# | `compacted`, `context_compacted`, and the    | marker `compaction`                    |	keep	compacted	compacted
 sessions	packages/sessions/src/moxi_sessions/codex.py	COMPACTION_KINDS = frozenset({"compacted", "event_msg/context_compacted",	keep	compacted	compacted
@@ -11628,6 +11670,12 @@ sessions	packages/sessions/src/moxi_sessions/find.py	_codex_child	name	handle	fh
 sessions	packages/sessions/src/moxi_sessions/find.py	_codex_sources	kwonly	heads	heads
 sessions	packages/sessions/src/moxi_sessions/find.py	rows = snap.sessions()	keep	sessions	sessions
 sessions	packages/sessions/src/moxi_sessions/find.py	several rollout files for one thread, and `find` returns each of them, a compressed one	keep	find	find
+sessions	packages/sessions/src/moxi_sessions/find.py	return not self.found and any(probe.outcome.startswith(UNREADABLE)	keep	any	any
+sessions	packages/sessions/src/moxi_sessions/find.py	self.held: set[str] = set()	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/find.py	is_archive=is_archive), set()	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/find.py	is_archive=is_archive, absent=True), set()	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/find.py	shadow = set(held)	keep	set	set
+sessions	packages/sessions/src/moxi_sessions/find.py	__all__ = ["find", "sources", "corpus", "subagents", "Found", "Probe", "Hit", "Listing", "Listed",	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/guards.py	name=NAME, calls=CALLS, who="any", judge="moxi_sessions.readguard:judge",	keep	any	any
 sessions	packages/sessions/src/moxi_sessions/guards.py	turns reads `GUARDS` from the `moxi.turns.guards` entry `sessions`, so the guard's id is	keep	sessions	sessions
 sessions	packages/sessions/src/moxi_sessions/lists.py	"""The entries that pass every filter but the harness (and, with `folder` false, the	keep	folder	folder
@@ -11683,6 +11731,7 @@ sessions	packages/sessions/src/moxi_sessions/lists.py	turn and the prompt of the
 sessions	packages/sessions/src/moxi_sessions/lists.py	turn of the rows it returns and of no other session, unless `folder` is asked.	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _folder(head.folder) if head is not None else None	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/lists.py	where = _work_dir(head.folder) if head is not None else None	use	head.folder	head.work_dir
+sessions	packages/sessions/src/moxi_sessions/module.py	is 5 plus the archive folders, `corpus` and `find`'s `include_archives`), the verb	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/opencode.py	"session": ("id", "parent_id", "title", "directory", "version", "model", "agent",	keep	directory	directory
 sessions	packages/sessions/src/moxi_sessions/opencode.py	SessionRow	name	directory	work_dir
 sessions	packages/sessions/src/moxi_sessions/opencode.py	Snapshot.query	name	e	exc
@@ -11934,6 +11983,20 @@ sessions	packages/sessions/tests/test_api.py	assert {"retention", "Retention"} <
 sessions	packages/sessions/tests/test_api.py	before = {"find", "sources", "subagents", "window", "retention", "Retention"}	keep	find	find
 sessions	packages/sessions/tests/test_api.py	found = modules.load("sessions", interface=2)	keep	sessions	sessions
 sessions	packages/sessions/tests/test_api.py	test_the_list_answers_through_the_api_over_the_roots_the_process_names	name	folders	session_dirs
+sessions	packages/sessions/tests/test_archives.py	monkeypatch.setenv("HOME", str(home))	keep	HOME	HOME
+sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO, "--harness", "codex")	keep	find	find
+sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO)	keep	find	find
+sessions	packages/sessions/tests/test_archives.py	code, out, _ = run(capsys, "find", TWO, "--json")	keep	find	find
+sessions	packages/sessions/tests/test_archives.py	assert run(capsys, "find", TWO)[0] == 0	keep	find	find
+sessions	packages/sessions/tests/test_archives.py	tool_use_id="toolu_1", input={"file_path": named}, cwd="/", env={"HOME": str(home)}))	keep	HOME	HOME
+sessions	packages/sessions/tests/test_archives.py	tool_use_id="toolu_1", input={"file_path": named}, cwd="/", env={"HOME": str(home)}))	keep	env	env
+sessions	packages/sessions/tests/test_archives.py	tool_use_id="toolu_1", input={"file_path": named}, cwd="/", env={"HOME": str(home)}))	keep	input	input
+sessions	packages/sessions/tests/test_archives.py	assert not any(path.startswith(archive_dir) for path in resolved)	keep	any	any
+sessions	packages/sessions/tests/test_archives.py	input={"command": f"cat {arch(home, 'codex', 1)}/2026/x.jsonl"}, cwd="/",	keep	input	input
+sessions	packages/sessions/tests/test_archives.py	env={"HOME": str(home)}))	keep	HOME	HOME
+sessions	packages/sessions/tests/test_archives.py	env={"HOME": str(home)}))	keep	env	env
+sessions	packages/sessions/tests/test_archives.py	assert any("never writes, moves or deletes" in line for line in said["claude"].lines)	keep	any	any
+sessions	packages/sessions/tests/test_archives.py	assert not any(path.startswith(str(home / "arch")) for path in opened)	keep	any	any
 sessions	packages/sessions/tests/test_bench.py	a.step(input=900, output=120, text="It reads every file it is given. " * 10)	keep	input	input
 sessions	packages/sessions/tests/test_bench.py	a.step(input=900, output=120, text="It reads every file it is given. " * 10)	use	input=	input_tokens=
 sessions	packages/sessions/tests/test_bench.py	bare_pass	name	handle	fh
@@ -12077,6 +12140,7 @@ sessions	packages/sessions/tests/test_cli.py	path = write_rollout(tmp_path / "co
 sessions	packages/sessions/tests/test_cli.py	r = CodexRollout(home / ".codex" / "sessions", thread_id=THREAD, cwd="/work/proj-b")	keep	sessions	sessions
 sessions	packages/sessions/tests/test_cli.py	root = env / ".codex" / "sessions"	keep	sessions	sessions
 sessions	packages/sessions/tests/test_cli.py	sessions = listed / ".codex" / "sessions"	keep	sessions	sessions
+sessions	packages/sessions/tests/test_cli.py	"source": "environment", "detail": "CODEX_HOME/sessions",	keep	environment	environment
 sessions	packages/sessions/tests/test_codex.py	-	name	test_a_directory_named_like_a_rollout_is_not_a_candidate	test_a_dir_named_like_a_rollout_is_not_a_candidate
 sessions	packages/sessions/tests/test_codex.py	-	name	test_a_rollout_outside_the_day_directories_is_not_a_candidate	test_a_rollout_outside_the_day_dirs_is_not_a_candidate
 sessions	packages/sessions/tests/test_codex.py	@pytest.mark.parametrize("bad", ["", "../x", "a/b", ".h", "a*", None])	keep	bad	bad
