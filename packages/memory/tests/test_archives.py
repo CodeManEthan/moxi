@@ -448,6 +448,8 @@ def test_an_absent_live_root_never_read_lets_archives_be_read_and_one_read_keeps
     report = run("rebuild")
     assert recorded()[str(api.root("claude"))].why == roots.EMPTY
     assert report.dropped == 0 and "live then the root goes" in texts()
+    row = {r.name: r for r in doctor.rows()}["folders"]
+    assert doctor.LIVE_FIX in row.fix and "sessions' config" not in row.fix
 
 
 def test_a_sessions_config_that_cant_be_read_drops_nothing(arch, tmp_path):

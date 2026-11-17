@@ -175,9 +175,12 @@ def _ingest(harnesses) -> Row:
                "moxi memory ingest" if state == "warn" else None)
 
 
-#: The fix for a folder that didn't answer, or was never listed whole.
+#: The fix for an archive folder that didn't answer, or was never listed whole.
 ANSWER_FIX = ("make it answer, or take it off sessions' config; its sessions then leave at "
               "the next `moxi memory reindex`")
+#: The fix for a live root that didn't answer: it can't be taken off sessions' config.
+LIVE_FIX = ("a live root answers again once a session lands there; to stop reading that "
+            "harness, take it out of memory's `harnesses`")
 #: The fix for an archive folder that lists nothing, though seen holding something.
 EMPTIED_FIX = ("an archive folder emptied on purpose: take it off sessions' config, and its "
                "sessions leave at the next `moxi memory reindex`")
@@ -203,10 +206,13 @@ def _roots_row(harnesses) -> Row:
                    f"{_plural(count, 'folder')} answered the last run" if count
                    else "no walk yet")
     fixes = []
-    if any(r.in_config for recs in records.values() for r in recs
-           if not r.answered or (r.is_archive and not r.listed_whole)
-           or r.missed_rebuild_at is not None):
+    stuck = [r for recs in records.values() for r in recs
+             if r.in_config and (not r.answered or (r.is_archive and not r.listed_whole)
+                                 or r.missed_rebuild_at is not None)]
+    if any(r.is_archive for r in stuck):
         fixes.append(ANSWER_FIX)
+    if any(not r.is_archive for r in stuck):
+        fixes.append(LIVE_FIX)
     if any(r.in_config and r.is_archive and not r.answered and r.why == roots.EMPTY
            for recs in records.values() for r in recs):
         fixes.append(EMPTIED_FIX)
