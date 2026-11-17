@@ -407,7 +407,7 @@ class _Schedule:
                     run_dir=run_dir_of(source, env),
                     record_dir=_absolute(args.record_dir) if args.record_dir else None,
                     slack=args.slack, idle_line=args.idle_line, takes=takes,
-                    stamp=args.stamp, uv=uv, git=git, python=python,
+                    stamp=args.stamp, uv=uv, git=git if has_git else None, python=python,
                     python_version=found[1], common_dir=common_dir)
 
     def linger(self) -> None:
