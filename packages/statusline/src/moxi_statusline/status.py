@@ -20,7 +20,7 @@ def report(project_dir: str | os.PathLike | None = None,
     """The status as plain data: `switch.state`'s keys, then `show` (the config's items),
     `config_error` (why the config can't be read, the default items then shown),
     `nothing_behind`, `clashes` and `project` (`{path, command}` for each project file
-    in `folder`, default the working folder, that sets its own line)."""
+    in `project_dir`, default the working folder, that sets its own line)."""
     from . import doctor, settings
 
     out = switch.state(env)

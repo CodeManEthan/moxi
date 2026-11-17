@@ -404,7 +404,7 @@ def state(env: Mapping[str, str] | None = None) -> dict:
 
 def project_lines(project_dir: str | os.PathLike,
                   env: Mapping[str, str] | None = None) -> list[tuple[str, str | None]]:
-    """The project settings in `folder` that set their own `statusLine`, which Claude
+    """The project settings in `project_dir` that set their own `statusLine`, which Claude
     Code uses there over the user's: `(path, command)` for each, the command None when
     the line has no command. A file that can't be read as JSON is passed over. The
     user's own `settings.json` is never one of them."""

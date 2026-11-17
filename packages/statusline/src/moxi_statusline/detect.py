@@ -439,7 +439,7 @@ def run(command: str, data: bytes, *, cwd: str, env: Mapping[str, str],
 
 
 def _git(repo_dir: str, branch: str, env: Mapping[str, str]) -> bool:
-    """Make `folder` a repository on `branch`. False without `git`, or when it fails."""
+    """Make `repo_dir` a repository on `branch`. False without `git`, or when it fails."""
     git = shutil.which("git", path=env.get("PATH"))
     if git is None:
         return False
