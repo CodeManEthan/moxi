@@ -17,6 +17,8 @@
   the endpoint refuses, so every session it loaded in ran without turns. `moxi doctor
   turns` has a new row, `claude installed runner`, that reads the leg of the runner
   Claude Code runs at user scope and fails when it is not the endpoint's.
+- `start.order`'s default is `["launcher", "comms", "notes", "memory"]`, the
+  start-context modules in this repository. A config that sets the key keeps its own list.
 
 ## 0.2.4 (2026-11-08)
 

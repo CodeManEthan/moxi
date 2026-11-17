@@ -48,6 +48,8 @@
 - A daemon's `HEALTH` row keeps the `needs` of the row its target returned.
 - An extension's `off` row, an optional link to a module that is not installed, needs that
   module.
+- The catalogue gains `memory` (`moxi-memory`), marked unreleased, so `moxi install memory`
+  and `moxi modules --available` know it by name. Its version is 6.
 
 ## 0.1.9 (unreleased)
 

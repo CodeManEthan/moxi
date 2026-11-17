@@ -39,6 +39,12 @@ summary = "Your own skills, agents and settings, placed for Claude Code, Codex a
 unreleased = true
 
 [[module]]
+name = "memory"
+distribution = "moxi-memory"
+summary = "Search past sessions: a stemmed keyword index of every harness's transcripts, read where the harness keeps them"
+unreleased = true
+
+[[module]]
 name = "notes"
 distribution = "moxi-notes"
 summary = "Where each session keeps its notes, snapshots of the notes repository, and the secret checks that guard it"
