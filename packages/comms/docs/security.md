@@ -12,8 +12,10 @@ running as your user said so, and nothing more.
 Any process running as your user can:
 
 - read the credential chain's token store (`STATE/comms/tokens/`) or the user's
-  keychain, and post as any holder in it, the operator and a module's reserved name
-  included;
+  keychain, and post as any holder in it, the operator and every send-only name (a
+  module's or a program's) included;
+- register, take over, renew or remove a program's send-only name (`moxi comms
+  send-only`) from outside every session;
 - read and write comms' store (`STATE/comms/comms.db`) directly;
 - connect to the daemon's socket and bind any name that isn't held or reserved;
 - connect to a session's Moxi turns endpoint and report a turn end that never happened,
@@ -67,7 +69,7 @@ Files from the 0.1.x posting-key layout that remain in a store outside comms' ow
 store are not accepted by the 0.2.0 posting path. The migration removes the retired
 files from comms' own store when they match the old format, while leaving unrelated
 files alone. Every message is written by the daemon, after it has checked the sender's
-credential: a live binding's token, the operator's, or a reserved name's.
+credential: a live binding's token, the operator's, or a send-only name's.
 
 A reserved name's token is minted when its module installs and rests in the credential
 chain for that module, as `comms/reserved/<name>`. No session is given it. The daemon
@@ -84,6 +86,21 @@ process, until a send under that name works again or `moxi comms reserved renew 
 mints a new token. Renew from the environment that failed: a token minted in your shell's
 keychain may still be out of the service's reach. comms' uninstall removes every
 reserved-name token it can find, including one a freed name left behind.
+
+A name a program registers with `moxi comms send-only add` has a token of its own, minted
+into the first writable step of the registering process's credential chain for the holder
+`send-only`, as `comms/send-only/<name>`; the daemon keeps only its hash. A process inside a
+session, or one comms can't place, may only register a name nobody uses (plain `add`):
+taking a name over (`add --take`), renewing its token and removing it are refused there,
+before anything is touched, and are for your own shell. Any process of your user outside
+every session may do all four, and may send under one. A session can't send under one: the daemon refuses it as it does a module's
+name, and `moxi comms send --as` refuses it before reading the token. When a send under a
+program's name finds no token it can use, comms leaves the same doctor record, whose fix
+is `moxi comms send-only renew NAME` run where the program sends from. Renewing from a
+shell that reads the chain differently would move the token out of the program's reach;
+when the doctor finds a stale copy in an earlier step (an environment variable, a
+keychain entry), it names that step, and removing the copy there is the cure. comms'
+uninstall frees every program's name and removes every `comms/send-only/` token too.
 
 comms' config file, `config.toml`, holds non-secret values only. comms refuses to load
 it when a key looks like a token.

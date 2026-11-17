@@ -80,12 +80,14 @@ TERMS: tuple[Entry, ...] = (
     ),
     Entry(
         "send-only",
-        "`(send-only)` on a frame line means a module sent the message, under a name it "
-        "holds reserved (`console`, say), not an agent. No session holds that name and "
-        "nobody receives mail under it, so the message carries `[no reply]`: a reply has "
-        "nowhere to go. `moxi comms agents` lists such a name as `send-only, reserved "
-        "for <module>`. Mail that was already waiting for the name when it was reserved "
-        "is dropped, and `moxi comms explain` says `reserved`.",
+        "`(send-only)` on a frame line means a module or a program sent the message, not "
+        "an agent: a module under a name it holds reserved (`console`, say), a program "
+        "under a name it registered with `moxi comms send-only add` and sends under with "
+        "`moxi comms send --as`. No session holds that name and nobody receives mail "
+        "under it, so the message carries `[no reply]`: a reply has nowhere to go. `moxi "
+        "comms agents` lists such a name as `send-only, reserved for <module>` or "
+        "`send-only, registered`. Mail that was already waiting for the name when it was "
+        "reserved or registered is dropped, and `moxi comms explain` says `reserved`.",
         aliases=("reserved name", "reserved"),
     ),
     Entry(

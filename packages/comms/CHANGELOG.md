@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Any program or service, not only a Moxi module, can hold a send-only name: `moxi comms
+  send-only add NAME` registers it, `moxi comms send --as NAME` and
+  `moxi_comms.api.send_under` send under it from outside every session, and `send-only
+  renew` and `remove` replace its token or free it. Nobody mails it and no session binds
+  it, as with a module's name. From inside a session only a plain `add` of an unused name
+  goes ahead; `add --take`, `renew` and `remove` are for the user's own shell. `moxi comms agents` lists it as `send-only, registered`,
+  a name an older comms kept now reads `send-only, nothing holds it`, and each send-only
+  entry of `agents --json`, `api.roster()` and `api.roster_rows()` carries `holder`.
+  `api.send_as` refuses a program's name (`not-reserved`), and `moxi comms reserved
+  renew` refuses one. comms.db moves to schema step 4 at its next write; a comms older
+  than this one can't open it afterwards, so a downgrade needs the store's backup.
 - Every setting carries page fields, which `moxi config comms show --json` prints and
   the settings page draws: a plain label, a line where the label can't carry it, and
   the unit of each wait, age and replay limit. No setting is shown first and none is
