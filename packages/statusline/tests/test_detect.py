@@ -75,11 +75,11 @@ def throwaway(tmp_path) -> Path:
 @pytest.fixture
 def line(tmp_path):
     """Write a made-up old line as a Python script; returns the command that runs it."""
-    folder = tmp_path / "lines"
-    folder.mkdir()
+    lines_dir = tmp_path / "lines"
+    lines_dir.mkdir()
 
     def make(body: str, name: str = "line.py") -> str:
-        path = folder / name
+        path = lines_dir / name
         path.write_text(textwrap.dedent(body))
         return f"{shlex.quote(sys.executable)} {shlex.quote(str(path))}"
 
@@ -129,7 +129,7 @@ def test_extra_text_is_shown_as_it_is(line, throwaway):
     assert found.also == "up 3d │"
 
 
-def test_a_line_that_shows_only_the_directory_finds_dir_alone(line, throwaway):
+def test_a_line_that_shows_only_the_dir_finds_dir_alone(line, throwaway):
     found = run(line("""
         import os
         print(os.getcwd())
@@ -302,7 +302,7 @@ def test_a_line_that_prints_nothing_detects_nothing(command, throwaway):
         "Your status line printed nothing, so nothing was detected.")
 
 
-def test_writes_under_home_land_in_the_throwaway_folder(line, throwaway, tmp_path):
+def test_writes_under_home_land_in_the_throwaway_dir(line, throwaway, tmp_path):
     seen = tmp_path / "seen.json"
     found = run(line(f"""
         import json, os, sys

@@ -12485,6 +12485,9 @@ statusline	packages/statusline/src/moxi_statusline/cli.py	parser.add_argument("-
 statusline	packages/statusline/src/moxi_statusline/cli.py	if args.show is not None:	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/cli.py	problem = show_problem(args.show)	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/cli.py	done = render(sample.payload(), show=args.show, color=not args.no_color)	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/cli.py	Verb.__init__	name	help	help_text
+statusline	packages/statusline/src/moxi_statusline/compile.py	_imports	kwonly	is_package	is_package
+statusline	packages/statusline/src/moxi_statusline/compile.py	compile_all	name	folder	top_dir
 statusline	packages/statusline/src/moxi_statusline/detect.py	`HOME` is an empty folder inside the throwaway folder, and every `XDG_*_HOME`, every	keep	HOME	HOME
 statusline	packages/statusline/src/moxi_statusline/detect.py	two: set[int] = set()	keep	set	set
 statusline	packages/statusline/src/moxi_statusline/detect.py	four: set[int] = set(range(1900, 2101))	keep	set	set
@@ -12498,12 +12501,19 @@ statusline	packages/statusline/src/moxi_statusline/detect.py	out["HOME"] = home	
 statusline	packages/statusline/src/moxi_statusline/detect.py	out, _ = proc.communicate(data, timeout=limit)	keep	timeout	timeout
 statusline	packages/statusline/src/moxi_statusline/detect.py	proc.communicate(timeout=1.0)	keep	timeout	timeout
 statusline	packages/statusline/src/moxi_statusline/detect.py	"""Make `folder` a repository on `branch`. False without `git`, or when it fails."""	keep	folder	folder
-statusline	packages/statusline/src/moxi_statusline/detect.py	self.folder = os.path.join(root, self.folder_name)	keep	folder	folder
-statusline	packages/statusline/src/moxi_statusline/detect.py	folder = own("dir", self.folder)	keep	folder	folder
-statusline	packages/statusline/src/moxi_statusline/detect.py	paths_ = [("dir", self.folder), (None, self.root), (None, self.home),	keep	folder	folder
-statusline	packages/statusline/src/moxi_statusline/detect.py	os.mkdir(drawn.folder, 0o700)	keep	folder	folder
-statusline	packages/statusline/src/moxi_statusline/detect.py	repo = _git(drawn.folder, drawn.branch, environ)	keep	folder	folder
-statusline	packages/statusline/src/moxi_statusline/detect.py	code, out = run(line, data, cwd=drawn.folder, env=environ, limit=limit)	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	Detection.__init__	kwonly	ran	ran
+statusline	packages/statusline/src/moxi_statusline/detect.py	self.folder_name = word()	use	self.folder_name	self.dir_name
+statusline	packages/statusline/src/moxi_statusline/detect.py	self.folder = os.path.join(root, self.folder_name)	use	self.folder_name	self.dir_name
+statusline	packages/statusline/src/moxi_statusline/detect.py	self.folder = os.path.join(root, self.folder_name)	use	self.folder	self.work_dir
+statusline	packages/statusline/src/moxi_statusline/detect.py	Marker("dir", self.folder_name, "word"),	use	self.folder_name	self.dir_name
+statusline	packages/statusline/src/moxi_statusline/detect.py	paths_ = [("dir", self.folder), (None, self.root), (None, self.home),	use	self.folder	self.work_dir
+statusline	packages/statusline/src/moxi_statusline/detect.py	os.mkdir(drawn.folder, 0o700)	use	drawn.folder	drawn.work_dir
+statusline	packages/statusline/src/moxi_statusline/detect.py	Plan.payload	name	folder	cwd
+statusline	packages/statusline/src/moxi_statusline/detect.py	_git	name	folder	repo_dir
+statusline	packages/statusline/src/moxi_statusline/detect.py	detect	name	environ	run_env
+statusline	packages/statusline/src/moxi_statusline/detect.py	cwd = own("dir", self.folder)	use	self.folder	self.work_dir
+statusline	packages/statusline/src/moxi_statusline/detect.py	repo = _git(drawn.folder, drawn.branch, run_env)	use	drawn.folder	drawn.work_dir
+statusline	packages/statusline/src/moxi_statusline/detect.py	code, out = run(line, data, cwd=drawn.folder, env=run_env, limit=limit)	use	drawn.folder	drawn.work_dir
 statusline	packages/statusline/src/moxi_statusline/doctor.py	- `show`: each module item of `show` has a segment behind it: the module is present and	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/doctor.py	show = list(settings.load()["show"])	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/doctor.py	show = list(settings.schema().keys["show"].default)	keep	show	show
@@ -12512,6 +12522,7 @@ statusline	packages/statusline/src/moxi_statusline/doctor.py	return Row(MODULE, 
 statusline	packages/statusline/src/moxi_statusline/fields.py	`row` is no field: in `show` it starts the second row.	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/fields.py	#: The base fields, by the name `show` gives them. They are read before module names.	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/fields.py	#: Every name `show` reads as something other than a module.	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/fields.py	branch	name	folder	search_dir
 statusline	packages/statusline/src/moxi_statusline/module.py	#: The whole check of the config file's text: the schema, then the rules of `show` and the	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/offers.py	1. **Switch** to Moxi's line, set up to show the same: `show` is the pieces found, in their	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/offers.py	default `show`. The old line is kept for `moxi statusline restore`.	keep	show	show
@@ -12543,7 +12554,9 @@ statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	if not any(li
 statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	return {"lines": done.lines, "ms": round(done.ms, 1), "notes": notes,	keep	round	round
 statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	if act.kind in ("changed", "not-moxis", "nothing-saved"):	keep	changed	changed
 statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	"""`POST /api/use`: Claude Code's line set to Moxi's, the config's `show` as it is."""	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/pagehandlers.py	-	name	SAMPLE_FOLDER	SAMPLE_DIR
 statusline	packages/statusline/src/moxi_statusline/pieces.py	return first + sorted(m for m in set(modules) if m not in FIRST)	keep	set	set
+statusline	packages/statusline/src/moxi_statusline/pieces.py	measure	name	environ	run_env
 statusline	packages/statusline/src/moxi_statusline/render.py	- `--show a,b,c`: these items in place of the config's `show`.	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/render.py	__slots__ = ("show", "only", "config", "color", "help")	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/render.py	self.show = None	keep	show	show
@@ -12551,6 +12564,7 @@ statusline	packages/statusline/src/moxi_statusline/render.py	else args.show if a
 statusline	packages/statusline/src/moxi_statusline/render.py	color=values["color"] and args.color, home=os.environ.get("HOME"))	keep	HOME	HOME
 statusline	packages/statusline/src/moxi_statusline/render.py	args.show = [item.strip() for item in value.split(",") if item.strip()]	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/render.py	if now is None and any(item not in RESERVED for item in items):	keep	any	any
+statusline	packages/statusline/src/moxi_statusline/render.py	_segment	kwonly	color	color
 statusline	packages/statusline/src/moxi_statusline/settings.py	The rules: each `show` item is a base field, `row`, or spelled as a module name; at most	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/settings.py	found = show_problem(settings["show"])	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/settings.py	return config.ConfigError(file, "show", problem, fix)	keep	show	show
@@ -12559,6 +12573,7 @@ statusline	packages/statusline/src/moxi_statusline/setup.py	and leaves the confi
 statusline	packages/statusline/src/moxi_statusline/setup.py	return list(schema().keys["show"].default)	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/setup.py	"""Step 4, for setup (`verb` false) and for `use`. The switch keeps a saved `show`,	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/setup.py	"record", "asked_path", "default_show", "QUESTION", "DETECT_QUESTION", "KEPT",	keep	record	record
+statusline	packages/statusline/src/moxi_statusline/setup.py	recorded	name	handle	fh
 statusline	packages/statusline/src/moxi_statusline/status.py	the items of `show` and which show nothing, modules named like a base field, and a	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/status.py	"""The status as plain data: `switch.state`'s keys, then `show` (the config's items),	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/status.py	in `folder`, default the working folder, that sets its own line)."""	keep	folder	folder
@@ -12567,6 +12582,7 @@ statusline	packages/statusline/src/moxi_statusline/status.py	show = list(setting
 statusline	packages/statusline/src/moxi_statusline/status.py	out["show"] = show	keep	show	show
 statusline	packages/statusline/src/moxi_statusline/status.py	elif data["set"]:	keep	set	set
 statusline	packages/statusline/src/moxi_statusline/status.py	out.append(f"Shows: {', '.join(data['show'])}")	keep	show	show
+statusline	packages/statusline/src/moxi_statusline/status.py	report	name	folder	project_dir
 statusline	packages/statusline/src/moxi_statusline/switch.py	config.set(MODULE, "show", list(show), by=by)	use	config.set	config.set_value
 statusline	packages/statusline/src/moxi_statusline/switch.py	config's `show` (`moxi.config.set`, with `by`). None leaves `show` as it is.	use	moxi.config.set	moxi.config.set_value
 statusline	packages/statusline/src/moxi_statusline/switch.py	already), `restored`, `removed`, `refused` (the settings file, or the store that	keep	refused	refused
@@ -12581,7 +12597,13 @@ statusline	packages/statusline/src/moxi_statusline/switch.py	`error` (why it can
 statusline	packages/statusline/src/moxi_statusline/switch.py	out: dict = {"settings": str(settings_path(env)), "error": None, "set": False,	keep	set	set
 statusline	packages/statusline/src/moxi_statusline/switch.py	out["set"] = current is not None	keep	set	set
 statusline	packages/statusline/src/moxi_statusline/switch.py	"""The project settings in `folder` that set their own `statusLine`, which Claude	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/switch.py	Saved.__init__	kwonly	had	had
+statusline	packages/statusline/src/moxi_statusline/switch.py	project_lines	name	folder	project_dir
 statusline	packages/statusline/tests/statusline_kit.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/statusline_kit.py	render	name	environ	child_env
+statusline	packages/statusline/tests/test_branch.py	-	name	test_found_from_a_folder_inside_the_repository	test_found_from_a_dir_inside_the_repository
+statusline	packages/statusline/tests/test_branch.py	-	name	test_the_branch_field_reads_the_input_folder	test_the_branch_field_reads_the_input_dir
+statusline	packages/statusline/tests/test_branch.py	repo	name	folder	repo_dir
 statusline	packages/statusline/tests/test_browser_page.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 statusline	packages/statusline/tests/test_browser_page.py	assert any("/m/statusline/api/state" in url for url in check.requests), check.requests	keep	any	any
 statusline	packages/statusline/tests/test_cli.py	@pytest.mark.parametrize("show", ["row,dir", "dir,row,model,row,cost", "Bad-Name"])	keep	show	show
@@ -12598,9 +12620,13 @@ statusline	packages/statusline/tests/test_detect.py	assert detect.Marker("x", "g
 statusline	packages/statusline/tests/test_detect.py	assert detect.Marker("x", "xhigh", "word").find("xhighs xhigh_ (xhigh)") == [15]	keep	find	find
 statusline	packages/statusline/tests/test_detect.py	env = detect.sandbox({"PATH": "/bin", "HOME": "/h", "MOXI_ROOT": "x",	keep	HOME	HOME
 statusline	packages/statusline/tests/test_detect.py	assert env == {"PATH": "/bin", "HOME": "/fake", "XDG_RUNTIME_DIR": "/r",	keep	HOME	HOME
+statusline	packages/statusline/tests/test_detect.py	-	name	test_a_line_that_shows_only_the_directory_finds_dir_alone	test_a_line_that_shows_only_the_dir_finds_dir_alone
+statusline	packages/statusline/tests/test_detect.py	-	name	test_writes_under_home_land_in_the_throwaway_folder	test_writes_under_home_land_in_the_throwaway_dir
+statusline	packages/statusline/tests/test_detect.py	line	name	folder	lines_dir
 statusline	packages/statusline/tests/test_doctor.py	assert [r.name for r in rows] == ["command", "bytecode", "sample render", "show",	keep	show	show
 statusline	packages/statusline/tests/test_doctor.py	assert [r.name for r in rows[2:]] == ["bytecode", "sample render", "show",	keep	show	show
 statusline	packages/statusline/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+statusline	packages/statusline/tests/test_doctor.py	-	name	test_moxis_line_in_another_environment_warns	test_moxis_line_in_another_env_warns
 statusline	packages/statusline/tests/test_fields.py	@pytest.mark.parametrize(("used", "colour"), [	keep	used	used
 statusline	packages/statusline/tests/test_offers.py	assert not any("Measured" in s for s in said)	keep	any	any
 statusline	packages/statusline/tests/test_page.py	inner = LB.app(page.PAGE, module="statusline", server_id=SERVER_ID, strict=True)	keep	strict	strict
@@ -12623,6 +12649,9 @@ statusline	packages/statusline/tests/test_page.py	assert "changed" in body["conf
 statusline	packages/statusline/tests/test_page.py	{"base": base, "changes": {"show": ["model"], "color": False}}),	keep	show	show
 statusline	packages/statusline/tests/test_page.py	{"base": base, "changes": {"show": ["effort"], "color": False}}))	keep	show	show
 statusline	packages/statusline/tests/test_page.py	status, body = post("/api/preview", draft({"show": ["model"]}))	keep	show	show
+statusline	packages/statusline/tests/test_page.py	test_the_first_request_sweeps_left_preview_files_and_import_does_not	name	folder	runtime_dir
+statusline	packages/statusline/tests/test_render.py	-	name	test_the_default_line_with_no_config_file_and_no_folder_made	test_the_default_line_with_no_config_file_and_no_dir_made
+statusline	packages/statusline/tests/test_render.py	test_the_default_line_shows_usage_and_cache_at_the_time_now	name	folder	clock_dir
 statusline	packages/statusline/tests/test_settings.py	"""The config's check: the schema, then the rules of `show`, the bands and `dir.parts`."""	keep	show	show
 statusline	packages/statusline/tests/test_settings.py	assert list(settings["show"]) == ["dir", "branch", "model", "effort", "context",	keep	show	show
 statusline	packages/statusline/tests/test_settings.py	('show = ["dir", "Not-A-Name"]', "show", "neither a base field nor a module name"),	keep	show	show
@@ -12635,8 +12664,6 @@ statusline	packages/statusline/tests/test_settings.py	assert caught.value.key ==
 statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["row", "dir"], by="test")	use	config.set	config.set_value
 statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["dir", "row", "model"], by="test")	use	config.set	config.set_value
 statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "context.warn_at", 90, by="test")	use	config.set	config.set_value
-statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["row", "dir"], by="test")	keep	show	show
-statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["dir", "row", "model"], by="test")	keep	show	show
 statusline	packages/statusline/tests/test_setup.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 statusline	packages/statusline/tests/test_setup.py	assert settings.load()["show"] == setup.default_show()	keep	show	show
 statusline	packages/statusline/tests/test_setup.py	config.set_many("statusline", [("show", SAVED)], by="ui")	keep	show	show
@@ -12648,6 +12675,9 @@ statusline	packages/statusline/tests/test_switch.py	assert act.code == codes.REF
 statusline	packages/statusline/tests/test_switch.py	assert act.code == codes.TEMPFAIL and act.kind == "changed"	keep	changed	changed
 statusline	packages/statusline/tests/test_switch.py	assert state["set"] is False and state["moxis"] is False and state["saved"] is None	keep	set	set
 statusline	packages/statusline/tests/test_switch.py	assert act.code == codes.ERROR and act.kind == "refused"	keep	refused	refused
+statusline	packages/statusline/tests/test_switch.py	-	name	test_a_folder_that_cant_be_written_is_said_and_changes_nothing	test_a_dir_that_cant_be_written_is_said_and_changes_nothing
+statusline	packages/statusline/tests/test_switch.py	backups	name	folder	backups_dir
+statusline	packages/statusline/tests/test_switch.py	test_a_dir_that_cant_be_written_is_said_and_changes_nothing	name	folder	settings_dir
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	CHECKS = ("orphan", "half", "renamed", "missing", "changed", "clash", "moved", "ok")	keep	changed	changed
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	_Live.__call__	name	caught	provider_exc
 tunnel	packages/tunnel/src/moxi_tunnel/acts.py	act.last = exc.record	keep	record	record

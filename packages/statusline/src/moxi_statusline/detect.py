@@ -16,7 +16,7 @@ their script runs with made-up input and may store what it is given.
 | `session` | `session_id`, a UUID's shape made of letters; found by its first 6 |
 | `transcript` | the name of `transcript_path`, a file that is not made |
 | `lines` | lines added and removed, each from 1000 to 9999 |
-| `cost` | `total_cost_usd`, `N.NN` with `N` from 2 to 9 |
+| `cost` | `total_cost_usd`, N.NN with N from 2 to 9 |
 
 A text marker is 8 letters from `g` to `z`, so none can be part of a number or a hex
 string. Every number in the input that is not a marker is 0 or a fixed size.
@@ -30,8 +30,8 @@ all of the id.
 from the clock while the run lasts: from building the input to 10 s after it, and the
 moment the limits reset, each in local time and in UTC. The two-digit markers skip the
 year's last two digits, the month, the day, the hour (24- and 12-hour), the minute and the
-second; the four-digit ones skip every year from 1900 to 2100 and every `HHMM`, `MMSS`,
-`mmdd` and `ddmm`; the cost skips every `H.MM`. A countdown to the resets is under a
+second; the four-digit ones skip every year from 1900 to 2100 and every HHMM, MMSS,
+mmdd and ddmm; the cost skips every H.MM. A countdown to the resets is under a
 minute, outside every range drawn.
 
 **The check before the run.** Before anything runs, each marker is looked for, by the
@@ -158,7 +158,7 @@ class Detection:
     __slots__ = ("found", "also", "problem", "ran")
 
     def __init__(self, found: list[Found] | None = None, also: str | None = None,
-                 problem: str | None = None, ran: bool = False):
+                 problem: str | None = None, *, ran: bool = False):
         self.found = list(found or [])
         self.also = also
         self.problem = problem
@@ -234,7 +234,7 @@ class Plan:
                     numbers.add(value)
                     return value
 
-        self.folder_name = word()
+        self.dir_name = word()
         self.branch = word()
         self.model_name = word()
         self.model_id = word()
@@ -255,11 +255,11 @@ class Plan:
         self.cost_text = text
         self.cost = float(text)
 
-        self.folder = os.path.join(root, self.folder_name)
+        self.work_dir = os.path.join(root, self.dir_name)
         self.home = os.path.join(root, "home")
         self.transcript = os.path.join(root, self.transcript_name + ".jsonl")
         self.markers = [
-            Marker("dir", self.folder_name, "word"),
+            Marker("dir", self.dir_name, "word"),
             Marker("branch", self.branch, "word"),
             Marker("model", self.model_name, "word"),
             Marker("model", self.model_id, "word"),
@@ -282,15 +282,15 @@ class Plan:
                 return value
             return "" if isinstance(value, str) else 0
 
-        folder = own("dir", self.folder)
+        cwd = own("dir", self.work_dir)
         return {
             "hook_event_name": "Status",
             "session_id": own("session", self.session),
             "transcript_path": own("transcript", self.transcript),
-            "cwd": folder,
+            "cwd": cwd,
             "model": {"id": own("model", self.model_id),
                       "display_name": own("model", self.model_name)},
-            "workspace": {"current_dir": folder, "project_dir": folder},
+            "workspace": {"current_dir": cwd, "project_dir": cwd},
             "effort": {"level": own("effort", EFFORT)},
             "context_window": {"used_percentage": own("context", self.context),
                                "context_window_size": WINDOW},
@@ -310,7 +310,7 @@ class Plan:
         """The first marker found outside its own piece's fields, or None. Each marker is
         looked for in the input with its piece's fields emptied, and in the folder paths
         that are not its piece's."""
-        paths_ = [("dir", self.folder), (None, self.root), (None, self.home),
+        paths_ = [("dir", self.work_dir), (None, self.root), (None, self.home),
                   ("transcript", self.transcript)]
         for marker in self.markers:
             text = "\n".join([json.dumps(self.payload(marker.piece)),
@@ -438,13 +438,13 @@ def run(command: str, data: bytes, *, cwd: str, env: Mapping[str, str],
     return proc.returncode, out or b""
 
 
-def _git(folder: str, branch: str, env: Mapping[str, str]) -> bool:
+def _git(repo_dir: str, branch: str, env: Mapping[str, str]) -> bool:
     """Make `folder` a repository on `branch`. False without `git`, or when it fails."""
     git = shutil.which("git", path=env.get("PATH"))
     if git is None:
         return False
     try:
-        done = subprocess.run([git, "init", "-q", "-b", branch], cwd=folder, env=dict(env),
+        done = subprocess.run([git, "init", "-q", "-b", branch], cwd=repo_dir, env=dict(env),
                               stdin=subprocess.DEVNULL, capture_output=True, timeout=LIMIT,
                               check=False)
     except (OSError, subprocess.TimeoutExpired):
@@ -498,10 +498,10 @@ def detect(command: str, *, tmp: str | None = None, now: Callable[[], float] = t
         if drawn is None:
             return nothing("Moxi couldn't draw test input whose markers stay apart (the "
                            "temp folder's path may hold one), so nothing was detected.")
-        os.mkdir(drawn.folder, 0o700)
+        os.mkdir(drawn.work_dir, 0o700)
         os.mkdir(drawn.home, 0o700)
-        environ = sandbox(base, drawn.home)
-        repo = _git(drawn.folder, drawn.branch, environ)
+        run_env = sandbox(base, drawn.home)
+        repo = _git(drawn.work_dir, drawn.branch, run_env)
         try:
             real_home = str(paths.home(base))
         except LookupError:
@@ -509,7 +509,7 @@ def detect(command: str, *, tmp: str | None = None, now: Callable[[], float] = t
         line = command if real_home is None else homed(command, real_home)
         data = json.dumps(drawn.payload()).encode("utf-8")
         try:
-            code, out = run(line, data, cwd=drawn.folder, env=environ, limit=limit)
+            code, out = run(line, data, cwd=drawn.work_dir, env=run_env, limit=limit)
         except OSError as exc:
             return nothing(f"Your status line couldn't be run ({exc.strerror or exc}), so "
                            "nothing was detected.")

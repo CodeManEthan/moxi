@@ -54,7 +54,7 @@ PREFIX = "preview-"
 SUFFIX = ".toml"
 #: The made-up folder the sample input is in, under the home folder. Nothing is read
 #: there but the branch, which it has none of.
-SAMPLE_FOLDER = ("projects", "sample")
+SAMPLE_DIR = ("projects", "sample")
 #: The note under the preview for a shown item with nothing for the sample.
 LIVE = "shows in a live session"
 NO_BRANCH = "shows inside a git repository"
@@ -199,7 +199,7 @@ def refusal(exc: config.ConfigError) -> Exception:
 
 def _payload() -> dict:
     home = str(moxi_paths.home())
-    return sample.payload(cwd=os.path.join(home, *SAMPLE_FOLDER))
+    return sample.payload(cwd=os.path.join(home, *SAMPLE_DIR))
 
 
 def _render_file(path: str, payload: dict, only: str | None = None) -> render.Rendered:

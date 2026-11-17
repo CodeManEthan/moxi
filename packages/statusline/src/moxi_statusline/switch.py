@@ -97,7 +97,7 @@ class Saved:
 
     __slots__ = ("had", "value", "at")
 
-    def __init__(self, had: bool, value=None, at: str | None = None):
+    def __init__(self, *, had: bool, value=None, at: str | None = None):
         self.had = had
         self.value = value if had else None
         self.at = at
@@ -221,14 +221,14 @@ def saved(env: Mapping[str, str] | None = None) -> Saved | None:
     if not isinstance(data, dict) or not isinstance(data.get("had"), bool):
         raise SavedError(f"{path} doesn't hold a saved status line")
     at = data.get("saved_at") if isinstance(data.get("saved_at"), str) else None
-    return Saved(data["had"], data.get(KEY), at)
+    return Saved(had=data["had"], value=data.get(KEY), at=at)
 
 
 def _keep(doc: harnessfile.Doc, env: Mapping[str, str] | None) -> None:
     from .clock import stamp
 
     had = KEY in doc.data and doc.data[KEY] is not None
-    entry = Saved(had, doc.data.get(KEY), stamp()).as_json()
+    entry = Saved(had=had, value=doc.data.get(KEY), at=stamp()).as_json()
     path = previous_path(env)
     files.private_dir(path.parent)
     files.atomic_write(path, (json.dumps(entry, indent=2, ensure_ascii=False) + "\n")
@@ -402,7 +402,7 @@ def state(env: Mapping[str, str] | None = None) -> dict:
     return out
 
 
-def project_lines(folder: str | os.PathLike,
+def project_lines(project_dir: str | os.PathLike,
                   env: Mapping[str, str] | None = None) -> list[tuple[str, str | None]]:
     """The project settings in `folder` that set their own `statusLine`, which Claude
     Code uses there over the user's: `(path, command)` for each, the command None when
@@ -411,7 +411,7 @@ def project_lines(folder: str | os.PathLike,
     mine = os.path.realpath(settings_path(env))
     out = []
     for name in ("settings.json", "settings.local.json"):
-        path = Path(folder) / ".claude" / name
+        path = Path(project_dir) / ".claude" / name
         if not path.is_file() or os.path.realpath(path) == mine:
             continue
         try:

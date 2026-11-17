@@ -41,8 +41,8 @@ def here() -> str:
 
 
 def backups():
-    folder = switch.backups_dir()
-    return sorted(folder.iterdir()) if folder.is_dir() else []
+    backups_dir = switch.backups_dir()
+    return sorted(backups_dir.iterdir()) if backups_dir.is_dir() else []
 
 
 # -- Moxi's line ------------------------------------------------------------------------
@@ -340,14 +340,14 @@ def test_project_lines_finds_a_projects_own_line(tmp_path):
     assert switch.project_lines(tmp_path) == []
 
 
-def test_a_folder_that_cant_be_written_is_said_and_changes_nothing():
+def test_a_dir_that_cant_be_written_is_said_and_changes_nothing():
     raw = write_settings({"statusLine": {"type": "command", "command": "/x/l.sh"}})
-    folder = settings_file().parent
-    folder.chmod(0o500)
+    settings_dir = settings_file().parent
+    settings_dir.chmod(0o500)
     try:
         act = switch.switch(None, by="test")
     finally:
-        folder.chmod(0o700)
+        settings_dir.chmod(0o700)
     assert act.code == codes.ERROR and act.kind == "refused"
     assert "can't be written" in act.lines[0]
     assert settings_file().read_bytes() == raw

@@ -23,7 +23,7 @@ from moxi import modules, paths
 SEP = " │ "
 
 
-def test_the_default_line_with_no_config_file_and_no_folder_made():
+def test_the_default_line_with_no_config_file_and_no_dir_made():
     assert not config_file().parent.exists()
     done = render("--no-color")
     # usage shows nothing without rate_limits, cache nothing without a clock record.
@@ -40,10 +40,10 @@ def test_the_default_line_shows_usage_and_cache_at_the_time_now():
             pytest.skip(f"{name} is not installed here")
     now = time.time()
     # cache's clock record, where its watcher writes it.
-    folder = paths.Layout("cache").runtime_dir() / "clock"
-    folder.mkdir(parents=True)
+    clock_dir = paths.Layout("cache").runtime_dir() / "clock"
+    clock_dir.mkdir(parents=True)
     session = INPUT["session_id"]
-    (folder / f"{session}.json").write_text(json.dumps({
+    (clock_dir / f"{session}.json").write_text(json.dumps({
         "v": 1, "session": session, "harness": "claude", "pid": 1, "kind": "warm",
         "last_request": now - 150, "ttl": 3600, "read_at": now, "seen_at": now,
         "code": None, "warn_before": 900, "stale_after": 30}))

@@ -114,9 +114,9 @@ def branch(start: str) -> str | None:
     """The branch of the repository holding folder `start`, read from its `HEAD` file:
     no process. None outside a repository, on a reftable repository, or when a file
     can't be read."""
-    folder = os.path.abspath(start)
+    search_dir = os.path.abspath(start)
     while True:
-        dot_git = os.path.join(folder, ".git")
+        dot_git = os.path.join(search_dir, ".git")
         if os.path.isdir(dot_git):
             return _head(os.path.join(dot_git, "HEAD"))
         if os.path.isfile(dot_git):
@@ -124,12 +124,12 @@ def branch(start: str) -> str | None:
             if git_dir is None:
                 return None
             if not os.path.isabs(git_dir):
-                git_dir = os.path.join(folder, git_dir)
+                git_dir = os.path.join(search_dir, git_dir)
             return _head(os.path.join(git_dir, "HEAD"))
-        parent = os.path.dirname(folder)
-        if parent == folder:
+        parent = os.path.dirname(search_dir)
+        if parent == search_dir:
             return None
-        folder = parent
+        search_dir = parent
 
 
 def _read(path: str) -> str | None:

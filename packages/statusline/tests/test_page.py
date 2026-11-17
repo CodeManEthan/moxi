@@ -371,9 +371,9 @@ def test_a_render_stopped_at_the_limit_leaves_no_file(monkeypatch):
 
 
 def test_the_first_request_sweeps_left_preview_files_and_import_does_not():
-    folder = pagehandlers.runtime_dir()
-    left = folder / "preview-abc123.toml"
-    other = folder / "page.json"
+    runtime_dir = pagehandlers.runtime_dir()
+    left = runtime_dir / "preview-abc123.toml"
+    other = runtime_dir / "page.json"
     left.write_text("show = []\n")
     other.write_text("{}")
     import importlib

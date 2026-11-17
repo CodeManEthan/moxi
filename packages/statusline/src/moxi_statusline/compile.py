@@ -52,9 +52,9 @@ def compile_all() -> list[str]:
     from .render import RENDER_IMPORTS
 
     for top in ("moxi", "moxi_statusline"):
-        folder = package_dir(top)
-        if folder is not None:
-            compileall.compile_dir(folder, quiet=2)
+        top_dir = package_dir(top)
+        if top_dir is not None:
+            compileall.compile_dir(top_dir, quiet=2)
     files = []
     for name in present_segments():
         files += [f for f in segment_sources(name) if f not in files]
@@ -124,7 +124,7 @@ def closure(dotted: str) -> list[str]:
         seen[name] = path
         parts = name.split(".")
         queue += [".".join(parts[:i]) for i in range(1, len(parts))]
-        queue += [n for n in _imports(path, name, is_package)
+        queue += [n for n in _imports(path, name, is_package=is_package)
                   if n.split(".")[0] == top and n not in seen]
     return list(seen.values())
 
@@ -183,7 +183,7 @@ def _file(name: str, roots: list[str]) -> tuple[str, bool] | None:
     return None
 
 
-def _imports(path: str, name: str, is_package: bool) -> list[str]:
+def _imports(path: str, name: str, *, is_package: bool) -> list[str]:
     """Every module name `path` may import: each `import a.b`, each `from a import b` as
     both `a` and `a.b` (`b` may be a submodule), relative ones resolved against `name`."""
     try:

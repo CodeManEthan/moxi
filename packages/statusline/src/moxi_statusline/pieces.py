@@ -93,14 +93,14 @@ def measure(piece: Piece, *, payload: Mapping | None = None, runs: int = RUNS,
 
         payload = sample()
     data = json.dumps(payload)
-    environ = dict(os.environ if env is None else env)
-    environ["input"] = data
+    run_env = dict(os.environ if env is None else env)
+    run_env["input"] = data
     times = []
     for i in range(runs + 1):
         start = time.perf_counter()
         try:
             done = subprocess.run(["sh", "-c", piece.command], input=data.encode("utf-8"),
-                                  capture_output=True, env=environ, timeout=timeout,
+                                  capture_output=True, env=run_env, timeout=timeout,
                                   check=False)
         except (OSError, subprocess.TimeoutExpired):
             return None

@@ -77,8 +77,8 @@ def recorded(env: Mapping[str, str] | None = None) -> dict | None:
     """The recorded answer, `{"answer": ..., "at": ...}`, or None when none is recorded
     (or the record can't be read, which asks again)."""
     try:
-        with open(asked_path(env), "rb") as handle:
-            data = json.loads(handle.read())
+        with open(asked_path(env), "rb") as fh:
+            data = json.loads(fh.read())
     except (OSError, ValueError):
         return None
     if isinstance(data, dict) and data.get("answer") in ANSWERS:

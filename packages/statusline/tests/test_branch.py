@@ -5,10 +5,10 @@ from moxi_statusline.fields import Options, branch, field
 HASH = "0123456789abcdef0123456789abcdef01234567"
 
 
-def repo(folder, head: str):
-    (folder / ".git").mkdir(parents=True)
-    (folder / ".git" / "HEAD").write_text(head)
-    return folder
+def repo(repo_dir, head: str):
+    (repo_dir / ".git").mkdir(parents=True)
+    (repo_dir / ".git" / "HEAD").write_text(head)
+    return repo_dir
 
 
 def test_a_branch(tmp_path):
@@ -16,7 +16,7 @@ def test_a_branch(tmp_path):
     assert branch(str(tmp_path / "r")) == "feature/one"
 
 
-def test_found_from_a_folder_inside_the_repository(tmp_path):
+def test_found_from_a_dir_inside_the_repository(tmp_path):
     repo(tmp_path / "r", "ref: refs/heads/main\n")
     inner = tmp_path / "r" / "a" / "b"
     inner.mkdir(parents=True)
@@ -62,7 +62,7 @@ def test_a_git_file_without_gitdir_shows_nothing(tmp_path):
     assert branch(str(tmp_path)) is None
 
 
-def test_the_branch_field_reads_the_input_folder(tmp_path):
+def test_the_branch_field_reads_the_input_dir(tmp_path):
     repo(tmp_path / "r", "ref: refs/heads/main\n")
     payload = {"workspace": {"current_dir": str(tmp_path / "r")}}
     assert field("branch", payload, Options()) == "main"

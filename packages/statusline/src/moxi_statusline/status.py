@@ -15,7 +15,7 @@ from moxi.config import ConfigError
 from . import switch
 
 
-def report(folder: str | os.PathLike | None = None,
+def report(project_dir: str | os.PathLike | None = None,
            env: Mapping[str, str] | None = None) -> dict:
     """The status as plain data: `switch.state`'s keys, then `show` (the config's items),
     `config_error` (why the config can't be read, the default items then shown),
@@ -33,9 +33,9 @@ def report(folder: str | os.PathLike | None = None,
     out["show"] = show
     out["nothing_behind"] = doctor.nothing_behind(show)
     out["clashes"] = doctor.clashes()
-    folder = os.getcwd() if folder is None else folder
+    project_dir = os.getcwd() if project_dir is None else project_dir
     out["project"] = [{"path": path, "command": command}
-                      for path, command in switch.project_lines(folder, env)]
+                      for path, command in switch.project_lines(project_dir, env)]
     return out
 
 
@@ -63,7 +63,8 @@ def lines(data: dict) -> list[str]:
     elif saved is None:
         out.append("Saved line: none kept")
     else:
-        kept = switch.Saved(saved["had"], saved.get(switch.KEY), saved.get("saved_at"))
+        kept = switch.Saved(had=saved["had"], value=saved.get(switch.KEY),
+                            at=saved.get("saved_at"))
         when = f" (kept {kept.at})" if kept.at else ""
         out.append(f"Saved line: {kept.describe()}{when}")
     if data["config_error"] is not None:

@@ -192,14 +192,15 @@ def lines(items, payload: dict | None, options, separator: str, *,
         if item in RESERVED:
             text = field(item, payload, options)
         else:
-            text = _segment(item, payload, options.color, segment_of, now)
+            text = _segment(item, payload, color=options.color, segment_of=segment_of,
+                            now=now)
         if text:
             row.append(text)
     rows.append(row)
     return [separator.join(row) for row in rows if row]
 
 
-def _segment(name: str, payload, color: bool, segment_of, now) -> str | None:
+def _segment(name: str, payload, *, color: bool, segment_of, now) -> str | None:
     """Module item `name`'s text, or None. Never raises: a failure is one stderr line."""
     if payload is None:
         return None

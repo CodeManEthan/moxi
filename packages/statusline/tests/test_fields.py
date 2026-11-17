@@ -119,7 +119,8 @@ def test_context_null_is_a_dash_and_junk_or_absent_is_left_out():
         "ctx:—"
     assert field("context", with_("context_window", {}), opts()) == "ctx:—"
     assert field("context", with_("context_window.used_percentage", "42"), opts()) is None
-    assert field("context", with_("context_window.used_percentage", True), opts()) is None
+    assert field("context", with_("context_window.used_percentage", True),  # noqa: FBT003 -- a bool is the bad input
+                 opts()) is None
     payload = copy.deepcopy(INPUT)
     del payload["context_window"]
     assert field("context", payload, opts()) is None

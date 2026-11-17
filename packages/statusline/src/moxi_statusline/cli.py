@@ -42,11 +42,11 @@ class Verb:
 
     __slots__ = ("name", "help", "description", "arguments", "run")
 
-    def __init__(self, name: str, help: str, description: str,
+    def __init__(self, name: str, help_text: str, description: str,
                  arguments: Callable[[argparse.ArgumentParser], None],
                  run: Callable[[argparse.Namespace], int]):
         self.name = name
-        self.help = help
+        self.help = help_text
         self.description = description
         self.arguments = arguments
         self.run = run

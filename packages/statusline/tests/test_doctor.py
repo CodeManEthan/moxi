@@ -95,7 +95,7 @@ def test_moxis_line_at_a_path_that_is_gone_fails():
     assert row.fix == "moxi statusline use"
 
 
-def test_moxis_line_in_another_environment_warns(tmp_path):
+def test_moxis_line_in_another_env_warns(tmp_path):
     other = tmp_path / "other" / "bin" / "moxi-statusline-render"
     other.parent.mkdir(parents=True)
     other.write_text("#!/bin/sh\n")

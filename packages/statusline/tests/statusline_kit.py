@@ -114,12 +114,12 @@ def render(*args: str, stdin: object = INPUT, site: Site | None = None,
     """One render in a child process: `stdin` as JSON (bytes and str as they are)."""
     data = (stdin if isinstance(stdin, bytes) else stdin.encode() if isinstance(stdin, str)
             else json.dumps(stdin).encode())
-    environ = dict(os.environ if env is None else env)
+    child_env = dict(os.environ if env is None else env)
     if site is not None:
-        environ["PYTHONPATH"] = os.pathsep.join(
-            [str(site.root), *filter(None, [environ.get("PYTHONPATH")])])
+        child_env["PYTHONPATH"] = os.pathsep.join(
+            [str(site.root), *filter(None, [child_env.get("PYTHONPATH")])])
     return subprocess.run([sys.executable, "-m", "moxi_statusline.render", *args],
-                          input=data, capture_output=True, env=environ, timeout=60,
+                          input=data, capture_output=True, env=child_env, timeout=60,
                           check=False)
 
 
