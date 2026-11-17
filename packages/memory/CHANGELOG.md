@@ -35,4 +35,4 @@ The first public release.
   can't be read.
 - `moxi doctor memory` rows: `index`, `ingest`, `sets`, `start`, `sessions`, `links` and
   `retention`.
-- Linux only. Requires moxi 0.1.6 or later and turns 0.2.4 or later.
+- Linux only. Requires moxi 0.1.7 or later and turns 0.2.4 or later.
