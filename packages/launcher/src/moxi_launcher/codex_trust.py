@@ -12,11 +12,12 @@ Codex neither shows its trust screen nor writes a trust entry into its config.
 The launcher reads `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) and never
 writes it. The lookup is Codex's own: the launch folder's key as given, then as its
 canonical path, then the trust root's. The trust root is the nearest folder at or above
-the launch folder holding `.git`; when that `.git` is a file naming a linked worktree's
-git folder (`<repo>/.git/worktrees/<name>`), it is the main checkout's folder instead; any
-other `.git` file (a submodule's) gives none. A folder's entry counts only when it names a
-trust level; one that names none leaves Codex to ask, so the launch passes `trusted`. A
-config that can't be read or doesn't parse counts as no entry, and the line says so.
+the launch folder's canonical path holding `.git`; when that `.git` is a file naming a
+linked worktree's git folder (`<repo>/.git/worktrees/<name>`), it is the main checkout's
+folder instead; any other `.git` file (a submodule's) gives none. A folder's entry counts
+only when it names a trust level; one that names none leaves Codex to ask, so the launch
+passes `trusted`. A config that can't be read or doesn't parse counts as no entry, and the
+line says so.
 """
 
 from __future__ import annotations
@@ -64,8 +65,9 @@ def config_file(env: Mapping[str, str]) -> Path:
 
 def trust_root(cwd: str | os.PathLike) -> Path | None:
     """The folder Codex keys a git project's trust by, for a launch in `cwd`; None
-    outside any repository, and for a `.git` file that names no linked worktree."""
-    here = Path(cwd)
+    outside any repository, and for a `.git` file that names no linked worktree. The walk
+    starts at the folder's canonical path, as git run in a symlinked folder does."""
+    here = _canonical(Path(cwd))
     if not here.is_dir():
         here = here.parent
     for candidate in (here, *here.parents):

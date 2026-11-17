@@ -109,7 +109,8 @@ def test_show_json_gives_every_key_but_the_templates_a_label(capsys):
     keys = show_json(capsys)
     assert {name for name, key in keys.items() if not key["label"]} == TEMPLATES
     assert keys["runs.keep_days"]["label"] == "Keep run files for"
-    assert keys["runs.keep_days"]["line"] == "A launch's prompt file and headless log."
+    assert keys["runs.keep_days"]["line"] == ("A launch's prompt file, settings file and "
+                                                 "headless log.")
     assert keys["ready.wait_s"]["label"] == "For a started session to be ready"
     assert keys["keep_warm.subagent_cap"]["label"] == "Nudges in a row, waiting on subagents"
     for key in keys.values():

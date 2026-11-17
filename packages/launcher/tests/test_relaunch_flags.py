@@ -151,7 +151,10 @@ def test_a_directors_relaunch_waits_for_ready_and_ends_relaunched_flagged(conn, 
     outcome, ended, new = relaunch(conn, rig, run)
     assert outcome == "relaunched" and ended.word == first.NO_READY
     assert new.state == "started"
-    [wait] = rig.turns_calls("wait_ready")
+    # The startup watch asks for ready at each read of the screens, then the launch
+    # waits once for `ready.wait_s`.
+    *polls, wait = rig.turns_calls("wait_ready")
+    assert all(poll["timeout"] <= startup.INTERVAL_S for poll in polls), polls
     assert wait["timeout"] == READY_WAIT_S
     assert "ended relaunched: no-ready" in notice(conn, ended)["text"]
 

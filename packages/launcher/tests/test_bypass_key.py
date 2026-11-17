@@ -75,9 +75,10 @@ def settings_args(argv) -> list[str]:
 
 
 def launch(work: Path, *, extra=(), **typed) -> api.LaunchResult:
+    """A slot launch of `typed`, allowed off the posture default as `--off-posture` does."""
     return api.launch(LaunchRequest(typed={"target": "slot", **typed}, extra=list(extra),
                                     cwd=str(work), request_id="r1", session_id=SID,
-                                    actor="ann"))
+                                    actor="ann", off_posture=True))
 
 
 def run_file(rid: str = "r1") -> Path:
