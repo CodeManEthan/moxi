@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Archive folders (interface 6): `claude.archives` and `codex.archives` name folders of
+  older transcripts, laid out as the harness's root, read after the live root in order;
+  a session an earlier folder holds is read from there only. `archives.answer_wait_s`
+  (5 seconds) bounds one call's wait for them, tested together in child processes; a
+  folder that doesn't answer is offline, never empty or a miss. New in the API: `corpus`,
+  `find(..., include_archives=True)`, `Found.unknown`, a listing's `is_archive`,
+  `absent`, `empty` and `shadowed`, `archive_dirs`, `archive_answers`, `ArchiveAnswer`,
+  and `Retention.archive_dirs`. `find` with no root and `sources` still read the live
+  root only. `moxi sessions find` and `read` ask the archives when no live root holds
+  the session and say "unknown" when a folder didn't answer; `root` names them;
+  setup and the doctor's new `archives` row test them; the transcript-read guard counts
+  them as transcript roots by their written path. sessions writes nothing in them.
+  `find`'s `--json` and `Found.as_dict` gain `unknown`, `root --json` gains `archives`.
+  Callers that compared those documents whole must allow the new keys.
+
 - Every setting carries page fields, which `moxi config sessions show --json` prints
   and the settings page draws: a plain label, a line where the label can't carry it,
   the transcript folders and the transcript-read guard shown first, and a can-hurt mark

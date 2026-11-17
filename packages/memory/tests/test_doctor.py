@@ -9,7 +9,7 @@ from moxi_sessions import api
 from moxi_memory import additions, doctor, ingest, links, module, state, table
 
 T = api.testing
-NAMES = ["index", "ingest", "sets", "start", "sessions", "links", "retention"]
+NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention"]
 
 
 def write_config(name, text):

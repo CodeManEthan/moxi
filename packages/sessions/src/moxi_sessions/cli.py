@@ -9,8 +9,14 @@ the newest sessions, and one session's turns.
 
 `find` prints where the session's records are (a Claude Code transcript, every rollout
 file of a Codex thread, or the OpenCode database that holds the session), or every root it
-probed and why each held none, and exits 1 then. `root` prints the root each harness is
-read from when a caller names none, and where that root came from. With `--json`, each
+probed and why each held none, and exits 1 then. It asks the live root, then the archive
+folders sessions' config names for the harness (`claude.archives`, `codex.archives`), then
+each `--root`. Asking for a session this way is asking the archives: when the live root
+doesn't hold it, the archive folders are tested together first, waiting at most
+`archives.answer_wait_s`. When no folder holds the session and one didn't answer, the session is
+unknown, not absent: it says so, names that folder, and exits 1. `root` prints the root
+each harness is read from when a caller names none, where that root came from, and its
+archive folders, testing none. With `--json`, each
 prints one JSON object whose first key is `shape`, the shape version, as every JSON
 document sessions writes has.
 
@@ -38,9 +44,15 @@ prints a tool's input past its summary, or its output. With the secrets module e
 message, tool call line and title is redacted with secrets' `credentials` and `broad` sets
 before it is cut; without it the read prints as written and says so once, on stderr.
 `--json` prints the same rows as one JSON object. Without `--harness`, `read` asks each
-harness's root for the session, the way `find` does, and reads the one that holds it; when
-more than one holds it, it names them and exits 2 for `--harness` to choose. A session no
-root holds, or a source that can't be read, exits 1 with the reason.
+harness's live root for the session, the way `find` does, and reads the one that holds it;
+only when no live root holds it does it test every harness's archive folders together (one
+wait) and ask them. With `--harness`, it asks that harness's live root, then its archive
+folders. When more than one harness holds the session, it names them and exits 2 for
+`--harness` to choose. When one harness holds it and another harness's archive folder
+didn't answer, it reads the one it found and names the folder it couldn't ask. A session
+no folder holds, or a source that can't be read, exits 1 with the reason; a session no
+folder holds while one didn't answer is unknown, and the read says so, names the folder,
+and exits 1.
 """
 
 from __future__ import annotations
@@ -55,8 +67,9 @@ from datetime import datetime
 from moxi.config import ConfigError
 
 from . import claude, view
+from .archives import archive_answers, archive_dirs
 from .errors import Unreadable
-from .find import find
+from .find import Found, find
 from .shape import CLAUDE, CODEX, HARNESSES, document
 from .source import root, root_origin
 
@@ -154,21 +167,32 @@ def _find(args, prog: str) -> int:
     if not claude.SAFE_ID_RE.match(session):
         print(f"{prog} find: {session!r} is not a session id", file=sys.stderr)
         return 2
-    roots = claude.search_roots(live=root(args.harness), extra=args.root)
-    found = find(args.harness, session, root=roots)
+    found = find(args.harness, session, include_archives=True)
+    asked = {probe.root for probe in found.probes}
+    extra = [each for each in claude.search_roots(live=root(args.harness),
+                                                  extra=args.root)[1:]
+             if str(each) not in asked]
+    if not found.found and extra:
+        more = find(args.harness, session, root=extra)
+        found = Found(args.harness, session, found.probes + more.probes)
     paths = [hit.source.path for hit in found.hits]
     if args.json:
         probes = [{"root": probe.root, "outcome": probe.outcome,
                    "paths": [hit.source.path for hit in probe.hits]}
                   for probe in found.probes]
         print(json.dumps(document(harness=args.harness, session=session,
-                                  found=found.found, paths=paths,
+                                  found=found.found, unknown=found.unknown, paths=paths,
                                   compressed=[hit.source.path for hit in found.hits
                                               if hit.compressed],
                                   probes=probes), indent=2))
     elif paths:
         for path in paths:
             print(path)
+    elif found.unknown:
+        print(f"{session} is unknown: no folder asked holds its {RECORD[args.harness]}, "
+              "and a folder that didn't answer may; probed:")
+        for probe in found.probes:
+            print(f"  {probe.root}: {probe.outcome}")
     else:
         print(f"no {RECORD[args.harness]} for {session}; probed:")
         for probe in found.probes:
@@ -180,15 +204,19 @@ def _find(args, prog: str) -> int:
 
 def _root(args) -> int:
     origins = [root_origin(harness) for harness in HARNESSES]
+    kept = {origin.harness: list(archive_dirs(origin.harness)) for origin in origins}
     if args.json:
         print(json.dumps(document(**{origin.harness: {"root": str(origin.path),
                                                       "source": origin.source,
-                                                      "detail": origin.detail}
+                                                      "detail": origin.detail,
+                                                      "archives": kept[origin.harness]}
                                      for origin in origins}), indent=2))
         return 0
     for origin in origins:
         print(f"{origin.harness}: {origin.path}")
         print(f"  from: {origin.detail}")
+        for archive_dir in kept[origin.harness]:
+            print(f"  archive: {archive_dir}")
     return 0
 
 
@@ -304,26 +332,59 @@ def _pick(found):
     return next((h for h in hits if not h.compressed), hits[0]).source
 
 
+def _offline(asked, asked_dirs) -> list[str]:
+    """`folder (why)` for each archive folder in `asked_dirs` that one of the finds in
+    `asked` probed and that didn't answer."""
+    return [f"{probe.root} ({probe.outcome.partition(': ')[2] or probe.outcome})"
+            for found in asked for probe in found.probes
+            if probe.root in asked_dirs and probe.outcome.startswith(claude.UNREADABLE)]
+
+
+def _unknown(prog: str, session: str, offline: list[str]) -> str:
+    return (f"{prog} read: session {session} is unknown: no folder asked holds it, and "
+            f"{'; '.join(offline)} didn't answer, so it may be there")
+
+
 def _source(harness: str | None, session: str, prog: str):
     """The harness and source to read, or the reason and the exit code when there is none.
 
-    With `harness` named, only that harness is asked. Without it, every harness is asked
-    in turn with `find`, which looks at names and, for OpenCode, one row, never a whole
-    transcript: the one that holds the session is read, and more than one is refused."""
+    With `harness` named, that harness's live root is asked, then its archive folders.
+    Without it, every harness's live root is asked in turn with `find`, which looks at
+    names and, for OpenCode, one row, never a whole transcript; only when none holds the
+    session are the archive folders of every harness tested together, once, and asked.
+    The one harness that holds the session is read, and more than one is refused."""
     if harness is not None:
-        found = find(harness, session)
+        found = find(harness, session, include_archives=True)
+        offline = _offline([found], set(archive_dirs(harness)))
+        if not found.found and offline:
+            return None, None, _unknown(prog, session, offline), 1
         if not found.found:
             return None, None, (f"{prog} read: no {harness} session {session} was found "
                                 f"({_probed(found)})"), 1
         return harness, _pick(found), None, 0
     asked = [find(each, session) for each in HARNESSES]
     held = [found for found in asked if found.found]
+    asked_dirs: list[str] = []
+    if not held:
+        asked_dirs = [archive_dir for each in HARNESSES for archive_dir in archive_dirs(each)]
+        if asked_dirs:
+            archive_answers(asked_dirs)
+            asked = [find(each, session, include_archives=True) for each in HARNESSES]
+            held = [found for found in asked if found.found]
     if len(held) == 1:
+        offline = _offline([found for found in asked if not found.found], set(asked_dirs))
+        if offline:
+            print(f"{prog} read: {held[0].harness} holds session {session}; "
+                  f"{'; '.join(offline)} didn't answer, so whether another harness holds "
+                  "it too is not known", file=sys.stderr)
         return held[0].harness, _pick(held[0]), None, 0
     if held:
         names = " and ".join(found.harness for found in held)
         return None, None, (f"{prog} read: session {session} is held by {names}; give "
                             "--harness to say which to read"), 2
+    offline = _offline(asked, set(asked_dirs))
+    if offline:
+        return None, None, _unknown(prog, session, offline), 1
     probed = "; ".join(f"{found.harness}: {_probed(found)}" for found in asked)
     return None, None, (f"{prog} read: no session {session} was found in any harness "
                         f"({probed})"), 1

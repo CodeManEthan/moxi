@@ -23,6 +23,16 @@ def test_installed_and_present_read_metadata_and_import_nothing(site):
     assert "moxi_alpha" not in sys.modules
 
 
+def test_the_site_installs_a_new_version_in_place_of_the_old(site):
+    site.module("alpha", version="0.1.0")
+    site.module("beta")
+    (site.root / "Moxi.Alpha-0.0.9.egg-info").mkdir()
+    site.module("alpha", version="0.2.0")
+    infos = sorted(p.name for p in site.root.iterdir() if p.name.endswith("-info"))
+    assert infos == ["moxi_alpha-0.2.0.dist-info", "moxi_beta-0.1.0.dist-info"]
+    assert modules.load("alpha").version == "0.2.0"
+
+
 def test_load_reads_the_announcement(site):
     site.write("moxi_alpha/api.py", "def hello():\n    return 'hi'\n")
     site.module("alpha", INTERFACES="frozenset({1, 2})", API="'moxi_alpha.api'",

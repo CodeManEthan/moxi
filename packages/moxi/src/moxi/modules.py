@@ -57,9 +57,10 @@ announcement and the `API` module, and returns a frozen `Found` whose state is `
 `absent` or `broken`; it never raises. `announced` returns that record without importing
 the `API` module, for a caller that needs only the announcement, such as a status line
 render. Both read that distribution's `.dist-info` directory straight off the `sys.path`
-directories, and find there what `importlib.metadata.distribution("moxi-<name>")` would;
-a distribution installed any other way (an `.egg-info`, a zip, a custom finder) is
-`absent` to them. `scan` is the full scan,
+directories, and find there what `importlib.metadata.distribution("moxi-<name>")` would
+where a directory holds one version of it (of two in one directory, the higher; see
+`_DistInfo.find`); a distribution installed any other way (an `.egg-info`, a zip, a
+custom finder) is `absent` to them. `scan` is the full scan,
 which also finds two distributions claiming one name, a module declared by a distribution
 not named `moxi-<name>`, and one `load` cannot see; `moxi modules`, the doctor and the
 installer use it. A feature that needs an optional module asks `available` (a
@@ -671,8 +672,9 @@ class _Record:
 # importing `importlib.metadata`, whose import costs a hook more than the rest of its path.
 # It looks where `importlib.metadata` looks, in the same order, so for a distribution
 # installed as a `.dist-info` directory on a `sys.path` directory it finds the same
-# distribution, version and entry. One installed any other way is absent here, and the full
-# scan reads it broken.
+# distribution, version and entry. A directory holding two versions of one distribution,
+# which no installer leaves, gives the higher here, whatever order the directory lists in.
+# One installed any other way is absent here, and the full scan reads it broken.
 
 #: A run of "-", "_" and "." in a distribution's name, which name normalization makes one.
 _RUNS = re.compile(r"[-_.]+")
@@ -693,13 +695,25 @@ class _DistInfo:
 
     @classmethod
     def find(cls, module: str) -> _DistInfo | None:
-        """The `moxi-<module>` distribution `importlib.metadata.distribution` would find,
-        when it is a `.dist-info` directory on a `sys.path` directory; otherwise None.
+        """The `moxi-<module>` distribution's `.dist-info` directory on a `sys.path`
+        directory, as `importlib.metadata.distribution` finds it where a directory holds one
+        version of it; otherwise None.
 
         Each `sys.path` entry that is a directory is listed once, in order, `""` as the
-        current directory, and the first metadata directory there whose name, normalized,
-        is the distribution's is the one. The suffix matches in any case. An `.egg-info`
-        found first is None, as is a distribution only a zip or a custom finder holds.
+        current directory, and the first one that holds any metadata directory whose name,
+        normalized, is the distribution's is the only one read. The suffix matches in any
+        case. Of that directory's metadata directories of the distribution:
+
+        - with no `.dist-info` among them, only `.egg-info`, the answer is None;
+        - otherwise the answer is the `.dist-info` whose name holds the highest version,
+          compared as PEP 440 versions. A version that does not parse ranks below every one
+          that does. Equal versions, and unparsable ones among themselves, go to the
+          directory name that sorts last as a string, so the answer never depends on the
+          order the directory lists in. An `.egg-info` beside a `.dist-info` is passed
+          over.
+
+        When the directory holds more than one, a debug line names the one taken and those
+        passed over. A distribution only a zip or a custom finder holds is None.
         """
         wanted = "moxi_" + module
         for entry in sys.path:
@@ -708,6 +722,8 @@ class _DistInfo:
                 children = os.listdir(root) if isinstance(root, str) else ()
             except Exception:  # noqa: BLE001 - not a directory: a zip, or nothing there
                 continue
+            matched: list[str] = []
+            infos: list[tuple[str, str, str]] = []
             for child in children:
                 low = child.lower()
                 if not low.endswith((".dist-info", ".egg-info")):
@@ -716,9 +732,19 @@ class _DistInfo:
                 dist, _, version = stem.partition("-")
                 if _RUNS.sub("_", dist).lower() != wanted:
                     continue
-                if low.endswith(".egg-info"):
-                    return None
-                return cls._read(os.path.join(root, child), dist, version)
+                matched.append(child)
+                if low.endswith(".dist-info"):
+                    infos.append((child, dist, version))
+            if not matched:
+                continue
+            if not infos:
+                return None
+            child, dist, version = infos[0] if len(infos) == 1 else _highest(infos)
+            if len(matched) > 1:
+                passed = ", ".join(sorted(c for c in matched if c != child))
+                _debug(f"{len(matched)} metadata directories of {wanted} in {root}: "
+                       f"took {child}, passed over {passed}")
+            return cls._read(os.path.join(root, child), dist, version)
         return None
 
     @classmethod
@@ -752,6 +778,22 @@ class _DistInfo:
             if section == GROUP and sep and key.strip() == name:
                 return value.strip()
         return None
+
+
+def _highest(infos: list[tuple[str, str, str]]) -> tuple[str, str, str]:
+    """Of `(directory name, distribution, version)` rows, the one with the highest PEP 440
+    version, by the rule `_DistInfo.find` states. The vendored `packaging` loads `typing`,
+    so it is imported only here, for a directory that holds two versions of one
+    distribution."""
+    from ._vendor.packaging.version import InvalidVersion, Version
+
+    def rank(row: tuple[str, str, str]) -> tuple:
+        try:
+            return (1, Version(row[2]), row[0])
+        except InvalidVersion:
+            return (0, 0, row[0])
+
+    return max(infos, key=rank)
 
 
 def _read_text(source_dir: str, name: str) -> str | None:
