@@ -14,6 +14,7 @@ from moxi import modules
 from moxi.config import ConfigError
 
 from moxi_launcher import catalog, presets
+from moxi_launcher.catalog import NeedsModule
 from moxi_launcher.presets import Request
 
 
@@ -561,12 +562,162 @@ def test_codex_with_turns_but_no_host_runs_without_turns(monkeypatch):
     assert any(presets.CODEX_HOST in w for w in got.warnings)
 
 
+def headless_comms(*harnesses, cold_gap_ok=True):
+    """A comms whose `HEADLESS` names `harnesses` (None: a comms older than the name), and
+    whose `parse_exit` takes the grammar of comms' own and records each call."""
+    calls = []
+
+    def parse_exit(values, *, harness):
+        calls.append((list(values), harness))
+        for value in values:
+            kind, _, rest = value.partition("=")
+            if value not in ("done", "cold") and not (
+                    kind in ("idle", "after") and rest[:-1].isdigit() and rest[-1:] in "smh"
+                    and rest[-1:]):
+                raise ValueError(f"--exit {value}: give done, cold, idle=<D> or after=<D>, "
+                                 "D like 90m or 2h")
+        gap = any(v.startswith(("idle=", "after=")) for v in values) and "cold" not in values
+        return SimpleNamespace(cold_gap=gap)
+
+    api = SimpleNamespace(parse_exit=parse_exit, calls=calls)
+    if harnesses != (None,):
+        api.HEADLESS = frozenset(harnesses)
+    return api
+
+
+def headless_launch(monkeypatch, comms_api, **typed):
+    monkeypatch.setattr(presets, "comms_api", lambda: comms_api)
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    typed = {"harness": "codex", "target": "headless", "identity": "x", **typed}
+    return resolve(typed=typed, available=only("comms", "turns", "cache"))
+
+
 @pytest.mark.parametrize("harness", ["claude", "codex"])
-def test_a_headless_launch_with_an_identity_waits_on_comms(harness):
+@pytest.mark.parametrize("comms_api", [None, headless_comms(None), headless_comms()],
+                         ids=["no-comms-api", "older-comms", "names-none"])
+def test_a_headless_launch_with_an_identity_waits_on_comms(monkeypatch, harness, comms_api):
+    monkeypatch.setattr(presets, "comms_api", lambda: comms_api)
     with pytest.raises(presets.NotYet, match="headless") as caught:
         resolve(typed={"harness": harness, "target": "headless", "identity": "x"},
                 available=only("comms"))
     assert caught.value.exit_code == codes.REFUSED
+
+
+def test_the_headless_refusal_lifts_only_for_a_harness_comms_names(monkeypatch):
+    comms_api = headless_comms("codex")
+    got = headless_launch(monkeypatch, comms_api)
+    # Codex headless with an identity runs comms' wrapper, which execs turns' host.
+    assert got.mode == "host" and {"turns", "comms"} <= got.links and got.identity == "x"
+    with pytest.raises(presets.NotYet, match="headless"):
+        headless_launch(monkeypatch, comms_api, harness="claude")
+    # Claude stays print where comms names it; the host's absence refuses Codex as today.
+    assert headless_launch(monkeypatch, headless_comms("claude", "codex"),
+                           harness="claude").mode == "print"
+    monkeypatch.setattr(presets, "_host_installed", lambda: False)
+    with pytest.raises(presets.NotYet, match="Codex host"):
+        resolve(typed={"harness": "codex", "target": "headless", "identity": "x"},
+                available=only("comms", "turns"))
+
+
+def test_a_headless_launch_without_an_identity_keeps_its_mode(monkeypatch):
+    monkeypatch.setattr(presets, "comms_api", lambda: headless_comms("codex"))
+    assert resolve(typed={"harness": "codex", "target": "headless"},
+                   available=only("comms", "turns")).mode == "exec"
+
+
+@pytest.mark.parametrize("value, want", [
+    (None, frozenset()), ("codex", frozenset()), (3, frozenset()),
+    (["codex"], frozenset({"codex"})), (frozenset({"claude", "codex"}),
+                                        frozenset({"claude", "codex"}))])
+def test_comms_headless_reads_comms_list_with_a_type_guard(value, want):
+    api = SimpleNamespace() if value is None else SimpleNamespace(HEADLESS=value)
+    assert presets.comms_headless(api) == want
+    assert presets.comms_headless(None) == frozenset()
+
+
+def test_the_exit_rule_is_checked_with_comms_parser(monkeypatch):
+    comms_api = headless_comms("codex")
+    got = headless_launch(monkeypatch, comms_api, headless_exit=["idle=90m", "cold"])
+    assert got.values["headless_exit"] == ["idle=90m", "cold"]
+    assert comms_api.calls == [(["idle=90m", "cold"], "codex")]
+    assert not any("cold" in w for w in got.warnings)
+
+
+@pytest.mark.parametrize("rule", [["idle=90"], ["soon"], ["after=0x"]])
+def test_an_exit_rule_comms_refuses_is_refused_at_resolve(monkeypatch, rule):
+    with pytest.raises(catalog.BadValue) as caught:
+        headless_launch(monkeypatch, headless_comms("codex"), headless_exit=rule)
+    assert caught.value.exit_code == codes.USAGE and caught.value.row == "headless_exit"
+    # comms' own words, naming the fix.
+    assert f"--exit {rule[0]}: give done, cold" in caught.value.problem
+
+
+def test_check_refuses_an_exit_rule_comms_refuses(monkeypatch, tmp_path):
+    from moxi_launcher import api, slots
+
+    monkeypatch.setattr(presets, "comms_api", lambda: headless_comms("codex"))
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    monkeypatch.setattr(slots, "links", lambda name: name in ("comms", "turns"))
+    (refused,) = api.check(api.LaunchRequest(
+        typed={"harness": "codex", "target": "headless", "identity": "x", "brief": "b",
+               "headless_exit": ["idle=90"]}, cwd=str(tmp_path)))
+    assert isinstance(refused, catalog.BadValue) and refused.row == "headless_exit"
+
+
+def test_no_exit_rule_asks_comms_nothing_and_leaves_its_default(monkeypatch):
+    comms_api = headless_comms("codex")
+    got = headless_launch(monkeypatch, comms_api)
+    assert got.values["headless_exit"] == [] and comms_api.calls == []
+
+
+@pytest.mark.parametrize("rule, gap", [
+    (["idle=90m"], True), (["after=2h"], True), (["done", "after=2h"], True),
+    (["idle=90m", "cold"], False), (["done"], False), (["cold"], False)])
+def test_idle_or_after_without_cold_warns_of_the_cold_gap(monkeypatch, rule, gap):
+    got = headless_launch(monkeypatch, headless_comms("codex"), headless_exit=rule)
+    assert (presets.COLD_GAP in got.warnings) is gap
+
+
+@pytest.mark.parametrize("typed", [
+    {"target": "terminal"}, {"identity": ""}, {"target": "slot"}],
+    ids=["terminal", "no-identity", "slot"])
+def test_an_exit_rule_on_any_other_launch_is_left_out_with_a_warning(monkeypatch, typed):
+    comms_api = headless_comms("codex")
+    got = headless_launch(monkeypatch, comms_api, headless_exit=["idle=90m"], **typed)
+    assert got.values["headless_exit"] == [] and comms_api.calls == []
+    assert any(w.startswith("headless_exit is ignored") for w in got.warnings)
+    assert presets.COLD_GAP not in got.warnings
+
+
+def test_an_exit_rule_from_defaults_is_left_out_without_a_warning(monkeypatch):
+    monkeypatch.setattr(presets, "comms_api", lambda: headless_comms("codex"))
+    got = resolve('[defaults]\nheadless_exit = ["cold"]\n',
+                  typed={"harness": "codex"}, available=only("comms"))
+    assert got.values["headless_exit"] == []
+    assert not any("headless_exit" in w for w in got.warnings)
+
+
+def test_the_exit_rule_needs_comms(monkeypatch):
+    monkeypatch.setattr(presets, "comms_api", lambda: None)
+    with pytest.raises(NeedsModule):
+        resolve(typed={"harness": "codex", "target": "headless",
+                       "headless_exit": ["cold"]}, available=only("turns"))
+
+
+@pytest.mark.parametrize("row, value", [("keep_warm", "on"), ("recycle_on_expiry", "clear"),
+                                        ("recycle_on_expiry", "compact")])
+def test_the_cache_timer_rows_are_left_out_of_a_headless_launch_with_an_identity(
+        monkeypatch, row, value):
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
+    got = headless_launch(monkeypatch, headless_comms("claude", "codex"), harness="claude",
+                          brief="b", **{row: value})
+    assert got.values[row] == "off"
+    assert f"{row} {value} is left out: a headless session with an identity ends by its " \
+           "exit rule" in " ".join(got.warnings)
+    # Without the identity the row stays.
+    plain = headless_launch(monkeypatch, headless_comms("claude", "codex"),
+                            harness="claude", identity="", brief="b", **{row: value})
+    assert plain.values[row] == value
 
 
 @pytest.mark.parametrize("target", ["terminal", "slot"])

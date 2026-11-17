@@ -1,6 +1,6 @@
 """A stand-in for one turns session, shaped as `moxi_turns.Session` is on turns' protocol
 version 2: `capabilities`, `facts`, `watch` (with `.facts`), `handle_stops`, `deliver`
-and `steer` with a `ref`, and the values turns hands back. The test drives the session's
+and `steer` with a `ref`, `agents` (its busy count), and the values turns hands back. The test drives the session's
 turns by hand, as turns' Codex host would report them.
 
 It imports nothing of turns: comms reaches turns only through its public API, and the
@@ -147,6 +147,17 @@ class Handed(NamedTuple):
     ref: str | None
 
 
+class FakeAgents:
+    """`Session.agents()`'s answer, as far as comms reads it: `busy()`, the count of busy
+    entries, None for a list turns can't vouch for."""
+
+    def __init__(self, count):
+        self.count = count
+
+    def busy(self, *, include_shells=True):
+        return self.count
+
+
 class FakeDelivery:
     """A `moxi_turns.Delivery`: `id` (None for an unknown outcome or a hand-in never
     written), `ref`, and the two waits. A wait with no value yet blocks until the test
@@ -238,6 +249,10 @@ class FakeSession:
         #: Each `mcp_reload` call's `timeout`, and what it answers (or raises).
         self.reload_calls: list = []
         self.reload_answer = {"reloaded": False, "servers": {"comms": "connected"}}
+        #: What `agents()` answers as its busy count (None: a list not complete), and
+        #: how many times it was asked.
+        self.busy = 0
+        self.agents_calls = 0
         self._events: queue.Queue = queue.Queue()
         self._ids = itertools.count(1)
         self._turns = itertools.count(1)
@@ -271,6 +286,13 @@ class FakeSession:
         if isinstance(answer, BaseException):
             raise answer
         return dict(answer)
+
+    def agents(self):
+        if "agents" not in self.capabilities:
+            raise RuntimeError("the session does not offer agents (the capability error)")
+        with self._lock:
+            self.agents_calls += 1
+            return FakeAgents(self.busy)
 
     def deliver(self, text, *, ref=None, only_if_idle=False, if_turn_number=None,
                 refuse_draft=False, refuse_agents=False):

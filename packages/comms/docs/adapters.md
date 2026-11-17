@@ -317,6 +317,63 @@ is acked when the turn that took it ends with an answer, and handed again otherw
 hand-in whose answer never came is waited on, not handed again: the text may already be
 in a turn.
 
+**A headless session.** `--headless` runs the session with no window and nobody in it:
+
+```text
+moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
+                 [settings flags] --headless [--exit WHEN]...
+                 (--brief TEXT | --brief-file F) [--dry-run]
+moxi comms exit-session NAME [--scope SCOPE | --global] [--wait-s 30]
+```
+
+The host line is the `--no-window` one. The wrapper writes the brief to `brief.md` (0600)
+in the session's runtime directory, and the adapter hands it in as the session's first
+turn, before any mail; mail waits for that turn's end. From then on mail starts turns as
+in a session nobody types into. The claim file records `headless: true` and `exit`, the
+rule as its `--exit` values.
+
+`WHEN` is `done`, `cold`, `idle=<D>` or `after=<D>`, D a whole number with its unit (`s`,
+`m`, `h`); with none the rule is `done`. The first to fire ends the session:
+
+- `done`: the brief's turn ended with an answer, no turn runs, and once the daemon's
+  settle window after the last turn has closed, the adapter's `look` (a release point)
+  and its read of the daemon's `agents` answer show nothing handed to it and unacked.
+  Rows held for a cold or unreadable cache don't hold it: they wait for the name's next
+  holder, and the end line counts them.
+- `cold`: while no turn runs, the adapter reads its own name's cache from the daemon
+  every 60 seconds; a `cold` read ends it, and so does a cache read `unknown` for five
+  minutes with no turn between (cause `cache-unreadable`). A cache that reads `no-cache`
+  never goes cold; the adapter says so once.
+- `idle=<D>`: no turn has run for D since the last turn ended.
+- `after=<D>`: D since the bind, a running turn included.
+
+`done`, `cold` and `idle=` count only once the brief's turn has ended with an answer. A
+brief turns refuses or loses, or whose turn ends `error`, `aborted` or `refusal`, ends the
+session (cause `brief-failed`), and so does a session the adapter has not found within
+300 seconds of the bind (a Codex start that keeps retrying, say), or whose brief's turn
+has not started within 300 seconds of its being found. A turn resets `idle=`.
+Before `done`, `cold`, `idle=` or a failed brief turn ends an idle session, the adapter
+asks the host for its background work (`agents`) and waits while any runs, up to an hour
+after the last turn. `after=` and `exit-session` wait for nothing.
+
+The end is one line in the adapter's log, `headless session ended: <cause>` with the rows
+left waiting for the name, and SIGTERM to the host through its pidfd. The adapter then
+releases the name as on any host's end. The host holds a lifeline whose other end only
+the adapter holds (`MOXI_LIFELINE_FD`), so a host whose adapter died by any death stops
+too. `moxi comms exit-session NAME` asks the adapter's claim socket to `end` the session
+(any local caller may; an adapter whose claim is not headless refuses) and waits up to
+`--wait-s` for the name to be released. An `end` that reaches the adapter before its bind
+is answered is kept, and the session ends on it as soon as the name is bound. While a
+second launch of the name is still binding, two claim files hold it; the verb asks the
+`bound` one. It exits 0 once the name is released, 1 when the socket didn't answer or
+the wait ran out, 3 when nobody holds the name or its session is not headless.
+
+`--headless` is refused with `--window`, `--no-window`, `--resume` and in the roster
+form; `--exit`, `--brief` and `--brief-file` are refused without it; so are a value
+outside the rule, a value given twice, and `cold` without the cache module. Each exits 2
+before anything starts. `--dry-run` prints the rule and the brief's file with the host's
+line.
+
 **One thread.** The adapter delivers into the thread this launch started or resumed. /clear, /new
 and /fork in the window start another thread, and /resume opens one; comms does not
 follow any of them, and mail still goes to the launch's thread. To start fresh, end the
