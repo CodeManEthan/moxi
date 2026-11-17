@@ -3281,6 +3281,8 @@ launcher	packages/launcher/src/moxi_launcher/cli.py	run = verbs.add_parser("run"
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(folder)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	shown = {"key": key, "folder": str(handoff_dir)}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/cli.py	state.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+launcher	packages/launcher/src/moxi_launcher/codex_trust.py	home = env.get("HOME") or os.path.expanduser("~")	keep	HOME	HOME
+launcher	packages/launcher/src/moxi_launcher/codex_trust.py	return path.resolve(strict=True)	keep	strict	strict
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	"build", "compose", "context", "environment", "first_turn", "host_script",	keep	environment	environment
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	`environ` is the caller's environment; `child_environ` the one the child's is built	keep	environ	environ
 launcher	packages/launcher/src/moxi_launcher/compose/__init__.py	`request` gives `request_id`, `session_id` and `actor`, each read as None when it is	keep	actor	actor
@@ -3689,6 +3691,10 @@ launcher	packages/launcher/src/moxi_launcher/resume.py	resume	name	environ	calle
 launcher	packages/launcher/src/moxi_launcher/resume.py	resume	name	met	exc
 launcher	packages/launcher/src/moxi_launcher/resume.py	return Result(codes.OK, lines, data={"sessions": [e.as_json() for e in entries]})	keep	sessions	sessions
 launcher	packages/launcher/src/moxi_launcher/resume.py	session = turns.find(session_id=session_id)	keep	find	find
+launcher	packages/launcher/src/moxi_launcher/seed.py	"""The launch's home folder: its `HOME`, else this account's."""	keep	HOME	HOME
+launcher	packages/launcher/src/moxi_launcher/seed.py	home = env.get("HOME")	keep	HOME	HOME
+launcher	packages/launcher/src/moxi_launcher/seed.py	return done(REFUSED.format(why="changed"))	keep	changed	changed
+launcher	packages/launcher/src/moxi_launcher/seed.py	return {"folder": self.root_dir, "file": self.file, "outcome": self.outcome}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/slots.py	-	name	SEAM	SLOTS_ENV
 launcher	packages/launcher/src/moxi_launcher/startup.py	"claude": (("startup.trust_dialog", "CLAUDE_TRUST_FOLDER"),	use	CLAUDE_TRUST_FOLDER	CLAUDE_TRUST_DIR
 launcher	packages/launcher/src/moxi_launcher/startup.py	answer = api.answer_screen(slot, screen, wait=wait)	use	wait=	wait_s=
@@ -3759,6 +3765,8 @@ launcher	packages/launcher/src/moxi_launcher/targets.py	place = dict(env=dict(la
 launcher	packages/launcher/src/moxi_launcher/targets.py	placed = api.start(named, list(launch.argv), **place, create=named is None)	keep	create	create
 launcher	packages/launcher/src/moxi_launcher/targets.py	return lambda timeout: turns.wait_ready(**where, timeout=timeout)	use	timeout=	timeout_s=
 launcher	packages/launcher/src/moxi_launcher/targets.py	sweep	name	folder	run_dir
+launcher	packages/launcher/src/moxi_launcher/targets.py	notes["CLAUDE_TRUST_DIR"] = {"folder": str(seed.trust_root(launch.cwd)),	keep	folder	folder
+launcher	packages/launcher/src/moxi_launcher/targets.py	trust = {"folder": seeded.root_dir, "file": seeded.file, "seed": seeded.outcome}	keep	folder	folder
 launcher	packages/launcher/src/moxi_launcher/waits.py	Reads.shared	name	err	exc
 launcher	packages/launcher/src/moxi_launcher/waits.py	_logged: set[type] = set()	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/waits.py	agents whose `directors` name that owner, comms' `session_of` for each, then turns' `find`	keep	find	find
@@ -4047,6 +4055,9 @@ launcher	packages/launcher/tests/test_cli_acts.py	status, out, err = run(["show"
 launcher	packages/launcher/tests/test_cli_acts.py	store.path().parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_cli_acts.py	too_new	name	raw	conn
 launcher	packages/launcher/tests/test_cli_acts.py	{"self": True, "dry_run": True, "json": True}),	keep	dry_run	dry_run
+launcher	packages/launcher/tests/test_codex_trust.py	"HOME": str(cwd), "PATH": "/usr/bin:/bin",	keep	HOME	HOME
+launcher	packages/launcher/tests/test_codex_trust.py	assert codex_trust.config_file({"HOME": str(tree)}) == tree / ".codex" / "config.toml"	keep	HOME	HOME
+launcher	packages/launcher/tests/test_codex_trust.py	return {"CODEX_HOME": str(tree / "codex-home"), "HOME": str(tree)}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_compose.py	-	name	test_a_claude_launch_needs_its_session_id_and_an_absolute_directory	test_a_claude_launch_needs_its_session_id_and_an_absolute_dir
 launcher	packages/launcher/tests/test_compose.py	-	name	test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_directory	test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_dir
 launcher	packages/launcher/tests/test_compose.py	assert any("instructions" in line for line in got.warnings)	keep	any	any
@@ -4216,6 +4227,7 @@ launcher	packages/launcher/tests/test_launch.py	test_a_launch_with_a_handoff_key
 launcher	packages/launcher/tests/test_launch.py	test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row	name	own_folder	own_handoffs_dir
 launcher	packages/launcher/tests/test_launch.py	turns	name	directory	turns_dir
 launcher	packages/launcher/tests/test_launch.py	wait_for(lambda: log.exists() and "delivered" in log.read_text(), timeout=30)	keep	delivered	delivered
+launcher	packages/launcher/tests/test_launch_guards.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_listeners.py	-	name	test_a_session_without_a_key_in_an_empty_folder_gets_nothing	test_a_session_without_a_key_in_an_empty_handoff_dir_gets_nothing
 launcher	packages/launcher/tests/test_listeners.py	-	name	test_the_own_folder_is_the_handoffs_store	test_the_own_dir_is_the_handoffs_store
 launcher	packages/launcher/tests/test_listeners.py	-	name	test_with_notes_a_launched_seat_is_pointed_into_notes_folder	test_with_notes_a_launched_seat_is_pointed_into_notes_dir
@@ -4595,6 +4607,7 @@ launcher	packages/launcher/tests/test_relaunch.py	test_the_caller_as_its_own_tar
 launcher	packages/launcher/tests/test_relaunch.py	test_the_warm_check_reads_the_cache_under_the_launchs_own_config_dir	name	connection	conn
 launcher	packages/launcher/tests/test_relaunch.py	test_the_warm_check_reads_the_cache_under_the_launchs_own_config_dir.Rooted.projects_root	name	environ	env
 launcher	packages/launcher/tests/test_relaunch.py	test_with_notes_installed_the_handoff_must_be_in_the_launchs_folder	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_relaunch_flags.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_relaunch_job.py	FakeSession.__init__	kwonly	agents_complete	agents_complete
 launcher	packages/launcher/tests/test_relaunch_job.py	Result("failed", "timeout"), Result("refused", "gone"),	keep	refused	refused
 launcher	packages/launcher/tests/test_relaunch_job.py	assert got.outcome == "expired"	keep	expired	expired
@@ -4680,6 +4693,16 @@ launcher	packages/launcher/tests/test_running.py	path.parent.mkdir(parents=True,
 launcher	packages/launcher/tests/test_running.py	store.insert(conn, request_id="r-spawning", actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_running.py	store.insert(conn, request_id=request_id, actor="alice", harness="claude",	use	actor=	by=
 launcher	packages/launcher/tests/test_running.py	test_a_log_held_past_the_wait_raises_busy_and_writes_nothing	name	raw	raw_conn
+launcher	packages/launcher/tests/test_seed.py	assert (screen.detail["folder"], screen.detail["file"]) == (str(repo),	keep	folder	folder
+launcher	packages/launcher/tests/test_seed.py	assert event.detail == {"folder": str(repo), "file": str(launch_config),	keep	folder	folder
+launcher	packages/launcher/tests/test_seed.py	assert seed.settings_file(env) == Path(env["HOME"]) / ".claude" / "settings.json"	keep	HOME	HOME
+launcher	packages/launcher/tests/test_seed.py	codex_config.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_seed.py	got = seed.seed(env["HOME"], env)	keep	HOME	HOME
+launcher	packages/launcher/tests/test_seed.py	keys = set(json.loads(config_of(env).read_text())["projects"])	keep	set	set
+launcher	packages/launcher/tests/test_seed.py	path = write_config(Path(env["HOME"]) / ".claude.json")	keep	HOME	HOME
+launcher	packages/launcher/tests/test_seed.py	path.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_seed.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_seed.py	return {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(home / "cc"), "PATH":	keep	HOME	HOME
 launcher	packages/launcher/tests/test_settings.py	assert cli.main(["config", "launcher", "show", "--json"]) == 0	keep	show	show
 launcher	packages/launcher/tests/test_settings.py	assert len(runs) == len(set(runs)), runs	keep	set	set
 launcher	packages/launcher/tests/test_settings.py	assert set(hurts) == {"startup.trust_dialog", "startup.dev_channels_dialog",	keep	set	set
@@ -4729,6 +4752,8 @@ launcher	packages/launcher/tests/test_slot.py	rig.plan(frames=[{"screen": "CLAUD
 launcher	packages/launcher/tests/test_slot.py	rig.plan(start="refused", refused={	keep	refused	refused
 launcher	packages/launcher/tests/test_slot.py	rig.plan(start="refused", refused={"reason": "no-free-slot",	keep	refused	refused
 launcher	packages/launcher/tests/test_slot.py	turns	name	directory	turns_dir
+launcher	packages/launcher/tests/test_slot.py	assert len(off) == 3 and not any(e.answer for e in off)	keep	any	any
+launcher	packages/launcher/tests/test_slot.py	assert set(startup.HINTS) == set(names)	keep	set	set
 launcher	packages/launcher/tests/test_state.py	"exited", "held", "expired", "not-held", "stopped",	keep	expired	expired
 launcher	packages/launcher/tests/test_state.py	@pytest.mark.parametrize("outcome", ["relaunched", "cleared", "compacted", "nudged",	keep	compacted	compacted
 launcher	packages/launcher/tests/test_state.py	assert got.relaunch.state == "stale" and got.relaunch.run.state == "stale"	keep	stale	stale
