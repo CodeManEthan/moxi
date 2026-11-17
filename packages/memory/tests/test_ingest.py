@@ -317,7 +317,11 @@ PLAIN = "hunter2-plain"         # a password no redaction set catches
     (f"echo PASS={PLAIN}>/work/app/.env", "/work/app/.env"),
     (f"printf '{{\"path\":\"/work/app/.env\",\"content\":\"DB_PASS={PLAIN}\"}}'",
      "/work/app/.env"),
-    (f"tool --out=/work/app/.env,DB_PASS:{PLAIN}", "/work/app/.env")])
+    (f"printf '{{\"content\":\"DB_PASS={PLAIN}\",\"path\":\"/work/app/.env\"}}'",
+     "/work/app/.env"),
+    (f"tool --out=/work/app/.env,DB_PASS:{PLAIN}", "/work/app/.env"),
+    (f"cat /work/app/.env:{PLAIN}", "/work/app/.env"),
+    (f"cat /work/app/.env\x00{PLAIN}", "/work/app/.env")])
 def test_a_secret_path_command_with_more_text_keeps_only_the_path(command, path):
     t = claude()
     call = t.request().tool_use("Bash", {"command": command, "description": "x"})

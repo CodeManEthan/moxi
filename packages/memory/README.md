@@ -283,7 +283,8 @@ What search prints, and what the library returns, is the redacted text.
 A tool call is a secret-path call when any whitespace-separated word of a string in its
 input is a path secrets says must not be read (`.env*`, `auth.json`, anything under
 `.ssh/`, `*.pem` and the rest of secrets' list); strings inside lists, nested objects and
-JSON text count, and a word is also split at `=`, `<`, `>`, `|`, `;` and `&`. Such a call
+JSON text count, and a word is also split at `=`, `<`, `>`, `|`, `;`, `&`, `,`, `:`,
+quotes, backticks, parentheses, brackets, braces and NUL. Such a call
 is stored as one line, the tool's name and the path, `Read(/srv/app/.env)`: its input is
 not stored and its result gives no tail. The path is the one word that matched, so
 `cat > /srv/app/.env <<EOF ...` is stored as `Bash(/srv/app/.env)`, and a path with a space
