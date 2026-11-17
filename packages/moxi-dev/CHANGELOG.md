@@ -11,6 +11,20 @@
 - `moxi-dev timed show` reads that record along a first-parent walk, each machine at its
   own set factor, with its own exit codes; `moxi-dev timed take` merges another
   machine's record into this clone's, per commit, never removing anything.
+- `moxi-dev timed schedule` (Linux) writes a machine's timer as systemd user units: a
+  tick at 08:00, 09:00, 10:00 and 11:00 local time that measures the commit in a run tree
+  of its own (a worktree of a clone, or a verified copy of a tree with no git) at the
+  machine's set factor (`--slack`), with `--record-dir`, `--idle-line`, `--stamp` and
+  `--take`. It checks the source, the tools, linger and the units before the timer
+  starts. `moxi-dev timed unschedule` removes the units and the run directory and keeps
+  the record. Both take the run lock first when the run tree exists, and never touch a
+  drop-in.
+- The tick, `tick.py`, uses the standard library alone: it locks, writes the stamp
+  (`--stamp`), brings the run tree to one commit, runs `moxi-dev timed --scheduled`,
+  takes each host's results, and writes a tick file under `<machine>/ticks/` in the
+  record. A host with no git measures the commit its synced tree's stamp names, once every
+  path matches, and reads as `tree not settled` (exit 3) until then. A new
+  `TICK_VERSION` needs `schedule` run again on each machine.
 - `moxi-dev check` has a renames step, after the Ruff check: it fails when the tree is
   not settled under `renames.tsv` (a row still to apply, a leftover or a row the script
   refuses), read in its own process with no `--main`, and prints the first of them with

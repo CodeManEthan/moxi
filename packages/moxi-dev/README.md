@@ -28,7 +28,8 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   it cannot resolve.
 - `moxi-dev timed` runs the timed tests on their own, each counted only when little other
   work ran on the machine during it, and keeps their results per commit and machine;
-  `moxi-dev timed show` reads them (see "Timed tests" below).
+  `moxi-dev timed show` reads them, and `moxi-dev timed schedule` runs them each morning
+  on Linux (see "Timed tests" below).
 
 `moxi-dev <verb> --help` shows a verb's own arguments. From the repository root:
 
@@ -300,6 +301,128 @@ here is removed. Its tick files are added when missing and never changed. A file
 doesn't parse, names another machine or has a format this moxi-dev doesn't know is named
 and left, and the exit is 2; `nothing to take` (exit 0) when the source is missing or
 empty, and exit 2 when its results folder is gone.
+
+### The scheduled run
+
+`moxi-dev timed schedule` runs the timed tests every morning on Linux, as systemd user
+units. Run it once on each machine that measures, from the tree it should measure (the
+source), which is a uv workspace root:
+
+```sh
+uv run --locked moxi-dev timed schedule --machine NAME [--slack F] [--idle-line CPUS]
+    [--record-dir DIR] [--stamp] [--take NAME=DIR]...
+```
+
+On macOS it refuses, since the timer is Linux only (run `moxi-dev timed` by hand there),
+and on Windows too. On a git clone the run tree is a worktree of it, made with `git
+worktree add --detach`, and the record goes to the clone's git directory unless
+`--record-dir` says otherwise. On a tree with no git (a synced copy, below) the run tree is
+a verified copy, `--record-dir` is required and `--stamp` refused. The run directory,
+`<user cache>/moxi-dev/timed/<12 hex of the source's path>` (`~/.cache` unless
+`XDG_CACHE_HOME` says otherwise), holds the run tree (`tree/`), the machine's settings
+(`schedule.json`) and the tick script (`tick.py`). `--slack` is the machine's set factor,
+1 by default, which every scheduled run passes as `MOXI_TEST_TIMED_SLACK`; `--idle-line`
+is passed to each run.
+
+It writes `moxi-dev-timed.timer`, which fires at 08:00, 09:00, 10:00 and 11:00 local time
+and never runs a missed tick later, and `moxi-dev-timed.service`, which runs one tick (at
+most 40 minutes; exit 3 counts as success) under the uv-managed Python 3.12 it found. When
+a uv upgrade has removed that interpreter, the service prints `moxi-dev timed tick:
+<machine>: interpreter missing: <python> (Python <version>); run schedule again` and exits
+2. With `--stamp` it also writes `moxi-dev-timed-stamp.path` and its service, which write
+the stamp (below) each time main moves.
+
+Before the timer starts, `schedule` checks, in order, and exits 2 with no unit left when a
+check fails: the source is a uv workspace root and its clone's top level; uv, Python 3.12
+and, on a clone, git resolve to absolute paths; with `--stamp`, main's reflog exists, and
+each `--take` folder exists; linger is on, or it says the timer fires only while you are
+logged in (`loginctl enable-linger` keeps it firing) and goes on; the run tree can be made
+and `uv sync --locked` in it succeeds; each unit passes `systemd-analyze --user verify`.
+Its last lines name a one-tick test: `systemctl --user start --no-block
+moxi-dev-timed.service`, which returns at once, then, once `systemctl --user is-active
+moxi-dev-timed.service` no longer prints `activating`, `journalctl --user -u
+moxi-dev-timed -n 5` for the tick's summary line.
+
+`schedule` run again rewrites the settings, the tick script and the units (a new factor, a
+take added) and never touches a unit's drop-in directory (`moxi-dev-timed.service.d/`), so
+a drop-in of your own on the service, such as a note when a tick fails, stays. `moxi-dev
+timed unschedule`, from the same source, stops the timer and the path unit, removes the
+units and the run directory, and leaves the record, the source and every drop-in. When the
+run tree exists, both take the run lock first, and when a run holds it they exit 2 with
+"a timed run is measuring here" and change nothing.
+
+The tick. `tick.py` uses the standard library alone, so a commit that breaks moxi-dev
+can't stop the next tick from bringing in its fix; what measures is the commit's own
+`moxi-dev timed`. Each tick, in order; a step that fails prints `moxi-dev timed tick:
+<machine>: <step> failed: <reason>` and the tick goes to step 6:
+
+1. Lock: the run lock, taken without waiting, on a descriptor the run inherits.
+2. Stamp (with `--stamp`): the stamp written when it is missing, doesn't parse or names a
+   commit other than main's.
+3. Tree: on a clone, `git checkout --quiet --force --detach main` in the run tree; on a
+   tree with no git, the verified copy. A copy that doesn't verify ends the tick `not
+   measured: tree not settled: <cause>`, which is no failure.
+4. Run: `moxi-dev timed --scheduled --machine <name>` in the run tree, with the settings'
+   `--record-dir` and `--idle-line`, the machine's factor, and the lock's descriptor in
+   `MOXI_TEST_TIMED_LOCK_FD`. Its output, the summary line included, goes to the unit's
+   journal. It is cut at 35 minutes.
+5. Take: for each `--take NAME=DIR`, `moxi-dev timed take DIR/NAME --machine NAME`,
+   whatever the run did.
+6. The tick file, then the exit: 2 when the lock, the stamp, the checkout, the copy or a
+   take failed, or the run exited 2 or couldn't start; 3 for a tree not settled; 1 for a
+   run cut at its bound; otherwise the run's own exit.
+
+A change to the tick raises its `TICK_VERSION`, and then `schedule` must run again on each
+machine to copy the new tick in. `show` prints each machine's newest tick's version beside
+its own and marks an older one `run schedule again on <machine>`. `tick.py --hand [--slack
+F]`, run with the run directory's Python, runs steps 1, 3 and 4 with a run that isn't
+`--scheduled` and writes no tick file.
+
+Tick files. Each scheduled tick writes `<record dir>/<machine>/ticks/YYYYMMDDTHHMMSSZ.json`,
+named for its start in UTC, a JSON object with `format` (1), `machine`, `started`,
+`tick_version`, `commit` (null when no tree was settled), `steps` (each of `lock`, `stamp`,
+`tree`, `run` and `take`: `ok`, `failed` or `skipped`, and `tree` also `not settled`),
+`failure` (the first failure line, or null), `not_settled` (the cause, or null), `summary`
+(the run's summary line, or null), `exit`, and `invocation` (systemd's `INVOCATION_ID`). A
+note of your own may read them, from a drop-in on `moxi-dev-timed.service`; moxi-dev ships
+none.
+
+### Measuring on another machine
+
+A test host needs no clone and no git directory. A clone's working tree is synced to it
+(by Syncthing, say) without `.git`, and its results are synced back:
+
+- The stamp. `.moxi-dev-stamp.json` at the clone's root, which git ignores, names main's
+  commit and lists every path of that commit's tree with its mode and blob hash.
+  `schedule --stamp` on the clone writes it each time main moves (a path unit on main's
+  reflog) and at each of that machine's ticks, under its own lock,
+  `.moxi-dev/stamp.lock`. The synced folder should leave out `.git`, `.venv`,
+  `.moxi-dev` and the other paths git ignores, and carry the stamp.
+- The verified copy. On the host, each tick reads every path the stamp lists from the
+  synced tree and checks its bytes against the stamp before it writes anything; then it
+  removes from the run tree what the stamp doesn't list (leaving `.venv`, `.moxi-dev`,
+  `__pycache__`, `.pytest_cache`, `.ruff_cache` and `node_modules`), writes what differs,
+  and records the stamp's commit for the run. While the sync hasn't landed, or the
+  clone's working tree isn't main's, the tick ends `tree not settled: <cause>` (`missing
+  <path>`, `differs <path>`, `stamp missing` or `stamp unreadable`), exit 3, and measures
+  nothing.
+- The results folder. The host keeps its record in a folder synced back to the clone's
+  machine, its `--record-dir`. The folder should leave out the record's `.lock` and
+  `*.part` files. On the clone's machine, `schedule --take NAME=DIR` names the folder the
+  host's results arrive in, and each of its ticks runs `moxi-dev timed take DIR/NAME
+  --machine NAME` after its own run, so the host's runs and tick files join this clone's
+  record, which `show` reads. `moxi-dev timed take` does the same by hand.
+
+For example, with the host's results folder `~/moxi-timed` arriving on the clone's machine
+as `~/moxi-timed-host-a`, on the clone's machine and then on the host:
+
+```sh
+uv run --locked moxi-dev timed schedule --machine alpha --stamp --take host-a=~/moxi-timed-host-a
+uv run --locked moxi-dev timed schedule --machine host-a --record-dir ~/moxi-timed
+```
+
+The host needs uv with its Python 3.12, git on its PATH (some timed tests build temporary
+repositories), and linger, so its timer fires while no one is logged in.
 
 ## Browser tests
 

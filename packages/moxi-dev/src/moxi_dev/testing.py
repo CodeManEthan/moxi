@@ -130,7 +130,7 @@ itself (an elapsed time, a per-call cost, a median, a percentile) is multiplied 
 measurements of the same run and counts are left alone: a slower machine slows both
 sides of a ratio. A test marked `timed` follows this rule whenever it is marked. A
 scheduled run of `moxi-dev timed` measures at its machine's set factor: its tick sets the
-variable to the factor the machine's `moxi-dev timed schedule` set, 1 unless it set one.
+variable to the factor `moxi-dev timed schedule --slack` set on that machine, 1 by default.
 
 The idle gate. `MOXI_TEST_IDLE=<line>@<deadline>`, read from the environment pytest
 starts with, gates every `timed` test the run runs: `<line>` is how much other work, in
