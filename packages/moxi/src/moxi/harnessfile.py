@@ -98,8 +98,9 @@ def _indent(raw: bytes | None) -> int:
     return 2
 
 
-def write(doc: Doc, backups: Path, keep: int, *, remove_empty: bool = False,
-          keep_copy=None) -> str | None:
+def write(  # noqa: MX1 -- keep is a count of backups, not a duration
+        doc: Doc, backups: Path, keep: int, *, remove_empty: bool = False,
+        keep_copy=None) -> str | None:
     """Write `doc` back once, or remove it when `remove_empty` and nothing is left in it,
     keeping the old bytes under `backups` (`backup`, the newest `keep`). With
     `keep_copy`, `keep_copy(path, now)` is called first, on a file that exists, with the
@@ -139,7 +140,8 @@ def write(doc: Doc, backups: Path, keep: int, *, remove_empty: bool = False,
     return None
 
 
-def backup(path: Path, backups: Path, data: bytes, keep: int) -> Path:
+def backup(  # noqa: MX1 -- keep is a count of backups, not a duration
+        path: Path, backups: Path, data: bytes, keep: int) -> Path:
     """Keep `data`, file `path`'s bytes before a write, as `backups/<stamp>-<name>` (the
     folder made private, the file 0600), and prune that name's backups to the newest
     `keep`."""

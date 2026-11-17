@@ -317,7 +317,7 @@ def test_a_file_that_is_not_toml_is_refused_alike(demo):
     assert drafted.key is saved.key is one.key is None
 
 
-def test_the_draft_writes_nothing_and_makes_no_file_or_folder(demo, writes, tmp_path):
+def test_the_draft_writes_nothing_and_makes_no_file_or_dir(demo, writes, tmp_path):
     text, _ = config.draft_text("demo", RAISED)
     assert "warn_at = 90" in text
     assert writes == [] and not (tmp_path / "config").exists()

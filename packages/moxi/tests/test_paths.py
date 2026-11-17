@@ -547,7 +547,7 @@ def test_a_home_nothing_places_raises_and_leaves_a_tilde_as_it_is(monkeypatch):
 
 @POSIX
 @pytest.mark.parametrize("value", [None, ""])
-def test_claude_home_unset_or_empty_is_the_homes_claude_folder(value):
+def test_claude_home_unset_or_empty_is_the_homes_claude_dir(value):
     given = env() if value is None else env(CLAUDE_CONFIG_DIR=value)
     assert paths.claude_home(given) == Path(HOME, ".claude")
 
@@ -576,7 +576,7 @@ def test_claude_home_takes_a_relative_value_as_given(tmp_path, monkeypatch):
 
 
 @POSIX
-def test_claude_home_reads_the_environment_by_name_alone(monkeypatch):
+def test_claude_home_reads_the_env_by_name_alone(monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/the/process/cc")
     assert paths.claude_home(env()) == Path(HOME, ".claude")
     assert paths.claude_home() == Path("/the/process/cc")

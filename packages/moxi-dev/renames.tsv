@@ -5641,6 +5641,7 @@ moxi	packages/moxi/src/moxi/config.py	units applied for each key, one list, as `
 moxi	packages/moxi/src/moxi/config.py	and `CONFIG_CHECK`, and each change prepared as `set` prepares it."""	use	`set`	`set_value`
 moxi	packages/moxi/src/moxi/config.py	_record_changes(module, keys, "set", by)	keep	set	set
 moxi	packages/moxi/src/moxi/config.py	with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:	use	timeout=	timeout_s=
+moxi	packages/moxi/src/moxi/config.py	_prepared	kwonly	text	text
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "is_needs_value", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	can call `record`. The doctor's runner and checks live in `moxi.doctor._run`, which the	keep	record	record
@@ -6125,6 +6126,7 @@ moxi	packages/moxi/tests/test_config_many.py	("demo", "context.warn_at", "set", 
 moxi	packages/moxi/tests/test_config_many.py	("demo", "context.alert_at", "set", "ui")]	keep	set	set
 moxi	packages/moxi/tests/test_config_many.py	assert all(set(r) == {"module", "key", "op", "by", "at"} for r in records)	keep	set	set
 moxi	packages/moxi/tests/test_config_many.py	changes = RAISED + [("show", ["dir", "row", "model"]), ("rows.backup", True)]	keep	show	show
+moxi	packages/moxi/tests/test_config_many.py	-	name	test_the_draft_writes_nothing_and_makes_no_file_or_folder	test_the_draft_writes_nothing_and_makes_no_file_or_dir
 moxi	packages/moxi/tests/test_config_page.py	assert cli.main(["config", module, "show", "--json"]) == 0	keep	show	show
 moxi	packages/moxi/tests/test_config_set.py	("demo", "private_names", "set", "ui"),	keep	set	set
 moxi	packages/moxi/tests/test_config_set.py	("set", "block", (True,)),	keep	set	set
@@ -6222,6 +6224,29 @@ moxi	packages/moxi/tests/test_files.py	test_edit_toml_takes_the_lock_it_is_given
 moxi	packages/moxi/tests/test_files.py	test_edit_toml_without_a_lock_leaves_its_lock_beside_the_file	name	folder	loadout_dir
 moxi	packages/moxi/tests/test_files.py	with files.lock(path, nested=True, timeout=0):	use	timeout=	timeout_s=
 moxi	packages/moxi/tests/test_files.py	with files.lock(path, nested=True, timeout=0.3):	use	timeout=	timeout_s=
+moxi	packages/moxi/tests/test_harnessfile.py	-	name	test_a_new_file_gets_its_kinds_mode_and_its_folder	test_a_new_file_gets_its_kinds_mode_and_its_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_missing_file_reads_empty_and_is_unchanged_until_given_data	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_blank_json_file_reads_as_an_empty_object	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_doc_takes_a_string_path	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_doc_unchanged_by_the_caller_is_not_changed_whatever_its_layout	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_json_that_is_not_an_object_is_refused_with_one_line	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_the_not_an_object_line_is_exactly_the_path_and_why	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_file_that_cant_be_read_is_refused	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_refusal_lines_name_no_module	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_write_keeps_the_files_mode_key_order_and_indent	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_text_files_bytes_that_arent_utf8_come_back_as_they_were	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_link_is_written_through_and_stays_a_link	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_file_changed_between_read_and_write_is_not_written	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_file_made_since_a_missing_read_is_not_written	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_file_that_cant_be_read_again_is_not_written	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_write_leaves_no_lock_or_temp_file_beside_the_file	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_a_backup_holds_the_old_bytes	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_backups_are_pruned_to_the_newest_keep_of_that_name	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_backup_returns_the_file_it_kept	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_remove_empty_removes_a_file_with_nothing_left_and_keeps_a_backup	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_remove_empty_of_a_missing_file_does_nothing	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	test_without_remove_empty_an_empty_doc_is_written	name	folder	harness_dir
+moxi	packages/moxi/tests/test_harnessfile.py	-	name	folder	harness_dir_fixture
 moxi	packages/moxi/tests/test_hook_path.py	-	name	test_a_directory_name_in_another_spelling_reads_the_same	test_a_dir_name_in_another_spelling_reads_the_same
 moxi	packages/moxi/tests/test_hook_path.py	-	name	test_an_empty_sys_path_entry_is_the_current_directory	test_an_empty_sys_path_entry_is_the_current_dir
 moxi	packages/moxi/tests/test_hook_path.py	-	name	test_of_two_copies_in_two_directories_the_first_on_sys_path_is_read	test_of_two_copies_in_two_dirs_the_first_on_sys_path_is_read
@@ -6451,6 +6476,8 @@ moxi	packages/moxi/tests/test_paths.py	test_the_windows_anchor_is_under_the_shel
 moxi	packages/moxi/tests/test_paths.py	test_the_windows_folders_are_the_overrides_else_the_shells	name	shell_folders	shell_dirs
 moxi	packages/moxi/tests/test_paths.py	test_the_windows_home_is_userprofile_then_homedrive_and_homepath_then_the_shell	name	shell_folders	shell_dirs
 moxi	packages/moxi/tests/test_paths.py	test_two_threads_of_one_process_agree_on_one_device_id.first_run	name	e	exc
+moxi	packages/moxi/tests/test_paths.py	-	name	test_claude_home_unset_or_empty_is_the_homes_claude_folder	test_claude_home_unset_or_empty_is_the_homes_claude_dir
+moxi	packages/moxi/tests/test_paths.py	-	name	test_claude_home_reads_the_environment_by_name_alone	test_claude_home_reads_the_env_by_name_alone
 moxi	packages/moxi/tests/test_place.py	-	name	folder_links	dir_links
 moxi	packages/moxi/tests/test_place.py	-	name	test_a_copied_folder_carries_its_mark_and_updates_when_the_source_changes	test_a_copied_dir_carries_its_mark_and_updates_when_the_source_changes
 moxi	packages/moxi/tests/test_place.py	-	name	test_a_harness_folder_reached_through_a_symlink_gives_one_key	test_a_harness_dir_reached_through_a_symlink_gives_one_key
@@ -6504,8 +6531,12 @@ moxi	packages/moxi/tests/test_place.py	test_the_windows_form	name	folder	is_dir
 moxi	packages/moxi/tests/test_place.py	with pytest.raises(ValueError, match="git_seconds"):	use	git_seconds	git_s
 moxi	packages/moxi/tests/test_place.py	assert place._folder("claude", kind, "", given) == Path(	use	place._folder	place._harness_dir
 moxi	packages/moxi/tests/test_place.py	assert place._folder("claude", "skills", "", given) == Path(folder, "skills")	use	place._folder	place._harness_dir
-moxi	packages/moxi/tests/test_place.py	@pytest.mark.parametrize(("value", "folder"), [	keep	folder	folder
 moxi	packages/moxi/tests/test_place.py	given = {"HOME": str(tmp_path / "given")}	keep	HOME	HOME
+moxi	packages/moxi/tests/test_place.py	-	name	test_claudes_built_in_folders_are_where_they_always_were	test_claudes_built_in_dirs_are_where_they_always_were
+moxi	packages/moxi/tests/test_place.py	-	name	test_claudes_built_in_folders_keep_a_tilde_when_nothing_places_a_home	test_claudes_built_in_dirs_keep_a_tilde_when_nothing_places_a_home
+moxi	packages/moxi/tests/test_place.py	test_claudes_built_in_dirs_are_where_they_always_were	name	folder	expected_dir
+moxi	packages/moxi/tests/test_place.py	test_claudes_built_in_dirs_keep_a_tilde_when_nothing_places_a_home	name	folder	expected_dir
+moxi	packages/moxi/tests/test_place.py	@pytest.mark.parametrize(("value", "folder"), [	use	"folder"	"expected_dir"
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_a_held_folder_is_copied_with_its_note_when_symlinks_are_not_allowed	test_a_held_dir_is_copied_with_its_note_when_symlinks_are_not_allowed
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_a_held_folder_links_relative_when_symlinks_are_allowed	test_a_held_dir_links_relative_when_symlinks_are_allowed
 moxi	packages/moxi/tests/test_place_windows.py	-	name	test_link_places_a_folder_as_a_junction_and_removes_only_the_junction	test_link_places_a_dir_as_a_junction_and_removes_only_the_junction
@@ -12459,9 +12490,6 @@ statusline	packages/statusline/src/moxi_statusline/detect.py	four: set[int] = se
 statusline	packages/statusline/src/moxi_statusline/detect.py	hm: set[str] = set()	keep	set	set
 statusline	packages/statusline/src/moxi_statusline/detect.py	words = set(taken)	keep	set	set
 statusline	packages/statusline/src/moxi_statusline/detect.py	numbers: set[int] = set()	keep	set	set
-statusline	packages/statusline/src/moxi_statusline/detect.py	self.folder = os.path.join(root, self.folder_name)	keep	folder	folder
-statusline	packages/statusline/src/moxi_statusline/detect.py	folder = own("dir", self.folder)	keep	folder	folder
-statusline	packages/statusline/src/moxi_statusline/detect.py	paths_ = [("dir", self.folder), (None, self.root), (None, self.home),	keep	folder	folder
 statusline	packages/statusline/src/moxi_statusline/detect.py	if marker.find(text):	keep	find	find
 statusline	packages/statusline/src/moxi_statusline/detect.py	for at in marker.find(text):	keep	find	find
 statusline	packages/statusline/src/moxi_statusline/detect.py	"""The run's environment: `base` with `HOME` set to `home`, and every `XDG_*_HOME`,	keep	HOME	HOME
@@ -12469,6 +12497,9 @@ statusline	packages/statusline/src/moxi_statusline/detect.py	out["HOME"] = home	
 statusline	packages/statusline/src/moxi_statusline/detect.py	out, _ = proc.communicate(data, timeout=limit)	keep	timeout	timeout
 statusline	packages/statusline/src/moxi_statusline/detect.py	proc.communicate(timeout=1.0)	keep	timeout	timeout
 statusline	packages/statusline/src/moxi_statusline/detect.py	"""Make `folder` a repository on `branch`. False without `git`, or when it fails."""	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	self.folder = os.path.join(root, self.folder_name)	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	folder = own("dir", self.folder)	keep	folder	folder
+statusline	packages/statusline/src/moxi_statusline/detect.py	paths_ = [("dir", self.folder), (None, self.root), (None, self.home),	keep	folder	folder
 statusline	packages/statusline/src/moxi_statusline/detect.py	os.mkdir(drawn.folder, 0o700)	keep	folder	folder
 statusline	packages/statusline/src/moxi_statusline/detect.py	repo = _git(drawn.folder, drawn.branch, environ)	keep	folder	folder
 statusline	packages/statusline/src/moxi_statusline/detect.py	code, out = run(line, data, cwd=drawn.folder, env=environ, limit=limit)	keep	folder	folder
@@ -12600,11 +12631,11 @@ statusline	packages/statusline/tests/test_settings.py	('show = ["row", "dir"]', 
 statusline	packages/statusline/tests/test_settings.py	('show = ["dir", "row"]', "show", "'row' last"),	keep	show	show
 statusline	packages/statusline/tests/test_settings.py	('show = ["row"]', "show", "'row' first"),	keep	show	show
 statusline	packages/statusline/tests/test_settings.py	assert caught.value.key == "show"	keep	show	show
-statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["row", "dir"], by="test")	keep	show	show
 statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["row", "dir"], by="test")	use	config.set	config.set_value
-statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["dir", "row", "model"], by="test")	keep	show	show
 statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["dir", "row", "model"], by="test")	use	config.set	config.set_value
 statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "context.warn_at", 90, by="test")	use	config.set	config.set_value
+statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["row", "dir"], by="test")	keep	show	show
+statusline	packages/statusline/tests/test_settings.py	config.set("statusline", "show", ["dir", "row", "model"], by="test")	keep	show	show
 statusline	packages/statusline/tests/test_setup.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 statusline	packages/statusline/tests/test_setup.py	assert settings.load()["show"] == setup.default_show()	keep	show	show
 statusline	packages/statusline/tests/test_setup.py	config.set_many("statusline", [("show", SAVED)], by="ui")	keep	show	show

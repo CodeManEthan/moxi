@@ -1282,7 +1282,7 @@ def _need_by(by, key) -> None:
                           "pass by=, who makes it (cli, ui, moxi install)")
 
 
-def _prepared(schema, module, key, value, path, text) -> tuple:
+def _prepared(schema, module, key, value, path, *, text) -> tuple:
     """Steps 2 and 3 of a set: the key `key` names, and `value` coerced and checked as its
     type. Returns `(target, entry, new)`; `entry` is the switch entry `key` names, or
     None."""
@@ -1316,7 +1316,8 @@ def _resolved(module, changes, path) -> tuple:
     """The first half of the step `set_many` and `draft_text` share: the module's schema
     and `CONFIG_CHECK`, and each change prepared as `set_value` prepares it."""
     schema, check = _schema_of(module)
-    steps = [_prepared(schema, module, key, value, path, False) for key, value in changes]
+    steps = [_prepared(schema, module, key, value, path, text=False)
+             for key, value in changes]
     return schema, check, steps
 
 
@@ -1399,7 +1400,7 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
     schema, check = _schema_of(module)
     path = _config_file(module)
     if op == "set":
-        target, entry, new = _prepared(schema, module, key, value, path, text)
+        target, entry, new = _prepared(schema, module, key, value, path, text=text)
     else:
         target, entry = _resolve(schema, module, key, path)
     if op in ("add", "remove"):

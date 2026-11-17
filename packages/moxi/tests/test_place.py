@@ -198,26 +198,26 @@ def test_a_row_dir_expands_its_tilde_from_the_mapping(home, tmp_path):
 
 
 @pytest.mark.skipif(WINDOWS, reason="POSIX homes")
-@pytest.mark.parametrize(("value", "folder"), [
+@pytest.mark.parametrize(("value", "expected_dir"), [
     (None, "{home}/.claude"), ("", "{home}/.claude"), ("/abs/cc", "/abs/cc"),
     ("~", "{home}"), ("~/cc", "{home}/cc"), ("rel/cc", "rel/cc")])
-def test_claudes_built_in_folders_are_where_they_always_were(tmp_path, value, folder):
+def test_claudes_built_in_dirs_are_where_they_always_were(tmp_path, value, expected_dir):
     given = {"HOME": str(tmp_path / "given")}
     if value is not None:
         given["CLAUDE_CONFIG_DIR"] = value
     for kind in ("skills", "agents"):
         assert place._harness_dir("claude", kind, "", given) == Path(
-            folder.format(home=tmp_path / "given"), kind)
+            expected_dir.format(home=tmp_path / "given"), kind)
 
 
 @pytest.mark.skipif(WINDOWS, reason="POSIX homes")
-@pytest.mark.parametrize(("value", "folder"), [
+@pytest.mark.parametrize(("value", "expected_dir"), [
     (None, "~/.claude"), ("", "~/.claude"), ("~/cc", "~/cc"), ("/abs/cc", "/abs/cc")])
-def test_claudes_built_in_folders_keep_a_tilde_when_nothing_places_a_home(
-        monkeypatch, value, folder):
+def test_claudes_built_in_dirs_keep_a_tilde_when_nothing_places_a_home(
+        monkeypatch, value, expected_dir):
     monkeypatch.setattr(moxi.paths, "_account_home", lambda: None)
     given = {} if value is None else {"CLAUDE_CONFIG_DIR": value}
-    assert place._harness_dir("claude", "skills", "", given) == Path(folder, "skills")
+    assert place._harness_dir("claude", "skills", "", given) == Path(expected_dir, "skills")
 
 
 def test_a_dest_places_exactly_there_and_a_relative_one_raises(tmp_path, skill):
