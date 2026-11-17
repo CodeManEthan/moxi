@@ -43,6 +43,7 @@ ASSIGNED = {
     ("runs-in", "Remote"): {"remote_control"},
     ("lifecycle", "Context"): {"warn_at", "recycle_at_limit", "limit_at"},
     ("lifecycle", "Cache"): {"keep_warm", "recycle_on_expiry"},
+    ("lifecycle", "Headless"): {"headless_exit"},
     ("config", "Layers"): {"profile", "config"},
     ("config", "Pass-through"): {"extra_flags"},
     ("config", None): {"scratch"},
@@ -63,6 +64,7 @@ LABELS = {
     "name": "Session name", "notes_dir": "Notes folder", "warn_at": "Warn at context mark",
     "keep_warm": "Keep warm", "recycle_on_expiry": "Recycle on cache expiry",
     "recycle_at_limit": "Recycle at limit", "limit_at": "Limit mark",
+    "headless_exit": "Headless exit",
     "agent": "Agent role", "tools": "Built-in tool set", "allowed_tools": "Allowed tools",
     "disallowed_tools": "Disallowed tools", "permission_mode": "Permission mode",
     "add_dir": "Extra folders", "remote_control": "Remote Control",
@@ -199,7 +201,7 @@ def test_only_the_rows_another_control_owns_are_never_filled_from_an_earlier_lau
 def test_the_comms_rows_and_the_project_are_drawn_only_with_their_module():
     assert {row.name: row.shown_with for row in every_row() if row.shown_with} == {
         "identity": ("comms",), "scope": ("comms",), "director": ("comms",),
-        "project": ("projects",)}
+        "headless_exit": ("comms",), "project": ("projects",)}
     assert {row.name: row.typed_with for row in every_row() if row.typed_with} == {
         "posture": "comms"}
     # Drawing a row only with a module is no launch rule: the row stays offered without it.

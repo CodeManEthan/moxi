@@ -1,5 +1,5 @@
 """The terminal a wrapper's window borrows, the children a wrapper spawns, and the pidfd a
-wrapper takes on a process, shared by the wrappers.
+wrapper takes on a process and signals it through, shared by the wrappers.
 
 A window is a CLI's own full-screen interface, run as the wrapper's child in the
 wrapper's terminal. The wrapper gives the window the terminal's foreground, takes it
@@ -79,6 +79,32 @@ def pidfd_open(pid: int) -> int:
     return fd
 
 
+#: The `pidfd_send_signal` system call's number: the same on x86_64 and aarch64.
+SYS_PIDFD_SEND_SIGNAL = 424
+
+
+def pidfd_send_signal(fd: int, sig: int) -> None:
+    """Send `sig` to the process the pidfd `fd` refers to: `signal.pidfd_send_signal`
+    where this Python has it, else on Linux the system call itself (the Pythons that
+    lack `os.pidfd_open` lack this too). Elsewhere this raises the AttributeError
+    `signal.pidfd_send_signal` would. A failed call raises OSError, as that function
+    does: ProcessLookupError when the process has ended."""
+    sender = getattr(signal, "pidfd_send_signal", None)
+    if sender is not None:
+        sender(fd, sig)
+        return
+    if not sys.platform.startswith("linux"):
+        raise AttributeError("module 'signal' has no attribute 'pidfd_send_signal'")
+    libc = ctypes.CDLL(None, use_errno=True)
+    syscall = libc.syscall
+    syscall.restype = ctypes.c_long
+    done = syscall(ctypes.c_long(SYS_PIDFD_SEND_SIGNAL), ctypes.c_int(fd),
+                   ctypes.c_int(int(sig)), ctypes.c_void_p(None), ctypes.c_uint(0))
+    if done == -1:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+
+
 def terminal_fd():
     """The wrapper's controlling terminal, or None when it has none."""
     for fd in (0, 1, 2):
@@ -140,6 +166,6 @@ class Terminal:
 
 
 __all__ = ["ENTER_ALT_SCREEN", "LEAVE_ALT_SCREEN", "SHOW_CURSOR", "RESTORE_SCREEN",
-           "JOB_CONTROL_SIGNALS", "PR_SET_PDEATHSIG", "SYS_PIDFD_OPEN", "TERM_GRACE",
-           "Terminal", "die_with_parent", "in_terminal_foreground", "pidfd_open",
-           "terminal_fd"]
+           "JOB_CONTROL_SIGNALS", "PR_SET_PDEATHSIG", "SYS_PIDFD_OPEN",
+           "SYS_PIDFD_SEND_SIGNAL", "TERM_GRACE", "Terminal", "die_with_parent",
+           "in_terminal_foreground", "pidfd_open", "pidfd_send_signal", "terminal_fd"]
