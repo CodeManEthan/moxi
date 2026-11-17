@@ -105,9 +105,9 @@ sets one in turns' config file, `~/.config/moxi/turns/config.toml` by default
   start's source as its argument and the session's facts as JSON on stdin; what it prints
   on exit 0 is added. It has the listeners' `listen.wait_ms` to finish and is then
   killed, so a program with longer work starts it in a session of its own and exits.
-  Default `["launcher", "comms", "notes"]`; setting it replaces the whole list. Add
-  `turns` to the list to give each session its own id at every start, resume, clear and
-  compaction.
+  Default `["launcher", "comms", "notes", "memory"]`; setting it replaces the whole list.
+  Add `turns` to the list to give each session its own id at every start, resume, clear
+  and compaction.
 - `start.limit_chars`: the most start context a session gets, in characters; 0 means the
   harness's own ceiling. Default 0.
 - `guards.run`: the guards that run besides those switched on: guard ids and paths to

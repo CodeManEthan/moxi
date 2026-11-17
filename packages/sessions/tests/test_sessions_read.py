@@ -203,10 +203,68 @@ def test_all_goes_with_neither_turns_nor_around(env, capsys):
 
 
 def test_a_session_no_root_holds_exits_1_and_says_where_it_looked(env, capsys):
-    code, out, err = run(capsys, "read", "aaaaaaaa-1111-4111-8111-111111111111")
+    code, out, err = run(capsys, "read", "aaaaaaaa-1111-4111-8111-111111111111",
+                         "--harness", "claude")
     assert code == 1 and out == ""
     assert "no claude session aaaaaaaa-1111-4111-8111-111111111111 was found" in err
     assert str(env / ".claude" / "projects") in err
+
+
+# --- which harness, when none is named -------------------------------------------------------
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
+def test_without_harness_the_one_harness_that_holds_it_is_read(env, capsys, harness):
+    session = harness_session(env, harness)
+    code, out, err = run(capsys, "read", session, "--turns", "1")
+    assert code == 0, err
+    assert out.startswith(f"{view.HARNESS_LABELS[harness]} session {session}")
+    assert questions(out) == ["question 2"]
+    data = json.loads(run(capsys, "read", session, "--json")[1])
+    assert data["harness"] == harness and data["session"] == session
+
+
+def test_without_harness_a_session_no_harness_holds_exits_1_naming_each(env, capsys):
+    session = "aaaaaaaa-1111-4111-8111-111111111111"
+    code, out, err = run(capsys, "read", session)
+    assert code == 1 and out == ""
+    assert f"no session {session} was found in any harness" in err
+    for name, place in (("claude", env / ".claude" / "projects"),
+                        ("codex", env / ".codex" / "sessions"),
+                        ("opencode", env / ".local" / "share" / "opencode")):
+        assert f"{name}: {place}" in err
+
+
+def same_id_in_claude_and_codex(env) -> str:
+    r = codex(env)
+    t = ClaudeTranscript(env / ".claude" / "projects", session_id=r.thread_id)
+    t.user("question from claude")
+    t.assistant("answer from claude")
+    t.write()
+    return r.thread_id
+
+
+def test_without_harness_a_session_two_harnesses_hold_is_refused(env, capsys):
+    session = same_id_in_claude_and_codex(env)
+    code, out, err = run(capsys, "read", session)
+    assert code == 2 and out == ""
+    assert f"session {session} is held by claude and codex" in err
+    assert "--harness" in err
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_named_harness_is_the_one_read(env, capsys, harness):
+    session = same_id_in_claude_and_codex(env)
+    code, out, err = run(capsys, "read", session, "--harness", harness)
+    assert code == 0, err
+    assert out.startswith(f"{view.HARNESS_LABELS[harness]} session {session}")
+    assert ("question from claude" in out) is (harness == "claude")
+
+
+def test_a_named_harness_that_holds_none_is_not_found_where_another_holds_it(env, capsys):
+    session = codex(env).thread_id
+    code, out, err = run(capsys, "read", session, "--harness", "claude")
+    assert code == 1 and out == ""
+    assert f"no claude session {session} was found" in err
 
 
 def test_an_id_that_is_not_one_is_refused(env, capsys):

@@ -5499,6 +5499,115 @@ loadout	packages/loadout/tests/test_writes.py	test_remove_takes_the_item_out_of_
 loadout	packages/loadout/tests/test_writes.py	test_set_mode_writes_the_global_mode	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_writes.py	test_writes_go_to_the_configured_folder	name	folder	loadout_dir
 loadout	packages/loadout/tests/test_writes.py	test_writes_hold_the_one_manifest_lock	name	folder	loadout_dir
+memory	packages/memory/src/moxi_memory/cli.py	"search", help="search past sessions",	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	p.add_argument("words", metavar="WORDS", help="what to search for")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	p.add_argument("--project", metavar="P", help="only sessions of project label P")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	help="only rows at or after TIME: an age (7d, 12h), ISO 8601, or "	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	p.add_argument("--harness", choices=HARNESSES, help="only this harness's sessions")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	help="search the ends of tool results too")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	help="search subagent sessions too (indexed only when config "	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	help="search sessions launched as scratch too")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	p.add_argument("--limit", type=_positive, default=10, metavar="N",	keep	default	default
+memory	packages/memory/src/moxi_memory/cli.py	p.add_argument("--limit", type=_positive, default=10, metavar="N",	keep	type	type
+memory	packages/memory/src/moxi_memory/cli.py	help="how many hits (default 10)")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	p.add_argument("--json", action="store_true", help="print one JSON object")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	p = verbs.add_parser("ingest", help="ask for new transcript lines to be read, and "	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	help="read every source from its start instead")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	p = verbs.add_parser("reindex", help="ask for a rebuild of the index, and return",	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	help="also derive each session's project label again from its folder")	keep	help	help
+memory	packages/memory/src/moxi_memory/cli.py	p = verbs.add_parser("status", help="print the index's state",	keep	help	help
+memory	packages/memory/src/moxi_memory/clock.py	Every time memory prints for a person goes through `show`, never formatted inline, so the	keep	show	show
+memory	packages/memory/src/moxi_memory/clock.py	__all__ = ["show"]	keep	show	show
+memory	packages/memory/src/moxi_memory/doctor.py	yield check(*args)	keep	ok	ok
+memory	packages/memory/src/moxi_memory/doctor.py	if not any(e.name == MODULE for e in plan.entries):	keep	any	any
+memory	packages/memory/src/moxi_memory/doctor.py	warn = any(item.warn for item in items)	keep	any	any
+memory	packages/memory/src/moxi_memory/index.py	found = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	self.seen: set[tuple[str, str]] = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	self.unlisted: set[str] = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	kind = link.api.launch_kind(session_id, timeout=KIND_WAIT)	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/ingest.py	hit = next((h for h in api.find(harness, current).hits if not h.compressed),	keep	find	find
+memory	packages/memory/src/moxi_memory/ingest.py	for hit in _api().find(harness, session_id).hits:	keep	find	find
+memory	packages/memory/src/moxi_memory/ingest.py	absent: set[str] = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	listing = api.sources(harness, modified_since=since, heads=True)	keep	heads	heads
+memory	packages/memory/src/moxi_memory/ingest.py	seen = set(job.seen)	keep	set	set
+memory	packages/memory/src/moxi_memory/ingest.py	group = parser.add_mutually_exclusive_group(required=True)	keep	required	required
+memory	packages/memory/src/moxi_memory/ingest.py	help="with --walk: someone asked for it, so a held lock "	keep	help	help
+memory	packages/memory/src/moxi_memory/listener.py	self.done.set()	keep	set	set
+memory	packages/memory/src/moxi_memory/rows.py	that sessions doesn't mark `injected`, that the harness doesn't flag as meta, and that	keep	injected	injected
+memory	packages/memory/src/moxi_memory/rows.py	is not a compaction summary. A message sessions marks `injected` as unknown is kept;	keep	injected	injected
+memory	packages/memory/src/moxi_memory/rows.py	if record.injected is True:	keep	injected	injected
+memory	packages/memory/src/moxi_memory/rows.py	and not record.reasoning and record.injected is not True)	keep	injected	injected
+memory	packages/memory/src/moxi_memory/rows.py	known_secret = set(secret_calls)	keep	set	set
+memory	packages/memory/src/moxi_memory/search.py	seen: set[str] = set()	keep	set	set
+memory	packages/memory/src/moxi_memory/settings.py	if not sets or any(not s.strip() for s in sets):	keep	any	any
+memory	packages/memory/src/moxi_memory/start.py	turns_dir = paths.Layout(MODULE).runtime_dir(create=True) / TURNS	keep	create	create
+memory	packages/memory/src/moxi_memory/start.py	turns_dir.mkdir(mode=0o700, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/src/moxi_memory/status.py	listing = api.sources(harness, modified_since=last, heads=False)	keep	heads	heads
+memory	packages/memory/tests/test_cli.py	session_id=f"0190b000-0000-7000-8000-{n:012d}", start=START, **kw)	keep	start	start
+memory	packages/memory/tests/test_cli.py	assert any(line.startswith(start_) for line in out.splitlines()), start_	keep	any	any
+memory	packages/memory/tests/test_doctor.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_doctor.py	assert set(module.OPTIONAL) == {"comms", "launcher"}	keep	set	set
+memory	packages/memory/tests/test_doctor.py	assert not any("moxi memory" in a for a in codex.argv)	keep	any	any
+memory	packages/memory/tests/test_index.py	return self.proc.wait(timeout=30)	keep	timeout	timeout
+memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=0.1):	keep	wait	wait
+memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=1.0) as started:	keep	wait	wait
+memory	packages/memory/tests/test_ingest.py	assert any(x.startswith("Read(/work/project/widget.py)") for x in got)	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert {"def render(): pass", "sprocket.py", "gizmo.py"} <= set(tails)	keep	set	set
+memory	packages/memory/tests/test_ingest.py	m.text("synthetic only", synthetic=True)	keep	synthetic	synthetic
+memory	packages/memory/tests/test_ingest.py	assert not any(gone in text for text in got), gone	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert not any("work" in x for x in texts())	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert set(before) < set(after) and len(after) == len(before) + 1	keep	set	set
+memory	packages/memory/tests/test_ingest.py	assert any("[REDACTED:" in x for x in texts("tails"))	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert any(r[3] for r in index_rows())	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert not any(r[3] for r in index_rows())	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert [p.wait(timeout=60) for p in procs] == [0] * len(procs)	keep	timeout	timeout
+memory	packages/memory/tests/test_listener.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_listener.py	assert names <= set(sys.stdlib_module_names) | {"__future__"}	keep	set	set
+memory	packages/memory/tests/test_listener.py	hung.set()	keep	set	set
+memory	packages/memory/tests/test_search.py	t = T.ClaudeTranscript(sessions.root("claude"), session_id=sid, start=start, **kw)	keep	start	start
+memory	packages/memory/tests/test_search.py	return self.proc.wait(timeout=30)	keep	timeout	timeout
+memory	packages/memory/tests/test_search.py	t.tool_result(call, "quokka.txt", is_error=True)	keep	is_error	is_error
+memory	packages/memory/tests/test_settings.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_settings.py	assert set(module.OPTIONAL) == {"comms", "launcher"}	keep	set	set
+memory	packages/memory/tests/test_setup.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_setup.py	and any(getattr(t, "id", None) == "CLIENT_NAME" for t in node.targets)]	keep	any	any
+memory	packages/memory/tests/test_table.py	assert after == before._replace(label="new", written=99.0)	keep	written	written
+memory	packages/memory/src/moxi_memory/index.py	held = files.lock(writer_lock_path(env), timeout=wait)	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/index.py	conn = store.connect(state.path(env), create=False, timeout=0.25)	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/index.py	conn = store.connect(db_path(n, self.env), create=create, timeout=timeout)	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/index.py	conn = store.connect(path, create=False, timeout=lock_wait)	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/index.py	with files.lock(rebuild_lock_path(self.env), timeout=wait):	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/index.py	with files.lock(lock_path(n, self.env), timeout=0):	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/index.py	with files.lock(lock, timeout=0):	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/state.py	conn = store.connect(path(env), timeout=timeout, create=create,	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/state.py	conn = store.connect(path(env), create=False, timeout=0.25)	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/status.py	conn = store.connect(where, create=False, timeout=0.25)	use	timeout=	timeout_s=
+memory	packages/memory/tests/test_index.py	with files.lock(index.rebuild_lock_path(), timeout=0):	use	timeout=	timeout_s=
+memory	packages/memory/tests/test_ingest.py	with files.lock(index.writer_lock_path(), timeout=0):	use	timeout=	timeout_s=
+memory	packages/memory/tests/test_ingest.py	with files.lock(index.rebuild_lock_path(), timeout=0):	use	timeout=	timeout_s=
+memory	packages/memory/tests/test_search.py	with files.lock(index.rebuild_lock_path(), timeout=0):	use	timeout=	timeout_s=
+memory	packages/memory/src/moxi_memory/labels.py	project_label	name	folder	search_dir
+memory	packages/memory/src/moxi_memory/labels.py	_linked_label	name	folder	work_dir
+memory	packages/memory/src/moxi_memory/listener.py	-	name	_folder	_work_dir
+memory	packages/memory/src/moxi_memory/start.py	_marker	name	folder	turns_dir
+memory	packages/memory/src/moxi_memory/ingest.py	Ingest.ask_kind	kwonly	answered	answered
+memory	packages/memory/src/moxi_memory/setup.py	timer_lines	kwonly	timer_on	timer_on
+memory	packages/memory/tests/test_index.py	-	name	test_the_writer_lock_is_a_file_in_memorys_state_directory	test_the_writer_lock_is_a_file_in_memorys_state_dir
+memory	packages/memory/tests/test_ingest.py	FakeLauncher.__init__	kwonly	fail	fail
+memory	packages/memory/tests/test_ingest.py	launcher	kwonly	fail	fail
+memory	packages/memory/tests/test_ingest.py	other	kwonly	asked	asked
+memory	packages/memory/tests/test_labels.py	-	name	test_the_nearest_folder_holding_git_names_the_project	test_the_nearest_dir_holding_git_names_the_project
+memory	packages/memory/tests/test_labels.py	test_a_git_file_that_leads_nowhere_names_its_own_dir	name	folder	sub_dir
+memory	packages/memory/tests/test_labels.py	-	name	test_a_git_file_that_leads_nowhere_names_its_own_folder	test_a_git_file_that_leads_nowhere_names_its_own_dir
+memory	packages/memory/tests/test_listener.py	shop	name	folder	shop_dir
+memory	packages/memory/tests/test_listener.py	-	name	test_the_start_line_takes_the_folder_from_pwd_when_the_event_has_none	test_the_start_line_takes_the_work_dir_from_pwd_when_the_event_has_none
+memory	packages/memory/tests/test_settings.py	-	name	test_every_key_is_read_at_its_use_and_none_from_the_environment	test_every_key_is_read_at_its_use_and_none_from_the_env
+memory	packages/memory/tests/test_settings.py	-	name	test_the_folders_are_the_cores_for_memory	test_the_dirs_are_the_cores_for_memory
+memory	packages/memory/tests/test_setup.py	-	name	test_setup_and_teardown_on_a_fresh_environment_with_no_harness_roots	test_setup_and_teardown_on_a_fresh_env_with_no_harness_roots
+memory	packages/memory/tests/test_setup.py	-	name	test_auto_memory_is_offered_where_claude_codes_folder_exists_without_settings	test_auto_memory_is_offered_where_claude_codes_dir_exists_without_settings
+memory	packages/memory/tests/test_table.py	-	name	test_the_store_lives_in_memorys_state_directory	test_the_store_lives_in_memorys_state_dir
+memory	packages/memory/tests/test_ingest.py	FakeLauncher.launch_kind	name	timeout	timeout_s
+memory	packages/memory/tests/test_search.py	FakeLauncher.launch_kind	name	timeout	timeout_s
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_mark.py	if not any(name.upper() == STARTED_BY_ENV for name in child):	keep	any	any
@@ -11422,6 +11531,10 @@ sessions	packages/sessions/src/moxi_sessions/cli.py	roots.add_argument("--json",
 sessions	packages/sessions/src/moxi_sessions/cli.py	row["name"] or row["folder"] or "-", row["session"])))	keep	folder	folder
 sessions	packages/sessions/src/moxi_sessions/cli.py	which.add_argument("--all", action="store_true", help="the whole session")	keep	help	help
 sessions	packages/sessions/src/moxi_sessions/cli.py	work_dir=args.folder)	keep	folder	folder
+sessions	packages/sessions/src/moxi_sessions/cli.py	harness's root for the session, the way `find` does, and reads the one that holds it; when	keep	find	find
+sessions	packages/sessions/src/moxi_sessions/cli.py	help="whose session it is (default: the harness whose root holds "	keep	help	help
+sessions	packages/sessions/src/moxi_sessions/cli.py	"""The source to read of what `find` found: the first that isn't compressed, else the	keep	find	find
+sessions	packages/sessions/src/moxi_sessions/cli.py	in turn with `find`, which looks at names and, for OpenCode, one row, never a whole	keep	find	find
 sessions	packages/sessions/src/moxi_sessions/codex.py	"compacted", "event_msg", "response_item",	keep	compacted	compacted
 sessions	packages/sessions/src/moxi_sessions/codex.py	# | `compacted`, `context_compacted`, and the    | marker `compaction`                    |	keep	compacted	compacted
 sessions	packages/sessions/src/moxi_sessions/codex.py	COMPACTION_KINDS = frozenset({"compacted", "event_msg/context_compacted",	keep	compacted	compacted

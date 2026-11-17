@@ -93,7 +93,7 @@ unit = "ms"
 [start.order]
 type = "list"
 items = "str"
-default = ["launcher", "comms", "notes"]
+default = ["launcher", "comms", "notes", "memory"]
 doc = "What adds start context, in order: module names, file paths and run entries (run:<path>, a program whose output is added); setting it replaces the whole list."
 read = "start"
 label = "Start context, in order"
