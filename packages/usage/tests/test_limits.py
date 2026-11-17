@@ -574,7 +574,7 @@ def test_limits_with_no_now_reads_the_clock():
 
 @pytest.mark.slow
 @pytest.mark.timed
-def test_limits_with_no_pull_answers_in_under_100_ms(fence):
+def test_limits_with_no_pull_answers_in_under_100_ms(fence, timed_reading):
     root = sessions_root(fence)
     for n in range(200):
         thread = f"0190c000-0000-7000-8000-{n:012d}"
@@ -583,6 +583,7 @@ def test_limits_with_no_pull_answers_in_under_100_ms(fence):
     put(*found)
     limits.limits(now=NOW, pull=False)
     best = min(_timed(lambda: limits.limits(now=NOW, pull=False)) for _ in range(5))
+    timed_reading(best, 0.1, "s")
     assert best < 0.1 * timed_slack()
 
 
