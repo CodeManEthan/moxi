@@ -14,6 +14,7 @@ import pytest
 from conftest import cache_absent
 from moxi_comms.adapters import headless
 from moxi_comms.adapters.headless import ExitRule, ExitWatch, parse_exit
+from moxi_comms.adapters.terminal import pidfd_open
 
 
 # --------------------------------------------------------------------------- the parser
@@ -483,7 +484,7 @@ def test_end_logs_the_cause_and_signals_the_host_through_its_pidfd():
     host = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     said: list = []
     try:
-        handle = os.pidfd_open(host.pid)
+        handle = pidfd_open(host.pid)
         try:
             assert headless.end(handle, "idle", waiting=2, say=said.append)
             assert host.wait(timeout=30) == -signal.SIGTERM
@@ -496,6 +497,27 @@ def test_end_logs_the_cause_and_signals_the_host_through_its_pidfd():
             host.wait()
     assert said == ["headless session ended: idle; 2 row(s) left waiting for the name",
                     "headless session ended: after"]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_end_signals_the_host_when_python_lacks_the_pidfd_wrappers(monkeypatch):
+    """A Python built without `os.pidfd_open` and `signal.pidfd_send_signal` still ends
+    the host: both helpers fall back to the system calls."""
+    monkeypatch.delattr(os, "pidfd_open", raising=False)
+    monkeypatch.delattr(signal, "pidfd_send_signal", raising=False)
+    host = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        handle = pidfd_open(host.pid)
+        try:
+            assert headless.end(handle, "idle", say=lambda line: None)
+            assert host.wait(timeout=30) == -signal.SIGTERM
+            assert not headless.end(handle, "after", say=lambda line: None)
+        finally:
+            os.close(handle)
+    finally:
+        if host.poll() is None:
+            host.kill()
+            host.wait()
 
 
 def test_the_end_line_names_why_the_brief_failed():

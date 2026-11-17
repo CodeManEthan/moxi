@@ -55,6 +55,8 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
+from .terminal import pidfd_send_signal
+
 log = logging.getLogger("comms.headless")
 
 #: How long a headless session has to get ready, how long its brief's turn has to start
@@ -385,7 +387,7 @@ def end(handle: int, cause: str, *, waiting: int | None = None, why: str = "",
     ended already."""
     (say or log.info)(end_line(cause, waiting, why))
     try:
-        signal.pidfd_send_signal(handle, signal.SIGTERM)
+        pidfd_send_signal(handle, signal.SIGTERM)
     except ProcessLookupError:
         return False
     return True

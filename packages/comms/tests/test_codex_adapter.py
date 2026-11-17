@@ -962,6 +962,7 @@ def served(headless, caplog):
     import threading
 
     from moxi_comms.adapters import codex_wrapper
+    from moxi_comms.adapters.terminal import pidfd_open
 
     caplog.set_level(logging.INFO)
     hosts: list = []
@@ -970,7 +971,7 @@ def served(headless, caplog):
     def build(*rule, find=None, **kwargs):
         host = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
         hosts.append(host)
-        handle = os.pidfd_open(host.pid)
+        handle = pidfd_open(host.pid)
         handles.append(handle)
         adapter = headless(*rule, start=False, **kwargs)
         if find is not None:
