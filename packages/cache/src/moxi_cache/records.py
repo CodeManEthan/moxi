@@ -55,7 +55,9 @@ its `tick_at` is then when it stopped. A watcher older than this file writes non
 which `moxi cache doctor` and cache's page say how the watcher stands.
 
 This module imports only the standard library and the core, so the status line segment
-can read records without loading the clock.
+can read records without loading the clock. It loads nothing a render doesn't run:
+`Watching` is a plain class rather than a dataclass, since the segment imports this module
+and `dataclasses` alone would add several milliseconds to every render.
 """
 
 from __future__ import annotations
@@ -64,7 +66,6 @@ import json
 import math
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
 
 from moxi.paths import Layout
@@ -190,16 +191,41 @@ def reading(path: Path | None = None) -> dict | None:
     return {name: doc[name] for name in READING_FIELDS}
 
 
-@dataclass(frozen=True)
 class Watching:
     """How a watcher stands (`watching`): one of `FRESH`, `NOT_READING`, `STOPPED` and
     `NO_READING`, with `at`, the newest moment the records were known to match the live
     sessions, and `last`, the newest moment there is evidence a watcher ran. Each is None
-    when nothing carries it."""
+    when nothing carries it. Immutable: its fields can't be set or deleted after it is
+    made. Two are equal when every field is."""
 
-    outcome: str
-    at: float | None
-    last: float | None
+    __slots__ = ("outcome", "at", "last")
+
+    def __init__(self, outcome: str, at: float | None, last: float | None) -> None:
+        for name, value in zip(self.__slots__, (outcome, at, last)):
+            object.__setattr__(self, name, value)
+
+    def _fields(self) -> tuple:
+        return (self.outcome, self.at, self.last)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"cannot assign to field {name!r}: a Watching is immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError(f"cannot delete field {name!r}: a Watching is immutable")
+
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._fields() == other._fields()
+
+    def __hash__(self) -> int:
+        return hash(self._fields())
+
+    def __repr__(self) -> str:
+        return f"Watching(outcome={self.outcome!r}, at={self.at!r}, last={self.last!r})"
+
+    def __reduce__(self):
+        return (Watching, self._fields())
 
 
 def watching(found: dict | None, records: Iterable[dict], now: float) -> Watching:

@@ -1,9 +1,13 @@
-"""sessions' interfaces 2 to 5, the module other Moxi modules import
+"""sessions' interfaces 2 to 6, the module other Moxi modules import
 (`moxi_sessions.api`).
 
 Interface 3 is interface 2 plus `retention()` and `Retention`; interface 4 is interface 3
 plus the list's reads (`sessions_list`, `sessions_more`, `sessions_newest`,
-`session_dirs`, `session_opened`); interface 5 is interface 4 plus `session_facts`.
+`session_dirs`, `session_opened`); interface 5 is interface 4 plus `session_facts`;
+interface 6 is interface 5 plus the archive folders: `corpus`, `find`'s
+`include_archives`, `Found.unknown`, a listing's `is_archive`, `absent`, `empty` and
+`shadowed`, `archive_dirs`, `archive_answers` and `ArchiveAnswer`, and `Retention`'s
+`archive_dirs`. Every call of interface 5 behaves as it did.
 A caller loads sessions with the newest interface whose names it uses.
 
 The one shape (`moxi_sessions.shape`):
@@ -15,10 +19,15 @@ The one shape (`moxi_sessions.shape`):
 
 Finding sessions:
 
-* `find(harness, session_id, *, root=None)`: where a harness keeps a session's records,
-  with every root asked and its outcome (`Found`, `Probe`, `Hit`).
+* `find(harness, session_id, *, root=None, include_archives=False)`: where a harness keeps
+  a session's records, with every root asked and its outcome (`Found`, `Probe`, `Hit`).
+  With no root it asks the live root only; `include_archives=True` asks the archive
+  folders after it (interface 6), and `Found.unknown` says a folder didn't answer.
 * `sources(harness, *, root=None, modified_since=None, heads=True)`: every source under a
   root, with its reuse keys (`Listing`, `Listed`).
+* `corpus(harness, *, since=None, heads=True)` (interface 6): every folder of a harness,
+  the live root and then its archive folders, one `Listing` each, a later folder leaving
+  out the sessions an earlier one holds.
 * `subagents(source)`: a session's subagents, `listed`, `none`, `unreadable` or
   `unsupported` (`SubagentListing`, `Subagent`).
 * `Source`, `Header`, `Unreadable`; `root(harness, environ)` and `root_origin(harness)`,
@@ -35,6 +44,16 @@ Reading one source (`Read`, `Back`, `LastRequest`, `Batch`, `Window`):
   written since a cursor (`CURSOR_VERSION`), and the cursor to hand back.
 * `window(source, *, turns=5, before=None, limit=WINDOW_LIMIT)`: the last turns, with a
   position to page back.
+
+Archive folders (interface 6; `moxi_sessions.archives` says how a folder answers):
+
+* `archive_dirs(harness)`: the archive folders sessions' config names for a harness, in
+  order (`claude.archives`, `codex.archives`; none for OpenCode).
+* `archive_answers(paths, *, fresh=False, wait_s=None)`: whether each folder answers
+  now (`ArchiveAnswer`: `ok`, `reason`, `empty`), all tested together within one
+  `archives.answer_wait_s`; `fresh` takes no answer this process kept.
+
+sessions never writes, moves, deletes or locks anything in an archive folder.
 
 Each harness's transcript retention (interface 3):
 
@@ -76,8 +95,10 @@ process has read; a caller in another process pays its own cold reads on its fir
 Writing records for tests:
 
 * `testing`: the builders other modules' tests write harness records with
-  (`ClaudeTranscript`, `CodexRollout`, `OpenCodeDb`; see `moxi_sessions.testing`). A test
-  reaches them through this module, as it reaches every other name sessions offers.
+  (`ClaudeTranscript`, `CodexRollout`, `OpenCodeDb`), and `archive_tests` and
+  `forget_archive_answers`, which hold how sessions tests archive folders for a test's
+  block (see `moxi_sessions.testing`). A test reaches them through this module, as it
+  reaches every other name sessions offers.
 
 Each harness's mapping, and the line reads under the records:
 
@@ -119,7 +140,8 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("read_back",), "reader"),
     **dict.fromkeys(("Unreadable",), "errors"),
     **dict.fromkeys(("Source", "Header", "root", "root_origin"), "source"),
-    **dict.fromkeys(("find", "sources", "subagents", "Found", "Probe", "Hit", "Listing",
+    **dict.fromkeys(("archive_dirs", "archive_answers", "ArchiveAnswer"), "archives"),
+    **dict.fromkeys(("find", "sources", "corpus", "subagents", "Found", "Probe", "Hit", "Listing",
                      "Listed", "SubagentListing", "Subagent"), "find"),
     **dict.fromkeys(("records", "records_back", "last_request", "records_since",
                      "window", "Read", "Back", "LastRequest", "Batch", "Window",

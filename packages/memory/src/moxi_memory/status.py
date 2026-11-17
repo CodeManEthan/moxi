@@ -8,7 +8,12 @@ The backlog is the sources that changed since the last walk of their harness, fo
 listing each harness root through sessions (one stat per file, no file read) and
 comparing each source's reuse keys with those the index stored. A source the next walk
 will look at and leave out (a subagent while `index.include_subagents` is off, an imported
-thread) may be counted until that walk has run.
+thread) may be counted until that walk has run. The backlog counts the live roots only:
+an archive folder is counted by asking sessions to test it, which a read never waits for.
+
+`roots` is each folder of each harness as the last run found it (`moxi_memory.roots`),
+read from the index, with each one's `in_config` said against sessions' config as it is
+now. Nothing here tests a folder.
 """
 
 from __future__ import annotations
@@ -56,7 +61,11 @@ class Status:
       kind), and by whether they have an identity (`with_identity`,
       `without_identity`). `sessions_unreadable`: why memory's state store, which holds
       the table, can't be read, or None; the index's own state is apart from it.
-    - `dropped`: how many sessions the last rebuild dropped; `rebuilt`: when it started.
+    - `dropped`: how many sessions the last rebuild dropped; `kept`: how many it kept
+      without reading them, from a folder that didn't answer it or a compressed
+      rollout; `rebuilt`: when it started.
+    - `roots`: per harness, each folder's record as the last run left it
+      (`moxi_memory.roots.Root.to_json`), `in_config` as sessions' config is now.
 
     Times are seconds since the epoch.
     """
@@ -79,7 +88,9 @@ class Status:
     sessions: dict[str, object] = field(default_factory=dict)
     sessions_unreadable: str | None = None
     dropped: int | None = None
+    kept: int | None = None
     rebuilt: float | None = None
+    roots: dict[str, list[dict[str, object]]] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, object]:
         """The status as plain JSON values. `rebuilding` is written `rebuild_started_at`,
@@ -147,6 +158,32 @@ def _sessions_of(conn, schema: str) -> dict[str, object]:
         f"SELECT count(identity), count(*) FROM {schema}.sessions").fetchone()
     return {"total": total, "by_kind": dict(sorted(kinds.items())),
             "with_identity": with_id, "without_identity": total - with_id}
+
+
+def against_config(records):
+    """`records` (harness to `roots.Root` list) with each one's `in_config` said
+    against sessions' config now, plus a record for each archive folder the config names
+    that no run has listed yet. A harness whose config can't be read is left as
+    recorded. Asks sessions for its folders' names only; tests none."""
+    from moxi_sessions import api
+
+    from . import roots
+
+    out = {}
+    for harness, recs in records.items():
+        try:
+            live = str(api.root(harness))
+            archive_dirs = api.archive_dirs(harness)
+        except Exception:  # noqa: BLE001 - config that can't be read: as recorded
+            out[harness] = list(recs)
+            continue
+        named = {live, *archive_dirs}
+        for rec in recs:
+            rec.in_config = rec.path in named
+        known = {r.path for r in recs}
+        out[harness] = list(recs) + [roots.Root(p, is_archive=True)
+                                     for p in archive_dirs if p not in known]
+    return out
 
 
 def backlog(conn, env: Mapping[str, str] | None = None) -> dict[str, int | None] | None:
@@ -238,6 +275,13 @@ def status(env: Mapping[str, str] | None = None, *, with_backlog: bool = True) -
             out.filling = filling(conn)
             out.tokenizer = meta.get("tokenizer")
             out.dropped = _number(meta.get("dropped"), int)
+            out.kept = _number(meta.get("kept"), int)
+            from . import roots
+
+            records = roots.read_all(conn)
+            if with_backlog:
+                records = against_config(records)
+            out.roots = {h: [r.to_json() for r in recs] for h, recs in records.items()}
             out.rebuilt = _number(meta.get("rebuilt"))
             try:
                 if reader.attach_state(STATE):
@@ -253,4 +297,5 @@ def status(env: Mapping[str, str] | None = None, *, with_backlog: bool = True) -
     return out
 
 
-__all__ = ["OK", "MISSING", "UNREADABLE", "NO_KIND", "Status", "backlog", "status"]
+__all__ = ["OK", "MISSING", "UNREADABLE", "NO_KIND", "Status", "against_config", "backlog",
+           "status"]

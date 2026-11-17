@@ -235,7 +235,8 @@ def test_reindex_says_what_a_rebuild_drops_before_it_starts_the_child(capsys, mo
     monkeypatch.setattr(start, "spawn", spawn)
     code, out, _ = memory(capsys, "reindex")
     assert code == 0
-    assert "drops every session whose transcript the harness has deleted" in printed[0]
+    assert ("drops each session whose transcript is gone from every folder of its "
+            "harness" in printed[0])
     assert "process 4242" in out
 
 

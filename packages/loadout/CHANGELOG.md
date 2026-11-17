@@ -84,6 +84,14 @@
 - The page's confirmed act is `POST /api/global-remove` (was `/api/global-off`), with no
   old route.
 - loadout needs moxi 0.1.8 or later, whose terminal record holds `OPENCODE_CONFIG_DIR`.
+- loadout needs moxi 0.1.11 or later, for the core's harness file writer.
+- A leading `~` in `CLAUDE_CONFIG_DIR` is the home folder, for `settings.json`,
+  `CLAUDE.md` and `.claude.json` alike. It was taken as a folder named `~` under the
+  folder loadout ran in.
+- Claude's folder is found by the core (`moxi.paths.claude_home`), and harness files are
+  read and written by the core's writer (`moxi.harnessfile`), which other modules that
+  write Claude's `settings.json` share. What loadout writes, its backups and its lines are
+  unchanged.
 
 ## 0.1.4 (2026-11-08)
 

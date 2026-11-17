@@ -3,9 +3,11 @@
 * `search(query, *, project=None, since=None, harness=None, results=False,
   subagents=False, scratch=False, limit=10) -> Result`: search past sessions. A `Result`
   holds `hits` (each a `Hit`), `rows` (how many rows were searched), `filling` (a
-  `Filling` while the first full read hasn't finished, else None) and `rebuilding` (the
-  start time of a running rebuild, else None).
-* `status() -> Status`: the index, its reads, a running rebuild and the session table.
+  `Filling` while the first full read hasn't finished, else None), `rebuilding` (the
+  start time of a running rebuild, else None) and `unread` (the archive folders no walk
+  has listed whole yet, whose sessions are not in the results).
+* `status() -> Status`: the index, its reads, a running rebuild, the session table, and
+  each folder of each harness as the last run found it.
 * `IndexMissing` and `IndexUnreadable`: what `search` raises when there is no index to
   read, or one that can't be read. A search never answers those with an empty list.
   `StateUnreadable`, a kind of `IndexUnreadable`, says the index reads but memory's

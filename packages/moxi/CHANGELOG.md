@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.1.11 (unreleased)
+
+- New `moxi.modules.announced(name)`: what `load` finds for a module (its distribution,
+  its entry point, its announcement imported and checked) without importing its `API`
+  module. It shares `load`'s record and never raises; an absent or broken module's record
+  says so, with `segment` None.
+- The `SEGMENT` field says how a segment is called: `segment(session_id, now=None)`, or
+  `from_input(payload, now)` when the module defines it, given Claude's status line input
+  as parsed JSON. Each returns an object with `text` and `coloured()`, or None.
+- New `moxi.render`, the render audit hook, moved here from moxi-cache unchanged:
+  `install()`, `installed()`, `Refused` and `load_segment(name)`. A process that renders a
+  status line segment installs it first, and can then read and do nothing else.
+  Importing it loads no `urllib.parse`; only the check of a `sqlite3.connect`
+  URI does.
+- The catalogue lists statusline, the Claude Code status line, marked `unreleased`.
+  Its version is 7.
+- New `moxi.config.set_many(module, changes, by=, base=)`: several keys set in one write,
+  checked once as a whole, so keys bound to each other move together; any refusal writes
+  nothing. New `moxi.config.draft_text(module, changes, base=)`: the text `set_many`
+  would write, byte for byte, and the stamp of the file it was built over, with no lock
+  and no write. Given that stamp as `base`, either refuses with the new `ConfigChanged`
+  (exit code 75) once the file has changed.
+- New `moxi.paths.claude_home(env=None)`: Claude Code's folder, `$CLAUDE_CONFIG_DIR`
+  else `~/.claude`, read from the given environment alone. A leading `~` in the variable
+  is that environment's home folder.
+- The skill placer finds Claude's built-in skills and agents folders through
+  `claude_home`. What it places doesn't change.
+- New `moxi.harnessfile`, the writer for a harness's own files (Claude Code's
+  `settings.json` and the like), moved here from moxi-loadout so every module that writes
+  one shares one rule: `Doc` reads a file once, keeping a JSON file's key order and
+  indent; `write(doc, backups, keep)` drops the write when the file changed since it was
+  read, keeps the old bytes under `backups`, writes atomically in the file's own mode and
+  through a link, and leaves no lock file. Its refusal lines name no module. With
+  `keep_copy`, the write first hands the bytes it is about to replace to the caller, and
+  writes nothing when that raises `OSError`.
+
 ## 0.1.10 (unreleased)
 
 - `moxi.doctor.Row` gains `needs`, given by keyword: on an `off` row given because a

@@ -17,7 +17,12 @@ the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <
   `--name=value` or `NAME=value` is read by its value too.
 
 The roots are each harness's `source.root()`: the configured root when a config key names
-one, and the harness's own rule over the launch's environment.
+one, and the harness's own rule over the launch's environment. Each archive folder
+sessions' config names (`claude.archives`, `codex.archives`) is a transcript root too. An
+archive folder is compared by its path as written (normalized by its text alone, as
+`archives.archive_dirs` gives it), never resolved, and a path under it is
+refused before anything resolves that path, so judging a call touches no archive folder.
+A path that reaches an archive folder through a symbolic link gets past the guard.
 
 **The escape.** A simple command that runs one of this environment's own `moxi` verbs
 named on `guard.transcript_read_escapes` (`moxi sessions` by default; as `moxi`, or by the
@@ -103,9 +108,12 @@ def judge(call):
         return None
 
 
-def decide(call, *, roots: Iterable[tuple[str, str]] | None = None) -> str | None:
+def decide(call, *, roots: Iterable[tuple[str, str]] | None = None,
+           archives: Iterable[tuple[str, str]] | None = None) -> str | None:
     """The refusal for `call`, or None to let it run, as `judge` gives it but letting
-    errors out. `roots` is `(harness, root)` pairs, `transcript_roots(env)` when None."""
+    errors out. `roots` is `(harness, root)` pairs, `transcript_roots(env)` when None;
+    `archives` is `(harness, folder)` pairs compared as written, `archive_roots()` when
+    None."""
     tool = getattr(call, "tool", None)
     harness = getattr(call, "harness", None)
     if not isinstance(tool, str) or tool not in CALLS.get(harness, ()):
@@ -118,11 +126,17 @@ def decide(call, *, roots: Iterable[tuple[str, str]] | None = None) -> str | Non
     home = _absolute(env.get("HOME"))
     if roots is None:
         roots = transcript_roots(env)
+    if archives is None:
+        archives = archive_roots()
     known = _known(roots)
-    if not known:
+    kept = tuple((harness, _normpath(archive_dir)) for harness, archive_dir in archives
+                 if isinstance(archive_dir, str) and archive_dir.startswith("/"))
+    if not known and not kept:
         return None
     for what, path in _named(tool, tool_input, cwd, home):
-        hit = _under_root(path, known)
+        hit = _under_written(path, kept)
+        if hit is None and known:
+            hit = _under_root(path, known)
         if hit is not None:
             return DENY.format(what=what, path=path, harness=hit[0], root=hit[1])
     return None
@@ -186,17 +200,25 @@ def _configured_roots() -> tuple[tuple[str, str], ...]:
     return _configured()[0]
 
 
+def archive_roots() -> tuple[tuple[str, str], ...]:
+    """Each archive folder sessions' config names, as `(harness, folder)`, read again only
+    when its file changes. Raises `moxi.config.ConfigError` when the file cannot be
+    read."""
+    return _configured()[2]
+
+
 def escapes() -> frozenset[str]:
     """The verbs on `guard.transcript_read_escapes`, read again only when sessions' config
     file changes. Raises `moxi.config.ConfigError` when the file cannot be read."""
     return _configured()[1]
 
 
-def _configured() -> tuple[tuple[tuple[str, str], ...], frozenset[str]]:
-    """The roots sessions' config names and its escape verbs, read again only when its
-    file changes."""
+def _configured() -> tuple:
+    """The roots sessions' config names, its escape verbs and its archive folders, read
+    again only when its file changes."""
     from moxi.paths import Layout
 
+    from .archives import ARCHIVE_KEYS, archive_dirs
     from .settings import MODULE, current
     from .source import ROOT_KEYS
 
@@ -208,7 +230,9 @@ def _configured() -> tuple[tuple[tuple[str, str], ...], frozenset[str]]:
     settings = current()
     roots = tuple((harness, str(settings[k])) for harness, k in ROOT_KEYS.items()
                   if settings[k] is not None)
-    found = (roots, frozenset(settings[ESCAPES_KEY]))
+    kept = tuple((harness, archive_dir) for harness in ARCHIVE_KEYS
+                 for archive_dir in archive_dirs(harness))
+    found = (roots, frozenset(settings[ESCAPES_KEY]), kept)
     with _lock:
         _config_cache[:] = [key, found]
     return found
@@ -235,6 +259,15 @@ def _known(roots: Iterable[tuple[str, str]]) -> tuple[tuple[str, str, str], ...]
         if real != lexical:
             out.append((harness, lexical, real))
     return tuple(out)
+
+
+def _under_written(path: str, kept) -> tuple[str, str] | None:
+    """`(harness, folder)` of the first archive folder `path` is or lies under, both as
+    written; nothing is resolved."""
+    for harness, archive_dir in kept:
+        if path == archive_dir or path.startswith(archive_dir.rstrip("/") + "/"):
+            return harness, archive_dir
+    return None
 
 
 def _under_root(path: str, known) -> tuple[str, str] | None:

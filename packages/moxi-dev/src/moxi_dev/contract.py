@@ -117,7 +117,7 @@ GROUP = "moxi.modules"
 #: underscored ones) are its own.
 CORE_MODULES = frozenset({"names", "paths", "config", "modules", "cli", "files", "store",
                           "proc", "log", "exit", "aio", "ipc", "units", "doctor", "place",
-                          "terminal"})
+                          "terminal", "render", "harnessfile"})
 #: Where the core keeps its vendored copies of released libraries, which no check reads.
 VENDORED = "src/moxi/_vendor/"
 #: The core's one console script.
