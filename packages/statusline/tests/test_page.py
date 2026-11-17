@@ -324,7 +324,7 @@ def test_a_held_lock_is_a_409_and_writes_nothing(monkeypatch):
 HOLD = """
 import sys
 from moxi import files
-with files.lock(sys.argv[1], timeout=5):
+with files.lock(sys.argv[1], timeout_s=5):
     print("held", flush=True)
     sys.stdin.read()
 """
