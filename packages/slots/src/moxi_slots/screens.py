@@ -1,7 +1,7 @@
 """The screens drawn outside a session, as data, and the one rule that matches them.
 
 slots types only on screens no session has control of: Claude Code's startup warnings
-and its exit dialog. Each is a `Screen` here, and `answer_screen` presses a key only
+(folder trust, development channels, the bypass-permissions warning) and its exit dialog. Each is a `Screen` here, and `answer_screen` presses a key only
 after a full match against one of them (see `answer`).
 
 The matcher reads plain text: `capture-pane -p`, or an `-e` capture with its escape
@@ -111,8 +111,17 @@ CLAUDE_DEV_CHANNELS = Screen(
     phrases=("Loading development channels", "Enter to confirm"),
     option="I am using this for local development", move=True, then=GONE)
 
+#: The warning a `bypassPermissions` session draws before it starts, with the marker on
+#: "No, exit" above the option. Answering it makes Claude Code write
+#: `skipDangerousModePermissionPrompt: true` into its user settings.
+CLAUDE_BYPASS_WARNING = Screen(
+    name="CLAUDE_BYPASS_WARNING",
+    phrases=("WARNING: Claude Code running in Bypass Permissions mode",
+             "By proceeding, you accept"),
+    option="Yes, I accept", move=True, then=GONE)
+
 #: Every screen slots ships.
-SCREENS = (CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS)
+SCREENS = (CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS, CLAUDE_BYPASS_WARNING)
 
 
 def plain(text: str) -> str:
@@ -252,5 +261,5 @@ def find(screens: Sequence[Screen], text: str, width: int, *,
 
 
 __all__ = ["MARKER", "RULE", "ENDED", "GONE", "Items", "Screen", "CLAUDE_EXIT_DIALOG",
-           "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "SCREENS", "plain", "rows",
+           "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING", "SCREENS", "plain", "rows",
            "is_rule", "region", "bare", "marked", "Match", "match", "find"]

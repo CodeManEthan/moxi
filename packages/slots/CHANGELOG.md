@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A new screen, `CLAUDE_BYPASS_WARNING`: the warning Claude Code draws before a
+  `bypassPermissions` session starts, answered with "Yes, I accept". Answering it makes
+  Claude Code write `skipDangerousModePermissionPrompt: true` into its user settings, so
+  slots presses it only when a caller asks.
+
 - Both settings carry page fields, which `moxi config slots show --json` prints and
   the settings page draws: a plain label and a line. slots needs moxi 0.1.9 or later.
 

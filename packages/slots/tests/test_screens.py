@@ -18,8 +18,9 @@ from pathlib import Path
 import pytest
 
 from moxi_slots import api, screens
-from moxi_slots.screens import (CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR,
-                                SCREENS, Items, Screen, bare, find, match, plain, region)
+from moxi_slots.screens import (CLAUDE_BYPASS_WARNING, CLAUDE_DEV_CHANNELS,
+                                CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, SCREENS, Items, Screen,
+                                bare, find, match, plain, region)
 
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/screens*")
 
@@ -36,6 +37,9 @@ def width_of(name: str) -> int:
 
 #: name -> (screen expected present or None, full, the marked row's text, its why's start)
 EXPECTED = {
+    "claude-2.1.325-trust-200.plain.txt": (CLAUDE_TRUST_DIR, True, "No, exit", ""),
+    "claude-2.1.325-bypass-warning-200.plain.txt":
+        (CLAUDE_BYPASS_WARNING, True, "No, exit", ""),
     "claude-2.1.314-trust-120x40.plain.txt": (CLAUDE_TRUST_DIR, True, "No, exit", ""),
     "claude-2.1.314-trust-120x40.ansi.txt": (CLAUDE_TRUST_DIR, True, "No, exit", ""),
     "claude-2.1.314-trust-on-option-120x40.plain.txt":
@@ -82,6 +86,30 @@ def test_the_matcher_over_each_fixture(name):
     assert held.why.startswith(why)
     assert bare(held.rows[held.marked]) == marked_text
     assert bare(held.rows[held.option]) == want.option
+
+
+@pytest.mark.parametrize(("screen", "name"), [
+    (CLAUDE_TRUST_DIR, "claude-2.1.325-trust-200.plain.txt"),
+    (CLAUDE_BYPASS_WARNING, "claude-2.1.325-bypass-warning-200.plain.txt")])
+def test_each_2_1_325_capture_needs_one_down(screen, name):
+    held = match(screen, fixture(name), width_of(name))
+    assert held.full, held.why
+    assert held.option - held.marked == 1
+
+
+@pytest.mark.parametrize(("screen", "other"), [
+    (CLAUDE_TRUST_DIR, "claude-2.1.325-bypass-warning-200.plain.txt"),
+    (CLAUDE_BYPASS_WARNING, "claude-2.1.325-trust-200.plain.txt")])
+def test_the_bypass_warning_and_the_trust_screen_never_match_each_other(screen, other):
+    held = match(screen, fixture(other), width_of(other))
+    assert not held.present and not held.full
+
+
+def test_the_bypass_warning_is_in_no_other_fixture():
+    for name in EXPECTED:
+        if "bypass-warning" in name:
+            continue
+        assert not match(CLAUDE_BYPASS_WARNING, fixture(name), width_of(name)).present, name
 
 
 def test_the_trust_capture_needs_one_down():
@@ -200,11 +228,13 @@ def test_the_index_is_dropped_from_an_option_row():
     assert bare(" ❯ No, exit") == "No, exit"
 
 
-def test_the_three_screens():
+def test_the_four_screens():
     assert CLAUDE_EXIT_DIALOG.move is False and CLAUDE_EXIT_DIALOG.then == "ended"
     assert CLAUDE_EXIT_DIALOG.items == Items("will stop when you exit", ("shell", "monitor"))
     assert CLAUDE_TRUST_DIR.move and CLAUDE_TRUST_DIR.then == "gone"
     assert CLAUDE_DEV_CHANNELS.move and CLAUDE_DEV_CHANNELS.then == "gone"
+    assert CLAUDE_BYPASS_WARNING.move and CLAUDE_BYPASS_WARNING.then == "gone"
+    assert CLAUDE_BYPASS_WARNING.option == "Yes, I accept"
     assert {s.marker for s in SCREENS} == {"❯"}
 
 
@@ -212,6 +242,7 @@ def test_the_api_re_exports_the_screens():
     assert api.CLAUDE_TRUST_DIR is CLAUDE_TRUST_DIR
     assert api.CLAUDE_DEV_CHANNELS is CLAUDE_DEV_CHANNELS
     assert api.CLAUDE_EXIT_DIALOG is CLAUDE_EXIT_DIALOG
+    assert api.CLAUDE_BYPASS_WARNING is CLAUDE_BYPASS_WARNING
     assert api.Screen is Screen
 
 

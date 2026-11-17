@@ -25,7 +25,8 @@ through tmux, and each returns once the command has started or has not (`exec`
 `started`, `failed` or `unconfirmed`). `wait_ended` waits for a run pane to end.
 
 `read_screen` says which of the given screens (`CLAUDE_TRUST_DIR`,
-`CLAUDE_DEV_CHANNELS`, `CLAUDE_EXIT_DIALOG`) a slot's run pane shows; `answer_screen`
+`CLAUDE_DEV_CHANNELS`, `CLAUDE_BYPASS_WARNING`, `CLAUDE_EXIT_DIALOG`) a slot's run pane
+shows; `answer_screen`
 answers one by its keys after a full match, and is the only call that sends a key.
 `pane_use` is the read behind a check for a person at the pane.
 
@@ -42,7 +43,8 @@ from .jobs import job, jobs, run_job
 from .launch import respawn, start, wait_ended
 from .model import (Answer, Drift, Ended, Hold, Job, Last, Listing, PaneUse, Placed, Removed,
                     Seen, Slot)
-from .screens import CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, Screen
+from .screens import (CLAUDE_BYPASS_WARNING, CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG,
+                      CLAUDE_TRUST_DIR, Screen)
 from .slots import attach_argv, create, hold, list_slots, release, remove, rename, show
 from .support import Support, supported
 
@@ -51,5 +53,6 @@ __all__ = ["REASONS", "Refused", "TmuxError", "TryAgain", "RegistryError", "Slot
            "Removed", "Placed", "Job", "Ended", "list_slots", "show", "create", "remove",
            "rename", "hold", "release", "attach_argv", "start", "respawn", "wait_ended",
            "run_job", "job", "jobs", "Screen", "Seen", "Answer", "PaneUse",
-           "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_EXIT_DIALOG", "read_screen",
+           "CLAUDE_TRUST_DIR", "CLAUDE_DEV_CHANNELS", "CLAUDE_BYPASS_WARNING",
+           "CLAUDE_EXIT_DIALOG", "read_screen",
            "answer_screen", "pane_use"]

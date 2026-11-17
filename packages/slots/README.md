@@ -38,12 +38,16 @@ The first line installs `moxi`, the core. The repository lists the other modules
   global `destroy-unattached` off, since slots rely on them.
 - On systemd, with linger off, the server and every slot stop at your last logout. The
   doctor warns and names `loginctl enable-linger`.
-- It presses keys in Claude Code, on three screens only: the folder trust warning, the
-  development channels warning, and the exit dialog shown while background shells or
-  monitors run. `answer_screen` presses Up, Down and Enter there, and only after every
-  phrase, the option row and the marker have matched on settled reads. It sends no other
-  key or text into any pane. The screens are matched by their text, not by a version
-  number; the test fixtures cover Claude Code 2.1.289 to 2.1.314. A screen that doesn't
+- It presses keys in Claude Code, on four screens only: the folder trust warning, the
+  development channels warning, the bypass-permissions warning, and the exit dialog shown
+  while background shells or monitors run. `answer_screen` presses Up, Down and Enter
+  there, and only after every phrase, the option row and the marker have matched on
+  settled reads. It sends no other key or text into any pane. Answering the
+  bypass-permissions warning makes Claude Code write
+  `skipDangerousModePermissionPrompt: true` into `~/.claude/settings.json`, which turns
+  the warning off for every later bypass session on the machine. The screens are matched
+  by their text, not by a version number; the test fixtures cover Claude Code 2.1.289 to
+  2.1.325. A screen that doesn't
   match is saved in slots' state directory (the last 20) and nothing is pressed.
 - Uninstalling stops the server, which ends every session in every slot. `moxi uninstall
   slots` refuses while any slot is occupied or not idle, or a job runs.
@@ -106,8 +110,8 @@ isn't answering yet.
   and `run_job(name, argv, env=, cwd=)` runs a detached one. The environment goes through
   a private file the pane's first command reads, never through tmux. Each returns once the
   command has started or hasn't. `wait_ended` waits for a run pane to end.
-- `read_screen(slot, screens)` says which of `CLAUDE_TRUST_FOLDER`, `CLAUDE_DEV_CHANNELS`
-  and `CLAUDE_EXIT_DIALOG` the run pane shows. `answer_screen(slot, screen, wait)`
+- `read_screen(slot, screens)` says which of `CLAUDE_TRUST_DIR`, `CLAUDE_DEV_CHANNELS`,
+  `CLAUDE_BYPASS_WARNING` and `CLAUDE_EXIT_DIALOG` the run pane shows. `answer_screen(slot, screen, wait)`
   answers one, and is the only call that sends a key. `pane_use` reads whether a person
   is at the pane.
 - Errors are `SlotsError`s: `Refused` (with a `reason` word from `REASONS`), `TryAgain`,
