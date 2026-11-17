@@ -128,8 +128,8 @@ def test_the_tiers_are_one_hour_and_five_minutes():
     assert claude.TIER_5M == ("cache_creation_5m_input_tokens", 300)
 
 
-def test_the_version_is_0_1_6():
-    assert metadata.version("moxi-cache") == "0.1.6"
+def test_the_version_is_0_1_7():
+    assert metadata.version("moxi-cache") == "0.1.7"
     assert module.INTERFACES == frozenset({1})
 
 
