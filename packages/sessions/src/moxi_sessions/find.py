@@ -362,7 +362,7 @@ class _Walk:
             self.unreadable.append((self.rel(path), GONE))
 
     def entries(self, target_dir: Path, *, listed: bool = False) -> list[os.DirEntry]:
-        """`directory`'s entries by name, or none when it cannot be listed (noted). A
+        """`target_dir`'s entries by name, or none when it cannot be listed (noted). A
         directory that isn't there is noted only when it was `listed` (an entry of a
         listing, not a place looked in by name) and gone counts as an error."""
         try:

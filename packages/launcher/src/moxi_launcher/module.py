@@ -23,8 +23,9 @@ OPTIONAL = {
              "seat gets its instructions in start context and a seat's waiting handoff is "
              "pointed to at its start. Without it the brief is the harness's opening prompt.",
     "comms": "Identities: a launch may take a comms name, a scope, directors and the "
-             "with: posture, and the launcher's console name is reserved. Without it every "
-             "launch is a plain harness launch.",
+             "with: posture, a headless one too where comms' wrapper takes it, with its "
+             "headless_exit rule, and the launcher's console name is reserved. Without it "
+             "every launch is a plain harness launch.",
     "slots": "Tmux slots: a launch may start in a numbered tmux session (--target slot, "
              "--slot), and the startup screens it is set to answer are answered there. "
              "Without it a launch starts in this terminal or headless.",

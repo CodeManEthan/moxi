@@ -77,6 +77,19 @@ An unanswered hand-in is never put back in the queue: the text may already be in
 turn. The session's end (the window closed, or the host failed) settles every open digest
 `unhandled` and ends the launch.
 
+**A headless launch** (`moxi comms codex --headless`) carries a brief and an exit rule
+(`headless.ExitRule`). Its claim records `headless` and `exit`, and its claim socket
+answers `end` (`moxi comms exit-session`). From the bind an `ExitWatch` counts the ready
+bound and `after=`; once the session is found, its first act is
+`deliver(<brief>, ref="brief")`, and mail waits for that turn's end, steered mail
+included. The watch is fed every turn event and, on a tick of `headless.TICK_S` while no
+turn runs, the reads it asks for: for `done`, a `look` (a release point of its own) and
+then the daemon's `agents` answer once the turn's settle window has closed; for `cold`,
+the daemon's `session` read of its own name; and, before an automatic cause fires, the
+session's busy count (`Session.agents()`) where the host offers `agents`. The first
+cause ends the session: one log line, `headless session ended: <cause>`, and SIGTERM to
+the host through its pidfd (`headless.end`, run by `serve`).
+
 The digest itself is `claude_shim`'s `render_digest` / `frame_line` -- one attributed
 frame line per message, the routing line already stripped by the daemon -- so the model
 sees the same thing on both harnesses, directive standing for the roster's declared
@@ -92,6 +105,7 @@ from pathlib import Path
 
 from .. import codex_threads
 from ..client import DaemonClient
+from . import headless as headless_mod
 from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, layer_one_form  # noqa: F401
 from . import codex_roster
 from .claude_shim import render_digest
@@ -254,10 +268,16 @@ class CodexAdapter(HarnessAdapter):
                  status_sink=None, clock=time.time, comms_path: str | None = None,
                  layer_one: bool = True, exit_hook=None, wait_retry: float = WAIT_RETRY,
                  find_step: float = FIND_STEP, wait_when_held: bool = True,
-                 resume: str | None = None):
+                 resume: str | None = None, brief: str | None = None,
+                 exit_rule: headless_mod.ExitRule | None = None,
+                 watch_clock=time.monotonic, headless_tick_s: float = headless_mod.TICK_S):
         #: The host process: turns' Codex host, the wrapper's pid kept across its exec.
         #: The claim's root. None in a test that hands in its own `find`.
         self.harness_pid = harness_pid
+        #: A headless launch's exit rule, and its brief; None for a launch with a person.
+        #: Set before the base builds the claim, which records them.
+        self.exit_rule = exit_rule
+        self.brief = brief
         self._claim_socket = claim_socket
         self.WAIT_WHEN_HELD = wait_when_held
         super().__init__(agent, socket_path=socket_path, autoreconnect=autoreconnect,
@@ -313,6 +333,17 @@ class CodexAdapter(HarnessAdapter):
         self._reloader: threading.Thread | None = None
         #: Each `mcp.reload` answer, in order (log and test visibility).
         self.reloads: list = []
+        #: A headless launch's watch, from the bind; the cause it ended on, once it has;
+        #: what ends the host (`serve` sets it: `headless.end` on the host's pidfd).
+        self.exit_watch: headless_mod.ExitWatch | None = None
+        self.ended_cause: str | None = None
+        #: A cause asked for before the bind built the watch (`exit-session` while the
+        #: name was still binding): the watch ends the session on it as it starts.
+        self._end_asked: str | None = None
+        self.on_headless_end = None
+        self._watch_clock = watch_clock
+        self._headless_tick_s = headless_tick_s
+        self._headless_wake = threading.Event()
 
     # ------------------------------------------------------------------ the clock's evidence
     def cache_source(self) -> str | None:
@@ -377,6 +408,10 @@ class CodexAdapter(HarnessAdapter):
         if self.harness_pid is not None:
             root = root_of(self.harness_pid, TREE)
             self.claims.roots = [root] if root is not None else []
+        if self.exit_rule is not None:
+            self._launch_claim.update(headless=True, exit=list(self.exit_rule.values))
+            self.claims.claim = dict(self._launch_claim)
+            self.claims.on_end = lambda: self.end_headless(headless_mod.EXIT_SESSION)
 
     def _directors(self) -> tuple:
         return tuple(getattr(self.agent, "directors", None) or ())
@@ -405,6 +440,8 @@ class CodexAdapter(HarnessAdapter):
         failure here ends the launch: there is no session to deliver into."""
         if self._on_bound is not None:
             self._on_bound()
+        if self.exit_rule is not None:
+            self._start_headless()
         session = self.find_session()
         thread_id = session.session_id
         born_with = {}
@@ -448,6 +485,10 @@ class CodexAdapter(HarnessAdapter):
         self._watcher.start()
         self.log.info("found codex thread %s for %s through turns", thread_id,
                       self.agent.qualified)
+        if self.exit_watch is not None:
+            # The brief is the session's first turn, before any mail: its hand is open
+            # before the ready below can release a row.
+            self._deliver_brief(session)
         if self.resume is not None:
             # The first load resumed the thread: one resume ready, from here.
             self.owed_session_changed(SOURCE_RESUME, thread_id)
@@ -457,7 +498,174 @@ class CodexAdapter(HarnessAdapter):
             self.report_ready(SOURCE_STARTUP)
         self._wake.set()
 
+    # ------------------------------------------------------------------ headless
+    def _start_headless(self) -> None:
+        """The watch, from the bind, and the thread that asks it for a cause. A cause
+        asked for before the watch existed ends the session now."""
+        watch = headless_mod.ExitWatch(self.exit_rule, self._watch_clock)
+        with self._lock:
+            self.exit_watch = watch
+            asked, self._end_asked = self._end_asked, None
+        threading.Thread(target=self._headless_loop, daemon=True,
+                         name="comms-codex-headless").start()
+        if asked is not None:
+            self.end_headless(asked)
+
+    def _deliver_brief(self, session) -> None:
+        """Hand the brief to the session as its first turn, `ref="brief"`. Its hand is a
+        boundary, so no mail goes while it is open; a refusal or loss fails the brief."""
+        with self._lock:
+            self.exit_watch.offers_shells = "agents" in session.capabilities
+            self.exit_watch.on_found()
+            hand = Hand(headless_mod.BRIEF_REF, None, (), self.brief or "", steer=False)
+            self.hands[hand.ref] = hand
+        try:
+            delivery = session.deliver(hand.text, ref=hand.ref)
+        except Exception as exc:                              # noqa: BLE001
+            self.log.warning("the hand-in of the brief failed: %s", exc)
+            delivery = _Unsent(HandInFailed(f"the hand-in failed: {type(exc).__name__}: "
+                                            f"{exc}"), hand.ref)
+        hand.delivery = delivery
+        self.log.info("handed the brief to turns as delivery %s", delivery.id)
+        threading.Thread(target=self._wait, args=(hand,), daemon=True,
+                         name="comms-codex-wait").start()
+        self._headless_wake.set()
+
+    def _headless_loop(self) -> None:
+        while not self._stop.is_set() and self.ended_cause is None:
+            self._headless_wake.clear()
+            try:
+                self.headless_step()
+            except Exception:                                  # noqa: BLE001
+                self.log.exception("the exit watch of %s failed a step",
+                                   self.agent.qualified)
+            self._headless_wake.wait(self._headless_tick_s)
+
+    def headless_step(self) -> str | None:
+        """Make the reads the watch asks for, then end the session on the cause that
+        fires now, if one does. Returns that cause."""
+        watch = self.exit_watch
+        if watch is None or self.ended_cause is not None:
+            return None
+        with self._lock:
+            mail, cache, shells = (watch.wants_mail_read(), watch.wants_cache_read(),
+                                   watch.wants_shells())
+        if mail:
+            self._read_mail(look=True)
+        if cache:
+            kind = self._read_cache_kind()
+            if kind is not None:
+                with self._lock:
+                    line = watch.note_cache_kind(kind)
+                if line:
+                    self.log.info("%s: %s", self.agent.qualified, line)
+        if shells:
+            busy = self._read_busy()
+            with self._lock:
+                watch.note_shells(busy=busy)
+        with self._lock:
+            cause = watch.due()
+        if cause is not None:
+            self.end_headless(cause)
+        return cause
+
+    def _daemon_call(self, method: str, params: dict | None = None) -> dict | None:
+        """One read on the binding's own connection, or None when it is down or the read
+        failed."""
+        daemon = self._daemon
+        if daemon is None or not daemon.connected:
+            return None
+        try:
+            answer = daemon.call(method, params)
+        except Exception as exc:                              # noqa: BLE001
+            self.log.info("the %s read for the exit watch failed: %s", method, exc)
+            return None
+        return answer if isinstance(answer, dict) else None
+
+    def _read_mail(self, *, look: bool) -> int | None:
+        """`done`'s read: a `look` on the binding's connection (a release point: a read
+        that passes hands every row, which starts a turn), then the daemon's `agents`
+        answer on the same connection, fed to the watch as the binding's `handed` and the
+        name's `waiting`. Returns `waiting`, or None when the daemon did not answer."""
+        with self._lock:
+            identity = self.identity
+        if not identity:
+            return None
+        if look and not self.notify_activity(identity, "look"):
+            return None
+        answer = self._daemon_call("agents")
+        if answer is None:
+            return None
+        handed = next((int(b.get("handed") or 0) for b in answer.get("bindings") or ()
+                       if b.get("qualified") == identity), 0)
+        waiting = int(((answer.get("waiting") or {}).get(identity) or {}).get("count") or 0)
+        if look:
+            with self._lock:
+                self.exit_watch.note_mail(handed=handed, waiting=waiting)
+        return waiting
+
+    def _read_cache_kind(self) -> str | None:
+        """The daemon's read of this name's cache (`session`), the one each send is
+        decided by; None when the daemon did not answer."""
+        with self._lock:
+            identity = self.identity
+        if not identity:
+            return None
+        answer = self._daemon_call("session", {"identity": identity})
+        if answer is None or not answer.get("bound"):
+            return None
+        return answer.get("cache_kind") or "unknown"
+
+    def _read_busy(self) -> int | None:
+        """The session's busy count (`Session.agents().busy()`); None, which counts as
+        busy, when the list can't be read whole or the read failed."""
+        session = self.session
+        try:
+            return session.agents().busy()
+        except Exception as exc:                              # noqa: BLE001
+            self.log.info("the busy work of %s could not be listed: %s",
+                          self.agent.qualified, exc)
+            return None
+
+    def end_headless(self, cause: str) -> bool:
+        """End this headless session on `cause`, once: the first cause wins. Logs the
+        end line with the rows left waiting for the name and ends the host
+        (`on_headless_end`). False when it had ended already, or is not headless.
+
+        Asked before the bind has built the watch (the claim socket answers `end` from
+        before the bind), the cause is kept and the session ends on it once the watch
+        starts: the name is held by then, and its holder must end."""
+        with self._lock:
+            if self.exit_rule is None or self.ended_cause is not None:
+                return False
+            if self.exit_watch is None:
+                self._end_asked = self._end_asked or cause
+                return True
+            self.ended_cause = cause
+            why = self.exit_watch.why(cause)
+        waiting = self._read_mail(look=False)
+        if waiting is None:
+            waiting = self.exit_watch.waiting
+        self._headless_wake.set()
+        if self.on_headless_end is not None:
+            self.on_headless_end(cause, waiting, why)
+        else:
+            self.log.info("%s", headless_mod.end_line(cause, waiting, why))
+        return True
+
+    def note_host_ended(self) -> None:
+        """The host ended on its own: a headless session's end line, cause
+        `host-ended`, unless a cause had ended it already."""
+        with self._lock:
+            if self.exit_watch is None or self.ended_cause is not None:
+                return
+            self.ended_cause = headless_mod.HOST_ENDED
+        waiting = self._read_mail(look=False)
+        self.log.info("%s", headless_mod.end_line(headless_mod.HOST_ENDED, waiting))
+
     def stop_before_unbind(self) -> None:
+        # The exit watch's thread waits on this between ticks: it sees the stop now.
+        self._headless_wake.set()
         stops, self._stops = self._stops, None
         watch, self._watch_handle = self._watch_handle, None
         for thing in (stops, watch):
@@ -583,6 +791,8 @@ class CodexAdapter(HarnessAdapter):
             resolves = self.blocked and turn_id != self._blocked_turn
             digests = [self.hands[r].digest for r in refs
                        if r in self.hands and self.hands[r].digest is not None]
+            if self.exit_watch is not None:
+                self.exit_watch.on_turn_started()
         if resolves:
             self.clear_block()
         self._report_started(digests)
@@ -617,6 +827,10 @@ class CodexAdapter(HarnessAdapter):
                     ids.extend(hand.ids)
             first = not self._own_turned
             self._own_turned = True
+            if self.exit_watch is not None:
+                self.exit_watch.on_turn_ended(
+                    outcome, is_brief=headless_mod.BRIEF_REF in refs)
+                self._headless_wake.set()
         completed = outcome == ANSWER
         self.report_turn_end(handled=ids if completed else (),
                              unhandled=() if completed else ids)
@@ -730,8 +944,11 @@ class CodexAdapter(HarnessAdapter):
         for its turn. While a turn runs, interrupt mail goes into it by `steer` when the
         session offers it (`flush_interrupt`); the rest waits for the turn's end. A steer
         holds, as the base's flush does, while catch-up is arriving or the adapter is
-        offline (a new binding's client is not installed yet)."""
+        offline (a new binding's client is not installed yet). Nothing goes while a
+        headless launch's brief is open: mail waits for the brief's turn to end."""
         with self._lock:
+            if headless_mod.BRIEF_REF in self.hands:
+                return None
             if self.turn_open:
                 steer = (not self.replaying and not self.offline and self.can_inject()
                          and self._can_steer()
@@ -875,6 +1092,14 @@ class CodexAdapter(HarnessAdapter):
                 return                     # settled already, by its turn's end
             del self.hands[hand.ref]
         reason = getattr(value, "reason", "")
+        if hand.ref == headless_mod.BRIEF_REF and self.exit_watch is not None:
+            self.log.warning("the brief for %s %s (%s)", self.agent.qualified,
+                             "was refused" if kind == "Refused" else "was lost", reason)
+            with self._lock:
+                self.exit_watch.on_brief_failed(
+                    f"{'refused' if kind == 'Refused' else 'lost'}: {reason}")
+            self._headless_wake.set()
+            return
         self.log.warning("digest %s for %s %s (%s): %d message(s) unhandled", hand.ref,
                          self.agent.qualified,
                          "was refused" if kind == "Refused" else "was lost", reason,

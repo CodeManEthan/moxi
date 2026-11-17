@@ -1,4 +1,4 @@
-"""The claim socket's two ops and who may call each, the membership rule, the claim file,
+"""The claim socket's ops and who may call each, the membership rule, the claim file,
 the cursor's hold guard, and the adapter states' transitions."""
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import pytest
 
 from claim_kit import FakeProc, World
 from moxi_comms import claimfile, claimhold
-from moxi_comms.claimhold import NOT_INSIDE, ClaimHolder
+from moxi_comms.claimhold import NOT_HEADLESS, NOT_INSIDE, ClaimHolder
 from moxi_comms.membership import SELF, TREE, ProcView, Root, inside, root_of, sessions_of
 
 PLANNER, REVIEWER = "planner@proj-a", "reviewer@proj-a"
@@ -124,6 +124,59 @@ def test_the_real_socket_reads_the_callers_pid(rig, tmp_path):
         h.close()
 
 
+def _holder(tmp_path, **claim):
+    h = ClaimHolder(kind="codex", key="end-test", keying="pid",
+                    socket_path=tmp_path / "c.sock", roots=[root_of(os.getpid(), SELF)])
+    h.start_launch({"name": "x", "scope": "proj-a", "qualified": "x@proj-a",
+                    "directors": [], **claim})
+    h.state = claimfile.BOUND
+    return h
+
+
+def test_end_answers_any_caller_of_a_headless_claim_and_runs_its_end(rig, tmp_path):
+    import threading
+
+    h = _holder(tmp_path, headless=True, exit=["done"])
+    ended = threading.Event()
+    h.on_end = ended.set
+    h.listen()
+    try:
+        code = ("import sys,json\nfrom moxi_comms import claimhold\n"
+                "print(json.dumps(claimhold.call(sys.argv[1],'end')))")
+        out = subprocess.run([sys.executable, "-c", code, str(h.socket_path)],
+                             capture_output=True, text=True, check=True).stdout
+        assert '"ending": true' in out and '"ok": true' in out
+        assert ended.wait(10)
+        record = claimfile.read("end-test")
+        assert record["claim"]["headless"] is True and record["claim"]["exit"] == ["done"]
+    finally:
+        h.close()
+
+
+@pytest.mark.parametrize("claim", [{}, {"headless": False}])
+def test_end_is_refused_on_a_claim_that_is_not_headless(rig, tmp_path, claim):
+    h = _holder(tmp_path, **claim)
+    h.on_end = lambda: pytest.fail("a session that is not headless is not ended")
+    answer = h.dispatch("end", os.getpid())
+    assert answer == {"ok": False, "error": NOT_HEADLESS, "not_headless": True}
+    h.close()
+
+
+def test_end_with_no_end_to_run_is_refused(rig, tmp_path):
+    h = _holder(tmp_path, headless=True, exit=["done"])
+    assert h.dispatch("end", os.getpid())["error"] == NOT_HEADLESS
+    h.close()
+
+
+def test_the_socket_names_every_op_it_answers(rig, tmp_path):
+    from moxi import ipc
+
+    h = _holder(tmp_path)
+    with pytest.raises(ipc.RpcError, match="claim, state, end"):
+        h.dispatch("stop", os.getpid())
+    h.close()
+
+
 # --------------------------------------------------------------------------- transitions
 
 def test_a_name_held_elsewhere_moves_a_held_claim_to_standby_and_leaves_a_launch_waiting(
@@ -188,6 +241,17 @@ def test_a_bind_rebuilds_the_claim_from_current_fields(rig, tmp_path):
     assert h.claim == {"name": "planner", "scope": "proj-a", "global": False,
                        "qualified": PLANNER, "tier": "chosen", "directors": []}
     assert h.token == "new-token"
+
+
+def test_a_bind_keeps_a_headless_claims_mark_and_rule(rig, tmp_path):
+    h = ClaimHolder(kind="codex", key="headless-claim", keying="pid",
+                    socket_path=tmp_path / "c.sock", roots=[])
+    h.claim = {"name": "planner", "scope": "proj-a", "global": False,
+               "qualified": PLANNER, "tier": None, "directors": [], "headless": True,
+               "exit": ["idle=5m", "cold"]}
+    h.bound({"identity": {"name": "planner", "scope": "proj-a",
+                          "qualified": PLANNER, "tier": "chosen"}})
+    assert (h.claim["headless"], h.claim["exit"]) == (True, ["idle=5m", "cold"])
 
 
 def test_a_cursor_moves_only_in_the_hold_its_digest_was_injected_under(rig, world):

@@ -209,3 +209,14 @@ doc = "The context mark at which recycle_at_limit acts, such as 1x or 1.5x."
 group = "lifecycle"
 sub = "Context"
 label = "Limit mark"
+
+[headless_exit]
+type = "list"
+default = []
+repeatable = true
+requires = "comms"
+doc = "When a headless session with an identity ends: done, cold, idle=<D>, after=<D>; D is like 90m or 2h."
+group = "lifecycle"
+sub = "Headless"
+label = "Headless exit"
+shown_with = "comms"
