@@ -23,7 +23,11 @@ the launcher has gone, so no command typed in it writes the account's terminal r
 **Headless** (`headless`). The harness's non-interactive mode, with the brief as its
 prompt, started detached and left: a session of its own (a detached process group on
 Windows), stdin closed, its output appended to the run log `STATE/runs/<request id>.log`.
-The pid and its start time are recorded, and the launch returns at once.
+The pid and its start time are recorded, and the launch returns at once. A launch with a
+comms identity runs comms' wrapper with its headless flags instead, the brief on
+`--brief`; the detached deliverer then starts with the wrapper's pid, as for this
+terminal, to settle the bind (a name the wrapper could not take ends the row `failed`)
+and send nothing, since no first turn is owed.
 
 **A tmux slot** (`slot`; Linux, macOS and WSL2, with slots installed). A launch that names
 a slot (a number or a name) goes only there, and `check` refuses it when slots says it is
@@ -343,12 +347,21 @@ class Terminal(Target):
 
 
 class Headless(Target):
-    """Headless: started detached, its output in the run log, and left."""
+    """Headless: started detached, its output in the run log, and left. A launch under
+    comms' wrapper also starts the detached deliverer with the wrapper's pid, which owes
+    no first turn (the wrapper carries it on `--brief`) and settles the bind: a name the
+    wrapper could not take ends the row `failed` with comms' cause."""
 
     name = "headless"
 
     def prepare(self, composition: Composition, env: Mapping[str, str]) -> str:
-        return find(composition.argv[0], env)
+        command = find(composition.argv[0], env)
+        if _wrapped(composition):
+            try:
+                first.deliverer_argv("-", 0)
+            except FileNotFoundError:
+                raise NoCommand("moxi", "the first turn's deliverer") from None
+        return command
 
     def start(self, launch: Launch) -> Started:
         rid = launch.request_id
@@ -361,6 +374,10 @@ class Headless(Target):
             return fail(launch.conn, rid, SPAWN_FAILED,
                            f"{launch.argv[0]} could not be started: {exc}")
         _on_started(launch.conn, rid, pid)
+        if _wrapped(launch.composition):
+            failed = _start_deliverer(launch, pid)
+            if failed is not None:
+                return replace(failed, pid=pid)
         return Started("started", exits.OK, pid=pid,
                        line=f"launch {rid} started headless, pid {pid}; its output goes "
                             f"to {output}")
@@ -602,7 +619,7 @@ def fail(conn: sqlite3.Connection, request_id: str, reason: str, why: str,
 
 def settle_bind(conn: sqlite3.Connection, request_id: str, *, pid: int | None = None,
                 status: Callable[[], int | None] | None = None,
-                where: str = "in the terminal it ran in",
+                where: str | None = None,
                 wait_s: float | None = None, poll_s: float = BIND_POLL_S,
                 clock: Callable[[], float] = time.monotonic,
                 sleep: Callable[[float], None] = time.sleep) -> Started | None:
@@ -615,7 +632,8 @@ def settle_bind(conn: sqlite3.Connection, request_id: str, *, pid: int | None = 
     the harness only after the bind: the row ends `failed` with the cause
     (`_wrapper_ended`), read from the process's exit status when `status` can give it (a
     slot's pane), else from what comms now says of the name. `where` says where comms' own
-    words are to read.
+    words are to read: by default the terminal it ran in, or for a headless launch its
+    run log.
 
     The wait lasts `wait_s`, by default `bind_wait()` of comms' API, which outlasts every
     wrapper's own wait. When it runs out with the process alive, what that process is
@@ -632,6 +650,9 @@ def settle_bind(conn: sqlite3.Connection, request_id: str, *, pid: int | None = 
     row = store.get(conn, request_id)
     if row is None or not row.identity:
         return None
+    if where is None:
+        where = ("in its run log" if row.target == "headless"
+                 else "in the terminal it ran in")
     pid = row.pid if pid is None else pid
     comms = _comms()
     if pid is None:

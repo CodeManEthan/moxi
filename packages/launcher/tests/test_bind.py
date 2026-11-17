@@ -97,8 +97,8 @@ def ended_pid() -> int:
 
 
 def launch_row(conn, *, rid="r1", identity="coder", scope="moxi", pid=None,
-               harness="claude", session_id=SID, brief=None):
-    store.insert(conn, request_id=rid, by="ann", harness=harness, target="terminal",
+               harness="claude", session_id=SID, brief=None, target="terminal"):
+    store.insert(conn, request_id=rid, by="ann", harness=harness, target=target,
                  cwd="/work", values={}, argv=["moxi", "comms", harness], env={},
                  posture="", identity=identity, scope=scope, brief=brief,
                  session_id=session_id if harness == "claude" else None)
@@ -412,6 +412,77 @@ def test_a_terminal_launch_with_an_identity_starts_the_deliverer(tmp_path, monke
     api.launch(LaunchRequest(typed={"identity": "coder"}, cwd=str(tmp_path),
                              request_id="r1", session_id=SID, actor="ann"))
     assert started == [("r1", os.getpid())]
+
+
+def headless_launch(tmp_path, monkeypatch, *, identity="coder", started=None,
+                    exit_rule=()):
+    """Launch Codex headless through `api.launch`, with comms' wrapper taking its headless
+    flags, turns' host stood in for, and the spawn and the deliverer's start caught."""
+    if not modules.available("comms"):
+        pytest.skip("comms is not installed")
+    spawned = []
+    monkeypatch.setattr(api, "_comms_api", lambda: comms("free"))
+    monkeypatch.setattr(presets, "comms_api", lambda: SimpleNamespace(
+        HEADLESS=frozenset({"codex"}),
+        parse_exit=lambda values, *, harness: SimpleNamespace(cold_gap=False)))
+    links = slots.links
+    monkeypatch.setattr(slots, "links", lambda name: name == "turns" or links(name))
+    monkeypatch.setattr(presets, "codex_host", lambda: "/env/bin/moxi-turns-codex-host")
+    monkeypatch.setattr(targets, "find", lambda command, env: command)
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: spawned.append(argv) or 4242)
+    monkeypatch.setattr(first, "start_deliverer", started or (
+        lambda rid, pid=None, env=None: pytest.fail("no deliverer is owed")))
+    got = api.launch(LaunchRequest(
+        typed={"harness": "codex", "target": "headless", "identity": identity,
+               "scope": "moxi" if identity else "", "brief": "go",
+               "headless_exit": list(exit_rule)},
+        cwd=str(tmp_path), request_id="r1", actor="ann"))
+    return got, spawned
+
+
+def test_a_headless_launch_with_an_identity_starts_the_deliverer_on_the_wrapper(
+        tmp_path, monkeypatch, conn):
+    started = []
+    got, spawned = headless_launch(
+        tmp_path, monkeypatch, exit_rule=["idle=90m"],
+        started=lambda rid, pid=None, env=None: started.append((rid, pid)) or 1)
+    # Detached and returned at once; the deliverer watches the wrapper's bind.
+    assert (got.state, got.exit_code) == ("started", exits.OK)
+    assert started == [("r1", 4242)]
+    (argv,) = spawned
+    assert argv[1:5] == ["comms", "codex", "--name", "coder"]
+    assert argv[argv.index("--headless"):argv.index("--brief")] == [
+        "--headless", "--exit", "idle=90m"]
+    # The brief rides --brief, so the deliverer, once the bind settles, sends nothing.
+    assert row(conn).state == "started"
+    outcome = first.send(conn, "r1", turns=SimpleNamespace())
+    assert outcome.outcome == "not-owed" and row(conn).state == "started"
+
+
+def test_a_headless_launch_without_an_identity_starts_no_deliverer(tmp_path, monkeypatch):
+    got, spawned = headless_launch(tmp_path, monkeypatch, identity="")
+    assert got.state == "started" and spawned[0][:2] == ["codex", "exec"]
+
+
+def test_a_headless_launch_whose_deliverer_cannot_start_fails(tmp_path, monkeypatch, conn):
+    def broken(rid, pid=None, env=None):
+        raise OSError("no room")
+
+    got, spawned = headless_launch(tmp_path, monkeypatch, started=broken)
+    assert (got.state, got.reason) == ("failed", targets.NO_DELIVERER)
+    assert got.pid == 4242 and row(conn).reason == targets.NO_DELIVERER
+
+
+@LISTS
+def test_a_headless_wrapper_that_lost_the_name_ends_the_row_identity_taken(
+        conn, monkeypatch, ends):
+    # The deliverer's bind settle for a headless launch is the terminal's: the wrapper
+    # ended (refused, exit 3) and comms says another session holds the name.
+    launch_row(conn, harness="codex", pid=ended_pid(), target="headless")
+    got = settle(conn, comms(state("held", holder=Holder("other")), ends=ends),
+                 monkeypatch)
+    assert (got.state, got.reason) == ("failed", targets.IDENTITY_TAKEN)
+    assert "comms' own words are in its run log" in got.line
 
 
 # -- the slot target -----------------------------------------------------------------------
