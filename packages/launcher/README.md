@@ -588,9 +588,12 @@ session's cache is cold waits for the name's next holder. `headless_exit` set by
 preset or a flag on any other launch is left out with a warning; set in your `[defaults]`
 it is left out without one, as `director` and `scope` are. `keep_warm` and
 `recycle_on_expiry` are left out with a warning on a headless launch with an identity,
-since nudging or recycling the session would work against its exit rule. The launch returns at once; the deliverer watches the bind and
-ends the row `failed` as above when the name can't be taken, and sends nothing more. A
-harness comms doesn't list (Claude, for now) is refused headless with an identity.
+since nudging or recycling the session would work against its exit rule. The launch
+returns at once; the deliverer watches the bind and ends the row `failed` as above when
+the name can't be taken, and sends nothing more. When the deliverer can't be started, the
+launcher ends the wrapper (SIGTERM), and its session with it, and the row ends `failed`,
+`no-deliverer`. A harness comms doesn't list (Claude, for now) is refused headless with
+an identity.
 `moxi comms exit-session NAME` ends such a session.
 
 ## Settings

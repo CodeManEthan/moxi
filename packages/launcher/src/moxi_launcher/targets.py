@@ -27,7 +27,8 @@ The pid and its start time are recorded, and the launch returns at once. A launc
 comms identity runs comms' wrapper with its headless flags instead, the brief on
 `--brief`; the detached deliverer then starts with the wrapper's pid, as for this
 terminal, to settle the bind (a name the wrapper could not take ends the row `failed`)
-and send nothing, since no first turn is owed.
+and send nothing, since no first turn is owed. A deliverer that can't start ends the
+wrapper (SIGTERM), and with it the session, and the row `failed`.
 
 **A tmux slot** (`slot`; Linux, macOS and WSL2, with slots installed). A launch that names
 a slot (a number or a name) goes only there, and `check` refuses it when slots says it is
@@ -60,6 +61,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -350,7 +352,9 @@ class Headless(Target):
     """Headless: started detached, its output in the run log, and left. A launch under
     comms' wrapper also starts the detached deliverer with the wrapper's pid, which owes
     no first turn (the wrapper carries it on `--brief`) and settles the bind: a name the
-    wrapper could not take ends the row `failed` with comms' cause."""
+    wrapper could not take ends the row `failed` with comms' cause. When the deliverer
+    can't start, the wrapper gets SIGTERM, which ends its session before or after the
+    bind, and the row ends `failed`, `no-deliverer`."""
 
     name = "headless"
 
@@ -375,9 +379,18 @@ class Headless(Target):
                            f"{launch.argv[0]} could not be started: {exc}")
         _on_started(launch.conn, rid, pid)
         if _wrapped(launch.composition):
-            failed = _start_deliverer(launch, pid)
-            if failed is not None:
-                return replace(failed, pid=pid)
+            try:
+                first.start_deliverer(rid, pid=pid, env=launch.deliverer_env)
+            except OSError as exc:
+                # Nothing would watch the bind, and the row can't say whether the name
+                # was taken: end the wrapper, which ends the session before or after
+                # its bind, so nothing runs under the name while the row says failed.
+                _end_process(pid)
+                return replace(fail(
+                    launch.conn, rid, NO_DELIVERER,
+                    f"the deliverer that watches its comms bind could not be started "
+                    f"({exc}), so the headless session was ended (SIGTERM to pid {pid})"),
+                    pid=pid)
         return Started("started", exits.OK, pid=pid,
                        line=f"launch {rid} started headless, pid {pid}; its output goes "
                             f"to {output}")
@@ -887,6 +900,15 @@ def _ready(turns: Any, launch: Launch, row: store.LaunchRow | None,
             return None
         where = {"session_id": row.session_id}
     return lambda timeout: turns.wait_ready(**where, timeout_s=timeout)
+
+
+def _end_process(pid: int) -> None:
+    """Send SIGTERM to `pid`, a process this launch has just started; one already gone is
+    left."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
 
 
 def _start_deliverer(launch: Launch, pid: int) -> Started | None:

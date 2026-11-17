@@ -464,13 +464,44 @@ def test_a_headless_launch_without_an_identity_starts_no_deliverer(tmp_path, mon
     assert got.state == "started" and spawned[0][:2] == ["codex", "exec"]
 
 
-def test_a_headless_launch_whose_deliverer_cannot_start_fails(tmp_path, monkeypatch, conn):
+def test_a_headless_launch_whose_deliverer_cannot_start_ends_the_wrapper(
+        tmp_path, monkeypatch, conn):
+    """Nothing would watch the bind: the wrapper gets SIGTERM, which ends its session,
+    so nothing runs under the name while the row says failed."""
     def broken(rid, pid=None, env=None):
         raise OSError("no room")
 
+    ended = []
+    monkeypatch.setattr(targets, "_end_process", ended.append)
     got, spawned = headless_launch(tmp_path, monkeypatch, started=broken)
     assert (got.state, got.reason) == ("failed", targets.NO_DELIVERER)
     assert got.pid == 4242 and row(conn).reason == targets.NO_DELIVERER
+    assert ended == [4242]
+    assert got.line == ("launch r1 failed: the deliverer that watches its comms bind "
+                        "could not be started (no room), so the headless session was "
+                        "ended (SIGTERM to pid 4242)")
+
+
+def test_ending_the_wrapper_sends_sigterm_and_leaves_a_process_already_gone(
+        monkeypatch):
+    import signal
+    import subprocess
+    import sys
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        targets._end_process(child.pid)
+        assert child.wait(10) == -signal.SIGTERM
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+    def gone(pid, signum):
+        raise ProcessLookupError(pid)
+
+    monkeypatch.setattr(targets.os, "kill", gone)
+    targets._end_process(4242)
 
 
 @LISTS
