@@ -189,3 +189,20 @@ def test_send_under_from_inside_a_session_is_refused_before_the_token_is_read(ti
 def test_send_under_with_the_daemon_down_is_offline(ticker):
     ticker.daemon.stop()
     assert api.send_under("ticker", [TO], "x").outcome == "offline"
+
+
+def test_send_under_from_a_process_comms_cant_place_is_refused_before_the_token_is_read(
+        ticker, monkeypatch):
+    from moxi_comms import membership
+
+    class Blind(membership.ProcView):
+        def stat(self, pid):
+            return None if pid == os.getppid() else super().stat(pid)
+
+    monkeypatch.setattr(membership, "DEFAULT_PROC", Blind())
+    TokenStore().delete_secret(reserved.program_owner(),
+                               reserved.program_secret_id("ticker"))
+    result = api.send_under("ticker", [TO], "x")
+    assert (result.outcome, result.refusal.code) == ("refused", "name-reserved")
+    assert "can't tell whether this process is inside a session" in result.refusal.text
+    assert "reserved-token-ticker" not in doctor_records()

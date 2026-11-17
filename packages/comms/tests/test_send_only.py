@@ -3,12 +3,14 @@ straight against comms.db and the credential chain, with the daemon down."""
 
 from __future__ import annotations
 
+import os
 import sqlite3
 
 import pytest
 
 from moxi.store import transaction
-from moxi_comms import reserved, secrets
+from moxi_comms import claimfile, membership, reserved, secrets
+from moxi_comms.membership import TREE, ProcView, root_of
 from moxi_comms.paths import comms_db
 from moxi_comms.store import open_write
 from moxi_comms.tokens import TokenStore
@@ -367,3 +369,85 @@ def test_a_held_lock_is_a_try_again_and_a_failed_write_an_error(monkeypatch, cap
     monkeypatch.setattr(reserved, "register", failed)
     code, out = cli_run(["send-only", "add", "ticker"], capsys)
     assert code == moxi_exit.ERROR and "couldn't be written" in out
+
+
+# --------------------------------------------------------------------------- inside a session
+
+class _Blind(ProcView):
+    """A view of /proc that can't read this process's parent: a walk from here can't
+    tell whether it is inside a session."""
+
+    def stat(self, pid):
+        return None if pid == os.getppid() else super().stat(pid)
+
+
+@pytest.fixture(params=["inside", "unplaced"])
+def placed(request, monkeypatch):
+    """This process inside a live session (its parent a session's root), or one whose
+    ancestry can't be read. Yields the words its refusal carries."""
+    if request.param == "inside":
+        claimfile.write("planner", {"roots": [root_of(os.getppid(), TREE).as_dict()],
+                                    "state": "bound",
+                                    "claim": {"qualified": "planner@proj-a",
+                                              "name": "planner"}})
+        return "from inside an agent's session"
+    monkeypatch.setattr(membership, "DEFAULT_PROC", _Blind())
+    return "from a process comms can't place outside every session"
+
+
+def test_the_shared_check_places_this_process(placed):
+    assert reserved.session_place() in (reserved.INSIDE, reserved.UNPLACED)
+
+
+def test_outside_every_session_the_shared_check_lets_everything_through():
+    assert reserved.session_place() is None
+    reserved.session_guard("renew", "ticker")
+
+
+@pytest.mark.parametrize("verb", ["add --take", "renew", "remove"])
+def test_inside_a_session_take_renew_and_remove_are_refused_touching_nothing(
+        chain, store, placed, verb):
+    reserved.register("ticker", chain=chain)
+    held = token(store)
+    before = snapshot()
+    call = {"add --take": lambda: reserved.register("fresh", take=True, chain=chain),
+            "renew": lambda: reserved.renew_program("ticker", chain=chain),
+            "remove": lambda: reserved.remove_program("ticker", chain=chain)}[verb]
+    name = "fresh" if verb == "add --take" else "ticker"
+    with pytest.raises(reserved.Refused) as refused:
+        call()
+    assert str(refused.value) == (
+        f"moxi comms send-only {verb} {name} is refused {placed}: a process inside a "
+        "session may only register a name nobody uses (plain add). Run it from your own "
+        "shell")
+    assert snapshot() == before and token(store) == held
+
+
+def test_inside_a_session_the_guard_comes_before_the_names_own_refusals(chain, placed):
+    """A name with no row, or a module's, still meets the session's refusal first."""
+    for call in (lambda: reserved.renew_program("nobody", chain=chain),
+                 lambda: reserved.remove_program("nobody", chain=chain)):
+        with pytest.raises(reserved.Refused, match="Run it from your own shell"):
+            call()
+
+
+def test_inside_a_session_plain_add_of_an_unused_name_goes_ahead(chain, store, placed):
+    result = reserved.register("ticker", chain=chain)
+    assert result.lines[0].startswith("ticker registered (token in the ")
+    assert row("ticker")["token_hash"] == reserved.token_hash(token(store))
+
+
+@pytest.mark.parametrize("argv", [["send-only", "add", "fresh", "--take"],
+                                  ["send-only", "renew", "ticker"],
+                                  ["send-only", "remove", "ticker"]])
+def test_the_verbs_refuse_inside_a_session_on_the_command_line(capsys, placed, argv):
+    from moxi import exit as moxi_exit
+
+    reserved.register("ticker", chain=secrets.from_config())
+    before = snapshot()
+    code, out = cli_run(argv, capsys)
+    assert code == moxi_exit.REFUSED
+    assert placed in out and "Run it from your own shell; nothing was changed" in out
+    assert snapshot() == before
+    code, out = cli_run(["send-only", "add", "other"], capsys)
+    assert code == moxi_exit.OK, out

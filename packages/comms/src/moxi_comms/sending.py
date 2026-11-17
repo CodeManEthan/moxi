@@ -794,10 +794,15 @@ def _registered_refusal(ctx: Context, name: str, row) -> int | None:
     store that can't be read refuses nothing here: the daemon decides."""
     from . import reserved
 
-    if _inside_a_session():
+    place = reserved.session_place()
+    if place == reserved.INSIDE:
         _refuse(ctx, "name-reserved", f"a send under a send-only name from inside a "
                 f"session: {name} sends only from a process outside every session. "
                 "Nothing was sent.")
+        return _REFUSED
+    if place == reserved.UNPLACED:
+        _refuse(ctx, "name-reserved", "comms can't tell whether this process is inside a "
+                f"session, so it sends nothing under {name}. Nothing was sent.")
         return _REFUSED
     if row is UNREAD or reserved.held_by_program(row):
         return None

@@ -37,7 +37,9 @@ program registered gets a conflict line, and the row stays the program's.
 
 `register`, `renew_program` and `remove_program` are a program's three: the `moxi comms
 send-only` verbs. Each takes the same lock and opens the store the same way as
-`reconcile`, so each works while the daemon is down.
+`reconcile`, so each works while the daemon is down. A process inside a session, or
+one comms can't place, may only register a name nobody uses: `session_guard` refuses it
+`add --take`, `renew` and `remove` before anything is touched.
 
 It runs from the core's `moxi.installs` group (`on_install`, `on_uninstall`), at the
 daemon's start, and in comms' doctor checks. `on_uninstall(module)` reconciles with the
@@ -398,6 +400,42 @@ def renew(name: str, *, chain=None, env=None, target=None, clock=time.time) -> R
 
 # --------------------------------------------------------------------------- a program's names
 
+#: Where `session_place` finds this process: inside a live session, or somewhere its
+#: ancestry can't be read far enough to tell.
+INSIDE, UNPLACED = "inside", "unplaced"
+
+
+def session_place(proc=None) -> str | None:
+    """Where this process stands against the live sessions, walked as the daemon walks a
+    sender under a send-only name: `INSIDE` a live session, `UNPLACED` when its ancestry
+    can't be read up to a process with no parent, or None outside every session. Reads
+    the claim files only, so it answers with the daemon down."""
+    from . import claimfile, membership
+
+    try:
+        live = claimfile.live_records(proc)
+        found = membership.sessions_of(os.getpid(), claimfile.membership_table(live),
+                                       proc, strict=True)
+    except membership.Unplaceable:
+        return UNPLACED
+    return INSIDE if found else None
+
+
+def session_guard(verb: str, name: str, *, proc=None) -> None:
+    """The one check `send-only add --take`, `renew` and `remove` make first, before any
+    row or token is touched: a process inside a live session, or one comms can't place,
+    may only register a name nobody uses (plain `add`). Taking a name over, replacing
+    its token and freeing it are for the user's own shell. Raises `Refused`."""
+    place = session_place(proc)
+    if place is None:
+        return
+    where = ("from inside an agent's session" if place == INSIDE else
+             "from a process comms can't place outside every session")
+    raise Refused(f"moxi comms send-only {verb} {name} is refused {where}: a process "
+                  "inside a session may only register a name nobody uses (plain add). "
+                  "Run it from your own shell")
+
+
 def register(name: str, *, take: bool = False, chain=None, env=None, target=None,
              clock=time.time) -> Result:
     """`moxi comms send-only add NAME`: register `name` as a program's send-only name. A
@@ -410,12 +448,15 @@ def register(name: str, *, take: bool = False, chain=None, env=None, target=None
     it when this process can't read its token back. Raises `Refused`, with nothing
     written, for a name comms can't register, a module's name, a retired name, a
     standing identity or a name a live session holds, and, unless `take`, a name a
-    session held before or one with mail waiting."""
+    session held before or one with mail waiting. With `take`, it is refused first from
+    inside a session (`session_guard`)."""
     from moxi.store import transaction
 
     from . import directory
     from .secrets import SecretError
 
+    if take:
+        session_guard("add --take", name)
     why = _bad_name(name)
     if why:
         raise Refused(f"{name} can't be registered: {why}")
@@ -484,11 +525,12 @@ def renew_program(name: str, *, chain=None, env=None, target=None,
     that can't be reached from here, or can't be written (the environment), keeps any
     copy it has: the result's lines say so, and `unreadable` names the name when this
     process doesn't read the new token back. Raises `Refused`, with nothing written,
-    when `name` isn't a program's."""
+    when `name` isn't a program's, and from inside a session (`session_guard`)."""
     from moxi.store import transaction
 
     from .secrets import SecretError
 
+    session_guard("renew", name)
     chain = _chain(chain, env)
     result = Result()
     with _Held(target, env) as conn:
@@ -528,9 +570,11 @@ def remove_program(name: str, *, chain=None, env=None, target=None,
     `unowned` one. The row is freed and its hash cleared, its interval closed, and its
     token removed from every step of this process's chain that holds it. The name is
     ordinary again: a session may bind it, as someone new. Raises `Refused`, with
-    nothing written, for a module's name or a name with no row."""
+    nothing written, for a module's name or a name with no row, and from inside a
+    session (`session_guard`)."""
     from moxi.store import transaction
 
+    session_guard("remove", name)
     chain = _chain(chain, env)
     result = Result()
     with _Held(target, env) as conn:
@@ -1052,8 +1096,8 @@ def _program_token_rows(chain, name: str, digest, context: str) -> list:
 
 __all__ = ["ACTIVE", "CONFLICT", "UNOWNED", "UNKNOWN", "MODULE_HOLDER", "PROGRAM_HOLDER",
            "PROGRAM_OWNER", "PROGRAM_SECRET_PREFIX", "SECRET_PREFIX", "Refused", "Result",
-           "credential", "declared_names", "doctor_rows", "held_by_program", "lookup",
+           "INSIDE", "UNPLACED", "credential", "declared_names", "doctor_rows", "held_by_program", "lookup",
            "module_words", "on_install", "on_uninstall", "owner", "program_owner",
            "program_secret_id", "reconcile", "record_key", "register", "release_all",
-           "remove_program", "renew", "renew_program", "rows", "secret_id", "token_hash",
+           "remove_program", "renew", "renew_program", "rows", "secret_id", "session_guard", "session_place", "token_hash",
            "token_rows", "trace_send"]
