@@ -931,3 +931,82 @@ def test_an_end_asked_before_the_bind_ends_the_session_once_the_watch_starts(
     assert [cause for cause, _, _ in adapter.ended] == ["exit-session"]
     assert adapter.ended_cause == "exit-session"
     assert adapter.end_headless("exit-session") is False, "it ends once"
+
+
+# ----------------------------------------------------------- serve's end of a headless host
+
+@pytest.fixture
+def served(headless, caplog):
+    """A headless adapter run by the wrapper's `serve` on a thread, over a stand-in host
+    (a child process, `serve`'s handle a pidfd on it). `.ends()` reads the end lines
+    logged so far."""
+    import logging
+    import os
+    import subprocess
+    import sys
+    import threading
+
+    from moxi_comms.adapters import codex_wrapper
+
+    caplog.set_level(logging.INFO)
+    hosts: list = []
+    handles: list = []
+
+    def build(*rule, find=None, **kwargs):
+        host = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        hosts.append(host)
+        handle = os.pidfd_open(host.pid)
+        handles.append(handle)
+        adapter = headless(*rule, start=False, **kwargs)
+        if find is not None:
+            adapter._find = find
+        got: dict = {}
+        runner = threading.Thread(target=lambda: got.setdefault(
+            "code", codex_wrapper.serve(adapter, handle)), daemon=True)
+        runner.start()
+        adapter.host, adapter.runner, adapter.served = host, runner, got
+        adapter.ends = lambda: [r.getMessage() for r in caplog.records
+                                if r.getMessage().startswith("headless session ended")]
+        return adapter
+
+    yield build
+    for host in hosts:
+        if host.poll() is None:
+            host.kill()
+        host.wait()
+    for handle in handles:
+        os.close(handle)
+
+
+def test_a_host_that_ends_before_its_session_is_found_logs_host_ended(rig, served):
+    def find(pid, timeout):
+        raise TimeoutError("not ready")
+
+    adapter = served(find=find, find_step=0.01)
+    assert wait_until(lambda: adapter.exit_watch is not None)
+    adapter.host.kill()
+    adapter.runner.join(15)
+    assert adapter.served == {"code": 0}
+    assert adapter.ends() == ["headless session ended: host-ended; 0 row(s) left "
+                              "waiting for the name"]
+
+
+def test_a_host_that_ends_on_its_own_logs_host_ended(rig, served):
+    adapter = served()
+    assert wait_until(lambda: adapter.exit_watch is not None and adapter.exit_watch.found)
+    adapter.host.kill()
+    adapter.runner.join(15)
+    assert adapter.served == {"code": 0}
+    assert adapter.ends() == ["headless session ended: host-ended; 0 row(s) left "
+                              "waiting for the name"]
+
+
+def test_a_session_a_cause_ended_writes_no_second_end_line(rig, served):
+    adapter = served("after=2h")
+    assert wait_until(lambda: adapter.exit_watch is not None and adapter.exit_watch.found)
+    adapter.claims.on_end()
+    adapter.runner.join(15)
+    assert adapter.served == {"code": 0}
+    assert adapter.host.wait(10) != 0, "the cause's SIGTERM ended the host"
+    assert adapter.ends() == ["headless session ended: exit-session; 0 row(s) left "
+                              "waiting for the name"]
