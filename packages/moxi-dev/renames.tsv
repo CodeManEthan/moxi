@@ -7314,6 +7314,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	writes = ((isinstance(mode, s
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	"waited_s": round(self.waited_s, 3)}	keep	round	round
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	waited_s=round(waited, 3))	keep	round	round
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	entry.update(other=_rounded(other), waited_s=round(window.waited_s, 3))	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	other = self.gauge.other(window.start, end)	keep	asked	asked
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	return None if value is None else round(value, 3)	keep	round	round
 moxi-dev	packages/moxi-dev/tests/test_check.py	"sessions", "cache", "comms", "launcher", "usage"}	keep	sessions	sessions
 moxi-dev	packages/moxi-dev/tests/test_check.py	"sessions": ("moxi-sessions", ["moxi>=0.1,<0.2"], {}, {"dev": ["pytest"]}),	keep	sessions	sessions
