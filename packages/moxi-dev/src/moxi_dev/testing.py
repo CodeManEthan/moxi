@@ -128,8 +128,9 @@ test too. In a `timed` test, every upper bound on a wall-clock measurement of th
 itself (an elapsed time, a per-call cost, a median, a percentile) is multiplied by
 `timed_slack()`. Lower bounds (a wait that must have happened), ratios between two
 measurements of the same run and counts are left alone: a slower machine slows both
-sides of a ratio. A test marked `timed` follows this rule whenever it is marked. The
-scheduled run of `moxi-dev timed` clears the variable, so it measures at 1.
+sides of a ratio. A test marked `timed` follows this rule whenever it is marked. A
+scheduled run of `moxi-dev timed` measures at its machine's set factor: its tick sets the
+variable to the factor the machine's `moxi-dev timed schedule` set, 1 unless it set one.
 
 The idle gate. `MOXI_TEST_IDLE=<line>@<deadline>`, read from the environment pytest
 starts with, gates every `timed` test the run runs: `<line>` is how much other work, in
@@ -280,6 +281,9 @@ TIMED_MODES = ("hold", "only")
 #: A factor of at least 1 for every upper bound of a `timed` test (module doc, Timed
 #: tests).
 TIMED_SLACK_ENV = "MOXI_TEST_TIMED_SLACK"
+#: The descriptor, open on the run lock, that a scheduled tick hands the `moxi-dev timed`
+#: run it starts, which the run locks again in place of opening its own (`moxi_dev.timed`).
+TIMED_LOCK_FD_ENV = "MOXI_TEST_TIMED_LOCK_FD"
 #: Tiers this run never puts back, comma-separated (module doc, Selection).
 LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
 
@@ -1765,7 +1769,7 @@ __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
            "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
            "PROC_STAT", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL", "Seam",
            "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_CLOCKS", "TIMED_ENV",
-           "TIMED_SLACK_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
+           "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV", "WINDOWS_HOMES", "WINDOWS_KEPT_ENV",
            "console_script", "fence", "findings_of", "idle", "param_id", "selection",
            "served", "short_dir", "stat_counts", "terminal_record", "timed_reading",
            "timed_slack", "touches_match", "uv_env", "wait_for", "write_sqlite"]

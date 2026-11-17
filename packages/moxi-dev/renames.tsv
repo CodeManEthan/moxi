@@ -7553,6 +7553,51 @@ moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.idle += round((self.cpu
 moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.pauses.append(round(seconds, 6))	keep	round	round
 moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	assert set(entries) == {"test_in_process", "test_in_a_child", "test_says_nothing",	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	assert set(entries) == {"test_one", "test_two"}	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="timed [show|take|schedule|unschedule]: run the timed tests on "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	[--record-dir DIR] [--no-record] [--scheduled]`. Its other verbs: `show` reads the	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	SUBVERBS = ("show", "take", "schedule", "unschedule")	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	lock_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	if not any(timed_record.counts(result.get("outcome"), float(key), factor)	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	if not opts.record or tree.dirty:	keep	record	record
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	"waited_s": round(result.waited_s, 3),	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	work.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--wait-s", type=float, default=DEFAULT_WAIT_S, metavar="S",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="how long the whole run may wait for the machine to quieten "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	type=float, default=DEFAULT_LINE, metavar="CPUS",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="other work, in CPUs, a test's window must stay under "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--finding", metavar="L<n>", action="append", default=[],	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="run only the timed tests marked with this finding")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--package", metavar="NAME", action="append", default=[],	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="run only this package's timed tests; may be given more "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--machine", metavar="NAME", default=None,	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="the machine the record files the run under (default: the "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="keep the record here (default: the clone's git directory)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	parser.add_argument("--no-record", action="store_true", help="keep no record")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	help="a scheduled run: exit 0 at once when this machine's record "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed.py	if verb == "show":	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	for nodeid in sorted(set(mine["tests"]) | set(theirs["tests"])):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	for factor in set(mine["tests"].get(nodeid, {})) | set(theirs["tests"].get(nodeid, {})):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	machine_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	(target / TICKS).mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	help="the host's machine directory, inside its results folder")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	parser.add_argument("--machine", metavar="NAME", required=True,	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	help="the host's name, as its record files it")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_record.py	help="the record to merge into (default: this clone's)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	return max(found, key=lambda one: str(one[1].get("run")), default=None)	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	newest_scheduled = max(scheduled, key=lambda run: str(run.get("started")), default=None)	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	run=result.get("run"), slack=factor)	keep	run	run
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	base = min(sets, key=lambda report: report["behind"], default=mine)	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("rev", nargs="?", default="main", metavar="REV")	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--days", type=float, default=7.0, metavar="N",	keep	default	default
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	help="how far back the walk goes from REV's time (default 7)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--machine", metavar="NAME", help="report this machine only")	keep	NAME	NAME
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	help="the record to read (default: this clone's)")	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/timed_show.py	parser.add_argument("--json", action="store_true", help="print the reports as JSON")	keep	help	help
+moxi-dev	packages/moxi-dev/tests/test_timed.py	"""`moxi-dev timed`, its record, `take` and `show`.	keep	show	show
+moxi-dev	packages/moxi-dev/tests/test_timed.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+moxi-dev	packages/moxi-dev/tests/test_timed.py	return tmp_path / "record"	keep	record	record
+moxi-dev	packages/moxi-dev/tests/test_timed.py	assert any("no complete run" in line for line in lines)	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_timed.py	assert any("passed at slack 2" in line for line in lines)	keep	any	any
 notes	packages/notes/src/moxi_notes/api.py	handoffs_dir	name	folder	found_dir
 notes	packages/notes/src/moxi_notes/backfill.py	"complete": sum(1 for x in p if not x.additions and not x.refused),	keep	refused	refused
 notes	packages/notes/src/moxi_notes/backfill.py	"keys": sum(len(x.additions) for x in p if not x.refused)}	keep	refused	refused

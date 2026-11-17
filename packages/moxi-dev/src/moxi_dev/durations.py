@@ -153,7 +153,7 @@ LOCK_RETRY = 0.01
 
 
 @contextlib.contextmanager
-def _locked(records_dir: Path) -> Iterator[None]:
+def locked(records_dir: Path) -> Iterator[None]:
     """Hold the records' lock (module doc); without `fcntl` or `msvcrt`, no lock."""
     if fcntl is None and msvcrt is None:
         yield
@@ -192,7 +192,7 @@ def keep(records_dir: Path, commit: str, runs: Mapping[str, PackageRun]) -> Path
     `OSError` (a read-only or full disk) reaches the caller, and no part file is left."""
     path = records_dir / f"{commit}.json"
     records_dir.mkdir(parents=True, exist_ok=True)
-    with _locked(records_dir):
+    with locked(records_dir):
         packages = dict(read_record(path) or {})
         packages.update(runs)
         body = {"format": FORMAT, "commit": commit,

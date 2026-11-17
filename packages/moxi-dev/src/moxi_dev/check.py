@@ -604,21 +604,10 @@ class _Steps:
     def browsers(self, chosen: Sequence[Package], venv: Path, suite_env: Mapping[str, str]
                  ) -> dict[str, tuple[Sequence[str], Mapping[str, str]]]:
         """For each picked package whose tests drive a browser, the pytest arguments and
-        kit variables both its passes take: its browser tests run when Playwright's
-        Chromium starts here, and are left out, with a printed line, when it can't."""
-        browser = [package for package in chosen if package.browser]
-        if not browser:
-            return {}
-        why = self.probe(venv_program(venv, "python"), suite_env)
-        if why is None:
-            return {package.dir: (("-m", WITH_BROWSER), {}) for package in browser}
-        for package in browser:
-            self.result.no_browser.append(package.dir)
-            print(f"moxi-dev check: {package.dir}'s browser tests are left out: "
-                  f"Playwright's Chromium can't start here ({why}); "
-                  f"`uv run playwright install chromium` installs it",
-                  file=sys.stderr, flush=True)
-        return {package.dir: ((), {LEAVE_OUT_ENV: "browser"}) for package in browser}
+        kit variables its pass takes (`browser_plans`)."""
+        plans, left_out = browser_plans(chosen, venv, suite_env, self.probe, "check")
+        self.result.no_browser.extend(left_out)
+        return plans
 
     def timings(self, every: Mapping[str, durations.PackageRun],
                   passed: Mapping[str, durations.PackageRun]) -> None:
@@ -736,6 +725,28 @@ class _Steps:
             ok = self.run(argv, package.path, env) == 0 and ok
         self.result.lint.append((package.dir, ok))
         return ok
+
+
+def browser_plans(chosen: Sequence[Package], venv: Path, suite_env: Mapping[str, str],
+                  probe: Probe, verb: str
+                  ) -> tuple[dict[str, tuple[Sequence[str], Mapping[str, str]]], list[str]]:
+    """For each package whose tests drive a browser, the pytest arguments and kit
+    variables its session takes, and the packages whose browser tests are left out: they
+    run when Playwright's Chromium starts here, and are left out, with a printed line
+    from `moxi-dev <verb>`, when it can't."""
+    browser = [package for package in chosen if package.browser]
+    if not browser:
+        return {}, []
+    why = probe(venv_program(venv, "python"), suite_env)
+    if why is None:
+        return {package.dir: (("-m", WITH_BROWSER), {}) for package in browser}, []
+    for package in browser:
+        print(f"moxi-dev {verb}: {package.dir}'s browser tests are left out: "
+              f"Playwright's Chromium can't start here ({why}); "
+              f"`uv run playwright install chromium` installs it",
+              file=sys.stderr, flush=True)
+    return ({package.dir: ((), {LEAVE_OUT_ENV: "browser"}) for package in browser},
+            [package.dir for package in browser])
 
 
 def _renames_scan(root: Path) -> list[rename.Unsettled]:
