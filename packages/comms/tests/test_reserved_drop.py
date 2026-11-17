@@ -158,6 +158,9 @@ def history(rig):
 
 def test_mail_queued_before_a_program_takes_the_name_is_dropped(rig):
     mid = queued(rig, "before the registration", to=(TICKER,))
+    # `register` counts the waiting rows in comms.db, which the daemon writes just after
+    # it queues the message in memory.
+    assert wait_until(lambda: any(m == mid for m, _, _ in store_rows(TICKER)))
     result = register(rig, take=True)
     assert result.lines[-1] == "1 message(s) waiting for ticker will be dropped"
     rig.daemon._agents_query({})

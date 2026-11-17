@@ -493,8 +493,9 @@ def register(name: str, *, take: bool = False, chain=None, env=None, target=None
                 + ([f"{waiting} message(s) wait for it, which registering drops for good"]
                    if waiting else [])
             if bits:
-                raise Refused(f"{name} has a past: {'; '.join(bits)}. Pass --take to "
-                              "register it anyway")
+                raise Refused(f"{name} has a past: {'; '.join(bits)}. To register it "
+                              "anyway, run add --take from your own shell, outside "
+                              "every session")
         token = _secrets.token_urlsafe(32)
         try:
             step = chain.put(program_secret_id(name), token, owner=program_owner())

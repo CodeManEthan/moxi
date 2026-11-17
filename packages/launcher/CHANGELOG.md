@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A launch whose comms identity is a send-only name a program registered is refused as
+  `identity <name> is a send-only name a program registered`, where it used to say the
+  name had no owner.
+
 - A headless launch with a comms identity runs where comms' wrapper takes the headless
   flags: comms' API names those harnesses in `HEADLESS` (read by
   `presets.comms_headless`), today Codex, which then runs `moxi comms codex ...

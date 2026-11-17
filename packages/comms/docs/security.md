@@ -93,8 +93,8 @@ into the first writable step of the registering process's credential chain for t
 session, or one comms can't place, may only register a name nobody uses (plain `add`):
 taking a name over (`add --take`), renewing its token and removing it are refused there,
 before anything is touched, and are for your own shell. Any process of your user outside
-every session may do all four, and may send under one. A session can't send under one: the daemon refuses it as it does a module's
-name, and `moxi comms send --as` refuses it before reading the token. When a send under a
+every session may do all four, and may send under one. A session can't send under one:
+the daemon refuses it as it does a module's name, and `moxi comms send --as` refuses it before reading the token. When a send under a
 program's name finds no token it can use, comms leaves the same doctor record, whose fix
 is `moxi comms send-only renew NAME` run where the program sends from. Renewing from a
 shell that reads the chain differently would move the token out of the program's reach;
