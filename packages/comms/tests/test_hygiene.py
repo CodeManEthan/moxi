@@ -82,19 +82,23 @@ def test_the_verbs_that_act_stay_four():
     would do. It posts nothing and reaches no credential, so the acting four are still
     four. `reserved renew` is the other store verb: it mints a reserved name's token
     into this process's credential chain for the module that owns the name, and commits
-    the token's hash. It posts nothing and reaches no credential an agent holds."""
+    the token's hash. It posts nothing and reaches no credential an agent holds.
+    `send-only add|renew|remove` is the third: it registers, renews or frees a send-only
+    name a program holds, writing comms.db and this process's credential chain. It posts
+    nothing either: a send under the name goes through `send --as`, one of the four."""
     from moxi_comms import cli
 
     sub = [a for a in cli.build_parser()._actions if hasattr(a, "choices") and a.dest
            == "verb"][0]
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
                                 "explain", "cache", "doctor", "owner", "whoami",
-                                "claude", "codex", "migrate", "remove", "reserved"}
+                                "claude", "codex", "migrate", "remove", "reserved",
+                                "send-only"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
     claim = {"whoami"}
     wrapper = {"claude", "codex"}
-    store_verb = {"migrate", "reserved"}
+    store_verb = {"migrate", "reserved", "send-only"}
     # `remove` acts only on the sender's own message, taking back what it sent.
     withdraw = {"remove"}
     assert (acting | reading | claim | wrapper | store_verb | withdraw

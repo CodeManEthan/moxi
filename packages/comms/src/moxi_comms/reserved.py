@@ -536,7 +536,7 @@ def remove_program(name: str, *, chain=None, env=None, target=None,
     with _Held(target, env) as conn:
         row = lookup(conn, name)
         if row is None:
-            raise Refused(f"{name} isn't a registered send-only name; nothing was changed")
+            raise Refused(f"{name} isn't a registered send-only name")
         if row["state"] != UNOWNED and not held_by_program(row):
             gone = (f"it goes when {row['module']} is uninstalled" if row["module"] else
                     "it goes when no module declares it")

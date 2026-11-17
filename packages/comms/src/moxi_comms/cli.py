@@ -187,9 +187,49 @@ def _offline(e: DaemonOffline) -> int:
 
 
 def cmd_send(args, ctx: Context) -> int:
-    """`moxi comms send`: the library's send, rendered. It decides nothing of its own."""
+    """`moxi comms send`: the library's send, rendered. It decides nothing of its own.
+    With `--as NAME`, a program's send under the send-only name NAME
+    (`cmd_send_under`)."""
     tags = [t.strip() for t in args.to.split(",") if t.strip()]
+    if getattr(args, "as_name", None) is not None:
+        return cmd_send_under(args, ctx, tags)
     return _render(ctx, sending.run(ctx, args, tags=tags))
+
+
+#: The send flags `--as` refuses, by their `args` field: each shapes a reply, an ask or
+#: a recipient check, and nobody replies to a send-only name.
+_NOT_WITH_AS = (("reply_to", "--reply-to"), ("standing", "--standing"),
+                ("audience", "--audience"), ("held", "--held"), ("cap", "--cap"),
+                ("no_cap", "--no-cap"), ("new", "--new"), ("new_name", "--new-name"))
+
+
+def cmd_send_under(args, ctx: Context, tags) -> int:
+    """`moxi comms send --as NAME TO TEXT`: a send under NAME, a send-only name a program
+    registered with `moxi comms send-only add`, with no claim socket: its token is read
+    through this process's credential chain, as `api.send_under` does. The posture is
+    always `none`; `--expires`, `--interrupt` and `--check` combine with it, and every
+    other send flag is a usage error."""
+    for field_name, flag in _NOT_WITH_AS:
+        if getattr(args, field_name, None):
+            ctx.say(f"--as doesn't take {flag}: nobody replies to a send-only name; "
+                    "nothing was sent")
+            return moxi_exit.USAGE
+    if args.posture not in (None, machine_line.POSTURE_NONE):
+        ctx.say(f"--as sends with posture none, not {args.posture}: nobody replies to a "
+                "send-only name; nothing was sent")
+        return moxi_exit.USAGE
+    if not tags:
+        ctx.say("send needs at least one recipient; nothing was sent")
+        return moxi_exit.USAGE
+    if args.expires is not None:
+        try:
+            sending.expiry_seconds(args.expires)
+        except ValueError as exc:
+            ctx.say(f"{exc}; nothing was sent")
+            return moxi_exit.USAGE
+    args.posture = machine_line.POSTURE_NONE
+    return _render(ctx, sending.run_reserved(ctx, args, module=None, name=args.as_name,
+                                             tags=tags))
 
 
 def cmd_reply(args, ctx: Context) -> int:
@@ -786,6 +826,43 @@ def cmd_migrate(args, ctx: Context) -> int:
     return moxi_exit.OK
 
 
+def cmd_send_only(args, ctx: Context) -> int:
+    """`moxi comms send-only add|renew|remove NAME`: a program's send-only name, written
+    straight to comms.db and the credential chain under the reserved names' lock, so each
+    works while the daemon is down.
+
+    Exits: `OK`; `REFUSED` for a refusal, with nothing written, and when this process
+    can't read back the token of the name it registered or renewed (the name stays
+    registered: the lines say which step shadows it, or to renew from the environment
+    that sends under it); `TEMPFAIL` when another process holds the lock; `ERROR` when a
+    store or chain write fails."""
+    from moxi.files import LockTimeout
+    from moxi.store import StoreError
+
+    from . import reserved, secrets
+
+    verbs = {"add": lambda: reserved.register(args.name, take=args.take, env=ctx.env),
+             "renew": lambda: reserved.renew_program(args.name, env=ctx.env),
+             "remove": lambda: reserved.remove_program(args.name, env=ctx.env)}
+    try:
+        result = verbs[args.action]()
+    except reserved.Refused as exc:
+        ctx.say(f"{exc}; nothing was changed")
+        return moxi_exit.REFUSED
+    except LockTimeout as exc:
+        ctx.say(f"another comms process holds the reserved names' lock ({exc}); nothing "
+                "was changed. Try again in a moment")
+        return moxi_exit.TEMPFAIL
+    except (StoreError, secrets.SecretError, config.ConfigError) as exc:
+        ctx.say(f"refused: {exc}")
+        return getattr(exc, "exit_code", moxi_exit.ERROR)
+    for line in result.lines:
+        ctx.say(line)
+    if result.failed:
+        return moxi_exit.ERROR
+    return moxi_exit.REFUSED if result.unreadable else moxi_exit.OK
+
+
 def cmd_reserved(args, ctx: Context) -> int:
     """`moxi comms reserved renew NAME`: a fresh token for a reserved name, minted into
     the first writable step of this process's credential chain, its hash committed. The
@@ -1044,6 +1121,10 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                         "seen bound, and the message waits for its first session. Without "
                         "it such a send is refused")
     s.add_argument("--check", action="store_true", help=CHECK_HELP)
+    s.add_argument("--as", dest="as_name", metavar="NAME",
+                   help="send under NAME, a send-only name registered with `moxi comms "
+                        "send-only add`, from outside every session; the posture is "
+                        "none, and only --expires, --interrupt and --check go with it")
     s.set_defaults(func=cmd_send)
 
     r = sub.add_parser("reply", help="answer a message")
@@ -1150,6 +1231,23 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                                          "this process's credential chain")
     rn.add_argument("name")
     rs.set_defaults(func=cmd_reserved)
+
+    so = sub.add_parser("send-only", help="the send-only names programs register: nobody "
+                                          "mails them, and only the program sends under "
+                                          "them (moxi comms send --as NAME)")
+    so_sub = so.add_subparsers(dest="action", required=True)
+    sa = so_sub.add_parser("add", help="register NAME, its token in this process's "
+                                       "credential chain; again, it changes nothing")
+    sa.add_argument("name")
+    sa.add_argument("--take", action="store_true",
+                    help="register a name a session held before, or one with mail "
+                         "waiting, dropping that mail")
+    sr = so_sub.add_parser("renew", help="replace NAME's token; run it where the program "
+                                         "sends from")
+    sr.add_argument("name")
+    sx = so_sub.add_parser("remove", help="free NAME: it is an ordinary name again")
+    sx.add_argument("name")
+    so.set_defaults(func=cmd_send_only)
 
     wh = sub.add_parser("whoami", help="what comms identity this session holds")
     wh.set_defaults(func=cmd_whoami)

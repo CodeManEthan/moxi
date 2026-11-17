@@ -282,3 +282,88 @@ def test_a_removed_name_can_be_registered_again_with_a_fresh_token(chain, store)
     reserved.register("ticker", chain=chain)
     assert token(store) not in (None, first)
     assert [i["released_at"] is None for i in intervals("ticker")] == [False, True]
+
+
+# --------------------------------------------------------------------------- the verbs
+
+def cli_run(argv, capsys):
+    from moxi_comms import cli
+
+    code = cli.main(argv)
+    return code, capsys.readouterr().out
+
+
+def test_the_verbs_register_renew_and_remove_on_the_command_line(capsys):
+    from moxi import exit as moxi_exit
+
+    configured = TokenStore()                       # the configured store, under tmp
+    code, out = cli_run(["send-only", "add", "ticker"], capsys)
+    assert code == moxi_exit.OK, out
+    assert out.startswith("ticker registered (token in the ")
+    first = token(configured)
+    assert row("ticker")["token_hash"] == reserved.token_hash(first)
+    code, out = cli_run(["send-only", "add", "ticker"], capsys)
+    assert (code, out) == (moxi_exit.OK, "ticker is already registered\n")
+    assert token(configured) == first
+    code, out = cli_run(["send-only", "renew", "ticker"], capsys)
+    assert code == moxi_exit.OK and "ticker: a new token, in the " in out, out
+    assert token(configured) != first
+    code, out = cli_run(["send-only", "remove", "ticker"], capsys)
+    assert code == moxi_exit.OK and "ticker removed: it is an ordinary name again" in out
+    code, out = cli_run(["send-only", "remove", "ticker"], capsys)
+    assert code == moxi_exit.REFUSED
+    assert out == "ticker isn't a registered send-only name; nothing was changed\n"
+
+
+def test_add_again_exits_refused_when_this_process_cant_read_the_token(capsys):
+    """A program that runs `add` at every start tells `fine` from `renew needed` by the
+    exit code."""
+    from moxi import exit as moxi_exit
+
+    configured = TokenStore()
+    assert cli_run(["send-only", "add", "ticker"], capsys)[0] == moxi_exit.OK
+    configured.delete_secret(reserved.program_owner(), reserved.program_secret_id("ticker"))
+    code, out = cli_run(["send-only", "add", "ticker"], capsys)
+    assert code == moxi_exit.REFUSED
+    assert out.splitlines()[0] == "ticker is already registered"
+    assert "moxi comms send-only renew ticker" in out.splitlines()[1]
+    assert row("ticker")["holder"] == reserved.PROGRAM_HOLDER
+
+
+def test_a_refused_verb_says_why_and_changes_nothing(capsys):
+    from moxi import exit as moxi_exit
+
+    reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
+    before = snapshot()
+    for argv, words in [
+            (["send-only", "add", "console"], "console is reserved for launcher: a program "
+                                              "can't register it"),
+            (["send-only", "add", "ticker@proj"], "ticker@proj can't be registered"),
+            (["send-only", "renew", "console"], "console is reserved for launcher: moxi "
+                                                "comms reserved renew console"),
+            (["send-only", "remove", "console"], "it goes when launcher is uninstalled")]:
+        code, out = cli_run(argv, capsys)
+        assert code == moxi_exit.REFUSED, (argv, out)
+        assert words in out and out.rstrip().endswith("; nothing was changed"), (argv, out)
+    assert snapshot() == before
+
+
+def test_a_held_lock_is_a_try_again_and_a_failed_write_an_error(monkeypatch, capsys):
+    from moxi import exit as moxi_exit
+    from moxi.files import LockTimeout
+
+    def held(*args, **kwargs):
+        raise LockTimeout("reserved.lock", 4242)
+
+    monkeypatch.setattr(reserved, "register", held)
+    code, out = cli_run(["send-only", "add", "ticker"], capsys)
+    assert code == moxi_exit.TEMPFAIL and "Try again in a moment" in out
+
+    def failed(*args, **kwargs):
+        return reserved.Result(failed=[("ticker", None, "no")],
+                               lines=["ticker isn't registered: its token couldn't be "
+                                      "written. no"])
+
+    monkeypatch.setattr(reserved, "register", failed)
+    code, out = cli_run(["send-only", "add", "ticker"], capsys)
+    assert code == moxi_exit.ERROR and "couldn't be written" in out
