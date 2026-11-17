@@ -630,6 +630,10 @@ comms	packages/comms/src/moxi_comms/adapters/codex.py	self._wake.set()	keep	set	
 comms	packages/comms/src/moxi_comms/adapters/codex.py	self.gone.set()	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/codex.py	self.injected.append(text)	keep	injected	injected
 comms	packages/comms/src/moxi_comms/adapters/codex.py	self.report_turn_end(handled=ids if completed else (),	keep	handled	handled
+comms	packages/comms/src/moxi_comms/adapters/codex.py	self._launch_claim.update(headless=True, exit=list(self.exit_rule.values))	keep	exit	exit
+comms	packages/comms/src/moxi_comms/adapters/codex.py	self._headless_wake.set()	keep	set	set
+comms	packages/comms/src/moxi_comms/adapters/codex.py	self.exit_watch.note_mail(handed=handed, waiting=waiting)	keep	waiting	waiting
+comms	packages/comms/src/moxi_comms/adapters/codex.py	f"{'refused' if kind == 'Refused' else 'lost'}: {reason}")	keep	refused	refused
 comms	packages/comms/src/moxi_comms/adapters/codex_roster.py	CodexAgent.launch_options	name	network	allow_network
 comms	packages/comms/src/moxi_comms/adapters/codex_roster.py	if set(section) & _CONTAINMENT_KEYS:	keep	set	set
 comms	packages/comms/src/moxi_comms/adapters/codex_roster.py	record = config_mod.load(env=env).local.record	keep	record	record
@@ -660,6 +664,11 @@ comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	main	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	plan	name	e	exc
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	self.dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	serve	name	e	exc
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="no window: the brief is the first turn, mail starts turns "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	nobody.add_argument("--exit", action="append", default=[], metavar="WHEN",	keep	default	default
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="when the session ends (repeatable, the first to fire wins): "	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	nobody.add_argument("--brief", metavar="TEXT", help="the session's first turn")	keep	help	help
+comms	packages/comms/src/moxi_comms/adapters/codex_wrapper.py	help="a file whose text is the session's first turn")	keep	help	help
 comms	packages/comms/src/moxi_comms/adapters/harness.py	"""The head of a wrapper's plan: the identity, roster, cwd, `record` (the	keep	record	record
 comms	packages/comms/src/moxi_comms/adapters/harness.py	HarnessAdapter	name	delivered	on_delivered
 comms	packages/comms/src/moxi_comms/adapters/harness.py	HarnessAdapter._open_batch	name	e	exc
@@ -685,6 +694,7 @@ comms	packages/comms/src/moxi_comms/adapters/harness.py	self.held_ids: set[str] 
 comms	packages/comms/src/moxi_comms/adapters/harness.py	self.injected.append(text)	keep	injected	injected
 comms	packages/comms/src/moxi_comms/adapters/harness.py	self.injected: list = []           # digest texts, for the tests and the smoke	keep	injected	injected
 comms	packages/comms/src/moxi_comms/adapters/harness.py	while len(self._opened) > 64:	keep	_opened	_opened
+comms	packages/comms/src/moxi_comms/adapters/headless.py	self.brief_refused = why or "refused"	keep	refused	refused
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	OpenCodeAdapter	name	_failed	_on_failed
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	OpenCodeAdapter	name	_succeeded	_on_succeeded
 comms	packages/comms/src/moxi_comms/adapters/opencode.py	OpenCodeAdapter	name	delivered	on_delivered
@@ -912,6 +922,13 @@ comms	packages/comms/src/moxi_comms/cli.py	s.add_argument("to", help="name, or a
 comms	packages/comms/src/moxi_comms/cli.py	sub = ap.add_subparsers(dest="verb", required=True)	keep	required	required
 comms	packages/comms/src/moxi_comms/cli.py	w = sub.add_parser("whois", help="read the card an identity wrote about itself")	keep	help	help
 comms	packages/comms/src/moxi_comms/cli.py	wh = sub.add_parser("whoami", help="what comms identity this session holds")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	ex = sub.add_parser("exit-session", help="end a headless session by its name")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	ex.add_argument("name", help="the session's comms name, bare; the scope goes in "	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	where.add_argument("--scope", metavar="S", help="the name's scope")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	help="the global identity (the default)")	keep	help	help
+comms	packages/comms/src/moxi_comms/cli.py	ex.add_argument("--wait-s", dest="wait_s", type=float, default=30.0, metavar="S",	keep	default	default
+comms	packages/comms/src/moxi_comms/cli.py	ex.add_argument("--wait-s", dest="wait_s", type=float, default=30.0, metavar="S",	keep	type	type
+comms	packages/comms/src/moxi_comms/cli.py	help="how long to wait for the name to be released, in seconds "	keep	help	help
 comms	packages/comms/src/moxi_comms/client.py	"""Fire-and-forget notification (`activity` and its kinds, `injected`,	keep	injected	injected
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient._call	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.attributed_message	name	e	exc
@@ -1761,6 +1778,7 @@ comms	packages/comms/tests/test_claim_ops.py	"qualified": PLANNER, "tier": None,
 comms	packages/comms/tests/test_claim_ops.py	assert set(answer) == {"ok", "error", "not_inside"}	keep	set	set
 comms	packages/comms/tests/test_claim_ops.py	assert set(answer) == {"ok", "state", "kind", "key", "claim", "claim_name", "lost"}	keep	set	set
 comms	packages/comms/tests/test_claim_ops.py	rec = n.record()	keep	record	record
+comms	packages/comms/tests/test_claim_ops.py	h.on_end = ended.set	keep	set	set
 comms	packages/comms/tests/test_claim_send.py	assert len(calls) == 1 and rig.record.history(rig.names_channel) == []	keep	record	record
 comms	packages/comms/tests/test_claim_send.py	assert phrase in out and rig.record.history(rig.names_channel) == []	keep	record	record
 comms	packages/comms/tests/test_claim_send.py	assert rig.record.history(rig.names_channel) == []	keep	record	record
@@ -1866,6 +1884,11 @@ comms	packages/comms/tests/test_codex_adapter.py	assert refused.value.refused	ke
 comms	packages/comms/tests/test_codex_adapter.py	assert session.delivered == [], "nothing goes into the running turn"	keep	delivered	delivered
 comms	packages/comms/tests/test_codex_adapter.py	code, _ = rig.send(to, text, sender=dict(name=name, scope=scope))	keep	fail	fail
 comms	packages/comms/tests/test_codex_adapter.py	return wait_until(lambda: len(session.delivered) >= count and session.delivered)	keep	delivered	delivered
+comms	packages/comms/tests/test_codex_adapter.py	assert rig.send(IDENTITY, "waited for the bind", "--new-name",	keep	fail	fail
+comms	packages/comms/tests/test_codex_adapter.py	assert rig.send(IDENTITY, "an interrupt while the brief runs", "--interrupt",	keep	fail	fail
+comms	packages/comms/tests/test_codex_adapter.py	assert len(adapter.fake.delivered) == 1, "no mail goes in, steered or not, before " \	keep	delivered	delivered
+comms	packages/comms/tests/test_codex_adapter.py	assert adapter.fake.delivered == [], "the brief was never handed in"	keep	delivered	delivered
+comms	packages/comms/tests/test_codex_adapter.py	assert wait_until(lambda: len(adapter.fake.delivered) == 2)	keep	delivered	delivered
 comms	packages/comms/tests/test_codex_containment.py	-	name	test_the_mock_backend_adds_the_store_directory	test_the_mock_backend_adds_the_store_dir
 comms	packages/comms/tests/test_codex_containment.py	added = tmp_path / "record"	keep	record	record
 comms	packages/comms/tests/test_codex_containment.py	tmp_path / "record")	keep	record	record
@@ -1882,6 +1905,7 @@ comms	packages/comms/tests/test_codex_wrapper.py	assert not codex_wrapper.sessio
 comms	packages/comms/tests/test_codex_wrapper.py	assert wait_until(lambda: not any(codex_wrapper.sessions_dir().glob("codex-*")), 10)	keep	any	any
 comms	packages/comms/tests/test_codex_wrapper.py	proc.communicate(timeout=20)	keep	timeout	timeout
 comms	packages/comms/tests/test_codex_wrapper.py	run_wrapper	name	environ	env
+comms	packages/comms/tests/test_codex_wrapper.py	return host.out.exists() and any(ln == word or ln.startswith(word + " ")	keep	any	any
 comms	packages/comms/tests/test_cold_every_sender.py	"unhandled": unhandled_d}, timeout=5.0)	keep	timeout	timeout
 comms	packages/comms/tests/test_cold_every_sender.py	-	name	test_projects_root_comes_from_the_shims_own_environment	test_projects_root_comes_from_the_shims_own_env
 comms	packages/comms/tests/test_cold_every_sender.py	AS_AGENT = dict(name=PLANNER["name"], scope=PLANNER["scope"], env=None)	keep	env	env
@@ -2083,6 +2107,7 @@ comms	packages/comms/tests/test_directory_provision.py	add_standing(rig.record, 
 comms	packages/comms/tests/test_directory_provision.py	assert set(store.owners_present()) == {"operator"}	keep	set	set
 comms	packages/comms/tests/test_doctor.py	assert set(r) == {"device", "DATA", "STATE", "CACHE", "CONFIG", "RUNTIME", "config",	keep	set	set
 comms	packages/comms/tests/test_doctor.py	env.update(HOME=str(tmp_path / "u"), PATH=os.path.dirname(sys.executable))	keep	HOME	HOME
+comms	packages/comms/tests/test_exit_session.py	asked.set()	keep	set	set
 comms	packages/comms/tests/test_explain.py	(line,) = [ln for ln in out.splitlines() if ln.lstrip().startswith("delivered")]	keep	delivered	delivered
 comms	packages/comms/tests/test_explain.py	CASE_TURN_INCOMPLETE, "expired", "withdrawn",	keep	expired	expired
 comms	packages/comms/tests/test_explain.py	assert line.split("delivered", 1)[1].strip() == "age unknown", line	keep	delivered	delivered
@@ -2139,6 +2164,11 @@ comms	packages/comms/tests/test_harness_base.py	port.report_turn_end(handled=ids
 comms	packages/comms/tests/test_harness_base.py	self.drops: set = set()	keep	set	set
 comms	packages/comms/tests/test_harness_base.py	self.ledger.injected(turn, high, self.digest_ids(high))	use	injected	on_injected
 comms	packages/comms/tests/test_harness_owed.py	assert wait_until(lambda: not codex.blocked and any(	keep	any	any
+comms	packages/comms/tests/test_headless.py	w.note_mail(handed=0, waiting=0)	keep	waiting	waiting
+comms	packages/comms/tests/test_headless.py	w.note_mail(handed=0, waiting=0)       # a read inside the window does not count	keep	waiting	waiting
+comms	packages/comms/tests/test_headless.py	w.note_mail(handed=2, waiting=0)	keep	waiting	waiting
+comms	packages/comms/tests/test_headless.py	w.note_mail(handed=0, waiting=3)	keep	waiting	waiting
+comms	packages/comms/tests/test_headless.py	assert host.wait(timeout=30) == -signal.SIGTERM	keep	timeout	timeout
 comms	packages/comms/tests/test_help.py	-	name	test_help_needs_no_claim_and_no_environment	test_help_needs_no_claim_and_no_env
 comms	packages/comms/tests/test_help.py	monkeypatch.setattr(cli.Context, "record", property(boom))	keep	record	record
 comms	packages/comms/tests/test_hygiene.py	== set(sub.choices)) \	keep	set	set
@@ -4525,6 +4555,10 @@ launcher	packages/launcher/tests/test_presets.py	assert laid.harness == got.harn
 launcher	packages/launcher/tests/test_presets.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_presets.py	laid_or_refused	name	refused	exc
 launcher	packages/launcher/tests/test_presets.py	test_roles_reads_the_core_harness_tables_folder	name	folder	agents_dir
+launcher	packages/launcher/tests/test_presets.py	gap = any(v.startswith(("idle=", "after=")) for v in values) and "cold" not in values	keep	any	any
+launcher	packages/launcher/tests/test_presets.py	assert not any("cold" in w for w in got.warnings)	keep	any	any
+launcher	packages/launcher/tests/test_presets.py	assert any(w.startswith("headless_exit is ignored") for w in got.warnings)	keep	any	any
+launcher	packages/launcher/tests/test_presets.py	assert not any("headless_exit" in w for w in got.warnings)	keep	any	any
 launcher	packages/launcher/tests/test_preview.py	({"harness": "claude", "cwd": "/work"}, set()),	keep	set	set
 launcher	packages/launcher/tests/test_preview.py	-	name	test_a_scratch_launch_works_in_a_folder_named_by_its_request_id	test_a_scratch_launch_works_in_a_dir_named_by_its_request_id
 launcher	packages/launcher/tests/test_preview.py	-	name	test_preview_of_a_scratch_codex_launch_names_the_scratch_folder	test_preview_of_a_scratch_codex_launch_names_the_scratch_dir

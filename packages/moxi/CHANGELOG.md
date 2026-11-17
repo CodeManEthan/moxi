@@ -2,6 +2,12 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi.proc.exec_env(lifeline_fd, env=None)` gives a process about to exec into a
+  program the `"fd"` lifeline `spawn` gives a child it starts: it makes the pipe's read
+  end inheritable and returns the environment with `MOXI_LIFELINE_FD` naming it, so the
+  program's `lifeline()` stops it when the process holding the write end closes it or
+  dies. POSIX only; on Windows it raises `OSError`. A module that calls it needs
+  `moxi>=0.1.11`.
 - New `moxi.modules.announced(name)`: what `load` finds for a module (its distribution,
   its entry point, its announcement imported and checked) without importing its `API`
   module. It shares `load`'s record and never raises; an absent or broken module's record

@@ -64,7 +64,8 @@ shipped one) is refused unless you add `--off-posture`. Put the posture you work
 on Linux and macOS the launcher execs it, on Windows it starts the harness and waits for it.
 `--target headless` starts the harness's non-interactive mode (`claude -p`, `codex exec`)
 detached, with the brief as its prompt, its output going to the launch's run log; a
-headless launch needs a brief. `--target slot` starts the session in a tmux slot, and needs
+headless launch needs a brief. With a comms identity it runs comms' wrapper instead
+(below). `--target slot` starts the session in a tmux slot, and needs
 the slots module (Linux and WSL2; macOS untested). `--slot` names the slot; a launch with
 any other target that names one is refused, exit 2.
 
@@ -577,7 +578,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | Module | With it | Without it |
 |---|---|---|
 | turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff lines at a seat's start or resume; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
-| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
+| comms | identities, scopes, directors and the `with:` start posture; a headless launch with an identity, and the `headless_exit` row; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
@@ -593,8 +594,8 @@ With comms installed, comms keeps the name `console` for the launcher's own noti
 no session can take it.
 
 A launch with an identity runs under comms' wrapper, `moxi comms claude` or `moxi comms
-codex` (which needs turns' Codex host), in this terminal or a slot; a headless one is
-refused for now. Before anything is written the launcher asks comms about the name: one
+codex` (which needs turns' Codex host), in this terminal or a slot, or headless where
+comms' wrapper takes its headless flags (see below). Before anything is written the launcher asks comms about the name: one
 held by another session, reserved for a module or retired is refused (3), naming who or
 why. When comms can't reach its daemon, or gets an answer from it that it can't read, the
 launch is a try-again (75), since the wrapper would stop before the harness starts. A
@@ -607,6 +608,28 @@ comms says its wrappers wait, and 5 s more. A wrapper that never starts the harn
 without the name and is still alive then, the name not its own, ends the row
 `comms-failed`. One that starts the harness anyway after its wait leaves the row
 `started`.
+
+**A headless launch with an identity.** Where comms' wrapper for the harness takes
+`--headless` (comms' API lists the harnesses in `HEADLESS`; today Codex), `--target
+headless` with an identity runs `moxi comms codex --name N ... --headless --brief
+<first turn>` in turns' Codex host, detached as any headless launch is, its output in the
+run log. The session holds its name between turns, takes mail, and ends by its exit
+rule: the `headless_exit` row, one `--exit` per value (`done`, `cold`, `idle=<D>`,
+`after=<D>`, D like `90m` or `2h`). Unset, comms' default applies: the session ends once
+its brief and the mail that reached it are done. The launcher checks the values with
+comms' own parser before anything starts, so a bad one is refused (2) in comms' words,
+and a rule with `idle=` or `after=` and no `cold` gets a warning: mail sent once the
+session's cache is cold waits for the name's next holder. `headless_exit` set by a
+preset or a flag on any other launch is left out with a warning; set in your `[defaults]`
+it is left out without one, as `director` and `scope` are. `keep_warm` and
+`recycle_on_expiry` are left out with a warning on a headless launch with an identity,
+since nudging or recycling the session would work against its exit rule. The launch
+returns at once; the deliverer watches the bind and ends the row `failed` as above when
+the name can't be taken, and sends nothing more. When the deliverer can't be started, the
+launcher ends the wrapper (SIGTERM), and its session with it, and the row ends `failed`,
+`no-deliverer`. A harness comms doesn't list (Claude, for now) is refused headless with
+an identity.
+`moxi comms exit-session NAME` ends such a session.
 
 ## What the launcher changes on your machine
 

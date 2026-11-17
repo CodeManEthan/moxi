@@ -39,6 +39,24 @@
   they look like your own entries, so check that file. The no-ready line of a Codex slot
   launch no longer suggests the trust prompt.
 - README: a section "What the launcher changes on your machine".
+- A headless launch with a comms identity runs where comms' wrapper takes the headless
+  flags: comms' API names those harnesses in `HEADLESS` (read by
+  `presets.comms_headless`), today Codex, which then runs `moxi comms codex ...
+  --headless [--exit W]... --brief <first turn>` in turns' Codex host (`host` mode),
+  detached, its output in the run log. A harness comms doesn't name (Claude, for now) is
+  refused as before, at each of the three places that refused it. The launch returns at
+  once and starts the detached deliverer with the wrapper's pid, which settles the bind
+  (a name the wrapper can't take ends the row `failed`, comms' words being in the run
+  log) and sends nothing, since the brief rides `--brief`; a deliverer that can't start
+  ends the wrapper (SIGTERM), so no session runs under the name of a `failed` row. New
+  launcher row `headless_exit` (`--headless-exit`, repeatable, with comms): one `--exit`
+  per value, checked at resolve and by `check` with comms' own `parse_exit`, so a bad
+  value is refused (2) in comms' words before anything starts; `idle=` or `after=`
+  without `cold` warns that mail held for a cold cache waits for the name's next holder.
+  Set by a preset or a flag on any other launch it is left out with a warning; set in
+  `[defaults]` it is left out without one, as `director` and `scope` are. `keep_warm`
+  and `recycle_on_expiry` are left out of a headless launch with an identity with a
+  warning. The size checks count the brief on `--brief` as the opening prompt.
 - Every setting but the two name templates carries page fields, which `moxi config
   launcher show --json` prints and the settings page draws: a plain label, a line where
   the label can't carry it, the unit of each wait and count, six settings shown first

@@ -19,6 +19,7 @@ import sys
 import textwrap
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from moxi import modules
@@ -477,8 +478,16 @@ def test_the_forms_modes_are_null_where_a_launch_under_the_identity_is_refused(m
     monkeypatch.setattr(presets, "comms_codex", lambda: True)
     assert form_modes("identity=planner") == {"terminal": "interactive", "headless": None,
                                               "slot": "interactive"}
+    monkeypatch.setattr(presets, "comms_api", lambda: SimpleNamespace())
     assert form_modes("harness=codex&identity=planner") == {
         "terminal": "host", "headless": None, "slot": "host"}
+    # Where comms' wrapper takes the headless flags, a Codex launch under a name runs
+    # headless in the host too; Claude's stays refused while comms doesn't name it.
+    monkeypatch.setattr(presets, "comms_api",
+                        lambda: SimpleNamespace(HEADLESS=frozenset({"codex"})))
+    assert form_modes("harness=codex&identity=planner") == {
+        "terminal": "host", "headless": "host", "slot": "host"}
+    assert form_modes("identity=planner")["headless"] is None
     # Without its wrapper's host a Codex launch under a name is refused everywhere.
     monkeypatch.setattr(presets, "_host_installed", lambda: False)
     assert form_modes("harness=codex&identity=planner") == {

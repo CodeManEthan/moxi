@@ -440,3 +440,174 @@ def test_a_bind_the_daemon_never_answers_ends_the_codex_launch(tmp_path):
                               "comms daemon did not answer in 0.5s; try again, or run "
                               "moxi comms doctor (its log: ")
     assert codex_wrapper.READY_WAIT == 15.0
+
+
+# --------------------------------------------------------------------------- headless
+
+HEADLESS = ["--name", NAME, "--scope", "proj-a", "--headless", "--brief", "go"]
+
+
+@pytest.mark.parametrize(("argv", "says"), [
+    (["--name", NAME, "--exit", "done"], "--exit goes with --headless"),
+    (["--name", NAME, "--brief", "go"], "--brief goes with --headless"),
+    (["--name", NAME, "--brief-file", "b.md"], "--brief-file goes with --headless"),
+    (["--name", NAME, "--headless"], "give one of --brief TEXT or --brief-file F"),
+    (["--name", NAME, "--headless", "--brief", "go", "--brief-file", "b.md"],
+     "give one of --brief TEXT or --brief-file F"),
+    (["--name", NAME, "--headless", "--brief", "  "], "the brief is empty"),
+    (["--name", NAME, "--headless", "--brief-file", "missing.md"], "can't read it"),
+    ([*HEADLESS, "--exit", "soon"], "give done, cold, idle=<D> or after=<D>"),
+    ([*HEADLESS, "--exit", "idle=90"], "s, m or h"),
+    ([*HEADLESS, "--exit", "after=0m"], "s, m or h"),
+    ([*HEADLESS, "--exit", "done", "--exit", "done"], "given twice"),
+    ([*HEADLESS, "--exit", "idle=5m", "--exit", "idle=9m"], "--exit idle= is given twice"),
+    ([*HEADLESS, "--window"], "drop --window"),
+    ([*HEADLESS, "--no-window"], "drop --no-window"),
+    ([*HEADLESS, "--resume", "thread-old"], "drop --resume"),
+    (["planner@proj-a", "--headless", "--brief", "go"], "goes with --name"),
+])
+def test_a_headless_launch_the_wrapper_refuses_exits_2_before_any_fork(
+        tmp_path, monkeypatch, capsys, argv, says):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(Refused) as refused:
+        plan(args(*argv), cwd=str(tmp_path))
+    assert says in str(refused.value)
+    monkeypatch.setattr(codex_wrapper.os, "fork",
+                        lambda: pytest.fail("nothing is forked for a refused launch"))
+    assert codex_wrapper.main(argv) == moxi_exit.USAGE
+    assert says in capsys.readouterr().err
+    assert not codex_wrapper.sessions_dir().exists() or not any(
+        codex_wrapper.sessions_dir().iterdir()), "nothing is written"
+
+
+def test_cold_without_the_cache_module_is_refused(tmp_path, monkeypatch, capsys):
+    from conftest import cache_absent
+
+    cache_absent(monkeypatch)
+    monkeypatch.setattr(codex_wrapper.os, "fork",
+                        lambda: pytest.fail("nothing is forked for a refused launch"))
+    assert codex_wrapper.main([*HEADLESS, "--exit", "cold"]) == moxi_exit.USAGE
+    assert "cold needs the cache module" in capsys.readouterr().err
+
+
+def test_a_headless_launch_runs_the_no_window_host_with_its_rule_and_brief(tmp_path):
+    brief = tmp_path / "brief.md"
+    brief.write_text("from a file\n")
+    launch = plan(args("--name", NAME, "--scope", "proj-a", "--headless", "--brief-file",
+                       str(brief), "--exit", "idle=90m", "--exit", "cold"),
+                  cwd=str(tmp_path))
+    assert launch.headless and not launch.window
+    assert read_host(launch)["window"] is False
+    assert launch.exit_rule.values == ("idle=90m", "cold")
+    assert launch.brief == "from a file\n"
+    assert plan(args(*HEADLESS), cwd=str(tmp_path)).exit_rule.values == ("done",)
+    assert not plan(args("--name", NAME), cwd=str(tmp_path)).headless
+
+
+@pytest.mark.parametrize(("rule", "warns"), [
+    ([], False), (["--exit", "idle=90m"], True), (["--exit", "after=2h"], True),
+    (["--exit", "after=2h", "--exit", "cold"], False)])
+def test_the_dry_run_prints_the_rule_and_the_brief_and_warns_of_the_cold_gap(
+        tmp_path, monkeypatch, capsys, rule, warns):
+    monkeypatch.chdir(tmp_path)
+    assert codex_wrapper.main([*HEADLESS, *rule, "--dry-run"]) == moxi_exit.OK
+    out, err = capsys.readouterr()
+    values = ", ".join(rule[1::2]) or "done"
+    assert (f"  headless   no window; ends on {values}, exit-session, or its host or "
+            "adapter ending") in out
+    assert "  brief      " in out and "brief.md (2 chars, the first turn)" in out
+    (line,) = [ln for ln in out.splitlines() if ln.startswith("  launch     ")]
+    assert "--no-window" in line.split()
+    gap = "mail sent once its cache is cold waits for the name's next holder"
+    assert (gap in err) is warns
+    assert not codex_wrapper.sessions_dir().exists() or not any(
+        codex_wrapper.sessions_dir().iterdir()), "a dry run writes no brief"
+
+
+@pytest.fixture
+def headless_host(tmp_path):
+    """A stand-in for turns' Codex host that holds a lifeline as the real one does: it
+    reads the fd `MOXI_LIFELINE_FD` names until it closes, and stops on SIGTERM."""
+    out = tmp_path / "host.out"
+    script = tmp_path / "moxi-turns-codex-host"
+    script.write_text(textwrap.dedent(f"""\
+        #!{sys.executable}
+        import os, signal, sys
+        def say(line):
+            with open({str(out)!r}, "a") as f:
+                f.write(line + "\\n")
+        signal.signal(signal.SIGTERM, lambda *_: (say("sigterm"), os._exit(0)))
+        fd = os.environ.get("MOXI_LIFELINE_FD")
+        say(f"pid {{os.getpid()}}")
+        say(f"args {{' '.join(sys.argv[1:])}}")
+        say(f"lifeline {{fd or 'none'}}")
+        while fd and os.read(int(fd), 1):
+            pass
+        say("lifeline-closed")
+        """))
+    script.chmod(0o755)
+    return SimpleNamespace(script=script, out=out)
+
+
+def host_said(host, word):
+    return host.out.exists() and any(ln == word or ln.startswith(word + " ")
+                                     for ln in host.out.read_text().splitlines())
+
+
+def _pipe_of(pid, fd) -> str:
+    return os.readlink(f"/proc/{pid}/fd/{fd}")
+
+
+def test_the_host_holds_the_lifeline_and_ends_when_the_adapter_dies(
+        rig, headless_host):
+    import signal
+
+    proc = run_wrapper(headless_host, *HEADLESS)
+    try:
+        assert wait_until(lambda: host_said(headless_host, "lifeline"), timeout=20), \
+            proc.stderr.read() if proc.poll() is not None else "the host did not start"
+        lines = headless_host.out.read_text().splitlines()
+        assert "--no-window" in lines[1].split()
+        fd = lines[2].split()[1]
+        assert fd not in ("none", "99"), "the host's lifeline is the adapter's, not the " \
+                                         "caller's"
+        pipe = _pipe_of(proc.pid, fd)
+        assert pipe.startswith("pipe:")
+        (key, record), = [(k, r) for k, r in claimfile.live_records()
+                          if (r.get("claim") or {}).get("qualified") == "coder@proj-a"]
+        assert (record["claim"]["headless"], record["claim"]["exit"]) == (True, ["done"])
+        adapter_pid = int(key.split("-")[0])
+        assert adapter_pid != proc.pid
+        held = [_pipe_of(adapter_pid, n) for n in os.listdir(f"/proc/{adapter_pid}/fd")
+                if os.path.exists(f"/proc/{adapter_pid}/fd/{n}")]
+        assert pipe in held, "the adapter holds the other end"
+        session_dir = next(codex_wrapper.sessions_dir().glob("codex-*"))
+        brief = session_dir / codex_wrapper.BRIEF_NAME
+        assert brief.read_text() == "go" and brief.stat().st_mode & 0o777 == 0o600
+        os.kill(adapter_pid, signal.SIGKILL)
+        assert wait_until(lambda: host_said(headless_host, "lifeline-closed"), 15)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.communicate(timeout=20)
+    assert proc.returncode == 0
+    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, 15)
+
+
+def test_exit_session_ends_the_host_through_its_pidfd_and_releases_the_name(
+        rig, headless_host, capsys):
+    proc = run_wrapper(headless_host, *HEADLESS, "--exit", "after=2h")
+    try:
+        assert wait_until(lambda: host_said(headless_host, "lifeline"), timeout=20), \
+            proc.stderr.read() if proc.poll() is not None else "the host did not start"
+        assert cli.main(["exit-session", NAME, "--scope", "proj-a"]) == moxi_exit.OK
+        assert "coder@proj-a has ended" in capsys.readouterr().out
+        assert host_said(headless_host, "sigterm")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.communicate(timeout=20)
+    assert proc.returncode == 0
+    assert wait_until(lambda: "coder@proj-a" not in rig.daemon.bindings, 15)
+    log = next(iter(codex_wrapper.log_dir().glob("codex-*.log"))).read_text()
+    assert "headless session ended: exit-session" in log

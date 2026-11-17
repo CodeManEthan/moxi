@@ -7,6 +7,8 @@
 - `spawn` starts a long-lived child that cannot outlive its parent: it holds a lifeline,
   a pipe the parent keeps open, and the child ends when the parent goes. With
   `detached=True` it starts a child that is meant to outlive it, logging to a file.
+- `exec_env` gives a process about to exec into a program the same `"fd"` lifeline,
+  for a parent that becomes its child rather than spawning one.
 - `lifeline` is what a Moxi child started with `lifeline="fd"` (or a plain stdin
   lifeline) calls to stop when its parent goes, and `lifeline_kind` tells such a child
   which lifeline it holds, without reading stdin.
@@ -311,6 +313,28 @@ def _spawn_fd(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
         os.close(read_end)
     proc.lifeline = open(write_end, "wb", buffering=0)
     return proc
+
+
+def exec_env(lifeline_fd: int, env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment for a program this process is about to exec into, holding a
+    lifeline: the `spawn(..., lifeline="fd")` contract for a parent that becomes its
+    child rather than starting one. POSIX only.
+
+    `lifeline_fd` is the read end of a pipe whose write end another process holds (one
+    this process forked before the exec, say). It is made inheritable, so it survives the
+    exec, and named in `MOXI_LIFELINE_FD`; the program calls `moxi.proc.lifeline()` and
+    stops when the holder closes the write end or dies. Close every other copy of the
+    write end in this process first, or the program holds its own lifeline open.
+
+    `env` is the program's whole environment, used as given (None: this process's) and
+    left unchanged, with `MOXI_LIFELINE_FD` set and the start mark added when it lacks
+    one, as `spawn` sets them. Pass the result to `os.execve`. On Windows, where an exec
+    starts a new process, it raises `OSError`.
+    """
+    if _WINDOWS:
+        raise OSError("exec_env is POSIX only: an exec on Windows starts a new process")
+    os.set_inheritable(lifeline_fd, True)
+    return _lifeline_env(env, str(lifeline_fd))
 
 
 def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
@@ -1148,5 +1172,5 @@ def _pairs(entries) -> dict[str, str]:
     return env
 
 
-__all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "lifeline",
+__all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "exec_env", "lifeline",
            "lifeline_kind", "identity", "alive", "process_env", "cmdline", "status", "parent"]

@@ -6,12 +6,15 @@ The mode follows from the target and the links:
 |---|---|---|
 | turns absent | `interactive` (`codex`) | `exec` (`codex exec`) |
 | turns present | `host` (turns' Codex host) | `exec` |
+| a comms identity | `host` (comms' Codex wrapper) | `host`, with the wrapper's headless flags |
 
 Until turns' host can start (its entry installed, with turns' `codex` extra), a launch
 with turns runs as one without it (`interactive`, the brief as the opening prompt) and
 says so in one warning line. A launch with a comms identity runs comms' Codex wrapper,
-which takes the host's flags and execs the host, so it needs the host too; a headless one
-is refused until comms takes its headless flags.
+which takes the host's flags and execs the host, so it needs the host too. A headless one
+gives the wrapper `--headless`, one `--exit` per `headless_exit` value and its first turn
+on `--brief`, and is refused where comms' wrapper takes no headless flags
+(`Context.comms_headless`).
 
     interactive  codex [<opening prompt>] -c check_for_update_on_startup=false -C <cwd>
                    [-m M] -s <S> -a <A> [other rows] [extra flags]
@@ -21,9 +24,10 @@ is refused until comms takes its headless flags.
                    [--option ...] [extra flags]
     host, comms  moxi comms codex --name N [--scope S] [--director D ...] [--model M]
                    --sandbox <S> [--option ...]
+                   [--headless [--exit W ...] --brief <first turn>]
 
-The host runs with its window, and applies turns' launch additions itself; the launcher
-passes none. A Codex session under the host gets its identity block and instructions from
+The host runs with its window (a headless launch's without one: comms' wrapper starts it
+so), and applies turns' launch additions itself; the launcher passes none. A Codex session under the host gets its identity block and instructions from
 the launcher's `start` listener, never on the argv. Without turns, or in `exec` mode, it
 gets neither, and a seat with instructions says so in one warning line; the posture line
 then goes on the opening prompt's second line.
@@ -104,7 +108,8 @@ def mode(values: Mapping[str, object], ctx: Context) -> tuple[str, tuple[str, ..
                          "comms' headless wrapper flags, which this comms does not take "
                          "yet", "leave the identity out, or launch in this terminal or a "
                          "slot")
-        return "exec", ()
+        if not identity:
+            return "exec", ()
     if identity:
         if not ctx.comms_codex:
             from ..presets import needed
@@ -139,6 +144,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     scope = (str(values.get("scope") or "") or None) if identity else None
     cwd = common.cwd_of(values)
     host = mode_ == "host"
+    headless = bool(identity) and values.get("target") == "headless"
 
     posture = ctx.posture_of(values) or None
     if ctx.resume:
@@ -148,8 +154,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                              handoff_text=ctx.handoff_text,
                              posture=None if host else posture,
                              relaunched=ctx.relaunched)
-    prompt, first = (None, text) if host else (text, None)
-    if mode_ == "exec" and prompt is None:
+    prompt, first = (None, text) if host and not headless else (text, None)
+    if (mode_ == "exec" or headless) and prompt is None:
         raise NoBrief("brief", "a headless launch needs a brief or a handoff to run",
                       "give it --brief, --brief-file or --handoff")
     if not host and ctx.instructions and ctx.instructions.strip():
@@ -188,6 +194,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         for director in values.get("director") or ():
             argv += ["--director", str(director)]
         argv += flags
+        if headless:
+            argv += common.headless_words(values, str(prompt))
     elif host:
         argv = [str(ctx.host)] + flags + extra
     else:

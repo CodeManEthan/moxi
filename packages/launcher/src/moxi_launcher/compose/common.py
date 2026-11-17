@@ -624,6 +624,15 @@ def scrub(env: Mapping[str, str], session_env: frozenset[str] | set[str] = froze
     return {name: value for name, value in env.items() if not scrubbed(name)}
 
 
+def headless_words(values: Mapping[str, object], brief: str) -> list[str]:
+    """The flags of comms' wrapper for a headless launch: `--headless`, one `--exit` per
+    `headless_exit` value, in order, and `--brief` with the launch's first turn."""
+    words = ["--headless"]
+    for value in values.get("headless_exit") or ():
+        words += ["--exit", str(value)]
+    return words + ["--brief", brief]
+
+
 def commands(values: Mapping[str, object]) -> tuple[str, ...]:
     """The session commands a launch grants through turns: `exit`, then `clear` or
     `compact` for `recycle_on_expiry`, and `compact` for `recycle_at_limit`."""
@@ -831,8 +840,8 @@ __all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL"
            "BYPASS", "Context", "NoBrief", "NotYet", "PromptFile", "SETTINGS_SUFFIX",
            "SKIP_BYPASS_WARNING", "SettingsFile", "TooLong", "TurnsAdditions",
            "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
-           "env_class", "child_env", "first_turn", "identity_block", "locator",
-           "no_credentials", "option_stamps", "prompt_path", "read_settings", "replay_env", "scratch_dir",
-           "scratch_root", "scratch_root_problem", "scrub", "seat_text", "settings_file",
-           "settings_path", "settings_value", "short_env", "skip_key_owed", "stamps",
-           "without_settings", "write_prompt", "write_settings"]
+           "env_class", "child_env", "first_turn", "headless_words", "identity_block",
+           "locator", "no_credentials", "option_stamps", "prompt_path", "read_settings",
+           "replay_env", "scratch_dir", "scratch_root", "scratch_root_problem", "scrub",
+           "seat_text", "settings_file", "settings_path", "settings_value", "short_env",
+           "skip_key_owed", "stamps", "without_settings", "write_prompt", "write_settings"]

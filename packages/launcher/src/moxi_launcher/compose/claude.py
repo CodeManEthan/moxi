@@ -2,7 +2,8 @@
 
 The mode follows from the target: `interactive` (`claude`) in this terminal or a slot,
 `print` (`claude -p`) headless. A headless launch with a comms identity needs comms'
-headless wrapper flags, and is refused until comms takes them.
+headless wrapper flags, and is refused where comms' Claude wrapper takes none
+(`Context.comms_headless`).
 
 Without comms (`print` adds `-p` after `claude`):
 
@@ -18,7 +19,13 @@ With comms and an identity, comms' wrapper runs claude, with the claude argv aft
       [--native-name L] -- [<opening prompt>] --append-system-prompt-file <F> ...
 
 The claude argv then carries neither `-n` (the native name goes to `--native-name`) nor
-turns' launch additions, which the wrapper asks for itself.
+turns' launch additions, which the wrapper asks for itself. A headless launch (`print`)
+gives the wrapper its headless flags and carries its opening prompt on `--brief`, not in
+the claude argv, which then holds no `-p` either:
+
+    moxi comms claude --name N [--scope S] [--director D ...] --session-id <U>
+      [--native-name L] --headless [--exit W ...] --brief <opening prompt>
+      -- --append-system-prompt-file <F> ...
 
 **The display name** (`-n`, or the wrapper's `--native-name`) is the `native_name` row
 when `[defaults]`, a preset or a flag set it, else the launch's own `name`. The launch
@@ -84,7 +91,7 @@ def mode(values: Mapping[str, object], ctx: Context) -> str:
         return ctx.mode
     if (values.get("target") or "terminal") != "headless":
         return "interactive"
-    if comms_identity(values, ctx):
+    if comms_identity(values, ctx) and not ctx.comms_headless:
         raise NotYet("identity", "a headless Claude launch with an identity needs comms' "
                      "headless wrapper flags, which this comms does not take yet",
                      "leave the identity out, or launch in this terminal or a slot")
@@ -149,7 +156,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
             flags += rows[name].tokens(mode_, fit.applied[name], cwd=cwd)
     if settings_file is not None:
         flags += [catalog.SETTINGS_FLAG, settings_file.path]
-    tail = ([prompt] if prompt is not None else []) + flags + extra
+    headless = bool(identity) and mode_ == "print"
+    tail = ([prompt] if prompt is not None and not headless else []) + flags + extra
 
     if identity:
         argv = [ctx.moxi, "comms", HARNESS, "--name", identity]
@@ -160,6 +168,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         argv += ["--session-id", ctx.session_id]
         if shown_as:
             argv += ["--native-name", shown_as]
+        if headless:
+            argv += common.headless_words(values, str(prompt))
         argv += ["--", *tail]
     else:
         argv = [HARNESS] + (["-p"] if mode_ == "print" else []) + tail
