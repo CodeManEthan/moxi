@@ -458,4 +458,4 @@ parses no harness's transcript format itself.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/main/packages/memory/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-memory-v0.1.0/packages/memory/LICENSE).
