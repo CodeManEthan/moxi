@@ -25,6 +25,7 @@ members = [
     "moxi-services",
     "moxi-sessions",
     "moxi-slots",
+    "moxi-statusline",
     "moxi-tunnel",
     "moxi-turns",
     "moxi-ui",
@@ -752,7 +753,7 @@ wheels = [
 
 [[package]]
 name = "moxi"
-version = "0.1.10"
+version = "0.1.11"
 source = { editable = "packages/moxi" }
 dependencies = [
     { name = "psutil" },
@@ -775,7 +776,7 @@ dev = [
 
 [[package]]
 name = "moxi-cache"
-version = "0.1.6"
+version = "0.1.7"
 source = { editable = "packages/cache" }
 dependencies = [
     { name = "moxi" },
@@ -1455,6 +1456,42 @@ requires-dist = [{ name = "moxi", editable = "packages/moxi" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "pytest" },
+]
+
+[[package]]
+name = "moxi-statusline"
+version = "0.1.0"
+source = { editable = "packages/statusline" }
+dependencies = [
+    { name = "moxi" },
+]
+
+[package.optional-dependencies]
+ui = [
+    { name = "moxi-ui" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
+]
+provides-extras = ["ui"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
 ]
 

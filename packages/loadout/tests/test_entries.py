@@ -249,6 +249,25 @@ def test_json_with_comments_is_refused_and_its_entries_stand(lo):
     assert read(harness.codex_home() / "hooks.json")["hooks"]   # the other harness goes on
 
 
+def test_a_refused_json_file_names_what_loadout_does_about_it(tmp_path):
+    """loadout's two lines after the core's: held whole, so a change in the core's
+    wording can't drop what loadout says it does."""
+    path = tmp_path / "settings.json"
+    path.write_text("{ // c }")
+    try:
+        json.loads("{ // c }")
+    except ValueError as exc:
+        why = str(exc)
+    with pytest.raises(harness.Refused) as refused:
+        harness.Doc(path, "json")
+    assert str(refused.value) == (f"{path} is not plain JSON ({why}); loadout leaves it, "
+                                  "so its entries for this harness are not written")
+    path.write_text("[]")
+    with pytest.raises(harness.Refused) as refused:
+        harness.Doc(path, "json")
+    assert str(refused.value) == f"{path} is not a JSON object; loadout leaves it"
+
+
 def test_a_file_changed_while_planning_is_not_written(lo, monkeypatch):
     write(lo, '[user]\nhooks = ["guard-rm"]\n' + HOOK)
     settings().parent.mkdir(parents=True)
@@ -419,6 +438,25 @@ def test_no_lock_file_lands_in_a_harness_home(lo):
     install.install()
     for home in (harness.claude_home(), harness.codex_home()):
         assert not [p for p in home.rglob("*.lock")]
+
+
+def test_a_tilde_in_claude_config_dir_puts_settings_and_mcp_file_under_the_home(
+        lo, monkeypatch, tmp_path):
+    home = Path(os.environ["HOME"])
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)   # where a `~` taken literally would land
+    given = {"HOME": "/given/home", "CLAUDE_CONFIG_DIR": "~/cc"}
+    assert harness.claude_home(given) / "settings.json" == Path("/given/home/cc/settings.json")
+    assert harness.claude_json(given) == Path("/given/home/cc/.claude.json")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/cc")
+    assert harness.settings_file("claude") == home / "cc" / "settings.json"
+    assert harness.claude_json() == home / "cc" / ".claude.json"
+    write(lo, '[user]\nhooks = ["guard-rm"]\n' + HOOK)
+    out = install.install()
+    assert out.code == 0, out.text()
+    assert read(home / "cc" / "settings.json")["hooks"]["PreToolUse"]
+    assert list(work.iterdir()) == []
 
 
 SHAPES = {

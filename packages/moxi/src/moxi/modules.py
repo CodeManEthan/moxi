@@ -22,7 +22,10 @@ is checked. A failed check makes the module `broken`, with the reason.
     INTERNAL_ENV    {variable: why the module reads it}; a name ending in `_` is a prefix
     SETTINGS        resource name of the config schema in the announcement's package
     SETUP           "package.module:function" the installer runs after installing
-    SEGMENT         dotted name of a module whose `segment` renders a status line segment
+    SEGMENT         dotted name of a module that renders a status line segment:
+                    `segment(session_id, now=None)`; or, when the module defines it,
+                    `from_input(payload, now)`, given Claude's status line input as parsed
+                    JSON. Each returns an object with `text` and `coloured()`, or None.
     DAEMONS         {name: entry}: long-running processes the core installs as units
     TIMERS          {name: entry}: scheduled commands the core installs, each behind a switch
     UNITS_FROM      target returning run-time declarations; kept as a string, never called
@@ -51,10 +54,12 @@ with a raised `ANNOUNCES`, so a typo is never read as "not set".
 `installed`, `present` and `scan` read every distribution's entry-point metadata through
 `importlib.metadata`. `load` reads only the distribution `moxi-<name>`, imports the
 announcement and the `API` module, and returns a frozen `Found` whose state is `present`,
-`absent` or `broken`; it never raises. It reads that distribution's `.dist-info` directory
-straight off the `sys.path` directories, and finds there what
-`importlib.metadata.distribution("moxi-<name>")` would; a distribution installed any other
-way (an `.egg-info`, a zip, a custom finder) is `absent` to it. `scan` is the full scan,
+`absent` or `broken`; it never raises. `announced` returns that record without importing
+the `API` module, for a caller that needs only the announcement, such as a status line
+render. Both read that distribution's `.dist-info` directory straight off the `sys.path`
+directories, and find there what `importlib.metadata.distribution("moxi-<name>")` would;
+a distribution installed any other way (an `.egg-info`, a zip, a custom finder) is
+`absent` to them. `scan` is the full scan,
 which also finds two distributions claiming one name, a module declared by a distribution
 not named `moxi-<name>`, and one `load` cannot see; `moxi modules`, the doctor and the
 installer use it. A feature that needs an optional module asks `available` (a
@@ -66,9 +71,9 @@ named `moxi.<module>` or `moxi.<module>.<part>`. `session_env()` collects every 
 module's `SESSION_ENV`. `setup_ran(module)` says whether the core records that the
 module's `SETUP` has run in this home. A `TEARDOWN` raises `Refused` to stop an uninstall.
 
-A hook may import this module and call `available` and `load`: neither they nor the
-import load `importlib.metadata`, `dataclasses`, `inspect`, `typing`, `zipfile` or `json`
-(beyond what the announcement's own package imports). So the record types are plain
+A hook may import this module and call `available`, `announced` and `load`: neither they
+nor the import load `importlib.metadata`, `dataclasses`, `inspect`, `typing`, `zipfile` or
+`json` (beyond what the announcement's own package imports). So the record types are plain
 frozen classes, not dataclasses, and `importlib.metadata` is imported only inside the
 functions off that path.
 """
@@ -421,10 +426,28 @@ def load(name: str, *, interface: int | None = None) -> Found:
     wrong is a `broken` `Found` with the reason.
     """
     with _lock:
-        record = _records.get(name)
-        if record is None:
-            record = _records[name] = _Record.read(name)
-        return record.found(interface)
+        return _record(name).found(interface)
+
+
+def announced(name: str) -> Found:
+    """What `load` finds for module `name` before it imports the `API` module: the
+    distribution, the entry point, and the announcement imported and checked.
+
+    `api` is always None, and an `API` module that would fail to import goes unnoticed.
+    It shares `load`'s record, so a later `load` of the same name reads nothing again.
+    Never raises: an absent or broken module is a `Found` that says so, with every
+    announcement name at its default (`segment` None).
+    """
+    with _lock:
+        return _record(name).base
+
+
+def _record(name: str) -> _Record:
+    """This process's record of `name`, read on first use. The caller holds `_lock`."""
+    record = _records.get(name)
+    if record is None:
+        record = _records[name] = _Record.read(name)
+    return record
 
 
 def scan() -> list[Found]:
