@@ -1,0 +1,13 @@
+{
+  "name": "moxi-statusline-web",
+  "private": true,
+  "description": "The statusline module's web sources: its page, which picks, orders and previews Claude Code's status line.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

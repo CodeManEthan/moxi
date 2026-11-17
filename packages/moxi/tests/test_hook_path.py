@@ -116,6 +116,115 @@ def test_of_two_copies_in_two_dirs_the_first_on_sys_path_is_read(
     assert fast("hptwo") == reference("hptwo") == want
 
 
+# --- two metadata directories of one distribution in one directory ------------------------
+
+def listing(monkeypatch, root: Path, names_in_order: list[str]) -> None:
+    """Make `os.listdir(root)` list `names_in_order`, and every other directory as it is."""
+    import os
+
+    real = os.listdir
+
+    def listdir(path="."):
+        return list(names_in_order) if Path(path) == root else real(path)
+
+    monkeypatch.setattr(os, "listdir", listdir)
+
+
+def two_versions(tmp_path, monkeypatch, first: str, second: str) -> Path:
+    """A site on `sys.path` holding `moxi-hpver2` at versions `first` and `second`."""
+    root = tmp_path / "site"
+    for version in (first, second):
+        write_dist(root, f"moxi_hpver2-{version}.dist-info", name="moxi-hpver2",
+                   version=version, entries={"hpver2": "moxi_hpver2.module"})
+    monkeypatch.syspath_prepend(str(root))
+    return root
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_of_two_versions_in_one_site_the_higher_is_read_in_either_listing_order(
+        tmp_path, monkeypatch, reverse):
+    root = two_versions(tmp_path, monkeypatch, "0.10.0", "0.9.0")
+    names_in_order = ["moxi_hpver2-0.9.0.dist-info", "moxi_hpver2-0.10.0.dist-info"]
+    listing(monkeypatch, root, names_in_order[::-1] if reverse else names_in_order)
+    assert fast("hpver2") == ("moxi-hpver2", "0.10.0", "moxi_hpver2.module")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_a_version_that_does_not_parse_loses_to_one_that_does(tmp_path, monkeypatch, reverse):
+    root = two_versions(tmp_path, monkeypatch, "0.1.0", "zzz")
+    names_in_order = ["moxi_hpver2-0.1.0.dist-info", "moxi_hpver2-zzz.dist-info"]
+    listing(monkeypatch, root, names_in_order[::-1] if reverse else names_in_order)
+    assert fast("hpver2") == ("moxi-hpver2", "0.1.0", "moxi_hpver2.module")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_equal_versions_go_to_the_name_that_sorts_last(tmp_path, monkeypatch, reverse):
+    root = two_versions(tmp_path, monkeypatch, "1.0", "1.0.0")
+    names_in_order = ["moxi_hpver2-1.0.dist-info", "moxi_hpver2-1.0.0.dist-info"]
+    listing(monkeypatch, root, names_in_order[::-1] if reverse else names_in_order)
+    assert modules._DistInfo.find("hpver2").path == str(root / "moxi_hpver2-1.0.dist-info")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_unparsable_versions_go_to_the_name_that_sorts_last(tmp_path, monkeypatch, reverse):
+    root = two_versions(tmp_path, monkeypatch, "aaa", "bbb")
+    names_in_order = ["moxi_hpver2-aaa.dist-info", "moxi_hpver2-bbb.dist-info"]
+    listing(monkeypatch, root, names_in_order[::-1] if reverse else names_in_order)
+    assert fast("hpver2") == ("moxi-hpver2", "bbb", "moxi_hpver2.module")
+
+
+def test_an_egg_info_alone_is_none(tmp_path, monkeypatch):
+    root = tmp_path / "site"
+    write_dist(root, "moxi_hpver2-1.0.egg-info", name="moxi-hpver2", version="1.0",
+               entries={"hpver2": "moxi_hpver2.module"})
+    monkeypatch.syspath_prepend(str(root))
+    assert modules._DistInfo.find("hpver2") is None
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_an_egg_info_beside_a_dist_info_is_passed_over(tmp_path, monkeypatch, reverse):
+    root = tmp_path / "site"
+    write_dist(root, "moxi_hpver2-9.0.egg-info", name="moxi-hpver2", version="9.0",
+               entries={"hpver2": "moxi_hpver2_egg.module"})
+    write_dist(root, "moxi_hpver2-1.0.dist-info", name="moxi-hpver2", version="1.0",
+               entries={"hpver2": "moxi_hpver2.module"})
+    monkeypatch.syspath_prepend(str(root))
+    names_in_order = ["moxi_hpver2-9.0.egg-info", "moxi_hpver2-1.0.dist-info"]
+    listing(monkeypatch, root, names_in_order[::-1] if reverse else names_in_order)
+    assert fast("hpver2") == ("moxi-hpver2", "1.0", "moxi_hpver2.module")
+
+
+def test_a_later_sys_path_entry_is_not_read_when_an_earlier_one_holds_a_match(
+        tmp_path, monkeypatch):
+    first, second = tmp_path / "first", tmp_path / "second"
+    write_dist(first, "moxi_hpver2-1.0.egg-info", name="moxi-hpver2", version="1.0")
+    write_dist(second, "moxi_hpver2-2.0.dist-info", name="moxi-hpver2", version="2.0",
+               entries={"hpver2": "moxi_hpver2.module"})
+    monkeypatch.syspath_prepend(str(second))
+    monkeypatch.syspath_prepend(str(first))
+    assert modules._DistInfo.find("hpver2") is None
+
+
+def test_the_debug_line_names_the_one_taken_and_the_one_passed_over(
+        tmp_path, monkeypatch, caplog):
+    two_versions(tmp_path, monkeypatch, "0.1.0", "0.2.0")
+    with caplog.at_level("DEBUG", logger="moxi.modules"):
+        modules._DistInfo.find("hpver2")
+    (line,) = [r.getMessage() for r in caplog.records if r.name == "moxi.modules"]
+    assert "took moxi_hpver2-0.2.0.dist-info" in line
+    assert "passed over moxi_hpver2-0.1.0.dist-info" in line
+
+
+def test_one_version_logs_nothing(tmp_path, monkeypatch, caplog):
+    root = tmp_path / "site"
+    write_dist(root, "moxi_hpver2-1.0.dist-info", name="moxi-hpver2", version="1.0",
+               entries={"hpver2": "moxi_hpver2.module"})
+    monkeypatch.syspath_prepend(str(root))
+    with caplog.at_level("DEBUG", logger="moxi.modules"):
+        assert fast("hpver2") == ("moxi-hpver2", "1.0", "moxi_hpver2.module")
+    assert not [r for r in caplog.records if r.name == "moxi.modules"]
+
+
 @pytest.mark.parametrize("dirname, name, found", [
     ("Moxi__HpOdd-3.0.dist-info", "Moxi__HpOdd", True),
     ("Moxi.HpOdd-3.0.dist-info", "Moxi.HpOdd", True),

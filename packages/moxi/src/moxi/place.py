@@ -387,8 +387,14 @@ def _harness_dir(name: str, kind: str, value: str, env=None) -> Path | None:
     if value:
         return Path(_expanduser(value, env))
     if name == "claude":
-        base = env.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
-        return Path(_expanduser(base, env)) / kind
+        from .paths import claude_home
+
+        try:
+            return claude_home(env) / kind
+        except LookupError:
+            # Nothing places the home: the `~` stays as written, as it always has here.
+            base = env.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
+            return Path(_expanduser(base, env)) / kind
     if name == "codex":
         if kind == "skills":
             base = os.path.join("~", ".agents")

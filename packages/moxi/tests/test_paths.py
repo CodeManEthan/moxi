@@ -543,6 +543,68 @@ def test_a_home_nothing_places_raises_and_leaves_a_tilde_as_it_is(monkeypatch):
     assert paths._expanduser("~/.local/share", {}) == "~/.local/share"
 
 
+# -- Claude Code's folder -----------------------------------------------------------------
+
+@POSIX
+@pytest.mark.parametrize("value", [None, ""])
+def test_claude_home_unset_or_empty_is_the_homes_claude_dir(value):
+    given = env() if value is None else env(CLAUDE_CONFIG_DIR=value)
+    assert paths.claude_home(given) == Path(HOME, ".claude")
+
+
+@POSIX
+def test_claude_home_takes_an_absolute_value_as_given():
+    assert paths.claude_home(env(CLAUDE_CONFIG_DIR="/elsewhere/cc")) == Path("/elsewhere/cc")
+
+
+@POSIX
+@pytest.mark.parametrize(("value", "under"), [("~", ""), ("~/x", "x"), ("~/x/y", "x/y")])
+def test_claude_home_reads_a_tilde_as_the_given_environments_home(value, under, monkeypatch):
+    monkeypatch.setenv("HOME", "/the/process")
+    assert paths.claude_home(env(CLAUDE_CONFIG_DIR=value)) == Path(HOME, under)
+    # Without a mapping, the process's own home.
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", value)
+    assert paths.claude_home() == Path("/the/process", under)
+
+
+@POSIX
+def test_claude_home_takes_a_relative_value_as_given(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert paths.claude_home(env(CLAUDE_CONFIG_DIR="cc")) == Path("cc")
+    # A folder named `~` is not a home: only a leading `~` or `~/` is.
+    assert paths.claude_home(env(CLAUDE_CONFIG_DIR="cc/~/x")) == Path("cc/~/x")
+
+
+@POSIX
+def test_claude_home_reads_the_env_by_name_alone(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/the/process/cc")
+    assert paths.claude_home(env()) == Path(HOME, ".claude")
+    assert paths.claude_home() == Path("/the/process/cc")
+
+
+@pytest.mark.parametrize("value", [None, "", "~", "~/x"])
+def test_claude_home_raises_when_it_needs_a_home_nothing_places(value, monkeypatch):
+    monkeypatch.setattr(paths, "_WINDOWS", False)
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    given = {} if value is None else {"CLAUDE_CONFIG_DIR": value}
+    with pytest.raises(LookupError, match="home folder"):
+        paths.claude_home(given)
+
+
+def test_claude_home_needs_no_home_for_a_value_without_a_tilde(monkeypatch):
+    monkeypatch.setattr(paths, "_WINDOWS", False)
+    monkeypatch.setattr(paths, "_account_home", lambda: None)
+    assert paths.claude_home({"CLAUDE_CONFIG_DIR": "/cc"}) == Path("/cc")
+
+
+def test_claude_home_on_windows_reads_userprofile(monkeypatch):
+    monkeypatch.setattr(paths, "_WINDOWS", True)
+    given = {"USERPROFILE": "C:/Users/ada"}
+    assert paths.claude_home(given) == Path("C:/Users/ada", ".claude")
+    assert paths.claude_home({**given, "CLAUDE_CONFIG_DIR": "~\\cc"}) == Path(
+        "C:/Users/ada\\cc")
+
+
 @pytest.fixture(name="shell_dirs")
 def shell_dirs_fixture(monkeypatch):
     """Windows as the core sees it, with the shell's known folders made up: `profile`,

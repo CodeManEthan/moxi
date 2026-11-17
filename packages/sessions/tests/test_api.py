@@ -22,8 +22,8 @@ CODEX_NAMES = {"TOP_KINDS", "EVENT_KINDS", "RESPONSE_KINDS", "META_KEYS", "HISTO
                "CHECKED_VERSIONS"}
 
 
-def test_the_announcement_offers_interfaces_2_to_5():
-    assert module.INTERFACES == frozenset({2, 3, 4, 5})
+def test_the_announcement_offers_interfaces_2_to_6():
+    assert module.INTERFACES == frozenset({2, 3, 4, 5, 6})
     assert module.API == "moxi_sessions.api"
     assert module.CLI == "moxi_sessions.cli:main"
     assert module.SETTINGS == "settings.toml"
@@ -57,7 +57,8 @@ def test_load_finds_the_module_and_its_api():
     assert modules.load("sessions", interface=4).ok
     assert not modules.load("sessions", interface=1).ok
     assert modules.load("sessions", interface=5).ok
-    assert not modules.load("sessions", interface=6).ok
+    assert modules.load("sessions", interface=6).ok
+    assert not modules.load("sessions", interface=7).ok
 
 
 def test_interface_3_adds_retention():
@@ -134,9 +135,15 @@ def test_the_list_answers_through_the_api_over_the_roots_the_process_names(
 
 def test_the_schema_holds_the_roots_the_guards_switch_and_escapes_and_the_recent_time():
     schema = Schema.from_resource("moxi_sessions", "settings.toml")
-    assert list(schema.keys) == ["claude.projects", "codex.sessions", "opencode.database",
-                                 "guard.transcript_read", "guard.transcript_read_escapes",
-                                 "list.recent_s"]
+    assert list(schema.keys) == ["claude.projects", "claude.archives", "codex.sessions",
+                                 "codex.archives", "opencode.database",
+                                 "archives.answer_wait_s", "guard.transcript_read",
+                                 "guard.transcript_read_escapes", "list.recent_s"]
+    for name in ("claude.archives", "codex.archives"):
+        key = schema.keys[name]
+        assert (key.type, key.items, key.default, key.read) == ("list", "str", [], "use")
+    key = schema.keys["archives.answer_wait_s"]
+    assert (key.type, key.default, key.read, key.env) == ("float", 5.0, "use", None)
     key = schema.keys["list.recent_s"]
     assert (key.type, key.default, key.read, key.env) == ("int", 3600, "use", None)
     for name in ("claude.projects", "codex.sessions", "opencode.database"):

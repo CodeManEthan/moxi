@@ -26,6 +26,33 @@ read = "use"
 label = "OpenCode database"
 common = true
 
+[claude.archives]
+type = "list"
+items = "str"
+default = []
+doc = "Folders of older Claude Code transcripts, each laid out as the projects root is (<project>/<session>.jsonl), read after the projects root in the order named; empty by default. A session an earlier folder holds is read from that folder only. sessions never writes, moves or deletes anything in them."
+read = "use"
+label = "Claude Code archive folders"
+line = "Folders of older transcripts, read after the live root; none by default."
+
+[codex.archives]
+type = "list"
+items = "str"
+default = []
+doc = "Folders of older Codex rollouts, each laid out as the sessions root is (YYYY/MM/DD/rollout-...jsonl), read after the sessions root in the order named; empty by default. A thread an earlier folder holds is read from that folder only. sessions never writes, moves or deletes anything in them."
+read = "use"
+label = "Codex archive folders"
+line = "Folders of older rollouts, read after the live root; none by default."
+
+[archives.answer_wait_s]
+type = "float"
+default = 5.0
+doc = "How many seconds a call waits for the archive folders it asks to answer, all tested together; a folder that doesn't answer in time is offline, never empty, and the call goes on without it."
+read = "use"
+label = "Wait for archive folders"
+line = "How long a read waits for the archive folders together before it reads them as offline."
+unit = "seconds"
+
 [guard.transcript_read]
 type = "bool"
 default = false

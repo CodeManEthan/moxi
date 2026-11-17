@@ -14,8 +14,9 @@ writes nothing. `--source` is where the record is read from: the Claude projects
 (default: sessions' root), the Codex sessions directory, or the OpenCode database.
 
 `segment` prints a Claude session's status line segment from the watcher's clock record
-(`cache:12m3s`), nothing when there is none. It installs the render audit hook before it
-loads the segment module, so the render can read and do nothing else.
+(`cache:12m3s`), nothing when there is none. It installs the core's render audit hook
+(`moxi.render`) before it loads the segment module, so the render can read and do nothing
+else.
 
 `watch` runs the watcher in the foreground. `moxi install cache` writes it as a unit of
 the system's supervisor, through the core.
@@ -171,7 +172,8 @@ def line(session: str, clock: Clock) -> str:
 def _segment(args) -> int:
     """Render inside the audit hook. The hook stays for the rest of the process, which
     ends when the render is printed."""
-    from . import render
+    from moxi import render
+
     from .module import SEGMENT
 
     try:

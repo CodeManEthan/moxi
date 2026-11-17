@@ -201,6 +201,38 @@ def whole_workspace(installs, monkeypatch) -> None:
     monkeypatch.setattr(reserved, "declared_names", _DECLARED_NAMES)
 
 
+#: The entry-point group turns reads launch additions from.
+ADDITIONS_GROUP = "moxi.turns.additions"
+
+
+@pytest.fixture(autouse=True)
+def only_comms_additions(monkeypatch) -> None:
+    """turns' launch additions in this test come from comms alone.
+
+    The workspace installs every module together, so a launch would otherwise also carry
+    what any other installed module contributes (memory's tool permissions, say), and a
+    test that reads a launch line word by word would meet them."""
+    from moxi import modules
+
+    real = modules.extensions
+
+    def extensions(group, *args, **kwargs):
+        found = real(group, *args, **kwargs)
+        if group != ADDITIONS_GROUP:
+            return found
+        return [e for e in found if e.name == "comms"]
+
+    monkeypatch.setattr(modules, "extensions", extensions)
+
+
+#: Python a child process runs first, so turns' launch additions in it come from comms
+#: alone, as `only_comms_additions` gives a test.
+ADDITIONS_COMMS_ONLY_PATCH = (
+    "from moxi import modules as _mo; _ex = _mo.extensions; "
+    "_mo.extensions = lambda group, *a, **k: [e for e in _ex(group, *a, **k) "
+    f"if group != {ADDITIONS_GROUP!r} or e.name == 'comms']; ")
+
+
 #: Python a child process runs first, so the reserve step in it sees no module's names,
 #: as `installs` gives a test that adds none.
 RESERVED_NONE_PATCH = ("import moxi_comms.reserved as _rs; "
