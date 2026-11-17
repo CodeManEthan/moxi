@@ -10,6 +10,9 @@
   and still refuses assignment, now with a plain `AttributeError` (`dataclasses`'
   `FrozenInstanceError` was one).
 - `Segment`'s `dim` is keyword-only: `Segment(text, band, age_s, ttl_s, dim=True)`.
+- `records.Watching` is a plain class, not a dataclass, for the same reason: the segment
+  module imports `records`. It keeps its fields, equality, hash and repr, and refuses
+  assignment with a plain `AttributeError`.
 
 ## 0.1.6 (unreleased)
 
