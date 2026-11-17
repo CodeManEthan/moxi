@@ -54,7 +54,11 @@ class Site:
                      requires: tuple[str, ...] = (),
                      extras: dict[str, list[str]] | None = None,
                      direct_url: dict | None = None) -> None:
+        """Install distribution `name` at `version` as a `.dist-info` directory. As an
+        installer does, it first removes every other metadata directory of the same
+        distribution in the site, so the site holds one version of it."""
         info = f"{name.replace('-', '_')}-{version}.dist-info"
+        self.remove_others(name, keep=info)
         self.write(f"{info}/METADATA",
                    metadata(name, version, requires=requires, extras=extras))
         if entry_points:
@@ -64,6 +68,20 @@ class Site:
             import json
 
             self.write(f"{info}/direct_url.json", json.dumps(direct_url))
+
+    def remove_others(self, name: str, *, keep: str) -> None:
+        """Remove each `.dist-info` or `.egg-info` directory in the site, but `keep`, whose
+        name, normalized as `moxi.modules._DistInfo.find` normalizes it, is `name`'s."""
+        import shutil
+
+        wanted = moxi.modules._RUNS.sub("_", name).lower()
+        for child in self.root.iterdir():
+            low = child.name.lower()
+            if child.name == keep or not low.endswith((".dist-info", ".egg-info")):
+                continue
+            dist = child.name[:low.rindex(".")].partition("-")[0]
+            if moxi.modules._RUNS.sub("_", dist).lower() == wanted:
+                shutil.rmtree(child)
 
     def module(self, name: str, *, dist: str | None = None, version: str = "0.1.0",
                package: str | None = None, drop: tuple[str, ...] = (),
