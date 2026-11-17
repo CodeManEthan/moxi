@@ -87,7 +87,11 @@ rebuild running since 2026-11-06 14:03; sessions since then are not in these res
 
 The first shows until the first full read of every harness root has finished (while no
 root has been listed yet it says `N sources read, the rest not listed yet`). The second
-shows while a rebuild runs: a search reads the index from before it.
+shows while a rebuild runs: a search reads the index from before it. A third, `N
+transcript folders not read yet: sessions there are not in these results`, shows while an
+archive folder (below) has never been listed whole by a walk it answered. A folder a walk
+has read before that doesn't answer now is not named on every search, since only what it
+gained since is missing; `status` and the doctor name it.
 
 With no index, or one that can't be read, search exits 1 and says so on stderr, names
 `moxi memory status`, and either says a rebuild is running or names `moxi memory reindex`,
@@ -120,14 +124,30 @@ given time and runs when it ends, or that it runs now or, if an ingest holds mem
 writer lock, as soon as that ingest ends; and `watch it with: moxi memory status`, which
 shows a request still waiting.
 
-`moxi memory reindex` builds a new index from every transcript the harnesses still keep.
-Before it asks it says that a rebuild drops every session whose transcript the harness
-has deleted since memory read it, and that those sessions stay searchable until the
-rebuild ends. Searches keep reading the old index while it runs. When it ends it switches
-to the new index, removes the dropped sessions from the session table, records how many it
-dropped (a harness it didn't list, because its folder couldn't be read or `harnesses`
-leaves it out, keeps its session table rows), and starts one catch-up walk for what was written meanwhile, or the waiting
-request, which reads everything anyway. `--relabel` also derives each session's project
+`moxi memory reindex` builds a new index from every transcript in every folder that
+answers. Before it asks it says that a rebuild drops a session only when its transcript is
+gone from every folder of its harness and every one of those folders answered the
+rebuild, and that those sessions stay searchable until the rebuild ends. It names each
+folder that didn't answer the last run, and why, whose harness's sessions will be kept if
+it still doesn't answer; each folder walked before that sessions' config no longer
+names, whose sessions will leave unless another folder holds them (a misspelt archive key
+shows here); and each folder the last rebuild didn't read, with the advice to run
+`reindex` again once it answers. Searches keep reading the old index while it runs. When
+it ends it switches to the new index, removes the dropped sessions from the session table,
+records how many it dropped and how many it kept, and starts one catch-up walk for what
+was written meanwhile, or the waiting request, which reads everything anyway.
+
+**What a rebuild keeps.** A harness with a folder that didn't answer the rebuild keeps
+every session it read no file for: the rebuild copies the session from the index it
+replaces (rows, tails, read positions and secret-path calls), with today's `harnesses`,
+`index.include_subagents`, `redact.sets` and tier sizes applied to what is copied and the
+session table's label on each row, and keeps its session table row. A session it began
+reading and couldn't finish is taken out of the new index and copied whole the same way. A
+Codex session found only as compressed rollouts, which sessions lists and doesn't read,
+counts as found and is copied too. What needs the transcript itself (a larger size, a set
+taken away, a new tier rule) reaches a kept session only at a rebuild that reads it. A
+harness config `harnesses` leaves out keeps its session table rows, and its rows leave the
+index. `--relabel` also derives each session's project
 label again from its folder where that folder still exists; a session whose folder is gone
 keeps its label.
 
@@ -138,7 +158,10 @@ harness; sources read, and those not read (compressed Codex rollouts); the time 
 was last read and each harness's last walk; the backlog, the sources changed since the
 last walk; whether the first full read has finished; whether a rebuild is running, since
 when and its process id; a request waiting for the writer lock (walk, full read, rebuild
-or relabel) and when it was asked; what the last rebuild dropped; and the session table's
+or relabel) and when it was asked; what the last rebuild dropped and kept; each folder
+that needs saying (one that didn't answer the last run, with why and since when, an
+archive folder not listed whole yet, one the last rebuild didn't read, and one sessions'
+config no longer names); and the session table's
 count by launch kind and by whether a session has an identity, or that memory's state
 store, which holds the session table, can't be read (the index line is apart from it).
 With no index, or one that can't be read, it says so, still prints the rebuild and session lines, names `moxi memory
@@ -207,12 +230,51 @@ runs that work doesn't run it again; a killed rebuild shows in the doctor's `ind
 - A turn of the main loop ended: that session's new lines, at most once a minute per
   session.
 - A session's endpoint is ending: that session to its end, then a catch-up walk.
-- A catch-up walk lists each harness root and reads every transcript changed since the
-  last walk. It is what reads a Codex session started outside turns, and a session killed
-  before it ended.
+- A catch-up walk lists each folder of each harness (its root, then its archive folders)
+  and reads every transcript changed since that folder's last walk. It is what reads a
+  Codex session started outside turns, and a session killed before it ended. A turn's or
+  an endpoint's read asks the root only, and waits on no archive folder.
 - The `ingest` timer, off by default, runs a catch-up walk every hour, for a machine where
   sessions rarely end.
 - `moxi memory ingest`, `moxi memory reindex`, and setup's offer of the first full read.
+
+### Archive folders
+
+Older transcripts can be kept outside a harness's own root, copied out before its cleanup
+deletes them or kept on another disk. They are sessions' feature: name them in sessions'
+`claude.archives` and `codex.archives` (`moxi config sessions`), and memory reads them
+through sessions after the root, a session an earlier folder holds read from that folder
+only. Nothing memory or sessions does writes in an archive folder.
+
+A folder can be offline (an unplugged disk, a network mount that doesn't answer), and
+offline is not gone. A folder **answered** a walk or a rebuild only when it was listed at
+the start, nothing in it failed at any depth (a directory that can't be listed, a file
+that can't be read, a file listed and then gone), and it still answered when sessions
+tested it again just before the run's decision. A folder whose top level lists nothing
+didn't answer while memory has read sessions from it ("lists nothing, though memory read
+N sources from it"), or once any listing showed it holding an entry, a session another
+folder shadows included ("lists nothing, though it held entries at <time>"): an unmounted
+disk can leave its mount point an empty directory, and an archive's copies are mostly
+shadowed, since they were copied out before the harness's cleanup and memory read them
+from the live root. A folder never seen holding anything answers, and so does a root that
+doesn't exist, was never read from and was never seen holding an entry. If you empty an
+archive folder on purpose, take it off sessions' config. Each folder's answer, why it
+didn't answer, since when and its first error are kept in the index, and `status`,
+`reindex` and the doctor's `folders` row show them.
+
+A folder that answered moves its last walk to the walk's start. One that failed during a
+walk moves it too and keeps the paths that failed, which the next walk reads again by
+their session, so one bad file doesn't make every walk list the folder from an old time;
+it stays not answered while any fail. One that was offline keeps its last walk, so the
+next walk it answers lists it from there, and an archive folder first seen offline is
+listed whole once it answers. The first full read finishes on the harness roots, whatever
+the archive folders do.
+
+Each run tests each archive folder twice at most, at its start and before its decision,
+each test one wait (`archives.answer_wait_s` in sessions, 5 s) however many folders don't
+answer. Once a folder answered, a mount that hangs partway can hang the child reading it,
+which then holds the writer lock until the mount answers; a request made meanwhile waits,
+and `status` shows it.
 
 Each transcript's read position is kept in the index beside its rows, so a read carries on
 where the last one stopped, and a row read twice is stored once.
@@ -305,9 +367,22 @@ redacted, where the index keeps only the tool and the path.
 ## How long sessions stay
 
 memory reads transcripts where each harness keeps them, so nothing outlives a harness's
-own cleanup for long. The index is derived from the transcripts, and a session leaves it
-at the first rebuild after its transcript is gone: until you run `moxi memory reindex`, a
-deleted session's rows stay searchable, though `moxi sessions read` can no longer open it.
+own cleanup unless a copy is in an archive folder. The index is derived from the
+transcripts, and a session leaves it at the first rebuild that finds its transcript in no
+folder of its harness while every one of them answers: until you run `moxi memory
+reindex`, a deleted session's rows stay searchable, though `moxi sessions read` can no
+longer open it.
+
+- **A folder that doesn't answer keeps its harness's sessions.** While one folder of a
+  harness is offline, or keeps an error such as a file memory may not read, no rebuild
+  drops a session of that harness, deleted on purpose or not, and there is no other way
+  to take one out. The doctor's `folders` row names the folder and the path.
+- **Claude Code's own cleanup during a rebuild.** Claude Code deletes old transcripts when
+  it starts, and those are the ones a long rebuild reads late. A transcript deleted
+  between the listing and its read is an error in the root, so that rebuild drops no
+  Claude Code session; run `reindex` again, as `status` says.
+- **A session read from an archive copy** loses the lines written after the copy was made
+  once the live file is gone, since it is read from the first folder that holds it.
 
 - **Claude Code** deletes transcripts older than `cleanupPeriodDays` days, set in
   `settings.json` under `${CLAUDE_CONFIG_DIR:-~/.claude}`; unset, 30. To keep sessions
@@ -330,8 +405,8 @@ questions, each answered no unless you type yes; with nobody at the keyboard it 
 nothing, changes nothing, and prints the command for each. Run `moxi install memory` again
 to see it again. In order, it:
 
-1. **Counts the sessions in each harness root** sessions finds, main sessions only, or
-   says why a root has none. When it finds Codex sessions that weren't started through
+1. **Counts the sessions in each harness root and archive folder** sessions finds, main
+   sessions only, or says why a root has none and which archive folders don't answer. When it finds Codex sessions that weren't started through
    turns, it says such a session is read only by a catch-up walk, which runs when some
    other session ends, and that one Codex compresses first is never read; and while the
    timer is off, that the `ingest` timer runs that walk every hour.
@@ -399,8 +474,9 @@ Two sessions share an identity only when comms' qualified names are the same, so
 
 | row | ok | otherwise |
 |---|---|---|
-| `index` | the generation, schema, tokenizer and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped sessions | `warn` with no index yet, or when a rebuild was killed before it finished and none has finished since; `fail` when it can't be read (fix for each: `moxi memory reindex`) |
+| `index` | the generation, schema, tokenizer and row counts; also says when the first full read is still filling it, a rebuild is running, older generations are left to remove, or the last rebuild dropped or kept sessions | `warn` with no index yet, or when a rebuild was killed before it finished and none has finished since; `fail` when it can't be read (fix for each: `moxi memory reindex`) |
 | `ingest` | each harness's last walk and the sources changed since, the same count as status's backlog; a harness with no root here has nothing to read; a request waiting behind a running rebuild, or for less than ten minutes | `warn` with no index yet (fix: `moxi memory reindex`), for a harness root that has no walk yet, for compressed Codex sessions not read, or for a request waiting ten minutes or more with no rebuild running (fix: `moxi memory ingest`, whose child starts it when it ends) |
+| `folders` | each folder of each harness as the last run found it, from the index; it tests none itself | `off` with no index; `warn` for a folder that didn't answer the last run (since when and why: offline, failed during the run with its first error's path, or lists nothing, with which of the two facts holds: the sources memory read from it, or when a listing last showed it holding an entry), an archive folder never listed whole, or one the last rebuild didn't read (fix: make it answer, or take it off sessions' config; its sessions then leave at the next `moxi memory reindex`; for an archive folder that lists nothing, take it off sessions' config if you emptied it on purpose), and for a folder walked before that sessions' config no longer names, whose sessions leave at the next rebuild unless another folder holds them (fix: put it back in sessions' config, or let them go) |
 | `sets` | memory's redaction sets load in secrets | `fail` for a set secrets doesn't have (fix: the `moxi config` line that removes it) or can't run, which stops every ingest; `off` when memory's config can't be read |
 | `start` | memory is on turns' start list for each harness it reads, and its listener rows import | `warn` when it is off the list; `fail` when a row doesn't import |
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
@@ -421,8 +497,9 @@ failed ingest child.
   `session_id`, always the main session's, `agent_id` on a subagent's hit, `time`,
   `project`, `kind`, `tier`, `snippet`, `key`, `score` and `failed`), `rows` (how many rows
   were searched), `tokens`, `filling` (a `Filling(read, listed)` while the first full read
-  hasn't finished, else None), `rebuilding` (a running rebuild's start time, else None)
-  and `generation`. With no index it raises `IndexMissing`, with one that can't be read
+  hasn't finished, else None), `rebuilding` (a running rebuild's start time, else None),
+  `unread` (the archive folders no walk they answered has listed whole) and
+  `generation`. With no index it raises `IndexMissing`, with one that can't be read
   `IndexUnreadable`, and with a state store that can't be read `StateUnreadable`, a kind
   of `IndexUnreadable`; it never answers any of them with an empty result.
 - `status() -> Status`: what `moxi memory status` prints, as fields. It doesn't raise for

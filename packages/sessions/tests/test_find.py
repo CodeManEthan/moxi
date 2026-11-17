@@ -126,6 +126,7 @@ def test_found_as_dict(projects):
     path = transcript(projects).write()
     data = find("claude", SESSION, root=projects).as_dict()
     assert data == {"harness": "claude", "session_id": SESSION, "found": True,
+                    "unknown": False,
                     "hits": [{"path": str(path), "session_id": SESSION, "agent_id": None,
                               "compressed": False}],
                     "probes": [{"root": str(projects), "outcome": HIT,

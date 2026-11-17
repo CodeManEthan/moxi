@@ -167,7 +167,8 @@ def test_root_names_claude_config_dir(env, capsys, monkeypatch, tmp_path):
     assert code == 0
     assert json.loads(out)["claude"] == {"root": str(tmp_path / "cfg" / "projects"),
                                          "source": "environment",
-                                         "detail": "CLAUDE_CONFIG_DIR/projects"}
+                                         "detail": "CLAUDE_CONFIG_DIR/projects",
+                                         "archives": []}
 
 
 def test_root_names_codex_home_and_xdg_data_home(env, capsys, monkeypatch, tmp_path):
@@ -176,10 +177,12 @@ def test_root_names_codex_home_and_xdg_data_home(env, capsys, monkeypatch, tmp_p
     data = json.loads(run(capsys, "root", "--json")[1])
     assert set(data) == {"shape", "claude", "codex", "opencode"}
     assert data["codex"] == {"root": str(tmp_path / "codex" / "sessions"),
-                             "source": "environment", "detail": "CODEX_HOME/sessions"}
+                             "source": "environment", "detail": "CODEX_HOME/sessions",
+                             "archives": []}
     assert data["opencode"] == {"root": str(tmp_path / "data" / "opencode" / "opencode.db"),
                                 "source": "environment",
-                                "detail": "XDG_DATA_HOME/opencode/opencode.db"}
+                                "detail": "XDG_DATA_HOME/opencode/opencode.db",
+                                "archives": []}
 
 
 def test_root_names_the_config_file(env, capsys, own_config, tmp_path):

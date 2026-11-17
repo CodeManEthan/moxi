@@ -10,7 +10,9 @@
 and under them one `moxi sessions read` command that opens the first hit's session
 around its time. A search that ran exits 0, also with no hit ("no match in N rows"), and
 adds one line for each state it can see that leaves its answer incomplete: the first
-full read still filling, or a rebuild running. A missing or unreadable index exits 1
+full read still filling, a rebuild running, or archive folders no walk has listed whole
+yet. A folder a walk read before that doesn't answer now isn't named on every search;
+`status` and the doctor name it. A missing or unreadable index exits 1
 with what to run; so does a state store that can't be read, naming the store.
 
 `ingest` and `reindex` only start the detached ingest child and exit 0 at once, with the
@@ -19,13 +21,16 @@ with what to run; so does a state store that can't be read, naming the store.
 What either asks for is recorded, so another ingest holding memory's writer lock delays
 it but doesn't lose it. Neither command touches that lock, so neither says the work
 started: each says it is queued behind a running rebuild, or that it runs now or once the
-ingest holding the lock ends. `reindex` builds a new index from every transcript the
-harnesses still keep, and `--relabel` derives each session's project label again where
-its folder still exists.
+ingest holding the lock ends. `reindex` builds a new index from every transcript in every
+folder that answers (each harness's live root and archive folders), keeps the sessions
+of a harness with a folder that doesn't answer, and says so first, naming each folder that
+didn't answer the last run and each one sessions' config no longer names. `--relabel`
+derives each session's project label again where its folder still exists.
 
 `status` prints the index's rows, reads and backlog, whether the first full read has
 finished, whether a rebuild is running, a request waiting, the session table's counts
-and what the last rebuild dropped. It exits 1 when there is no index, or one that can't
+what the last rebuild dropped and kept, and each folder as the last run found it. It
+exits 1 when there is no index, or one that can't
 be read.
 """
 
@@ -114,6 +119,10 @@ def incomplete(result) -> list[str]:
                  else "a moment ago")
         lines.append(f"rebuild running since {since}; sessions since then are not in "
                      "these results")
+    if result.unread:
+        n = len(result.unread)
+        lines.append(f"{n} transcript folder{'' if n == 1 else 's'} not read yet: "
+                     "sessions there are not in these results")
     return lines
 
 
@@ -166,7 +175,8 @@ def _search(args, out, prog: str) -> int:
             "filling": (None if result.filling is None else
                         {"sources_read": result.filling.read,
                          "listed": result.filling.listed}),
-            "rebuild_started_at": result.rebuilding, "top_read_command": first,
+            "rebuild_started_at": result.rebuilding, "unread": list(result.unread),
+            "top_read_command": first,
             "notes": notes,
         }), file=out)
         return codes.OK
@@ -215,15 +225,32 @@ def _ingest(args, out, prog: str) -> int:
 def _reindex(args, out, prog: str) -> int:
     from . import start
 
-    print("A rebuild drops every session whose transcript the harness has deleted since "
-          "memory read it; until the rebuild ends, those sessions stay searchable.",
-          file=out)
+    print("A rebuild drops each session whose transcript is gone from every folder of its "
+          "harness, and only when every folder of that harness answers it; until the "
+          "rebuild ends, those sessions stay searchable. A harness with a folder that "
+          "doesn't answer keeps all its sessions.", file=out)
+    for line in _last_run_lines():
+        print(line, file=out)
     if args.relabel:
         print("--relabel derives each session's project label again where its folder "
               "still exists; a session whose folder is gone keeps its label.", file=out)
     _asked("a relabel" if args.relabel else "a rebuild",
            lambda: start.start_rebuild(relabel=args.relabel), out)
     return codes.OK
+
+
+def _last_run_lines() -> list[str]:
+    """`roots.lines` for the folders the last run recorded, said against sessions'
+    config now; none when there is no index to read."""
+    from . import roots, index
+    from . import status as stat
+
+    try:
+        with index.open_read() as reader:
+            records = roots.read_all(reader.conn)
+    except (index.IndexMissing, index.IndexUnreadable):
+        return []
+    return roots.lines(stat.against_config(records))
 
 
 def _counts(by: dict) -> str:
@@ -285,7 +312,21 @@ def _status(args, out, prog: str) -> int:
             print("last rebuild: none yet", file=out)
         else:
             print(f"last rebuild: started {show(s.rebuilt)}, dropped "
-                  f"{s.dropped or 0} sessions whose transcript was gone", file=out)
+                  f"{s.dropped or 0} sessions whose transcript was gone, kept "
+                  f"{s.kept or 0} it couldn't read", file=out)
+        from . import roots
+
+        records = {h: [roots.Root.from_json(r) for r in recs]
+                   for h, recs in s.roots.items()}
+        lines = roots.lines(records)
+        count = sum(len(recs) for recs in records.values())
+        if not lines:
+            print(f"folders: {count} answered the last run" if count else
+                  "folders: none walked yet", file=out)
+        else:
+            print("folders:", file=out)
+            for line in lines:
+                print(f"  {line}", file=out)
     sessions = s.sessions
     if s.sessions_unreadable is not None:
         print(f"sessions: the state store can't be read ({s.sessions_unreadable})",

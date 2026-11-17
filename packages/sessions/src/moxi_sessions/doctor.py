@@ -1,5 +1,6 @@
 """sessions' doctor checks, `rows()`, which the announcement's `DOCTOR` names: one row per
-harness root, then `retention`, each harness's transcript retention as set.
+harness root, then `archives`, whether each archive folder answers, then `retention`, each
+harness's transcript retention as set, then `guard`.
 
 * `ok`: the root is readable. For Codex the imports file beside the sessions root is
   readable too, or absent (an absent one means the user never imported). For OpenCode the
@@ -8,6 +9,13 @@ harness root, then `retention`, each harness's transcript retention as set.
   or parsed; a root a config key names is missing; the config file cannot be read.
 * `off`: the harness's root is absent and no config key names it, so the harness is not
   used here.
+
+The `archives` row names each archive folder sessions' config gives (`claude.archives`,
+`codex.archives`), tested together within one `archives.answer_wait_s`:
+
+* `off`: none is configured.
+* `ok`: each answers.
+* `warn`: one or more doesn't, each named with why; or the config file cannot be read.
 
 The `retention` row (`retention.retention()`) is `ok` with each harness's setting in its
 detail, and `warn` when a harness's settings file can't be read, Codex's compression
@@ -125,6 +133,34 @@ def check(harness: str) -> Row:
     return _opencode(origin.path, origin.detail)
 
 
+#: The fix the `archives` row's warning names.
+ARCHIVES_FIX = "make it answer, or take it off claude.archives/codex.archives"
+
+
+def archives_row() -> Row:
+    """The archive folders: `off` with none configured, `ok` when each answers, `warn`
+    naming each that doesn't."""
+    from .archives import ARCHIVE_KEYS, archive_answers, archive_dirs
+
+    try:
+        named = [(harness, archive_dir) for harness in ARCHIVE_KEYS
+                 for archive_dir in archive_dirs(harness)]
+        said = archive_answers([archive_dir for _, archive_dir in named]) if named else {}
+    except ConfigError as exc:
+        return Row(MODULE, "archives", "warn",
+                   f"the archive folders cannot be named: the config file cannot be read "
+                   f"({exc})", "moxi config sessions")
+    if not named:
+        return Row(MODULE, "archives", "off",
+                   "no archive folder is configured (claude.archives, codex.archives)")
+    bad = [f"{harness} {archive_dir} doesn't answer: {said[archive_dir].reason}"
+           for harness, archive_dir in named if not said[archive_dir].ok]
+    if bad:
+        return Row(MODULE, "archives", "warn", "; ".join(bad), ARCHIVES_FIX)
+    return Row(MODULE, "archives", "ok", "each archive folder answers: " + ", ".join(
+        f"{harness} {archive_dir}" for harness, archive_dir in named))
+
+
 def retention_row() -> Row:
     """Each harness's transcript retention as set, in one row."""
     from .retention import retention
@@ -145,7 +181,7 @@ def guard_row(env=None) -> Row:
     on and nothing does, or on a fault."""
     import moxi.modules
 
-    from .readguard import GUARD_ID, SWITCH, transcript_roots
+    from .readguard import GUARD_ID, SWITCH, archive_roots, transcript_roots
     from .settings import current
 
     try:
@@ -174,6 +210,7 @@ def guard_row(env=None) -> Row:
                    f"reports: {problem}")
     try:
         roots = sorted({r for _, r in transcript_roots(env)})
+        roots += [archive_dir for _, archive_dir in archive_roots() if archive_dir not in roots]
     except ConfigError as exc:
         return Row(MODULE, "guard", "warn",
                    f"the transcript-read guard is on ({on}) but its roots cannot be named: "
@@ -202,11 +239,13 @@ def _in_turns(guard_id: str, env) -> tuple[object | None, str | None]:
 
 def rows() -> Iterator[Row]:
     """One row per harness root, in the order Claude Code, Codex, OpenCode, then
-    `retention` and `guard`."""
+    `archives`, `retention` and `guard`."""
     for harness in HARNESSES:
         yield check(harness)
+    yield archives_row()
     yield retention_row()
     yield guard_row()
 
 
-__all__ = ["rows", "check", "retention_row", "guard_row", "GUARD_FIX", "MODULE"]
+__all__ = ["rows", "check", "archives_row", "retention_row", "guard_row", "GUARD_FIX",
+           "ARCHIVES_FIX", "MODULE"]

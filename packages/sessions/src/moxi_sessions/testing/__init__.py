@@ -14,13 +14,18 @@ No line a builder writes is cut from a real record.
   transaction.
 * `today_at`: a time for a record a test means to be today that stays on today's local
   date in the first minutes after midnight.
+* `archive_tests` and `forget_archive_answers`: how sessions tests archive folders, held
+  by a test for a block (never answering, a keep time, a callback as each test starts, a
+  stand-in answer), and forgetting the answers this process kept.
 """
 
 from .claude import ClaudeRequest, ClaudeTranscript, usage
 from .codex import CodexRollout, rate_limits, spawn_meta, token_usage, write_imports
+from .archives import NEVER_ANSWERS, archive_tests, forget_archive_answers
 from .opencode import OpenCodeDb
 from .today import today_at
 
 __all__ = ["ClaudeTranscript", "ClaudeRequest", "usage"]
 __all__ += ["CodexRollout", "token_usage", "rate_limits", "write_imports", "spawn_meta"]
 __all__ += ["OpenCodeDb", "today_at"]
+__all__ += ["archive_tests", "forget_archive_answers", "NEVER_ANSWERS"]
