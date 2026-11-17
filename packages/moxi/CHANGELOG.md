@@ -15,7 +15,7 @@
   Importing it loads no `urllib.parse`; only the check of a `sqlite3.connect`
   URI does.
 - The catalogue lists statusline, the Claude Code status line, marked `unreleased`.
-  Its version is 6.
+  Its version is 7.
 - New `moxi.config.set_many(module, changes, by=, base=)`: several keys set in one write,
   checked once as a whole, so keys bound to each other move together; any refusal writes
   nothing. New `moxi.config.draft_text(module, changes, base=)`: the text `set_many`

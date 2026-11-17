@@ -29,7 +29,7 @@ def text(version=2, extra=""):
 
 def test_the_shipped_catalogue_lists_every_first_party_module():
     shipped = catalogue.shipped()
-    assert shipped.version == 6 and shipped.source == "shipped"
+    assert shipped.version == 7 and shipped.source == "shipped"
     assert shipped.names() == ["cache", "comms", "connector", "launcher", "loadout", "memory",
                                "notes", "projects", "publishing", "repo", "rounds",
                                "secrets", "services", "sessions", "slots", "statusline",

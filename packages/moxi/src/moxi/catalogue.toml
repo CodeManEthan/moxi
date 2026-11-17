@@ -6,7 +6,7 @@
 # with its release tag): `moxi install` then wants `--from`. The core release after a
 # module's first release drops its mark. Every module on the workspace's not-ready list is
 # marked.
-version = 6
+version = 7
 
 [[module]]
 name = "cache"
