@@ -240,17 +240,17 @@ def _reindex(args, out, prog: str) -> int:
 
 
 def _last_run_lines() -> list[str]:
-    """`folders.lines` for the folders the last run recorded, said against sessions'
+    """`roots.lines` for the folders the last run recorded, said against sessions'
     config now; none when there is no index to read."""
-    from . import folders, index
+    from . import roots, index
     from . import status as stat
 
     try:
         with index.open_read() as reader:
-            records = folders.read_all(reader.conn)
+            records = roots.read_all(reader.conn)
     except (index.IndexMissing, index.IndexUnreadable):
         return []
-    return folders.lines(stat.against_config(records))
+    return roots.lines(stat.against_config(records))
 
 
 def _counts(by: dict) -> str:
@@ -314,11 +314,11 @@ def _status(args, out, prog: str) -> int:
             print(f"last rebuild: started {show(s.rebuilt)}, dropped "
                   f"{s.dropped or 0} sessions whose transcript was gone, kept "
                   f"{s.kept or 0} it couldn't read", file=out)
-        from . import folders
+        from . import roots
 
-        records = {h: [folders.Folder.from_json(r) for r in recs]
-                   for h, recs in s.folders.items()}
-        lines = folders.lines(records)
+        records = {h: [roots.Root.from_json(r) for r in recs]
+                   for h, recs in s.roots.items()}
+        lines = roots.lines(records)
         count = sum(len(recs) for recs in records.values())
         if not lines:
             print(f"folders: {count} answered the last run" if count else

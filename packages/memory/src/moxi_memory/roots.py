@@ -2,7 +2,7 @@
 
 A harness's folders are its live root and the archive folders sessions' config names for
 it, read through `moxi_sessions.api.corpus`. A run (one walk or one rebuild, in one ingest
-child) records, for each folder it lists, one `Folder` under the meta key
+child) records, for each folder it lists, one `Root` under the meta key
 `folders.<harness>`, a JSON list in the order sessions lists them.
 
 **A folder answered a run only when the run listed it, every listing and every read of it
@@ -43,7 +43,7 @@ EMPTY = "empty"
 
 
 @dataclass
-class Folder:
+class Root:
     """One folder's record. Times are seconds since the epoch."""
 
     path: str
@@ -68,7 +68,7 @@ class Folder:
         return out
 
     @classmethod
-    def from_json(cls, data: dict[str, Any]) -> Folder:
+    def from_json(cls, data: dict[str, Any]) -> Root:
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         first = known.get("first_error")
         known["first_error"] = tuple(first) if isinstance(first, list) and len(first) == 2 \
@@ -93,7 +93,7 @@ class Folder:
         return f"offline{since}: {self.reason or 'no answer'}"
 
 
-def read(conn, harness: str) -> list[Folder]:
+def read(conn, harness: str) -> list[Root]:
     """`harness`'s folder records in `conn`'s generation, or none."""
     row = conn.execute("SELECT value FROM meta WHERE key = ?",
                        (PREFIX + harness,)).fetchone()
@@ -103,12 +103,12 @@ def read(conn, harness: str) -> list[Folder]:
         data = json.loads(row[0])
     except ValueError:
         return []
-    return [Folder.from_json(item) for item in data if isinstance(item, dict)]
+    return [Root.from_json(item) for item in data if isinstance(item, dict)]
 
 
-def read_all(conn) -> dict[str, list[Folder]]:
+def read_all(conn) -> dict[str, list[Root]]:
     """Every harness's folder records in `conn`'s generation."""
-    out: dict[str, list[Folder]] = {}
+    out: dict[str, list[Root]] = {}
     for (key,) in conn.execute("SELECT key FROM meta WHERE key LIKE 'folders.%' "
                                "ORDER BY key"):
         harness = key[len(PREFIX):]
@@ -116,7 +116,7 @@ def read_all(conn) -> dict[str, list[Folder]]:
     return out
 
 
-def write(conn, harness: str, records: list[Folder]) -> None:
+def write(conn, harness: str, records: list[Root]) -> None:
     conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) "
                  "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                  (PREFIX + harness, json.dumps([r.to_json() for r in records])))
@@ -133,10 +133,10 @@ def held(conn, harness: str, root: str) -> int:
         (harness, root, len(root) + 1, root + "/", len(root) + 1, root + "#")).fetchone()[0]
 
 
-def not_read_yet(records: dict[str, list[Folder]]) -> list[str]:
+def not_read_yet(records: dict[str, list[Root]]) -> list[str]:
     """The archive folders sessions' config names that no run they answered has listed
     whole: sessions there are not in the index yet."""
-    return [r.path for folders in records.values() for r in folders
+    return [r.path for recs in records.values() for r in recs
             if r.is_archive and r.in_config and not r.listed_whole]
 
 
@@ -144,7 +144,7 @@ def lines(records) -> list[str]:
     """One line for each folder that needs saying: one that didn't answer the last run
     (and why, since when), an archive folder no run has listed whole, a folder the last
     rebuild didn't read, and one walked before that sessions' config no longer names.
-    `records` maps a harness to its `folders.Folder` list."""
+    `records` maps a harness to its `roots.Root` list."""
     from .clock import show
 
     out = []
@@ -171,5 +171,5 @@ def lines(records) -> list[str]:
     return out
 
 
-__all__ = ["PREFIX", "OFFLINE", "FAILED", "EMPTY", "Folder", "read", "read_all", "write",
+__all__ = ["PREFIX", "OFFLINE", "FAILED", "EMPTY", "Root", "read", "read_all", "write",
            "held", "not_read_yet", "lines"]

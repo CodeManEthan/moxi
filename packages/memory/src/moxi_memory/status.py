@@ -11,7 +11,7 @@ will look at and leave out (a subagent while `index.include_subagents` is off, a
 thread) may be counted until that walk has run. The backlog counts the live roots only:
 an archive folder is counted by asking sessions to test it, which a read never waits for.
 
-`folders` is each folder of each harness as the last run found it (`moxi_memory.folders`),
+`roots` is each folder of each harness as the last run found it (`moxi_memory.roots`),
 read from the index, with each one's `in_config` said against sessions' config as it is
 now. Nothing here tests a folder.
 """
@@ -64,8 +64,8 @@ class Status:
     - `dropped`: how many sessions the last rebuild dropped; `kept`: how many it kept
       without reading them, from a folder that didn't answer it or a compressed
       rollout; `rebuilt`: when it started.
-    - `folders`: per harness, each folder's record as the last run left it
-      (`moxi_memory.folders.Folder.to_json`), `in_config` as sessions' config is now.
+    - `roots`: per harness, each folder's record as the last run left it
+      (`moxi_memory.roots.Root.to_json`), `in_config` as sessions' config is now.
 
     Times are seconds since the epoch.
     """
@@ -90,7 +90,7 @@ class Status:
     dropped: int | None = None
     kept: int | None = None
     rebuilt: float | None = None
-    folders: dict[str, list[dict[str, object]]] = field(default_factory=dict)
+    roots: dict[str, list[dict[str, object]]] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, object]:
         """The status as plain JSON values. `rebuilding` is written `rebuild_started_at`,
@@ -161,13 +161,13 @@ def _sessions_of(conn, schema: str) -> dict[str, object]:
 
 
 def against_config(records):
-    """`records` (harness to `folders.Folder` list) with each one's `in_config` said
+    """`records` (harness to `roots.Root` list) with each one's `in_config` said
     against sessions' config now, plus a record for each archive folder the config names
     that no run has listed yet. A harness whose config can't be read is left as
     recorded. Asks sessions for its folders' names only; tests none."""
     from moxi_sessions import api
 
-    from . import folders
+    from . import roots
 
     out = {}
     for harness, recs in records.items():
@@ -181,7 +181,7 @@ def against_config(records):
         for rec in recs:
             rec.in_config = rec.path in named
         known = {r.path for r in recs}
-        out[harness] = list(recs) + [folders.Folder(p, is_archive=True)
+        out[harness] = list(recs) + [roots.Root(p, is_archive=True)
                                      for p in archive_dirs if p not in known]
     return out
 
@@ -276,12 +276,12 @@ def status(env: Mapping[str, str] | None = None, *, with_backlog: bool = True) -
             out.tokenizer = meta.get("tokenizer")
             out.dropped = _number(meta.get("dropped"), int)
             out.kept = _number(meta.get("kept"), int)
-            from . import folders
+            from . import roots
 
-            records = folders.read_all(conn)
+            records = roots.read_all(conn)
             if with_backlog:
                 records = against_config(records)
-            out.folders = {h: [r.to_json() for r in recs] for h, recs in records.items()}
+            out.roots = {h: [r.to_json() for r in recs] for h, recs in records.items()}
             out.rebuilt = _number(meta.get("rebuilt"))
             try:
                 if reader.attach_state(STATE):

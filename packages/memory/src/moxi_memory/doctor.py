@@ -58,7 +58,8 @@ def rows() -> Iterator[Row]:
         config = None
     harnesses = tuple(config["harnesses"]) if config else settings.HARNESSES
     checks = (("index", _index, ()), ("ingest", _ingest, (harnesses,)),
-              ("folders", _folders, (harnesses,)), ("sets", _sets, (config,)), ("start", _start, (harnesses,)),
+              ("folders", _roots_row, (harnesses,)), ("sets", _sets, (config,)),
+              ("start", _start, (harnesses,)),
               ("sessions", _sessions, ()), ("links", _links, ()),
               ("retention", _retention, (harnesses,)))
     for name, check, args in checks:
@@ -175,24 +176,24 @@ def _ingest(harnesses) -> Row:
 
 
 #: The fix for a folder that didn't answer, or was never listed whole.
-FOLDER_FIX = ("make it answer, or take it off sessions' config; its sessions then leave at "
+ANSWER_FIX = ("make it answer, or take it off sessions' config; its sessions then leave at "
               "the next `moxi memory reindex`")
 #: The fix for a folder walked before that sessions' config no longer names.
 REMOVED_FIX = "put it back in sessions' config, or let them go"
 
 
-def _folders(harnesses) -> Row:
+def _roots_row(harnesses) -> Row:
     """Each folder as the last run found it, from the index; tests no folder."""
-    from . import folders, index, status
+    from . import roots, index, status
 
     try:
         with index.open_read() as reader:
-            records = folders.read_all(reader.conn)
+            records = roots.read_all(reader.conn)
     except (index.IndexMissing, index.IndexUnreadable):
         return Row(MODULE, "folders", "off", "no index yet, so no folder has been walked")
     records = status.against_config({h: records.get(h, []) for h in harnesses
                                      if h in records})
-    lines = folders.lines(records)
+    lines = roots.lines(records)
     count = sum(len(recs) for recs in records.values())
     if not lines:
         return Row(MODULE, "folders", "ok",
@@ -202,7 +203,7 @@ def _folders(harnesses) -> Row:
     if any(r.in_config for recs in records.values() for r in recs
            if not r.answered or (r.is_archive and not r.listed_whole)
            or r.missed_rebuild_at is not None):
-        fixes.append(FOLDER_FIX)
+        fixes.append(ANSWER_FIX)
     if any(not r.in_config for recs in records.values() for r in recs):
         fixes.append(f"for a folder no longer named: {REMOVED_FIX}")
     return Row(MODULE, "folders", "warn", "; ".join(lines), "; ".join(fixes) or None)

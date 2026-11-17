@@ -312,9 +312,9 @@ def search(query: str, *, project: str | None = None,
                     found += _hits(conn, table, match(tokens), filters, limit)
                 rows += _count(conn, table, filters)
             fill = filling(conn)
-            from . import folders
+            from . import roots
 
-            unread = tuple(folders.not_read_yet(folders.read_all(conn)))
+            unread = tuple(roots.not_read_yet(roots.read_all(conn)))
         except sqlite3.DatabaseError as exc:
             raise IndexUnreadable(f"{reader.path}: {exc}") from None
         generation = reader.generation
