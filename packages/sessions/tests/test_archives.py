@@ -166,6 +166,49 @@ def test_find_without_archives_and_sources_ask_the_live_root_only_and_test_nothi
     assert spawned == []
 
 
+def test_an_archive_written_with_a_trailing_slash_is_one_archive_dir(home, own_config):
+    one = arch(home, "claude", 1)
+    configure(own_config, home, claude=[f"{one}/", f"{one}//.", str(one)], codex=[])
+    assert archives.archive_dirs("claude") == (str(one),)
+    old = time.time() - 86400 * 30
+    session(one, "claude", TWO, mtime=old)
+    listings = find.corpus("claude", since={str(one): old + 60})
+    assert [listing.root for listing in listings] == [str(live(home, "claude")), str(one)]
+    assert listings[1].ok and ids(listings[1]) == []        # its last walk was taken
+    assert find.find("claude", TWO, include_archives=True).found
+
+
+def test_the_testing_hold_on_archive_tests_is_put_back(home):
+    from moxi_sessions import api
+    from moxi_sessions.testing import archive_tests, forget_archive_answers
+
+    one, two = str(arch(home, "claude", 1)), str(arch(home, "claude", 2))
+    started: list[str] = []
+    real = (archives._argv, archives._spawn, archives.KEEP_S, archives.archive_answers)
+    api_had = vars(api).get("archive_answers")
+
+    def asleep(archive_dir, *, fresh):
+        return None if fresh or archive_dir != one else archives.ArchiveAnswer(
+            archive_dir, ok=False, reason="asleep")
+
+    with archive_tests(keep_s=0, on_test=started.append, stand_in=asleep):
+        said = api.archive_answers([one, two])
+        assert not said[one].ok and said[one].reason == "asleep" and said[two].ok
+        assert started == [two]
+        listings = find.corpus("claude")
+        assert not listings[1].ok and "asleep" in listings[1].reason
+        assert api.archive_answers([one], fresh=True)[one].ok
+        assert started == [two, two, one]                 # nothing kept
+    with archive_tests(never_answer=True):
+        assert "no answer" in archives.archive_answers([one], wait_s=0.3)[one].reason
+    assert (archives._argv, archives._spawn, archives.KEEP_S,
+            archives.archive_answers) == real
+    assert vars(api).get("archive_answers") is api_had
+    archives.archive_answers([one])
+    forget_archive_answers()
+    assert archives._kept == {}
+
+
 def test_a_kept_answer_tests_each_dir_once(home, spawned):
     find.corpus("claude")
     find.find("claude", THREE, include_archives=True)

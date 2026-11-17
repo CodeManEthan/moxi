@@ -398,8 +398,9 @@ transcript root: Claude Code's Read, Grep and Glob, and a shell command on Claud
 Codex. A shell command is split into simple commands, each judged on its own, and one is
 refused when one of its words is such a path. The refusal points the agent to `moxi
 sessions read <session>`. The roots are each harness's root, the configured one included,
-and each archive folder. An archive folder is compared by its path as written and is never
-resolved, so judging a call touches no archive folder.
+and each archive folder. An archive folder is compared by its path as written, with a
+trailing `/`, `//`, `.` and `x/..` folded by the text alone, and is never resolved, so
+judging a call touches no archive folder.
 
 A simple command that runs this environment's own `moxi sessions` passes whatever paths it
 names. The command after it on the same line is judged on its own, so `moxi sessions root;

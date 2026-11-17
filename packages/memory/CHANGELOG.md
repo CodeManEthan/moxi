@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- Archive folders: memory reads every folder sessions names for a harness, its live root
+  and then its archive folders (`claude.archives`, `codex.archives`), each from its own
+  last walk. A folder that is offline, fails at any depth during a run, or fails the test
+  just before the run's decision didn't answer that run; nor does one whose top level
+  lists nothing while memory read sources from it or a listing once showed it holding an
+  entry, since an unmounted disk can leave its mount point an empty directory. A rebuild
+  drops a session only when every folder of its harness answered; otherwise it keeps the
+  session's rows, under today's settings and labels, and its session-table row. Offline is
+  not gone. Each folder's answer is kept in the index.
+- The doctor's new `folders` row names each folder that didn't answer the last run (why,
+  since when, its first error), an archive folder never listed whole, and one sessions'
+  config no longer names. `status --json` gains `roots` and `kept`. A search names the
+  archive folders not read yet in `unread` and one line; `reindex` says when a rebuild
+  drops a session and names each folder that didn't answer the last run, and `status`
+  says what the last rebuild kept. Callers that compared those documents whole
+  must allow the new keys. memory needs the sessions release with archive folders
+  (interface 6).
+
 ## 0.1.0 (2026-11-08)
 
 The first public release.

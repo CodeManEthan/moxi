@@ -333,8 +333,8 @@ def _pick(found):
 
 
 def _offline(asked, asked_dirs) -> list[str]:
-    """`folder (why)` for each archive folder in `folders` that was asked and didn't
-    answer."""
+    """`folder (why)` for each archive folder in `asked_dirs` that one of the finds in
+    `asked` probed and that didn't answer."""
     return [f"{probe.root} ({probe.outcome.partition(': ')[2] or probe.outcome})"
             for found in asked for probe in found.probes
             if probe.root in asked_dirs and probe.outcome.startswith(claude.UNREADABLE)]

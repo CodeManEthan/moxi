@@ -74,7 +74,8 @@ print("empty" if first is None else "entries")
 class ArchiveAnswer:
     """One archive folder's answer test.
 
-    * `archive_dir`: the folder as configured, `~` expanded and nothing resolved.
+    * `archive_dir`: the folder as asked for (`archive_dirs` gives each as configured,
+      `~` expanded and normalized by its text alone, no link resolved).
     * `ok`: it was listed within the wait.
     * `reason`: why it is offline, else None.
     * `empty`: it answered and its top level holds no entry at all. A disk that isn't
@@ -94,8 +95,10 @@ class ArchiveAnswer:
 
 def archive_dirs(harness: str) -> tuple[str, ...]:
     """`harness`'s archive folders as sessions' config names them, in order, `~` expanded
-    and nothing resolved; none for OpenCode. A folder named twice is kept once. Raises
-    `moxi.config.ConfigError` when the config file cannot be read."""
+    and normalized by their text alone (a trailing `/`, `//` and `.` dropped, `x/..`
+    folded), no link resolved; none for OpenCode. A folder named twice, in either
+    spelling, is kept once. Raises `moxi.config.ConfigError` when the config file cannot
+    be read."""
     key = ARCHIVE_KEYS.get(harness)
     if key is None:
         return ()
@@ -103,7 +106,7 @@ def archive_dirs(harness: str) -> tuple[str, ...]:
 
     out: list[str] = []
     for item in current()[key]:
-        path = os.path.expanduser(item) if item.startswith("~") else item
+        path = os.path.normpath(os.path.expanduser(item) if item.startswith("~") else item)
         if path not in out:
             out.append(path)
     return tuple(out)

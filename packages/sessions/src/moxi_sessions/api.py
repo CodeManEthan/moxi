@@ -49,7 +49,7 @@ Archive folders (interface 6; `moxi_sessions.archives` says how a folder answers
 
 * `archive_dirs(harness)`: the archive folders sessions' config names for a harness, in
   order (`claude.archives`, `codex.archives`; none for OpenCode).
-* `archive_answers(folders, *, fresh=False, wait_s=None)`: whether each folder answers
+* `archive_answers(paths, *, fresh=False, wait_s=None)`: whether each folder answers
   now (`ArchiveAnswer`: `ok`, `reason`, `empty`), all tested together within one
   `archives.answer_wait_s`; `fresh` takes no answer this process kept.
 
@@ -95,8 +95,10 @@ process has read; a caller in another process pays its own cold reads on its fir
 Writing records for tests:
 
 * `testing`: the builders other modules' tests write harness records with
-  (`ClaudeTranscript`, `CodexRollout`, `OpenCodeDb`; see `moxi_sessions.testing`). A test
-  reaches them through this module, as it reaches every other name sessions offers.
+  (`ClaudeTranscript`, `CodexRollout`, `OpenCodeDb`), and `archive_tests` and
+  `forget_archive_answers`, which hold how sessions tests archive folders for a test's
+  block (see `moxi_sessions.testing`). A test reaches them through this module, as it
+  reaches every other name sessions offers.
 
 Each harness's mapping, and the line reads under the records:
 

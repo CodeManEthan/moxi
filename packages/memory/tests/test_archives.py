@@ -5,15 +5,15 @@ status, reindex's words and the doctor's folders row."""
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
-from moxi_sessions import api, archives
+from moxi_sessions import api
 from test_ingest import NO_LAUNCHER, TOKEN, claude, config, run, texts
 
 from moxi_memory import cli, doctor, index, ingest, roots, search, state, status, table
@@ -29,14 +29,14 @@ WAIT_S = 0.6
 def arch(tmp_path, monkeypatch) -> Path:
     """One Claude archive folder and one Codex archive folder, named in a sessions config
     of the test's own."""
-    archives.forget()
+    T.forget_archive_answers()
     base = tmp_path / "arch"
     for name in ("claude", "codex"):
         (base / name).mkdir(parents=True)
     monkeypatch.setenv("MOXI_SESSIONS_CONFIG_HOME", str(tmp_path / "sessions-config"))
     configure(tmp_path, claude=[str(base / "claude")], codex=[str(base / "codex")])
     yield base
-    archives.forget()
+    T.forget_archive_answers()
 
 
 def configure(tmp_path, *, claude=(), codex=(), text=None):
@@ -46,13 +46,21 @@ def configure(tmp_path, *, claude=(), codex=(), text=None):
         f"[claude]\narchives = {json.dumps(list(claude))}\n"
         f"[codex]\narchives = {json.dumps(list(codex))}\n"
         f"[archives]\nanswer_wait_s = {WAIT_S}\n"), encoding="utf-8")
-    archives.forget()
+    T.forget_archive_answers()
 
 
 @pytest.fixture
-def never_answers(monkeypatch):
-    monkeypatch.setattr(archives, "_argv", lambda d: [
-        sys.executable, "-I", "-S", "-c", "import time; time.sleep(60)", d])
+def never_answers():
+    with T.archive_tests(never_answer=True):
+        yield
+
+
+@pytest.fixture
+def hold():
+    """Hold how sessions tests archive folders, as `api.testing.archive_tests` takes it,
+    until the test ends."""
+    with contextlib.ExitStack() as stack:
+        yield lambda **kw: stack.enter_context(T.archive_tests(**kw))
 
 
 def in_archive(arch, sid, words, **kw):
@@ -91,35 +99,31 @@ def test_a_session_in_both_is_read_from_the_live_root_and_from_the_archive_once_
 
 
 def test_an_offline_archive_is_skipped_recorded_named_and_listed_whole_once_it_answers(
-        arch, monkeypatch):
-    real_argv = archives._argv
-    monkeypatch.setattr(archives, "_argv", lambda d: [
-        sys.executable, "-I", "-S", "-c", "import time; time.sleep(60)", d])
-    claude(TWO).user("a live prompt")
-    t = claude(TWO)
-    t.user("a live prompt")
-    t.write()
-    in_archive(arch, ONE, "words kept in the archive")
-    run()
-    assert meta("first_read") == "1"             # the live roots finish it
-    rec = recorded()[str(arch / "claude")]
-    assert not rec.answered and rec.why == roots.OFFLINE and "no answer" in rec.reason
-    assert not rec.listed_whole and rec.last_walk_at is None
-    assert "words kept in the archive" not in texts()
-    result = search.search("archive")
-    assert str(arch / "claude") in result.unread
-    assert any("2 transcript folders not read yet" in line for line in cli.incomplete(result))
-    s = status.status()
-    assert any(r["path"] == str(arch / "claude") and not r["answered"]
-               for r in s.roots["claude"])
-    row = {r.name: r for r in doctor.rows()}["folders"]
-    assert row.state == "warn" and str(arch / "claude") in row.detail
-    assert row.fix == doctor.ANSWER_FIX
-    said = cli._last_run_lines()
-    assert any(str(arch / "claude") in line and "offline" in line for line in said), said
+        arch):
+    with T.archive_tests(never_answer=True):
+        claude(TWO).user("a live prompt")
+        t = claude(TWO)
+        t.user("a live prompt")
+        t.write()
+        in_archive(arch, ONE, "words kept in the archive")
+        run()
+        assert meta("first_read") == "1"             # the live roots finish it
+        rec = recorded()[str(arch / "claude")]
+        assert not rec.answered and rec.why == roots.OFFLINE and "no answer" in rec.reason
+        assert not rec.listed_whole and rec.last_walk_at is None
+        assert "words kept in the archive" not in texts()
+        result = search.search("archive")
+        assert str(arch / "claude") in result.unread
+        assert any("2 transcript folders not read yet" in line for line in cli.incomplete(result))
+        s = status.status()
+        assert any(r["path"] == str(arch / "claude") and not r["answered"]
+                   for r in s.roots["claude"])
+        row = {r.name: r for r in doctor.rows()}["folders"]
+        assert row.state == "warn" and str(arch / "claude") in row.detail
+        assert row.fix == doctor.ANSWER_FIX
+        said = cli._last_run_lines()
+        assert any(str(arch / "claude") in line and "offline" in line for line in said), said
 
-    monkeypatch.setattr(archives, "_argv", real_argv)
-    archives.forget()
     run()
     rec = recorded()[str(arch / "claude")]
     assert rec.answered and rec.listed_whole and rec.last_walk_at is not None
@@ -129,12 +133,10 @@ def test_an_offline_archive_is_skipped_recorded_named_and_listed_whole_once_it_a
 
 
 def test_the_climb_to_a_main_session_asks_only_the_roots_that_answered_the_run(
-        arch, tmp_path, monkeypatch):
+        arch, tmp_path, hold):
     configure(tmp_path, codex=[str(arch / "codex")])
-    monkeypatch.setattr(archives, "KEEP_S", 0.0)      # no kept answer helps a later call
     spawned = []
-    real = archives._spawn
-    monkeypatch.setattr(archives, "_spawn", lambda d: spawned.append(d) or real(d))
+    hold(keep_s=0, on_test=spawned.append)            # no kept answer helps a later call
     r = T.CodexRollout(arch / "codex")
     r.turn()
     r.user("codex main in the archive")
@@ -151,7 +153,7 @@ def test_the_climb_to_a_main_session_asks_only_the_roots_that_answered_the_run(
 # -- the rebuild's keep rule ---------------------------------------------------------
 
 def test_a_rebuild_with_an_archive_offline_keeps_and_copies_what_it_read_no_file_for(
-        arch, monkeypatch):
+        arch, hold):
     t = in_archive(arch, ONE, "archived prompt")
     call = t.request().tool_use("Bash", {"command": "cat .env"})
     t.tool_result(call, "root:x:0:0")
@@ -170,9 +172,7 @@ def test_a_rebuild_with_an_archive_offline_keeps_and_copies_what_it_read_no_file
                                  (ONE,)).fetchall()
         secret = rd.conn.execute("SELECT count(*) FROM secret_calls").fetchone()[0]
     assert secret == 1
-    monkeypatch.setattr(archives, "_argv", lambda d: [
-        sys.executable, "-I", "-S", "-c", "import time; time.sleep(60)", d])
-    archives.forget()
+    hold(never_answer=True)
     for _ in range(2):                               # and again while still offline
         report = run("rebuild", config=config(**{"index.tail_chars": 200}))
         assert report.dropped == 0 and report.kept == 1
@@ -209,14 +209,13 @@ def test_a_harness_whose_roots_all_answer_drops_a_gone_session(arch):
 
 
 def test_an_archive_taken_off_config_is_not_tested_and_its_sessions_leave_at_the_rebuild(
-        arch, tmp_path, monkeypatch):
+        arch, tmp_path, hold):
     in_archive(arch, ONE, "only in the archive")
     run()
     assert "only in the archive" in texts()
     configure(tmp_path, codex=[str(arch / "codex")])
     spawned = []
-    real = archives._spawn
-    monkeypatch.setattr(archives, "_spawn", lambda d: spawned.append(d) or real(d))
+    hold(on_test=spawned.append)
     assert any("no longer names it" in line and str(arch / "claude") in line
                for line in cli._last_run_lines())
     row = {r.name: r for r in doctor.rows()}["folders"]
@@ -250,22 +249,15 @@ def test_a_compressed_only_codex_session_counts_as_found_and_its_rows_are_copied
 
 # -- a folder that fails during a run --------------------------------------------------
 
-def fault(kind, arch, monkeypatch, target):
-    """Swap one fault into sessions' listing and reads for `target`'s file."""
+def fault(kind, arch, monkeypatch, stack, target):
+    """Swap one fault into sessions' listing and reads for `target`'s file, until
+    `monkeypatch`'s context and `stack` end."""
     if kind == "unlistable":
         os.chmod(target.parent, 0)
         return
     if kind == "unplugged":
-        real_answers = api.archive_answers
-
-        def answers(dirs, *, fresh=False, **kw):
-            if fresh:
-                return {d: archives.ArchiveAnswer(d, ok=False, reason="unplugged")
-                        for d in dirs}
-            return real_answers(dirs, fresh=fresh, **kw)
-
-        monkeypatch.setattr(api, "archive_answers", answers)
-        monkeypatch.setattr(archives, "archive_answers", answers)
+        stack.enter_context(T.archive_tests(stand_in=lambda d, *, fresh: (
+            api.ArchiveAnswer(d, ok=False, reason="unplugged") if fresh else None)))
         return
     real = api.records_since
     calls = {"n": 0}
@@ -302,8 +294,8 @@ def test_a_rebuild_with_an_archive_failing_keeps_its_harness_and_copies_whole(
         t2.user(f"new words {n} " + "z" * 60)
     t2.write()
     os.remove(live.path)
-    with monkeypatch.context() as m:
-        fault(kind, arch, m, t.path)
+    with monkeypatch.context() as m, contextlib.ExitStack() as stack:
+        fault(kind, arch, m, stack, t.path)
         try:
             report = run("rebuild")
         finally:
@@ -332,8 +324,8 @@ def test_a_walk_with_an_archive_failing_retries_what_failed_next_time(
     before = recorded()[str(arch / "claude")].last_walk_at
     t.user("later words " + "z" * 300)
     t.write()
-    with monkeypatch.context() as m:
-        fault(kind, arch, m, t.path)
+    with monkeypatch.context() as m, contextlib.ExitStack() as stack:
+        fault(kind, arch, m, stack, t.path)
         try:
             run()
         finally:
@@ -344,7 +336,7 @@ def test_a_walk_with_an_archive_failing_retries_what_failed_next_time(
         assert rec.last_walk_at == before and rec.retry == ()
     else:
         assert rec.last_walk_at > before and rec.retry   # read again by its session
-    archives.forget()
+    T.forget_archive_answers()
     os.utime(t.path, (1_000_000_000, 1_000_000_000))   # older than every last walk
     run()
     rec = recorded()[str(arch / "claude")]
@@ -353,18 +345,11 @@ def test_a_walk_with_an_archive_failing_retries_what_failed_next_time(
 
 
 def test_an_archive_offline_at_the_start_and_answering_at_the_test_is_not_answered(
-        arch, monkeypatch):
+        arch, hold):
     in_archive(arch, ONE, "archive words")
     run()
-    real_answers = api.archive_answers
-
-    def answers(dirs, *, fresh=False, **kw):
-        if not fresh:
-            return {d: archives.ArchiveAnswer(d, ok=False, reason="asleep") for d in dirs}
-        return real_answers(dirs, fresh=fresh, **kw)
-
-    monkeypatch.setattr(archives, "archive_answers", answers)
-    monkeypatch.setattr(api, "archive_answers", answers)
+    hold(stand_in=lambda d, *, fresh: (
+        None if fresh else api.ArchiveAnswer(d, ok=False, reason="asleep")))
     report = run("rebuild")
     assert report.kept == 1 and "archive words" in texts()
     assert recorded()[str(arch / "claude")].why == roots.OFFLINE
@@ -419,29 +404,28 @@ def test_an_archive_seen_holding_entries_in_a_run_it_failed_is_not_answered_once
         run()
     finally:
         os.chmod(locked, 0o755)
-    rec = recorded()[str(arch / "claude")]
-    assert rec.why == roots.FAILED and rec.held_entries_at is not None
-    assert rec.held_entries_at == rec.last_walk_at   # its own field, set by that run
+    failed = recorded()[str(arch / "claude")]
+    assert failed.why == roots.FAILED
     os.remove(live.path)
     shutil.rmtree(t.path.parent)
     locked.rmdir()
     report = run("rebuild")
     assert report.dropped == 0 and "read from the live root" in texts()
-    assert recorded()[str(arch / "claude")].why == roots.EMPTY
+    rec = recorded()[str(arch / "claude")]
+    assert rec.why == roots.EMPTY and "though it held entries at" in rec.reason
+    assert rec.held_entries_at == failed.last_walk_at   # set by the run it failed
 
 
-def test_the_test_before_the_decision_sees_a_mount_point_left_empty(arch, monkeypatch):
+def test_the_test_before_the_decision_sees_a_mount_point_left_empty(arch, hold):
     t = in_archive(arch, ONE, "on the unmounted disk")
     run()
-    real_answers = api.archive_answers
     away = arch / "away"
 
-    def answers(dirs, *, fresh=False, **kw):
-        if fresh:                                  # unmounted after the read
+    def unmount(d, *, fresh):
+        if fresh and t.path.parent.exists():       # unmounted after the read
             shutil.move(str(t.path.parent), str(away))
-        return real_answers(dirs, fresh=fresh, **kw)
 
-    monkeypatch.setattr(api, "archive_answers", answers)
+    hold(stand_in=unmount)
     report = run("rebuild")
     assert recorded()[str(arch / "claude")].why == roots.EMPTY
     assert report.dropped == 0 and "on the unmounted disk" in texts()
@@ -480,10 +464,9 @@ def test_a_sessions_config_that_cant_be_read_drops_nothing(arch, tmp_path):
     assert rec.why == roots.FAILED and "can't list" in rec.first_error[1]
 
 
-def test_a_turn_read_asks_the_live_root_only(arch, monkeypatch):
+def test_a_turn_read_asks_the_live_root_only(arch, hold):
     spawned = []
-    real = archives._spawn
-    monkeypatch.setattr(archives, "_spawn", lambda d: spawned.append(d) or real(d))
+    hold(on_test=spawned.append)
     t = claude(ONE)
     t.user("a turn")
     t.write()

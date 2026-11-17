@@ -19,7 +19,8 @@ the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <
 The roots are each harness's `source.root()`: the configured root when a config key names
 one, and the harness's own rule over the launch's environment. Each archive folder
 sessions' config names (`claude.archives`, `codex.archives`) is a transcript root too. An
-archive folder is compared by its path as written, never resolved, and a path under it is
+archive folder is compared by its path as written (normalized by its text alone, as
+`archives.archive_dirs` gives it), never resolved, and a path under it is
 refused before anything resolves that path, so judging a call touches no archive folder.
 A path that reaches an archive folder through a symbolic link gets past the guard.
 
