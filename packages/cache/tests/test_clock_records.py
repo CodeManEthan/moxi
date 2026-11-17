@@ -208,3 +208,18 @@ def test_timers_lists_what_clock_records_gives(monkeypatch, frozen, capsys):
     doc = json.loads(run_timers(capsys, frozen, "--json"))
     assert [s["session"] for s in doc["sessions"]] == [B]
 
+
+def test_a_watching_is_a_value_that_cant_change():
+    a = records.Watching(records.STOPPED, 10.0, 12.0)
+    b = records.Watching(records.STOPPED, 10.0, 12.0)
+    assert a == b and hash(a) == hash(b) and len({a, b}) == 1
+    assert a != records.Watching(records.STOPPED, 10.0, None)
+    assert a != (records.STOPPED, 10.0, 12.0)
+    assert repr(a) == f"Watching(outcome={records.STOPPED!r}, at=10.0, last=12.0)"
+    with pytest.raises(AttributeError):
+        a.at = 11.0
+    with pytest.raises(AttributeError):
+        del a.last
+    with pytest.raises(AttributeError):
+        a.other = 1
+    assert a.at == 10.0

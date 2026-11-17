@@ -6,7 +6,7 @@
 # with its release tag): `moxi install` then wants `--from`. The core release after a
 # module's first release drops its mark. Every module on the workspace's not-ready list is
 # marked.
-version = 5
+version = 7
 
 [[module]]
 name = "cache"
@@ -36,6 +36,12 @@ unreleased = true
 name = "loadout"
 distribution = "moxi-loadout"
 summary = "Your own skills, agents and settings, placed for Claude Code, Codex and OpenCode"
+unreleased = true
+
+[[module]]
+name = "memory"
+distribution = "moxi-memory"
+summary = "Search past sessions: a stemmed keyword index of every harness's transcripts, read where the harness keeps them"
 unreleased = true
 
 [[module]]
@@ -90,6 +96,12 @@ unreleased = true
 name = "slots"
 distribution = "moxi-slots"
 summary = "Numbered tmux sessions to launch into, on one supervised tmux server"
+unreleased = true
+
+[[module]]
+name = "statusline"
+distribution = "moxi-statusline"
+summary = "A Claude Code status line: your directory, branch, model and context, with the figures installed modules add"
 unreleased = true
 
 [[module]]

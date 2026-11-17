@@ -27,6 +27,8 @@ members = [
     "packages/connector",
     "packages/rounds",
     "packages/publishing",
+    "packages/memory",
+    "packages/statusline",
 ]
 
 [tool.uv.sources]
@@ -50,6 +52,8 @@ moxi-tunnel = { workspace = true }
 moxi-connector = { workspace = true }
 moxi-rounds = { workspace = true }
 moxi-publishing = { workspace = true }
+moxi-memory = { workspace = true }
+moxi-statusline = { workspace = true }
 
 # The contributor's tools: `uv sync` installs moxi-dev, whose `moxi-dev check` runs the
 # checks a change must pass.
@@ -84,6 +88,8 @@ not-ready = [
     "moxi-connector",
     "moxi-rounds",
     "moxi-publishing",
+    "moxi-memory",
+    "moxi-statusline",
 ]
 ready = []
 check-workflow = "ci.yml"

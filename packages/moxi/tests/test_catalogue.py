@@ -29,11 +29,11 @@ def text(version=2, extra=""):
 
 def test_the_shipped_catalogue_lists_every_first_party_module():
     shipped = catalogue.shipped()
-    assert shipped.version == 5 and shipped.source == "shipped"
-    assert shipped.names() == ["cache", "comms", "connector", "launcher", "loadout", "notes",
-                               "projects", "publishing", "repo", "rounds", "secrets",
-                               "services", "sessions", "slots", "tunnel", "turns", "ui",
-                               "usage"]
+    assert shipped.version == 7 and shipped.source == "shipped"
+    assert shipped.names() == ["cache", "comms", "connector", "launcher", "loadout", "memory",
+                               "notes", "projects", "publishing", "repo", "rounds",
+                               "secrets", "services", "sessions", "slots", "statusline",
+                               "tunnel", "turns", "ui", "usage"]
     for entry in shipped.entries:
         assert entry.distribution == f"moxi-{entry.name}"
         assert entry.summary and "\n" not in entry.summary

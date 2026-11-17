@@ -22,14 +22,15 @@ it; the next tick rewrites it). The age is counted from the record's `last_reque
 read.
 
 This module imports only the standard library and the core (through `records`), so a
-renderer can load it alone. `moxi cache segment` loads it inside the render audit hook
-(`render`).
+renderer can load it alone. It loads nothing a render doesn't run: `Segment` is a plain
+class rather than a dataclass, since `dataclasses` alone would add several milliseconds
+to every render. `moxi cache segment` loads it inside the core's render audit
+hook (`moxi.render`).
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass
 
 from . import records
 
@@ -44,18 +45,44 @@ DIM = "\033[2m"
 RESET = "\033[0m"
 
 
-@dataclass(frozen=True)
 class Segment:
-    """One session's segment: what to show and how."""
+    """One session's segment: what to show and how. Immutable: its fields can't be set
+    or deleted after it is made. Two segments are equal when every field is."""
 
-    text: str
-    band: str
-    age_s: float
-    ttl_s: float
-    dim: bool = False
+    __slots__ = ("text", "band", "age_s", "ttl_s", "dim")
+
+    def __init__(self, text: str, band: str, age_s: float, ttl_s: float,
+                 *, dim: bool = False) -> None:
+        for name, value in zip(self.__slots__, (text, band, age_s, ttl_s, dim)):
+            object.__setattr__(self, name, value)
+
+    def _fields(self) -> tuple:
+        return (self.text, self.band, self.age_s, self.ttl_s, self.dim)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"cannot assign to field {name!r}: a Segment is immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError(f"cannot delete field {name!r}: a Segment is immutable")
+
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._fields() == other._fields()
+
+    def __hash__(self) -> int:
+        return hash(self._fields())
+
+    def __repr__(self) -> str:
+        return (f"Segment(text={self.text!r}, band={self.band!r}, age_s={self.age_s!r}, "
+                f"ttl_s={self.ttl_s!r}, dim={self.dim!r})")
+
+    def __reduce__(self):
+        return (Segment, self._fields())
 
     def as_dict(self) -> dict:
-        return asdict(self)
+        return {"text": self.text, "band": self.band, "age_s": self.age_s,
+                "ttl_s": self.ttl_s, "dim": self.dim}
 
     def coloured(self) -> str:
         """The text in its band's colour, dimmed when the watcher has stopped."""
@@ -90,7 +117,7 @@ def from_record(record: dict, now: float) -> Segment | None:
     else:
         band = WARM
     dim = now - record["seen_at"] > stale_after
-    return Segment(f"cache:{age_text(age)}", band, age, float(ttl), dim)
+    return Segment(f"cache:{age_text(age)}", band, age, float(ttl), dim=dim)
 
 
 def segment(session_id, now: float | None = None) -> Segment | None:

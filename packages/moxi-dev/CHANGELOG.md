@@ -72,6 +72,8 @@ The first public release.
 - The contract check gains check 9: a module reached by `moxi.modules.load` or
   `available` with a literal or constant name must come with the package, a required
   dependency, an extra, or a module an extra requires.
+- The contract check counts the core's `render` and `harnessfile` among the core modules
+  another module may import.
 - The test fence answers the unit plan's listener connect with "nothing listens" in
   every test, so what listens on the machine's ports never decides a test. A test marked
   `honest_ports` (a new marker), or `live`, makes the real connect.

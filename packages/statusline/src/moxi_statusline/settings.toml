@@ -1,0 +1,40 @@
+# The statusline module's config schema. The file it governs is CONFIG/statusline/config.toml;
+# `moxi config statusline` shows every key and `moxi config statusline init` writes the file.
+# Every key is read at each render.
+
+[show]
+type = "list"
+items = "str"
+default = ["dir", "branch", "model", "effort", "context", "usage", "cache"]
+doc = "The items on the line, in order: base fields (dir, branch, model, effort, context, session, transcript, lines, cost) and the names of modules with a status line segment. One `row` starts a second row; it may not be first or last."
+read = "use"
+
+[separator]
+type = "string"
+default = " │ "
+doc = "The text between two items."
+read = "use"
+
+[color]
+type = "bool"
+default = true
+doc = "Colour the line: the context bands and each segment's own colours."
+read = "use"
+
+[dir.parts]
+type = "int"
+default = 2
+doc = "How many trailing parts of the directory the line keeps; a longer path starts with …/. At least 1."
+read = "use"
+
+[context.warn_at]
+type = "int"
+default = 50
+doc = "The context percent from which the context item shows yellow. Not above context.alert_at."
+read = "use"
+
+[context.alert_at]
+type = "int"
+default = 80
+doc = "The context percent from which the context item shows red."
+read = "use"
