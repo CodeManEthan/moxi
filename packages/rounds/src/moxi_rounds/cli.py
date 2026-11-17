@@ -35,7 +35,7 @@
     moxi rounds drop ROUND --by lead|operator --record PTR [--withdraw-questions]
                      [--as NAME]
     moxi rounds drop ROUND B<n> --by lead|operator --record PTR [--as NAME]
-    moxi rounds drop --leftovers [--remove] [--json]
+    moxi rounds drop --leftovers [--refs] [--remove] [--json]
     moxi rounds next [ROUND] [--json]
     moxi rounds next --schema design|build|step|majors|retro
     moxi rounds show ROUND [--json]
@@ -1341,6 +1341,7 @@ def _finish(args, out) -> int:
     _cleanup_lines(done.removed, done.kept, out)
     if done.branch is not None:
         print(f"branch: {done.branch}", file=out)
+    _ref_lines(done.refs, out)
     if not done.released:
         print(f"{args.prog} finish: warning: the finish lock no longer pointed at this "
               "finish's own and was left as it is; moxi doctor rounds names it if it "
@@ -1442,6 +1443,11 @@ def _declare_drop(verbs) -> None:
                         help="sweep the worktrees and scratch folders that ended builds "
                              "left on this machine: say what would go, and what stays "
                              "and why; it takes no round, --by or --record")
+    parser.add_argument("--refs", action="store_true",
+                        help="with --leftovers, also give the account of CI's own refs "
+                             "on the remote of each project whose ci names a ref: each "
+                             "branch under the ref's prefix that no build that has not "
+                             "ended, nor the target, owns; it reaches the network")
     parser.add_argument("--remove", action="store_true",
                         help="with --leftovers, remove what would go; refused, after "
                              "the dry run, until sweep.armed is true")
@@ -1455,9 +1461,9 @@ def _drop(args, out) -> int:
 
     if args.leftovers:
         return _leftovers(args, out)
-    if args.remove or args.as_json:
-        raise BadArgument("--remove and --json are for the sweep of leftover folders",
-                          "add --leftovers, or leave them out")
+    if args.remove or args.as_json or args.refs:
+        raise BadArgument("--remove, --refs and --json are for the sweep of leftover "
+                          "folders", "add --leftovers, or leave them out")
     if args.round is None or args.by is None:
         raise BadArgument("a drop names the round and whose drop it is",
                           "moxi rounds drop ROUND [B<n>] --by lead|operator --record PTR")
@@ -1483,6 +1489,7 @@ def _drop(args, out) -> int:
               f"{'no branch' if one['tip'] is None else one['tip'][:12]}, kept in git",
               file=out)
     _cleanup_lines(dropped.removed, dropped.kept, out)
+    _ref_lines(dropped.refs, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
 
@@ -1504,6 +1511,7 @@ def _drop_build(args, out) -> int:
           f"the stage stays owed: commission it again, or take it out of the plan",
           file=out)
     _cleanup_lines(dropped.removed, dropped.kept, out)
+    _ref_lines(dropped.refs, out)
     _warn_of(dropped.failed, args.prog, args.verb)
     return codes.OK
 
@@ -1523,10 +1531,21 @@ def _leftovers(args, out) -> int:
         raise BadArgument(f"the sweep changes no record of any round, so it takes no "
                           f"{', '.join(given)}", f"{sweeping.DRY_RUN} [--remove]")
     swept = sweeping.run(remove=args.remove)
+    refs = None
+    if args.refs:
+        from . import ci_refs
+        from . import settings as own
+
+        refs = ci_refs.account(own.load(), removing=swept.removing)
     if args.as_json:
-        print(json.dumps(swept.as_json(), indent=2), file=out)
+        found = swept.as_json()
+        if refs is not None:
+            found["refs"] = refs.as_json()
+        print(json.dumps(found, indent=2), file=out)
     else:
         _account_lines(swept, out)
+        if refs is not None:
+            _ref_account_lines(refs, swept, out)
     if args.remove and not swept.armed:
         raise Refused([Unmet("the sweep is not armed (sweep.armed is false), so it "
                              "removes nothing; above is what it would remove",
@@ -1560,6 +1579,30 @@ def _account_lines(swept, out) -> None:
         arm = "" if swept.armed else ("set armed = true under [sweep] in rounds' config, "
                                       "then: ")
         print(f"then: {arm}{sweeping.REMOVE}", file=out)
+
+
+def _ref_lines(refs, out) -> None:
+    """Say what became of each of CI's own refs an ended build pushed."""
+    for one in refs:
+        print(one.line(), file=out)
+
+
+def _ref_account_lines(refs, swept, out) -> None:
+    """The account of CI's own refs on the remotes, and the command that removes what
+    would go."""
+    from . import ci_refs
+
+    why = "" if swept.removing else (" (dry run)" if swept.armed
+                                     else " (dry run: sweep.armed is false)")
+    print(f"CI's own refs on the remotes{why}", file=out)
+    for line in refs.lines():
+        print(line, file=out)
+    if not refs.refs and not refs.unlisted:
+        print("no ref of CI's own is on a remote", file=out)
+    if refs.would_go and not swept.removing:
+        arm = "" if swept.armed else ("set armed = true under [sweep] in rounds' config, "
+                                      "then: ")
+        print(f"then: {arm}{ci_refs.REMOVE}", file=out)
 
 
 def _cleanup_lines(removed, kept, out) -> None:
