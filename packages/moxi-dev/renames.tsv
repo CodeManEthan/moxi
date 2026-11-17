@@ -7081,6 +7081,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	changed: set[str] = set()	keep
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	cited = everywhere | own.get(source.path, set())	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	done: set[int] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	for path in sorted(set(edits) | used):	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found = [Unsettled("refused", reading.rows[index].path, f"{table_name} {why}")	keep	refused	refused
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found = found or any(_names(generator.target, name, stored=True)	keep	any	any
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	found: set[Leftover] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/rename.py	help="compare not-here and dead rows with this merged main ref")	keep	help	help

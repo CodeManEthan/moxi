@@ -4,12 +4,15 @@ The contributor tools for the Moxi repository. It is a development package: the
 repository's `uv sync` installs it, and no Moxi module depends on it at run time.
 
 - `moxi-dev check` runs the checks a change must pass before it merges: the lock, the
-  tag, comment-reference, naming and Ruff checks, the release step (see below), the
-  contract's import rules (import-linter and deptry) and the tests of the packages the
-  change reaches. A test in the `slow`, `browser` or `build` tier runs
-  when a path its `touches` mark names changed; `--full` runs every package and every
-  tier but `live`; `--finding L<n>` runs only the tests marked with that finding (see
-  "The tag check" below). Its last line gives the tests' seconds, the slowest 5 %'s
+  tag, comment-reference, naming and Ruff checks, the renames step (about 50 s here; see
+  below), the release step (see below), the contract's import rules (import-linter and
+  deptry) and the tests of the packages the change reaches. A test in the `slow`,
+  `browser` or `build` tier runs when a path its `touches` mark names changed; `--full`
+  runs every package and every tier but `live`; `--finding L<n>` runs only the tests
+  marked with that finding (see "The tag check" below). It runs no `timed` test, in any
+  form: it holds each one back and its last line counts them as `timed held <n>`;
+  `moxi-dev timed` runs them. A finding whose tests are all timed counts as found, with
+  a line that says so. Its last line also gives the tests' seconds, the slowest 5 %'s
   share of them and the change against the newest record on `main` (one record per
   commit, kept under git's own directory).
 - `moxi_dev.testing` is the test kit every package loads from its root `conftest.py`:
@@ -74,10 +77,18 @@ refuses a bare `# noqa` and an MX, N, A or FBT mark without ` -- <why>`; put a p
 exception on its function definition line and a settings exception on the key's table
 line.
 
+The renames step reads the tree as `moxi-dev rename --dry-run` reads it, in the check's
+own process and with no `--main`: the check reads the tree it is given, and comparing
+with main is for a branch taking main in. It fails on any row still to apply, any
+leftover and any row the script refuses, and prints the first ten with their state;
+`moxi-dev rename --dry-run` lists every one. It costs about 50 s on this repository's
+table of about 15,800 rows, and reads the whole tree whatever the change picks. A tree
+with no `packages/moxi-dev/renames.tsv` counts as `none`.
+
 Run one step without the lock, release, package, lint or test steps with
-`moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]` or
-`moxi-dev check --only ruff [PATH...]`. Each step still reads the whole tree, but paths
-limit the findings it prints.
+`moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]`,
+`moxi-dev check --only ruff [PATH...]` or `moxi-dev check --only renames [PATH...]`.
+Each step still reads the whole tree, but paths limit the findings it prints.
 
 `moxi-dev rename [--table PATH] [--dry-run] [--main REF] [ROOT]` reads tab-separated
 rows of `<package> TAB <path> TAB <scope> TAB <kind> TAB <old> TAB <new>` from

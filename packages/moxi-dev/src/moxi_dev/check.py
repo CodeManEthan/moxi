@@ -13,6 +13,12 @@ worker count or base stops it there, before any step runs. Then, in order:
    flag cited by a comment exists or has a live `.refs-allow` entry; public config keys,
    flags, parameters and CLI verbs keep their unit and switch-word rules; code uses the
    house words and naming forms; every exception mark names its rule and reason.
+   Then the renames step (`moxi_dev.rename`, about 2 minutes on this repository): the
+   tree is settled under its rename table, `packages/moxi-dev/renames.tsv`, read in this
+   process as `moxi-dev rename --dry-run` reads it, with no `--main`, since the check
+   reads the tree it is given. Any row still to apply, any leftover and any row the
+   script refuses fails it, and the first of them are printed with their state. A tree
+   with no table counts as `none`.
    Then the release step over every workspace member, whatever the change picks
    (`moxi_dev.release`): the core's catalogue lists exactly the module packages, every
    requirement one member places on another admits that member's version, and each
@@ -55,7 +61,9 @@ worker count or base stops it there, before any step runs. Then, in order:
    with that finding (one reported issue, named by an L and a number, which
    `@pytest.mark.finding` gives the tests that cover it), whatever their tier but `live`. Under `--finding` a package where
    no test carries it counts as `none`, not as a failure, but a check where no package
-   has one fails. A `live` test never runs here.
+   has one fails. A finding whose tests are all timed counts as found: the check prints
+   `L<n>: its tests are timed; moxi-dev timed --finding L<n> runs them` and passes
+   having run none of them. A `live` test never runs here.
 
    A package whose tests drive a browser (its declarations name Playwright, or moxi-ui
    with its `testing` extra) runs its browser tests as well, beside the rest, when
@@ -63,31 +71,24 @@ worker count or base stops it there, before any step runs. Then, in order:
    line says why and the package's browser tests are left out, even those `--full` or a
    changed path would put back (`MOXI_TEST_LEAVE_OUT=browser`).
 
-   A test marked `timed` asserts a wall-clock budget, which sixteen workers beside every
-   other suite would break (`moxi_dev.testing`, Timed tests). The parallel pass holds
-   back every timed test it would have run (`MOXI_TEST_TIMED=hold`), and the kit names
-   them in the suite's durations.
-8. The serial pass, once every package's parallel pass has finished: for each package
-   whose parallel pass held a timed test, in the packages' order, one pytest session
-   with no workers (`-n 0`) and the same selection, running only the timed tests
-   (`MOXI_TEST_TIMED=only`): under `--full` every timed test but a `live` one, under a
-   picked run the plain ones and the tier ones a changed path puts back, under
-   `--finding` the ones that carry it. Nothing else of the check runs meanwhile. A
-   failure here fails the check as one in the parallel pass does. A package whose
-   parallel pass ran nothing because every test it chose was timed counts as `none`
-   there.
-9. Read each suite's durations (the kit writes them; a package's two passes are one
-   package), keep the commit's record and find the newest record on `main` to compare
-   with (`moxi_dev.durations`).
-10. Print one summary line, the last line of the output: the commit, the packages, the
-   lock, tag, reference, name, Ruff, release, stamp, web, sync and lint results, each package's tests and seconds (and
-   `without its browser tests` where Chromium couldn't start), the serial pass's
-   packages with their results and seconds (`timed none` when no package held a timed
-   test, `timed not run` when the suites never ran), the tests' own seconds with the
-   slowest 5 %'s share of them and the delta against main, the total and the exit code.
+   A test marked `timed` asserts a wall-clock budget, which a busy machine breaks
+   whatever the check does (`moxi_dev.testing`, Timed tests). The check runs no timed
+   test, in any form: the pass holds back every timed test it would have run
+   (`MOXI_TEST_TIMED=hold`), the kit names them in the suite's durations, and
+   `moxi-dev timed` runs them on their own. A package whose pass ran nothing because
+   every test it chose was timed counts as `none`.
+8. Read each suite's durations (the kit writes them), keep the commit's record and find
+   the newest record on `main` to compare with (`moxi_dev.durations`).
+9. Print one summary line, the last line of the output: the commit, the packages, the
+   lock, tag, reference, name, Ruff, renames, release, stamp, web, sync and lint
+   results, each package's tests and seconds (and `without its browser tests` where
+   Chromium couldn't start), `timed held <n>` with the number of timed tests the suites
+   held back (`timed none` when they held none, `timed not run` when the suites never
+   ran), the tests' own seconds with the slowest 5 %'s share of them and the delta
+   against main, the total and the exit code.
 
-The tags, references, names, Ruff, release step, each package's lint and each package's tests
-(both passes) all run even when one before them failed, so one run shows every failure.
+The tags, references, names, Ruff, renames and release steps, each package's lint and each
+package's tests all run even when one before them failed, so one run shows every failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
@@ -109,7 +110,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from . import durations, lint, naming, refs, release, ruff_check, stamp, tags
+from . import durations, lint, naming, refs, release, rename, ruff_check, stamp, tags
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
 
@@ -118,8 +119,8 @@ ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
 RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
 WORKERS_ENV = "MOXI_TEST_WORKERS"
-#: pytest-xdist's arguments for the serial pass of the timed tests: no workers.
-SERIAL = ("-n", "0")
+#: How many of the renames step's unsettled rows and leftovers a failure prints.
+RENAMES_SHOWN = 10
 
 # A step's command, run from `cwd` with `env`; returns the exit code. Tests replace it.
 Run = Callable[[Sequence[str], Path, Mapping[str, str]], int]
@@ -375,6 +376,7 @@ class Result:
     refs: str = "not run"
     names: str = "not run"
     ruff: str = "not run"
+    renames: str = "not run"
     release: str = "not run"
     stamps: str = "not run"
     web: str = "not run"
@@ -385,9 +387,8 @@ class Result:
     suites: list[tuple[str, bool | None, float]] = field(default_factory=list)
     #: The packages whose browser tests were left out, Chromium not starting.
     no_browser: list[str] = field(default_factory=list)
-    #: The serial pass of the timed tests, (package, passed, seconds) for each package
-    #: whose parallel pass held one; None when the suites never ran.
-    timed: list[tuple[str, bool, float]] | None = None
+    #: How many timed tests the suites held back; None when the suites never ran.
+    timed: int | None = None
     durations: durations.Summary | None = None
     delta: durations.Delta | None = None
     kept: Path | None = None             # the commit's durations record, when kept
@@ -415,8 +416,7 @@ class Result:
         if self.timed is None:
             timed = "not run"
         else:
-            timed = ", ".join(f"{name} {word[ok]} {secs:.1f}s"
-                              for name, ok, secs in self.timed) or "none"
+            timed = f"held {self.timed}" if self.timed else "none"
         if self.lint is None:
             linted = "not run"
         elif not self.lint:
@@ -426,7 +426,8 @@ class Result:
             linted = f"fail ({', '.join(failed)})" if failed else "pass"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
                 f"lock {self.lock} | tags {self.tags} | refs {self.refs} | "
-                f"names {self.names} | ruff {self.ruff} | release {self.release} | "
+                f"names {self.names} | ruff {self.ruff} | renames {self.renames} | "
+                f"release {self.release} | "
                 f"stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
@@ -505,6 +506,7 @@ class _Steps:
         ok = self.references() and ok
         ok = self.names() and ok
         ok = self.ruff() and ok
+        ok = self.renames() and ok
         ok = self.release() and ok
         if not chosen:
             result.stamps = result.web = result.sync = "skipped"
@@ -544,19 +546,18 @@ class _Steps:
 
     def suites(self, chosen: Sequence[Package], venv: Path,
                suite_env: Mapping[str, str]) -> bool:
-        """Each picked package's tests in the parallel pass, then the timed tests it held
-        in the serial pass, then the durations; True when every suite passed (and, under
-        --finding, some package had a test that carries it)."""
+        """Each picked package's tests, every timed test held back, then the durations;
+        True when every suite passed (and, under --finding, some package had a test that
+        carries it, or held one)."""
         run, result = self.run, self.result
         work = self.root / RUN_DIR
         work.mkdir(parents=True, exist_ok=True)
         env = {**suite_env, **self.selection_env(work)}
         python = str(venv_program(venv, "python"))
         ok, ran = True, False
-        # Each package's (passed, tests) over both passes; passed None: it ran nothing.
+        # Each package's (passed, tests); passed None: it ran nothing.
         runs: dict[str, tuple[bool | None, dict | None]] = {}
-        holding: list[Package] = []
-        result.timed = []
+        result.timed = 0
         browsers = self.browsers(chosen, venv, suite_env)
         for package in chosen:
             where = work / f"{package.dir}.durations.json"
@@ -578,27 +579,20 @@ class _Steps:
             ok = ok and passed is not False
             ran = ran or passed is True
             runs[package.dir] = (passed, tests)
-            if held:
-                holding.append(package)
-        for package in holding:
-            # The serial pass: no workers, one package at a time, nothing else running.
-            where = work / f"{package.dir}.timed.durations.json"
-            where.unlink(missing_ok=True)
-            began = time.monotonic()
-            args, extra = browsers.get(package.dir, ((), {}))
-            code = run([python, "-m", "pytest", *SERIAL, *args], package.path,
-                       {**env, **extra, TIMED_ENV: "only", DURATIONS_ENV: str(where)})
-            passed = code == 0
-            result.timed.append((package.dir, passed, time.monotonic() - began))
-            ok = ok and passed
-            ran = ran or passed
-            before, tests = runs[package.dir]
-            both = False if before is False else passed
-            runs[package.dir] = (both, durations.merged(tests, durations.load_run(where)))
+            result.timed += len(held)
         if self.findings and not ran and ok:
-            print(f"moxi-dev check: no test in {', '.join(p.dir for p in chosen)} carries "
-                  f"{', '.join(self.findings)}", flush=True)
-            ok = False
+            names = ", ".join(self.findings)
+            if result.timed:
+                # Every test that carries a finding here is timed: found, and left to
+                # `moxi-dev timed`.
+                flags = " ".join(f"--finding {name}" for name in self.findings)
+                whose = "its" if len(self.findings) == 1 else "their"
+                print(f"moxi-dev check: {names}: {whose} tests are timed; "
+                      f"moxi-dev timed {flags} runs them", flush=True)
+            else:
+                print(f"moxi-dev check: no test in {', '.join(p.dir for p in chosen)} "
+                      f"carries {names}", flush=True)
+                ok = False
         timed = {name: (passed, durations.PackageRun(
                      tiers=durations.tiers_of(tests, full=self.changed is None),
                      tests=tests))
@@ -702,6 +696,24 @@ class _Steps:
         self.result.ruff = "fail" if hits else "pass"
         return not hits
 
+    def renames(self) -> bool:
+        """The tree is settled under its rename table: no row to apply, no leftover, no
+        row refused. A failure prints the first of them with their state."""
+        if not (self.root / rename.TABLE).is_file():
+            self.result.renames = "none"
+            return True
+        try:
+            hits = _renames_scan(self.root)
+        except (rename.RenameError, OSError, subprocess.SubprocessError) as exc:
+            raise CheckError(f"the renames step could not read the tree ({exc})") from exc
+        for hit in hits[:RENAMES_SHOWN]:
+            print(f"moxi-dev check: renames: {hit}", flush=True)
+        if len(hits) > RENAMES_SHOWN:
+            print(f"moxi-dev check: renames: and {len(hits) - RENAMES_SHOWN} more; "
+                  f"`uv run moxi-dev rename --dry-run` lists every one", flush=True)
+        self.result.renames = "fail" if hits else "pass"
+        return not hits
+
     def lint(self, package: Package, venv: Path, suite_env: Mapping[str, str]) -> bool:
         """The package's lint commands, run in the check's environment; True when each
         passed. A package with none is left out of the result."""
@@ -724,6 +736,12 @@ class _Steps:
             ok = self.run(argv, package.path, env) == 0 and ok
         self.result.lint.append((package.dir, ok))
         return ok
+
+
+def _renames_scan(root: Path) -> list[rename.Unsettled]:
+    """What keeps the tree at `root` from being settled under its rename table; empty when
+    it has no table."""
+    return rename.scan(root) if (root / rename.TABLE).is_file() else []
 
 
 def _stamps(root: Path, chosen: Sequence[Package], result: Result) -> bool:
@@ -762,7 +780,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moxi-dev check",
         description="Run the checks a change must pass before it merges: the lock, the "
-                    "tag, comment-reference, naming and Ruff checks and the release step, "
+                    "tag, comment-reference, naming and Ruff checks, the renames step "
+                    "and the release step, "
                     "then the import rules and the tests "
                     "of every package the change touches and of every package that "
                     "depends on one, in an environment of the check's own. Run it from "
@@ -776,7 +795,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--finding", metavar="L<n>", action="append", default=[],
                         help="run only the tests marked with this finding; may be given "
                              "more than once")
-    parser.add_argument("--only", choices=("refs", "names", "ruff"),
+    parser.add_argument("--only", choices=("refs", "names", "ruff", "renames"),
                         help="run only this whole-tree code check")
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="with --only, print findings only under these paths")
@@ -794,10 +813,11 @@ def _shown(path: str, selected: Sequence[str]) -> bool:
 
 def only(root: Path, step: str, paths: Sequence[str] = ()) -> int:
     """Run one whole-tree code check and print its selected findings."""
-    scanner = {"refs": refs.scan, "names": naming.scan, "ruff": ruff_check.scan}[step]
+    scanner = {"refs": refs.scan, "names": naming.scan, "ruff": ruff_check.scan,
+               "renames": _renames_scan}[step]
     try:
         hits = scanner(root)
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (rename.RenameError, OSError, subprocess.SubprocessError) as exc:
         print(f"moxi-dev check: {step} could not read the tree ({exc})", file=sys.stderr)
         return 2
     shown = [hit for hit in hits if _shown(hit.path, paths)]

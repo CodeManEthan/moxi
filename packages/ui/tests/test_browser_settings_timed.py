@@ -5,7 +5,7 @@ start), checked at each animation frame.
 
 A `browser` and `slow` test: a plain pytest run leaves it out; `pytest -m slow -s` runs
 it and prints both times with the machine's load. It is also `timed`, so `moxi-dev check`
-runs it alone, after its parallel pass."""
+holds it back and `moxi-dev timed` runs it."""
 
 from __future__ import annotations
 

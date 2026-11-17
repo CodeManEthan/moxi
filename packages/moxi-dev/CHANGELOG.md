@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `moxi-dev check` has a renames step, after the Ruff check: it fails when the tree is
+  not settled under `renames.tsv` (a row still to apply, a leftover or a row the script
+  refuses), read in its own process with no `--main`, and prints the first of them with
+  their state. The summary line says `renames pass`, `fail`, or `none` for a tree with no
+  table. `--only renames` runs it alone. It costs about 50 s on this repository.
+- `moxi-dev check` runs no `timed` test, in any form: the serial pass after the parallel
+  one is gone, and the summary line says `timed held <n>` (or `timed none`) for the
+  tests the suites held back. A `--finding` whose tests are all timed no longer fails
+  for want of a test: it prints that they are timed and that `moxi-dev timed` runs them.
+  The durations record holds the parallel pass only, so the first delta against a
+  record that still holds timed tests reads lower once.
 - `moxi-dev rename` reads a row whose file is not in the tree as dead: it applies nothing,
   its old name is no leftover anywhere (a `name` or `kwonly` row there used to list every
   string, attribute, keyword and cite of that spelling across the repository), and it is

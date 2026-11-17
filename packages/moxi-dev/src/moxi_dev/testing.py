@@ -114,9 +114,9 @@ starts with, else it is skipped.
 
 Timed tests. A test that asserts a wall-clock budget (a median under so many
 milliseconds, an import under its share of a hook's ceiling) is marked `timed`, whatever
-its tier. Beside other tests on a loaded machine such a test measures the machine, so
-`moxi-dev check` never runs one beside another: its parallel pass holds the timed tests
-back and a serial pass afterwards runs them alone. A test whose bound only tells a
+its tier. On a loaded machine such a test measures the machine, so `moxi-dev check`
+runs no timed test: it holds every one back, and `moxi-dev timed` runs them on their
+own. A test whose bound only tells a
 deadline or timeout that fired from one that never did (a 0.3 s timeout that must return
 in under 0.9 s) is not timed. A plain `pytest`, with neither of the values below, runs a
 timed test where it falls, like any other.
@@ -128,7 +128,8 @@ test too. In a `timed` test, every upper bound on a wall-clock measurement of th
 itself (an elapsed time, a per-call cost, a median, a percentile) is multiplied by
 `timed_slack()`. Lower bounds (a wait that must have happened), ratios between two
 measurements of the same run and counts are left alone: a slower machine slows both
-sides of a ratio. A test marked `timed` follows this rule whenever it is marked.
+sides of a ratio. A test marked `timed` follows this rule whenever it is marked. The
+scheduled run of `moxi-dev timed` clears the variable, so it measures at 1.
 
 Selection. Five variables, read from the environment pytest starts with, change what
 runs; `moxi-dev check` sets them for each suite, and a contributor may set them by hand:
@@ -214,8 +215,8 @@ MARKERS = {
     "touches(*globs)": "the repository paths whose change puts this test back in "
                        "moxi-dev check",
     "finding(tag)": "the finding this test holds",
-    "timed": "asserts a wall-clock budget; moxi-dev check runs it alone, in a serial "
-             "pass after the parallel one",
+    "timed": "asserts a wall-clock budget; moxi-dev check holds it back, and "
+             "moxi-dev timed runs it",
     "honest_fsync": "os.fsync is the real one in this test",
     "honest_ports": "the unit plan's listener check makes its real TCP connect in this "
                     "test",
