@@ -35,7 +35,7 @@ DOCTOR = "moxi_memory.doctor:rows"
 #: The timer the core writes once its switch is on: a catch-up walk outside agent
 #: sessions, for a machine where sessions end rarely or Codex runs outside turns.
 TIMERS = {"ingest": {"command": "moxi-memory-ingest", "args": ["--walk"], "every": "1h",
-                     "switch": "ingest.timer",
+                     "switch": "ingest.timer.enabled",
                      "doc": "read the transcripts that changed since the last walk"}}
 #: The session table, which holds each session's identity and launch kind and can't be
 #: rebuilt from the transcripts; and the index folder, which holds the index generations,

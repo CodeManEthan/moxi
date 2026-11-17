@@ -17,7 +17,7 @@ START = 1_700_000_000.0
 
 
 def config(**over):
-    base = {"harnesses": ["claude", "codex", "opencode"], "index.subagents": False,
+    base = {"harnesses": ["claude", "codex", "opencode"], "index.include_subagents": False,
             "index.tail_chars": 1000, "redact.sets": ["credentials", "broad"]}
     base.update(over)
     return base
@@ -142,6 +142,10 @@ def test_a_filling_index_and_a_running_rebuild_each_add_one_line(capsys):
         state.write_entry(sc, START)
         sc.close()
         code, out, _ = memory(capsys, "search", "anything")
+        _, json_out, _ = memory(capsys, "search", "anything", "--json")
+    doc = json.loads(json_out)
+    assert doc["filling"] == {"sources_read": 2, "listed": 7}
+    assert doc["rebuild_started_at"] == START
     assert code == 0
     assert out.splitlines() == [
         "no match in 0 rows",
@@ -162,7 +166,8 @@ def test_json_carries_the_hits_the_states_and_the_read_line(capsys):
     hit, = doc["hits"]
     assert hit["session_id"] == t.session_id and hit["kind"] == "user"
     assert hit["at"] == time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(START))
-    assert doc["read"] == hit["read"] and doc["filling"] is None and doc["notes"] == []
+    assert doc["top_read_command"] == hit["read_command"] and doc["filling"] is None
+    assert doc["rebuild_started_at"] is None and doc["notes"] == []
 
 
 def test_bad_arguments_exit_2(capsys):
@@ -274,7 +279,7 @@ def test_status_shows_a_waiting_request(capsys):
     code, out, _ = memory(capsys, "status")
     assert code == 0 and f"request waiting: rebuild, asked {clock.show(START)}" in out
     code, out, _ = memory(capsys, "status", "--json")
-    assert json.loads(out)["waiting"] == {"kind": "rebuild", "asked": START}
+    assert json.loads(out)["waiting"] == {"kind": "rebuild", "asked_at": START}
     run("waiting")
     code, out, _ = memory(capsys, "status")
     assert "request waiting: none" in out
@@ -303,7 +308,7 @@ def test_status_shows_every_field(capsys):
     assert doc["rows"]["2"] == {"claude": 1} and doc["rows"]["subagents"] == {}
     assert doc["sources_read"] == 2 and doc["sources_not_read"] == 0
     assert doc["first_read"] is True and doc["filling"] is None
-    assert doc["rebuilding"] is None and doc["tokenizer"] == index.TOKENIZER
+    assert doc["rebuild_started_at"] is None and doc["tokenizer"] == index.TOKENIZER
     assert doc["dropped"] == 0 and doc["rebuilt"] is not None
     assert doc["waiting"] is None
     assert doc["last_ingest"] is not None

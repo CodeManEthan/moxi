@@ -162,10 +162,12 @@ def _search(args, out, prog: str) -> int:
                       "at": None if h.time is None else searching.stamp(h.time),
                       "project": h.project, "kind": h.kind, "tier": h.tier,
                       "failed": h.failed, "snippet": h.snippet, "score": h.score,
-                      "read": read_line(h)} for h in result.hits],
+                      "read_command": read_line(h)} for h in result.hits],
             "filling": (None if result.filling is None else
-                        {"read": result.filling.read, "listed": result.filling.listed}),
-            "rebuilding": result.rebuilding, "read": first, "notes": notes,
+                        {"sources_read": result.filling.read,
+                         "listed": result.filling.listed}),
+            "rebuild_started_at": result.rebuilding, "top_read_command": first,
+            "notes": notes,
         }), file=out)
         return codes.OK
     if not result.hits:
@@ -276,7 +278,7 @@ def _status(args, out, prog: str) -> int:
     if s.waiting is None:
         print("request waiting: none", file=out)
     else:
-        print(f"request waiting: {s.waiting['kind']}, asked {show(s.waiting['asked'])}",
+        print(f"request waiting: {s.waiting['kind']}, asked {show(s.waiting['asked_at'])}",
               file=out)
     if s.index == stat.OK:
         if s.rebuilt is None:
@@ -325,7 +327,7 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                    help="search the ends of tool results too")
     p.add_argument("--subagents", action="store_true",
                    help="search subagent sessions too (indexed only when config "
-                        "index.subagents is on)")
+                        "index.include_subagents is on)")
     p.add_argument("--scratch", action="store_true",
                    help="search sessions launched as scratch too")
     p.add_argument("--limit", type=_positive, default=10, metavar="N",

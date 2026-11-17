@@ -58,7 +58,7 @@ query keeps at most 64 tokens of at most 100 characters each.
 - `--harness H`: only `claude`, `codex` or `opencode` sessions.
 - `--results`: search the ends of tool results too.
 - `--subagents`: search subagent sessions too, which are indexed only while
-  `index.subagents` is on.
+  `index.include_subagents` is on.
 - `--scratch`: search sessions launched as scratch too (below).
 - `--limit N`: how many hits, 10 by default.
 
@@ -98,9 +98,10 @@ a rebuild doesn't repair it.
 
 `--json` prints one object: `tokens`, `rows`, `hits` (each with `harness`, `session_id`,
 `agent_id`, `time` in epoch seconds, `at` in UTC ISO 8601, `project`, `kind`, `tier` (`1`,
-`2` or `"subagent"`), `failed`, `snippet`, `score` and its own `read` command), `filling`
-(`{"read", "listed"}` or null), `rebuilding` (the rebuild's start in epoch seconds, or
-null), `read` (the first hit's command) and `notes` (the incomplete-answer lines). With no
+`2` or `"subagent"`), `failed`, `snippet`, `score` and `read_command`, the command that
+opens its session), `filling` (`{"sources_read", "listed"}` or null), `rebuild_started_at`
+(the rebuild's start in epoch seconds, or null), `top_read_command` (the first hit's
+`read_command`) and `notes` (the incomplete-answer lines). With no
 index it prints `{"error": "missing" | "unreadable", "message": ...}` and exits 1.
 
 ### Ingest and reindex
@@ -183,7 +184,7 @@ The lists come from memory's session table alone, never from the index, and work
 deadline of 1.5 s inside turns' wait: a busy store or a slow comms answer costs a list,
 never the start line. A missing or rebuilding index can't slow a start.
 
-At each prompt of the main loop, unless `reminder` is off:
+At each prompt of the main loop, unless `reminder.enabled` is off:
 
 ```text
 memory: search past sessions if this turn needs them.
@@ -225,7 +226,7 @@ A failed child (a setting memory can't use, a redaction set that won't run) leav
 |---|---|---|---|
 | 1 | each `user` or `assistant` message of a main session, and each tool call, as its summary line and its input | a message's first 16,384 characters, a tool call's first 2,048 | always |
 | 2 | the end of each main-session tool result, with whether the tool failed | the last `index.tail_chars` characters, 1,000 by default | with `--results` |
-| subagents | tier 1 rows of subagent sessions, under their main session's id | as tier 1 | with `--subagents`, and only while `index.subagents` is on |
+| subagents | tier 1 rows of subagent sessions, under their main session's id | as tier 1 | with `--subagents`, and only while `index.include_subagents` is on |
 
 A cut text says how much went: `[... N more characters cut]` after a message, `[... N
 earlier characters cut]` before a tail.
@@ -350,7 +351,7 @@ to see it again. In order, it:
    or prints `moxi memory ingest --all`.
 
 Right after setup, `moxi install` asks whether to turn the `ingest` timer on, default no;
-`moxi config set memory ingest.timer true` turns it on later.
+`moxi config set memory ingest.timer.enabled true` turns it on later.
 
 `moxi uninstall memory` leaves Claude Code's settings as they are and says so: auto memory
 stays off if setup turned it off. With `--purge` it removes the index (the `index`
@@ -365,13 +366,13 @@ effect at the next read.
 | key | default | what |
 |---|---|---|
 | `harnesses` | `["claude", "codex", "opencode"]` | the harnesses whose transcripts are indexed |
-| `index.subagents` | `false` | index subagent sessions too, searched only with `--subagents` |
+| `index.include_subagents` | `false` | index subagent sessions too, searched only with `--subagents` |
 | `index.tail_chars` | `1000` | how many characters from the end of each tool result tier 2 keeps; at least 1 |
 | `redact.sets` | `["credentials", "broad"]` | the secrets sets every stored text is redacted with; at least one |
-| `reminder` | `true` | send the reminder at each prompt |
-| `ingest.timer` | `false` | run a catch-up walk every hour, outside sessions |
+| `reminder.enabled` | `true` | send the reminder at each prompt |
+| `ingest.timer.enabled` | `false` | run a catch-up walk every hour, outside sessions |
 
-A change to `index.subagents`, `index.tail_chars` or `redact.sets` applies to what is read
+A change to `index.include_subagents`, `index.tail_chars` or `redact.sets` applies to what is read
 after it; `moxi memory reindex` applies it to everything. To turn the start line and
 lists off, take `memory` off turns' `start.order`.
 

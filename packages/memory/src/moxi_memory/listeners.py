@@ -12,7 +12,7 @@ Four rows, in this order:
   module's start answers in the order its rows are declared, so the lists follow the
   line.
 - `prompt` answers each main-loop prompt with the short reminder, or nothing when config
-  `reminder` is off.
+  `reminder.enabled` is off.
 - `fire` starts the ingest child, detached, when a main-loop turn ends and when the
   session's endpoint is ending.
 

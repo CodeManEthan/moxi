@@ -226,11 +226,11 @@ def test_the_announcement_names_every_part():
     assert set(module.OPTIONAL) == {"comms", "launcher"}
     assert module.TIMERS["ingest"] == {
         "command": "moxi-memory-ingest", "args": ["--walk"], "every": "1h",
-        "switch": "ingest.timer",
+        "switch": "ingest.timer.enabled",
         "doc": "read the transcripts that changed since the last walk"}
     from moxi_memory import settings
 
-    assert "ingest.timer" in settings.schema().keys
+    assert "ingest.timer.enabled" in settings.schema().keys
 
 
 def test_the_index_is_a_declared_rebuildable_store_and_the_session_table_is_kept():

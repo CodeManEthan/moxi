@@ -38,7 +38,7 @@ read, and the key's replace rule makes that harmless: a row whose key is stored 
 replaced only when its text differs.
 
 **Which sources.** The main sessions of each harness in config `harnesses`; subagents only
-with `index.subagents` on, their rows under their main session's id. A Codex thread whose
+with `index.include_subagents` on, their rows under their main session's id. A Codex thread whose
 import marks say it was imported (it is listed in Codex's imports file, or its turns
 carry the import prefix) is skipped: the Claude Code transcript is the original. A
 compressed Codex rollout, which sessions doesn't read, is recorded in `sources` and counted
@@ -192,7 +192,7 @@ class Ingest:
         self.conn = conn
         self.sc = sc
         self.harnesses = tuple(config["harnesses"])
-        self.subagents = bool(config["index.subagents"])
+        self.subagents = bool(config["index.include_subagents"])
         self.policy = rows.Policy(tuple(config["redact.sets"]),
                                   int(config["index.tail_chars"]))
         self.fresh = fresh
@@ -437,7 +437,7 @@ class Ingest:
 
     def read_session(self, harness: str, session_id: str) -> None:
         """Read one session's sources since their cursors, and its subagents' when
-        `index.subagents` is on."""
+        `index.include_subagents` is on."""
         if harness not in self.harnesses:
             return
         for hit in _api().find(harness, session_id).hits:

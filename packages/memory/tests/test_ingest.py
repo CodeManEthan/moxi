@@ -21,7 +21,7 @@ class Config(dict):
 
 
 def config(**over):
-    base = {"harnesses": ["claude", "codex", "opencode"], "index.subagents": False,
+    base = {"harnesses": ["claude", "codex", "opencode"], "index.include_subagents": False,
             "index.tail_chars": 1000, "redact.sets": ["credentials", "broad"]}
     base.update(over)
     return Config(base)
@@ -161,7 +161,7 @@ def test_subagents_only_with_the_switch_and_under_the_main_session():
 
     run()
     assert not any("work" in x for x in texts())
-    run("all", config=config(**{"index.subagents": True}))
+    run("all", config=config(**{"index.include_subagents": True}))
     subs = {(r[2], r[3]) for r in index_rows() if "work" in r[-1]}
     assert subs == {(t.session_id, "a0190b0000000001"),
                     (r.thread_id, "0190c000-0000-7000-8000-0000000c0de9")}
@@ -464,7 +464,7 @@ def test_a_rebuild_equals_a_fresh_ingest_by_key_and_text_and_starts_a_walk():
 
 def test_a_rebuild_with_subagents_off_and_tails_lowered():
     corpus()
-    run("all", config=config(**{"index.subagents": True}))
+    run("all", config=config(**{"index.include_subagents": True}))
     assert any(r[3] for r in index_rows())
     run("rebuild", config=config(**{"index.tail_chars": 200}))
     assert not any(r[3] for r in index_rows())

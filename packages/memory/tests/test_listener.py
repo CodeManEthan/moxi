@@ -151,8 +151,8 @@ def test_the_reminder_is_the_same_for_every_harness(harness):
 
 
 def test_the_reminder_off_sends_nothing():
-    write_config("reminder = false\n")
-    assert settings.read()["reminder"] is False
+    write_config("[reminder]\nenabled = false\n")
+    assert settings.read()["reminder.enabled"] is False
     assert listener.prompt(event("prompt")) is None
 
 

@@ -109,7 +109,7 @@ def test_the_roots_and_their_sessions_and_the_codex_sessions_turns_never_saw(spa
     assert "2 Codex sessions here were not started through turns" in said
     assert setup.TIMER_LINE in said
 
-    write_config("[ingest]\ntimer = true\n")
+    write_config("[ingest.timer]\nenabled = true\n")
     code, said = run()
     assert "2 Codex sessions here were not started through turns" in said
     assert setup.TIMER_LINE not in said

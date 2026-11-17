@@ -7,7 +7,7 @@ session table). Like a search, it only reads, and never takes the writer lock.
 The backlog is the sources that changed since the last walk of their harness, found by
 listing each harness root through sessions (one stat per file, no file read) and
 comparing each source's reuse keys with those the index stored. A source the next walk
-will look at and leave out (a subagent while `index.subagents` is off, an imported
+will look at and leave out (a subagent while `index.include_subagents` is off, an imported
 thread) may be counted until that walk has run.
 """
 
@@ -49,7 +49,7 @@ class Status:
       while it hasn't.
     - `rebuilding`: the start time of a running rebuild (0.0 before it wrote its time),
       and `rebuild_pid` the process id it wrote, for information only.
-    - `waiting`: the request waiting for the writer lock (`{"kind", "asked"}`, kind
+    - `waiting`: the request waiting for the writer lock (`{"kind", "asked_at"}`, kind
       `walk`, `all`, `rebuild` or `relabel`), or None.
     - `tokenizer`: the generation's tokenizer.
     - `sessions`: the session table's rows (`total`), by launch kind (`none` for no
@@ -82,10 +82,13 @@ class Status:
     rebuilt: float | None = None
 
     def to_json(self) -> dict[str, object]:
-        """The status as plain JSON values."""
+        """The status as plain JSON values. `rebuilding` is written `rebuild_started_at`,
+        a name that says it holds a time, and `filling`'s count of sources read is
+        `sources_read`, as at the top level."""
         out = dict(self.__dict__)
+        out["rebuild_started_at"] = out.pop("rebuilding")
         out["filling"] = (None if self.filling is None else
-                          {"read": self.filling.read, "listed": self.filling.listed})
+                          {"sources_read": self.filling.read, "listed": self.filling.listed})
         return out
 
 
@@ -161,7 +164,7 @@ def backlog(conn, env: Mapping[str, str] | None = None) -> dict[str, int | None]
     except ConfigError:
         return None
     api = ingest._api()
-    subagents = bool(config["index.subagents"])
+    subagents = bool(config["index.include_subagents"])
     out: dict[str, int | None] = {}
     for harness in config["harnesses"]:
         last = _number(index.meta_get(conn, f"last_walk.{harness}"))
@@ -207,7 +210,7 @@ def status(env: Mapping[str, str] | None = None, *, with_backlog: bool = True) -
 
     request, _ = state.peek(env)
     if request is not None:
-        out.waiting = {"kind": request.kind, "asked": request.asked}
+        out.waiting = {"kind": request.kind, "asked_at": request.asked}
     try:
         reader = index.open_read(env)
     except index.IndexMissing as exc:

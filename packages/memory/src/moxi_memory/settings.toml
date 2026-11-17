@@ -9,7 +9,7 @@ default = ["claude", "codex", "opencode"]
 doc = "The harnesses whose transcripts are indexed: any of claude, codex and opencode."
 read = "use"
 
-[index.subagents]
+[index.include_subagents]
 type = "bool"
 default = false
 doc = "Index subagent sessions too. They are searched only with --subagents."
@@ -28,13 +28,13 @@ default = ["credentials", "broad"]
 doc = "The secrets sets every stored text is redacted with."
 read = "use"
 
-[reminder]
+[reminder.enabled]
 type = "bool"
 default = true
 doc = "Send the short reminder at each prompt."
 read = "use"
 
-[ingest.timer]
+[ingest.timer.enabled]
 type = "bool"
 default = false
 doc = "Run a catch-up ingest on a timer, outside agent sessions, as well."

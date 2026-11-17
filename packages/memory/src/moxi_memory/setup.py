@@ -47,7 +47,7 @@ AUTO_MEMORY_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
 #: `originator`. A rollout with another originator was started outside turns.
 TURNS_CODEX_CLIENT = "moxi-turns"
 #: The line that turns the ingest timer on.
-TIMER_LINE = "moxi config set memory ingest.timer true"
+TIMER_LINE = "moxi config set memory ingest.timer.enabled true"
 #: The line that starts a full ingest by hand, and the one that watches it.
 INGEST_LINE = "moxi memory ingest --all"
 STATUS_LINE = "moxi memory status"
@@ -312,7 +312,7 @@ def _timer_on(env) -> bool:
     from . import settings
 
     try:
-        return bool(settings.read(env)["ingest.timer"])
+        return bool(settings.read(env)["ingest.timer.enabled"])
     except ConfigError:
         return False
 

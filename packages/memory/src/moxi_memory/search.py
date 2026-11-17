@@ -12,7 +12,7 @@ the lower row id.
 
 **What is searched.** Tier 1 (`rows`: main-session messages and tool calls) always; tier 2
 (`tails`: the end of each tool result) only with `results`; subagent rows only with
-`subagents` (they exist only when config `index.subagents` is on). A session whose launch
+`subagents` (they exist only when config `index.include_subagents` is on). A session whose launch
 kind is `scratch` is left out of every tier unless `scratch` is asked. The kind is read
 from the session table, attached read-only beside the index, so a kind learned after the
 rows were written applies at the next search with no rewrite of the index.

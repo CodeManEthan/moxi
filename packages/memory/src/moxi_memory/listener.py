@@ -9,7 +9,7 @@ the session's project label when the session's folder gives one, and leaves the
 parenthesis about `--project` out when it doesn't.
 
 `prompt(event)` answers a main-loop prompt with the reminder, the same for every harness,
-or None when config `reminder` is off.
+or None when config `reminder.enabled` is off.
 
 `fire(event)` only starts the ingest child for a `turn` or a `gone`, detached, and
 returns (`moxi_memory.start.fire`).
@@ -109,16 +109,16 @@ def start(event) -> str:
 
 
 def prompt(event) -> str | None:
-    """The reminder, or None when config `reminder` is off. A config memory can't read
+    """The reminder, or None when config `reminder.enabled` is off. A config memory can't read
     gives the default, which is on."""
     from moxi.config import ConfigError
 
     from . import settings
 
     try:
-        on = bool(settings.read()["reminder"])
+        on = bool(settings.read()["reminder.enabled"])
     except ConfigError:
-        on = bool(settings.schema().keys["reminder"].default)
+        on = bool(settings.schema().keys["reminder.enabled"].default)
     return REMINDER if on else None
 
 

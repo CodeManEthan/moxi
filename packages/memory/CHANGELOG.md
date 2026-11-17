@@ -8,7 +8,7 @@ The first public release.
   through sessions where each harness keeps them, with Porter stemming and BM25 ranking.
   Tier 1 holds the messages a person or an agent wrote and every tool call; tier 2 the end
   of each tool result, searched with `--results`; subagent sessions are indexed only with
-  `index.subagents` on.
+  `index.include_subagents` on.
 - Every stored text is redacted with secrets' sets (`credentials` and `broad` by default)
   before it is cut, and a tool call that names a secret file keeps only the tool and the
   path. A secret that holds a `/` can reach the index under the default sets.

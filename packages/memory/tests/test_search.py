@@ -36,7 +36,7 @@ class FakeLauncher:
 
 
 def config(**over):
-    base = {"harnesses": ["claude", "codex", "opencode"], "index.subagents": False,
+    base = {"harnesses": ["claude", "codex", "opencode"], "index.include_subagents": False,
             "index.tail_chars": 1000, "redact.sets": ["credentials", "broad"]}
     base.update(over)
     return base
@@ -352,7 +352,7 @@ def test_subagents_only_when_asked():
     sub = t.subagent("a0190b0000000001")
     sub.user("narwhal subagent words")
     t.write()
-    run(config=config(**{"index.subagents": True}))
+    run(config=config(**{"index.include_subagents": True}))
     assert api.search("narwhal").hits == ()
     hit, = api.search("narwhal", subagents=True).hits
     assert (hit.tier, hit.session_id, hit.agent_id) == ("subagent", t.session_id,
@@ -370,7 +370,7 @@ def test_a_scratch_session_is_found_only_with_scratch_in_every_tier():
     sub = t.subagent("a0190b0000000002")
     sub.user("ocelot subagent")
     t.write()
-    run(kinds={t.session_id: "scratch"}, config=config(**{"index.subagents": True}))
+    run(kinds={t.session_id: "scratch"}, config=config(**{"index.include_subagents": True}))
     assert api.search("ocelot", results=True, subagents=True).hits == ()
     assert api.search("ocelot", results=True, subagents=True).rows == 0
     tiers = {h.tier for h in api.search("ocelot", results=True, subagents=True,
