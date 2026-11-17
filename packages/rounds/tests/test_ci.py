@@ -107,6 +107,59 @@ def test_a_path_the_ids_do_not_name_reads_absent():
     assert (each[0]["id"], each[0]["reading"], whole) == (None, ci.ABSENT, ci.ABSENT)
 
 
+def job(name: str, **fields) -> dict:
+    found = {"name": name, "status": "completed", "conclusion": "success",
+             "url": f"https://example.test/job/{name}"}
+    found.update(fields)
+    return found
+
+
+def by_jobs(names, jobs, **fields):
+    asked = []
+
+    def jobs_of(one):
+        asked.append(one["databaseId"])
+        return jobs
+
+    each, whole = ci.reading([ci.Workflow(FLOW, tuple(names))], IDS, [run(**fields)], TIP,
+                             jobs_of=jobs_of)
+    return each[0], whole, asked
+
+
+def test_a_workflow_read_by_its_jobs_reads_only_the_jobs_it_names():
+    jobs = [job("linux"), job("browser (ui, chromium)", conclusion="failure")]
+
+    flow, whole, asked = by_jobs(["linux"], jobs, conclusion="failure")
+
+    assert (flow["reading"], whole, asked) == (ci.GREEN, ci.GREEN, [1])
+    assert flow["jobs"] == [{"name": "linux", "reading": ci.GREEN,
+                             "url": "https://example.test/job/linux"}]
+    assert by_jobs(["linux", "browser (ui, chromium)"], jobs)[1] == ci.RED
+
+
+@pytest.mark.parametrize("fields, run_fields, word", [
+    ({"status": "in_progress", "conclusion": ""}, {}, ci.PENDING),
+    ({"conclusion": "cancelled"}, {}, ci.RED),
+    ({"conclusion": "skipped"}, {}, ci.RED),
+    (None, {"status": "in_progress", "conclusion": ""}, ci.PENDING),
+    (None, {}, ci.ABSENT),
+])
+def test_a_named_job_reads_from_the_first_job_of_that_name(fields, run_fields, word):
+    jobs = [job("linux (x)"), job("other")]
+    if fields is not None:
+        jobs += [job("linux", **fields), job("linux")]
+
+    flow, whole, _asked = by_jobs(["linux"], jobs, **run_fields)
+
+    assert (flow["jobs"][0]["reading"], flow["reading"], whole) == (word, word, word)
+
+
+def test_a_workflow_read_by_its_jobs_with_no_run_at_the_tip_reads_absent_unasked():
+    flow, whole, asked = by_jobs(["linux"], [job("linux")], headSha="b" * 40)
+
+    assert (flow["reading"], flow["jobs"], whole, asked) == (ci.ABSENT, [], ci.ABSENT, [])
+
+
 # -- the setting -------------------------------------------------------------------------
 
 CHECK = 'check = { command = "make check" }\n'
@@ -132,7 +185,25 @@ CHECK = 'check = { command = "make check" }\n'
     (CHECK + 'ci = { workflows = ["a.yml"], local = "none", ids = [] }\n', "ci.ids",
      "is not a command"),
     (CHECK + 'ci = { workflows = ["a.yml"], local = "none", jobs = [] }\n', "ci.jobs",
-     "is not a key of ci"),
+     "is not a command"),
+    (CHECK + 'ci = { workflows = ["a.yml"], local = "none", builds = [] }\n',
+     "ci.builds", "is not a key of ci"),
+    (CHECK + 'ci = { workflows = [{ path = "a.yml" }], local = "none" }\n',
+     "ci.workflows.jobs", "is missing"),
+    (CHECK + 'ci = { workflows = [{ path = "a.yml", jobs = [] }], local = "none" }\n',
+     "ci.workflows.jobs", "is not a list of job names"),
+    (CHECK + 'ci = { workflows = [{ path = "a.yml", jobs = ["x", ""] }], local = "none" }\n',
+     "ci.workflows.jobs", "is not a list of job names"),
+    (CHECK + 'ci = { workflows = [{ path = "a.yml", jobs = ["x", "x"] }], local = "none" }\n',
+     "ci.workflows.jobs", "names a job twice"),
+    (CHECK + 'ci = { workflows = [{ path = "a.yml", jobs = ["x"], all = true }], '
+     'local = "none" }\n', "ci.workflows.all", "is not a key of a workflow entry"),
+    (CHECK + 'ci = { workflows = [{ path = "../a.yml", jobs = ["x"] }], local = "none" }\n',
+     "ci.workflows", "not a path inside the repo"),
+    (CHECK + 'ci = { workflows = [{ jobs = ["x"] }], local = "none" }\n',
+     "ci.workflows", "not a path inside the repo"),
+    (CHECK + 'ci = { workflows = ["a.yml"], local = "none", ref = "ci/{branch}" }\n',
+     "ci.ref", "no remote"),
 ])
 def test_the_config_check_refuses_a_ci_it_can_t_read(table, key, said):
     with pytest.raises(ConfigError) as caught:
@@ -151,6 +222,34 @@ def test_a_ci_remote_that_is_not_a_name_is_refused_in_words_that_agree(remote, p
     assert caught.value.key == "projects.proj-a.ci.remote"
     assert caught.value.problem == problem
     assert caught.value.fix == "give a remote's name, or leave the key out"
+
+
+@pytest.mark.parametrize("ref", [
+    "{branch}", "ci{branch}", "/{branch}", "ci/{branch}/x", "ci/{branch}{branch}",
+    "ci/{tip}/{branch}", "refs/heads/ci/{branch}", "a..b/{branch}", "ci x/{branch}",
+    "ci//{branch}", ".ci/{branch}", "ci.lock/{branch}", "-ci/{branch}", "ci/", ""])
+def test_the_config_check_refuses_a_ref_that_is_not_a_prefix_then_the_branch(ref):
+    with pytest.raises(ConfigError) as caught:
+        settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                            f'local = "none", remote = "origin", ref = "{ref}" }}\n')
+
+    assert caught.value.key == "projects.proj-a.ci.ref"
+
+
+@pytest.mark.parametrize("ref", ["ci/{branch}", "ci-full/{branch}", "a/b/{branch}"])
+def test_a_ref_of_a_prefix_then_the_branch_is_taken(ref):
+    settings.check_text(f'[projects.proj-a]\n{CHECK}ci = {{ workflows = ["a.yml"], '
+                        f'local = "none", remote = "origin", ref = "{ref}" }}\n')
+
+    assert ci.ref_for(ref, "a/b") == ref.replace("{branch}", "a/b")
+
+
+def test_a_setting_that_reads_named_jobs_and_pushes_to_a_ci_ref_is_taken():
+    settings.check_text(
+        f'[projects.proj-a]\n{CHECK}ci = {{ remote = "origin", ref = "ci/{{branch}}", '
+        'local = "none", jobs = ["gh", "run", "view", "{run}", "--json", "jobs"], '
+        f'workflows = [{{ path = "{FLOW}", jobs = [\n  "linux",\n  "web (ubuntu-latest)"] }},'
+        f'\n  "{OTHER}"] }}\n')
 
 
 def test_a_ci_with_the_defaults_is_read_with_gh():
@@ -180,6 +279,7 @@ class Stub:
         self.script.write_text(STUB, encoding="utf-8")
         self.ids({FLOW: 11})
         self.runs([])
+        self.jobs([])
 
     def argv(self, kind: str, *more: str) -> list[str]:
         return [PY, str(self.script), str(self.stub_dir), kind, *more]
@@ -189,6 +289,9 @@ class Stub:
 
     def runs(self, found: list) -> None:
         self._write("status", found)
+
+    def jobs(self, found: list) -> None:
+        self._write("jobs", found)
 
     def _write(self, kind: str, data) -> None:
         (self.stub_dir / f"{kind}.json").write_text(json.dumps(data), encoding="utf-8")
@@ -212,19 +315,27 @@ def setup(repo, stub, write_config, tmp_path, capsys):
     done: list = []
 
     def configure(local: str = "print('local ran')", *, remote: str | None = None,
-                  workflows=(FLOW,), status=None):
+                  workflows=(FLOW,), status=None, ref: str | None = None,
+                  extra: str = ""):
         full = shlex.join([PY, "-c", "print('full ran')"])
         if local == ci.NONE:
             local_toml = '"none"'
         else:
             local_toml = f"{{ command = {json.dumps(shlex.join([PY, '-c', local]))} }}"
         status = stub.argv("status", "{tip}") if status is None else status
-        table = (f"workflows = {json.dumps(list(workflows))}, local = {local_toml}, "
-                 f"status = {json.dumps(status)}, ids = {json.dumps(stub.argv('ids'))}")
+        flows = ", ".join(
+            json.dumps(one) if isinstance(one, str)
+            else f"{{ path = {json.dumps(one[0])}, jobs = {json.dumps(list(one[1]))} }}"
+            for one in workflows)
+        table = (f"workflows = [{flows}], local = {local_toml}, "
+                 f"status = {json.dumps(status)}, ids = {json.dumps(stub.argv('ids'))}, "
+                 f"jobs = {json.dumps(stub.argv('jobs', '{run}'))}")
         if remote is not None:
             table += f", remote = {json.dumps(remote)}"
+        if ref is not None:
+            table += f", ref = {json.dumps(ref)}"
         write_config(f"[projects.proj-a]\ncheck = {{ command = {json.dumps(full)} }}\n"
-                     f"ci = {{ {table} }}\n")
+                     f"{extra}ci = {{ {table} }}\n")
         if done:
             return done[0]
         opening.open_round(ROUND, description="a placeholder round", by="planner",
@@ -419,6 +530,121 @@ def test_the_check_pushes_to_the_remote_first_and_the_pre_push_hook_runs(
     assert done.pushed == "origin"
     assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/work") == tree.rev()
     assert (tmp_path / "hook-ran").read_text() == "pushed\n"
+
+
+def test_a_check_reads_the_jobs_named_and_records_each(setup, stub):
+    path, tree, _made = setup(ci.NONE, workflows=[(FLOW, ("linux", "web (ubuntu-latest)"))])
+    green_at(stub, tree.rev(), databaseId=77, conclusion="failure")
+    stub.jobs([job("linux"), job("web (ubuntu-latest)"),
+               job("browser (ui, chromium)", conclusion="failure")])
+
+    done = checking.check(ROUND, "B1", by="coder")
+
+    [read] = events(path, ci.READ)
+    assert done.passed and read["reading"] == ci.GREEN
+    assert read["jobs_argvs"] == [stub.argv("jobs", "77")]
+    assert [(one["name"], one["reading"]) for one in read["workflows"][0]["jobs"]] == [
+        ("linux", ci.GREEN), ("web (ubuntu-latest)", ci.GREEN)]
+    assert check_step(path).state == steps.DONE
+
+    setup(ci.NONE, workflows=[(FLOW, ("linux",))])
+    owes = check_step(path).owes[1]
+    assert f"for {FLOW} (jobs linux, web (ubuntu-latest))" in owes
+    assert f"named now are {FLOW} (jobs linux)" in owes
+    setup(ci.NONE, workflows=[FLOW])
+    assert "the workflows named now are" in check_step(path).owes[1]
+
+
+def test_a_failed_job_read_records_nothing(setup, stub):
+    path, tree, _made = setup(ci.NONE, workflows=[(FLOW, ("linux",))])
+    green_at(stub, tree.rev())
+    stub.jobs([{"name": "linux"}])
+    before = path.read_bytes()
+
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", by="coder")
+
+    assert "printed a job with no status, conclusion" in str(caught.value)
+    assert path.read_bytes() == before
+
+
+def bare_remote(repo, tmp_path, hook: str = "") -> Path:
+    bare = tmp_path / "remote.git"
+    repo.git("init", "-q", "--bare", str(bare))
+    repo.git("remote", "add", "origin", str(bare))
+    if hook:
+        hooks = Path(repo.git("rev-parse", "--git-common-dir"))
+        hooks = (hooks if hooks.is_absolute() else repo.root / hooks) / "hooks"
+        hooks.mkdir(exist_ok=True)
+        (hooks / "pre-push").write_text(hook)
+        (hooks / "pre-push").chmod(0o755)
+    return bare
+
+
+def test_with_a_ref_the_tip_is_forced_to_ci_s_own_branch_and_recorded(
+        setup, stub, repo, tmp_path, capsys):
+    bare = bare_remote(repo, tmp_path,
+                       f"#!/bin/sh\ncat >> {tmp_path / 'hook-read'}\n")
+    path, tree, _made = setup(remote="origin", ref="ci/{branch}")
+    green_at(stub, tree.rev())
+
+    assert main(["check", ROUND, "B1"]) == 0
+
+    assert "pushed: origin ci/work, forced" in capsys.readouterr().out
+    assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/ci/work") == tree.rev()
+    assert repo.git("--git-dir", str(bare), "branch", "--list", "work") == ""
+    [local] = events(path, "check.ran")
+    [read] = events(path, ci.READ)
+    assert local["pushed"] == read["pushed"] == {"remote": "origin", "ref": "ci/work"}
+
+    tree.git("commit", "-q", "--amend", "-m", "the work, reworded")
+    green_at(stub, tree.rev())
+    assert checking.check(ROUND, "B1", by="coder").ref == "ci/work"
+    assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/ci/work") == tree.rev()
+    assert f"{tree.rev()} {tree.rev()} refs/heads/ci/work" in (tmp_path / "hook-read").read_text()
+
+
+def test_without_a_ref_the_push_goes_to_the_branch_name_and_records_no_ref(
+        setup, stub, repo, tmp_path):
+    bare = bare_remote(repo, tmp_path)
+    path, tree, _made = setup(remote="origin")
+    green_at(stub, tree.rev())
+
+    assert checking.check(ROUND, "B1", by="coder").ref is None
+
+    assert repo.git("--git-dir", str(bare), "rev-parse", "refs/heads/work") == tree.rev()
+    assert all("pushed" not in one for one in events(path, ci.READ))
+
+
+def test_a_push_to_ci_s_ref_a_guard_refuses_records_nothing_and_names_the_way_on(
+        setup, stub, repo, tmp_path):
+    bare_remote(repo, tmp_path, "#!/bin/sh\necho 'a secret in abc123' >&2\nexit 1\n")
+    path, tree, _made = setup(remote="origin", ref="ci/{branch}")
+    green_at(stub, tree.rev())
+    before = path.read_bytes()
+
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", by="coder")
+
+    said = str(caught.value)
+    assert "a secret in abc123" in said and "was refused, so nothing is recorded" in said
+    assert "give this text to your lead" in said and "--no-verify" in said
+    assert path.read_bytes() == before
+
+
+def test_a_build_on_the_target_is_refused_before_any_push(setup, stub, repo, tmp_path):
+    bare = bare_remote(repo, tmp_path)
+    path, tree, _made = setup(remote="origin", ref="ci/{branch}")
+    setup(remote="origin", ref="ci/{branch}", extra='into = "work"\n')
+    green_at(stub, tree.rev())
+    before = path.read_bytes()
+
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", by="coder")
+
+    assert "ci/work is the lead's to push" in str(caught.value)
+    assert repo.git("--git-dir", str(bare), "for-each-ref") == ""
+    assert path.read_bytes() == before
 
 
 def test_a_refused_push_records_nothing(setup, stub, repo, tmp_path):

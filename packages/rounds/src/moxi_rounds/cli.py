@@ -1215,9 +1215,9 @@ def _declare_check(verbs) -> None:
             "command step of the round's flow the same way, recorded under its name. "
             "Its output goes to check-<n>.log in the build's scratch folder. Nothing is "
             "recorded when the tip or the worktree changed while it ran. In a repo that "
-            "declares ci, it pushes the tip to ci.remote when set, runs the local part "
-            "unless it passed at the tip, and reads CI; --full runs the full check "
-            "instead.")
+            "declares ci, it pushes the tip to ci.remote when set (forced, to the "
+            "branch name ci.ref gives, where it names one), runs the local part unless "
+            "it passed at the tip, and reads CI; --full runs the full check instead.")
     parser = verbs.add_parser("check", help=said, description=said)
     parser.add_argument("round", metavar="ROUND", nargs="?",
                         help="the round, <project>/<slug>; left out in a build's "
@@ -1354,7 +1354,8 @@ def _ci_checked(ran, args, out) -> int:
 
     print(f"check {ran.name} {ran.stage} at {ran.commit[:12]}, by CI", file=out)
     if ran.pushed is not None:
-        print(f"pushed: {ran.pushed}", file=out)
+        print(f"pushed: {ran.pushed}" + ("" if ran.ref is None else f" {ran.ref}, forced"),
+              file=out)
     local = ran.local
     if local is not None:
         code = local["exit_code"]
@@ -1375,6 +1376,10 @@ def _ci_checked(ran, args, out) -> int:
         for one in reading["workflows"]:
             url = "" if one["url"] is None else f"   {one['url']}"
             print(f"  {one['path']}: {one['reading']}{url}", file=out)
+            for job in one.get("jobs") or ():
+                if job["reading"] != ci.GREEN:
+                    url = "" if job["url"] is None else f"   {job['url']}"
+                    print(f"    {job['name']}: {job['reading']}{url}", file=out)
         for line in _ci_way_on(ran.name, ran.stage, reading["reading"]):
             print(f"  fix: {line}", file=out)
     _warn_of(ran.failed, args.prog, args.verb)
