@@ -41,9 +41,30 @@ either way (the ready wait decides), or `failed` with slots' exec line. A slot t
 `check` ends the row `failed` with slots' reason, naming the holder (exit 3); slots' lock
 held too long ends it `try-again` (exit 75); any other slots error (its registry
 unreadable, tmux failing) ends it `spawn-failed` with slots' words (exit 1). Nothing
-retries. The launch then watches for the startup screens it is set to answer (`startup`),
-and sends the first turn itself before it returns. Native Windows, and an install without
-slots, are refused with a hint naming the other two targets.
+retries. Native Windows, and an install without slots, are refused with a hint naming the
+other two targets.
+
+**How a slot launch ends.** A Claude slot launch with `startup.trust_dialog` on first marks
+its folder trusted in Claude Code's config (`seed`), just before slots starts the session,
+and records the outcome as a `trust-seed` event. Once the session runs, the launch reads it
+at two points: the startup watch, over every screen on the launcher's startup list
+(`startup`), and ready. With a ready signal (turns present, for a Claude session or Codex
+under turns' host), every slot launch waits for ready after the watch, up to
+`ready.wait_s`, whether or not it owes a first turn. Without one, nothing can confirm the
+session got past its screens: the launch ends `started` with the reason `ready-unknown`,
+and its line names the slot. A launch that owes a first turn sends it once ready, before it
+returns.
+
+What the launcher finds at those two points (a screen it won't answer,
+`screen-not-answered`; one slots could not answer, `screen-mismatch`; no ready in time,
+`no-ready`) depends on what the launch replaced. A launch that started a session where
+none was running (a fresh launch or a resume) ends `failed` with it, exit 1. A relaunch has
+already exited the session it replaces, so the new one is the seat now: the finding only
+flags it. Its row stays `started`, the finding goes on the row as a `flagged` event with its
+code and line, the launch's line says it, and `Started.finding` carries the code; a
+relaunch held on a screen sends no first turn. Neither a failure nor a flag stops the
+session: it stays in its slot for a person to attach to. A session that died during the
+watch fails every kind of launch (`exited`).
 
 **The sweep.** A launch's run files (its run log and its system prompt file) are kept for
 `runs.keep_days` and then removed, and a run log past `LOG_CAP` is cut from the front to
@@ -70,7 +91,7 @@ from moxi import files, proc, terminal
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import catalog, first, identity, slots, startup, store
+from . import catalog, first, identity, seed, slots, startup, store
 from .compose import Composition
 
 log = logging.getLogger("moxi.launcher.targets")
@@ -117,7 +138,8 @@ BIND_POLL_S = 0.25
 #: those in `TRY_AGAIN_REASONS` (75).
 FAILED_ERRORS = frozenset({SPAWN_FAILED, NO_DELIVERER, first.NO_READY,
                            first.HANDOFF_UNREADABLE, first.NO_TURNS, startup.EXITED,
-                           startup.SCREEN_MISMATCH, COMMS_FAILED})
+                           startup.SCREEN_MISMATCH, startup.SCREEN_NOT_ANSWERED,
+                           COMMS_FAILED})
 TRY_AGAIN = "try-again"
 #: Reasons a failed row exits 75 with: worth trying again as it was.
 TRY_AGAIN_REASONS = frozenset({TRY_AGAIN, COMMS_OFFLINE, COMMS_NO_ANSWER})
@@ -125,6 +147,13 @@ TRY_AGAIN_REASONS = frozenset({TRY_AGAIN, COMMS_OFFLINE, COMMS_NO_ANSWER})
 #: (the row's reason then); `failed` is the third.
 STARTED = "started"
 UNCONFIRMED = "unconfirmed"
+#: The reason a slot launch ends `started` with when nothing can report its session ready.
+READY_UNKNOWN = "ready-unknown"
+#: The `events` kind of a finding that flags a relaunch instead of failing it.
+FLAGGED = "flagged"
+#: The startup watch's findings that flag a relaunch: its session is running, held on a
+#: screen. `exited` is not here: a session that died fails every launch.
+FLAGGED_AT_SCREENS = frozenset({startup.SCREEN_NOT_ANSWERED, startup.SCREEN_MISMATCH})
 
 WINDOWS = sys.platform == "win32"
 
@@ -248,8 +277,9 @@ class Launch:
 @dataclass(frozen=True)
 class Started:
     """What a target did: the state it left the row in, the reason with a `failed`, the
-    process it started, the code the launch exits with, a line for the caller, and the
-    first turn's outcome when the target sent it itself."""
+    process it started, the code the launch exits with, a line for the caller, the first
+    turn's outcome when the target sent it itself, and `finding`, the code of what flagged
+    a relaunch (`screen-not-answered`, `screen-mismatch` or `no-ready`), else None."""
 
     state: str
     exit_code: int
@@ -259,6 +289,7 @@ class Started:
     slot: str | None = None
     line: str = ""
     outcome: first.Outcome | None = None
+    finding: str | None = None
 
 
 class Target:
@@ -367,9 +398,9 @@ class Headless(Target):
 
 
 class Slot(Target):
-    """A tmux slot, through slots: the launch claims a slot and starts there, the
-    startup screens it is set to answer are answered, and the first turn is sent before
-    the launch returns."""
+    """A tmux slot, through slots: the launch claims a slot and starts there, its startup
+    screens are watched and those it is set to answer are answered, it waits for ready,
+    and the first turn is sent before the launch returns."""
 
     name = "slot"
 
@@ -439,6 +470,9 @@ class Slot(Target):
             return fail(conn, rid, SPAWN_FAILED, "slots can't be loaded")
         named = named_slot(launch.composition.values)
         row = store.get(conn, rid)
+        relaunch = bool(row is not None and row.relaunch_of)
+        current = _settings()
+        notes = _seed(conn, rid, launch, current)
         meta = {"request_id": rid, "session_id": row.session_id if row else None,
                 "chain": launch.chain or rid}
         place = dict(env=dict(launch.env), cwd=launch.cwd, label=f"launcher:{rid}",
@@ -478,7 +512,12 @@ class Slot(Target):
                         + (f" (pane status {status})" if status is not None else ""))
         pid = _pane_pid(api, slot)
         ident = proc.identity(pid) if pid else None
-        reason = UNCONFIRMED if verdict == UNCONFIRMED else None
+        turns = first.turns_api(quiet=True)
+        ready = _ready(turns, launch, row, pid)
+        if verdict == UNCONFIRMED:
+            reason = UNCONFIRMED
+        else:
+            reason = READY_UNKNOWN if ready is None else None
         store.set_state(conn, rid, "started", reason=reason, leaving=("spawning",), pid=pid,
                         pid_started=ident.started if ident is not None else None, **where)
         if _wrapped(launch.composition):
@@ -493,22 +532,47 @@ class Slot(Target):
             here += (" (slots could not confirm that the command started: "
                      f"{placed.exec_line or 'no verdict'})")
 
-        turns = first.turns_api(quiet=True)
-        try:
-            enabled = startup.screens(launch.composition.harness, api)
-        except ConfigError as exc:
-            log.warning("startup screens of %s not watched: %s", rid, exc)
-            enabled = []
-        if enabled:
-            watched = startup.watch(conn, rid, slot, enabled, api=api,
-                                    ready=_ready(turns, launch, row, pid))
+        screens = _startup_list(launch.composition.harness, api, current)
+        is_ready = False
+        if screens:
+            bound = None if current is not None else _number(None, "startup.wait_s")
+            watched = startup.watch(conn, rid, slot, screens, api=api, ready=ready,
+                                    wait_s=bound, notes=notes)
             if watched.failed:
-                done = fail(conn, rid, watched.reason or startup.EXITED, watched.why,
-                            capture=watched.capture)
                 capture = f"; the screen is saved at {watched.capture}" \
                     if watched.capture else ""
+                more = {"capture": watched.capture, "screen": watched.screen,
+                        "rows": list(watched.rows) or None}
+                if relaunch and watched.reason in FLAGGED_AT_SCREENS:
+                    return _flag(conn, rid, watched.reason, watched.why + capture,
+                                 Started("started", exits.OK, reason, pid, pane_id,
+                                         str(slot), here), **more)
+                done = fail(conn, rid, watched.reason or startup.EXITED, watched.why,
+                            **more)
                 return Started(done.state, done.exit_code, done.reason, pid, pane_id,
                                str(slot), done.line + capture)
+            is_ready = watched.ended == "ready"
+
+        if ready is None:
+            if not launch.first_owed:
+                return Started("started", exits.OK, reason, pid=pid, pane_id=pane_id,
+                               slot=str(slot),
+                               line=f"{here}; nothing could confirm that the session is "
+                                    f"ready: attach to slot {slot} to see it")
+        elif not is_ready and not _came_ready(ready, _number(current, "ready.wait_s")):
+            why = ("not ready: a screen or dialog the launcher does not know may be "
+                   f"waiting; attach to slot {slot}")
+            if launch.composition.harness == "codex":
+                why += (". Codex may be waiting on its folder-trust prompt: answer it "
+                        "there, or launch with trust_cwd on")
+            rows = _rows(api, slot, screens)
+            if relaunch:
+                return _flag(conn, rid, first.NO_READY, why,
+                             Started("started", exits.OK, reason, pid, pane_id, str(slot),
+                                     here), rows=rows)
+            done = fail(conn, rid, first.NO_READY, why, rows=rows)
+            return Started(done.state, done.exit_code, done.reason, pid, pane_id,
+                           str(slot), done.line)
 
         if not launch.first_owed:
             return Started("started", exits.OK, reason, pid=pid, pane_id=pane_id,
@@ -866,6 +930,87 @@ def _ready(turns: Any, launch: Launch, row: store.LaunchRow | None,
             return None
         where = {"session_id": row.session_id}
     return lambda timeout: turns.wait_ready(**where, timeout_s=timeout)
+
+
+def _settings() -> Any | None:
+    """The launcher's settings, or None when they can't be read (logged)."""
+    from . import settings
+
+    try:
+        return settings.current()
+    except ConfigError as exc:
+        log.warning("the launcher's settings can't be read: %s", exc)
+        return None
+
+
+def _number(current: Any | None, key: str) -> float:
+    """A wait from the settings, or its schema default when they can't be read."""
+    if current is not None:
+        return float(current[key])
+    from . import settings
+
+    return float(settings.schema().keys[key].default)
+
+
+def _startup_list(harness: str, api: Any, current: Any | None) -> list[startup.Listed]:
+    """The startup list of a slot launch of `harness`; with the settings unreadable, every
+    screen on it unanswered."""
+    if current is None:
+        current = {key: False for key, _ in startup.SCREENS.get(harness, ())}
+    return startup.listed(harness, api, current)
+
+
+def _seed(conn: sqlite3.Connection, request_id: str, launch: Launch,
+          current: Any | None) -> dict[str, dict[str, Any]]:
+    """Seed a Claude launch's folder trust when `startup.trust_dialog` is on, recording a
+    `trust-seed` event, and give the notes the startup watch adds to each screen's events:
+    the folder and file the trust screen is about (and the seed's outcome), and the
+    settings file Claude Code writes after the bypass warning is answered."""
+    if launch.composition.harness != "claude":
+        return {}
+    notes: dict[str, dict[str, Any]] = {
+        "CLAUDE_BYPASS_WARNING": {"file": str(seed.settings_file(launch.env))}}
+    if current is None or not current["startup.trust_dialog"]:
+        notes["CLAUDE_TRUST_DIR"] = {"folder": str(seed.trust_root(launch.cwd)),
+                                     "file": str(seed.config_file(launch.env))}
+        return notes
+    seeded = seed.seed(launch.cwd, launch.env)
+    store.add_event(conn, seed.EVENT, seeded.detail(), request_id=request_id)
+    trust = {"folder": seeded.folder, "file": seeded.file, "seed": seeded.outcome}
+    if seeded.written:
+        trust["seed_missed"] = True
+    notes["CLAUDE_TRUST_DIR"] = trust
+    return notes
+
+
+def _came_ready(ready: Callable[[float], Any], wait_s: float) -> bool:
+    """Whether the session says it is ready within `wait_s`."""
+    try:
+        return bool(ready(wait_s))
+    except Exception:  # noqa: BLE001  (not ready in time, or turns can't say)
+        return False
+
+
+def _rows(api: Any, slot: Any, screens: list[startup.Listed]) -> list[str] | None:
+    """The rows one more read of the pane shows, for a launch whose session is not ready.
+    slots reads a pane only against screens, so a harness with none on the startup list
+    gets none."""
+    if not screens:
+        return None
+    try:
+        seen = api.read_screen(slot, screens=[entry.screen for entry in screens])
+    except api.SlotsError:
+        return None
+    return list(seen.rows or ()) or None
+
+
+def _flag(conn: sqlite3.Connection, request_id: str, code: str, why: str,
+          started: Started, **more: Any) -> Started:
+    """Flag a relaunch with a finding: a `flagged` event with its code and line, the row
+    left as it is, and the line saying it."""
+    detail = {"code": code, "line": why, **{k: v for k, v in more.items() if v is not None}}
+    store.add_event(conn, FLAGGED, detail, request_id=request_id)
+    return replace(started, line=f"{started.line}; flagged {code}: {why}", finding=code)
 
 
 def _start_deliverer(launch: Launch, pid: int) -> Started | None:

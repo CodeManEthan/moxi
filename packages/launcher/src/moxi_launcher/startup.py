@@ -1,23 +1,34 @@
-"""Startup screens: the screens a harness shows before any hook can run, answered in a slot
-launch, and the install questions that turn that on.
+"""Startup screens: the screens a harness shows before any hook can run, watched in every
+slot launch and answered when their settings say so, and the install questions that turn
+the answers on.
 
 Claude Code can open on a screen of its own before the session starts: the folder-trust
-screen, and the development-channels screen. Nothing inside the session can answer them,
-so in a slot launch the launcher may, through slots' screen calls, which recognise each
-screen by its content and press only the keys it declares. Each screen is answered only
-when its setting is on: `startup.trust_dialog` and `startup.dev_channels_dialog`, both off
-by default. In this terminal the person answers them; headless runs do not show them.
+screen, the development-channels screen, and the bypass-permissions warning. Nothing
+inside the session can answer them. The launcher's startup list (`SCREENS`) holds each,
+by harness, with the setting that lets the launcher answer it: `startup.trust_dialog`,
+`startup.dev_channels_dialog` and `startup.bypass_warning`, all off by default. In a slot
+launch the watch reads every screen on the list, whatever the settings say, through
+slots' screen calls, which recognise each screen by its content and press only the keys
+it declares. In this terminal the person answers them; headless runs do not show them.
+slots' exit dialog is not a startup screen and is never on the list.
 
-**The rule: the launcher presses a key only on a screen it has just seen showing, and fails
-a launch only when a screen is still showing that it cannot answer.** A screen that never
-shows, or leaves on its own (a person attached and answered it), is not a failure.
+**The rule: the launcher presses a key only on a screen it has just seen showing and whose
+setting is on. A screen on the list whose setting is off ends the watch at once, with
+nothing pressed: the launch fails `screen-not-answered` (a relaunch is flagged instead; see
+`targets`), naming the setting that would answer it.** A screen that never shows, or that
+leaves on its own (a person attached and answered it) before the watch reads it, is not a
+finding. The session is never stopped: it stays in its slot for a person.
 
 `watch` is the loop. After the slot's session starts, every `INTERVAL_S` until the session
 is ready or `startup.wait_s` has passed (without turns it runs to the bound), it reads the
-pane with `read_screen`, which sends nothing. When an enabled screen shows, it calls
+pane with `read_screen`, which sends nothing. When a screen whose setting is off shows, it
+records a `startup-screen` event with the outcome `not-answered` and the rows slots read,
+and ends `failed`, `screen-not-answered`. When a screen whose setting is on shows, it calls
 `answer_screen` with what remains of the bound (at most `ANSWER_WAIT_S`), since that bound
 covers the whole call, keys and settling included, and records the outcome as a
-`startup-screen` event. slots' outcome words decide what follows:
+`startup-screen` event. Each event carries what the caller noted for its screen (the
+folder and file the trust screen is about, the settings file the bypass answer makes
+Claude Code write). slots' outcome words decide what follows:
 
 - `gone`: the screen was answered and left; the loop goes on. So does `not-ended`, which
   slots gives only for a screen that must end its pane, and the pane is still there.
@@ -42,15 +53,15 @@ the one word the loop reads in it. Any slots error from a read or an answer (its
 not answering, tmux failing, the slot gone from its registry) stops the watch, and the
 ready wait decides.
 
-No Codex screen is declared yet, so a Codex slot launch answers none: a folder Codex has
+No Codex screen is declared yet, so a Codex slot launch watches none: a folder Codex has
 not trusted may show Codex's own trust prompt, which waits for a person who attaches, and a
-launch that owes a first turn then ends `no-ready`. The `trust_cwd` row trusts the
-launch's folder for that launch only.
+launch whose session is not ready in time then ends `no-ready`. The `trust_cwd` row trusts
+the launch's folder for that launch only.
 
 `setup` is the launcher's `SETUP`, which `moxi install launcher` runs: when slots is
-installed it asks the two `startup.*` questions, each once (a key set in the launcher's
+installed it asks the three `startup.*` questions, each once (a key set in the launcher's
 config file has been answered, and install never resets it). With nobody at the keyboard
-both stay off and it prints the `moxi config set` lines that turn them on. Without slots
+all stay off and it prints the `moxi config set` lines that turn them on. Without slots
 it asks nothing.
 """
 
@@ -93,20 +104,50 @@ PANE_ENDED = frozenset({"ended", "ended-without-screen", "no-pane"})
 #: The reasons a launch fails with here.
 EXITED = "exited"
 SCREEN_MISMATCH = "screen-mismatch"
+SCREEN_NOT_ANSWERED = "screen-not-answered"
+#: The outcome recorded for a screen the loop saw and did not answer.
+NOT_ANSWERED = "not-answered"
 
-#: The setting that turns each screen on, by the name slots declares it under.
+#: The launcher's startup list: by harness, each screen a session may draw before it
+#: starts, with the setting that lets the launcher answer it, by the name slots declares
+#: the screen under.
 SCREENS = {
     "claude": (("startup.trust_dialog", "CLAUDE_TRUST_DIR"),
-               ("startup.dev_channels_dialog", "CLAUDE_DEV_CHANNELS")),
+               ("startup.dev_channels_dialog", "CLAUDE_DEV_CHANNELS"),
+               ("startup.bypass_warning", "CLAUDE_BYPASS_WARNING")),
+}
+
+#: What gets a slot launch past each screen, for the line of a launch held on it.
+HINTS = {
+    "CLAUDE_TRUST_DIR":
+        "to let slot launches past it, run: moxi config set launcher startup.trust_dialog "
+        "true",
+    "CLAUDE_DEV_CHANNELS":
+        "to let slot launches past it, run: moxi config set launcher "
+        "startup.dev_channels_dialog true",
+    "CLAUDE_BYPASS_WARNING":
+        "to let slot launches past it, run: moxi config set launcher "
+        "startup.bypass_warning true; or run one bypass launch in a terminal and accept "
+        "the warning there. Either way Claude Code writes "
+        "skipDangerousModePermissionPrompt into ~/.claude/settings.json, which turns the "
+        "warning off for every later bypass session on this machine",
 }
 
 #: The install questions: each `startup.*` switch and the question asked for it.
 QUESTIONS = (
     ("startup.trust_dialog",
-     "Answer Claude Code's folder-trust screen when a slot launch opens on it? The "
-     "launcher answers only a screen recognised by its content, with its declared keys."),
+     "Let slot launches past Claude Code's folder-trust screen? Before a slot launch the "
+     "launcher marks the launch folder's git root as trusted in Claude Code's "
+     "~/.claude.json, and answers the screen if it still shows. Claude Code keeps that "
+     "trust for later sessions there."),
     ("startup.dev_channels_dialog",
      "Answer Claude Code's development-channels screen when a slot launch opens on it?"),
+    ("startup.bypass_warning",
+     "Let slot launches past Claude Code's bypass-permissions warning? Each bypass slot "
+     "launch passes a key that should keep the warning away. If it still shows, the "
+     "launcher presses 'Yes, I accept', and Claude Code writes "
+     "skipDangerousModePermissionPrompt: true into ~/.claude/settings.json, which turns "
+     "the warning off for every later bypass session on this machine."),
 )
 
 
@@ -119,47 +160,66 @@ class Watched:
 
     `ended` is `ready` (the session said it is ready), `bound` (`startup.wait_s` passed),
     `stopped` (slots could not be read, or answered in a word the loop does not know; the
-    ready wait decides), or `failed`, with `reason` (`exited` or `screen-mismatch`), `why`,
-    and slots' `capture` of a screen it could not answer. `answered` lists each answer's
-    screen and its outcome: slots' word, or `not-settled`."""
+    ready wait decides), or `failed`, with `reason` (`exited`, `screen-mismatch` or
+    `screen-not-answered`), `why`, slots' `capture` of a screen it could not answer, and,
+    for `screen-not-answered`, the `screen`'s name and the `rows` of the read that saw it.
+    `answered` lists each answer's screen and its outcome: slots' word, or
+    `not-settled`."""
 
     ended: str
     reason: str | None = None
     why: str = ""
     capture: str | None = None
     answered: tuple[tuple[str, str], ...] = ()
+    screen: str | None = None
+    rows: tuple[str, ...] = ()
 
     @property
     def failed(self) -> bool:
         return self.ended == "failed"
 
 
-def screens(harness: str, api: Any, current: Mapping[str, Any] | None = None
-            ) -> list[tuple[str, Any]]:
-    """The screens a slot launch of `harness` answers: each one whose setting is on, as
-    slots' API module declares it, by name. None for Codex, which has no screen declared
-    yet."""
-    return [(name, getattr(api, name)) for key, name in SCREENS.get(harness, ())
-            if _setting(current, key)]
+@dataclass(frozen=True)
+class Listed:
+    """One screen on the startup list: slots' name for it and the `Screen` itself, the
+    setting that lets the launcher answer it, and whether that setting is on."""
+
+    name: str
+    screen: Any
+    setting: str
+    answer: bool
+
+
+def listed(harness: str, api: Any, current: Mapping[str, Any] | None = None
+           ) -> list[Listed]:
+    """The startup list of a slot launch of `harness`, as slots' API module declares each
+    screen, by name, with whether its setting is on. Empty for Codex, which has no screen
+    declared yet. Raises `moxi.config.ConfigError` when the settings can't be read."""
+    return [Listed(name, getattr(api, name), key, answer=_setting(current, key))
+            for key, name in SCREENS.get(harness, ())]
 
 
 def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
-          enabled: Sequence[tuple[str, Any]], *, api: Any,
+          screens: Sequence[Listed], *, api: Any,
           ready: Callable[[float], Any] | None = None, wait_s: float | None = None,
+          notes: Mapping[str, Mapping[str, Any]] | None = None,
           interval: float = INTERVAL_S, clock: Callable[[], float] = time.monotonic,
           sleep: Callable[[float], None] = time.sleep) -> Watched:
-    """Watch slot `slot` for the `enabled` screens (`(name, screen)` pairs) until the
-    session is ready or `wait_s` (`startup.wait_s`) passes, answering each that shows.
+    """Watch slot `slot` for the startup list's `screens` until the session is ready or
+    `wait_s` (`startup.wait_s`) passes, answering each that shows whose setting is on, and
+    ending at once on one whose setting is off.
 
     `ready(timeout)` asks whether the session is ready, waiting at most `timeout`: truthy
     when it is, falsy or raising (`TimeoutError`) when not. None (no turns) runs the loop
-    to its bound. Writes a `startup-screen` event per answer; never writes the row's
+    to its bound. `notes` adds to each screen's events, by the screen's name. Writes a
+    `startup-screen` event per answer and per screen not answered; never writes the row's
     state, which the caller writes from what this returns."""
     if wait_s is None:
         from . import settings
 
         wait_s = float(settings.current()["startup.wait_s"])
-    shown = [screen for _, screen in enabled]
+    notes = notes or {}
+    shown = [entry.screen for entry in screens]
     answered: list[tuple[str, str]] = []
     deadline = clock() + wait_s
     failures = api.SlotsError
@@ -176,8 +236,17 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
             return _stopped(conn, request_id, exc, done)
         if seen.dead:
             return done("failed", reason=EXITED, why=_exited(api, slot))
-        name, screen = _named(seen.screen, enabled)
-        if screen is not None:
+        entry = _named(seen.screen, screens)
+        if entry is not None and not entry.answer:
+            rows = tuple(seen.rows or ())
+            store.add_event(conn, EVENT, {"screen": entry.name, "outcome": NOT_ANSWERED,
+                                          "setting": entry.setting, "rows": list(rows),
+                                          **notes.get(entry.name, {})},
+                            request_id=request_id)
+            return done("failed", reason=SCREEN_NOT_ANSWERED,
+                        why=held_words(entry, slot), screen=entry.name, rows=rows)
+        if entry is not None:
+            name, screen = entry.name, entry.screen
             left = deadline - clock()
             if left < MIN_ANSWER_S:
                 return done("bound")
@@ -196,7 +265,8 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
             recorded = NOT_SETTLED if unsettled else outcome
             answered.append((name, recorded))
             detail = {"screen": name, "outcome": recorded, "why": why, "wait": wait,
-                      "capture": capture, "keys": list(answer.keys)}
+                      "capture": capture, "keys": list(answer.keys),
+                      **notes.get(name, {})}
             if unsettled:
                 detail["answer"] = outcome
             store.add_event(conn, EVENT, detail, request_id=request_id)
@@ -215,7 +285,7 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
                     return _stopped(conn, request_id, exc, done)
                 if again.dead:
                     return done("failed", reason=EXITED, why=_exited(api, slot))
-                if _named(again.screen, enabled)[0] == name:
+                if getattr(_named(again.screen, screens), "name", None) == name:
                     return done("failed", reason=SCREEN_MISMATCH,
                                 why=f"the {name} screen showed and slots could not answer "
                                     "it" + (f": {why}" if why else ""),
@@ -248,15 +318,22 @@ def _dead(seen: Any) -> bool:
     return seen is not None and bool(seen.dead)
 
 
-def _named(shown: Any, enabled: Sequence[tuple[str, Any]]) -> tuple[str | None, Any]:
-    """The enabled screen that slots' read matched, by the name the launcher knows it
-    under, or `(None, None)`."""
+def _named(shown: Any, screens: Sequence[Listed]) -> Listed | None:
+    """The screen on the list that slots' read matched, or None."""
     if shown is None:
-        return None, None
-    for name, screen in enabled:
-        if shown is screen or shown == screen:
-            return name, screen
-    return None, None
+        return None
+    for entry in screens:
+        if shown is entry.screen or shown == entry.screen:
+            return entry
+    return None
+
+
+def held_words(entry: Listed, slot: Any) -> str:
+    """Why a launch held on `entry`'s screen did not go on: the screen, the setting that is
+    off, the slot the session waits in, and what gets a launch past it."""
+    hint = HINTS.get(entry.name, f"turn on {entry.setting}")
+    return (f"the {entry.name} screen showed and {entry.setting} is off, so the launcher "
+            f"pressed nothing; the session waits in slot {slot} for a person ({hint})")
 
 
 def _exited(api: Any, slot: Any) -> str:
@@ -340,6 +417,7 @@ def _ask(question: str) -> bool:
     return answer.strip().lower() in ("y", "yes")
 
 
-__all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "GO_ON", "INTERVAL_S", "MIN_ANSWER_S",
-           "MISMATCH", "NOT_SETTLED", "PANE_ENDED", "QUESTIONS", "SCREENS",
-           "SCREEN_MISMATCH", "Watched", "screens", "setup", "watch"]
+__all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "GO_ON", "HINTS", "INTERVAL_S", "Listed",
+           "MIN_ANSWER_S", "MISMATCH", "NOT_ANSWERED", "NOT_SETTLED", "PANE_ENDED",
+           "QUESTIONS", "SCREENS", "SCREEN_MISMATCH", "SCREEN_NOT_ANSWERED", "Watched",
+           "held_words", "listed", "setup", "watch"]
