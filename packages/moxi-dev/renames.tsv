@@ -7144,6 +7144,10 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	self.held: set[str] = set()	k
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	server = make(where / "sock")	keep	start	start
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	started.set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	writes = ((isinstance(mode, str) and any(c in mode for c in "wax+"))	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	"waited_s": round(self.waited_s, 3)}	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	waited_s=round(waited, 3))	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	entry.update(other=_rounded(other), waited_s=round(window.waited_s, 3))	keep	round	round
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	return None if value is None else round(value, 3)	keep	round	round
 moxi-dev	packages/moxi-dev/tests/test_check.py	"sessions", "cache", "comms", "launcher", "usage"}	keep	sessions	sessions
 moxi-dev	packages/moxi-dev/tests/test_check.py	"sessions": ("moxi-sessions", ["moxi>=0.1,<0.2"], {}, {"dev": ["pytest"]}),	keep	sessions	sessions
 moxi-dev	packages/moxi-dev/tests/test_check.py	("sessions", "hold"), ("cache", "hold"), ("comms", "hold"),	keep	sessions	sessions
@@ -7307,6 +7311,12 @@ moxi-dev	packages/moxi-dev/tests/test_selection.py	names = set()	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_stamp.py	-	name	test_the_output_directory_is_the_import_package_web_dir	test_the_output_dir_is_the_import_package_web_dir
 moxi-dev	packages/moxi-dev/tests/test_stamp.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 moxi-dev	packages/moxi-dev/tests/test_tags.py	-	name	test_scan_reads_a_module_s_own_vendor_directory	test_scan_reads_a_module_s_own_vendor_dir
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.busy += round((other + own) * ticks)	keep	round	round
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.iowait += round(iowait * ticks)	keep	round	round
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.idle += round((self.cpus - other - own - iowait) * ticks)	keep	round	round
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	self.pauses.append(round(seconds, 6))	keep	round	round
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	assert set(entries) == {"test_in_process", "test_in_a_child", "test_says_nothing",	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_timed_gate.py	assert set(entries) == {"test_one", "test_two"}	keep	set	set
 notes	packages/notes/src/moxi_notes/api.py	handoffs_dir	name	folder	found_dir
 notes	packages/notes/src/moxi_notes/backfill.py	"complete": sum(1 for x in p if not x.additions and not x.refused),	keep	refused	refused
 notes	packages/notes/src/moxi_notes/backfill.py	"keys": sum(len(x.additions) for x in p if not x.refused)}	keep	refused	refused
