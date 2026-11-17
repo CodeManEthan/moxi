@@ -828,8 +828,8 @@ class CodexAdapter(HarnessAdapter):
             first = not self._own_turned
             self._own_turned = True
             if self.exit_watch is not None:
-                self.exit_watch.on_turn_ended(outcome,
-                                              brief=headless_mod.BRIEF_REF in refs)
+                self.exit_watch.on_turn_ended(
+                    outcome, is_brief=headless_mod.BRIEF_REF in refs)
                 self._headless_wake.set()
         completed = outcome == ANSWER
         self.report_turn_end(handled=ids if completed else (),

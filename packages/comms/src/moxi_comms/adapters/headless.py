@@ -170,7 +170,7 @@ class ExitWatch:
 
     The adapter calls the feeds from the events it watches and the reads it makes:
     `on_found()` once it has found the session, `on_brief_failed(why)` when turns refused
-    or lost the brief, `on_turn_started()`, `on_turn_ended(outcome, brief=...)`,
+    or lost the brief, `on_turn_started()`, `on_turn_ended(outcome, is_brief=...)`,
     `note_mail(handed=, waiting=)` (the daemon's `agents` answer, after a `look`),
     `note_cache_kind(kind)` (the daemon's `session` read), and `note_shells(busy=)` (the
     session's busy count, None when its list is not complete). It asks `wants_mail_read()`,
@@ -240,13 +240,13 @@ class ExitWatch:
         self.cache_kind = None
         self.unknown_since = None
 
-    def on_turn_ended(self, outcome: str, *, brief: bool = False) -> None:
+    def on_turn_ended(self, outcome: str, *, is_brief: bool = False) -> None:
         self.turn_running = False
         self.last_turn_end = self.clock()
         self.mail = None
         self.cache_kind = None
         self.unknown_since = None
-        if brief and self.brief_outcome is None:
+        if is_brief and self.brief_outcome is None:
             self.brief_outcome = outcome
 
     def note_mail(self, *, handed: int, waiting: int) -> None:

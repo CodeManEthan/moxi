@@ -112,7 +112,7 @@ def answered(w, outcome="answer"):
     """The brief's turn runs and ends."""
     w.on_turn_started()
     w.clock_.advance(1)
-    w.on_turn_ended(outcome, brief=True)
+    w.on_turn_ended(outcome, is_brief=True)
 
 
 def past_window(w):
