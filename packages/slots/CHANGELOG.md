@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Three screens slots reads and never answers, from Claude Code 2.1.326:
+  `CLAUDE_THEME_PICKER` and `CLAUDE_WELCOME`, the first-run theme picker and welcome
+  screen, and `CLAUDE_CHROME_DIALOG`, the "Claude in Chrome extension detected" dialog.
+  `read_screen` names them; `answer_screen` refuses them with a `UsageError`. A `Screen`
+  gains `ruled` (False: drawn with no full-width rule, read over the whole pane) and
+  `answerable` (False: never answered, and no marked row needed for a full match).
+
 - A new screen, `CLAUDE_BYPASS_WARNING`: the warning Claude Code draws before a
   `bypassPermissions` session starts, answered with "Yes, I accept". Answering it makes
   Claude Code write `skipDangerousModePermissionPrompt: true` into its user settings, so

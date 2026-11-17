@@ -47,8 +47,14 @@ The first line installs `moxi`, the core. The repository lists the other modules
   `skipDangerousModePermissionPrompt: true` into `~/.claude/settings.json`, which turns
   the warning off for every later bypass session on the machine. The screens are matched
   by their text, not by a version number; the test fixtures cover Claude Code 2.1.289 to
-  2.1.325. A screen that doesn't
+  2.1.326. A screen that doesn't
   match is saved in slots' state directory (the last 20) and nothing is pressed.
+- It reads three more screens and never presses a key on them: Claude Code's first-run
+  theme picker and welcome screen ("Security notes ... Press Enter to continue"), which
+  show in a config folder Claude Code has never run in, and its "Claude in Chrome
+  extension detected" dialog, which shows once onboarding is done until it is answered
+  once. A caller can tell what holds a session; a person answers them.
+  `answer_screen` refuses them.
 - Uninstalling stops the server, which ends every session in every slot. `moxi uninstall
   slots` refuses while any slot is occupied or not idle, or a job runs.
 
@@ -111,8 +117,9 @@ isn't answering yet.
   a private file the pane's first command reads, never through tmux. Each returns once the
   command has started or hasn't. `wait_ended` waits for a run pane to end.
 - `read_screen(slot, screens)` says which of `CLAUDE_TRUST_DIR`, `CLAUDE_DEV_CHANNELS`,
-  `CLAUDE_BYPASS_WARNING` and `CLAUDE_EXIT_DIALOG` the run pane shows. `answer_screen(slot, screen, wait)`
-  answers one, and is the only call that sends a key. `pane_use` reads whether a person
+  `CLAUDE_BYPASS_WARNING`, `CLAUDE_EXIT_DIALOG`, `CLAUDE_THEME_PICKER`, `CLAUDE_WELCOME`
+  and `CLAUDE_CHROME_DIALOG` the run pane shows. `answer_screen(slot, screen, wait_s)`
+  answers one of the first four, and is the only call that sends a key. `pane_use` reads whether a person
   is at the pane.
 - Errors are `SlotsError`s: `Refused` (with a `reason` word from `REASONS`), `TryAgain`,
   `TmuxError`, `RegistryError` and `UsageError`.

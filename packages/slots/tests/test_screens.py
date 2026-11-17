@@ -6,7 +6,8 @@ Each runs against the matcher on every run; a new version's capture is added her
 
 A capture is cropped to a few rows above the last full-width rule before it is added: the
 matcher reads only below that rule, and the history above it carries the capturing
-machine's paths, prompts and status line. Below the rule, a row that names the capturing
+machine's paths, prompts and status line. A capture of a screen drawn with no rule (the
+2.1.326 first-run screens) is kept whole, since its region is the whole pane. Below the rule, a row that names the capturing
 user's own things (paths, skills, a custom status line) is rewritten or taken out.
 """
 
@@ -18,8 +19,9 @@ from pathlib import Path
 import pytest
 
 from moxi_slots import api, screens
-from moxi_slots.screens import (CLAUDE_BYPASS_WARNING, CLAUDE_DEV_CHANNELS,
-                                CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, SCREENS, Items, Screen,
+from moxi_slots.screens import (CLAUDE_BYPASS_WARNING, CLAUDE_CHROME_DIALOG,
+                                CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_THEME_PICKER,
+                                CLAUDE_TRUST_DIR, CLAUDE_WELCOME, SCREENS, Items, Screen,
                                 bare, find, match, plain, region)
 
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/screens*")
@@ -35,8 +37,19 @@ def width_of(name: str) -> int:
     return int(re.search(r"-(\d+)(?:x\d+)?\.(?:plain|ansi)\.txt$", name).group(1))
 
 
-#: name -> (screen expected present or None, full, the marked row's text, its why's start)
+#: name -> (screen expected present or None, full, the marked row's text (None: no row is
+#: marked), its why's start)
 EXPECTED = {
+    "claude-2.1.326-theme-picker-200x50.plain.txt":
+        (CLAUDE_THEME_PICKER, True, "✔ Auto (match terminal)", ""),
+    "claude-2.1.326-theme-picker-200x50.ansi.txt":
+        (CLAUDE_THEME_PICKER, True, "✔ Auto (match terminal)", ""),
+    "claude-2.1.326-welcome-200x50.plain.txt": (CLAUDE_WELCOME, True, None, ""),
+    "claude-2.1.326-welcome-200x50.ansi.txt": (CLAUDE_WELCOME, True, None, ""),
+    "claude-2.1.326-chrome-dialog-200x50.plain.txt":
+        (CLAUDE_CHROME_DIALOG, True, "No, keep browser tools off", ""),
+    "claude-2.1.326-chrome-dialog-200x50.ansi.txt":
+        (CLAUDE_CHROME_DIALOG, True, "No, keep browser tools off", ""),
     "claude-2.1.325-trust-200.plain.txt": (CLAUDE_TRUST_DIR, True, "No, exit", ""),
     "claude-2.1.325-bypass-warning-200.plain.txt":
         (CLAUDE_BYPASS_WARNING, True, "No, exit", ""),
@@ -84,8 +97,68 @@ def test_the_matcher_over_each_fixture(name):
     assert held.screen is want
     assert held.full is full, held.why
     assert held.why.startswith(why)
-    assert bare(held.rows[held.marked]) == marked_text
+    if marked_text is None:
+        assert held.marked is None
+    else:
+        assert bare(held.rows[held.marked]) == marked_text
     assert bare(held.rows[held.option]) == want.option
+
+
+#: The screens 2.1.326 draws on a first run and once onboarding is done, by their captures.
+FIRST_RUN = {CLAUDE_THEME_PICKER: "theme-picker", CLAUDE_WELCOME: "welcome",
+             CLAUDE_CHROME_DIALOG: "chrome-dialog"}
+EARLIER = (CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_DIR, CLAUDE_DEV_CHANNELS, CLAUDE_BYPASS_WARNING)
+
+
+@pytest.mark.parametrize("screen", list(FIRST_RUN), ids=lambda s: s.name)
+def test_each_2_1_326_screen_matches_its_capture_and_no_other(screen):
+    own = [name for name in EXPECTED if f"-{FIRST_RUN[screen]}-" in name]
+    assert len(own) == 2
+    for name in EXPECTED:
+        held = match(screen, fixture(name), width_of(name))
+        if name in own:
+            assert held.present and held.full, (name, held.why)
+        else:
+            assert not held.present, name
+
+
+@pytest.mark.parametrize("screen", EARLIER, ids=lambda s: s.name)
+def test_no_earlier_screen_matches_a_2_1_326_capture(screen):
+    for name in EXPECTED:
+        if name.startswith("claude-2.1.326-"):
+            assert not match(screen, fixture(name), width_of(name)).present, name
+
+
+def test_the_first_run_screens_draw_no_rule_and_are_read_over_the_whole_pane():
+    for stem in ("theme-picker", "welcome"):
+        text = fixture(f"claude-2.1.326-{stem}-200x50.plain.txt")
+        assert region(text, 200) is None
+        assert region(text, 200, ruled=False)[0] == "Welcome to Claude Code v2.1.326"
+    assert not CLAUDE_THEME_PICKER.ruled and not CLAUDE_WELCOME.ruled
+    assert CLAUDE_CHROME_DIALOG.ruled
+
+
+def test_a_ruled_screen_reads_only_below_the_rule_of_a_rule_less_capture():
+    ruled = Screen("X", CLAUDE_WELCOME.phrases, CLAUDE_WELCOME.option, move=False,
+                   then="gone")
+    held = match(ruled, fixture("claude-2.1.326-welcome-200x50.plain.txt"), 200)
+    assert not held.present and held.why == "no full-width rule on screen"
+
+
+def test_the_three_read_only_screens_are_never_answerable():
+    assert {s.name for s in SCREENS if not s.answerable} == \
+        {"CLAUDE_THEME_PICKER", "CLAUDE_WELCOME", "CLAUDE_CHROME_DIALOG"}
+    assert CLAUDE_CHROME_DIALOG.option == "No, keep browser tools off"
+    assert all(s.to_json()["answerable"] is False for s in FIRST_RUN)
+
+
+def test_an_answerable_screen_still_needs_one_marked_row():
+    text = fixture("claude-2.1.326-welcome-200x50.plain.txt")
+    answerable = Screen("X", CLAUDE_WELCOME.phrases, CLAUDE_WELCOME.option, move=False,
+                        then="gone", ruled=False)
+    held = match(answerable, text, 200)
+    assert held.present and not held.full
+    assert held.why == "0 rows are marked with '❯', not one"
 
 
 @pytest.mark.parametrize(("screen", "name"), [
@@ -244,6 +317,9 @@ def test_the_api_re_exports_the_screens():
     assert api.CLAUDE_EXIT_DIALOG is CLAUDE_EXIT_DIALOG
     assert api.CLAUDE_BYPASS_WARNING is CLAUDE_BYPASS_WARNING
     assert api.Screen is Screen
+    assert api.CLAUDE_THEME_PICKER is CLAUDE_THEME_PICKER
+    assert api.CLAUDE_WELCOME is CLAUDE_WELCOME
+    assert api.CLAUDE_CHROME_DIALOG is CLAUDE_CHROME_DIALOG
 
 
 def test_a_screen_checks_its_then():
