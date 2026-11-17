@@ -239,16 +239,16 @@ def test_outside_git_no_commit_file_or_no_record_dir_exits_2_before_measuring(sy
 
 def test_machine_files_the_record_defaults_to_the_short_host_name_and_refuses_odd_names(
         repo, monkeypatch):
-    go(repo, Stand(PLAN), machine="mini-1")
-    assert (record_dir(repo) / "mini-1" / f"{head(repo)}.json").is_file()
+    go(repo, Stand(PLAN), machine="host-b")
+    assert (record_dir(repo) / "host-b" / f"{head(repo)}.json").is_file()
+    stand = Stand(PLAN)
+    assert go(repo, stand, machine="a/b").code == 2 and stand.calls == []
     monkeypatch.setattr(timed_record.platform, "node", lambda: "alpha.lan")
     assert timed_record.default_machine() == "alpha"
     seen = []
     monkeypatch.setattr(timed, "run_timed", lambda start, o: seen.append(o) or timed.Result())
     timed.main([])
     assert seen[0].machine == "alpha"
-    stand = Stand(PLAN)
-    assert go(repo, stand, machine="a/b").code == 2 and stand.calls == []
 
 
 def test_a_slack_the_kit_would_refuse_exits_2_and_a_set_one_is_recorded(repo):

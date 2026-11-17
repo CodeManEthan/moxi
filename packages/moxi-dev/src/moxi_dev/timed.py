@@ -253,7 +253,8 @@ class Result:
                     other = "unknown" if self.busy is None else f"{self.busy:.2f}"
                     middle += (f" (machine busy, other work {other} CPUs over "
                                f"{self.line_cpus:g}, waited {self.waited_s:.0f} s)")
-        return (f"moxi-dev timed: commit {self.commit[:12]} on {self.machine} | {middle} | "
+        sha, plus, mark = self.commit.partition("+")
+        return (f"moxi-dev timed: commit {sha[:12]}{plus}{mark} on {self.machine} | {middle} | "
                 f"total {self.seconds:.1f} s | exit {self.code}")
 
 
