@@ -545,17 +545,20 @@ def test_a_tracked_occupant_is_cause_tracked_when_git_answers_in_the_time_given(
         "tracked", f"{target} is a folder the placer did not mark, and git tracks it")
 
 
-@pytest.mark.timed
-@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
-@pytest.mark.parametrize("how", ["git_s", "each call"])
-def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
-        tmp_path, monkeypatch, skill, how):
-    """A git that doesn't answer in time never makes an occupant `tracked`: it stays
-    `occupant`, its reason says so, and `git_s` bounds every folder's calls
-    together."""
+#: How long `plan` may take while git hangs, by how the time is given: `git_s` bounds
+#: every folder's calls together, and the per-call time bounds each of the two.
+GIT_HANG_S = {"git_s": 2.0, "each call": 4.0}
+#: The land-check test's bound: five times the timed one, so load alone doesn't fail it
+#: and a guard that never fired does (the stand-in git sleeps twice as long as this).
+GIT_HANG_LOOSE = 5
+
+
+def _plan_while_git_hangs(tmp_path, monkeypatch, skill, how) -> float:
+    """Plan two occupied folders while git doesn't answer, check that each stays
+    `occupant` with its reason, and return how long `plan` took."""
     bin_dir = tmp_path / "slow-bin"
     bin_dir.mkdir()
-    (bin_dir / "git").write_text("#!/bin/sh\nexec sleep 30\n")
+    (bin_dir / "git").write_text("#!/bin/sh\nexec sleep 40\n")
     (bin_dir / "git").chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     targets = []
@@ -579,7 +582,29 @@ def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
     for s in steps:
         assert s.reason == (f"{s.target} is a folder the placer did not mark; git did not "
                             f"answer in time, so whether it tracks it is unknown")
-    assert took < (2 if how == "git_s" else 4) * timed_slack(), took
+    return took
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
+@pytest.mark.parametrize("how", ["git_s", "each call"])
+def test_an_occupant_stays_cause_occupant_when_git_does_not_answer(
+        tmp_path, monkeypatch, skill, how):
+    """A git that doesn't answer in time never makes an occupant `tracked`: it stays
+    `occupant`, its reason says so, and `plan` returns well before git would answer."""
+    took = _plan_while_git_hangs(tmp_path, monkeypatch, skill, how)
+    assert took < GIT_HANG_LOOSE * GIT_HANG_S[how], took
+
+
+@pytest.mark.timed
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in git is a shell script")
+@pytest.mark.parametrize("how", ["git_s", "each call"])
+def test_an_occupant_stays_cause_occupant_when_git_does_not_answer_in_time(
+        tmp_path, monkeypatch, skill, how, timed_reading):
+    """As above, and `git_s` bounds every folder's calls together: `plan` takes under
+    2 s given `git_s`, under 4 s given the per-call time."""
+    took = _plan_while_git_hangs(tmp_path, monkeypatch, skill, how)
+    timed_reading(took, GIT_HANG_S[how], "s")
+    assert took < GIT_HANG_S[how] * timed_slack(), took
 
 
 def test_git_s_must_be_a_number(skill):
