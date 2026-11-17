@@ -125,8 +125,10 @@ way), and it adds four commands:
   in UTC, in the form `--around` takes. A message shows as its text, cut at 64 KiB with
   the cut said; a tool call as one line naming the tool and what it was called on, cut at
   160 characters; a tool result as its size and whether it failed. No flag prints more of
-  a tool's input than that line, or any of a tool's output. A session no root holds, or
-  a source that can't be read, exits 1 with the reason.
+  a tool's input than that line, or any of a tool's output. Without `--harness` it reads
+  the session from whichever harness's root holds it, and when more than one does it
+  names them and exits 2 for `--harness` to choose. A session no root holds, or a source
+  that can't be read, exits 1 with the reason.
 
 With `--json`, each command prints one JSON object that starts with the shape version.
 `read --json` holds the same rows the page is sent, under `records`, with the header and

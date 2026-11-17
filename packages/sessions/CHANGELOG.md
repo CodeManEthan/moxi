@@ -8,6 +8,10 @@
   on turning the guard off. sessions needs moxi 0.1.9 or later.
 - `moxi_sessions.testing` has `today_at`, which times a record a test means to be today
   so it stays on today's local date in the first minutes after midnight.
+- `moxi sessions read` without `--harness` reads the session from whichever harness's
+  root holds it, where before it read Claude Code's only. When more than one harness
+  holds the id it names them and exits 2; when none does it says what each was asked
+  and exits 1. `--harness` reads only that harness, as before.
 
 ## 0.2.9 (2026-11-10)
 
